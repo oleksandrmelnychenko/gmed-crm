@@ -60,539 +60,95 @@ import {
   selectClass as shellSelectClassName,
   textareaClass as shellTextareaClass,
   tokens,
-  type StatusTone,
 } from "@/components/ui-shell";
-import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
-
-type OrderPhase = "discovery" | "intake" | "execution" | "closure" | "followup";
-type OrderStatus = "active" | "paused" | "completed" | "cancelled";
-type LeistungStatus = "draft" | "delivered" | "approved" | "cancelled";
-type ExternalInvoiceStatus =
-  | "expected"
-  | "received"
-  | "approved"
-  | "paid"
-  | "overdue"
-  | "cancelled";
-
-type OrderSummary = {
-  id: string;
-  order_number: string;
-  patient_id: string;
-  patient_name: string;
-  patient_pid: string;
-  phase: OrderPhase | string;
-  status: OrderStatus | string;
-  total_estimated?: unknown;
-  created_at: string;
-};
-
-type Leistung = {
-  id: string;
-  description: string;
-  quantity: unknown;
-  unit_price: unknown;
-  currency: string;
-  vat_rate: unknown;
-  is_cost_passthrough: boolean;
-  status: LeistungStatus | string;
-  delivered_at?: string | null;
-  approved_at?: string | null;
-  notes: string | null;
-  provider_id: string | null;
-  provider_name: string | null;
-  doctor_id: string | null;
-  doctor_name: string | null;
-  source_interpreter_report_id?: string | null;
-  source_medical_appointment_id?: string | null;
-  agency_service_id?: string | null;
-  agency_service_key?: string | null;
-  agency_service_name?: string | null;
-  external_document_id?: string | null;
-  external_document_auto_name?: string | null;
-  external_document_filename?: string | null;
-};
-
-type ExternalInvoice = {
-  id: string;
-  provider_id: string | null;
-  provider_name: string | null;
-  external_invoice_number: string;
-  invoice_date: string | null;
-  due_date: string | null;
-  amount_net: unknown;
-  amount_vat: unknown;
-  amount_gross: unknown;
-  currency: string;
-  status: ExternalInvoiceStatus | string;
-  received_at?: string | null;
-  paid_at?: string | null;
-  notes?: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-type OrderDetail = {
-  id: string;
-  order_number: string;
-  patient_id: string;
-  patient_name: string;
-  patient_pid: string;
-  phase: OrderPhase | string;
-  status: OrderStatus | string;
-  needs_description: string | null;
-  signed_patient?: boolean | null;
-  signed_agency?: boolean | null;
-  total_estimated: unknown;
-  total_actual: unknown;
-  leistungen: Leistung[];
-  external_invoices?: ExternalInvoice[];
-  process_gates?: OrderProcessGates | null;
-  planning_preparation?: OrderPlanningPreparation | null;
-  execution_flow?: OrderExecutionFlow | null;
-  followup_flow?: OrderFollowupFlow | null;
-  lifecycle?: OrderLifecycle | null;
-  created_at: string;
-  updated_at: string;
-};
-
-type OrderProcessGates = {
-  execution_ready: boolean;
-  debt_hold: boolean;
-  overdue_invoice_count: number;
-  outstanding_balance?: string | null;
-  debt_management?: OrderDebtManagement | null;
-  billing_release_status: string;
-  billing_release_note: string | null;
-  billing_released_by: string | null;
-  billing_released_at: string | null;
-  package_coverage_status: string;
-  package_coverage_note: string | null;
-  package_coverage_decided_by: string | null;
-  package_coverage_decided_at: string | null;
-  financial_gate_ready: boolean;
-  contract_gate_ready: boolean;
-  signed_patient: boolean;
-  signed_agency: boolean;
-  payment_gate_required: boolean;
-  payment_gate_ready: boolean;
-  advance_invoice_count: number;
-  paid_advance_invoice_count: number;
-  blocking_reasons: string[];
-};
-
-type OrderDebtManagement = {
-  status: string;
-  effective_status: string;
-  workflow_required: boolean;
-  blocking: boolean;
-  blocking_reason: string | null;
-  note: string | null;
-  owner_user_id: string | null;
-  owner_name: string | null;
-  next_review_at: string | null;
-  last_contact_at: string | null;
-  resolution_note: string | null;
-  resolved_at: string | null;
-  resolved_by: string | null;
-  resolved_by_name: string | null;
-  overdue_invoice_count: number;
-  outstanding_balance: string;
-  created_at: string;
-  updated_at: string;
-};
-
-type OrderPlanningPreparation = {
-  planning_ready: boolean;
-  treatment_plan_status: string;
-  treatment_plan_note: string | null;
-  non_medical_required: boolean;
-  interpreter_required: boolean;
-  preparation_documents_status: string;
-  interpreter_briefing_status: string;
-  treatment_plan_ready: boolean;
-  medical_bookings_ready: boolean;
-  medical_total: number;
-  medical_confirmed: number;
-  non_medical_bookings_ready: boolean;
-  non_medical_total: number;
-  non_medical_confirmed: number;
-  interpreter_assignment_ready: boolean;
-  interpreter_confirmation_ready: boolean;
-  interpreter_assigned: number;
-  interpreter_confirmed: number;
-  interpreter_briefing_ready: boolean;
-  preparation_documents_ready: boolean;
-  plan_finalized_at: string | null;
-  plan_finalized_by: string | null;
-  plan_finalized_by_name: string | null;
-  preparation_documents_sent_at: string | null;
-  preparation_documents_sent_by: string | null;
-  preparation_documents_sent_by_name: string | null;
-  interpreter_briefed_at: string | null;
-  interpreter_briefed_by: string | null;
-  interpreter_briefed_by_name: string | null;
-  blocking_reasons: string[];
-};
-
-type OrderExecutionFlow = {
-  closure_ready: boolean;
-  arrival_status: string;
-  medical_execution_status: string;
-  non_medical_execution_status: string;
-  interpreter_service_status: string;
-  issue_status: string;
-  deviation_note: string | null;
-  execution_summary: string | null;
-  non_medical_required: boolean;
-  interpreter_required: boolean;
-  arrival_ready: boolean;
-  medical_execution_ready: boolean;
-  non_medical_execution_ready: boolean;
-  interpreter_execution_ready: boolean;
-  issue_ready: boolean;
-  execution_checklist_ready: boolean;
-  medical_completed: number;
-  non_medical_completed: number;
-  interpreter_completed: number;
-  interpreter_confirmed_completed: number;
-  approved_interpreter_reports: number;
-  delivered_leistungen: number;
-  concierge_completed: number;
-  execution_documents: number;
-  open_execution_checklist_count: number;
-  arrival_recorded_at: string | null;
-  medical_completed_at: string | null;
-  non_medical_completed_at: string | null;
-  interpreter_completed_at: string | null;
-  issues_resolved_at: string | null;
-  blocking_reasons: string[];
-};
-
-type OrderFollowupFlow = {
-  followup_ready: boolean;
-  doctor_followup_status: string;
-  followup_1w_status: string;
-  followup_1m_status: string;
-  followup_6m_status: string;
-  package_end_date: string | null;
-  suggested_package_end_date: string | null;
-  package_end_status: string;
-  results_handoff_status: string;
-  followup_summary: string | null;
-  doctor_followup_ready: boolean;
-  followup_1w_ready: boolean;
-  followup_1m_ready: boolean;
-  followup_6m_ready: boolean;
-  package_end_required: boolean;
-  package_end_ready: boolean;
-  results_handoff_ready: boolean;
-  followup_activity_ready: boolean;
-  closure_anchor_at: string | null;
-  recommended_followup_1w_at: string | null;
-  recommended_followup_1m_at: string | null;
-  recommended_followup_6m_at: string | null;
-  recommended_package_end_followup_at: string | null;
-  followup_appointments_total: number;
-  doctor_followup_visits: number;
-  doctor_followup_tasks: number;
-  followup_1w_visits: number;
-  followup_1m_visits: number;
-  followup_6m_visits: number;
-  followup_1w_reminders: number;
-  followup_1m_reminders: number;
-  followup_6m_reminders: number;
-  package_end_tasks: number;
-  package_end_reminders: number;
-  results_portal_shares: number;
-  blocking_reasons: string[];
-};
-
-type LifecycleEvent = {
-  from_stage: string | null;
-  to_stage: string;
-  transition_kind: string;
-  note: string | null;
-  created_at: string;
-};
-
-type OrderLifecycleTransition = {
-  phase: string;
-  blocked: boolean;
-  reasons: string[];
-};
-
-type OrderLifecycle = {
-  current_stage: string;
-  stage_entered_at: string | null;
-  next_stage: string | null;
-  allowed_transitions: OrderLifecycleTransition[];
-  history: LifecycleEvent[];
-};
-
-type WorkflowChecklistItem = {
-  id: string;
-  checklist_key: string;
-  item_key: string;
-  item_text: string;
-  owner_role: string;
-  owner_user_id: string | null;
-  owner_name: string | null;
-  owner_user_role: string | null;
-  priority: string;
-  due_date: string | null;
-  linked_task_id: string | null;
-  linked_task_status: string | null;
-  is_completed: boolean;
-  completed_at: string | null;
-  sort_order: number;
-  created_at: string;
-};
-
-type WorkflowChecklistResponse = {
-  scope_type: string;
-  scope_id: string;
-  open_count: number;
-  completed_count: number;
-  items: WorkflowChecklistItem[];
-};
-
-type WorkflowChecklistFormState = {
-  itemText: string;
-  ownerUserId: string;
-  priority: string;
-  dueDate: string;
-};
-
-type OrderProcessGateFormState = {
-  debtStatus: string;
-  debtNote: string;
-  debtOwnerUserId: string;
-  debtNextReviewAt: string;
-  debtLastContactAt: string;
-  debtResolutionNote: string;
-  billingReleaseStatus: string;
-  billingReleaseNote: string;
-  packageCoverageStatus: string;
-  packageCoverageNote: string;
-};
-
-type OrderPlanningFormState = {
-  treatmentPlanStatus: string;
-  treatmentPlanNote: string;
-  nonMedicalRequired: boolean;
-  interpreterRequired: boolean;
-  preparationDocumentsStatus: string;
-  interpreterBriefingStatus: string;
-};
-
-type OrderExecutionFormState = {
-  arrivalStatus: string;
-  medicalExecutionStatus: string;
-  nonMedicalExecutionStatus: string;
-  interpreterServiceStatus: string;
-  issueStatus: string;
-  deviationNote: string;
-  executionSummary: string;
-};
-
-type OrderFollowupFormState = {
-  doctorFollowupStatus: string;
-  followup1wStatus: string;
-  followup1mStatus: string;
-  followup6mStatus: string;
-  packageEndDate: string;
-  packageEndStatus: string;
-  resultsHandoffStatus: string;
-  followupSummary: string;
-};
-
-type PatientAssignmentOption = {
-  user_id: string;
-  user_name: string;
-  user_role: string;
-  user_active: boolean;
-  revoked_at: string | null;
-};
-
-type PatientOption = {
-  id: string;
-  patient_id: string;
-  first_name?: string;
-  last_name?: string;
-};
-
-type ProviderOption = {
-  id: string;
-  name: string;
-  address_city: string | null;
-};
-
-type DoctorOption = {
-  id: string;
-  name: string;
-  fachbereich: string | null;
-};
-
-type ProviderDetailResponse = {
-  doctors?: DoctorOption[];
-};
-
-type CreateResponse = {
-  id: string;
-};
-
-type PatientRecheckCheck = {
-  key: string;
-  label: string;
-  passed: boolean;
-  blocking_for: string;
-};
-
-type PatientRecheckDocumentAlerts = {
-  missing_documents: Array<{ key: string; label: string }>;
-  missing_count: number;
-  out_of_sync: boolean;
-};
-
-type PatientRecheckContract = {
-  id: string;
-  contract_number: string;
-  status: string;
-  signed_at: string | null;
-  valid_from: string | null;
-  valid_to: string | null;
-};
-
-type PatientOrderRecheck = {
-  requires_recheck: boolean;
-  can_create_order: boolean;
-  reason?: string | null;
-  base_data_ready: boolean;
-  compliance_ready: boolean;
-  identity_ready: boolean;
-  document_pack_ready: boolean;
-  contract_ready: boolean;
-  debt_hold: boolean;
-  overdue_invoice_count: number;
-  outstanding_balance?: string | null;
-  debt_management?: {
-    blocking: boolean;
-    blocking_reason: string | null;
-    overdue_invoice_count: number;
-    outstanding_balance: string;
-    latest_workflow?: {
-      order_id: string;
-      order_number: string;
-      status: string;
-      effective_status: string;
-      blocking: boolean;
-      note: string | null;
-      owner_user_id: string | null;
-      owner_name: string | null;
-      next_review_at: string | null;
-      last_contact_at: string | null;
-      resolution_note: string | null;
-      resolved_at: string | null;
-      resolved_by: string | null;
-      resolved_by_name: string | null;
-      updated_at: string | null;
-      overdue_invoice_count: number;
-      outstanding_balance: string;
-    } | null;
-  } | null;
-  base_data_missing_fields: string[];
-  blocking_reasons: string[];
-  checks: PatientRecheckCheck[];
-  document_alerts: PatientRecheckDocumentAlerts;
-  latest_framework_contract: PatientRecheckContract | null;
-};
-
-type OrderDebtQueueItem = {
-  order_id: string;
-  order_number: string;
-  phase: string;
-  order_status: string;
-  patient_id: string;
-  patient_code: string;
-  patient_name: string;
-  status: string;
-  effective_status: string;
-  blocking_reason: string | null;
-  note: string | null;
-  owner_user_id: string | null;
-  owner_name: string | null;
-  next_review_at: string | null;
-  last_contact_at: string | null;
-  resolution_note: string | null;
-  resolved_at: string | null;
-  updated_at: string | null;
-  overdue_invoice_count: number;
-  outstanding_balance: string;
-};
-
-type OrdersFilters = {
-  search: string;
-  phase: string;
-  status: string;
-  patientId: string;
-  providerId: string;
-  doctorId: string;
-};
-
-type CreateOrderFormState = {
-  patientId: string;
-  needsDescription: string;
-};
-
-type LeistungFormState = {
-  description: string;
-  quantity: string;
-  unitPrice: string;
-  vatRate: string;
-  providerId: string;
-  doctorId: string;
-  externalDocumentId: string;
-  notes: string;
-  isCostPassthrough: boolean;
-};
-
-type SupportingDocumentOption = {
-  id: string;
-  order_id?: string | null;
-  auto_name: string;
-  original_filename?: string | null;
-  art?: string | null;
-  category?: string | null;
-  has_stored_file?: boolean;
-  file_deleted_at?: string | null;
-};
-
-type ExternalInvoiceFormState = {
-  providerId: string;
-  externalInvoiceNumber: string;
-  invoiceDate: string;
-  dueDate: string;
-  amountNet: string;
-  amountVat: string;
-  amountGross: string;
-  currency: string;
-  status: ExternalInvoiceStatus;
-  notes: string;
-};
-
-type OrdersPermissions = {
-  canViewPage: boolean;
-  canCreate: boolean;
-  canManagePhase: boolean;
-  canAddLeistung: boolean;
-  canApproveLeistung: boolean;
-  canManageExternalInvoices: boolean;
-};
+import {
+  orderPhaseTone,
+  orderStatusTone,
+  phaseClassName,
+  priorityBadgeClass,
+  recheckBadgeClass,
+  statusClassName,
+} from "./appearance/status-appearance";
+import {
+  approveOrderLeistung,
+  completeWorkflowChecklistItem,
+  createExternalInvoice,
+  createOrder,
+  createOrderLeistung,
+  createWorkflowChecklistItem,
+  fetchOrderDebtQueue,
+  fetchOrderDirectory,
+  fetchOrderWorkspace,
+  fetchOrders,
+  fetchPatientOrderRecheck,
+  fetchProviderDoctors,
+  updateExternalInvoice,
+  updateOrderDebtManagement,
+  updateOrderExecutionFlow,
+  updateOrderFollowupFlow,
+  updateOrderPhase,
+  updateOrderPlanningPreparation,
+  updateOrderProcessGates,
+} from "./data/order-api";
+import {
+  DEFAULT_FILTERS,
+  EXTERNAL_INVOICE_STATUSES,
+  ORDER_PHASES,
+  ORDER_STATUSES,
+  blankCreateOrderForm,
+  blankExternalInvoiceForm,
+  blankLeistungForm,
+  blankOrderExecutionForm,
+  blankOrderFollowupForm,
+  blankOrderPlanningForm,
+  blankOrderProcessGateForm,
+  blankWorkflowChecklistForm,
+  formatCurrency,
+  formatDate,
+  formatDateOnly,
+  formatDateTime,
+  formatNumber,
+  inputDateTimeToApiValue,
+  nextPhase,
+  numberFromUnknown,
+  optString,
+  orderExecutionToForm,
+  orderFollowupToForm,
+  orderPermissions,
+  orderPlanningToForm,
+  orderProcessGatesToForm,
+  patientLabel,
+  recheckMissingFieldLabel,
+  sumLeistungTotals,
+  workflowChecklistLabel,
+} from "./model/order-model";
+import type {
+  CreateOrderFormState,
+  DoctorOption,
+  ExternalInvoiceFormState,
+  ExternalInvoiceStatus,
+  LeistungFormState,
+  OrderDebtQueueItem,
+  OrderDetail,
+  OrderExecutionFormState,
+  OrderFollowupFormState,
+  OrderPlanningFormState,
+  OrderProcessGateFormState,
+  OrdersFilters,
+  OrderSummary,
+  PatientAssignmentOption,
+  PatientOption,
+  PatientOrderRecheck,
+  ProviderOption,
+  SupportingDocumentOption,
+  WorkflowChecklistItem,
+  WorkflowChecklistFormState,
+  WorkflowChecklistResponse,
+} from "./model/types";
 
 type StatCardProps = {
   label: string;
@@ -620,476 +176,8 @@ type EmptyStateProps = {
   action?: ReactNode;
 };
 
-const ORDER_PHASES: OrderPhase[] = [
-  "discovery",
-  "intake",
-  "execution",
-  "closure",
-  "followup",
-];
-const ORDER_STATUSES: OrderStatus[] = [
-  "active",
-  "paused",
-  "completed",
-  "cancelled",
-];
-const EXTERNAL_INVOICE_STATUSES: ExternalInvoiceStatus[] = [
-  "expected",
-  "received",
-  "approved",
-  "paid",
-  "overdue",
-  "cancelled",
-];
-
-const DEFAULT_FILTERS: OrdersFilters = {
-  search: "",
-  phase: "",
-  status: "",
-  patientId: "",
-  providerId: "",
-  doctorId: "",
-};
-
 const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
-
-function orderPhaseTone(phase: string): StatusTone {
-  switch (phase) {
-    case "intake":
-      return "info";
-    case "execution":
-      return "warning";
-    case "closure":
-      return "success";
-    case "followup":
-      return "brand";
-    default:
-      return "neutral";
-  }
-}
-
-function orderStatusTone(status: string): StatusTone {
-  switch (status) {
-    case "active":
-    case "completed":
-      return "success";
-    case "paused":
-      return "warning";
-    case "cancelled":
-      return "error";
-    default:
-      return "neutral";
-  }
-}
-
-function orderPermissions(role?: string): OrdersPermissions {
-  switch (role) {
-    case "ceo":
-    case "patient_manager":
-      return {
-        canViewPage: true,
-        canCreate: true,
-        canManagePhase: true,
-        canAddLeistung: true,
-        canApproveLeistung: true,
-        canManageExternalInvoices: true,
-      };
-    case "billing":
-      return {
-        canViewPage: true,
-        canCreate: false,
-        canManagePhase: false,
-        canAddLeistung: false,
-        canApproveLeistung: false,
-        canManageExternalInvoices: true,
-      };
-    default:
-      return {
-        canViewPage: false,
-        canCreate: false,
-        canManagePhase: false,
-        canAddLeistung: false,
-        canApproveLeistung: false,
-        canManageExternalInvoices: false,
-      };
-  }
-}
-
-function blankCreateOrderForm(): CreateOrderFormState {
-  return { patientId: "", needsDescription: "" };
-}
-
-function blankLeistungForm(): LeistungFormState {
-  return {
-    description: "",
-    quantity: "1",
-    unitPrice: "",
-    vatRate: "19",
-    providerId: "",
-    doctorId: "",
-    externalDocumentId: "",
-    notes: "",
-    isCostPassthrough: false,
-  };
-}
-
-function blankExternalInvoiceForm(): ExternalInvoiceFormState {
-  return {
-    providerId: "",
-    externalInvoiceNumber: "",
-    invoiceDate: "",
-    dueDate: "",
-    amountNet: "",
-    amountVat: "",
-    amountGross: "",
-    currency: "EUR",
-    status: "expected",
-    notes: "",
-  };
-}
-
-function blankWorkflowChecklistForm(): WorkflowChecklistFormState {
-  return {
-    itemText: "",
-    ownerUserId: "",
-    priority: "normal",
-    dueDate: "",
-  };
-}
-
-function blankOrderProcessGateForm(): OrderProcessGateFormState {
-  return {
-    debtStatus: "review_required",
-    debtNote: "",
-    debtOwnerUserId: "",
-    debtNextReviewAt: "",
-    debtLastContactAt: "",
-    debtResolutionNote: "",
-    billingReleaseStatus: "pending",
-    billingReleaseNote: "",
-    packageCoverageStatus: "unknown",
-    packageCoverageNote: "",
-  };
-}
-
-function blankOrderPlanningForm(): OrderPlanningFormState {
-  return {
-    treatmentPlanStatus: "draft",
-    treatmentPlanNote: "",
-    nonMedicalRequired: false,
-    interpreterRequired: false,
-    preparationDocumentsStatus: "pending",
-    interpreterBriefingStatus: "not_needed",
-  };
-}
-
-function blankOrderExecutionForm(): OrderExecutionFormState {
-  return {
-    arrivalStatus: "pending",
-    medicalExecutionStatus: "pending",
-    nonMedicalExecutionStatus: "not_required",
-    interpreterServiceStatus: "not_required",
-    issueStatus: "pending",
-    deviationNote: "",
-    executionSummary: "",
-  };
-}
-
-function blankOrderFollowupForm(): OrderFollowupFormState {
-  return {
-    doctorFollowupStatus: "not_required",
-    followup1wStatus: "pending",
-    followup1mStatus: "pending",
-    followup6mStatus: "pending",
-    packageEndDate: "",
-    packageEndStatus: "not_required",
-    resultsHandoffStatus: "pending",
-    followupSummary: "",
-  };
-}
-
-function orderProcessGatesToForm(
-  processGates?: OrderProcessGates | null,
-): OrderProcessGateFormState {
-  if (!processGates) return blankOrderProcessGateForm();
-  return {
-    debtStatus: processGates.debt_management?.status ?? "review_required",
-    debtNote: processGates.debt_management?.note ?? "",
-    debtOwnerUserId: processGates.debt_management?.owner_user_id ?? "",
-    debtNextReviewAt: toDateTimeInputValue(
-      processGates.debt_management?.next_review_at,
-    ),
-    debtLastContactAt: toDateTimeInputValue(
-      processGates.debt_management?.last_contact_at,
-    ),
-    debtResolutionNote: processGates.debt_management?.resolution_note ?? "",
-    billingReleaseStatus: processGates.billing_release_status,
-    billingReleaseNote: processGates.billing_release_note ?? "",
-    packageCoverageStatus: processGates.package_coverage_status,
-    packageCoverageNote: processGates.package_coverage_note ?? "",
-  };
-}
-
-function orderPlanningToForm(
-  planning?: OrderPlanningPreparation | null,
-): OrderPlanningFormState {
-  if (!planning) return blankOrderPlanningForm();
-  return {
-    treatmentPlanStatus: planning.treatment_plan_status,
-    treatmentPlanNote: planning.treatment_plan_note ?? "",
-    nonMedicalRequired: planning.non_medical_required,
-    interpreterRequired: planning.interpreter_required,
-    preparationDocumentsStatus: planning.preparation_documents_status,
-    interpreterBriefingStatus: planning.interpreter_briefing_status,
-  };
-}
-
-function orderExecutionToForm(
-  execution?: OrderExecutionFlow | null,
-): OrderExecutionFormState {
-  if (!execution) return blankOrderExecutionForm();
-  return {
-    arrivalStatus: execution.arrival_status,
-    medicalExecutionStatus: execution.medical_execution_status,
-    nonMedicalExecutionStatus: execution.non_medical_execution_status,
-    interpreterServiceStatus: execution.interpreter_service_status,
-    issueStatus: execution.issue_status,
-    deviationNote: execution.deviation_note ?? "",
-    executionSummary: execution.execution_summary ?? "",
-  };
-}
-
-function orderFollowupToForm(
-  followup?: OrderFollowupFlow | null,
-): OrderFollowupFormState {
-  if (!followup) return blankOrderFollowupForm();
-  return {
-    doctorFollowupStatus: followup.doctor_followup_status,
-    followup1wStatus: followup.followup_1w_status,
-    followup1mStatus: followup.followup_1m_status,
-    followup6mStatus: followup.followup_6m_status,
-    packageEndDate:
-      followup.package_end_date ?? followup.suggested_package_end_date ?? "",
-    packageEndStatus: followup.package_end_status,
-    resultsHandoffStatus: followup.results_handoff_status,
-    followupSummary: followup.followup_summary ?? "",
-  };
-}
-
-function workflowChecklistLabel(
-  key: string,
-  labels?: Partial<Record<OrderPhase | "custom", string>>,
-) {
-  switch (key) {
-    case "order_discovery":
-      return labels?.discovery ?? "Discovery";
-    case "order_intake":
-      return labels?.intake ?? "Intake";
-    case "order_execution":
-      return labels?.execution ?? "Execution";
-    case "order_closure":
-      return labels?.closure ?? "Closure";
-    case "order_followup":
-      return labels?.followup ?? "Follow-up";
-    case "order_custom":
-      return labels?.custom ?? "Custom";
-    default:
-      return key.replaceAll("_", " ");
-  }
-}
-
-function priorityBadgeClass(priority: string) {
-  switch (priority) {
-    case "urgent":
-      return "border-rose-200 bg-rose-50 text-rose-700";
-    case "high":
-      return "border-amber-200 bg-amber-50 text-amber-700";
-    case "low":
-      return "border-slate-200 bg-slate-50 text-slate-600";
-    default:
-      return "border-sky-200 bg-sky-50 text-sky-700";
-  }
-}
-
-function phaseClassName(phase: string) {
-  switch (phase) {
-    case "discovery":
-      return "border-slate-200 bg-slate-100 text-slate-700";
-    case "intake":
-      return "border-sky-200 bg-sky-100 text-sky-700";
-    case "execution":
-      return "border-amber-200 bg-amber-100 text-amber-700";
-    case "closure":
-      return "border-emerald-200 bg-emerald-100 text-emerald-700";
-    case "followup":
-      return "border-violet-200 bg-violet-100 text-violet-700";
-    default:
-      return "border-slate-200 bg-slate-100 text-slate-700";
-  }
-}
-
-function recheckBadgeClass(passed: boolean) {
-  return passed
-    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-    : "border-amber-200 bg-amber-50 text-amber-700";
-}
-
-function recheckMissingFieldLabel(
-  field: string,
-  labels?: Partial<Record<"primary_contact" | "country" | "language", string>>,
-) {
-  switch (field) {
-    case "primary_contact":
-      return labels?.primary_contact ?? "Primary contact";
-    case "country":
-      return labels?.country ?? "Country";
-    case "language":
-      return labels?.language ?? "Preferred language";
-    default:
-      return field.replaceAll("_", " ");
-  }
-}
-
-function statusClassName(status: string) {
-  switch (status) {
-    case "active":
-      return "border-emerald-200 bg-emerald-100 text-emerald-700";
-    case "paused":
-      return "border-amber-200 bg-amber-100 text-amber-700";
-    case "completed":
-      return "border-sky-200 bg-sky-100 text-sky-700";
-    case "cancelled":
-      return "border-rose-200 bg-rose-100 text-rose-700";
-    case "draft":
-      return "border-slate-200 bg-slate-100 text-slate-700";
-    case "delivered":
-      return "border-amber-200 bg-amber-100 text-amber-700";
-    case "approved":
-      return "border-emerald-200 bg-emerald-100 text-emerald-700";
-    case "received":
-      return "border-sky-200 bg-sky-100 text-sky-700";
-    case "overdue":
-      return "border-rose-200 bg-rose-100 text-rose-700";
-    case "paid":
-      return "border-emerald-200 bg-emerald-100 text-emerald-700";
-    case "expected":
-      return "border-violet-200 bg-violet-100 text-violet-700";
-    default:
-      return "border-slate-200 bg-slate-100 text-slate-700";
-  }
-}
-
-function optString(value: string) {
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-function formatDate(
-  value: string | null | undefined,
-  locale = "de-DE",
-  emptyLabel = "Nicht festgelegt",
-) {
-  if (!value) return emptyLabel;
-  const date = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(date);
-}
-
-function numberFromUnknown(value: unknown) {
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-}
-
-function formatNumber(value: unknown, locale = "de-DE") {
-  const parsed = numberFromUnknown(value);
-  if (parsed == null) {
-    if (typeof value === "string") return value;
-    return "0";
-  }
-  return new Intl.NumberFormat(locale, {
-    maximumFractionDigits: 2,
-  }).format(parsed);
-}
-
-function formatCurrency(value: unknown, currency = "EUR", locale = "de-DE") {
-  const parsed = numberFromUnknown(value);
-  if (parsed == null) {
-    const fallback = typeof value === "string" && value.trim() ? value : "0";
-    return `${fallback} ${currency}`;
-  }
-  return new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 2,
-  }).format(parsed);
-}
-
-function formatDateTime(
-  value: string | null | undefined,
-  locale = "de-DE",
-  emptyLabel = "Nicht festgelegt",
-) {
-  if (!value) return emptyLabel;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(locale, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
-}
-
-function formatDateOnly(
-  value: string | null | undefined,
-  locale = "de-DE",
-  emptyLabel = "Nicht festgelegt",
-) {
-  if (!value) return emptyLabel;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(date);
-}
-
-function toDateTimeInputValue(value: string | null | undefined) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 16);
-}
-
-function inputDateTimeToApiValue(value: string) {
-  if (!value.trim()) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString();
-}
-
-function patientLabel(patient: PatientOption, fallback = "Patient") {
-  const name = [patient.first_name, patient.last_name]
-    .filter(Boolean)
-    .join(" ")
-    .trim();
-  return `${name || fallback} (${patient.patient_id})`;
-}
-
-function nextPhase(current: string) {
-  const index = ORDER_PHASES.indexOf(current as OrderPhase);
-  if (index < 0 || index >= ORDER_PHASES.length - 1) return null;
-  return ORDER_PHASES[index + 1];
-}
-
-function sumLeistungTotals(items: Leistung[]) {
-  return items.reduce((sum, item) => {
-    const quantity = numberFromUnknown(item.quantity) ?? 0;
-    const unitPrice = numberFromUnknown(item.unit_price) ?? 0;
-    return sum + quantity * unitPrice;
-  }, 0);
-}
 
 function StatCard({ label, value, description, icon }: StatCardProps) {
   return (
@@ -1824,10 +912,7 @@ export function OrdersPage() {
       const cached = providerDoctors[providerId];
       if (cached) return cached;
 
-      const detail = await apiFetch<ProviderDetailResponse>(
-        `/providers/${providerId}`,
-      );
-      const doctors = detail.doctors ?? [];
+      const doctors = await fetchProviderDoctors(providerId);
       setProviderDoctors((current) => ({
         ...current,
         [providerId]: doctors,
@@ -1928,13 +1013,10 @@ export function OrdersPage() {
     let cancelled = false;
     async function loadDirectory() {
       try {
-        const [patientsResponse, providersResponse] = await Promise.all([
-          apiFetch<PatientOption[]>("/patients"),
-          apiFetch<ProviderOption[]>("/providers"),
-        ]);
+        const directory = await fetchOrderDirectory();
         if (cancelled) return;
-        setPatients(patientsResponse);
-        setProviders(providersResponse);
+        setPatients(directory.patients);
+        setProviders(directory.providers);
       } catch {
         if (cancelled) return;
         setPatients([]);
@@ -1962,9 +1044,7 @@ export function OrdersPage() {
 
     async function loadCreateRecheck() {
       try {
-        const response = await apiFetch<PatientOrderRecheck>(
-          `/patients/${createForm.patientId}/recheck`,
-        );
+        const response = await fetchPatientOrderRecheck(createForm.patientId);
         if (cancelled) return;
         setCreateRecheck(response);
       } catch (error) {
@@ -2006,7 +1086,7 @@ export function OrdersPage() {
         if (filters.doctorId) params.set("doctor_id", filters.doctorId);
 
         const queryString = params.toString();
-        const response = await apiFetch<OrderSummary[]>(
+        const response = await fetchOrders(
           `/orders${queryString ? `?${queryString}` : ""}`,
         );
         if (cancelled) return;
@@ -2053,9 +1133,7 @@ export function OrdersPage() {
 
     async function loadDebtQueue() {
       try {
-        const response = await apiFetch<OrderDebtQueueItem[]>(
-          "/orders/debt-management",
-        );
+        const response = await fetchOrderDebtQueue();
         if (cancelled) return;
         setDebtQueue(response);
       } catch (error) {
@@ -2117,24 +1195,15 @@ export function OrdersPage() {
       return;
     }
 
+    const currentOrderId = selectedOrderId;
     let cancelled = false;
     setDetailLoading(true);
     setDetailError(null);
 
     async function loadDetail() {
       try {
-        const [detail, documents, workflow] = await Promise.all([
-          apiFetch<OrderDetail>(`/orders/${selectedOrderId}`),
-          apiFetch<SupportingDocumentOption[]>(
-            `/documents?order_id=${selectedOrderId}`,
-          ).catch(() => []),
-          apiFetch<WorkflowChecklistResponse>(
-            `/orders/${selectedOrderId}/workflow-checklist`,
-          ).catch(() => null),
-        ]);
-        const assignments = await apiFetch<PatientAssignmentOption[]>(
-          `/patients/${detail.patient_id}/assignments`,
-        ).catch(() => []);
+        const { detail, documents, workflow, assignments } =
+          await fetchOrderWorkspace(currentOrderId);
         if (cancelled) return;
         setOrderDetail(detail);
         setOrderDocuments(documents);
@@ -2203,13 +1272,10 @@ export function OrdersPage() {
     setCreateSaving(true);
     setCreateError(null);
     try {
-      const created = await apiFetch<CreateResponse>("/orders", {
-        method: "POST",
-        body: JSON.stringify({
-          patient_id: createForm.patientId,
-          contract_id: null,
-          needs_description: optString(createForm.needsDescription),
-        }),
+      const created = await createOrder({
+        patient_id: createForm.patientId,
+        contract_id: null,
+        needs_description: optString(createForm.needsDescription),
       });
 
       resetCreateDialog(false);
@@ -2241,10 +1307,7 @@ export function OrdersPage() {
     setPhaseSaving(true);
     setPhaseError(null);
     try {
-      await apiFetch(`/orders/${selectedOrderId}/phase`, {
-        method: "POST",
-        body: JSON.stringify({ phase: phaseDraft }),
-      });
+      await updateOrderPhase(selectedOrderId, phaseDraft);
       triggerReload();
     } catch (error) {
       setPhaseError(
@@ -2261,10 +1324,7 @@ export function OrdersPage() {
       orderDetail.lifecycle?.next_stage ?? nextPhase(orderDetail.phase);
     if (!phase) return;
     setPhaseDraft(phase);
-    await apiFetch(`/orders/${orderDetail.id}/phase`, {
-      method: "POST",
-      body: JSON.stringify({ phase }),
-    })
+    await updateOrderPhase(orderDetail.id, phase)
       .then(() => {
         setPhaseError(null);
         triggerReload();
@@ -2283,20 +1343,17 @@ export function OrdersPage() {
     setProcessGateBusy(true);
     setProcessGateError(null);
     try {
-      await apiFetch(`/orders/${selectedOrderId}/debt-management`, {
-        method: "POST",
-        body: JSON.stringify({
-          status: processGateForm.debtStatus,
-          note: optString(processGateForm.debtNote),
-          owner_user_id: processGateForm.debtOwnerUserId || null,
-          next_review_at: inputDateTimeToApiValue(
-            processGateForm.debtNextReviewAt,
-          ),
-          last_contact_at: inputDateTimeToApiValue(
-            processGateForm.debtLastContactAt,
-          ),
-          resolution_note: optString(processGateForm.debtResolutionNote),
-        }),
+      await updateOrderDebtManagement(selectedOrderId, {
+        status: processGateForm.debtStatus,
+        note: optString(processGateForm.debtNote),
+        owner_user_id: processGateForm.debtOwnerUserId || null,
+        next_review_at: inputDateTimeToApiValue(
+          processGateForm.debtNextReviewAt,
+        ),
+        last_contact_at: inputDateTimeToApiValue(
+          processGateForm.debtLastContactAt,
+        ),
+        resolution_note: optString(processGateForm.debtResolutionNote),
       });
       triggerReload();
     } catch (error) {
@@ -2316,12 +1373,9 @@ export function OrdersPage() {
     setProcessGateBusy(true);
     setProcessGateError(null);
     try {
-      await apiFetch(`/orders/${selectedOrderId}/process-gates`, {
-        method: "POST",
-        body: JSON.stringify({
-          billing_release_status: processGateForm.billingReleaseStatus,
-          billing_release_note: optString(processGateForm.billingReleaseNote),
-        }),
+      await updateOrderProcessGates(selectedOrderId, {
+        billing_release_status: processGateForm.billingReleaseStatus,
+        billing_release_note: optString(processGateForm.billingReleaseNote),
       });
       triggerReload();
     } catch (error) {
@@ -2341,12 +1395,9 @@ export function OrdersPage() {
     setProcessGateBusy(true);
     setProcessGateError(null);
     try {
-      await apiFetch(`/orders/${selectedOrderId}/process-gates`, {
-        method: "POST",
-        body: JSON.stringify({
-          package_coverage_status: processGateForm.packageCoverageStatus,
-          package_coverage_note: optString(processGateForm.packageCoverageNote),
-        }),
+      await updateOrderProcessGates(selectedOrderId, {
+        package_coverage_status: processGateForm.packageCoverageStatus,
+        package_coverage_note: optString(processGateForm.packageCoverageNote),
       });
       triggerReload();
     } catch (error) {
@@ -2366,18 +1417,15 @@ export function OrdersPage() {
     setPlanningBusy(true);
     setPlanningError(null);
     try {
-      await apiFetch(`/orders/${selectedOrderId}/planning-preparation`, {
-        method: "POST",
-        body: JSON.stringify({
-          treatment_plan_status: planningForm.treatmentPlanStatus,
-          treatment_plan_note: optString(planningForm.treatmentPlanNote),
-          non_medical_required: planningForm.nonMedicalRequired,
-          interpreter_required: planningForm.interpreterRequired,
-          preparation_documents_status: planningForm.preparationDocumentsStatus,
-          interpreter_briefing_status: planningForm.interpreterRequired
-            ? planningForm.interpreterBriefingStatus
-            : "not_needed",
-        }),
+      await updateOrderPlanningPreparation(selectedOrderId, {
+        treatment_plan_status: planningForm.treatmentPlanStatus,
+        treatment_plan_note: optString(planningForm.treatmentPlanNote),
+        non_medical_required: planningForm.nonMedicalRequired,
+        interpreter_required: planningForm.interpreterRequired,
+        preparation_documents_status: planningForm.preparationDocumentsStatus,
+        interpreter_briefing_status: planningForm.interpreterRequired
+          ? planningForm.interpreterBriefingStatus
+          : "not_needed",
       });
       triggerReload();
     } catch (error) {
@@ -2397,17 +1445,14 @@ export function OrdersPage() {
     setExecutionBusy(true);
     setExecutionError(null);
     try {
-      await apiFetch(`/orders/${selectedOrderId}/execution-flow`, {
-        method: "POST",
-        body: JSON.stringify({
-          arrival_status: executionForm.arrivalStatus,
-          medical_execution_status: executionForm.medicalExecutionStatus,
-          non_medical_execution_status: executionForm.nonMedicalExecutionStatus,
-          interpreter_service_status: executionForm.interpreterServiceStatus,
-          issue_status: executionForm.issueStatus,
-          deviation_note: optString(executionForm.deviationNote),
-          execution_summary: optString(executionForm.executionSummary),
-        }),
+      await updateOrderExecutionFlow(selectedOrderId, {
+        arrival_status: executionForm.arrivalStatus,
+        medical_execution_status: executionForm.medicalExecutionStatus,
+        non_medical_execution_status: executionForm.nonMedicalExecutionStatus,
+        interpreter_service_status: executionForm.interpreterServiceStatus,
+        issue_status: executionForm.issueStatus,
+        deviation_note: optString(executionForm.deviationNote),
+        execution_summary: optString(executionForm.executionSummary),
       });
       triggerReload();
     } catch (error) {
@@ -2427,18 +1472,15 @@ export function OrdersPage() {
     setFollowupBusy(true);
     setFollowupError(null);
     try {
-      await apiFetch(`/orders/${selectedOrderId}/followup-flow`, {
-        method: "POST",
-        body: JSON.stringify({
-          doctor_followup_status: followupForm.doctorFollowupStatus,
-          followup_1w_status: followupForm.followup1wStatus,
-          followup_1m_status: followupForm.followup1mStatus,
-          followup_6m_status: followupForm.followup6mStatus,
-          package_end_date: followupForm.packageEndDate,
-          package_end_status: followupForm.packageEndStatus,
-          results_handoff_status: followupForm.resultsHandoffStatus,
-          followup_summary: optString(followupForm.followupSummary),
-        }),
+      await updateOrderFollowupFlow(selectedOrderId, {
+        doctor_followup_status: followupForm.doctorFollowupStatus,
+        followup_1w_status: followupForm.followup1wStatus,
+        followup_1m_status: followupForm.followup1mStatus,
+        followup_6m_status: followupForm.followup6mStatus,
+        package_end_date: followupForm.packageEndDate,
+        package_end_status: followupForm.packageEndStatus,
+        results_handoff_status: followupForm.resultsHandoffStatus,
+        followup_summary: optString(followupForm.followupSummary),
       });
       triggerReload();
     } catch (error) {
@@ -2484,19 +1526,16 @@ export function OrdersPage() {
     setLeistungSaving(true);
     setLeistungError(null);
     try {
-      await apiFetch(`/orders/${selectedOrderId}/leistungen`, {
-        method: "POST",
-        body: JSON.stringify({
-          description: leistungForm.description.trim(),
-          quantity,
-          unit_price: unitPrice,
-          vat_rate: vatRate,
-          is_cost_passthrough: leistungForm.isCostPassthrough,
-          provider_id: optString(leistungForm.providerId),
-          doctor_id: optString(leistungForm.doctorId),
-          external_document_id: optString(leistungForm.externalDocumentId),
-          notes: optString(leistungForm.notes),
-        }),
+      await createOrderLeistung(selectedOrderId, {
+        description: leistungForm.description.trim(),
+        quantity,
+        unit_price: unitPrice,
+        vat_rate: vatRate,
+        is_cost_passthrough: leistungForm.isCostPassthrough,
+        provider_id: optString(leistungForm.providerId),
+        doctor_id: optString(leistungForm.doctorId),
+        external_document_id: optString(leistungForm.externalDocumentId),
+        notes: optString(leistungForm.notes),
       });
       resetLeistungDialog(false);
       triggerReload();
@@ -2514,12 +1553,7 @@ export function OrdersPage() {
 
     setApprovingLeistungId(leistungId);
     try {
-      await apiFetch(
-        `/orders/${selectedOrderId}/leistungen/${leistungId}/approve`,
-        {
-          method: "POST",
-        },
-      );
+      await approveOrderLeistung(selectedOrderId, leistungId);
       triggerReload();
     } catch (error) {
       setDetailError(
@@ -2571,21 +1605,18 @@ export function OrdersPage() {
     setExternalInvoiceSaving(true);
     setExternalInvoiceError(null);
     try {
-      await apiFetch(`/orders/${selectedOrderId}/external-invoices`, {
-        method: "POST",
-        body: JSON.stringify({
-          provider_id: optString(externalInvoiceForm.providerId),
-          external_invoice_number:
-            externalInvoiceForm.externalInvoiceNumber.trim(),
-          invoice_date: optString(externalInvoiceForm.invoiceDate),
-          due_date: optString(externalInvoiceForm.dueDate),
-          amount_net: externalInvoiceForm.amountNet.trim() ? amountNet : 0,
-          amount_vat: externalInvoiceForm.amountVat.trim() ? amountVat : 0,
-          amount_gross: amountGross,
-          currency: optString(externalInvoiceForm.currency) ?? "EUR",
-          status: externalInvoiceForm.status,
-          notes: optString(externalInvoiceForm.notes),
-        }),
+      await createExternalInvoice(selectedOrderId, {
+        provider_id: optString(externalInvoiceForm.providerId),
+        external_invoice_number:
+          externalInvoiceForm.externalInvoiceNumber.trim(),
+        invoice_date: optString(externalInvoiceForm.invoiceDate),
+        due_date: optString(externalInvoiceForm.dueDate),
+        amount_net: externalInvoiceForm.amountNet.trim() ? amountNet : 0,
+        amount_vat: externalInvoiceForm.amountVat.trim() ? amountVat : 0,
+        amount_gross: amountGross,
+        currency: optString(externalInvoiceForm.currency) ?? "EUR",
+        status: externalInvoiceForm.status,
+        notes: optString(externalInvoiceForm.notes),
       });
       setExternalInvoiceForm(blankExternalInvoiceForm());
       triggerReload();
@@ -2609,13 +1640,7 @@ export function OrdersPage() {
     setExternalInvoiceUpdatingId(externalInvoiceId);
     setDetailError(null);
     try {
-      await apiFetch(
-        `/orders/${selectedOrderId}/external-invoices/${externalInvoiceId}/update`,
-        {
-          method: "POST",
-          body: JSON.stringify({ status }),
-        },
-      );
+      await updateExternalInvoice(selectedOrderId, externalInvoiceId, { status });
       triggerReload();
     } catch (error) {
       setDetailError(
@@ -2638,16 +1663,13 @@ export function OrdersPage() {
     setWorkflowBusy(true);
     setDetailError(null);
     try {
-      await apiFetch(`/orders/${selectedOrderId}/workflow-checklist`, {
-        method: "POST",
-        body: JSON.stringify({
-          item_text: workflowForm.itemText.trim(),
-          owner_user_id: optString(workflowForm.ownerUserId),
-          priority: workflowForm.priority,
-          due_date: workflowForm.dueDate
-            ? new Date(workflowForm.dueDate).toISOString()
-            : null,
-        }),
+      await createWorkflowChecklistItem(selectedOrderId, {
+        item_text: workflowForm.itemText.trim(),
+        owner_user_id: optString(workflowForm.ownerUserId),
+        priority: workflowForm.priority,
+        due_date: workflowForm.dueDate
+          ? new Date(workflowForm.dueDate).toISOString()
+          : null,
       });
       setWorkflowForm((current) => ({
         ...blankWorkflowChecklistForm(),
@@ -2671,12 +1693,7 @@ export function OrdersPage() {
     setWorkflowBusy(true);
     setDetailError(null);
     try {
-      await apiFetch(
-        `/orders/${selectedOrderId}/workflow-checklist/${itemId}/complete`,
-        {
-          method: "POST",
-        },
-      );
+      await completeWorkflowChecklistItem(selectedOrderId, itemId);
       triggerReload();
     } catch (error) {
       setDetailError(

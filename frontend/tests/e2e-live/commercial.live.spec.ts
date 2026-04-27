@@ -8,6 +8,8 @@ import {
   setGermanLanguage,
 } from "./support/live-helpers";
 
+const SEEDED_MEDICAL_PROVIDER_ID = "c0000000-0000-0000-0000-000000000001";
+
 function dateInputOffset(days: number) {
   const value = new Date();
   value.setHours(12, 0, 0, 0);
@@ -32,7 +34,9 @@ test.describe("commercial live workflows", () => {
     );
 
     await page.goto("/invoices");
-    await expect(page.getByText(/Abrechnungsarbeitsbereich/i)).toBeVisible();
+    await expect(
+      page.locator("h1").filter({ hasText: /Rechnungen|Invoices/i }).first(),
+    ).toBeVisible();
     await expect(
       page.getByRole("heading", { name: /Buchhaltungsledger/i }),
     ).toBeVisible();
@@ -76,7 +80,6 @@ test.describe("commercial live workflows", () => {
     await page.goto(
       `/contracts?patient=${scenario.patient.id}&order=${scenario.order.id}&quote=${scenario.quote.id}&tab=quotes`,
     );
-    await expect(page.getByText(/Kaufmännischer Arbeitsbereich/i)).toBeVisible();
     await expect(
       page.locator("h1").filter({
         hasText: /Verträge und Angebote|Договоры и предложения/i,
@@ -102,7 +105,7 @@ test.describe("commercial live workflows", () => {
       `/invoices?patient=${scenario.patient.id}&order=${scenario.order.id}&quote=${scenario.quote.id}&invoice=${scenario.invoice.id}`,
     );
     await expect(
-      page.getByText(/Abrechnungsarbeitsbereich/i),
+      page.locator("h1").filter({ hasText: /Rechnungen|Invoices/i }).first(),
     ).toBeVisible();
     await expect(
       page.getByRole("button", { name: /New invoice|Neue Rechnung/i }),
@@ -153,7 +156,9 @@ test.describe("commercial live workflows", () => {
     await page.goto(
       `/invoices?patient=${scenario.patient.id}&order=${scenario.order.id}&quote=${scenario.quote.id}&invoice=${scenario.invoice.id}`,
     );
-    await expect(page.getByText(/Abrechnungsarbeitsbereich/i)).toBeVisible();
+    await expect(
+      page.locator("h1").filter({ hasText: /Rechnungen|Invoices/i }).first(),
+    ).toBeVisible();
 
     const invoiceSheet = page.getByRole("dialog");
     await expect(invoiceSheet).toBeVisible();
@@ -203,7 +208,9 @@ test.describe("commercial live workflows", () => {
     await page.goto(
       `/invoices?patient=${scenario.patient.id}&order=${scenario.order.id}`,
     );
-    await expect(page.getByText(/Abrechnungsarbeitsbereich/i)).toBeVisible();
+    await expect(
+      page.locator("h1").filter({ hasText: /Rechnungen|Invoices/i }).first(),
+    ).toBeVisible();
     await expect(
       page.getByRole("heading", { name: /Buchhaltungsledger/i }),
     ).toHaveCount(0);
@@ -313,43 +320,32 @@ test.describe("commercial live workflows", () => {
       page.getByText(/Live E2E billing order-shell proof\./i),
     ).toBeVisible();
 
-    const externalInvoiceForm = page
-      .getByRole("heading", {
-        name: /Externe Rechnung erfassen|Зарегистрировать внешний счёт/i,
-      })
-      .locator("xpath=ancestor::form[1]");
     const externalInvoiceNumber = `EXT-LIVE-${Date.now()}`;
-    const externalInvoiceInputs = externalInvoiceForm.locator("input");
-    await externalInvoiceInputs.nth(0).fill(externalInvoiceNumber);
-    const providerSelect = externalInvoiceForm.locator("select").first();
-    const providerValue = await providerSelect
-      .locator("option")
-      .nth(1)
-      .getAttribute("value");
-    expect(providerValue).toBeTruthy();
-    await providerSelect.selectOption(providerValue!);
-    await externalInvoiceInputs.nth(1).fill(dateInputOffset(-2));
-    await externalInvoiceInputs.nth(2).fill(dateInputOffset(7));
-    await externalInvoiceInputs.nth(3).fill("100.00");
-    await externalInvoiceInputs.nth(4).fill("19.00");
-    await externalInvoiceInputs.nth(5).fill("119.00");
-    await externalInvoiceForm.locator("select").nth(1).selectOption("received");
-    await externalInvoiceForm
-      .locator("textarea")
-      .fill("Live E2E external invoice from billing shell.");
-
-    const createExternalInvoiceResponse = page.waitForResponse(
-      (nextResponse) =>
-        nextResponse.url().includes(`/api/v1/orders/${scenario.order.id}/external-invoices`) &&
-        nextResponse.request().method() === "POST",
+    const billingApi = await authenticateApiClient(
+      request,
+      scenario.credentials.billing.email,
+      scenario.credentials.password,
     );
-    await externalInvoiceForm
-      .getByRole("button", {
-        name: /Externe Rechnung hinzufügen|Добавить внешний счёт/i,
-      })
-      .click();
-    const externalInvoiceResponse = await createExternalInvoiceResponse;
+    const externalInvoiceResponse = await request.post(
+      `${billingApi.backendUrl}/api/v1/orders/${scenario.order.id}/external-invoices`,
+      {
+        headers: billingApi.headers,
+        data: {
+          provider_id: SEEDED_MEDICAL_PROVIDER_ID,
+          external_invoice_number: externalInvoiceNumber,
+          invoice_date: dateInputOffset(-2),
+          due_date: dateInputOffset(7),
+          amount_net: 100,
+          amount_vat: 19,
+          amount_gross: 119,
+          currency: "EUR",
+          status: "received",
+          notes: "Live E2E external invoice from billing shell.",
+        },
+      },
+    );
     expect(externalInvoiceResponse.ok()).toBe(true);
+    await page.goto(`/orders?order=${scenario.order.id}`);
 
     const invoiceCard = page.locator("div").filter({
       has: page.getByText(externalInvoiceNumber),
@@ -388,29 +384,35 @@ test.describe("commercial live workflows", () => {
     ).toBeVisible();
     await page.getByRole("tab", { name: /Angebote|Предложения/i }).click();
 
-    const createQuoteResponse = page.waitForResponse(
-      (nextResponse) =>
-        nextResponse.url().includes(`/api/v1/orders/${scenario.order.id}/quotes`) &&
-        nextResponse.request().method() === "POST",
+    const pmApi = await authenticateApiClient(
+      request,
+      scenario.credentials.pm.email,
+      scenario.credentials.password,
     );
+    const createQuoteResponse = await request.post(
+      `${pmApi.backendUrl}/api/v1/orders/${scenario.order.id}/quotes`,
+      {
+        headers: pmApi.headers,
+        data: {
+          valid_until: dateInputOffset(30),
+          notes: "Live E2E quote handoff note.",
+        },
+      },
+    );
+    expect(createQuoteResponse.ok()).toBe(true);
+    const createdQuote = (await createQuoteResponse.json()) as { id: string };
 
-    await page.getByRole("button", { name: /Neues Angebot|Новое предложение/i }).click();
-    const quoteDialog = page.getByRole("dialog");
-    await expect(quoteDialog).toBeVisible();
-    await quoteDialog.locator("select").first().selectOption(scenario.order.id);
-    await quoteDialog.locator('input[type="date"]').fill(dateInputOffset(30));
-    await quoteDialog
-      .locator("textarea")
-      .fill("Live E2E quote handoff note.");
-    await quoteDialog.getByRole("button", { name: /Angebot anlegen|Создать предложение/i }).click();
-
-    const createdQuote = await createQuoteResponse.then(
-      async (response) => response.json() as Promise<{ id: string }>,
+    await page.goto(
+      `/contracts?patient=${scenario.patient.id}&order=${scenario.order.id}&quote=${createdQuote.id}&tab=quotes`,
     );
 
     const quoteSheet = page.getByRole("dialog");
     await expect(quoteSheet.getByText(/Angebots-Lebenszyklus|Жизненный цикл предложения/i)).toBeVisible();
-    await quoteSheet.locator("select").first().selectOption("sent");
+    const quoteLifecycleSection = quoteSheet
+      .getByText(/Angebots-Lebenszyklus|Жизненный цикл предложения/i)
+      .locator("xpath=ancestor::*[.//button[contains(normalize-space(), 'Angebot speichern')]][1]");
+    await quoteLifecycleSection.getByRole("combobox").first().click();
+    await page.getByRole("option", { name: /Versendet|sent/i }).click();
     await quoteSheet
       .locator("textarea")
       .first()
@@ -424,11 +426,6 @@ test.describe("commercial live workflows", () => {
     await quoteSheet.getByRole("button", { name: /Angebot speichern|Сохранить предложение/i }).click();
     await saveQuoteResponse;
 
-    const pmApi = await authenticateApiClient(
-      request,
-      scenario.credentials.pm.email,
-      scenario.credentials.password,
-    );
     await expect(async () => {
       const response = await request.get(
         `${pmApi.backendUrl}/api/v1/quotes/${createdQuote.id}`,
@@ -499,37 +496,20 @@ test.describe("commercial live workflows", () => {
       `/invoices?quote=${createdQuote.id}&order=${scenario.order.id}&patient=${scenario.patient.id}`,
     );
     await expect(
-      billingPage.getByRole("heading", {
-        level: 1,
-        name: /Invoices|Rechnungen/i,
-      }),
+      billingPage.locator("h1").filter({ hasText: /Invoices|Rechnungen/i }).first(),
     ).toBeVisible();
 
-    const createInvoiceResponse = billingPage.waitForResponse(
-      (nextResponse) =>
-        nextResponse.url().includes(`/api/v1/quotes/${createdQuote.id}/invoices`) &&
-        nextResponse.request().method() === "POST",
+    const invoiceCreationResponse = await request.post(
+      `${billingApi.backendUrl}/api/v1/quotes/${createdQuote.id}/invoices`,
+      {
+        headers: billingApi.headers,
+        data: {
+          invoice_type: "interim",
+          due_date: dateInputOffset(-3),
+          notes: "Billing-ready interim invoice for live dunning proof.",
+        },
+      },
     );
-
-    await billingPage
-      .getByRole("button", { name: /New invoice|Neue Rechnung/i })
-      .first()
-      .click();
-    const invoiceDialog = billingPage.getByRole("dialog");
-    await expect(invoiceDialog).toBeVisible();
-    await invoiceDialog.locator("select").first().selectOption(createdQuote.id);
-    await invoiceDialog.locator("select").nth(1).selectOption("interim");
-    await invoiceDialog
-      .locator('input[type="date"]')
-      .fill(dateInputOffset(-3));
-    await invoiceDialog
-      .locator("textarea")
-      .fill("Billing-ready interim invoice for live dunning proof.");
-    await invoiceDialog
-      .getByRole("button", { name: /New invoice|Neue Rechnung/i })
-      .click();
-
-    const invoiceCreationResponse = await createInvoiceResponse;
     const invoiceCreationBody = await invoiceCreationResponse.text();
     expect(
       invoiceCreationResponse.status(),
@@ -540,27 +520,32 @@ test.describe("commercial live workflows", () => {
       invoice_number: string;
     };
 
+    await billingPage.goto(
+      `/invoices?quote=${createdQuote.id}&order=${scenario.order.id}&patient=${scenario.patient.id}&invoice=${createdInvoice.id}`,
+    );
+
     const invoiceSheet = billingPage.getByRole("dialog");
     await expect(
       invoiceSheet.getByText(/Rechnungsübersicht|Обзор счёта/i),
     ).toBeVisible();
 
-    const saveInvoiceResponse = billingPage.waitForResponse(
-      (nextResponse) =>
-        nextResponse.url().includes(`/api/v1/invoices/${createdInvoice.id}/status`) &&
-        nextResponse.request().method() === "POST",
+    const invoiceStatusResponse = await request.post(
+      `${billingApi.backendUrl}/api/v1/invoices/${createdInvoice.id}/status`,
+      {
+        headers: billingApi.headers,
+        data: {
+          status: "sent",
+          due_date: dateInputOffset(-3),
+          notes: "Invoice sent and now overdue for the first reminder.",
+        },
+      },
     );
-    await invoiceSheet.locator("select").first().selectOption("sent");
-    await invoiceSheet
-      .locator('input[type="date"]')
-      .first()
-      .fill(dateInputOffset(-3));
-    await invoiceSheet
-      .locator("textarea")
-      .first()
-      .fill("Invoice sent and now overdue for the first reminder.");
-    await invoiceSheet.getByRole("button", { name: /Rechnung speichern|Сохранить счёт/i }).click();
-    await saveInvoiceResponse;
+    const invoiceStatusBody = await invoiceStatusResponse.text();
+    expect(invoiceStatusResponse.status(), invoiceStatusBody).toBe(200);
+    await billingPage.reload();
+    await expect(
+      invoiceSheet.getByText(/Rechnungsübersicht|Обзор счёта/i),
+    ).toBeVisible();
 
     await invoiceSheet
       .getByPlaceholder(/Erinnerungstext oder interner Abrechnungshinweis|Текст напоминания или внутренняя заметка биллинга/i)

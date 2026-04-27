@@ -304,6 +304,56 @@ async fn create_invoice(
     body
 }
 
+fn current_ledger_year() -> String {
+    chrono::Utc::now().format("%Y").to_string()
+}
+
+fn accounting_entries_for_invoice_or_external<'a>(
+    entries: &'a [Value],
+    invoice_number: &str,
+    external_invoice_number: &str,
+) -> Vec<&'a Value> {
+    entries
+        .iter()
+        .filter(|entry| {
+            entry
+                .get("invoice_number")
+                .and_then(Value::as_str)
+                .is_some_and(|value| value == invoice_number)
+                || entry
+                    .get("external_invoice_number")
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| value == external_invoice_number)
+        })
+        .collect()
+}
+
+fn accounting_entries_for_invoice<'a>(
+    entries: &'a [Value],
+    invoice_number: &str,
+) -> Vec<&'a Value> {
+    entries
+        .iter()
+        .filter(|entry| {
+            entry
+                .get("invoice_number")
+                .and_then(Value::as_str)
+                .is_some_and(|value| value == invoice_number)
+        })
+        .collect()
+}
+
+fn accounting_amount_gross(entry: &Value) -> f64 {
+    entry["amount_gross"].as_str().unwrap().parse().unwrap()
+}
+
+fn assert_money_close(actual: f64, expected: f64) {
+    assert!(
+        (actual - expected).abs() < 0.01,
+        "expected {expected}, got {actual}"
+    );
+}
+
 #[tokio::test]
 async fn invoice_creation_from_quote_marks_order_services_invoiced() {
     let Some((app, pool, admin_id)) = test_context().await else {
@@ -770,6 +820,9 @@ async fn paid_invoice_and_external_invoice_materialize_accounting_ledger_without
     };
 
     let tag = unique_tag("accounting-ledger");
+    let ledger_year = current_ledger_year();
+    let invoice_due_date = format!("{ledger_year}-05-20");
+    let external_invoice_number = format!("EXT-{tag}");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let pm_id = seed_user(&pool, &tag, "patient_manager").await;
     let billing_id = seed_user(&pool, &tag, "billing").await;
@@ -816,11 +869,12 @@ async fn paid_invoice_and_external_invoice_materialize_accounting_ledger_without
         "POST",
         &format!("/api/v1/quotes/{quote_id}/invoices"),
         &billing_bearer,
-        Some(json!({ "invoice_type": "final", "due_date": "2026-05-20" })),
+        Some(json!({ "invoice_type": "final", "due_date": invoice_due_date })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
     let invoice_id = invoice["id"].as_str().unwrap();
+    let invoice_number = invoice["invoice_number"].as_str().unwrap();
     let total_gross: f64 = invoice["total_gross"].as_str().unwrap().parse().unwrap();
 
     let (status, body) = json_request(
@@ -844,7 +898,7 @@ async fn paid_invoice_and_external_invoice_materialize_accounting_ledger_without
         &billing_bearer,
         Some(json!({
             "provider_id": provider_id,
-            "external_invoice_number": format!("EXT-{tag}"),
+            "external_invoice_number": external_invoice_number.clone(),
             "invoice_date": "2026-04-10",
             "due_date": "2026-04-25",
             "amount_net": 50.0,
@@ -874,25 +928,44 @@ async fn paid_invoice_and_external_invoice_materialize_accounting_ledger_without
     let (status, ledger) = json_request(
         &app,
         "GET",
-        "/api/v1/invoices/accounting-ledger?year=2026",
+        &format!("/api/v1/invoices/accounting-ledger?year={ledger_year}"),
         &billing_bearer,
         None,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
     let entries = ledger["entries"].as_array().unwrap();
-    assert_eq!(entries.len(), 3);
-    let categories = entries
+    let scoped_entries = accounting_entries_for_invoice_or_external(
+        entries,
+        invoice_number,
+        &external_invoice_number,
+    );
+    assert_eq!(scoped_entries.len(), 3);
+    let categories = scoped_entries
         .iter()
         .map(|entry| entry["category"].as_str().unwrap().to_string())
         .collect::<Vec<_>>();
     assert!(categories.contains(&"service_revenue".to_string()));
     assert!(categories.contains(&"cost_passthrough_revenue".to_string()));
     assert!(categories.contains(&"provider_expense".to_string()));
-    assert_eq!(ledger["summary"]["income_gross"], invoice["total_gross"]);
-    assert_eq!(ledger["summary"]["expense_gross"], "60");
-    assert_eq!(ledger["summary"]["cost_passthrough_revenue_gross"], "50");
-    assert_eq!(ledger["summary"]["provider_expense_gross"], "60");
+
+    let invoice_entries = accounting_entries_for_invoice(entries, invoice_number);
+    assert_eq!(invoice_entries.len(), 2);
+    let invoice_income_gross = invoice_entries
+        .iter()
+        .map(|entry| accounting_amount_gross(entry))
+        .sum::<f64>();
+    assert_money_close(invoice_income_gross, total_gross);
+    let cost_passthrough_entry = scoped_entries
+        .iter()
+        .find(|entry| entry["category"] == "cost_passthrough_revenue")
+        .unwrap();
+    assert_money_close(accounting_amount_gross(cost_passthrough_entry), 50.0);
+    let provider_expense_entry = scoped_entries
+        .iter()
+        .find(|entry| entry["category"] == "provider_expense")
+        .unwrap();
+    assert_money_close(accounting_amount_gross(provider_expense_entry), 60.0);
 
     let (status, _) = json_request(
         &app,
@@ -922,13 +995,19 @@ async fn paid_invoice_and_external_invoice_materialize_accounting_ledger_without
     let (status, ledger) = json_request(
         &app,
         "GET",
-        "/api/v1/invoices/accounting-ledger?year=2026",
+        &format!("/api/v1/invoices/accounting-ledger?year={ledger_year}"),
         &billing_bearer,
         None,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(ledger["entries"].as_array().unwrap().len(), 3);
+    let entries = ledger["entries"].as_array().unwrap();
+    let scoped_entries = accounting_entries_for_invoice_or_external(
+        entries,
+        invoice_number,
+        &external_invoice_number,
+    );
+    assert_eq!(scoped_entries.len(), 3);
 }
 
 #[tokio::test]
@@ -938,6 +1017,8 @@ async fn ceo_assistant_can_read_accounting_ledger_export_and_sales_cannot() {
     };
 
     let tag = unique_tag("accounting-ledger-rbac");
+    let ledger_year = current_ledger_year();
+    let invoice_due_date = format!("{ledger_year}-05-22");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let pm_id = seed_user(&pool, &tag, "patient_manager").await;
     let billing_id = seed_user(&pool, &tag, "billing").await;
@@ -955,8 +1036,9 @@ async fn ceo_assistant_can_read_accounting_ledger_export_and_sales_cannot() {
     let quote = create_quote(&app, &pm_bearer, order_id).await;
     let quote_id = quote["id"].as_str().unwrap();
 
-    let invoice = create_invoice(&app, &billing_bearer, quote_id, "final", "2026-05-22").await;
+    let invoice = create_invoice(&app, &billing_bearer, quote_id, "final", &invoice_due_date).await;
     let invoice_id = invoice["id"].as_str().unwrap();
+    let invoice_number = invoice["invoice_number"].as_str().unwrap();
     let total_gross: f64 = invoice["total_gross"].as_str().unwrap().parse().unwrap();
 
     let (status, _) = json_request(
@@ -975,18 +1057,20 @@ async fn ceo_assistant_can_read_accounting_ledger_export_and_sales_cannot() {
     let (status, body) = json_request(
         &app,
         "GET",
-        "/api/v1/invoices/accounting-ledger?year=2026",
+        &format!("/api/v1/invoices/accounting-ledger?year={ledger_year}"),
         &assistant_bearer,
         None,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["entries"].as_array().unwrap().len(), 1);
+    let entries = body["entries"].as_array().unwrap();
+    let invoice_entries = accounting_entries_for_invoice(entries, invoice_number);
+    assert_eq!(invoice_entries.len(), 1);
 
     let (status, headers, bytes) = binary_request(
         &app,
         "GET",
-        "/api/v1/invoices/accounting-ledger/export?year=2026",
+        &format!("/api/v1/invoices/accounting-ledger/export?year={ledger_year}"),
         &assistant_bearer,
     )
     .await;
@@ -1004,7 +1088,7 @@ async fn ceo_assistant_can_read_accounting_ledger_export_and_sales_cannot() {
     let (status, _) = json_request(
         &app,
         "GET",
-        "/api/v1/invoices/accounting-ledger?year=2026",
+        &format!("/api/v1/invoices/accounting-ledger?year={ledger_year}"),
         &sales_bearer,
         None,
     )
@@ -1014,7 +1098,7 @@ async fn ceo_assistant_can_read_accounting_ledger_export_and_sales_cannot() {
     let (status, _, _) = binary_request(
         &app,
         "GET",
-        "/api/v1/invoices/accounting-ledger/export?year=2026",
+        &format!("/api/v1/invoices/accounting-ledger/export?year={ledger_year}"),
         &sales_bearer,
     )
     .await;

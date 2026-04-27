@@ -4,8 +4,11 @@ import { LoaderCircle, RefreshCw, Shield } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import {
+  createPortalPrivacyRequest,
+  fetchPortalPrivacyRequests,
+} from "@/pages/patients/data/portal-api";
 import {
   formatPortalDate,
   formatPortalDateTime,
@@ -46,7 +49,7 @@ export function PatientPrivacyPage() {
       }
 
       try {
-        const rows = await apiFetch<PortalPrivacyRequest[]>("/me/privacy-requests");
+        const rows = await fetchPortalPrivacyRequests();
         if (cancelled) return;
         startTransition(() => {
           setRequests(rows);
@@ -81,12 +84,9 @@ export function PatientPrivacyPage() {
     setError("");
 
     try {
-      await apiFetch("/me/privacy-requests", {
-        method: "POST",
-        body: JSON.stringify({
-          request_type: requestType,
-          reason: reason.trim() || null,
-        }),
+      await createPortalPrivacyRequest({
+        request_type: requestType,
+        reason: reason.trim() || null,
       });
       setReason("");
       setNotice(l("Datenschutzanfrage wurde eingereicht.", "Запрос по приватности отправлен.", "Privacy request submitted."));

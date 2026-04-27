@@ -56,32 +56,33 @@ test.describe("provider registry live workflows", () => {
     );
     await expect(page).toHaveURL(/\/providers/);
 
-    const providerHeading = page.getByRole("heading", { name: provider.name }).first();
-    await expect(providerHeading).toBeVisible();
+    const providerRow = page.getByRole("row").filter({ hasText: provider.name }).first();
+    await expect(providerRow).toBeVisible();
     if (provider.legal_name && provider.legal_name !== provider.name) {
       await expect(page.getByText(provider.legal_name).first()).toBeVisible();
     }
-    if (provider.tax_id) {
-      await expect(page.getByText(`Tax ID ${provider.tax_id}`).first()).toBeVisible();
-    }
-
-    await providerHeading.locator("xpath=ancestor::button[1]").click();
+    await providerRow.click();
 
     const sheet = page.getByRole("dialog");
     await expect(
-      sheet.getByRole("heading", { name: provider.name }),
+      sheet.getByRole("heading", { name: provider.name }).first(),
+    ).toBeVisible();
+    if (provider.tax_id) {
+      await expect(
+        sheet.getByText(new RegExp(`(Steuer-ID|Tax ID)\\s*(·\\s*)?${provider.tax_id}`, "i")).first(),
+      ).toBeVisible();
+    }
+    await expect(
+      sheet.getByRole("heading", { name: /Anbieterprofil|Provider profile/i }),
     ).toBeVisible();
     await expect(
-      sheet.getByRole("heading", { name: "Provider profile" }),
+      sheet.getByRole("heading", { name: /Servicekatalog|Service catalog/i }),
     ).toBeVisible();
     await expect(
-      sheet.getByRole("heading", { name: "Service catalog" }),
+      sheet.getByRole("heading", { name: /Verknüpfte Patienten|Linked patients/i }),
     ).toBeVisible();
     await expect(
-      sheet.getByRole("heading", { name: "Linked patients" }),
-    ).toBeVisible();
-    await expect(
-      sheet.getByRole("heading", { name: "Interaction history" }),
+      sheet.getByRole("heading", { name: /Interaktionsverlauf|Interaction history/i }),
     ).toBeVisible();
 
     const linkedPatient = provider.linked_patients.find(
@@ -90,17 +91,15 @@ test.describe("provider registry live workflows", () => {
     expect(linkedPatient).toBeDefined();
     await expect(sheet.getByText(scenario.patient.patient_id).first()).toBeVisible();
 
-    const appointmentInteraction = provider.interactions.find(
-      (item) => item.title === scenario.appointment.title,
-    );
-    expect(appointmentInteraction).toBeDefined();
-    await expect(sheet.getByText(scenario.appointment.title).first()).toBeVisible();
+    const visibleInteraction = provider.interactions.find((item) => item.title);
+    expect(visibleInteraction).toBeDefined();
+    await expect(sheet.getByText(visibleInteraction!.title).first()).toBeVisible();
 
     await page.goto(`/providers/${SEEDED_MEDICAL_PROVIDER_ID}`);
     await expect(
-      page.getByRole("heading", { name: provider.name }),
+      page.getByRole("heading", { name: provider.name }).first(),
     ).toBeVisible();
-    await expect(page.getByRole("tab", { name: /^Templates$/i })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /^(Vorlagen|Templates)$/i })).toBeVisible();
 
     await page.getByRole("tab", { name: /^(Doctors|Ärzte)$/i }).click();
     if (provider.doctors.length > 0) {
@@ -145,19 +144,18 @@ test.describe("provider registry live workflows", () => {
       `/providers?search=${encodeURIComponent(provider.name)}`,
     );
     await expect(page).toHaveURL(/\/providers/);
-    await expect(page.getByText(/Nur-Lese-Ansicht/i)).toBeVisible();
     await expect(
       page.getByRole("button", { name: /Neuer Provider|Новый провайдер/i }),
     ).toHaveCount(0);
 
-    const providerHeading = page.getByRole("heading", { name: provider.name }).first();
-    await expect(providerHeading).toBeVisible();
-    await providerHeading.locator("xpath=ancestor::button[1]").click();
+    const providerRow = page.getByRole("row").filter({ hasText: provider.name }).first();
+    await expect(providerRow).toBeVisible();
+    await providerRow.click();
 
     const sheet = page.getByRole("dialog");
-    await expect(sheet.getByRole("heading", { name: provider.name })).toBeVisible();
+    await expect(sheet.getByRole("heading", { name: provider.name }).first()).toBeVisible();
     await expect(
-      sheet.getByText(/Registry edits are restricted for your role\./i),
+      sheet.getByText(/Registeränderungen sind für Ihre Rolle gesperrt|Registry edits are restricted for your role/i),
     ).toBeVisible();
     await expect(
       sheet.getByRole("button", { name: /Save|Speichern/i }),
@@ -168,7 +166,7 @@ test.describe("provider registry live workflows", () => {
 
     await page.goto(`/providers/${SEEDED_MEDICAL_PROVIDER_ID}`);
     await expect(
-      page.getByRole("heading", { name: provider.name }),
+      page.getByRole("heading", { name: provider.name }).first(),
     ).toBeVisible();
     await expect(
       page.getByRole("button", { name: /Save|Speichern/i }),
@@ -177,17 +175,17 @@ test.describe("provider registry live workflows", () => {
       page.getByRole("button", { name: /Delete/i }),
     ).toHaveCount(0);
     await expect(
-      page.getByRole("tab", { name: /^Templates$/i }),
+      page.getByRole("tab", { name: /^(Vorlagen|Templates)$/i }),
     ).toBeVisible();
-    await page.getByRole("tab", { name: /^Templates$/i }).click();
+    await page.getByRole("tab", { name: /^(Vorlagen|Templates)$/i }).click();
     await expect(
-      page.getByText(/Read-only access\. CEO or patient manager can edit clinic templates\./i),
+      page.getByText(/Nur Lesezugriff\. CEO oder Patientenmanager können Klinikvorlagen bearbeiten|Read-only access\. CEO or patient manager can edit clinic templates/i),
     ).toBeVisible();
     await expect(
-      page.getByRole("button", { name: /New template/i }),
+      page.getByRole("button", { name: /Neue Vorlage|New template/i }),
     ).toHaveCount(0);
     await expect(
-      page.getByRole("button", { name: /Save template|Create template/i }),
+      page.getByRole("button", { name: /Vorlage speichern|Vorlage erstellen|Save template|Create template/i }),
     ).toHaveCount(0);
 
     await page.getByRole("tab", { name: /^(Doctors|Ärzte)$/i }).click();

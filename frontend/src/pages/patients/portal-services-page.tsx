@@ -26,8 +26,12 @@ import {
   TabLoader,
   textareaClass,
 } from "@/components/ui-shell";
-import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import {
+  cancelPortalService,
+  createPortalServiceRequest,
+  fetchPortalServices,
+} from "@/pages/patients/data/portal-api";
 import {
   conciergeServiceKindLabel,
   conciergeServiceSourceLabel,
@@ -94,7 +98,7 @@ export function PatientServicesPage() {
       }
 
       try {
-        const rows = await apiFetch<PortalConciergeServiceItem[]>("/me/concierge-services");
+        const rows = await fetchPortalServices();
         if (cancelled) return;
         startTransition(() => {
           setServices(rows);
@@ -157,18 +161,15 @@ export function PatientServicesPage() {
     setNotice("");
 
     try {
-      await apiFetch("/me/concierge-services", {
-        method: "POST",
-        body: JSON.stringify({
-          service_kind: form.serviceKind,
-          title: form.title,
-          vendor_name: form.vendorName || undefined,
-          vendor_contact: form.vendorContact || undefined,
-          starts_at: toIsoDateTime(form.startsAt),
-          ends_at: toIsoDateTime(form.endsAt),
-          cost_estimate: form.costEstimate ? Number(form.costEstimate) : undefined,
-          service_notes: form.serviceNotes || undefined,
-        }),
+      await createPortalServiceRequest({
+        service_kind: form.serviceKind,
+        title: form.title,
+        vendor_name: form.vendorName || undefined,
+        vendor_contact: form.vendorContact || undefined,
+        starts_at: toIsoDateTime(form.startsAt),
+        ends_at: toIsoDateTime(form.endsAt),
+        cost_estimate: form.costEstimate ? Number(form.costEstimate) : undefined,
+        service_notes: form.serviceNotes || undefined,
       });
       setNotice(t.services_notice_created);
       setForm(blankServiceRequestForm());
@@ -186,9 +187,7 @@ export function PatientServicesPage() {
     setNotice("");
 
     try {
-      await apiFetch(`/me/concierge-services/${serviceId}/cancel`, {
-        method: "POST",
-      });
+      await cancelPortalService(serviceId);
       setNotice(t.services_notice_cancelled);
       setVersion((value) => value + 1);
     } catch (err) {
@@ -339,8 +338,9 @@ export function PatientServicesPage() {
               </Select>
             </Field>
 
-            <Field label={t.services_form_title}>
+            <Field label={t.services_form_title} htmlFor="portal-service-title">
               <Input
+                id="portal-service-title"
                 value={form.title}
                 onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))}
                 placeholder={t.services_form_title_placeholder}
@@ -350,16 +350,24 @@ export function PatientServicesPage() {
             </Field>
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label={t.services_form_preferred_vendor}>
+              <Field
+                label={t.services_form_preferred_vendor}
+                htmlFor="portal-service-vendor"
+              >
                 <Input
+                  id="portal-service-vendor"
                   value={form.vendorName}
                   onChange={(event) => setForm((current) => ({ ...current, vendorName: event.target.value }))}
                   placeholder={t.services_form_preferred_vendor_placeholder}
                   className={inputClass}
                 />
               </Field>
-              <Field label={t.services_form_vendor_contact}>
+              <Field
+                label={t.services_form_vendor_contact}
+                htmlFor="portal-service-vendor-contact"
+              >
                 <Input
+                  id="portal-service-vendor-contact"
                   value={form.vendorContact}
                   onChange={(event) => setForm((current) => ({ ...current, vendorContact: event.target.value }))}
                   placeholder={t.services_form_vendor_contact_placeholder}
@@ -387,8 +395,9 @@ export function PatientServicesPage() {
               </Field>
             </div>
 
-            <Field label={t.services_form_budget}>
+            <Field label={t.services_form_budget} htmlFor="portal-service-budget">
               <Input
+                id="portal-service-budget"
                 type="number"
                 min="0"
                 step="0.01"
@@ -399,8 +408,9 @@ export function PatientServicesPage() {
               />
             </Field>
 
-            <Field label={t.services_form_notes}>
+            <Field label={t.services_form_notes} htmlFor="portal-service-notes">
               <textarea
+                id="portal-service-notes"
                 value={form.serviceNotes}
                 onChange={(event) => setForm((current) => ({ ...current, serviceNotes: event.target.value }))}
                 placeholder={t.services_form_notes_placeholder}

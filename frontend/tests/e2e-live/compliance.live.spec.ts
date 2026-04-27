@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import {
   authenticateApiClient,
@@ -7,6 +7,30 @@ import {
   loginViaApi,
   setGermanLanguage,
 } from "./support/live-helpers";
+
+function privacyQueueRow(page: Page, requestType: RegExp, reason: string) {
+  return page
+    .getByRole("row")
+    .filter({ hasText: requestType })
+    .filter({ hasText: reason })
+    .last();
+}
+
+async function chooseSheetOption(page: Page, sheet: Locator, option: RegExp) {
+  await sheet.getByRole("combobox").first().click();
+  await page.getByRole("option", { name: option }).click();
+}
+
+async function openQueueReviewSheet(page: Page, row: Locator) {
+  await row.getByRole("button", { name: /Details/i }).click();
+  const sheet = page.getByRole("dialog").last();
+  await expect(sheet).toBeVisible();
+  return sheet;
+}
+
+async function closeCurrentSheet(page: Page) {
+  await page.getByRole("button", { name: /Schließen|Close/i }).last().click();
+}
 
 test.describe("compliance live workflows", () => {
   test("patient manager can grant consent and execute a third-party revoke request", async ({
@@ -25,11 +49,18 @@ test.describe("compliance live workflows", () => {
       page.getByRole("heading", { name: /DSGVO \/ Compliance|Compliance/i }),
     ).toBeVisible();
 
-    await page.locator("#consent-type").selectOption("third_party_sharing");
-    await page.locator("#consent-note").fill(consentNote);
-    await page
+    await page.getByRole("button", { name: "Details" }).first().click();
+    const consentSheet = page.getByRole("dialog").last();
+    await chooseSheetOption(
+      page,
+      consentSheet,
+      /Weitergabe an Dritte|Third-party sharing/i,
+    );
+    await consentSheet.locator("#consent-note").fill(consentNote);
+    await consentSheet
       .getByRole("button", { name: /Einwilligung erteilen|Grant consent/i })
       .click();
+    await closeCurrentSheet(page);
 
     const consentHistory = page.locator("table").first();
     await expect(
@@ -38,12 +69,19 @@ test.describe("compliance live workflows", () => {
     await expect(consentHistory.getByText(consentNote)).toBeVisible();
 
     await page
-      .locator("#privacy-request-type")
-      .selectOption("third_party_revoke");
-    await page.locator("#privacy-request-reason").fill(revokeReason);
-    await page
       .getByRole("button", { name: /Antrag anlegen|Create request/i })
       .click();
+    const requestSheet = page.getByRole("dialog").last();
+    await chooseSheetOption(
+      page,
+      requestSheet,
+      /Widerruf der Drittweitergabe|Third-party sharing revoke/i,
+    );
+    await requestSheet.locator("#privacy-request-reason").fill(revokeReason);
+    await requestSheet
+      .getByRole("button", { name: /Antrag anlegen|Create request/i })
+      .click();
+    await closeCurrentSheet(page);
 
     const privacyHistory = page.locator("table").nth(1);
     await expect(
@@ -53,23 +91,19 @@ test.describe("compliance live workflows", () => {
     ).toBeVisible();
     await expect(privacyHistory.getByText(revokeReason)).toBeVisible();
 
-    const queueRow = page
-      .getByRole("row")
-      .filter({
-        hasText: /Widerruf der Drittweitergabe|Third-party sharing revoke/i,
-      })
-      .filter({ hasText: revokeReason })
-      .last();
+    const queueRow = privacyQueueRow(
+      page,
+      /Widerruf der Drittweitergabe|Third-party sharing revoke/i,
+      revokeReason,
+    );
 
     await expect(queueRow).toBeVisible();
-    await queueRow
-      .getByRole("button", { name: /Genehmigen|Approve/i })
-      .click();
+    let reviewSheet = await openQueueReviewSheet(page, queueRow);
+    await reviewSheet.getByRole("button", { name: /Genehmigen|Approve/i }).click();
     await expect(queueRow.getByText(/Genehmigt|Approved/i)).toBeVisible();
 
-    await queueRow
-      .getByRole("button", { name: /Ausführen|Execute/i })
-      .click();
+    reviewSheet = await openQueueReviewSheet(page, queueRow);
+    await reviewSheet.getByRole("button", { name: /Ausführen|Execute/i }).click();
     await expect(queueRow.getByText(/Abgeschlossen|Completed/i)).toBeVisible();
     await expect(
       page.getByText(/"request_type": "third_party_revoke"/),
@@ -129,15 +163,12 @@ test.describe("compliance live workflows", () => {
       page.getByRole("heading", { name: /DSGVO \/ Compliance|Compliance/i }),
     ).toBeVisible();
 
-    const queueRow = page
-      .getByRole("row")
-      .filter({ hasText: /Löschantrag|Erasure/i })
-      .filter({ hasText: reason })
-      .last();
+    const queueRow = privacyQueueRow(page, /Löschantrag|Erasure/i, reason);
 
     await expect(queueRow).toBeVisible();
     await expect(queueRow.getByText(/Angefordert|Requested/i)).toBeVisible();
-    await queueRow.getByRole("button", { name: /Genehmigen|Approve/i }).click();
+    let reviewSheet = await openQueueReviewSheet(page, queueRow);
+    await reviewSheet.getByRole("button", { name: /Genehmigen|Approve/i }).click();
     await expect(queueRow.getByText(/Genehmigt|Approved/i)).toBeVisible();
 
     const baseUrl = new URL(page.url()).origin;
@@ -152,20 +183,17 @@ test.describe("compliance live workflows", () => {
     );
     await pmPage.goto(`/admin/compliance?patient=${scenario.patient.id}`);
 
-    const pmQueueRow = pmPage
-      .getByRole("row")
-      .filter({ hasText: /Löschantrag|Erasure/i })
-      .filter({ hasText: reason })
-      .last();
+    const pmQueueRow = privacyQueueRow(pmPage, /Löschantrag|Erasure/i, reason);
 
     await expect(pmQueueRow).toBeVisible();
     await expect(pmQueueRow.getByText(/Genehmigt|Approved/i)).toBeVisible();
     await expect(
-      pmQueueRow.getByRole("button", { name: /Ausführen|Execute/i }),
+      pmQueueRow.getByRole("button", { name: /Details/i }),
     ).toHaveCount(0);
 
     page.once("dialog", (dialog) => dialog.accept());
-    await queueRow.getByRole("button", { name: /Ausführen|Execute/i }).click();
+    reviewSheet = await openQueueReviewSheet(page, queueRow);
+    await reviewSheet.getByRole("button", { name: /Ausführen|Execute/i }).click();
     await expect(
       page
         .getByRole("row")

@@ -210,6 +210,17 @@ async fn seed_agency_service_catalog_item(
                 $1, $2, $3, 'hour',
                 95.0, 'EUR', 19.0, true, $4, $5
            )
+           ON CONFLICT (service_key) DO UPDATE
+           SET service_name = EXCLUDED.service_name,
+               description = EXCLUDED.description,
+               unit_label = EXCLUDED.unit_label,
+               unit_price = EXCLUDED.unit_price,
+               currency = EXCLUDED.currency,
+               vat_rate = EXCLUDED.vat_rate,
+               is_active = true,
+               valid_from = EXCLUDED.valid_from,
+               valid_to = NULL,
+               updated_by = EXCLUDED.created_by
            RETURNING id"#,
     )
     .bind(service_key)
@@ -220,6 +231,14 @@ async fn seed_agency_service_catalog_item(
     .fetch_one(pool)
     .await
     .unwrap()
+}
+
+async fn deactivate_agency_service_catalog_item(pool: &PgPool, service_key: &str) {
+    sqlx::query("UPDATE agency_service_catalog SET is_active = false WHERE service_key = $1")
+        .bind(service_key)
+        .execute(pool)
+        .await
+        .unwrap();
 }
 
 struct ProviderConciergeServiceSeed<'a> {
@@ -2538,6 +2557,7 @@ async fn approved_interpreter_report_auto_creates_order_leistung_from_agency_cat
 
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
     seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+    deactivate_agency_service_catalog_item(&pool, "interpreter_hours").await;
 
     let appointment_id = seed_appointment(
         &pool,
@@ -2797,6 +2817,7 @@ async fn interpreter_report_billing_scheduler_backfills_after_catalog_setup_with
 
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
     seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+    deactivate_agency_service_catalog_item(&pool, "interpreter_hours").await;
 
     let appointment_id = seed_appointment(
         &pool,

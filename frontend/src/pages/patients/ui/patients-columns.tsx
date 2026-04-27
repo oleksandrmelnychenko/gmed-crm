@@ -1,7 +1,11 @@
 import { BadgeCheck, CalendarClock, Mail, Phone, UserRound, UsersRound } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { humanizeFunctionalLabel } from "./shared/patient-form-primitives";
+import {
+  functionalLabelChipClass,
+  humanizeFunctionalLabel,
+  normalizeFunctionalLabel,
+} from "./shared/patient-form-primitives";
 import type { ColumnDef, FilterOption } from "@/components/data-table/types";
 import { cn } from "@/lib/utils";
 
@@ -62,16 +66,6 @@ function insuranceText(value: string | null | undefined, tr: Record<string, stri
   }
 }
 
-function initials(patient: PatientSummary): string {
-  const full = patientDisplayName(patient);
-  if (!full) return patient.patient_id.slice(0, 2).toUpperCase();
-  return full
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((word) => word[0]?.toUpperCase() ?? "")
-    .join("");
-}
-
 type DynamicOptions = {
   insuranceProviders: FilterOption[];
   nationalities: FilterOption[];
@@ -118,6 +112,9 @@ export const DEFAULT_PATIENT_HIDDEN_COLUMNS: string[] = [
   "address_city",
 ];
 
+export const DEFAULT_PATIENT_FROZEN_COLUMNS: string[] = ["no", "patient"];
+export const MAX_PATIENT_FROZEN_COLUMNS = 4;
+
 export const PATIENT_COLUMN_GROUPS: Record<string, string> = {
   identity: "Identity",
   contact: "Contact",
@@ -162,7 +159,7 @@ export function buildPatientColumns(
       ],
       sortable: true,
       defaultVisible: true,
-      width: 100,
+      width: 112,
       group: "identity",
       render: (p: PatientSummary) => <StatusPill active={p.is_active} tr={tr} />,
     },
@@ -178,19 +175,11 @@ export function buildPatientColumns(
       width: 240,
       group: "identity",
       render: (p: PatientSummary) => (
-        <div className="flex min-w-0 items-center gap-2">
-          <div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-foreground">
-            {initials(p)}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-xs font-medium text-foreground">{patientDisplayName(p)}</div>
-            {p.functional_labels?.length ? (
-              <div className="truncate text-[10px] text-muted-foreground">
-                {p.functional_labels.slice(0, 2).map(humanizeFunctionalLabel).join(", ")}
-                {p.functional_labels.length > 2 ? ` +${p.functional_labels.length - 2}` : ""}
-              </div>
-            ) : null}
-          </div>
+        <div className="min-w-0">
+          <div className="truncate text-xs font-medium text-foreground">{patientDisplayName(p)}</div>
+          {p.functional_labels?.length ? (
+            <FunctionalLabelSummary labels={p.functional_labels} />
+          ) : null}
         </div>
       ),
     },
@@ -251,6 +240,13 @@ export function buildPatientColumns(
       searchable: true,
       width: 180,
       group: "insurance",
+      render: (p: PatientSummary) => (
+        <TextCell
+          renderId="insurance_provider"
+          value={p.insurance_provider}
+          emptyLabel={tr.common_not_set}
+        />
+      ),
     },
     {
       id: "phone_primary",
@@ -277,6 +273,15 @@ export function buildPatientColumns(
       searchable: true,
       width: 220,
       group: "contact",
+      render: (p: PatientSummary) => (
+        <TextCell
+          renderId="email"
+          value={p.email}
+          icon={<Mail className="size-3" />}
+          mono
+          emptyLabel={tr.common_not_set}
+        />
+      ),
     },
     {
       id: "birth_date",
@@ -306,7 +311,11 @@ export function buildPatientColumns(
       width: 100,
       group: "identity",
       render: (p: PatientSummary) => (
-        <span className="text-xs text-muted-foreground">{genderText(p.gender, tr)}</span>
+        <TextCell
+          renderId="gender"
+          value={genderText(p.gender, tr)}
+          emptyLabel={tr.common_not_set}
+        />
       ),
     },
     {
@@ -319,6 +328,13 @@ export function buildPatientColumns(
       searchable: true,
       width: 128,
       group: "metadata",
+      render: (p: PatientSummary) => (
+        <PillCell
+          renderId="nationality"
+          value={p.nationality}
+          emptyLabel={tr.common_not_set}
+        />
+      ),
     },
     {
       id: "residence_country",
@@ -330,6 +346,13 @@ export function buildPatientColumns(
       searchable: true,
       width: 128,
       group: "metadata",
+      render: (p: PatientSummary) => (
+        <PillCell
+          renderId="residence_country"
+          value={p.residence_country}
+          emptyLabel={tr.common_not_set}
+        />
+      ),
     },
     {
       id: "languages",
@@ -341,7 +364,11 @@ export function buildPatientColumns(
       width: 160,
       group: "metadata",
       render: (p: PatientSummary) => (
-        <span className="truncate text-xs text-muted-foreground">{p.languages?.join(", ") ?? "—"}</span>
+        <TagListCell
+          renderId="languages"
+          values={p.languages ?? []}
+          emptyLabel={tr.common_not_set}
+        />
       ),
     },
     {
@@ -354,9 +381,15 @@ export function buildPatientColumns(
       width: 200,
       group: "metadata",
       render: (p: PatientSummary) => (
-        <span className="truncate text-xs text-muted-foreground">
-          {(p.functional_labels ?? []).map(humanizeFunctionalLabel).join(", ") || "—"}
-        </span>
+        <TagListCell
+          renderId="functional_labels"
+          values={p.functional_labels ?? []}
+          format={humanizeFunctionalLabel}
+          classNameForValue={functionalLabelChipClass}
+          dataValueAttribute={normalizeFunctionalLabel}
+          emptyLabel={tr.common_not_set}
+          maxVisible={2}
+        />
       ),
     },
     {
@@ -399,22 +432,158 @@ export function iconForColumn(id: string): ReactNode {
   }
 }
 
+type TextCellProps = {
+  emptyLabel?: string;
+  icon?: ReactNode;
+  mono?: boolean;
+  renderId: string;
+  value?: ReactNode;
+};
+
+function TextCell({ emptyLabel = "—", icon, mono = false, renderId, value }: TextCellProps) {
+  const isEmpty =
+    value == null ||
+    value === "" ||
+    (Array.isArray(value) && value.length === 0);
+  return (
+    <div data-patient-cell-render={renderId} className="flex min-w-0 items-center gap-1.5">
+      {icon ? (
+        <span className="shrink-0 text-muted-foreground/70">{icon}</span>
+      ) : null}
+      <span
+        className={cn(
+          "min-w-0 truncate text-xs",
+          mono && "font-mono text-[11px] tabular-nums",
+          isEmpty ? "text-muted-foreground/60" : "text-muted-foreground",
+        )}
+      >
+        {isEmpty ? emptyLabel || "—" : value}
+      </span>
+    </div>
+  );
+}
+
+type PillCellProps = {
+  emptyLabel?: string;
+  renderId: string;
+  value?: string | null;
+};
+
+function PillCell({ emptyLabel = "—", renderId, value }: PillCellProps) {
+  if (!value) {
+    return <TextCell renderId={renderId} value={null} emptyLabel={emptyLabel} />;
+  }
+  return (
+    <div data-patient-cell-render={renderId} className="flex min-w-0 items-center">
+      <span className="min-w-0 truncate rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+        {value}
+      </span>
+    </div>
+  );
+}
+
+type TagListCellProps = {
+  classNameForValue?: (value: string) => string;
+  dataValueAttribute?: (value: string) => string;
+  emptyLabel?: string;
+  format?: (value: string) => string;
+  maxVisible?: number;
+  renderId: string;
+  values: readonly string[];
+};
+
+function TagListCell({
+  classNameForValue,
+  dataValueAttribute,
+  emptyLabel = "—",
+  format = (value) => value,
+  maxVisible = 3,
+  renderId,
+  values,
+}: TagListCellProps) {
+  const normalized = values.filter(Boolean);
+  if (normalized.length === 0) {
+    return <TextCell renderId={renderId} value={null} emptyLabel={emptyLabel} />;
+  }
+
+  const visible = normalized.slice(0, maxVisible);
+  const hiddenCount = normalized.length - visible.length;
+
+  return (
+    <div data-patient-cell-render={renderId} className="flex min-w-0 items-center gap-1 overflow-hidden">
+      {visible.map((value) => (
+        <span
+          key={value}
+          data-patient-functional-label={dataValueAttribute?.(value)}
+          className={cn(
+            "max-w-[6.5rem] shrink truncate rounded-md border px-1.5 py-0.5 text-[11px] font-medium",
+            classNameForValue ? classNameForValue(value) : "border-transparent bg-muted text-muted-foreground",
+          )}
+        >
+          {format(value)}
+        </span>
+      ))}
+      {hiddenCount > 0 ? (
+        <span className="shrink-0 rounded-md bg-muted/70 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+          +{hiddenCount}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function FunctionalLabelSummary({
+  labels,
+  maxVisible = 2,
+}: {
+  labels: readonly string[];
+  maxVisible?: number;
+}) {
+  const visible = labels.filter(Boolean).slice(0, maxVisible);
+  const hiddenCount = labels.filter(Boolean).length - visible.length;
+
+  return (
+    <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1 overflow-hidden">
+      {visible.map((label) => (
+        <span
+          key={label}
+          data-patient-functional-label={normalizeFunctionalLabel(label)}
+          className={cn(
+            "max-w-[6.75rem] shrink truncate rounded-full border px-1.5 py-0.5 text-[10px] font-semibold leading-3",
+            functionalLabelChipClass(label),
+          )}
+        >
+          {humanizeFunctionalLabel(label)}
+        </span>
+      ))}
+      {hiddenCount > 0 ? (
+        <span className="shrink-0 rounded-full border border-border bg-muted/70 px-1.5 py-0.5 text-[10px] font-semibold leading-3 text-muted-foreground">
+          +{hiddenCount}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 type StatusPillProps = { active: boolean; tr: Record<string, string> };
 
 function StatusPill({ active, tr }: StatusPillProps) {
+  const status = active ? "active" : "inactive";
   return (
     <span
+      data-patient-cell-render="status"
+      data-patient-status-pill={status}
       className={cn(
-        "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium",
+        "inline-flex max-w-full items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-semibold leading-4",
         active
-          ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400"
-          : "bg-muted text-muted-foreground",
+          ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:border-emerald-400/25 dark:bg-emerald-400/10 dark:text-emerald-300"
+          : "border-rose-500/25 bg-rose-500/10 text-rose-700 dark:border-rose-400/25 dark:bg-rose-400/10 dark:text-rose-300",
       )}
     >
       <span
         className={cn(
-          "size-1 rounded-full",
-          active ? "bg-emerald-500" : "bg-muted-foreground/50",
+          "size-1.5 rounded-full",
+          active ? "bg-emerald-500" : "bg-rose-500",
         )}
       />
       {active ? tr.common_active ?? "Active" : tr.common_inactive ?? "Inactive"}

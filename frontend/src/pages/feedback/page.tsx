@@ -29,9 +29,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { getLang, useLang } from "@/lib/i18n";
+import { useLang } from "@/lib/i18n";
 import {
   feedbackSourceLabel,
   feedbackStatusTone,
@@ -48,105 +47,33 @@ import type {
   PortalFeedbackSummary,
 } from "@/pages/patients/model/portal-shared";
 import { cn } from "@/lib/utils";
-
-type PatientOption = {
-  id: string;
-  patient_id: string;
-  first_name?: string;
-  last_name?: string;
-};
-
-type PatientAppointmentOption = {
-  id: string;
-  title: string;
-  date: string;
-  time_start: string | null;
-  provider_name?: string | null;
-  doctor_name?: string | null;
-  status: string;
-};
-
-type FeedbackFormState = {
-  appointmentId: string;
-  overallScore: string;
-  patientManagerScore: string;
-  interpreterScore: string;
-  conciergeScore: string;
-  treatmentScore: string;
-  doctorScore: string;
-  organizationScore: string;
-  serviceScore: string;
-  infrastructureScore: string;
-  priceValueScore: string;
-  treatmentSuccess: string;
-  complicationReported: boolean;
-  npsScore: string;
-  comments: string;
-  improvementNotes: string;
-  internalNote: string;
-};
-
-const scoreOptions = ["1", "2", "3", "4", "5"];
-const npsOptions = Array.from({ length: 11 }, (_, index) => String(index));
-
-function feedbackText(de: string, ru: string, en: string) {
-  const lang = getLang();
-  if (lang === "de") return de;
-  if (lang === "ru") return ru;
-  return en;
-}
-
-function blankFeedbackForm(): FeedbackFormState {
-  return {
-    appointmentId: "",
-    overallScore: "5",
-    patientManagerScore: "5",
-    interpreterScore: "5",
-    conciergeScore: "5",
-    treatmentScore: "5",
-    doctorScore: "5",
-    organizationScore: "5",
-    serviceScore: "5",
-    infrastructureScore: "5",
-    priceValueScore: "5",
-    treatmentSuccess: "yes",
-    complicationReported: false,
-    npsScore: "10",
-    comments: "",
-    improvementNotes: "",
-    internalNote: "",
-  };
-}
+import {
+  captureStaffFeedback,
+  fetchFeedbackPatientAppointments,
+  fetchFeedbackPatients,
+  fetchPatientFeedbackWorkspace,
+  fetchStaffFeedbackWorkspace,
+  reviewFeedback,
+  submitPatientFeedback,
+} from "./data/feedback-api";
+import {
+  blankFeedbackForm,
+  buildFeedbackQuery,
+  canViewStaffFeedback,
+  feedbackText,
+  npsOptions,
+  patientLabel,
+  roleCanCaptureFeedback,
+  scoreOptions,
+} from "./model/feedback-model";
+import type {
+  FeedbackFormState,
+  PatientAppointmentOption,
+  PatientOption,
+} from "./model/types";
 
 function shellCard(extra?: string) {
   return cn("rounded-[1.75rem] border border-slate-200 bg-white shadow-sm", extra);
-}
-
-function roleCanCaptureFeedback(role?: string) {
-  return role === "ceo" || role === "patient_manager";
-}
-
-function canViewStaffFeedback(role?: string) {
-  return (
-    role === "ceo" ||
-    role === "ceo_assistant" ||
-    role === "patient_manager" ||
-    role === "teamlead_interpreter" ||
-    role === "concierge"
-  );
-}
-
-function buildFeedbackQuery(search: string, status: string, source: string) {
-  const params = new URLSearchParams();
-  if (search.trim()) params.set("search", search.trim());
-  if (status) params.set("status", status);
-  if (source) params.set("source", source);
-  const query = params.toString();
-  return query ? `?${query}` : "";
-}
-
-function patientLabel(item: PatientOption) {
-  return `${item.patient_id} · ${[item.first_name, item.last_name].filter(Boolean).join(" ")}`.trim();
 }
 
 function scoreField(
@@ -300,10 +227,10 @@ function PatientFeedbackWorkspace() {
       else setRefreshing(true);
 
       try {
-        const [feedbackRows, appointmentRows] = await Promise.all([
-          apiFetch<PortalFeedbackItem[]>("/me/feedback").catch(() => []),
-          apiFetch<PortalAppointmentItem[]>("/me/appointments").catch(() => []),
-        ]);
+        const {
+          feedback: feedbackRows,
+          appointments: appointmentRows,
+        } = await fetchPatientFeedbackWorkspace();
         if (cancelled) return;
         startTransition(() => {
           setFeedback(feedbackRows);
@@ -364,26 +291,23 @@ function PatientFeedbackWorkspace() {
     setNotice("");
 
     try {
-      await apiFetch("/me/feedback", {
-        method: "POST",
-        body: JSON.stringify({
-          appointment_id: form.appointmentId || null,
-          overall_score: Number(form.overallScore),
-          patient_manager_score: Number(form.patientManagerScore),
-          interpreter_score: Number(form.interpreterScore),
-          concierge_score: Number(form.conciergeScore),
-          treatment_score: Number(form.treatmentScore),
-          doctor_score: Number(form.doctorScore),
-          organization_score: Number(form.organizationScore),
-          service_score: Number(form.serviceScore),
-          infrastructure_score: Number(form.infrastructureScore),
-          price_value_score: Number(form.priceValueScore),
-          treatment_success: form.treatmentSuccess || null,
-          complication_reported: form.complicationReported,
-          nps_score: Number(form.npsScore),
-          comments: form.comments.trim() || null,
-          improvement_notes: form.improvementNotes.trim() || null,
-        }),
+      await submitPatientFeedback({
+        appointment_id: form.appointmentId || null,
+        overall_score: Number(form.overallScore),
+        patient_manager_score: Number(form.patientManagerScore),
+        interpreter_score: Number(form.interpreterScore),
+        concierge_score: Number(form.conciergeScore),
+        treatment_score: Number(form.treatmentScore),
+        doctor_score: Number(form.doctorScore),
+        organization_score: Number(form.organizationScore),
+        service_score: Number(form.serviceScore),
+        infrastructure_score: Number(form.infrastructureScore),
+        price_value_score: Number(form.priceValueScore),
+        treatment_success: form.treatmentSuccess || null,
+        complication_reported: form.complicationReported,
+        nps_score: Number(form.npsScore),
+        comments: form.comments.trim() || null,
+        improvement_notes: form.improvementNotes.trim() || null,
       });
       setForm(blankFeedbackForm());
       setNotice(
@@ -717,10 +641,10 @@ function StaffFeedbackWorkspace() {
       else setRefreshing(true);
 
       try {
-        const [feedbackRows, summaryData] = await Promise.all([
-          apiFetch<PortalFeedbackItem[]>(`/feedback${queryString}`).catch(() => []),
-          apiFetch<PortalFeedbackSummary>(`/feedback/summary${queryString}`).catch(() => null),
-        ]);
+        const {
+          feedback: feedbackRows,
+          summary: summaryData,
+        } = await fetchStaffFeedbackWorkspace(queryString);
         if (cancelled) return;
         startTransition(() => {
           setFeedback(feedbackRows);
@@ -758,7 +682,7 @@ function StaffFeedbackWorkspace() {
 
     async function loadPatients() {
       try {
-        const rows = await apiFetch<PatientOption[]>("/patients?active_only=true");
+        const rows = await fetchFeedbackPatients();
         if (!cancelled) setPatients(rows);
       } catch {
         if (!cancelled) setPatients([]);
@@ -781,7 +705,7 @@ function StaffFeedbackWorkspace() {
     let cancelled = false;
     async function loadAppointments() {
       try {
-        const rows = await apiFetch<PatientAppointmentOption[]>(`/patients/${selectedPatientId}/appointments`);
+        const rows = await fetchFeedbackPatientAppointments(selectedPatientId);
         if (!cancelled) setPatientAppointments(rows);
       } catch {
         if (!cancelled) setPatientAppointments([]);
@@ -812,28 +736,25 @@ function StaffFeedbackWorkspace() {
     setNotice("");
 
     try {
-      await apiFetch("/feedback", {
-        method: "POST",
-        body: JSON.stringify({
-          patient_id: selectedPatientId,
-          appointment_id: form.appointmentId || null,
-          overall_score: Number(form.overallScore),
-          patient_manager_score: Number(form.patientManagerScore),
-          interpreter_score: Number(form.interpreterScore),
-          concierge_score: Number(form.conciergeScore),
-          treatment_score: Number(form.treatmentScore),
-          doctor_score: Number(form.doctorScore),
-          organization_score: Number(form.organizationScore),
-          service_score: Number(form.serviceScore),
-          infrastructure_score: Number(form.infrastructureScore),
-          price_value_score: Number(form.priceValueScore),
-          treatment_success: form.treatmentSuccess || null,
-          complication_reported: form.complicationReported,
-          nps_score: Number(form.npsScore),
-          comments: form.comments.trim() || null,
-          improvement_notes: form.improvementNotes.trim() || null,
-          internal_note: form.internalNote.trim() || null,
-        }),
+      await captureStaffFeedback({
+        patient_id: selectedPatientId,
+        appointment_id: form.appointmentId || null,
+        overall_score: Number(form.overallScore),
+        patient_manager_score: Number(form.patientManagerScore),
+        interpreter_score: Number(form.interpreterScore),
+        concierge_score: Number(form.conciergeScore),
+        treatment_score: Number(form.treatmentScore),
+        doctor_score: Number(form.doctorScore),
+        organization_score: Number(form.organizationScore),
+        service_score: Number(form.serviceScore),
+        infrastructure_score: Number(form.infrastructureScore),
+        price_value_score: Number(form.priceValueScore),
+        treatment_success: form.treatmentSuccess || null,
+        complication_reported: form.complicationReported,
+        nps_score: Number(form.npsScore),
+        comments: form.comments.trim() || null,
+        improvement_notes: form.improvementNotes.trim() || null,
+        internal_note: form.internalNote.trim() || null,
       });
       setForm(blankFeedbackForm());
       setSelectedPatientId("");
@@ -864,12 +785,9 @@ function StaffFeedbackWorkspace() {
     setNotice("");
 
     try {
-      await apiFetch(`/feedback/${activeReview.id}/review`, {
-        method: "POST",
-        body: JSON.stringify({
-          status: reviewStatus,
-          review_note: reviewNote.trim() || null,
-        }),
+      await reviewFeedback(activeReview.id, {
+        status: reviewStatus,
+        review_note: reviewNote.trim() || null,
       });
       setActiveReview(null);
       setReviewStatus("reviewed");

@@ -226,7 +226,7 @@ export function buildPatientsPath(filters: PatientFilters) {
   const params = new URLSearchParams();
   if (filters.search.trim()) params.set("search", filters.search.trim());
   if (filters.activeOnly === "true") params.set("active_only", "true");
-  else params.set("active_only", "false");
+  else if (filters.activeOnly === "false") params.set("active_only", "false");
   if (filters.providerId) params.set("provider_id", filters.providerId);
   if (filters.doctorId) params.set("doctor_id", filters.doctorId);
   const query = params.toString();

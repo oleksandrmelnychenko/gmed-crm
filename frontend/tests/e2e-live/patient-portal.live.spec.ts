@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 
 import {
   authenticateApiClient,
@@ -18,9 +18,18 @@ async function submitPortalFeedback(
   comment: string,
   improvement: string,
 ) {
-  await page.getByPlaceholder("What worked well?").fill(comment);
-  await page.getByPlaceholder("What should the team improve?").fill(improvement);
-  await page.getByRole("button", { name: /Submit feedback/i }).click();
+  await page.getByPlaceholder(/Was ist gut gelaufen\?|What worked well\?/i).fill(comment);
+  await page
+    .getByPlaceholder(/Was sollte das Team verbessern\?|What should the team improve\?/i)
+    .fill(improvement);
+  await page.getByRole("button", { name: /Feedback senden|Submit feedback/i }).click();
+}
+
+async function fillMuiDate(container: Locator, value: string, index = 0) {
+  const [year = "", month = "", day = ""] = value.split("-");
+  await container.getByRole("spinbutton", { name: "Year" }).nth(index).fill(year);
+  await container.getByRole("spinbutton", { name: "Month" }).nth(index).fill(month);
+  await container.getByRole("spinbutton", { name: "Day" }).nth(index).fill(day);
 }
 
 test.describe("patient portal live workflows", () => {
@@ -33,16 +42,18 @@ test.describe("patient portal live workflows", () => {
 
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { name: /Hello,/i }),
+      page.getByRole("heading", { name: /Hallo,|Hello,/i }),
     ).toBeVisible();
     await expect(
-      page.getByText("Required documents", { exact: true }).first(),
+      page.getByText(/Erforderliche Dokumente|Required documents/i).first(),
     ).toBeVisible();
-    await expect(page.getByText(/required documents? still missing/i)).toBeVisible();
+    await expect(
+      page.getByText(/Pflichtdokumente?\.|required documents? still missing/i),
+    ).toBeVisible();
     await expect(page.getByText("Reisepass")).toBeVisible();
     await expect(page.getByText("Einverständniserklärung")).toBeVisible();
 
-    await page.getByRole("button", { name: /Open documents/i }).click();
+    await page.getByRole("button", { name: /Dokumente öffnen|Open documents/i }).click();
     await expect(page).toHaveURL(/\/documents$/);
   });
 
@@ -74,7 +85,7 @@ test.describe("patient portal live workflows", () => {
       page.getByRole("heading", { name: scenario.invoice.invoice_number }),
     ).toBeVisible();
 
-    await page.getByRole("button", { name: /Upload payment proof/i }).click();
+    await page.getByRole("button", { name: /Zahlungsnachweis hochladen|Upload payment proof/i }).click();
     await page
       .locator("#invoice-payment-proof")
       .setInputFiles({
@@ -85,10 +96,10 @@ test.describe("patient portal live workflows", () => {
     await page
       .locator("#invoice-payment-proof-note")
       .fill("Bank transfer sent.");
-    await page.getByRole("button", { name: /Send proof/i }).click();
+    await page.getByRole("button", { name: /Nachweis senden|Send proof/i }).click();
 
     await expect(
-      page.getByText("Payment proof uploaded for the billing team."),
+      page.getByText(/Zahlungsnachweis wurde für das Abrechnungsteam hochgeladen|Payment proof uploaded for the billing team/i),
     ).toBeVisible();
 
     const api = await authenticateApiClient(
@@ -122,7 +133,7 @@ test.describe("patient portal live workflows", () => {
       next.method() === "GET" && next.url().includes("/api/v1/me/export?format=zip"),
     );
 
-    await page.getByRole("button", { name: /Export my data/i }).click();
+    await page.getByRole("button", { name: /Meine Daten exportieren|Export my data/i }).click();
     await exportRequest;
 
     await page.goto("/privacy");
@@ -130,12 +141,12 @@ test.describe("patient portal live workflows", () => {
     await page
       .locator("#privacy-reason")
       .fill("Please stop sharing my records with external providers.");
-    await page.getByRole("button", { name: /Submit request/i }).click();
+    await page.getByRole("button", { name: /Anfrage senden|Submit request/i }).click();
 
     const submittedRequest = page.locator("article").filter({
       hasText: "Please stop sharing my records with external providers.",
     });
-    await expect(page.getByText("Privacy request submitted.")).toBeVisible();
+    await expect(page.getByText(/Datenschutzanfrage wurde eingereicht|Privacy request submitted/i)).toBeVisible();
     await expect(submittedRequest).toBeVisible();
 
     const api = await authenticateApiClient(
@@ -176,10 +187,10 @@ test.describe("patient portal live workflows", () => {
       hasText: scenario.documents.released.title,
     });
     await expect(releasedCard).toBeVisible();
-    await releasedCard.getByRole("button", { name: /Confirm receipt/i }).click();
+    await releasedCard.getByRole("button", { name: /Empfang bestätigen|Confirm receipt/i }).click();
 
-    await expect(page.getByText("Document receipt confirmed.")).toBeVisible();
-    await expect(releasedCard.getByText("Confirmed")).toBeVisible();
+    await expect(page.getByText(/Dokumentenerhalt bestätigt|Document receipt confirmed/i)).toBeVisible();
+    await expect(releasedCard.getByText(/Bestätigt|Confirmed/i)).toBeVisible();
 
     const api = await authenticateApiClient(
       request,
@@ -293,11 +304,11 @@ test.describe("patient portal live workflows", () => {
     });
     await expect(generatedCard).toHaveCount(1);
     await generatedCard
-      .getByRole("button", { name: /Confirm receipt/i })
+      .getByRole("button", { name: /Empfang bestätigen|Confirm receipt/i })
       .click();
 
-    await expect(page.getByText("Document receipt confirmed.")).toBeVisible();
-    await expect(generatedCard.getByText("Confirmed")).toBeVisible();
+    await expect(page.getByText(/Dokumentenerhalt bestätigt|Document receipt confirmed/i)).toBeVisible();
+    await expect(generatedCard.getByText(/Bestätigt|Confirmed/i)).toBeVisible();
 
     await expect(async () => {
       const response = await request.get(
@@ -336,20 +347,20 @@ test.describe("patient portal live workflows", () => {
       next.method() === "GET" &&
       next.url().includes(`/api/v1/me/documents/${scenario.documents.released.id}/download`),
     );
-    await releasedCard.getByRole("button", { name: /^Download$/i }).click();
+    await releasedCard.getByRole("button", { name: /^Herunterladen$|^Download$/i }).click();
     await releasedDownloadRequest;
 
-    await page.getByLabel("Upload type").selectOption("insurance_document");
-    await page.getByLabel("Title").fill("Insurance card April");
-    await page.getByLabel("File").setInputFiles({
+    await page.getByLabel(/Upload-Typ|Upload type/i).selectOption("insurance_document");
+    await page.getByLabel(/Titel|Title/i).fill("Insurance card April");
+    await page.getByLabel(/Datei|File/i).setInputFiles({
       name: "insurance-card.pdf",
       mimeType: "application/pdf",
       buffer: MINIMAL_PDF,
     });
-    await page.getByLabel("Note").fill("Front and back scanned.");
-    await page.getByRole("button", { name: /Send upload/i }).click();
+    await page.getByLabel(/Notiz|Note/i).fill("Front and back scanned.");
+    await page.getByRole("button", { name: /Upload senden|Send upload/i }).click();
 
-    await expect(page.getByText("Upload sent to the care team.")).toBeVisible();
+    await expect(page.getByText(/Upload wurde an das Betreuungsteam gesendet|Upload sent to the care team/i)).toBeVisible();
 
     const uploadedCard = page.locator("article").filter({
       hasText: "Insurance card April",
@@ -359,7 +370,7 @@ test.describe("patient portal live workflows", () => {
       next.method() === "GET" &&
       next.url().includes("/api/v1/me/documents/uploads/"),
     );
-    await uploadedCard.getByRole("button", { name: /^Download$/i }).click();
+    await uploadedCard.getByRole("button", { name: /^Herunterladen$|^Download$/i }).click();
     await uploadDownloadRequest;
 
     const api = await authenticateApiClient(
@@ -399,20 +410,34 @@ test.describe("patient portal live workflows", () => {
     const scenario = await bootstrapAndLogin(page, request, "patient");
 
     await page.goto("/appointments");
-    await page.getByLabel("Preferred from").fill("2026-05-10");
-    await page.getByLabel("Preferred to").fill("2026-05-12");
-    await page.getByLabel("Specialty or topic").fill("Cardiology follow-up");
-    await page.getByLabel("Location preference").fill("Clinic Cologne");
-    await page
-      .getByLabel("Reason")
+    const requestForm = page
+      .locator("form")
+      .filter({
+        has: page.getByRole("button", {
+          name: /Terminanfrage senden|Send appointment request/i,
+        }),
+      })
+      .first();
+    await fillMuiDate(requestForm, "2026-05-10", 0);
+    await fillMuiDate(requestForm, "2026-05-12", 1);
+    await requestForm
+      .getByLabel(/Fachgebiet oder Thema|Specialty or topic/i)
+      .fill("Cardiology follow-up");
+    await requestForm.getByLabel(/Ortpräferenz|Location preference/i).fill("Clinic Cologne");
+    await requestForm
+      .getByLabel(/Anlass|Reason/i)
       .fill("Need a follow-up appointment after receiving the latest findings.");
-    await page.getByLabel("Additional note").fill("Morning slots preferred.");
-    await page.getByRole("button", { name: /Send appointment request/i }).click();
+    await requestForm
+      .getByLabel(/Zusätzliche Notiz|Additional note/i)
+      .fill("Morning slots preferred.");
+    await requestForm
+      .getByRole("button", { name: /Terminanfrage senden|Send appointment request/i })
+      .click();
 
     const requestCard = page.locator("article").filter({
       hasText: "Need a follow-up appointment after receiving the latest findings.",
     });
-    await expect(page.getByText("Appointment request sent to the care team.")).toBeVisible();
+    await expect(page.getByText(/Terminanfrage wurde an das Betreuungsteam gesendet|Appointment request sent to the care team/i)).toBeVisible();
     await expect(requestCard).toBeVisible();
 
     const api = await authenticateApiClient(
@@ -462,23 +487,23 @@ test.describe("patient portal live workflows", () => {
     const scenario = await bootstrapAndLogin(page, request, "patient");
 
     await page.goto("/services");
-    await page.getByLabel("Title").fill("Hotel near clinic");
-    await page.getByLabel("Preferred vendor").fill("River Hotel");
-    await page.getByLabel("Vendor contact").fill("booking@river.example");
-    await page.getByLabel("Estimated budget (EUR)").fill("240");
+    await page.getByLabel(/Titel|Title/i).fill("Hotel near clinic");
+    await page.getByLabel(/Bevorzugter Anbieter|Preferred vendor/i).fill("River Hotel");
+    await page.getByLabel(/Kontakt des Anbieters|Vendor contact/i).fill("booking@river.example");
+    await page.getByLabel(/Geschätztes Budget \(EUR\)|Estimated budget \(EUR\)/i).fill("240");
     await page
-      .getByLabel("Notes")
+      .getByLabel(/Notizen|Notes/i)
       .fill("Need a quiet room close to the clinic for two nights.");
-    await page.getByRole("button", { name: /Send request/i }).click();
+    await page.getByRole("button", { name: /Anfrage senden|Send request/i }).click();
 
     const createdCard = page.locator("article").filter({
       hasText: "Hotel near clinic",
     });
-    await expect(page.getByText("Additional service request sent to the care team.")).toBeVisible();
+    await expect(page.getByText(/Serviceanfrage wurde an das Betreuungsteam gesendet|Additional service request sent to the care team/i)).toBeVisible();
     await expect(createdCard).toBeVisible();
-    await createdCard.getByRole("button", { name: /Cancel request/i }).click();
-    await expect(page.getByText("Service request cancelled.")).toBeVisible();
-    await expect(createdCard.getByText("cancelled")).toBeVisible();
+    await createdCard.getByRole("button", { name: /Anfrage stornieren|Cancel request/i }).click();
+    await expect(page.getByText(/Serviceanfrage wurde storniert|Service request cancelled/i)).toBeVisible();
+    await expect(createdCard.getByText(/storniert|cancelled/i)).toBeVisible();
 
     const api = await authenticateApiClient(
       request,
@@ -522,7 +547,7 @@ test.describe("patient portal live workflows", () => {
 
     await page.goto("/feedback");
     await expect(
-      page.getByRole("heading", { name: /My feedback/i }),
+      page.getByRole("heading", { name: /Mein Feedback|My feedback/i }),
     ).toBeVisible();
     const comment = "The doctor explained the next steps clearly.";
     const improvement = "Waiting area signage could be clearer.";
@@ -532,7 +557,7 @@ test.describe("patient portal live workflows", () => {
       hasText: comment,
     }).first();
 
-    const successNotice = page.getByText("Feedback submitted. Thank you.");
+    const successNotice = page.getByText(/Feedback wurde gesendet\. Vielen Dank\.|Feedback submitted\. Thank you\./i);
     try {
       await expect(successNotice).toBeVisible({ timeout: 10_000 });
     } catch {
@@ -543,7 +568,7 @@ test.describe("patient portal live workflows", () => {
       await ensureLiveBackendHealthy(true);
       await page.goto("/feedback");
       await expect(
-        page.getByRole("heading", { name: /My feedback/i }),
+        page.getByRole("heading", { name: /Mein Feedback|My feedback/i }),
       ).toBeVisible();
       await submitPortalFeedback(page, comment, improvement);
       await expect(successNotice).toBeVisible();

@@ -8,8 +8,12 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Banner, inputClass, textareaClass, tokens } from "@/components/ui-shell";
-import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import {
+  fetchPortalInvoiceDetail,
+  fetchPortalInvoices,
+  uploadPortalPaymentProof,
+} from "@/pages/patients/data/portal-api";
 import {
   formatPortalCurrency,
   formatPortalDate,
@@ -62,7 +66,7 @@ export function PatientInvoicesPage() {
       }
 
       try {
-        const rows = await apiFetch<PortalInvoiceItem[]>("/me/invoices");
+        const rows = await fetchPortalInvoices();
         if (cancelled) return;
         startTransition(() => {
           setInvoices(rows);
@@ -102,7 +106,7 @@ export function PatientInvoicesPage() {
     async function loadDetail() {
       setDetailBusy(true);
       try {
-        const invoice = await apiFetch<PortalInvoiceItem>(`/me/invoices/${selectedInvoiceId}`);
+        const invoice = await fetchPortalInvoiceDetail(selectedInvoiceId);
         if (cancelled) return;
         setDetail(invoice);
         setDetailError("");
@@ -162,7 +166,7 @@ export function PatientInvoicesPage() {
         formData.set("notes", uploadNote.trim());
       }
 
-      await apiFetch("/me/documents/upload", { method: "POST", body: formData });
+      await uploadPortalPaymentProof(formData);
       setNotice(l("Zahlungsnachweis wurde für das Abrechnungsteam hochgeladen.", "Подтверждение оплаты загружено для отдела биллинга.", "Payment proof uploaded for the billing team."));
       setUploadOpen(false);
       setUploadFile(null);

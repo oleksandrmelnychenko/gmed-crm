@@ -39,7 +39,6 @@ import {
   Sheet,
   SheetContent,
 } from "@/components/ui/sheet";
-import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import {
   compactNotificationConfig,
@@ -59,6 +58,12 @@ import {
 } from "@/components/ui-shell";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import {
+  createAdminNotificationChannel,
+  deleteAdminNotificationChannel,
+  fetchAdminNotificationChannels,
+  testAdminNotificationChannel,
+} from "@/pages/admin/data/admin-api";
 
 interface Channel {
   id: string;
@@ -97,7 +102,7 @@ export function AdminNotificationsPage() {
     setLoading(true);
     setError("");
     try {
-      const data = await apiFetch<Channel[]>("/admin/notifications");
+      const data = await fetchAdminNotificationChannels<Channel>();
       startTransition(() => setChannels(data));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : t.common_error);
@@ -181,14 +186,11 @@ export function AdminNotificationsPage() {
 
     setSubmitting(true);
     try {
-      await apiFetch("/admin/notifications", {
-        method: "POST",
-        body: JSON.stringify({
-          channel_type: formType,
-          name: formName.trim(),
-          config,
-          is_active: true,
-        }),
+      await createAdminNotificationChannel({
+        channel_type: formType,
+        name: formName.trim(),
+        config,
+        is_active: true,
       });
       handleCreateOpenChange(false);
       setFlash({ tone: "success", text: t.settings_updated });
@@ -206,7 +208,7 @@ export function AdminNotificationsPage() {
     setFlash(null);
     setActionBusyId(id);
     try {
-      await apiFetch(`/admin/notifications/${id}/delete`, { method: "POST" });
+      await deleteAdminNotificationChannel(id);
       if (selectedChannelId === id) handleDetailOpenChange(false);
       await load();
     } catch (deleteError) {
@@ -223,7 +225,7 @@ export function AdminNotificationsPage() {
     setFlash(null);
     setActionBusyId(id);
     try {
-      await apiFetch(`/admin/notifications/${id}/test`, { method: "POST" });
+      await testAdminNotificationChannel(id);
       setFlash({ tone: "success", text: t.notif_test_ok });
     } catch (testError) {
       setFlash({
@@ -633,5 +635,4 @@ export function AdminNotificationsPage() {
     </>
   );
 }
-
 

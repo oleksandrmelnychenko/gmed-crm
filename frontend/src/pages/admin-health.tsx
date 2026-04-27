@@ -15,9 +15,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { formatAdminDateTime } from "@/pages/admin-pages.helpers";
+import { fetchAdminHealth } from "@/pages/admin/data/admin-api";
 import {
   Banner,
   EmptyCell,
@@ -64,7 +64,7 @@ export function AdminHealthPage() {
     setLoading(true);
     setError("");
     try {
-      const payload = await apiFetch<HealthData>("/admin/health");
+      const payload = await fetchAdminHealth<HealthData>();
       setData(payload);
       setRefreshedAt(new Date());
     } catch (loadError) {

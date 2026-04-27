@@ -6,7 +6,12 @@ import { AuthProvider } from "@/lib/auth";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppLayout } from "@/components/layout";
 import { LoginPage } from "@/pages/login";
-import { DashboardPage } from "@/pages/dashboard";
+
+const DashboardPage = lazy(() =>
+  import("@/pages/dashboard").then((module) => ({
+    default: module.DashboardPage,
+  })),
+);
 
 const ChatPage = lazy(() =>
   import("@/pages/chat").then((module) => ({
@@ -111,7 +116,7 @@ const PatientDetailPage = lazy(() =>
 );
 
 const ProviderDetailPage = lazy(() =>
-  import("@/pages/provider-detail").then((module) => ({
+  import("@/pages/providers/detail-entry").then((module) => ({
     default: module.ProviderDetailPage,
   })),
 );

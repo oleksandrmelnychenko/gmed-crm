@@ -1,4 +1,4 @@
-import { useLang } from "@/lib/i18n";
+import { getLang, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
   CountBadge,
@@ -23,12 +23,78 @@ export const textareaClassName = textareaClass;
 export function parseFunctionalLabels(value: string): string[] {
   return value
     .split(",")
-    .map((item) => item.trim().toLowerCase().replaceAll("-", "_").replaceAll(" ", "_"))
+    .map(normalizeFunctionalLabel)
     .filter(Boolean);
 }
 
-export function humanizeFunctionalLabel(value: string): string {
+type FunctionalLabelLang = "de" | "ru" | "en";
+
+type FunctionalLabelMeta = {
+  de: string;
+  ru: string;
+  en: string;
+  className: string;
+};
+
+const FUNCTIONAL_LABEL_META: Record<string, FunctionalLabelMeta> = {
+  vip: {
+    de: "VIP",
+    ru: "VIP",
+    en: "VIP",
+    className: "border-amber-300 bg-amber-50 text-amber-800",
+  },
+  high_risk: {
+    de: "Hohes Risiko",
+    ru: "Высокий риск",
+    en: "High risk",
+    className: "border-rose-300 bg-rose-50 text-rose-700",
+  },
+  mobility_support: {
+    de: "Mobilitätshilfe",
+    ru: "Помощь с мобильностью",
+    en: "Mobility support",
+    className: "border-sky-300 bg-sky-50 text-sky-700",
+  },
+  fall_risk: {
+    de: "Sturzrisiko",
+    ru: "Риск падения",
+    en: "Fall risk",
+    className: "border-orange-300 bg-orange-50 text-orange-700",
+  },
+  complex_coordination: {
+    de: "Komplexe Koordination",
+    ru: "Сложная координация",
+    en: "Complex coordination",
+    className: "border-violet-300 bg-violet-50 text-violet-700",
+  },
+};
+
+export function normalizeFunctionalLabel(value: string): string {
+  return value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+export function humanizeFunctionalLabel(
+  value: string,
+  lang: FunctionalLabelLang = getLang(),
+): string {
+  const normalized = normalizeFunctionalLabel(value);
+  const meta = FUNCTIONAL_LABEL_META[normalized];
+  if (meta) return meta[lang] ?? meta.ru;
   return value.replaceAll("_", " ");
+}
+
+export function functionalLabelChipClass(value: string): string {
+  return (
+    FUNCTIONAL_LABEL_META[normalizeFunctionalLabel(value)]?.className ??
+    "border-border bg-muted text-muted-foreground"
+  );
+}
+
+export function functionalLabelOptions(lang: FunctionalLabelLang): { value: string; label: string }[] {
+  return Object.keys(FUNCTIONAL_LABEL_META).map((value) => ({
+    value,
+    label: humanizeFunctionalLabel(value, lang),
+  }));
 }
 
 export function FunctionalLabelChips({
@@ -39,15 +105,7 @@ export function FunctionalLabelChips({
   onChange: (next: string) => void;
 }) {
   const { lang } = useLang();
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
-  const options: { value: string; label: string }[] = [
-    { value: "vip", label: "VIP" },
-    { value: "high_risk", label: l("Hohes Risiko", "Высокий риск", "High risk") },
-    { value: "mobility_support", label: l("Mobilitätshilfe", "Помощь с мобильностью", "Mobility support") },
-    { value: "fall_risk", label: l("Sturzrisiko", "Риск падения", "Fall risk") },
-    { value: "complex_coordination", label: l("Komplexe Koordination", "Сложная координация", "Complex coordination") },
-  ];
+  const options = functionalLabelOptions(lang);
   const selected = parseFunctionalLabels(value);
   const toggle = (v: string) => {
     const next = selected.includes(v) ? selected.filter((s) => s !== v) : [...selected, v];
@@ -65,7 +123,7 @@ export function FunctionalLabelChips({
             className={cn(
               "h-7 rounded-full border px-2.5 text-[12px] font-medium transition-colors",
               checked
-                ? "bg-[var(--brand)] text-white border-[var(--brand)]"
+                ? functionalLabelChipClass(opt.value)
                 : "bg-card text-muted-foreground border-border hover:text-foreground hover:border-foreground/30"
             )}
           >

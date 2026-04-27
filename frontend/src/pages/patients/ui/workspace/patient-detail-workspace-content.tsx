@@ -18,6 +18,7 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import type { Translations } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 
 import {
   PATIENT_LABEL_FORMAT_OPTIONS,
@@ -46,7 +47,10 @@ import type {
   PatientRiskScore,
   PatientVitalMeasurement,
 } from "../../model/detail-resource-types";
-import { humanizeFunctionalLabel } from "../shared/patient-form-primitives";
+import {
+  functionalLabelChipClass,
+  humanizeFunctionalLabel,
+} from "../shared/patient-form-primitives";
 
 const loadPatientProfileTab = () => import("../sections/patient-profile-section");
 const loadPatientCuratorsTab = () => import("../sections/patient-curators-tab");
@@ -600,7 +604,7 @@ export function PatientDetailWorkspaceContent(props: PatientDetailWorkspaceConte
               <Badge
                 key={`${detail.id}-${label}`}
                 variant="outline"
-                className="rounded-full border-amber-200 bg-amber-50 text-amber-700 text-[10.5px]"
+                className={cn("rounded-full text-[10.5px]", functionalLabelChipClass(label))}
               >
                 {humanizeFunctionalLabel(label)}
               </Badge>

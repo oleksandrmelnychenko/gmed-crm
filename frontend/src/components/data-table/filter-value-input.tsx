@@ -25,6 +25,16 @@ type Props<T> = {
   operator: FilterOperator;
   value: FilterValue;
   onChange: (value: FilterValue) => void;
+  translations?: FilterValueInputTranslations;
+};
+
+type FilterValueInputTranslations = {
+  clear?: string;
+  no?: string;
+  noMatch?: string;
+  searchPlaceholder?: string;
+  valuePlaceholder?: string;
+  yes?: string;
 };
 
 function resolveOptions<T>(column: ColumnDef<T>, rows: readonly T[]): FilterOption[] {
@@ -33,7 +43,14 @@ function resolveOptions<T>(column: ColumnDef<T>, rows: readonly T[]): FilterOpti
   return column.filterOptions.slice();
 }
 
-export function FilterValueInput<T>({ column, rows, operator, value, onChange }: Props<T>) {
+export function FilterValueInput<T>({
+  column,
+  rows,
+  operator,
+  value,
+  onChange,
+  translations,
+}: Props<T>) {
   if (!operatorTakesValue(operator)) return null;
 
   const fieldType: FilterFieldType = column.filterType ?? "text";
@@ -93,6 +110,7 @@ export function FilterValueInput<T>({ column, rows, operator, value, onChange }:
         options={options}
         selected={selected}
         onChange={(next) => onChange(next)}
+        translations={translations}
       />
     );
   }
@@ -129,7 +147,7 @@ export function FilterValueInput<T>({ column, rows, operator, value, onChange }:
             !current && "text-muted-foreground",
           )}
         >
-          Yes
+          {translations?.yes ?? "Yes"}
         </button>
         <button
           type="button"
@@ -140,7 +158,7 @@ export function FilterValueInput<T>({ column, rows, operator, value, onChange }:
             current && "text-muted-foreground",
           )}
         >
-          No
+          {translations?.no ?? "No"}
         </button>
       </div>
     );
@@ -152,7 +170,7 @@ export function FilterValueInput<T>({ column, rows, operator, value, onChange }:
       value={typeof value === "string" ? value : ""}
       onChange={onTextChange}
       className="h-7 w-44 text-xs"
-      placeholder="value"
+      placeholder={translations?.valuePlaceholder ?? "value"}
     />
   );
 }
@@ -161,9 +179,10 @@ type MultiSelectProps = {
   options: readonly FilterOption[];
   selected: readonly string[];
   onChange: (next: string[]) => void;
+  translations?: FilterValueInputTranslations;
 };
 
-function MultiSelect({ options, selected, onChange }: MultiSelectProps) {
+function MultiSelect({ options, selected, onChange, translations }: MultiSelectProps) {
   const [query, setQuery] = useState("");
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -184,7 +203,7 @@ function MultiSelect({ options, selected, onChange }: MultiSelectProps) {
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="search"
+          placeholder={translations?.searchPlaceholder ?? "search"}
           className="h-6 border-0 px-0 text-xs shadow-none focus-visible:ring-0"
         />
         {selected.length > 0 ? (
@@ -192,7 +211,7 @@ function MultiSelect({ options, selected, onChange }: MultiSelectProps) {
             type="button"
             onClick={() => onChange([])}
             className="inline-flex size-4 items-center justify-center rounded text-muted-foreground hover:bg-muted"
-            title="Clear"
+            title={translations?.clear ?? "Clear"}
           >
             <X className="size-3" />
           </button>
@@ -200,7 +219,9 @@ function MultiSelect({ options, selected, onChange }: MultiSelectProps) {
       </div>
       <div className="max-h-48 overflow-y-auto p-1">
         {filtered.length === 0 ? (
-          <div className="px-2 py-1 text-xs text-muted-foreground">No match</div>
+          <div className="px-2 py-1 text-xs text-muted-foreground">
+            {translations?.noMatch ?? "No match"}
+          </div>
         ) : (
           filtered.map((opt) => {
             const isOn = selected.includes(opt.value);

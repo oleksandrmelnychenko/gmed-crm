@@ -3,9 +3,13 @@ import { Download, LoaderCircle, RefreshCw, ShieldCheck, Upload } from "lucide-r
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { localizeRequiredDocumentLabel } from "@/lib/required-document-labels";
+import {
+  confirmPortalDocument,
+  fetchPortalDocumentsWorkspace,
+  uploadPortalDocument,
+} from "@/pages/patients/data/portal-api";
 import {
   documentTone,
   downloadPortalDocument,
@@ -56,16 +60,12 @@ export function PatientDocumentsPage() {
       }
 
       try {
-        const [releasedRows, uploadedRows, alertSummary] = await Promise.all([
-          apiFetch<PortalDocumentItem[]>("/me/documents"),
-          apiFetch<PortalUploadedDocumentItem[]>("/me/documents/uploads"),
-          apiFetch<PortalDocumentAlertsSummary>("/me/document-alerts").catch(() => null),
-        ]);
+        const workspace = await fetchPortalDocumentsWorkspace();
         if (cancelled) return;
         startTransition(() => {
-          setDocuments(releasedRows);
-          setDocumentAlerts(alertSummary);
-          setUploads(uploadedRows);
+          setDocuments(workspace.releasedDocuments);
+          setDocumentAlerts(workspace.documentAlerts);
+          setUploads(workspace.uploadedDocuments);
           setError("");
         });
       } catch (err) {
@@ -112,10 +112,7 @@ export function PatientDocumentsPage() {
         formData.set("notes", uploadNotes.trim());
       }
 
-      await apiFetch("/me/documents/upload", {
-        method: "POST",
-        body: formData,
-      });
+      await uploadPortalDocument(formData);
 
       setNotice(l("Upload wurde an das Betreuungsteam gesendet.", "Загрузка отправлена команде сопровождения.", "Upload sent to the care team."));
       setUploadFile(null);
@@ -136,7 +133,7 @@ export function PatientDocumentsPage() {
     setError("");
 
     try {
-      await apiFetch(`/me/documents/${documentId}/confirm`, { method: "POST" });
+      await confirmPortalDocument(documentId);
       setNotice(l("Dokumentenerhalt bestätigt.", "Получение документа подтверждено.", "Document receipt confirmed."));
       setVersion((value) => value + 1);
     } catch (err) {

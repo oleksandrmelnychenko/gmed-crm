@@ -105,7 +105,8 @@ export function SortBuilder<T>({
       {open ? (
         <div
           role="menu"
-          className="absolute right-0 z-50 mt-1 flex w-96 flex-col rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-md"
+          data-table-sort-menu
+          className="absolute left-0 z-[90] mt-1 flex w-96 max-w-[calc(100vw-2rem)] flex-col rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
         >
           {value.length === 0 ? (
             <div className="px-3 py-4 text-center text-xs text-muted-foreground">

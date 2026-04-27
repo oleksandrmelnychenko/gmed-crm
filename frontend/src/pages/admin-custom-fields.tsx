@@ -13,7 +13,6 @@ import {
   PageHeader,
   TabLoader,
 } from "@/components/ui-shell";
-import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,6 +35,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useSheetDirtyGuard } from "@/hooks/use-sheet-dirty-guard";
+import {
+  createAdminCustomField,
+  deleteAdminCustomField,
+  fetchAdminCustomFields,
+} from "@/pages/admin/data/admin-api";
 
 interface CustomField {
   id: string;
@@ -77,10 +81,7 @@ export function AdminCustomFieldsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const url = filterEntity
-        ? `/admin/custom-fields?entity_type=${filterEntity}`
-        : "/admin/custom-fields";
-      setFields(await apiFetch<CustomField[]>(url));
+      setFields(await fetchAdminCustomFields<CustomField>(filterEntity));
     } catch {
       setFields([]);
     } finally {
@@ -106,17 +107,14 @@ export function AdminCustomFieldsPage() {
       }
     }
     try {
-      await apiFetch("/admin/custom-fields", {
-        method: "POST",
-        body: JSON.stringify({
-          entity_type: fEntity,
-          field_key: fKey,
-          field_label: fLabel,
-          field_type: fType,
-          options: opts ?? null,
-          is_required: false,
-          sort_order: parseInt(fSort, 10) || 0,
-        }),
+      await createAdminCustomField({
+        entity_type: fEntity,
+        field_key: fKey,
+        field_label: fLabel,
+        field_type: fType,
+        options: opts ?? null,
+        is_required: false,
+        sort_order: parseInt(fSort, 10) || 0,
       });
       closeCreateSheet();
       void load();
@@ -155,7 +153,7 @@ export function AdminCustomFieldsPage() {
   });
 
   const onDelete = async (id: string) => {
-    await apiFetch(`/admin/custom-fields/${id}/delete`, { method: "POST" });
+    await deleteAdminCustomField(id);
     void load();
   };
 

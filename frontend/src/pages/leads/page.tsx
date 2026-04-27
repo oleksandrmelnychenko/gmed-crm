@@ -60,179 +60,55 @@ import {
   selectClass as shellSelectClassName,
   textareaClass as shellTextareaClass,
   tokens,
-  type StatusTone,
 } from "@/components/ui-shell";
-import { apiFetch } from "@/lib/api";
-import { convertLead as apiConvertLead, downloadLeadAttachment } from "@/lib/api/leads";
-import { computeLeadConversionGate, filterLeadsByContact } from "./leads.helpers";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
-import type {
-  CreateLeadBody,
-  Lead,
-  LeadDetail,
-  LeadsStats,
-  MonthlyEntry,
-  StatusCount,
-} from "@/lib/api/types";
+import type { CreateLeadBody, LeadDetail, LeadsStats, MonthlyEntry, StatusCount } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
-
-type LeadListItem = Lead;
-
-type LeadFilters = {
-  search: string;
-  status: string;
-  email: string;
-  phone: string;
-  source: string;
-  country: string;
-  includeArchived: string;
-};
-
-type LeadForm = {
-  firstName: string;
-  lastName: string;
-  email: string;
-  phone: string;
-  source: string;
-  country: string;
-  notes: string;
-};
-
-type LeadGateForm = {
-  email: string;
-  phone: string;
-  country: string;
-  primaryLanguage: string;
-  dateOfBirth: string;
-  legalSex: string;
-  complianceStatus: string;
-  consentHealthcare: boolean;
-  consentPrivacyPractices: boolean;
-  notes: string;
-};
-
-type FailedLeadResolutionForm = {
-  resolution: "archive" | "delete";
-  reason: string;
-  note: string;
-};
-
-type LeadPermissions = {
-  canViewPage: boolean;
-  canCreate: boolean;
-  canConvert: boolean;
-};
-
-const DEFAULT_FILTERS: LeadFilters = {
-  search: "",
-  status: "",
-  email: "",
-  phone: "",
-  source: "",
-  country: "",
-  includeArchived: "false",
-};
-
-const STATUS_OPTIONS = [
-  "new",
-  "in_progress",
-  "qualified",
-  "not_qualified",
-  "converted",
-  "archived",
-] as const;
-
-const COMPLIANCE_OPTIONS = [
-  "pending",
-  "documents_sent",
-  "signed",
-  "rejected",
-] as const;
-
-const LEGAL_SEX_OPTIONS = [
-  "female",
-  "male",
-  "diverse",
-  "no_entry",
-] as const;
-
-function leadPermissions(role?: string): LeadPermissions {
-  return {
-    canViewPage: role === "ceo" || role === "patient_manager" || role === "sales",
-    canCreate: role === "ceo" || role === "patient_manager" || role === "sales",
-    canConvert: role === "ceo" || role === "patient_manager",
-  };
-}
-
-function blankLeadForm(): LeadForm {
-  return {
-    firstName: "",
-    lastName: "",
-    email: "",
-    phone: "",
-    source: "",
-    country: "",
-    notes: "",
-  };
-}
-
-function blankFailedLeadResolutionForm(): FailedLeadResolutionForm {
-  return {
-    resolution: "archive",
-    reason: "",
-    note: "",
-  };
-}
-
-function leadToGateForm(detail: LeadDetail): LeadGateForm {
-  return {
-    email: detail.email ?? "",
-    phone: detail.phone ?? "",
-    country: detail.country ?? "",
-    primaryLanguage: detail.primary_language ?? "",
-    dateOfBirth: detail.date_of_birth ?? "",
-    legalSex: detail.legal_sex ?? "",
-    complianceStatus: detail.compliance_status ?? "pending",
-    consentHealthcare: detail.consent_healthcare,
-    consentPrivacyPractices: detail.consent_privacy_practices,
-    notes: detail.notes ?? "",
-  };
-}
-
-function nonempty(value: string): string | null {
-  const trimmed = value.trim();
-  return trimmed || null;
-}
-
-function yesNo(value: boolean | null | undefined): string {
-  if (value === true) return "Yes";
-  if (value === false) return "No";
-  return "-";
-}
-
-function dashOrValue(value?: string | null): string {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : "-";
-}
-
-function formatSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function buildLeadsPath(filters: LeadFilters) {
-  const params = new URLSearchParams();
-  if (filters.search.trim()) params.set("search", filters.search.trim());
-  if (filters.status) params.set("status", filters.status);
-  if (filters.source.trim()) params.set("source", filters.source.trim());
-  if (filters.country.trim()) params.set("country", filters.country.trim());
-  if (filters.includeArchived) params.set("include_archived", filters.includeArchived);
-  const query = params.toString();
-  return query ? `/leads?${query}` : "/leads";
-}
+import {
+  complianceTone,
+  failedOutcomeTone,
+  leadRowAccent,
+  leadStatusTone,
+} from "./appearance/status-appearance";
+import {
+  convertLead,
+  createLead,
+  downloadLeadAttachment,
+  fetchLeadDetail,
+  fetchLeadStats,
+  fetchLeads,
+  resolveFailedLead,
+  updateLeadGate,
+  updateLeadStatus,
+} from "./data/leads-api";
+import {
+  COMPLIANCE_OPTIONS,
+  DEFAULT_FILTERS,
+  LEGAL_SEX_OPTIONS,
+  STATUS_OPTIONS,
+  blankFailedLeadResolutionForm,
+  blankLeadForm,
+  buildLeadsPath,
+  computeLeadConversionGate,
+  dashOrValue,
+  filterLeadsByContact,
+  formatDate,
+  formatSize,
+  leadPermissions,
+  leadToGateForm,
+  nonempty,
+  statusLabel,
+  yesNo,
+} from "./model/leads-model";
+import type {
+  FailedLeadResolutionForm,
+  LeadFilters,
+  LeadForm,
+  LeadGateForm,
+  LeadListItem,
+} from "./model/types";
 
 const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
@@ -244,86 +120,6 @@ function titleWithDot(title: ReactNode) {
       <span>{title}</span>
     </span>
   );
-}
-
-function statusLabel(status: string) {
-  return status
-    .split("_")
-    .filter(Boolean)
-    .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
-    .join(" ");
-}
-
-function leadStatusTone(status: string): StatusTone {
-  switch (status) {
-    case "new":
-      return "info";
-    case "in_progress":
-      return "warning";
-    case "qualified":
-      return "success";
-    case "not_qualified":
-      return "error";
-    case "converted":
-      return "info";
-    case "archived":
-      return "neutral";
-    default:
-      return "neutral";
-  }
-}
-
-function complianceTone(status?: string | null): StatusTone {
-  switch (status) {
-    case "signed":
-      return "success";
-    case "documents_sent":
-      return "warning";
-    case "rejected":
-      return "error";
-    case "pending":
-      return "neutral";
-    default:
-      return "neutral";
-  }
-}
-
-function failedOutcomeTone(status?: string | null): StatusTone {
-  if (!status || status === "none") return "neutral";
-  if (status === "delete_anonymized") return "error";
-  return "warning";
-}
-
-function leadRowAccent(status: string): string {
-  switch (status) {
-    case "new":
-      return "bg-sky-500";
-    case "in_progress":
-      return "bg-amber-500";
-    case "qualified":
-      return "bg-emerald-500";
-    case "not_qualified":
-      return "bg-rose-500";
-    case "converted":
-      return "bg-indigo-500";
-    case "archived":
-      return "bg-slate-300";
-    default:
-      return "bg-slate-300";
-  }
-}
-
-function formatDate(value?: string | null) {
-  if (!value) return "Not set";
-  try {
-    return new Intl.DateTimeFormat("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }).format(new Date(value));
-  } catch {
-    return value;
-  }
 }
 
 function cardClass(extra?: string) {
@@ -516,7 +312,7 @@ export function LeadsPage() {
     setLoading(true);
     setError("");
 
-    void apiFetch<LeadListItem[]>(leadsPath)
+    void fetchLeads(leadsPath)
       .then((items) => {
         if (!cancelled) {
           startTransition(() => setLeads(items));
@@ -542,11 +338,7 @@ export function LeadsPage() {
     if (!permissions.canViewPage) return;
     let cancelled = false;
 
-    void Promise.all([
-      apiFetch<LeadsStats>("/stats/leads").catch(() => null),
-      apiFetch<MonthlyEntry[]>("/stats/leads/monthly").catch(() => []),
-      apiFetch<StatusCount[]>("/stats/leads/by-status").catch(() => []),
-    ]).then(([statsPayload, monthlyPayload, statusPayload]) => {
+    void fetchLeadStats().then(({ stats: statsPayload, monthly: monthlyPayload, byStatus: statusPayload }) => {
       if (cancelled) return;
       startTransition(() => {
         setStats(statsPayload);
@@ -567,7 +359,7 @@ export function LeadsPage() {
     setDetailLoading(true);
     setDetailError("");
 
-    void apiFetch<LeadDetail>(`/leads/${selectedLeadId}`)
+    void fetchLeadDetail(selectedLeadId)
       .then((item) => {
         if (!cancelled) {
           startTransition(() => setDetail(item));
@@ -644,10 +436,7 @@ export function LeadsPage() {
     };
 
     try {
-      await apiFetch("/leads", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
+      await createLead(payload);
       setCreateOpen(false);
       setCreateForm(blankLeadForm());
       reload();
@@ -663,10 +452,7 @@ export function LeadsPage() {
   async function updateStatus(leadId: string, status: string) {
     setActionBusy(`status:${leadId}:${status}`);
     try {
-      await apiFetch(`/leads/${leadId}/qualify`, {
-        method: "POST",
-        body: JSON.stringify({ status }),
-      });
+      await updateLeadStatus(leadId, status);
       reload();
     } catch (actionError) {
       const message =
@@ -683,7 +469,7 @@ export function LeadsPage() {
     setError("");
     setSuccessMessage("");
     try {
-      const result = await apiConvertLead(leadId);
+      const result = await convertLead(leadId);
       // Close the dialog first so the success banner and the navigation
       // are not visually occluded by the modal overlay.
       setPendingConvertLead(null);
@@ -712,20 +498,17 @@ export function LeadsPage() {
     setGateBusy(true);
     setDetailError("");
     try {
-      await apiFetch(`/leads/${selectedLeadId}/update`, {
-        method: "POST",
-        body: JSON.stringify({
-          email: nonempty(gateForm.email),
-          phone: nonempty(gateForm.phone),
-          country: nonempty(gateForm.country),
-          primary_language: nonempty(gateForm.primaryLanguage),
-          date_of_birth: nonempty(gateForm.dateOfBirth),
-          legal_sex: nonempty(gateForm.legalSex),
-          compliance_status: nonempty(gateForm.complianceStatus),
-          consent_healthcare: gateForm.consentHealthcare,
-          consent_privacy_practices: gateForm.consentPrivacyPractices,
-          notes: nonempty(gateForm.notes),
-        }),
+      await updateLeadGate(selectedLeadId, {
+        email: nonempty(gateForm.email),
+        phone: nonempty(gateForm.phone),
+        country: nonempty(gateForm.country),
+        primary_language: nonempty(gateForm.primaryLanguage),
+        date_of_birth: nonempty(gateForm.dateOfBirth),
+        legal_sex: nonempty(gateForm.legalSex),
+        compliance_status: nonempty(gateForm.complianceStatus),
+        consent_healthcare: gateForm.consentHealthcare,
+        consent_privacy_practices: gateForm.consentPrivacyPractices,
+        notes: nonempty(gateForm.notes),
       });
       reload();
     } catch (saveError) {
@@ -745,13 +528,10 @@ export function LeadsPage() {
     setDetailError("");
 
     try {
-      await apiFetch(`/leads/${selectedLeadId}/failed-flow`, {
-        method: "POST",
-        body: JSON.stringify({
-          resolution: failedLeadForm.resolution,
-          reason: failedLeadForm.reason.trim(),
-          note: nonempty(failedLeadForm.note),
-        }),
+      await resolveFailedLead(selectedLeadId, {
+        resolution: failedLeadForm.resolution,
+        reason: failedLeadForm.reason.trim(),
+        note: nonempty(failedLeadForm.note),
       });
       reload();
     } catch (resolveError) {
@@ -2008,6 +1788,3 @@ function DetailCard({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
-
-
-

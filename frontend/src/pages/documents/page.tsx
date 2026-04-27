@@ -60,349 +60,88 @@ import {
   Sheet,
   SheetContent,
 } from "@/components/ui/sheet";
-import { apiFetch, buildApiUrl, getAccessToken } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { getLang, t as translateCatalog, useLang } from "@/lib/i18n";
 import { PatientDocumentsPage } from "@/pages/patients/portal-documents-page";
 import { cn } from "@/lib/utils";
+import {
+  sensitivityBadge,
+  statusBadge,
+  textExtractionStatusBadge,
+  translationStatusBadge,
+  visibilityBadge,
+} from "./appearance/status-appearance";
+import {
+  confirmDocumentShare,
+  createBulkDocumentShares,
+  createDocumentShare,
+  createTranslationRequest,
+  deleteStoredDocumentFile,
+  downloadDocumentFile,
+  fetchDocument,
+  fetchDocumentDetailBundle,
+  fetchDocumentIntakeQueue,
+  fetchDocumentLookups,
+  fetchDocumentShares,
+  fetchDocumentVersions,
+  fetchDocuments,
+  fetchPatientDocumentContext,
+  fetchTranslationRequests,
+  generateDocument,
+  openDocumentPreview,
+  releaseDocumentToPortal,
+  revokeDocumentPortalRelease,
+  revokeDocumentShare,
+  runDocumentTextExtraction,
+  updateDocument,
+  updateTranslationRequest,
+  uploadDocument,
+} from "./data/document-api";
+import {
+  STATUS_OPTIONS,
+  VISIBILITY_OPTIONS,
+  buildDocumentsPath,
+  canManageDocumentIntake,
+  canManageDocuments,
+  canRequestTranslations,
+  canUpdateTranslations,
+  canUploadDocuments,
+  canViewDocumentShares,
+  canViewDocuments,
+  detailToEditForm,
+  emptyGenerateForm,
+  emptyUploadForm,
+  formatConfidenceLabel,
+  normalizeTemplateLanguage,
+  patientOptionLabel,
+  resolveTemplateLanguage,
+  templateForDocument,
+} from "./model/document-model";
+import type {
+  AppointmentOption,
+  CategoryOption,
+  DocumentItem,
+  DocumentShare,
+  DocumentStatus,
+  DocumentTemplate,
+  DocumentTextExtraction,
+  DocumentVisibility,
+  EditFormState,
+  FiltersState,
+  GenerateFormState,
+  OrderOption,
+  PatientOption,
+  ProviderOption,
+  ShareFormState,
+  StaffOption,
+  TemplateTextBlock,
+  TranslationRequest,
+  TranslationWorkspaceDraft,
+  UploadFormState,
+} from "./model/types";
 
-type DocumentStatus = "draft" | "active" | "archived";
-type DocumentVisibility =
-  | "internal"
-  | "released_internal"
-  | "released_external"
-  | "patient_visible";
-
-type DocumentClassificationSuggestion = {
-  art: string;
-  category: string;
-  is_medical: boolean;
-  confidence: string;
-  rationale: string;
-};
-
-type DocumentItem = {
-  id: string;
-  patient_id: string | null;
-  order_id: string | null;
-  appointment_id: string | null;
-  patient_pid: string | null;
-  patient_name: string | null;
-  order_number: string | null;
-  appointment_title: string | null;
-  auto_name: string;
-  original_filename: string | null;
-  art: string;
-  category: string | null;
-  status: string;
-  visibility: string;
-  is_medical: boolean;
-  mime_type: string | null;
-  file_size: number | null;
-  has_stored_file: boolean;
-  klinik: string | null;
-  ursprung: string | null;
-  notes: string | null;
-  uploaded_by_name: string | null;
-  version_root_document_id: string;
-  replaces_document_id: string | null;
-  superseded_by_document_id: string | null;
-  version_number: number;
-  version_count: number;
-  is_latest_version: boolean;
-  file_deleted_at: string | null;
-  file_deleted_by: string | null;
-  file_deleted_by_name: string | null;
-  file_delete_reason: string | null;
-  created_at: string;
-  updated_at: string;
-  share_count: number;
-  shared_to_current: boolean;
-  data_sensitivity: string;
-  needs_categorization: boolean;
-  classification_suggestion: DocumentClassificationSuggestion | null;
-};
-
-type DocumentShare = {
-  id: string;
-  shared_with_provider_id: string | null;
-  shared_with_user_id: string | null;
-  provider_name: string | null;
-  target_user_name: string | null;
-  target_user_role: string | null;
-  shared_by_name: string | null;
-  channel: string | null;
-  message: string | null;
-  requires_confirmation: boolean;
-  confirmed: boolean;
-  confirmed_at: string | null;
-  shared_at: string;
-  revoked_at: string | null;
-};
-
-type TranslationRequest = {
-  id: string;
-  document_id: string;
-  patient_id: string | null;
-  requested_language: string;
-  status: string;
-  note: string | null;
-  source_language: string | null;
-  source_text: string | null;
-  translated_text: string | null;
-  requested_by: string;
-  requested_by_name: string | null;
-  translated_by: string | null;
-  translated_by_name: string | null;
-  requested_at: string;
-  completed_at: string | null;
-  translated_at: string | null;
-  updated_at: string;
-};
-
-type TranslationWorkspaceDraft = {
-  note: string;
-  sourceLanguage: string;
-  sourceText: string;
-  translatedText: string;
-};
-
-type DocumentTextExtraction = {
-  status: string;
-  method: string | null;
-  message: string | null;
-  extracted_text: string | null;
-  has_text: boolean;
-  extracted_at: string | null;
-  extracted_by: string | null;
-  extracted_by_name: string | null;
-};
-
-type StaffOption = { id: string; name: string; role: string };
-type CategoryOption = { key: string; label: string };
-type CategoriesResponse = { categories: CategoryOption[]; arts: string[] };
-type PatientOption = {
-  id: string;
-  patient_id: string;
-  first_name?: string;
-  last_name?: string;
-  languages?: string[];
-};
-type ProviderOption = { id: string; name: string; address_city: string | null };
-type OrderOption = { id: string; order_number: string; patient_pid: string };
-type AppointmentOption = {
-  id: string;
-  title: string;
-  date: string;
-  time_start: string | null;
-};
-
-type FiltersState = {
-  search: string;
-  patientId: string;
-  orderId: string;
-  appointmentId: string;
-  status: string;
-  visibility: string;
-  art: string;
-  category: string;
-  dateFrom: string;
-  dateTo: string;
-  klinik: string;
-  ursprung: string;
-};
-
-type UploadFormState = {
-  file: File | null;
-  patientId: string;
-  orderId: string;
-  appointmentId: string;
-  autoName: string;
-  art: string;
-  category: string;
-  status: DocumentStatus;
-  visibility: DocumentVisibility;
-  isMedical: boolean;
-  klinik: string;
-  ursprung: string;
-  notes: string;
-};
-
-type EditFormState = {
-  patientId: string;
-  orderId: string;
-  appointmentId: string;
-  autoName: string;
-  art: string;
-  category: string;
-  status: DocumentStatus;
-  visibility: DocumentVisibility;
-  isMedical: boolean;
-  klinik: string;
-  ursprung: string;
-  notes: string;
-};
-
-type ShareFormState = {
-  targetType: "user" | "provider";
-  userId: string;
-  providerId: string;
-  channel: string;
-  message: string;
-  requiresConfirmation: boolean;
-};
-
-type DocumentTemplate = {
-  id: string;
-  template_kind?: "builtin" | "provider";
-  provider_id?: string | null;
-  provider_name?: string | null;
-  doctor_id?: string | null;
-  doctor_name?: string | null;
-  label: string;
-  description: string;
-  art: string;
-  category: string;
-  default_auto_name: string;
-  default_status: DocumentStatus;
-  default_visibility: DocumentVisibility;
-  is_medical: boolean;
-  supported_languages: string[];
-  text_block_keys: string[];
-};
-
-type TemplateTextBlock = {
-  key: string;
-  label: string;
-  description: string;
-};
-
-type TemplateCatalogResponse = {
-  templates: DocumentTemplate[];
-  text_blocks: TemplateTextBlock[];
-};
-
-type GenerateFormState = {
-  templateId: string;
-  patientId: string;
-  orderId: string;
-  appointmentId: string;
-  replaceDocumentId: string;
-  autoName: string;
-  status: DocumentStatus;
-  visibility: DocumentVisibility;
-  language: string;
-  titleOverride: string;
-  introduction: string;
-  closingNote: string;
-  klinik: string;
-  ursprung: string;
-  notes: string;
-  textBlockKeys: string[];
-};
-
-type GenerateDocumentResponse = {
-  id: string;
-  auto_name: string;
-  original_filename: string;
-  mime_type: string;
-  file_size: number;
-  language?: string;
-  version_number?: number;
-  preview_html?: string;
-};
-
-type UploadDocumentResponse = {
-  id: string;
-  art: string;
-  category: string | null;
-  is_medical: boolean;
-  needs_categorization: boolean;
-  classification_suggestion?: DocumentClassificationSuggestion | null;
-};
-
-const STATUS_OPTIONS: DocumentStatus[] = ["draft", "active", "archived"];
-const VISIBILITY_OPTIONS: DocumentVisibility[] = [
-  "internal",
-  "released_internal",
-  "released_external",
-  "patient_visible",
-];
 const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
-
-function canManageDocuments(role?: string) {
-  return role === "ceo" || role === "patient_manager";
-}
-
-function canUploadDocuments(role?: string) {
-  return [
-    "ceo",
-    "patient_manager",
-    "teamlead_interpreter",
-    "interpreter",
-  ].includes(role ?? "");
-}
-
-function canManageDocumentIntake(role?: string) {
-  return ["ceo", "patient_manager", "teamlead_interpreter"].includes(
-    role ?? "",
-  );
-}
-
-function canViewDocuments(role?: string) {
-  return [
-    "ceo",
-    "ceo_assistant",
-    "patient_manager",
-    "teamlead_interpreter",
-    "interpreter",
-    "concierge",
-    "billing",
-  ].includes(role ?? "");
-}
-
-function canRequestTranslations(role?: string) {
-  return [
-    "ceo",
-    "patient_manager",
-    "teamlead_interpreter",
-    "interpreter",
-    "concierge",
-  ].includes(role ?? "");
-}
-
-function canUpdateTranslations(role?: string) {
-  return [
-    "ceo",
-    "patient_manager",
-    "teamlead_interpreter",
-    "concierge",
-  ].includes(role ?? "");
-}
-
-function canViewDocumentShares(role?: string) {
-  return ["ceo", "ceo_assistant", "patient_manager"].includes(role ?? "");
-}
-
-function buildDocumentsPath(filters: FiltersState) {
-  const params = new URLSearchParams();
-  if (filters.search.trim()) params.set("search", filters.search.trim());
-  if (filters.patientId) params.set("patient_id", filters.patientId);
-  if (filters.orderId) params.set("order_id", filters.orderId);
-  if (filters.appointmentId)
-    params.set("appointment_id", filters.appointmentId);
-  if (filters.status) params.set("status", filters.status);
-  if (filters.visibility) params.set("visibility", filters.visibility);
-  if (filters.art.trim()) params.set("art", filters.art.trim());
-  if (filters.category) params.set("category", filters.category);
-  if (filters.dateFrom) params.set("date_from", filters.dateFrom);
-  if (filters.dateTo) params.set("date_to", filters.dateTo);
-  if (filters.klinik.trim()) params.set("klinik", filters.klinik.trim());
-  if (filters.ursprung.trim())
-    params.set("ursprung", filters.ursprung.trim());
-  return params.size ? `/documents?${params.toString()}` : "/documents";
-}
 
 function runtimeTranslations() {
   return translateCatalog(getLang());
@@ -608,232 +347,6 @@ function formatExtractionStatusLabel(
       return tr.documents_extraction_not_started;
     default:
       return status.replaceAll("_", " ");
-  }
-}
-
-function statusBadge(status: string) {
-  if (status === "active")
-    return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  if (status === "archived")
-    return "border-border/60 bg-muted/25 text-muted-foreground";
-  return "border-amber-200 bg-amber-50 text-amber-700";
-}
-
-function translationStatusBadge(status: string) {
-  if (status === "completed")
-    return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  if (status === "in_progress")
-    return "border-sky-200 bg-sky-50 text-sky-700";
-  if (status === "cancelled")
-    return "border-border/60 bg-muted/25 text-muted-foreground";
-  return "border-amber-200 bg-amber-50 text-amber-700";
-}
-
-function textExtractionStatusBadge(status: string) {
-  if (status === "completed")
-    return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  if (status === "failed") return "border-rose-200 bg-rose-50 text-rose-700";
-  if (status === "unsupported")
-    return "border-amber-200 bg-amber-50 text-amber-700";
-  return "border-border/60 bg-muted/25 text-muted-foreground";
-}
-
-function visibilityBadge(visibility: string) {
-  if (visibility === "released_internal")
-    return "border-sky-200 bg-sky-50 text-sky-700";
-  if (visibility === "released_external")
-    return "border-violet-200 bg-violet-50 text-violet-700";
-  if (visibility === "patient_visible")
-    return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  return "border-border/60 bg-muted/25 text-muted-foreground";
-}
-
-function sensitivityBadge(value: string) {
-  if (value.toLowerCase() === "medical")
-    return "border-rose-200 bg-rose-50 text-rose-700";
-  if (value.toLowerCase() === "financial")
-    return "border-orange-200 bg-orange-50 text-orange-700";
-  return "border-sky-200 bg-sky-50 text-sky-700";
-}
-
-function patientOptionLabel(patient: PatientOption) {
-  return `${patient.patient_id} · ${[patient.first_name, patient.last_name].filter(Boolean).join(" ")}`;
-}
-
-function formatConfidenceLabel(
-  value: string,
-  tr: Record<string, string>,
-): string {
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "high") return tr.documents_confidence_high ?? value;
-  if (normalized === "medium") return tr.documents_confidence_medium ?? value;
-  if (normalized === "low") return tr.documents_confidence_low ?? value;
-  return value;
-}
-
-function normalizeTemplateLanguage(value?: string | null) {
-  const normalized = value?.trim().toLowerCase();
-  if (!normalized) return null;
-  if (
-    ["de", "de-de", "de_at", "de-at", "de_ch", "de-ch"].includes(normalized)
-  ) {
-    return "de";
-  }
-  if (["uk", "uk-ua", "ua", "ukrainian"].includes(normalized)) return "uk";
-  if (["en", "en-gb", "en-us", "english"].includes(normalized)) return "en";
-  if (["ru", "ru-ru", "russian"].includes(normalized)) return "ru";
-  return null;
-}
-
-function resolveTemplateLanguage(
-  patientId: string,
-  template: DocumentTemplate | null,
-  patients: PatientOption[],
-) {
-  if (!template) return "de";
-  const patient = patients.find((item) => item.id === patientId);
-  for (const language of patient?.languages ?? []) {
-    const normalized = normalizeTemplateLanguage(language);
-    if (normalized && template.supported_languages.includes(normalized)) {
-      return normalized;
-    }
-  }
-  return template.supported_languages[0] ?? "de";
-}
-
-function templateForDocument(
-  templates: DocumentTemplate[],
-  detail: DocumentItem | null,
-) {
-  if (!detail) return null;
-  return (
-    templates.find(
-      (template) =>
-        (template.template_kind ?? "builtin") === "builtin" &&
-        template.art === detail.art && template.category === detail.category,
-    ) ?? null
-  );
-}
-
-function emptyUploadForm(patientId = ""): UploadFormState {
-  return {
-    file: null,
-    patientId,
-    orderId: "",
-    appointmentId: "",
-    autoName: "",
-    art: "",
-    category: "",
-    status: "active",
-    visibility: "internal",
-    isMedical: false,
-    klinik: "",
-    ursprung: "",
-    notes: "",
-  };
-}
-
-function emptyGenerateForm(patientId = ""): GenerateFormState {
-  return {
-    templateId: "",
-    patientId,
-    orderId: "",
-    appointmentId: "",
-    replaceDocumentId: "",
-    autoName: "",
-    status: "draft",
-    visibility: "patient_visible",
-    language: "de",
-    titleOverride: "",
-    introduction: "",
-    closingNote: "",
-    klinik: "",
-    ursprung: "",
-    notes: "",
-    textBlockKeys: [],
-  };
-}
-
-function detailToEditForm(detail: DocumentItem): EditFormState {
-  return {
-    patientId: detail.patient_id ?? "",
-    orderId: detail.order_id ?? "",
-    appointmentId: detail.appointment_id ?? "",
-    autoName: detail.auto_name,
-    art: detail.art,
-    category: detail.category ?? "",
-    status: (detail.status as DocumentStatus) ?? "active",
-    visibility: (detail.visibility as DocumentVisibility) ?? "internal",
-    isMedical: detail.is_medical,
-    klinik: detail.klinik ?? "",
-    ursprung: detail.ursprung ?? "",
-    notes: detail.notes ?? "",
-  };
-}
-
-async function downloadDocument(id: string, filename: string) {
-  const token = getAccessToken();
-  const response = await fetch(buildApiUrl(`/documents/${id}/download`), {
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-  });
-  if (!response.ok)
-    throw new Error(`${response.status} ${response.statusText}`);
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename || "document";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-function writePreviewWindow(previewWindow: Window | null, html?: string) {
-  if (!previewWindow || !html) return false;
-  previewWindow.document.open();
-  previewWindow.document.write(html);
-  previewWindow.document.close();
-  return true;
-}
-
-function openBlobPreviewWindow(previewWindow: Window | null, blob: Blob) {
-  const openedWindow =
-    previewWindow ?? window.open("", "_blank", "noopener,noreferrer");
-  if (!openedWindow) return false;
-  const objectUrl = URL.createObjectURL(blob);
-  openedWindow.location.href = objectUrl;
-  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
-  return true;
-}
-
-async function openDocumentPreview(id: string, previewWindow?: Window | null) {
-  const tr = runtimeTranslations();
-  const token = getAccessToken();
-  const response = await fetch(buildApiUrl(`/documents/${id}/download`), {
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-  });
-  if (!response.ok)
-    throw new Error(`${response.status} ${response.statusText}`);
-  const contentType = response.headers.get("content-type") ?? "";
-  if (contentType.startsWith("text/html")) {
-    const html = await response.text();
-    const opened = writePreviewWindow(
-      previewWindow ?? window.open("", "_blank", "noopener,noreferrer"),
-      html,
-    );
-    if (!opened) {
-      if (previewWindow) previewWindow.close();
-      throw new Error(tr.documents_popup_blocked);
-    }
-    return;
-  }
-
-  const blob = await response.blob();
-  const opened = openBlobPreviewWindow(previewWindow ?? null, blob);
-  if (!opened) {
-    if (previewWindow) previewWindow.close();
-    throw new Error(tr.documents_popup_blocked);
   }
 }
 
@@ -1079,38 +592,16 @@ function StaffDocumentsPage() {
     if (!canView) return;
     let active = true;
     async function loadLookups() {
-      const [
-        patientsResponse,
-        providersResponse,
-        staffResponse,
-        categoriesResponse,
-        templateCatalogResponse,
-      ] = await Promise.all([
-        apiFetch<PatientOption[]>("/patients?active_only=true").catch(() => []),
-        canManage
-          ? apiFetch<ProviderOption[]>("/providers?active_only=true").catch(
-              () => [],
-            )
-          : Promise.resolve([]),
-        apiFetch<StaffOption[]>("/documents/meta/staff").catch(() => []),
-        apiFetch<CategoriesResponse>("/documents/meta/categories").catch(
-          () => ({ categories: [], arts: [] }),
-        ),
-        canManage
-          ? apiFetch<TemplateCatalogResponse>("/documents/templates").catch(
-              () => ({ templates: [], text_blocks: [] }),
-            )
-          : Promise.resolve({ templates: [], text_blocks: [] }),
-      ]);
+      const lookups = await fetchDocumentLookups(canManage);
       if (!active) return;
       startTransition(() => {
-        setPatients(patientsResponse);
-        setProviders(providersResponse);
-        setStaff(staffResponse);
-        setCategories(categoriesResponse.categories);
-        setArts(categoriesResponse.arts);
-        setTemplates(templateCatalogResponse.templates);
-        setTemplateTextBlocks(templateCatalogResponse.text_blocks);
+        setPatients(lookups.patients);
+        setProviders(lookups.providers);
+        setStaff(lookups.staff);
+        setCategories(lookups.categories);
+        setArts(lookups.arts);
+        setTemplates(lookups.templates);
+        setTemplateTextBlocks(lookups.textBlocks);
       });
     }
     void loadLookups();
@@ -1126,7 +617,7 @@ function StaffDocumentsPage() {
       setBusy(true);
       setError("");
       try {
-        const rows = await apiFetch<DocumentItem[]>(documentsPath);
+        const rows = await fetchDocuments(documentsPath);
         if (!active) return;
         startTransition(() => setDocuments(rows));
       } catch (nextError) {
@@ -1160,7 +651,7 @@ function StaffDocumentsPage() {
       setIntakeBusy(true);
       setIntakeError("");
       try {
-        const rows = await apiFetch<DocumentItem[]>("/documents/intake-queue");
+        const rows = await fetchDocumentIntakeQueue();
         if (!active) return;
         startTransition(() => setIntakeQueue(rows));
       } catch (nextError) {
@@ -1205,30 +696,13 @@ function StaffDocumentsPage() {
       setTranslationError("");
       setTextExtractionError("");
       try {
-        const [
-          documentResponse,
-          shareResponse,
-          versionResponse,
-          translationResponse,
-          extractionResponse,
-        ] =
-          await Promise.all([
-            apiFetch<DocumentItem>(`/documents/${selectedId}`),
-            canViewShares
-              ? apiFetch<DocumentShare[]>(
-                  `/documents/${selectedId}/shares`,
-                ).catch(() => [])
-              : Promise.resolve([]),
-            apiFetch<DocumentItem[]>(`/documents/${selectedId}/versions`).catch(
-              () => [],
-            ),
-            apiFetch<TranslationRequest[]>(
-              `/documents/${selectedId}/translation-requests`,
-            ).catch(() => []),
-            apiFetch<DocumentTextExtraction>(
-              `/documents/${selectedId}/text-extraction`,
-            ).catch(() => null),
-          ]);
+        const {
+          detail: documentResponse,
+          shares: shareResponse,
+          versions: versionResponse,
+          translationRequests: translationResponse,
+          textExtraction: extractionResponse,
+        } = await fetchDocumentDetailBundle(selectedId, canViewShares);
         if (!active) return;
         setDetail(documentResponse);
         setDetailVersions(versionResponse);
@@ -1268,14 +742,8 @@ function StaffDocumentsPage() {
     }
     let active = true;
     async function loadUploadContext() {
-      const [orderRows, appointmentRows] = await Promise.all([
-        apiFetch<OrderOption[]>(
-          `/orders?patient_id=${uploadForm.patientId}`,
-        ).catch(() => []),
-        apiFetch<AppointmentOption[]>(
-          `/appointments?patient_id=${uploadForm.patientId}`,
-        ).catch(() => []),
-      ]);
+      const { orders: orderRows, appointments: appointmentRows } =
+        await fetchPatientDocumentContext(uploadForm.patientId);
       if (!active) return;
       setUploadOrders(orderRows);
       setUploadAppointments(appointmentRows);
@@ -1336,14 +804,8 @@ function StaffDocumentsPage() {
     }
     let active = true;
     async function loadGenerateContext() {
-      const [orderRows, appointmentRows] = await Promise.all([
-        apiFetch<OrderOption[]>(
-          `/orders?patient_id=${generateForm.patientId}`,
-        ).catch(() => []),
-        apiFetch<AppointmentOption[]>(
-          `/appointments?patient_id=${generateForm.patientId}`,
-        ).catch(() => []),
-      ]);
+      const { orders: orderRows, appointments: appointmentRows } =
+        await fetchPatientDocumentContext(generateForm.patientId);
       if (!active) return;
       setGenerateOrders(orderRows);
       setGenerateAppointments(appointmentRows);
@@ -1386,14 +848,8 @@ function StaffDocumentsPage() {
     const patientId = editForm.patientId;
     let active = true;
     async function loadDetailContext() {
-      const [orderRows, appointmentRows] = await Promise.all([
-        apiFetch<OrderOption[]>(`/orders?patient_id=${patientId}`).catch(
-          () => [],
-        ),
-        apiFetch<AppointmentOption[]>(
-          `/appointments?patient_id=${patientId}`,
-        ).catch(() => []),
-      ]);
+      const { orders: orderRows, appointments: appointmentRows } =
+        await fetchPatientDocumentContext(patientId);
       if (!active) return;
       setDetailOrders(orderRows);
       setDetailAppointments(appointmentRows);
@@ -1484,13 +940,7 @@ function StaffDocumentsPage() {
         formData.append("ursprung", uploadForm.ursprung.trim());
       if (uploadForm.notes.trim())
         formData.append("notes", uploadForm.notes.trim());
-      const response = await apiFetch<UploadDocumentResponse>(
-        "/documents/upload",
-        {
-        method: "POST",
-        body: formData,
-        },
-      );
+      const response = await uploadDocument(formData);
       setNotice(
         constrainedUpload
           ? t.documents_uploaded_internal_review
@@ -1518,17 +968,14 @@ function StaffDocumentsPage() {
     setNotice("");
     setError("");
     try {
-      await apiFetch<{ ok: boolean }>(`/documents/${item.id}/update`, {
-        method: "POST",
-        body: JSON.stringify({
-          art: item.classification_suggestion.art,
-          category: item.classification_suggestion.category,
-          is_medical: item.classification_suggestion.is_medical,
-          status:
-            item.ursprung === "interpreter_upload" && item.status === "draft"
-              ? "active"
-              : undefined,
-        }),
+      await updateDocument(item.id, {
+        art: item.classification_suggestion.art,
+        category: item.classification_suggestion.category,
+        is_medical: item.classification_suggestion.is_medical,
+        status:
+          item.ursprung === "interpreter_upload" && item.status === "draft"
+            ? "active"
+            : undefined,
       });
       setNotice(
         item.ursprung === "interpreter_upload" && item.status === "draft"
@@ -1640,36 +1087,35 @@ function StaffDocumentsPage() {
     setGenerateBusy(true);
     setGenerateError("");
     try {
-      const response = await apiFetch<GenerateDocumentResponse>(
-        "/documents/generate",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            template_id: selectedTemplate.id,
-            patient_id: generateForm.patientId,
-            order_id: generateForm.orderId || null,
-            appointment_id: generateForm.appointmentId || null,
-            auto_name: generateForm.autoName.trim() || null,
-            status: generateForm.status,
-            visibility: generateForm.visibility,
-            language: generateForm.language || null,
-            replace_document_id: generateForm.replaceDocumentId || null,
-            title_override: generateForm.titleOverride.trim() || null,
-            introduction: generateForm.introduction.trim() || null,
-            closing_note: generateForm.closingNote.trim() || null,
-            klinik: generateForm.klinik.trim() || null,
-            ursprung: generateForm.ursprung.trim() || null,
-            notes: generateForm.notes.trim() || null,
-            text_block_keys: generateForm.textBlockKeys,
-          }),
-        },
-      );
+      const response = await generateDocument({
+        template_id: selectedTemplate.id,
+        patient_id: generateForm.patientId,
+        order_id: generateForm.orderId || null,
+        appointment_id: generateForm.appointmentId || null,
+        auto_name: generateForm.autoName.trim() || null,
+        status: generateForm.status,
+        visibility: generateForm.visibility,
+        language: generateForm.language || null,
+        replace_document_id: generateForm.replaceDocumentId || null,
+        title_override: generateForm.titleOverride.trim() || null,
+        introduction: generateForm.introduction.trim() || null,
+        closing_note: generateForm.closingNote.trim() || null,
+        klinik: generateForm.klinik.trim() || null,
+        ursprung: generateForm.ursprung.trim() || null,
+        notes: generateForm.notes.trim() || null,
+        text_block_keys: generateForm.textBlockKeys,
+      });
       let previewOpened = false;
       if (response.mime_type.startsWith("text/html")) {
-        previewOpened = writePreviewWindow(previewWindow, response.preview_html);
+        if (previewWindow && response.preview_html) {
+          previewWindow.document.open();
+          previewWindow.document.write(response.preview_html);
+          previewWindow.document.close();
+          previewOpened = true;
+        }
       } else if (response.id) {
         try {
-          await openDocumentPreview(response.id, previewWindow);
+          await openDocumentPreview(response.id, t.documents_popup_blocked, previewWindow);
           previewOpened = true;
         } catch {
           previewOpened = false;
@@ -1707,7 +1153,7 @@ function StaffDocumentsPage() {
   async function handleOpenPreview() {
     if (!detail) return;
     try {
-      await openDocumentPreview(detail.id);
+      await openDocumentPreview(detail.id, t.documents_popup_blocked);
       setNotice(t.documents_preview_opened);
     } catch (nextError) {
       setDetailError(
@@ -1719,9 +1165,7 @@ function StaffDocumentsPage() {
   }
 
   async function reloadTranslationRequests(documentId: string) {
-    const rows = await apiFetch<TranslationRequest[]>(
-      `/documents/${documentId}/translation-requests`,
-    );
+    const rows = await fetchTranslationRequests(documentId);
     setTranslationRequests(rows);
   }
 
@@ -1754,12 +1198,9 @@ function StaffDocumentsPage() {
     setTranslationBusy(true);
     setTranslationError("");
     try {
-      await apiFetch(`/documents/${detail.id}/translation-requests`, {
-        method: "POST",
-        body: JSON.stringify({
-          requested_language: translationForm.requestedLanguage,
-          note: translationForm.note.trim() || null,
-        }),
+      await createTranslationRequest(detail.id, {
+        requested_language: translationForm.requestedLanguage,
+        note: translationForm.note.trim() || null,
       });
       await reloadTranslationRequests(detail.id);
       setTranslationForm({ requestedLanguage: "en", note: "" });
@@ -1780,13 +1221,7 @@ function StaffDocumentsPage() {
     setTextExtractionBusy(true);
     setTextExtractionError("");
     try {
-      const response = await apiFetch<DocumentTextExtraction>(
-        `/documents/${detail.id}/text-extraction/run`,
-        {
-          method: "POST",
-          body: JSON.stringify({}),
-        },
-      );
+      const response = await runDocumentTextExtraction(detail.id);
       setTextExtraction(response);
       await reloadTranslationRequests(detail.id);
       setNotice(t.documents_extraction_updated);
@@ -1820,15 +1255,12 @@ function StaffDocumentsPage() {
         translatedText:
           patch?.translatedText ?? existingDraft?.translatedText ?? "",
       };
-      await apiFetch(`/documents/translation-requests/${requestId}/update`, {
-        method: "POST",
-        body: JSON.stringify({
-          status,
-          note: draft.note.trim() || null,
-          source_language: draft.sourceLanguage || null,
-          source_text: draft.sourceText.trim() || null,
-          translated_text: draft.translatedText.trim() || null,
-        }),
+      await updateTranslationRequest(requestId, {
+        status,
+        note: draft.note.trim() || null,
+        source_language: draft.sourceLanguage || null,
+        source_text: draft.sourceText.trim() || null,
+        translated_text: draft.translatedText.trim() || null,
       });
       await reloadTranslationRequests(detail.id);
       setNotice(
@@ -1910,11 +1342,8 @@ function StaffDocumentsPage() {
             status: "active",
             notes: editForm.notes.trim() || null,
           };
-      await apiFetch<{ ok: boolean }>(`/documents/${detail.id}/update`, {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-      const fresh = await apiFetch<DocumentItem>(`/documents/${detail.id}`);
+      await updateDocument(detail.id, payload);
+      const fresh = await fetchDocument(detail.id);
       setDetail(fresh);
       setEditForm(detailToEditForm(fresh));
       setNotice(
@@ -1971,24 +1400,12 @@ function StaffDocumentsPage() {
               requires_confirmation: shareForm.requiresConfirmation,
             };
       if (targetDocumentIds.length > 1) {
-        await apiFetch<{ ok: boolean }>("/documents/shares/bulk", {
-          method: "POST",
-          body: JSON.stringify({
-            document_ids: targetDocumentIds,
-            ...payload,
-          }),
-        });
+        await createBulkDocumentShares(targetDocumentIds, payload);
       } else {
-        await apiFetch<{ ok: boolean }>(
-          `/documents/${targetDocumentIds[0]}/shares`,
-          {
-            method: "POST",
-            body: JSON.stringify(payload),
-          },
-        );
+        await createDocumentShare(targetDocumentIds[0], payload);
       }
       if (detail) {
-        setShares(await apiFetch<DocumentShare[]>(`/documents/${detail.id}/shares`));
+        setShares(await fetchDocumentShares(detail.id));
       }
       setShareForm({
         targetType: "user",
@@ -2020,31 +1437,17 @@ function StaffDocumentsPage() {
 
   async function handleRevokeShare(shareId: string) {
     if (!detail) return;
-    await apiFetch<{ ok: boolean }>(
-      `/documents/${detail.id}/shares/${shareId}/revoke`,
-      {
-        method: "POST",
-      },
-    );
-    setShares(
-      await apiFetch<DocumentShare[]>(`/documents/${detail.id}/shares`),
-    );
+    await revokeDocumentShare(detail.id, shareId);
+    setShares(await fetchDocumentShares(detail.id));
     setNotice(t.documents_share_revoked_notice);
     refresh();
   }
 
   async function handleConfirmShare(shareId: string) {
     if (!detail) return;
-    await apiFetch<{ ok: boolean }>(
-      `/documents/${detail.id}/shares/${shareId}/confirm`,
-      {
-        method: "POST",
-      },
-    );
+    await confirmDocumentShare(detail.id, shareId);
     if (canManage) {
-      setShares(
-        await apiFetch<DocumentShare[]>(`/documents/${detail.id}/shares`),
-      );
+      setShares(await fetchDocumentShares(detail.id));
     }
     setNotice(t.documents_share_confirmed_notice);
     refresh();
@@ -2055,16 +1458,10 @@ function StaffDocumentsPage() {
     setPortalBusy(true);
     setShareError("");
     try {
-      await apiFetch(`/documents/${detail.id}/portal-release`, {
-        method: "POST",
-        body: JSON.stringify({
-          channel: "patient_portal",
-          requires_confirmation: true,
-        }),
-      });
+      await releaseDocumentToPortal(detail.id);
       const [fresh, freshShares] = await Promise.all([
-        apiFetch<DocumentItem>(`/documents/${detail.id}`),
-        apiFetch<DocumentShare[]>(`/documents/${detail.id}/shares`),
+        fetchDocument(detail.id),
+        fetchDocumentShares(detail.id),
       ]);
       setDetail(fresh);
       setEditForm(detailToEditForm(fresh));
@@ -2087,12 +1484,10 @@ function StaffDocumentsPage() {
     setPortalBusy(true);
     setShareError("");
     try {
-      await apiFetch(`/documents/${detail.id}/portal-release/revoke`, {
-        method: "POST",
-      });
+      await revokeDocumentPortalRelease(detail.id);
       const [fresh, freshShares] = await Promise.all([
-        apiFetch<DocumentItem>(`/documents/${detail.id}`),
-        apiFetch<DocumentShare[]>(`/documents/${detail.id}/shares`),
+        fetchDocument(detail.id),
+        fetchDocumentShares(detail.id),
       ]);
       setDetail(fresh);
       setEditForm(detailToEditForm(fresh));
@@ -2120,25 +1515,13 @@ function StaffDocumentsPage() {
     setDeleteBusy(true);
     setDeleteError("");
     try {
-      const response = await apiFetch<{
-        ok: boolean;
-        document: DocumentItem;
-      }>(`/documents/${detail.id}/delete`, {
-        method: "POST",
-        body: JSON.stringify({
-          reason: deleteReason.trim(),
-        }),
-      });
+      const response = await deleteStoredDocumentFile(detail.id, deleteReason.trim());
 
       const [freshShares, freshVersions] = await Promise.all([
         canManage
-          ? apiFetch<DocumentShare[]>(`/documents/${detail.id}/shares`).catch(
-              () => [],
-            )
+          ? fetchDocumentShares(detail.id).catch(() => [])
           : Promise.resolve([]),
-        apiFetch<DocumentItem[]>(`/documents/${detail.id}/versions`).catch(
-          () => [],
-        ),
+        fetchDocumentVersions(detail.id).catch(() => []),
       ]);
 
       setDetail(response.document);
@@ -3342,7 +2725,7 @@ function StaffDocumentsPage() {
                         className="rounded-lg"
                         disabled={!detail.has_stored_file}
                         onClick={() =>
-                          void downloadDocument(
+                          void downloadDocumentFile(
                             detail.id,
                             detail.original_filename ?? detail.auto_name,
                           )

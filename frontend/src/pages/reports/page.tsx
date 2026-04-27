@@ -15,10 +15,21 @@ import {
 import { StaffLink } from "@/components/staff-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { apiFetch, buildApiUrl, getAccessToken } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { fetchReportsExport, fetchReportsWorkspace } from "./data/reports-api";
+import {
+  formatChange,
+  formatDays,
+  formatHours,
+  formatMoney,
+  formatMoneyMetric,
+  formatPercent,
+  formatRating,
+  roleCanOpenReports,
+  serviceTypeLabel,
+} from "./model/report-model";
 
 type ReportSummary = {
   active_patients: number;
@@ -293,66 +304,6 @@ function metricCard(label: string, value: string | number, icon: ElementType) {
       </div>
       <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-950">{value}</p>
     </article>
-  );
-}
-
-function formatMoney(value?: string | null, locale = "de-DE") {
-  const numeric = Number(value ?? 0);
-  return new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency: "EUR",
-    maximumFractionDigits: 0,
-  }).format(Number.isFinite(numeric) ? numeric : 0);
-}
-
-function formatMoneyMetric(value?: string | number | null, locale = "de-DE") {
-  const numeric =
-    typeof value === "number" ? value : Number(value ?? 0);
-  return new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency: "EUR",
-    maximumFractionDigits: 0,
-  }).format(Number.isFinite(numeric) ? numeric : 0);
-}
-
-function formatRating(value?: number | null, emptyLabel = "-") {
-  if (typeof value !== "number" || Number.isNaN(value)) return emptyLabel;
-  return `${value.toFixed(1)}/5`;
-}
-
-function formatPercent(value?: number | null, emptyLabel = "-") {
-  if (typeof value !== "number" || Number.isNaN(value)) return emptyLabel;
-  return `${value.toFixed(1)}%`;
-}
-
-function formatHours(value?: number | null, emptyLabel = "-") {
-  if (typeof value !== "number" || Number.isNaN(value)) return emptyLabel;
-  return `${value.toFixed(1)} h`;
-}
-
-function formatDays(value?: number | null, emptyLabel = "-") {
-  if (typeof value !== "number" || Number.isNaN(value)) return emptyLabel;
-  return `${value.toFixed(1)} d`;
-}
-
-function formatChange(value?: number | null, emptyLabel = "-") {
-  if (typeof value !== "number" || Number.isNaN(value)) return emptyLabel;
-  const prefix = value > 0 ? "+" : "";
-  return `${prefix}${value.toFixed(1)}%`;
-}
-
-function serviceTypeLabel(value: string, labels?: Record<string, string>) {
-  if (labels?.[value]) return labels[value];
-  return value.replaceAll("_", " ");
-}
-
-function roleCanOpenReports(role?: string) {
-  return (
-    role === "ceo" ||
-    role === "ceo_assistant" ||
-    role === "patient_manager" ||
-    role === "billing" ||
-    role === "sales"
   );
 }
 
@@ -834,10 +785,8 @@ export function ReportsPage() {
       else setRefreshing(true);
 
       try {
-        const [payload, forecastPayload] = await Promise.all([
-          apiFetch<ReportsWorkspacePayload>("/stats/reports/workspace"),
-          apiFetch<ForecastingPayload>("/stats/forecasting"),
-        ]);
+        const { payload, forecastPayload } =
+          await fetchReportsWorkspace<ReportsWorkspacePayload, ForecastingPayload>();
         if (!cancelled) {
           setData(payload);
           setForecasting(forecastPayload);
@@ -899,25 +848,11 @@ export function ReportsPage() {
     setError("");
 
     try {
-      const token = getAccessToken();
-      const params = new URLSearchParams({ section });
-      if ((section === "doctors" || section === "provider_costs") && selectedClinicId) {
-        params.set("provider_id", selectedClinicId);
-      }
-
-      const response = await fetch(buildApiUrl(`/stats/reports/export?${params.toString()}`), {
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      });
-      if (!response.ok) {
-        throw new Error((await response.text()) || text.exportError);
-      }
-
-      const blob = await response.blob();
-      const filename =
-        response.headers
-          .get("Content-Disposition")
-          ?.match(/filename="?([^";]+)"?/)?.[1] ??
-        `${section}.csv`;
+      const { blob, filename } = await fetchReportsExport(
+        section,
+        selectedClinicId,
+        text.exportError,
+      );
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;

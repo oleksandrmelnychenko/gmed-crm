@@ -14,6 +14,9 @@
 // - T-017 Pain block із NRS, локалізацією, динамікою та причиною
 //   route: `crates/server/src/routes/cases.rs:1284` (save_pain_records)
 //
+// - T-018 Symptome: опис скарги + вибір фахового напрямку
+//   route: `crates/server/src/routes/cases.rs:1644` (save_symptome)
+//
 // - T-019 Попередні захворювання: діагноз + дата + нотатка
 //   route: `crates/server/src/routes/cases.rs:951` (save_vorerkrankungen)
 //
@@ -444,6 +447,91 @@ async fn save_pain_records_round_trips_nrs_and_localization() {
         Some("right thigh down to knee")
     );
     assert_eq!(item["auftreten"].as_str(), Some("morning, after activity"));
+}
+
+// ============================================================================
+// EPIC 2 T-018 — symptome repeat block (description + fachrichtung)
+// ============================================================================
+
+#[tokio::test]
+async fn save_symptome_round_trips_description_and_fachrichtung() {
+    let Some((app, _pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let bearer = auth_header_for(admin_id, "ceo");
+
+    let tag = unique_tag("case-symptoms");
+    let patient_id = create_patient(&app, &bearer, &tag).await;
+    let case_uuid = create_case(&app, &bearer, patient_id).await;
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/cases/{case_uuid}/symptome"),
+        &bearer,
+        Some(json!({
+            "items": [
+                {
+                    "beschreibung": "Belastungsdyspnoe seit zwei Wochen",
+                    "fachrichtung": "Kardiologie"
+                },
+                {
+                    "beschreibung": "Intermittierende Oberbauchbeschwerden",
+                    "fachrichtung": "Gastroenterologie"
+                }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "save body: {body}");
+    assert_eq!(body["count"].as_u64(), Some(2));
+
+    let case = fetch_case(&app, &bearer, case_uuid).await;
+    let symptoms = case["symptome"].as_array().unwrap();
+    assert_eq!(symptoms.len(), 2);
+    assert_eq!(
+        symptoms[0]["beschreibung"].as_str(),
+        Some("Belastungsdyspnoe seit zwei Wochen")
+    );
+    assert_eq!(symptoms[0]["fachrichtung"].as_str(), Some("Kardiologie"));
+    assert_eq!(
+        symptoms[1]["beschreibung"].as_str(),
+        Some("Intermittierende Oberbauchbeschwerden")
+    );
+    assert_eq!(
+        symptoms[1]["fachrichtung"].as_str(),
+        Some("Gastroenterologie")
+    );
+
+    let (replace_status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/cases/{case_uuid}/symptome"),
+        &bearer,
+        Some(json!({
+            "items": [
+                {
+                    "beschreibung": "Persisted single symptom after replace",
+                    "fachrichtung": null
+                }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(replace_status, StatusCode::OK);
+
+    let case_after = fetch_case(&app, &bearer, case_uuid).await;
+    let symptoms_after = case_after["symptome"].as_array().unwrap();
+    assert_eq!(
+        symptoms_after.len(),
+        1,
+        "symptome save must REPLACE, not append"
+    );
+    assert_eq!(
+        symptoms_after[0]["beschreibung"].as_str(),
+        Some("Persisted single symptom after replace")
+    );
+    assert!(symptoms_after[0]["fachrichtung"].is_null());
 }
 
 // ============================================================================

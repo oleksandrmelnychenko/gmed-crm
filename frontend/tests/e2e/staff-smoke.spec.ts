@@ -15,6 +15,13 @@ type StaffMockOptions = {
   userId?: string;
 };
 
+function localIsoDate(date = new Date()) {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 async function loginAsStaff(page: Page, email: string) {
   await page.goto("/login");
   await page.locator("#email").fill(email);
@@ -31,6 +38,7 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
   let portalShareActive = false;
   const documentId = "00000000-0000-0000-0000-000000000501";
   const patientId = "00000000-0000-0000-0000-000000000301";
+  const appointmentDate = localIsoDate();
   let nextGeneratedDocumentIndex = 1;
   let nextProviderShareIndex = 1;
   let nextTranslationRequestIndex = 1;
@@ -504,7 +512,7 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
         {
           id: "00000000-0000-0000-0000-000000000101",
           title: "Follow-up slot",
-          date: "2026-04-20",
+          date: appointmentDate,
           time_start: "09:00",
           status: "planned",
           patient_name: "Patient One",
@@ -706,7 +714,7 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
         {
           id: "00000000-0000-0000-0000-000000000401",
           title: "Follow-up slot",
-          date: "2026-04-20",
+          date: appointmentDate,
           time_start: "09:00",
           time_end: "10:00",
           type: "medical",

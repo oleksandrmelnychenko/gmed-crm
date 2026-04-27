@@ -19,6 +19,8 @@ type UsePatientDetailSheetDataArgs = {
   selectedId: string;
 };
 
+const PATIENT_DETAIL_SHEET_META_CACHE_TTL_MS = 60_000;
+
 export function usePatientDetailSheetData({
   commonFailedLoad,
   detailOpen,
@@ -48,7 +50,9 @@ export function usePatientDetailSheetData({
       ? apiFetch<PatientAssignment[]>(`/patients/${selectedId}/assignments`).catch(() => [])
       : Promise.resolve([] as PatientAssignment[]);
     const staffPromise = permissions.canManageAssignments
-      ? apiFetch<StaffOption[]>("/appointments/meta/staff").catch(() => [])
+      ? apiFetch<StaffOption[]>("/appointments/meta/staff", {
+          cacheTtlMs: PATIENT_DETAIL_SHEET_META_CACHE_TTL_MS,
+        }).catch(() => [])
       : Promise.resolve([] as StaffOption[]);
 
     void Promise.all([detailPromise, assignmentsPromise, staffPromise])

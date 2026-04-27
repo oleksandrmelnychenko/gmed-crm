@@ -74,6 +74,9 @@ export type FilterBuilderTranslations = {
   searchPlaceholder?: string;
   noFields?: string;
   remove?: string;
+  valuePlaceholder?: string;
+  yes?: string;
+  no?: string;
   operatorLabels?: FilterOperatorLabels;
 };
 
@@ -182,7 +185,8 @@ export function FilterBuilder<T>({
         {pickerOpen ? (
           <div
             role="menu"
-            className="absolute left-0 z-50 mt-1 flex w-64 flex-col rounded-lg border border-border bg-popover text-popover-foreground shadow-md"
+            data-table-filter-picker
+            className="absolute left-0 z-[80] mt-1 flex w-64 flex-col rounded-lg border border-border bg-popover text-popover-foreground shadow-lg"
           >
             <div className="flex items-center gap-1.5 border-b border-border p-2">
               <Search className="size-3.5 text-muted-foreground" />
@@ -271,7 +275,11 @@ function FilterChip<T>({
   };
 
   return (
-    <div ref={chipRef} className="relative">
+    <div
+      ref={chipRef}
+      data-filter-field={predicate.field}
+      className={cn("relative", isEditing && "z-[90]")}
+    >
       <div
         className={cn(
           "inline-flex items-center overflow-hidden rounded-md border border-border bg-muted text-xs",
@@ -300,7 +308,10 @@ function FilterChip<T>({
         </button>
       </div>
       {isEditing ? (
-        <div className="absolute left-0 top-full z-50 mt-1 flex items-center gap-1.5 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-md">
+        <div
+          data-table-filter-editor
+          className="absolute left-0 top-full z-[90] mt-1 flex items-center gap-1.5 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
+        >
           <select
             value={predicate.operator}
             onChange={(e) => changeOperator(e.target.value as FilterOperator)}
@@ -318,6 +329,14 @@ function FilterChip<T>({
             operator={predicate.operator}
             value={predicate.value}
             onChange={changeValue}
+            translations={{
+              clear: translations?.clearAll,
+              noMatch: translations?.noFields,
+              searchPlaceholder: translations?.searchPlaceholder,
+              valuePlaceholder: translations?.valuePlaceholder,
+              yes: translations?.yes,
+              no: translations?.no,
+            }}
           />
         </div>
       ) : null}

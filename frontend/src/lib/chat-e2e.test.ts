@@ -1,9 +1,51 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { apiFetchMock } = vi.hoisted(() => ({
+  apiFetchMock: vi.fn(
+    async (
+      _path: string,
+      init?: {
+        body?: string;
+      },
+    ) => {
+      const body = JSON.parse(init?.body ?? "{}") as {
+        algorithm: string;
+        public_key: string;
+      };
+      const binary = atob(body.public_key);
+      const publicKey = new Uint8Array(binary.length);
+      for (let idx = 0; idx < binary.length; idx += 1) {
+        publicKey[idx] = binary.charCodeAt(idx);
+      }
+      const digest = new Uint8Array(
+        await crypto.subtle.digest("SHA-256", publicKey),
+      );
+      const fingerprint = Array.from(digest)
+        .map((value) => value.toString(16).padStart(2, "0"))
+        .join("");
+
+      return {
+        id: crypto.randomUUID(),
+        user_id: crypto.randomUUID(),
+        fingerprint,
+        algorithm: body.algorithm,
+        public_key: body.public_key,
+        is_active: true,
+        created_at: new Date().toISOString(),
+      };
+    },
+  ),
+}));
+
+vi.mock("@/lib/api", () => ({
+  apiFetch: apiFetchMock,
+}));
 
 import {
   CHAT_E2E_ALGORITHM,
   decryptAttachmentFromPeer,
   encryptAttachmentForPeer,
+  ensureServerMessageKey,
   exportKeyRingBackup,
   importKeyRingBackup,
   type MessageKeyEnvelope,
@@ -77,6 +119,26 @@ async function makeKeyRecord(seed: Uint8Array): Promise<{
 beforeEach(() => {
   installLocalStorageMock();
   localStorage.clear();
+  apiFetchMock.mockClear();
+});
+
+describe("secure chat server key setup", () => {
+  it("deduplicates concurrent first-run key registration", async () => {
+    const [first, second] = await Promise.all([
+      ensureServerMessageKey(),
+      ensureServerMessageKey(),
+    ]);
+
+    expect(first.fingerprint).toBe(second.fingerprint);
+    expect(apiFetchMock).toHaveBeenCalledTimes(1);
+
+    const ring = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as {
+      activeFingerprint?: string;
+      keys?: Record<string, MessageKeyRecord>;
+    };
+    expect(ring.activeFingerprint).toBe(first.fingerprint);
+    expect(Object.keys(ring.keys ?? {})).toEqual([first.fingerprint]);
+  });
 });
 
 describe("chat E2E attachments", () => {

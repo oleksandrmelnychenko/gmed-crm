@@ -28,12 +28,12 @@ test.describe("staff live workflows", () => {
     await expect(page.getByText(scenario.leads.blocked.name)).toBeVisible();
     await expect(page.getByText(scenario.leads.ready.name)).toBeVisible();
 
-    const blockedCard = page.getByRole("button", {
-      name: `Open lead ${scenario.leads.blocked.name}`,
-    });
-    const readyCard = page.getByRole("button", {
-      name: `Open lead ${scenario.leads.ready.name}`,
-    });
+    const blockedCard = page.getByRole("row").filter({
+      hasText: scenario.leads.blocked.name,
+    }).first();
+    const readyCard = page.getByRole("row").filter({
+      hasText: scenario.leads.ready.name,
+    }).first();
 
     await blockedCard.scrollIntoViewIfNeeded();
     await readyCard.scrollIntoViewIfNeeded();
@@ -66,18 +66,36 @@ test.describe("staff live workflows", () => {
     await expect(page.getByRole("tab", { name: "Relations" })).toHaveCount(0);
     await expect(page.getByRole("tab", { name: "Workflow" })).toHaveCount(0);
     await expect(page.getByRole("tab", { name: "Timeline" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Open documents" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /Dokumente öffnen|Open documents/i }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: /Verträge öffnen|Open contracts/i }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /Rechnungen öffnen|Open invoices/i }),
+    ).toBeVisible();
 
-    await page.getByRole("tab", { name: "Contracts" }).click();
+    await page
+      .locator('[data-workspace-rail="patient"]')
+      .getByRole("link", { name: /Verträge|Contracts/i })
+      .click();
     await expect(page.getByText(scenario.contract.contract_number)).toBeVisible();
-    await expect(page.getByRole("button", { name: "Open workspace" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "New contract" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Update status" })).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: /^Öffnen$|^Open$/i }).first(),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: /Neuer Vertrag|New contract/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Status aktualisieren|Update status/i })).toHaveCount(0);
 
-    await page.getByRole("tab", { name: "Invoices" }).click();
+    await page
+      .locator('[data-workspace-rail="patient"]')
+      .getByRole("link", { name: /Rechnungen|Invoices/i })
+      .click();
     await expect(page.getByText(scenario.invoice.invoice_number)).toBeVisible();
-    await expect(page.getByRole("button", { name: "Open workspace" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Manage billing" })).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: /^Öffnen$|^Open$/i }).first(),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: /Billing verwalten|Manage billing/i })).toHaveCount(0);
   });
 
   test("ceo assistant can inspect released document share and translation history without mutation controls", async ({
@@ -742,17 +760,19 @@ test.describe("staff live workflows", () => {
     const templateFileName = `Prep packet ${scenario.tag}`;
 
     await page.goto(`/providers/${SEEDED_MEDICAL_PROVIDER_ID}`);
-    await expect(page.getByRole("tab", { name: "Templates" })).toBeVisible();
-    await page.getByRole("tab", { name: "Templates" }).click();
-    const templatePanel = page.getByRole("tabpanel", { name: "Templates" });
-    await expect(templatePanel.getByRole("heading", { name: "Clinic templates" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /Vorlagen|Templates/i })).toBeVisible();
+    await page.getByRole("tab", { name: /Vorlagen|Templates/i }).click();
+    const templatePanel = page.getByRole("tabpanel", { name: /Vorlagen|Templates/i });
+    await expect(
+      templatePanel.getByRole("heading", { name: /Klinikvorlagen|Clinic templates/i }),
+    ).toBeVisible();
 
-    await templatePanel.getByRole("button", { name: "New template" }).click();
+    await templatePanel.getByRole("button", { name: /Neue Vorlage|New template/i }).click();
     const createTemplateHeading = templatePanel.getByRole("heading", {
-      name: "Create template",
+      name: /Vorlage erstellen|Create template/i,
     });
     if (!(await createTemplateHeading.isVisible().catch(() => false))) {
-      const resetButton = templatePanel.getByRole("button", { name: "Reset" });
+      const resetButton = templatePanel.getByRole("button", { name: /Zurücksetzen|Reset/i });
       if (await resetButton.isVisible().catch(() => false)) {
         await resetButton.click();
       }
@@ -770,11 +790,11 @@ test.describe("staff live workflows", () => {
       .fill("Live E2E preparation template for patient portal handoff.");
     await templatePanel
       .getByRole("checkbox", {
-        name: "Auto-send when appointment is confirmed",
+        name: /Automatisch senden, wenn der Termin bestätigt ist|Auto-send when appointment is confirmed/i,
       })
       .check();
     await templatePanel
-      .getByPlaceholder(/Use placeholders like/i)
+      .getByPlaceholder(/Platzhalter wie|Use placeholders like/i)
       .first()
       .fill(
         "Hallo {{patient_name}}, bitte erscheinen Sie zu {{appointment_title}} am {{appointment_date}}.",
@@ -787,7 +807,7 @@ test.describe("staff live workflows", () => {
         ) && nextResponse.request().method() === "POST",
     );
     await templatePanel
-      .getByRole("button", { name: "Create template" })
+      .getByRole("button", { name: /Vorlage erstellen|Create template/i })
       .click();
     expect((await createTemplateResponse).ok()).toBeTruthy();
 
@@ -795,7 +815,9 @@ test.describe("staff live workflows", () => {
       has: page.getByText(templateLabel),
     });
     await expect(templateCard).toBeVisible();
-    await expect(templateCard.getByText("Auto-send on confirmation")).toBeVisible();
+    await expect(
+      templateCard.getByText(/Automatisch bei Bestätigung senden|Auto-send on confirmation/i),
+    ).toBeVisible();
 
     const pmApi = await authenticateApiClient(
       request,
@@ -861,7 +883,7 @@ test.describe("staff live workflows", () => {
 
     await page.goto("/feedback");
     await expect(
-      page.getByRole("heading", { name: /Feedback and NPS/i }),
+      page.getByRole("heading", { name: /Feedback und NPS|Feedback and NPS/i }),
     ).toBeVisible();
 
     const feedbackCard = page
@@ -869,16 +891,16 @@ test.describe("staff live workflows", () => {
       .filter({ hasText: scenario.feedback.comments })
       .first();
     await expect(feedbackCard).toBeVisible();
-    await feedbackCard.getByRole("button", { name: /^Review$/i }).click();
+    await feedbackCard.getByRole("button", { name: /^Prüfen$|^Review$/i }).click();
 
     const reviewSheet = page.getByRole("dialog");
     await expect(
-      reviewSheet.getByRole("heading", { name: /Review feedback/i }),
+      reviewSheet.getByRole("heading", { name: /Feedback prüfen|Review feedback/i }),
     ).toBeVisible();
     await reviewSheet
-      .getByPlaceholder(/Operational follow-up or review note/i)
+      .getByPlaceholder(/Operative Nachverfolgung oder Prüfnotiz|Operational follow-up or review note/i)
       .fill("Reviewed with the clinic manager and added to the quality follow-up list.");
-    await reviewSheet.getByRole("button", { name: /Save review/i }).click();
+    await reviewSheet.getByRole("button", { name: /Prüfung speichern|Save review/i }).click();
 
     await expect(reviewSheet).toHaveCount(0);
     await expect(

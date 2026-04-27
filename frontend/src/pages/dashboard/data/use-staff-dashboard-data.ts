@@ -14,6 +14,8 @@ import type {
   UpcomingAppointment,
 } from "../model/staff-dashboard-types";
 
+const DASHBOARD_CACHE_TTL_MS = 30_000;
+
 export function useStaffDashboardData(period: Period) {
   const [overview, setOverview] = useState<OverviewStats | null>(null);
   const [monthly, setMonthly] = useState<MonthlyEntry[]>([]);
@@ -31,13 +33,23 @@ export function useStaffDashboardData(period: Period) {
     let cancelled = false;
 
     void Promise.all([
-      apiFetch<OverviewStats>("/stats/overview").catch(() => null),
-      apiFetch<MonthlyEntry[]>("/stats/leads/monthly").catch(() => [] as MonthlyEntry[]),
-      apiFetch<UpcomingAppointment[]>("/stats/appointments/upcoming").catch(
+      apiFetch<OverviewStats>("/stats/overview", {
+        cacheTtlMs: DASHBOARD_CACHE_TTL_MS,
+      }).catch(() => null),
+      apiFetch<MonthlyEntry[]>("/stats/leads/monthly", {
+        cacheTtlMs: DASHBOARD_CACHE_TTL_MS,
+      }).catch(() => [] as MonthlyEntry[]),
+      apiFetch<UpcomingAppointment[]>("/stats/appointments/upcoming", {
+        cacheTtlMs: DASHBOARD_CACHE_TTL_MS,
+      }).catch(
         () => [] as UpcomingAppointment[],
       ),
-      apiFetch<TaskItem[]>("/tasks?mine_only=true").catch(() => [] as TaskItem[]),
-      apiFetch<PatientSummary[]>("/patients").catch(() => [] as PatientSummary[]),
+      apiFetch<TaskItem[]>("/tasks?mine_only=true", {
+        cacheTtlMs: DASHBOARD_CACHE_TTL_MS,
+      }).catch(() => [] as TaskItem[]),
+      apiFetch<PatientSummary[]>("/patients", {
+        cacheTtlMs: DASHBOARD_CACHE_TTL_MS,
+      }).catch(() => [] as PatientSummary[]),
     ]).then(([ov, mm, up, tk, pts]) => {
       if (cancelled) return;
       setOverview(ov);
@@ -57,9 +69,15 @@ export function useStaffDashboardData(period: Period) {
     let cancelled = false;
 
     void Promise.all([
-      apiFetch<DemographicsPayload>(`/stats/dashboard/demographics?period=${period}`).catch(() => null),
-      apiFetch<ClinicalPayload>(`/stats/dashboard/clinical?period=${period}`).catch(() => null),
-      apiFetch<OperationsPayload>(`/stats/dashboard/operations?period=${period}`).catch(() => null),
+      apiFetch<DemographicsPayload>(`/stats/dashboard/demographics?period=${period}`, {
+        cacheTtlMs: DASHBOARD_CACHE_TTL_MS,
+      }).catch(() => null),
+      apiFetch<ClinicalPayload>(`/stats/dashboard/clinical?period=${period}`, {
+        cacheTtlMs: DASHBOARD_CACHE_TTL_MS,
+      }).catch(() => null),
+      apiFetch<OperationsPayload>(`/stats/dashboard/operations?period=${period}`, {
+        cacheTtlMs: DASHBOARD_CACHE_TTL_MS,
+      }).catch(() => null),
     ]).then(([d, c, o]) => {
       if (cancelled) return;
       setDemographics(d);

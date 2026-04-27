@@ -4,8 +4,11 @@ import { CalendarClock, LoaderCircle, RefreshCw, Send, Stethoscope } from "lucid
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import {
+  createPortalAppointmentRequest,
+  fetchPortalAppointmentsWorkspace,
+} from "@/pages/patients/data/portal-api";
 import {
   appointmentCarePathKindLabel,
   appointmentRequestStatusTone,
@@ -84,17 +87,13 @@ export function PatientAppointmentsPage() {
       }
 
       try {
-        const [appointmentRows, requestRows, followupRows] = await Promise.all([
-          apiFetch<PortalAppointmentItem[]>("/me/appointments"),
-          apiFetch<PortalAppointmentRequestItem[]>("/me/appointment-requests"),
-          apiFetch<PortalFollowupMilestoneItem[]>("/me/followup-milestones").catch(() => []),
-        ]);
+        const workspace = await fetchPortalAppointmentsWorkspace();
 
         if (cancelled) return;
         startTransition(() => {
-          setAppointments(appointmentRows);
-          setRequests(requestRows);
-          setFollowupMilestones(followupRows);
+          setAppointments(workspace.appointments);
+          setRequests(workspace.requests);
+          setFollowupMilestones(workspace.followupMilestones);
           setError("");
         });
       } catch (err) {
@@ -137,19 +136,19 @@ export function PatientAppointmentsPage() {
     setNotice("");
 
     try {
-      await apiFetch("/me/appointment-requests", {
-        method: "POST",
-        body: JSON.stringify({
-          appointment_type: requestForm.appointmentType,
-          care_path_kind: requestForm.appointmentType === "medical" ? requestForm.carePathKind : "regular",
-          preferred_date_from: requestForm.preferredDateFrom || undefined,
-          preferred_date_to: requestForm.preferredDateTo || undefined,
-          preferred_time_of_day: requestForm.preferredTimeOfDay || undefined,
-          specialty: requestForm.specialty || undefined,
-          location: requestForm.location || undefined,
-          reason: requestForm.reason || undefined,
-          notes: requestForm.notes || undefined,
-        }),
+      await createPortalAppointmentRequest({
+        appointment_type: requestForm.appointmentType,
+        care_path_kind:
+          requestForm.appointmentType === "medical"
+            ? requestForm.carePathKind
+            : "regular",
+        preferred_date_from: requestForm.preferredDateFrom || undefined,
+        preferred_date_to: requestForm.preferredDateTo || undefined,
+        preferred_time_of_day: requestForm.preferredTimeOfDay || undefined,
+        specialty: requestForm.specialty || undefined,
+        location: requestForm.location || undefined,
+        reason: requestForm.reason || undefined,
+        notes: requestForm.notes || undefined,
       });
       setNotice(l("Terminanfrage wurde an das Betreuungsteam gesendet.", "Запрос на запись отправлен команде сопровождения.", "Appointment request sent to the care team."));
       setRequestForm(blankRequestForm());

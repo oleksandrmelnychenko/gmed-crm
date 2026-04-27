@@ -25,159 +25,34 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
-import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-type ProviderDetail = {
-  id: string;
-  name: string;
-  provider_type: string;
-  legal_name?: string | null;
-  tax_id?: string | null;
-  address_street?: string | null;
-  address_city?: string | null;
-  address_zip?: string | null;
-  address_country?: string | null;
-  phone?: string | null;
-  email?: string | null;
-  website?: string | null;
-  fachbereich?: string | null;
-  kooperationsvertrag?: unknown;
-  notes?: string | null;
-  is_active: boolean;
-  updated_at: string;
-  doctors: DoctorItem[];
-  services: ServiceItem[];
-  linked_patients: LinkedPatient[];
-  interactions: InteractionItem[];
-  templates: ProviderTemplateItem[];
-};
-
-type DoctorItem = {
-  id: string;
-  name: string;
-  title?: string | null;
-  fachbereich?: string | null;
-  languages?: string[];
-  phone?: string | null;
-  email?: string | null;
-  license_number?: string | null;
-  licensing_country?: string | null;
-  licensing_valid_until?: string | null;
-  notes?: string | null;
-  patient_count: number;
-  appointment_count: number;
-};
-
-type ServiceItem = {
-  id: string;
-  service_name: string;
-  description?: string | null;
-  price: unknown;
-  currency: string;
-  valid_from: string;
-  valid_to?: string | null;
-};
-
-type LinkedPatient = {
-  patient_id: string;
-  first_name: string;
-  last_name: string;
-  appointment_count: number;
-  leistung_count: number;
-  last_interaction_at: string;
-};
-
-type InteractionItem = {
-  kind: string;
-  id: string;
-  patient_name: string;
-  doctor_name?: string | null;
-  status: string;
-  title: string;
-  occurred_at: string;
-};
-
-type AppointmentItem = {
-  id: string;
-  title: string;
-  date: string;
-  time_start?: string | null;
-  apt_type: string;
-  status: string;
-  patient_name: string;
-  doctor_name?: string | null;
-};
-
-type ProviderTemplateItem = {
-  id: string;
-  provider_id: string;
-  doctor_id?: string | null;
-  doctor_name?: string | null;
-  label: string;
-  description?: string | null;
-  art: string;
-  category: string;
-  default_auto_name: string;
-  default_status: string;
-  default_visibility: string;
-  is_medical: boolean;
-  supported_languages: string[];
-  body_de?: string | null;
-  body_en?: string | null;
-  body_uk?: string | null;
-  body_ru?: string | null;
-  notes?: string | null;
-  is_active: boolean;
-  auto_send_on_confirmed_appointment: boolean;
-  updated_at: string;
-};
-
-type ProviderTemplateFormState = {
-  label: string;
-  description: string;
-  doctorId: string;
-  art: string;
-  category: string;
-  defaultAutoName: string;
-  defaultStatus: "draft" | "active" | "archived";
-  defaultVisibility:
-    | "internal"
-    | "released_internal"
-    | "released_external"
-    | "patient_visible";
-  isMedical: boolean;
-  isActive: boolean;
-  supportedLanguages: string[];
-  bodyDe: string;
-  bodyEn: string;
-  bodyUk: string;
-  bodyRu: string;
-  notes: string;
-  autoSendOnConfirmedAppointment: boolean;
-};
+import { PROVIDER_DETAIL_STATUS_COLORS } from "./appearance/status-appearance";
+import {
+  createProviderTemplate,
+  fetchProviderAppointments,
+  fetchProviderRouteDetail,
+  setProviderActive,
+  updateProviderTemplate,
+} from "./data/provider-api";
+import {
+  detailFieldValue,
+  emptyTemplateForm,
+  formatProviderDetailDate,
+  templateToFormState,
+} from "./model/detail-model";
+import type {
+  AppointmentItem,
+  ProviderRouteDetail as ProviderDetail,
+  ProviderTemplateFormState,
+  ProviderTemplateItem,
+} from "./model/types";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function fmtDate(v?: string | null, fb = "") {
-  if (!v) return fb;
-  try {
-    return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(v.includes("T") ? v : `${v}T00:00:00`));
-  } catch { return v; }
-}
-
-function fieldVal(v: string | null | undefined, fb: string) {
-  return v && v.trim() ? v : fb;
-}
 
 function card(extra?: string) {
   return cn("rounded-[1.75rem] border border-border/70 bg-card shadow-[0_20px_60px_rgba(15,23,42,0.05)]", extra);
@@ -188,55 +63,6 @@ const inputClassName =
 
 const textareaClassName =
   "min-h-[104px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
-
-function emptyTemplateForm(): ProviderTemplateFormState {
-  return {
-    label: "",
-    description: "",
-    doctorId: "",
-    art: "provider_template_instruction",
-    category: "provider_template",
-    defaultAutoName: "",
-    defaultStatus: "draft",
-    defaultVisibility: "patient_visible",
-    isMedical: true,
-    isActive: true,
-    supportedLanguages: ["de"],
-    bodyDe: "",
-    bodyEn: "",
-    bodyUk: "",
-    bodyRu: "",
-    notes: "",
-    autoSendOnConfirmedAppointment: false,
-  };
-}
-
-function templateToFormState(template: ProviderTemplateItem): ProviderTemplateFormState {
-  return {
-    label: template.label,
-    description: template.description ?? "",
-    doctorId: template.doctor_id ?? "",
-    art: template.art,
-    category: template.category,
-    defaultAutoName: template.default_auto_name,
-    defaultStatus:
-      (template.default_status as ProviderTemplateFormState["defaultStatus"]) ??
-      "draft",
-    defaultVisibility:
-      (template.default_visibility as ProviderTemplateFormState["defaultVisibility"]) ??
-      "patient_visible",
-    isMedical: template.is_medical,
-    isActive: template.is_active,
-    supportedLanguages: template.supported_languages,
-    bodyDe: template.body_de ?? "",
-    bodyEn: template.body_en ?? "",
-    bodyUk: template.body_uk ?? "",
-    bodyRu: template.body_ru ?? "",
-    notes: template.notes ?? "",
-    autoSendOnConfirmedAppointment:
-      template.auto_send_on_confirmed_appointment ?? false,
-  };
-}
 
 function Lbl({ children }: { children: React.ReactNode }) {
   return <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">{children}</span>;
@@ -250,16 +76,6 @@ function InfoRow({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
-
-const STATUS_COLORS: Record<string, string> = {
-  open: "border-sky-200 bg-sky-50 text-sky-700",
-  in_progress: "border-amber-200 bg-amber-50 text-amber-700",
-  completed: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  confirmed: "border-sky-200 bg-sky-50 text-sky-700",
-  planned: "border-sky-200 bg-sky-50 text-sky-700",
-  cancelled: "border-red-200 bg-red-50 text-red-700",
-  active: "border-emerald-200 bg-emerald-50 text-emerald-700",
-};
 
 // ---------------------------------------------------------------------------
 // Component
@@ -297,7 +113,7 @@ export function ProviderDetailPage() {
     if (!id) return;
     let cancelled = false;
 
-    apiFetch<ProviderDetail>(`/providers/${id}`)
+    fetchProviderRouteDetail(id)
       .then((d) => { if (!cancelled) startTransition(() => setDetail(d)); })
       .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -309,7 +125,7 @@ export function ProviderDetailPage() {
     if (!id || activeTab !== "appointments") return;
     let cancelled = false;
 
-    apiFetch<AppointmentItem[]>(`/appointments?provider_id=${id}`)
+    fetchProviderAppointments(id)
       .then((r) => { if (!cancelled) setAppointments(r); })
       .catch(() => { if (!cancelled) setAppointments([]); })
       .finally(() => { if (!cancelled) setTabLoading(false); });
@@ -363,15 +179,9 @@ export function ProviderDetailPage() {
           templateForm.autoSendOnConfirmedAppointment,
       };
       if (selectedTemplateId) {
-        await apiFetch(`/providers/${id}/templates/${selectedTemplateId}/update`, {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
+        await updateProviderTemplate(id, selectedTemplateId, payload);
       } else {
-        const created = await apiFetch<{ id: string }>(`/providers/${id}/templates`, {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
+        const created = await createProviderTemplate(id, payload);
         setCreatingTemplate(false);
         setSelectedTemplateId(created.id);
       }
@@ -454,8 +264,7 @@ export function ProviderDetailPage() {
         {canManage && (
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" className="gap-2 rounded-xl" onClick={async () => {
-              const path = detail.is_active ? `/providers/${id}/deactivate` : `/providers/${id}/activate`;
-              await apiFetch(path, { method: "POST" }).catch(() => {});
+              await setProviderActive(detail.id, !detail.is_active).catch(() => {});
               reload();
             }}>
               <UserX className="size-3.5" />
@@ -506,16 +315,16 @@ export function ProviderDetailPage() {
           <div className={card("p-6")}>
             <h2 className="text-sm font-semibold text-slate-950 mb-4">{t.providers_detail}</h2>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              <InfoRow label={t.providers_street} value={fieldVal(detail.address_street, t.common_not_set)} />
-              <InfoRow label={t.providers_city} value={fieldVal(detail.address_city, t.common_not_set)} />
-              <InfoRow label={t.providers_zip} value={fieldVal(detail.address_zip, t.common_not_set)} />
-              <InfoRow label={t.providers_country} value={fieldVal(detail.address_country, t.common_not_set)} />
-              <InfoRow label={t.field_phone} value={fieldVal(detail.phone, t.common_not_set)} />
-              <InfoRow label={t.field_email} value={fieldVal(detail.email, t.common_not_set)} />
-              <InfoRow label={l("Rechtlicher Name", "Юридическое название", "Legal name")} value={fieldVal(detail.legal_name, t.common_not_set)} />
-              <InfoRow label={l("Steuer-ID", "Налоговый ID", "Tax ID")} value={fieldVal(detail.tax_id, t.common_not_set)} />
-              <InfoRow label={t.providers_website} value={fieldVal(detail.website, t.common_not_set)} />
-              <InfoRow label={t.providers_fachbereich} value={fieldVal(detail.fachbereich, t.common_not_set)} />
+              <InfoRow label={t.providers_street} value={detailFieldValue(detail.address_street, t.common_not_set)} />
+              <InfoRow label={t.providers_city} value={detailFieldValue(detail.address_city, t.common_not_set)} />
+              <InfoRow label={t.providers_zip} value={detailFieldValue(detail.address_zip, t.common_not_set)} />
+              <InfoRow label={t.providers_country} value={detailFieldValue(detail.address_country, t.common_not_set)} />
+              <InfoRow label={t.field_phone} value={detailFieldValue(detail.phone, t.common_not_set)} />
+              <InfoRow label={t.field_email} value={detailFieldValue(detail.email, t.common_not_set)} />
+              <InfoRow label={l("Rechtlicher Name", "Юридическое название", "Legal name")} value={detailFieldValue(detail.legal_name, t.common_not_set)} />
+              <InfoRow label={l("Steuer-ID", "Налоговый ID", "Tax ID")} value={detailFieldValue(detail.tax_id, t.common_not_set)} />
+              <InfoRow label={t.providers_website} value={detailFieldValue(detail.website, t.common_not_set)} />
+              <InfoRow label={t.providers_fachbereich} value={detailFieldValue(detail.fachbereich, t.common_not_set)} />
             </div>
           </div>
           {detail.notes && (
@@ -559,7 +368,7 @@ export function ProviderDetailPage() {
                   <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-slate-500">
                     <div>{`${l("Lizenz", "Лицензия", "License")} ${doc.license_number || t.common_not_set}`}</div>
                     <div>{`${l("Land", "Страна", "Country")} ${doc.licensing_country || t.common_not_set}`}</div>
-                    <div>{`${l("Gültig bis", "Действует до", "Valid until")} ${fmtDate(doc.licensing_valid_until, t.common_not_set)}`}</div>
+                    <div>{`${l("Gültig bis", "Действует до", "Valid until")} ${formatProviderDetailDate(doc.licensing_valid_until, t.common_not_set)}`}</div>
                   </div>
                   <div className="mt-3 flex gap-3 text-xs text-slate-400">
                     <span>{doc.patient_count} {t.providers_linked_patients}</span>
@@ -589,8 +398,8 @@ export function ProviderDetailPage() {
                     {svc.description && <p className="text-xs text-slate-500 mt-0.5">{svc.description}</p>}
                   </div>
                   <span className="text-sm text-slate-900">{String(svc.price)} {svc.currency}</span>
-                  <span className="text-xs text-slate-500">{fmtDate(svc.valid_from, t.common_not_set)}</span>
-                  <span className="text-xs text-slate-500">{fmtDate(svc.valid_to, t.common_not_set)}</span>
+                  <span className="text-xs text-slate-500">{formatProviderDetailDate(svc.valid_from, t.common_not_set)}</span>
+                  <span className="text-xs text-slate-500">{formatProviderDetailDate(svc.valid_to, t.common_not_set)}</span>
                 </div>
               ))}
             </div>
@@ -1004,7 +813,7 @@ export function ProviderDetailPage() {
                       </div>
                     </div>
                   </div>
-                  <p className="mt-2 text-xs text-slate-400">{t.providers_last_activity}: {fmtDate(p.last_interaction_at)}</p>
+                  <p className="mt-2 text-xs text-slate-400">{t.providers_last_activity}: {formatProviderDetailDate(p.last_interaction_at)}</p>
                 </button>
               ))}
             </div>
@@ -1023,11 +832,11 @@ export function ProviderDetailPage() {
                 <button key={a.id} type="button" onClick={() => staffGo(`/appointments?appointment=${a.id}`)} className={card("p-5 text-left hover:-translate-y-0.5 hover:shadow-lg transition")}>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-slate-400">{a.apt_type}</span>
-                    <Badge variant="outline" className={cn("rounded-full text-[10px]", STATUS_COLORS[a.status] ?? "")}>{a.status}</Badge>
+                    <Badge variant="outline" className={cn("rounded-full text-[10px]", PROVIDER_DETAIL_STATUS_COLORS[a.status] ?? "")}>{a.status}</Badge>
                   </div>
                   <p className="mt-2 text-sm font-medium text-slate-900">{a.title}</p>
                   <div className="flex gap-2 mt-1 text-xs text-slate-400">
-                    <span>{fmtDate(a.date)}</span>
+                    <span>{formatProviderDetailDate(a.date)}</span>
                     {a.time_start && <span>{a.time_start}</span>}
                     <span>· {a.patient_name}</span>
                   </div>

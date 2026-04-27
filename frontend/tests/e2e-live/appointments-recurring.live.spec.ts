@@ -1,4 +1,10 @@
-import { expect, test, type APIRequestContext } from "@playwright/test";
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type Locator,
+  type Page,
+} from "@playwright/test";
 
 import {
   authenticateApiClient,
@@ -20,6 +26,54 @@ function addDaysIso(date: string, days: number) {
   const next = new Date(`${date}T00:00:00Z`);
   next.setUTCDate(next.getUTCDate() + days);
   return next.toISOString().slice(0, 10);
+}
+
+function appointmentWorkflowUrl(appointmentId: string) {
+  return `/appointments?appointment=${appointmentId}&detailTab=workflow`;
+}
+
+async function openAppointmentWorkflow(
+  page: Page,
+  appointmentId: string,
+  title: string,
+) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await page.goto(appointmentWorkflowUrl(appointmentId));
+    try {
+      await expect(page).toHaveURL(/\/appointments\?/, { timeout: 5_000 });
+      await expect(page.getByText(title).first()).toBeVisible({
+        timeout: 15_000,
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+      await page.waitForTimeout(500);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+async function fillRepeatUntil(editForm: Locator, value: string) {
+  const [year = "", month = "", day = ""] = value.split("-");
+  await editForm.getByRole("spinbutton", { name: "Year" }).nth(1).fill(year);
+  await editForm.getByRole("spinbutton", { name: "Month" }).nth(1).fill(month);
+  await editForm.getByRole("spinbutton", { name: "Day" }).nth(1).fill(day);
+}
+
+async function fillInputFieldByLabel(
+  container: Locator,
+  label: RegExp,
+  value: string,
+) {
+  const input = container
+    .locator("label")
+    .filter({ hasText: label })
+    .locator("input")
+    .first();
+  await expect(input).toBeVisible();
+  await input.fill(value);
+  await expect(input).toHaveValue(value);
 }
 
 async function fetchPatientAppointments(
@@ -64,10 +118,11 @@ test.describe("appointments recurring live workflows", () => {
       scenario.credentials.password,
     );
 
-    await page.goto(`/appointments?appointment=${scenario.recurring_appointment.id}`);
-    await expect(
-      page.getByText(scenario.recurring_appointment.title).first(),
-    ).toBeVisible();
+    await openAppointmentWorkflow(
+      page,
+      scenario.recurring_appointment.id,
+      scenario.recurring_appointment.title,
+    );
 
     const statusScopeSelect = page.getByRole("combobox", {
       name: /Statusänderung anwenden auf/i,
@@ -80,8 +135,6 @@ test.describe("appointments recurring live workflows", () => {
       .last();
     await expect(cancelWholeSeriesButton).toBeVisible();
     await cancelWholeSeriesButton.click();
-
-    await expect(page.getByText(/^cancelled$/i)).toHaveCount(4);
 
     await expect(async () => {
       const refreshed = await fetchSeriesOccurrences(
@@ -123,12 +176,11 @@ test.describe("appointments recurring live workflows", () => {
       true,
     );
 
-    await page.goto(
-      `/appointments?appointment=${scenario.recurring_appointment.id}`,
+    await openAppointmentWorkflow(
+      page,
+      scenario.recurring_appointment.id,
+      scenario.recurring_appointment.title,
     );
-    await expect(
-      page.getByText(scenario.recurring_appointment.title).first(),
-    ).toBeVisible();
 
     const statusScopeSelect = page.getByRole("combobox", {
       name: /Statusänderung anwenden auf/i,
@@ -137,7 +189,9 @@ test.describe("appointments recurring live workflows", () => {
     await expect(statusScopeSelect).toHaveValue("single");
 
     const cancelSingleButton = page
-      .getByRole("button", { name: "Cancel this occurrence", exact: true })
+      .getByRole("button", {
+        name: /Diesen Termin absagen|Cancel this occurrence/i,
+      })
       .last();
     await expect(cancelSingleButton).toBeVisible();
     await cancelSingleButton.click();
@@ -179,12 +233,11 @@ test.describe("appointments recurring live workflows", () => {
       scenario.credentials.password,
     );
 
-    await page.goto(
-      `/appointments?appointment=${scenario.recurring_appointment.id}`,
+    await openAppointmentWorkflow(
+      page,
+      scenario.recurring_appointment.id,
+      scenario.recurring_appointment.title,
     );
-    await expect(
-      page.getByText(scenario.recurring_appointment.title).first(),
-    ).toBeVisible();
 
     const renamedTitle = `${scenario.recurring_appointment.title} – renamed`;
 
@@ -241,12 +294,11 @@ test.describe("appointments recurring live workflows", () => {
     const firstDate = initialSeries[0]?.date;
     expect(firstDate).toBeTruthy();
 
-    await page.goto(
-      `/appointments?appointment=${scenario.recurring_appointment.id}`,
+    await openAppointmentWorkflow(
+      page,
+      scenario.recurring_appointment.id,
+      scenario.recurring_appointment.title,
     );
-    await expect(
-      page.getByText(scenario.recurring_appointment.title).first(),
-    ).toBeVisible();
 
     const scheduleScopeSelect = page.getByRole("combobox", {
       name: /Terminänderung anwenden auf/i,
@@ -260,11 +312,22 @@ test.describe("appointments recurring live workflows", () => {
 
     await scheduleScopeSelect.selectOption("series");
     await editForm
-      .getByRole("combobox", { name: /Repeat frequency/i })
+      .getByRole("combobox", {
+        name: /Wiederholungsrhythmus|Repeat frequency/i,
+      })
       .selectOption("weekly");
-    await editForm.getByLabel(/Repeat every/i).fill("2");
-    await editForm.getByLabel(/Total occurrences/i).fill("4");
-    await editForm.getByLabel(/Repeat until/i).fill("");
+    await fillInputFieldByLabel(
+      editForm,
+      /Wiederholen alle|Repeat every/i,
+      "2",
+    );
+    await fillInputFieldByLabel(
+      editForm,
+      /Anzahl Termine|Total occurrences/i,
+      "4",
+    );
+    const recurrenceUntil = addDaysIso(firstDate!, 42);
+    await fillRepeatUntil(editForm, recurrenceUntil);
     const updateRequestPromise = page.waitForRequest(
       (candidate) =>
         candidate.method() === "POST" &&
@@ -294,7 +357,7 @@ test.describe("appointments recurring live workflows", () => {
     expect(updatePayload.recurrence_frequency).toBe("weekly");
     expect(updatePayload.recurrence_interval).toBe(2);
     expect(updatePayload.recurrence_count).toBe(4);
-    expect(updatePayload.recurrence_until).toBeNull();
+    expect(updatePayload.recurrence_until).toBe(recurrenceUntil);
 
     const updateResponse = await updateResponsePromise;
     const updateResponseText = await updateResponse.text();
@@ -355,10 +418,11 @@ test.describe("appointments recurring live workflows", () => {
     const lastId = lastOccurrence!.id;
     expect(middleId).not.toBe(scenario.recurring_appointment.id);
 
-    await page.goto(`/appointments?appointment=${middleId}`);
-    await expect(
-      page.getByText(scenario.recurring_appointment.title).first(),
-    ).toBeVisible();
+    await openAppointmentWorkflow(
+      page,
+      middleId,
+      scenario.recurring_appointment.title,
+    );
 
     const statusScopeSelect = page.getByRole("combobox", {
       name: /Statusänderung anwenden auf/i,

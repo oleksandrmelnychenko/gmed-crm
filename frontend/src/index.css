@@ -159,6 +159,55 @@
     }
 }
 
+@layer components {
+  .data-table-header-row,
+  .data-table-header-cell {
+    background-color: var(--card);
+  }
+
+  .data-table-header-cell {
+    box-shadow: none;
+  }
+
+  .data-table-row {
+    --dt-current-row-bg: var(--dt-row-bg);
+    background-color: var(--dt-current-row-bg);
+    box-shadow: inset 0 0 0 0 transparent;
+    transition-duration: 140ms;
+    transition-timing-function: ease;
+  }
+
+  .data-table-row::before {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    left: 0;
+    z-index: 25;
+    width: 3px;
+    pointer-events: none;
+    background: var(--brand);
+    opacity: 0;
+    transition: opacity 140ms ease;
+  }
+
+  .data-table-row:hover {
+    --dt-current-row-bg: var(--dt-row-hover-bg);
+    box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--foreground) 8%, transparent);
+  }
+
+  .data-table-row:hover .data-table-cell {
+    background-color: var(--dt-row-hover-bg);
+  }
+
+  .data-table-row:hover::before {
+    opacity: 1;
+  }
+
+  .data-table-cell {
+    background-color: var(--dt-current-row-bg);
+  }
+}
+
 .appointments-calendar-shell .fc {
   --fc-border-color: var(--color-border);
   --fc-button-bg-color: oklch(1 0 0);

@@ -19,7 +19,7 @@ test.describe("admin security live workflows", () => {
     ).toBeVisible();
 
     await expect(page.getByText(/^Fehlgeschlagene Logins 24h$/i)).toBeVisible();
-    await expect(page.getByText(/^Blockierte Logins 24h$/i)).toBeVisible();
+    await expect(page.getByText(/^Blockierte Logins 24h$/i).first()).toBeVisible();
     await expect(page.getByText(/^Token-Diebstahl 30d$/i)).toBeVisible();
     await expect(
       page.getByText(/^Executive-Sensitivzugriffe 7d$/i),

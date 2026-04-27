@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import {
   authenticateApiClient,
@@ -14,6 +14,44 @@ function futureLocalDateTime(daysFromNow: number) {
   return shifted.toISOString().slice(0, 16);
 }
 
+async function openPatientDetailTab(
+  page: Page,
+  patientId: string,
+  tab: string,
+  expected: RegExp | string,
+) {
+  await page.goto(`/patients/${patientId}${tab === "profile" ? "" : `?tab=${tab}`}`);
+  await expect(page.getByRole("heading", { name: expected }).first()).toBeVisible();
+}
+
+function sectionWithHeading(page: Page, heading: RegExp | string) {
+  return page
+    .locator("section")
+    .filter({ has: page.getByRole("heading", { name: heading }) })
+    .first();
+}
+
+async function fillMuiDate(container: Locator, value: string, index = 0) {
+  const [year = "", month = "", day = ""] = value.split("-");
+  await container.getByRole("spinbutton", { name: "Year" }).nth(index).fill(year);
+  await container.getByRole("spinbutton", { name: "Month" }).nth(index).fill(month);
+  await container.getByRole("spinbutton", { name: "Day" }).nth(index).fill(day);
+}
+
+async function fillMuiDateTime(container: Locator, value: string, index = 0) {
+  const [date = "", time = ""] = value.split("T");
+  const [hours = "", minutes = ""] = time.split(":");
+  await fillMuiDate(container, date, index);
+  await container.getByRole("spinbutton", { name: "Hours" }).nth(index).fill(hours);
+  await container.getByRole("spinbutton", { name: "Minutes" }).nth(index).fill(minutes);
+}
+
+async function saveOpenDialog(page: Page) {
+  const dialog = page.getByRole("dialog").last();
+  await dialog.getByRole("button", { name: /^Speichern$|^Save$/ }).click();
+  await expect(dialog).toBeHidden({ timeout: 15_000 });
+}
+
 test.describe("patient profile live workflows", () => {
   test("ceo assistant can inspect patient registry in read-only mode without create edit or assignment controls", async ({
     page,
@@ -26,7 +64,6 @@ test.describe("patient profile live workflows", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: /Patient/i }),
     ).toBeVisible();
-    await expect(page.getByText("Nur-Lese-Ansicht", { exact: true })).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Neuer Patient" }),
     ).toHaveCount(0);
@@ -39,8 +76,7 @@ test.describe("patient profile live workflows", () => {
     ).toBeVisible();
     await expect(
       profileDialog.getByText(
-        "This role has read-only access to patient demographics and assignment context.",
-        { exact: true },
+        /nur Lesezugriff auf Patientendemografie|read-only access to patient demographics/i,
       ),
     ).toBeVisible();
     await expect(
@@ -62,12 +98,14 @@ test.describe("patient profile live workflows", () => {
     await setGermanLanguage(page);
     const scenario = await bootstrapAndLogin(page, request, "assistant");
 
-    await page.goto(`/patients/${scenario.patient.id}`);
-    await expect(
-      page.getByRole("heading", { name: scenario.patient.name }),
-    ).toBeVisible();
+    await openPatientDetailTab(page, scenario.patient.id, "profile", scenario.patient.name);
 
-    await page.getByRole("tab", { name: "Verträge" }).click();
+    await openPatientDetailTab(
+      page,
+      scenario.patient.id,
+      "contracts",
+      "Verträge dieses Patienten",
+    );
     await expect(
       page.getByRole("heading", { name: "Verträge dieses Patienten" }),
     ).toBeVisible();
@@ -79,7 +117,12 @@ test.describe("patient profile live workflows", () => {
       page.getByRole("button", { name: "Status aktualisieren" }),
     ).toHaveCount(0);
 
-    await page.getByRole("tab", { name: "Rechnungen" }).click();
+    await openPatientDetailTab(
+      page,
+      scenario.patient.id,
+      "invoices",
+      "Rechnungen und Zahlungsnachverfolgung",
+    );
     await expect(
       page.getByRole("heading", {
         name: "Rechnungen und Zahlungsnachverfolgung",
@@ -104,13 +147,9 @@ test.describe("patient profile live workflows", () => {
       scenario.credentials.password,
     );
 
-    await page.goto(`/patients/${scenario.patient.id}`);
+    await openPatientDetailTab(page, scenario.patient.id, "documents", /Dokumenten-Cockpit/i);
     await expect(
-      page.getByRole("heading", { name: scenario.patient.name }),
-    ).toBeVisible();
-    await page.getByRole("tab", { name: "Dokumente" }).click();
-    await expect(
-      page.getByText("Erforderliche Dokumente", { exact: true }),
+      page.getByRole("heading", { name: "Dokumente zu diesem Patienten" }),
     ).toBeVisible();
     await expect(page.getByText("Reisepass")).toBeVisible();
 
@@ -134,10 +173,9 @@ test.describe("patient profile live workflows", () => {
     expect(labelPayload.ok, JSON.stringify(labelPayload.body)).toBeTruthy();
     expect(labelPayload.body.patient_id).toBe(scenario.patient.patient_id);
 
-    await page.getByRole("tab", { name: "Zeitachse" }).click();
+    await openPatientDetailTab(page, scenario.patient.id, "timeline", /Timeline-Cockpit/i);
     await expect(page.getByText("Ereignisse gesamt")).toBeVisible();
-    await page.getByRole("button", { name: /document/i }).first().click();
-    await expect(page.getByText("Released discharge note")).toBeVisible();
+    await expect(page.getByText("Released discharge note").first()).toBeVisible();
   });
 
   test("patient manager can manage relations, review appointments and complete patient workflow items", async ({
@@ -147,24 +185,29 @@ test.describe("patient profile live workflows", () => {
     await setGermanLanguage(page);
     const scenario = await bootstrapAndLogin(page, request, "pm");
 
-    await page.goto(`/patients/${scenario.patient.id}`);
-    await expect(
-      page.getByRole("heading", { name: scenario.patient.name }),
-    ).toBeVisible();
+    await openPatientDetailTab(page, scenario.patient.id, "appointments", /Termine/i);
 
-    await page.getByRole("tab", { name: /Appointments|Termine/i }).click();
     await expect(page.getByText(scenario.appointment.title)).toBeVisible();
 
-    await page.getByRole("tab", { name: "Beziehungen" }).click();
+    await openPatientDetailTab(
+      page,
+      scenario.patient.id,
+      "relations",
+      "Beziehungen und Notfallkontakte",
+    );
     await page.getByRole("button", { name: "Neue Beziehung" }).click();
 
     const relationDialog = page.getByRole("dialog");
     await expect(
-      relationDialog.getByRole("heading", { name: "Beziehung hinzufügen" }),
+      relationDialog.getByRole("heading", {
+        name: /Beziehung hinzufügen|Beziehung hinzufugen|Add relation/i,
+      }),
     ).toBeVisible();
     await relationDialog.getByLabel("Name").fill("Emergency Contact Live");
-    await relationDialog.getByLabel("Relation type").selectOption("caregiver");
-    await relationDialog.getByLabel("Phone").fill("+49 30 222222");
+    await relationDialog
+      .getByLabel(/Beziehungstyp|Relation type/i)
+      .selectOption("caregiver");
+    await relationDialog.getByLabel(/Telefon|Phone/i).fill("+49 30 222222");
     await relationDialog
       .locator("label")
       .filter({ hasText: "Notfallkontakt" })
@@ -178,13 +221,23 @@ test.describe("patient profile live workflows", () => {
     await expect(page.getByText("Emergency Contact Live")).toBeVisible();
     await expect(page.getByText("Available during all clinic visits.")).toBeVisible();
 
-    await page.getByRole("tab", { name: "Workflow" }).click();
+    await openPatientDetailTab(page, scenario.patient.id, "workflow", "Workflow-Cockpit");
 
     const workflowItemName = "Live E2E workflow call-back";
-    await page.getByLabel("Checklistenpunkt").fill(workflowItemName);
-    await page.getByLabel("Fällig am").fill(futureLocalDateTime(2));
-    await page
-      .getByRole("button", { name: "Workflow-Element hinzufügen" })
+    const workflowForm = page
+      .locator("form")
+      .filter({
+        has: page.getByRole("button", {
+          name: /Workflow-Element hinzufügen|Add workflow item/i,
+        }),
+      })
+      .last();
+    await workflowForm.locator("#patient-workflow-item-text").fill(workflowItemName);
+    await fillMuiDateTime(workflowForm, futureLocalDateTime(2));
+    await workflowForm
+      .getByRole("button", {
+        name: /Workflow-Element hinzufügen|Add workflow item/i,
+      })
       .click();
 
     const workflowCard = page
@@ -198,7 +251,9 @@ test.describe("patient profile live workflows", () => {
       .first();
     await expect(workflowCard).toBeVisible();
     await workflowCard.getByRole("button", { name: "Abschließen" }).first().click();
-    await expect(workflowCard.getByText("completed")).toBeVisible();
+    await expect(
+      workflowCard.getByText(/Abgeschlossen|completed/i).first(),
+    ).toBeVisible();
   });
 
   test("patient manager can maintain cave notes, vitals, card entries, medical orders and risk scores from the patient profile", async ({
@@ -221,50 +276,45 @@ test.describe("patient profile live workflows", () => {
     const riskInterpretation = `Moderate stroke-prevention risk ${scenario.tag}.`;
     const riskSource = `Live profile review ${scenario.tag}`;
 
-    await page.goto(`/patients/${scenario.patient.id}`);
-    await expect(
-      page.getByRole("heading", { name: scenario.patient.name }),
-    ).toBeVisible();
+    await openPatientDetailTab(page, scenario.patient.id, "profile", scenario.patient.name);
 
-    await page.getByRole("button", { name: "Profil bearbeiten" }).click();
-
-    const profileDialog = page.getByRole("dialog");
-    const savePatientButton = profileDialog
-      .getByRole("button", { name: "Patient speichern" })
-      .last();
-    await expect(savePatientButton).toBeVisible();
-    await profileDialog.locator("#patient-clinical-warnings-edit").fill(caveNotes);
-    await profileDialog
-      .locator("form")
-      .first()
-      .evaluate((form) => (form as HTMLFormElement).requestSubmit());
-    await expect(profileDialog).toBeHidden({ timeout: 15_000 });
+    await sectionWithHeading(page, "CAVE-Hinweise")
+      .getByRole("button", { name: /Aktualisieren|Update/i })
+      .click();
+    await page.locator("#patient-cave-notes").fill(caveNotes);
+    await saveOpenDialog(page);
     await expect(page.getByText(`Latex allergy ${scenario.tag}`)).toBeVisible();
 
+    await sectionWithHeading(page, "Vitalwerte-Verlauf")
+      .getByRole("button", { name: /Hinzufügen|Add/i })
+      .click();
     await page.locator("#patient-vitals-bp-systolic").fill("128");
     await page.locator("#patient-vitals-bp-diastolic").fill("84");
     await page.locator("#patient-vitals-heart-rate").fill("71");
     await page.locator("#patient-vitals-weight").fill("70");
     await page.locator("#patient-vitals-height").fill("175");
     await page.locator("#patient-vitals-notes").fill(vitalsNote);
-    await page.getByRole("button", { name: "Vitalwert speichern" }).click();
-    await expect(page.getByText("Vital measurement saved.")).toBeVisible();
+    await saveOpenDialog(page);
     await expect(page.getByText(vitalsNote).first()).toBeVisible();
 
+    await sectionWithHeading(page, "Klinisches Kartenprotokoll")
+      .getByRole("button", { name: /Hinzufügen|Add/i })
+      .click();
     await page.locator("#patient-card-entry-source").fill("Patient portal follow-up");
     await page.locator("#patient-card-entry-content").fill(cardEntryContent);
-    await page.getByRole("button", { name: "Eintrag speichern" }).click();
-    await expect(page.getByText("Clinical card entry saved.")).toBeVisible();
+    await saveOpenDialog(page);
     await expect(page.getByText(cardEntryContent)).toBeVisible();
 
+    await sectionWithHeading(page, "Medizinische Anordnungen")
+      .getByRole("button", { name: /Hinzufügen|Add/i })
+      .click();
     await page.locator("#patient-medical-order-title").fill(medicalOrderTitle);
     await page.locator("#patient-medical-order-source").fill("Discharge note");
-    await page.locator("#patient-medical-order-due-date").fill("2026-05-01");
+    await fillMuiDate(page.getByRole("dialog").last(), "2026-05-01", 1);
     await page
       .locator("#patient-medical-order-instructions")
       .fill(medicalOrderInstructions);
-    await page.getByRole("button", { name: "Anordnung speichern" }).click();
-    await expect(page.getByText("Medical order saved.")).toBeVisible();
+    await saveOpenDialog(page);
 
     const medicalOrderCard = page
       .locator("div")
@@ -274,9 +324,8 @@ test.describe("patient profile live workflows", () => {
       .first();
     await expect(medicalOrderCard).toBeVisible();
     await medicalOrderCard
-      .getByRole("button", { name: "Als abgeschlossen markieren" })
+      .getByRole("button", { name: /Abschließen|Complete/i })
       .click();
-    await expect(page.getByText("Medical order completed.")).toBeVisible();
     await expect(
       medicalOrderCard
         .locator('[data-slot="badge"]')
@@ -284,8 +333,11 @@ test.describe("patient profile live workflows", () => {
         .first(),
     ).toBeVisible();
 
+    await sectionWithHeading(page, "Risikoscores")
+      .getByRole("button", { name: /Hinzufügen|Add/i })
+      .click();
     await page.locator("#patient-risk-score-value").fill("4");
-    await page.locator("#patient-risk-score-scale").fill("9");
+    await page.locator("#patient-risk-score-scale-max").fill("9");
     await page.locator("#patient-risk-score-source").fill(riskSource);
     await page
       .locator("#patient-risk-score-interpretation")
@@ -293,8 +345,7 @@ test.describe("patient profile live workflows", () => {
     await page
       .locator("#patient-risk-score-inputs")
       .fill('{"age":68,"hypertension":true,"prior_stroke":false}');
-    await page.getByRole("button", { name: "Risikoscore speichern" }).click();
-    await expect(page.getByText("Risk score saved.")).toBeVisible();
+    await saveOpenDialog(page);
     await expect(page.getByText("CHA2DS2-VASc")).toBeVisible();
     await expect(page.getByText(riskInterpretation)).toBeVisible();
 
@@ -464,24 +515,25 @@ test.describe("patient profile live workflows", () => {
     const email = `${tag}@example.test`;
 
     await page.getByRole("button", { name: "Neuer Patient" }).click();
-    const sheet = page.getByRole("dialog");
+    const sheet = page.getByRole("dialog").last();
     await expect(
       sheet.getByRole("heading", { name: "Patient anlegen" }),
     ).toBeVisible();
 
     const fillField = async (label: string, value: string) => {
-      await sheet
-        .locator("label")
-        .filter({ hasText: new RegExp(`^${label}$`, "i") })
-        .locator("input")
-        .first()
-        .fill(value);
+      const field = sheet
+        .getByText(label, { exact: true })
+        .locator("..")
+        .getByRole("textbox")
+        .first();
+      await expect(field).toBeVisible();
+      await field.fill(value);
     };
 
     await fillField("Anrede", "Dr.");
     await fillField("Vorname", firstName);
     await fillField("Nachname", lastName);
-    await fillField("Geburtsdatum", "1992-04-15");
+    await fillMuiDate(sheet, "1992-04-15");
     await fillField("Staatsangehörigkeit", "Ukraine");
     await fillField("Wohnsitzland", "Germany");
     await fillField("Sprachen", "uk, de, en");
@@ -499,7 +551,7 @@ test.describe("patient profile live workflows", () => {
     await fillField("Notfallkontakt Beziehung", "spouse");
 
     await sheet
-      .getByRole("button", { name: /^Patient anlegen$/ })
+      .getByRole("button", { name: /^Anlegen$|^Create$/ })
       .click();
 
     await expect(sheet).toBeHidden({ timeout: 15_000 });

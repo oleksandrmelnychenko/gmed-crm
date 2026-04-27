@@ -60,6 +60,6 @@ export {
 export { FilterValueInput } from "./filter-value-input";
 export { FilterBuilder, type FilterBuilderProps, type FilterBuilderTranslations } from "./filter-builder";
 export { SortBuilder, type SortBuilderProps, type SortBuilderTranslations } from "./sort-builder";
-export { DataTable, type DataTableProps } from "./data-table";
+export { DataTable, type ColumnHeaderContextMenuLabels, type DataTableProps } from "./data-table";
 export { SplitView, type SplitViewProps } from "./split-view";
 export { useResponsiveViewMode, DEFAULT_SPLIT_BREAKPOINT } from "./use-responsive-view-mode";

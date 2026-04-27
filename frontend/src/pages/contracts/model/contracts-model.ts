@@ -1,0 +1,251 @@
+import type {
+  AgencyServiceFilters,
+  AgencyServiceFormState,
+  AgencyServiceItem,
+  ContractFilters,
+  ContractFormState,
+  ContractItem,
+  ContractStatus,
+  ContractStatusFormState,
+  ContractsPermissions,
+  OrderOption,
+  PatientOption,
+  QuoteFilters,
+  QuoteFormState,
+  QuoteItem,
+  QuoteStatus,
+  QuoteStatusFormState,
+} from "./types";
+
+export const CONTRACT_STATUSES: ContractStatus[] = [
+  "draft",
+  "sent",
+  "signed",
+  "expired",
+  "terminated",
+];
+
+export const QUOTE_STATUSES: QuoteStatus[] = [
+  "draft",
+  "sent",
+  "accepted",
+  "rejected",
+  "expired",
+];
+
+export const DEFAULT_CONTRACT_FILTERS: ContractFilters = {
+  search: "",
+  patientId: "",
+  status: "",
+};
+
+export const DEFAULT_QUOTE_FILTERS: QuoteFilters = {
+  search: "",
+  patientId: "",
+  orderId: "",
+  status: "",
+};
+
+export const DEFAULT_AGENCY_SERVICE_FILTERS: AgencyServiceFilters = {
+  search: "",
+  activeOnly: "true",
+};
+
+export function contractsPermissions(role?: string): ContractsPermissions {
+  const canView =
+    role === "ceo" ||
+    role === "ceo_assistant" ||
+    role === "patient_manager" ||
+    role === "billing";
+  const canManage = role === "ceo" || role === "patient_manager" || role === "billing";
+  return {
+    canViewPage: canView,
+    canCreateContract: canManage,
+    canManageContract: canManage,
+    canCreateQuote: canManage,
+    canManageQuote: canManage,
+    canManageCatalog: canManage,
+  };
+}
+
+export function buildContractsPath(filters: ContractFilters) {
+  const params = new URLSearchParams();
+  if (filters.search.trim()) params.set("search", filters.search.trim());
+  if (filters.patientId) params.set("patient_id", filters.patientId);
+  if (filters.status) params.set("status", filters.status);
+  return params.size ? `/framework-contracts?${params.toString()}` : "/framework-contracts";
+}
+
+export function buildQuotesPath(filters: QuoteFilters) {
+  const params = new URLSearchParams();
+  if (filters.search.trim()) params.set("search", filters.search.trim());
+  if (filters.patientId) params.set("patient_id", filters.patientId);
+  if (filters.orderId) params.set("order_id", filters.orderId);
+  if (filters.status) params.set("status", filters.status);
+  return params.size ? `/quotes?${params.toString()}` : "/quotes";
+}
+
+export function buildAgencyServicesPath(filters: AgencyServiceFilters) {
+  const params = new URLSearchParams();
+  if (filters.search.trim()) params.set("search", filters.search.trim());
+  if (filters.activeOnly === "true") params.set("active_only", "true");
+  if (filters.activeOnly === "false") params.set("active_only", "false");
+  return params.size ? `/agency-services?${params.toString()}` : "/agency-services";
+}
+
+export function blankContractForm(patientId = ""): ContractFormState {
+  return {
+    patientId,
+    status: "draft",
+    validFrom: "",
+    validTo: "",
+    signedAt: "",
+    conditionsText: "",
+  };
+}
+
+export function blankQuoteForm(orderId = ""): QuoteFormState {
+  return {
+    orderId,
+    validUntil: "",
+    notes: "",
+  };
+}
+
+export function blankAgencyServiceForm(lang: "de" | "ru" = "de"): AgencyServiceFormState {
+  return {
+    id: "",
+    serviceKey: "",
+    serviceName: "",
+    description: "",
+    unitLabel: lang === "de" ? "Einheit" : "ед.",
+    unitPrice: "",
+    currency: "EUR",
+    vatRate: "19",
+    isActive: true,
+    validFrom: "",
+    validTo: "",
+  };
+}
+
+export function contractToStatusForm(contract: ContractItem): ContractStatusFormState {
+  return {
+    status: (contract.status as ContractStatus) ?? "draft",
+    validFrom: contract.valid_from ?? "",
+    validTo: contract.valid_to ?? "",
+    signedAt: contract.signed_at ? toDateTimeLocal(contract.signed_at) : "",
+    conditionsText: contract.conditions ? JSON.stringify(contract.conditions, null, 2) : "",
+  };
+}
+
+export function quoteToStatusForm(quote: QuoteItem): QuoteStatusFormState {
+  return {
+    status: (quote.status as QuoteStatus) ?? "draft",
+    paidAmount: valueToInput(quote.paid_amount),
+    notes: quote.notes ?? "",
+  };
+}
+
+export function agencyServiceToForm(service: AgencyServiceItem): AgencyServiceFormState {
+  return {
+    id: service.id,
+    serviceKey: service.service_key,
+    serviceName: service.service_name,
+    description: service.description ?? "",
+    unitLabel: service.unit_label,
+    unitPrice: valueToInput(service.unit_price),
+    currency: service.currency,
+    vatRate: valueToInput(service.vat_rate),
+    isActive: service.is_active,
+    validFrom: service.valid_from ?? "",
+    validTo: service.valid_to ?? "",
+  };
+}
+
+export function toOptional(value: string) {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+export function valueToInput(value: unknown) {
+  if (value === null || value === undefined) return "";
+  return String(value);
+}
+
+export function toDateTimeLocal(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+export function formatDateTime(
+  value?: string | null,
+  locale = "de-DE",
+  emptyLabel = "-",
+) {
+  if (!value) return emptyLabel;
+  try {
+    return new Intl.DateTimeFormat(locale, {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value));
+  } catch {
+    return value;
+  }
+}
+
+export function formatDate(
+  value?: string | null,
+  locale = "de-DE",
+  emptyLabel = "-",
+) {
+  if (!value) return emptyLabel;
+  try {
+    return new Intl.DateTimeFormat(locale, {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }).format(new Date(`${value}T00:00:00`));
+  } catch {
+    return value;
+  }
+}
+
+export function enumLabel(value: string, labels: Record<string, string>) {
+  return labels[value] ?? value.replaceAll("_", " ");
+}
+
+export function formatCurrency(value: unknown) {
+  const numeric = typeof value === "number" ? value : Number(value ?? 0);
+  if (!Number.isFinite(numeric)) return "EUR 0.00";
+  return new Intl.NumberFormat("de-DE", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(numeric);
+}
+
+export function patientOptionLabel(patient: PatientOption) {
+  return `${patient.patient_id} · ${[patient.first_name, patient.last_name].filter(Boolean).join(" ")}`;
+}
+
+export function orderOptionLabel(order: OrderOption) {
+  return `${order.order_number} · ${order.patient_pid} · ${order.patient_name}`;
+}
+
+export function buildSearchParams(
+  current: URLSearchParams,
+  patch: Record<string, string | null | undefined>,
+) {
+  const next = new URLSearchParams(current);
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null || value === undefined || value === "") next.delete(key);
+    else next.set(key, value);
+  }
+  return next;
+}

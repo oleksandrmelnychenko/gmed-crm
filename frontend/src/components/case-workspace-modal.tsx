@@ -29,6 +29,9 @@ export function CaseWorkspaceModal({
       embedded
       embeddedPatientId={patientId}
       embeddedCaseId={caseId}
+      embeddedSheetModal={false}
+      embeddedSheetShowOverlay={false}
+      embeddedSheetSide="right"
       onCloseCaseSheet={() => onOpenChange(false)}
     />
   );

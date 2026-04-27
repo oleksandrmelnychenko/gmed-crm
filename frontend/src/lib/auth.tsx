@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
-import { buildApiUrl } from "@/lib/api";
+import { buildApiUrl, clearApiCache } from "@/lib/api";
 
 export interface User {
   id: string;
@@ -69,11 +69,13 @@ function getRefreshToken() {
 function saveTokens(tokens: AuthTokens) {
   localStorage.setItem(ACCESS_TOKEN_KEY, tokens.access_token);
   localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);
+  clearApiCache();
 }
 
 function clearTokens() {
   localStorage.removeItem(ACCESS_TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
+  clearApiCache();
 }
 
 function isPendingLoginResponse(

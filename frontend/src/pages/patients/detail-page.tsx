@@ -1625,6 +1625,10 @@ export function PatientDetailPage() {
     setDocumentUploadOpen(true);
   }
 
+  function openCaseWorkspace(caseId: string) {
+    staffGo(`/cases/${caseId}?patient=${id}`);
+  }
+
   async function handleSaveInvoiceStatus(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!invoiceManageId) return;
@@ -1926,7 +1930,7 @@ export function PatientDetailPage() {
         onMedicalOrderSheetOpenChange={setMedicalOrderSheetOpen}
         onNotesSheetOpenChange={setNotesSheetOpen}
         onOpenAppointment={(appointmentId) => { staffGo(`/appointments?appointment=${appointmentId}`); }}
-        onOpenCase={(caseId) => { staffGo(`/cases/${caseId}?patient=${id}`); }}
+        onOpenCase={openCaseWorkspace}
         onOpenContract={(contractId) => { staffGo(`/contracts?contract=${contractId}`); }}
         onOpenInvoice={(invoiceId) => { staffGo(`/invoices?invoice=${invoiceId}`); }}
         onOpenOrder={(orderId) => { staffGo(`/orders?order=${orderId}`); }}
@@ -2102,6 +2106,7 @@ export function PatientDetailPage() {
           />
         </Suspense>
       ) : null}
+
     </>
   );
 }

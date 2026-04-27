@@ -31,7 +31,6 @@ import {
   Sheet,
   SheetContent,
 } from "@/components/ui/sheet";
-import { apiFetch } from "@/lib/api";
 import { useSheetDirtyGuard } from "@/hooks/use-sheet-dirty-guard";
 import { useLang } from "@/lib/i18n";
 import {
@@ -43,6 +42,11 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { cn } from "@/lib/utils";
+import {
+  fetchAccessPolicies,
+  resetAccessPolicies,
+  updateAccessPolicy,
+} from "@/pages/admin/data/admin-api";
 
 interface Policy {
   role: string;
@@ -201,7 +205,7 @@ export function AdminAccessPage() {
     setLoading(true);
     setError("");
     try {
-      const data = await apiFetch<Policy[]>("/access-policies?entity_type=patient");
+      const data = await fetchAccessPolicies<Policy>();
       startTransition(() => setPolicies(data));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : t.common_error);
@@ -301,15 +305,12 @@ export function AdminAccessPage() {
     );
 
     try {
-      await apiFetch("/access-policies/update", {
-        method: "POST",
-        body: JSON.stringify({
-          role,
-          entity_type: "patient",
-          field_name: field,
-          access_level: newLevel,
-          condition_type: condition,
-        }),
+      await updateAccessPolicy({
+        role,
+        entity_type: "patient",
+        field_name: field,
+        access_level: newLevel,
+        condition_type: condition,
       });
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : t.common_error);
@@ -323,10 +324,7 @@ export function AdminAccessPage() {
     setResetBusy(true);
     setError("");
     try {
-      await apiFetch("/access-policies/reset", {
-        method: "POST",
-        body: JSON.stringify({ entity_type: "patient" }),
-      });
+      await resetAccessPolicies();
       await loadPolicies();
     } catch (resetError) {
       setError(resetError instanceof Error ? resetError.message : t.common_error);
@@ -615,5 +613,4 @@ export function AdminAccessPage() {
     </>
   );
 }
-
 

@@ -3,10 +3,13 @@ import { Download, LoaderCircle, ShieldCheck } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { apiFetch, downloadApiFile } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { localizeRequiredDocumentLabel } from "@/lib/required-document-labels";
+import {
+  downloadPatientPortalExport,
+  fetchPatientPortalWorkspace,
+} from "@/pages/patients/data/portal-api";
 import {
   appointmentStatusTone,
   feedbackStatusTone,
@@ -70,25 +73,17 @@ export function PatientDashboardPage() {
       }
 
       try {
-        const [portalAppointments, portalServices, docs, portalInvoices, privacy, feedbackRows, portalDocumentAlerts] = await Promise.all([
-          apiFetch<PortalAppointmentItem[]>("/me/appointments").catch(() => []),
-          apiFetch<PortalConciergeServiceItem[]>("/me/concierge-services").catch(() => []),
-          apiFetch<PortalDocumentItem[]>("/me/documents").catch(() => []),
-          apiFetch<PortalInvoiceItem[]>("/me/invoices").catch(() => []),
-          apiFetch<PortalPrivacyRequest[]>("/me/privacy-requests").catch(() => []),
-          apiFetch<PortalFeedbackItem[]>("/me/feedback").catch(() => []),
-          apiFetch<PortalDocumentAlertsSummary>("/me/document-alerts").catch(() => null),
-        ]);
+        const workspace = await fetchPatientPortalWorkspace();
 
         if (cancelled) return;
         startTransition(() => {
-          setAppointments(portalAppointments);
-          setServices(portalServices);
-          setDocuments(docs);
-          setDocumentAlerts(portalDocumentAlerts);
-          setInvoices(portalInvoices);
-          setRequests(privacy);
-          setFeedback(feedbackRows);
+          setAppointments(workspace.appointments);
+          setServices(workspace.services);
+          setDocuments(workspace.documents);
+          setDocumentAlerts(workspace.documentAlerts);
+          setInvoices(workspace.invoices);
+          setRequests(workspace.privacyRequests);
+          setFeedback(workspace.feedback);
           setError("");
         });
       } catch (err) {
@@ -145,10 +140,7 @@ export function PatientDashboardPage() {
   async function handleExportData() {
     setExportBusy(true);
     try {
-      await downloadApiFile(
-        "/me/export?format=zip",
-        `patient-export-${new Date().toISOString().slice(0, 10)}.zip`,
-      );
+      await downloadPatientPortalExport();
     } catch (err) {
       setError(err instanceof Error ? err.message : l("Patientendaten konnten nicht exportiert werden.", "Не удалось экспортировать данные пациента.", "Failed to export patient data."));
     } finally {

@@ -33,5 +33,5 @@ export function ListItem({
     );
   }
 
-  return <div className={classNames}>{children}</div>;
+  return <article className={classNames}>{children}</article>;
 }

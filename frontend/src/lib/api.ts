@@ -8,6 +8,12 @@ type ApiErrorBody = {
   message?: string;
 };
 
+type ApiFetchInit = RequestInit & {
+  cacheTtlMs?: number;
+  forceFresh?: boolean;
+  skipDedupe?: boolean;
+};
+
 export function getAccessToken() {
   return localStorage.getItem(ACCESS_TOKEN_KEY);
 }
@@ -59,6 +65,135 @@ function buildApiHeaders(init: RequestInit = {}) {
   return headers;
 }
 
+const RATE_LIMIT_MAX_RETRIES = 3;
+const RATE_LIMIT_DEFAULT_BACKOFF_MS = 1000;
+const RATE_LIMIT_MAX_BACKOFF_MS = 10_000;
+
+function parseRetryAfterMs(header: string | null) {
+  if (!header) return null;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(seconds * 1000, RATE_LIMIT_MAX_BACKOFF_MS);
+  }
+  const dateMs = Date.parse(header);
+  if (!Number.isNaN(dateMs)) {
+    return Math.min(Math.max(dateMs - Date.now(), 0), RATE_LIMIT_MAX_BACKOFF_MS);
+  }
+  return null;
+}
+
+async function fetchWithRateLimitRetry(url: string, init: RequestInit) {
+  let attempt = 0;
+  while (true) {
+    const res = await fetch(url, init);
+    if (res.status !== 429 || attempt >= RATE_LIMIT_MAX_RETRIES) {
+      return res;
+    }
+    const retryAfterMs = parseRetryAfterMs(res.headers.get("retry-after"));
+    const backoffMs = retryAfterMs ?? RATE_LIMIT_DEFAULT_BACKOFF_MS * 2 ** attempt;
+    await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    attempt += 1;
+  }
+}
+
+const JSON_CACHE_MAX_ENTRIES = 160;
+
+type JsonCacheEntry = {
+  expiresAt: number;
+  value: unknown;
+};
+
+const jsonCache = new Map<string, JsonCacheEntry>();
+const inFlightJsonGets = new Map<string, Promise<unknown>>();
+
+function requestMethod(init: RequestInit) {
+  return (init.method ?? "GET").toUpperCase();
+}
+
+function isCacheableJsonGet(init: RequestInit) {
+  return (
+    requestMethod(init) === "GET" &&
+    !init.body &&
+    !init.signal &&
+    init.cache !== "no-store"
+  );
+}
+
+function headersCacheKey(headers: Headers) {
+  return Array.from(headers.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}:${value}`)
+    .join("\n");
+}
+
+function jsonRequestCacheKey(url: string, headers: Headers) {
+  return `${url}\n${headersCacheKey(headers)}`;
+}
+
+function cloneJsonPayload<T>(value: T): T {
+  if (value == null || typeof value !== "object") return value;
+  if (typeof structuredClone === "function") {
+    try {
+      return structuredClone(value);
+    } catch {
+      return value;
+    }
+  }
+  return value;
+}
+
+function rememberJsonCache(key: string, value: unknown, ttlMs?: number) {
+  if (!ttlMs || ttlMs <= 0) return;
+  if (jsonCache.has(key)) jsonCache.delete(key);
+  jsonCache.set(key, {
+    expiresAt: Date.now() + ttlMs,
+    value: cloneJsonPayload(value),
+  });
+  if (jsonCache.size <= JSON_CACHE_MAX_ENTRIES) return;
+  const oldestKey = jsonCache.keys().next().value;
+  if (oldestKey) jsonCache.delete(oldestKey);
+}
+
+function readFreshJsonCache(key: string) {
+  const cached = jsonCache.get(key);
+  if (!cached) return undefined;
+  if (cached.expiresAt <= Date.now()) {
+    jsonCache.delete(key);
+    return undefined;
+  }
+  return cloneJsonPayload(cached.value);
+}
+
+export function clearApiCache(pathPrefix?: string) {
+  if (!pathPrefix) {
+    jsonCache.clear();
+    return;
+  }
+
+  const urlPrefix = buildApiUrl(pathPrefix);
+  for (const key of jsonCache.keys()) {
+    if (key.startsWith(urlPrefix)) {
+      jsonCache.delete(key);
+    }
+  }
+}
+
+async function readApiJsonResponse<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    const body = await res.json().catch(() => null) as ApiErrorBody | null;
+    if (res.status === 429) {
+      throw new Error(body?.message ?? body?.error ?? "Забагато запитів. Спробуйте ще раз пізніше.");
+    }
+    throw new Error(body?.message ?? body?.error ?? `${res.status} ${res.statusText}`);
+  }
+
+  if (res.status === 204) {
+    return undefined as T;
+  }
+
+  return res.json() as Promise<T>;
+}
+
 function parseContentDispositionFilename(header: string | null) {
   if (!header) return null;
 
@@ -80,21 +215,52 @@ function parseContentDispositionFilename(header: string | null) {
   return plainMatch?.[1]?.trim().replace(/^"|"$/g, "") ?? null;
 }
 
-export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const headers = buildApiHeaders(init);
-  const res = await fetch(buildApiUrl(path), { ...init, headers });
+export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promise<T> {
+  const {
+    cacheTtlMs,
+    forceFresh = false,
+    skipDedupe = false,
+    ...requestInit
+  } = init;
+  const headers = buildApiHeaders(requestInit);
+  const url = buildApiUrl(path);
+  const method = requestMethod(requestInit);
+  const canCacheGet = isCacheableJsonGet(requestInit);
+  const cacheKey = canCacheGet ? jsonRequestCacheKey(url, headers) : "";
 
-  if (!res.ok) {
-    const body = await res.json().catch(() => null) as ApiErrorBody | null;
+  if (canCacheGet && !forceFresh) {
+    const cached = readFreshJsonCache(cacheKey);
+    if (cached !== undefined) return cached as T;
 
-    throw new Error(body?.message ?? body?.error ?? `${res.status} ${res.statusText}`);
+    if (!skipDedupe) {
+      const inFlight = inFlightJsonGets.get(cacheKey);
+      if (inFlight) {
+        return cloneJsonPayload(await inFlight) as T;
+      }
+    }
   }
 
-  if (res.status === 204) {
-    return undefined as T;
+  const request = fetchWithRateLimitRetry(url, { ...requestInit, headers })
+    .then(async (res) => {
+      const payload = await readApiJsonResponse<T>(res);
+      if (canCacheGet) {
+        rememberJsonCache(cacheKey, payload, cacheTtlMs);
+      } else if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+        clearApiCache();
+      }
+      return payload;
+    });
+
+  if (!canCacheGet || skipDedupe) {
+    return request;
   }
 
-  return res.json() as Promise<T>;
+  inFlightJsonGets.set(cacheKey, request);
+  try {
+    return await request;
+  } finally {
+    inFlightJsonGets.delete(cacheKey);
+  }
 }
 
 export function buildApiWebSocketUrl(
@@ -109,11 +275,13 @@ export function buildApiWebSocketUrl(
 
 export async function apiFetchFile(path: string, init: RequestInit = {}) {
   const headers = buildApiHeaders(init);
-  const res = await fetch(buildApiUrl(path), { ...init, headers });
+  const res = await fetchWithRateLimitRetry(buildApiUrl(path), { ...init, headers });
 
   if (!res.ok) {
     const body = await res.json().catch(() => null) as ApiErrorBody | null;
-
+    if (res.status === 429) {
+      throw new Error(body?.message ?? body?.error ?? "Забагато запитів. Спробуйте ще раз пізніше.");
+    }
     throw new Error(body?.message ?? body?.error ?? `${res.status} ${res.statusText}`);
   }
 

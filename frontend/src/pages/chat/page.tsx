@@ -11,7 +11,6 @@ import {
   MessageSquare,
   Shield,
 } from "lucide-react";
-import { apiFetch, buildApiUrl, buildApiWebSocketUrl, getAccessToken } from "@/lib/api";
 import {
   CHAT_E2E_PREVIEW,
   CHAT_E2E_UNAVAILABLE,
@@ -40,117 +39,26 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-
-// ── Types ──
-
-interface Conversation {
-  user_id: string;
-  name: string;
-  email: string;
-  role: string;
-  last_message: string;
-  last_at: string;
-  is_read: boolean;
-  last_read_at?: string | null;
-  is_mine: boolean;
-  unread: number;
-  is_e2e?: boolean;
-}
-
-interface Message {
-  id: string;
-  from_user: string;
-  to_user: string;
-  message: string | null;
-  is_e2e?: boolean;
-  e2e_algorithm?: string | null;
-  e2e_ciphertext?: string | null;
-  e2e_nonce?: string | null;
-  e2e_salt?: string | null;
-  sender_key_fingerprint?: string | null;
-  recipient_key_fingerprint?: string | null;
-  is_read: boolean;
-  read_at: string | null;
-  created_at: string;
-  attachment_filename: string | null;
-  attachment_mime: string | null;
-  attachment_size: number | null;
-  attachment_key: string | null;
-  attachment_is_e2e?: boolean;
-  attachment_e2e_algorithm?: string | null;
-  attachment_e2e_nonce?: string | null;
-  attachment_e2e_salt?: string | null;
-}
-
-interface UserItem {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-  is_active: boolean;
-}
-
-interface ChatStreamEvent {
-  type: "message_created" | "conversation_read";
-  user_id: string;
-  peer_id: string;
-  message_id?: string | null;
-}
-
-// ── Helpers ──
-
-function initials(name: string) {
-  return name
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? "")
-    .join("");
-}
-
-function roleDisplay(role: string) {
-  return role
-    .split("_")
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
-}
-
-function timeAgo(iso: string) {
-  const idx = iso.indexOf("T");
-  if (idx < 0) return iso.slice(0, 16);
-  const hm = iso.slice(idx + 1, idx + 6);
-  const datePart = iso.slice(0, idx);
-  const today = new Date().toISOString().slice(0, 10);
-  if (datePart === today) return hm;
-  return `${datePart.slice(5).replace("-", ".")} ${hm}`;
-}
-
-function truncate(s: string, max: number) {
-  return s.length <= max ? s : s.slice(0, max) + "...";
-}
-
-function formatSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function canAccessChat(role?: string) {
-  return (
-    role === "patient" ||
-    role === "ceo" ||
-    role === "ceo_assistant" ||
-    role === "patient_manager" ||
-    role === "teamlead_interpreter" ||
-    role === "interpreter" ||
-    role === "concierge" ||
-    role === "billing" ||
-    role === "it_admin"
-  );
-}
-
-function buildMessageAttachmentUrl(fileKey: string) {
-  return buildApiUrl(`/messages/file/${fileKey}`);
-}
+import {
+  downloadMessageAttachmentBytes,
+  fetchAllowedPeers,
+  fetchConversations,
+  fetchPeerMessages,
+  getMessageAttachmentUrl,
+  markPeerMessagesRead,
+  openMessagesSocket,
+  sendPeerMessage,
+  uploadPeerAttachment,
+} from "./data/chat-api";
+import {
+  canAccessChat,
+  formatSize,
+  initials,
+  roleDisplay,
+  timeAgo,
+  truncate,
+} from "./model/chat-model";
+import type { ChatStreamEvent, Conversation, Message, UserItem } from "./model/types";
 
 // ── Component ──
 
@@ -207,7 +115,7 @@ export function ChatPage() {
       return;
     }
     try {
-      const data = await apiFetch<Conversation[]>("/messages/conversations");
+      const data = await fetchConversations();
       setConversations(data);
     } catch {
       /* ignore */
@@ -286,11 +194,11 @@ export function ChatPage() {
         setMessages([]);
         return;
       }
-      const msgs = await apiFetch<Message[]>(`/messages/${peerId}?limit=100`);
+      const msgs = await fetchPeerMessages(peerId);
       const hydrated = await hydrateMessages(peerId, msgs);
       setMessages(hydrated);
       if (markRead) {
-        await apiFetch(`/messages/${peerId}/read`, { method: "POST" });
+        await markPeerMessagesRead(peerId);
       }
     },
     [canViewChat, hydrateMessages],
@@ -415,16 +323,15 @@ export function ChatPage() {
   // Keep chat live via WebSocket push.
   useEffect(() => {
     if (!canViewChat) return;
-    const token = getAccessToken();
-    if (!token) return;
 
-    const url = buildApiWebSocketUrl("/messages/ws", { token });
     let socket: WebSocket | null = null;
     let reconnectTimer: number | null = null;
     let disposed = false;
 
     const connect = () => {
-      socket = new WebSocket(url);
+      const nextSocket = openMessagesSocket();
+      if (!nextSocket) return;
+      socket = nextSocket;
       socket.onmessage = (event) => {
         const payload = (() => {
           try {
@@ -503,10 +410,7 @@ export function ChatPage() {
       return;
     }
     try {
-      const query = userSearch.trim()
-        ? `/messages/allowed-peers?search=${encodeURIComponent(userSearch.trim())}`
-        : "/messages/allowed-peers";
-      const data = await apiFetch<UserItem[]>(query);
+      const data = await fetchAllowedPeers(userSearch);
       setAllUsers(data);
     } catch {
       /* ignore */
@@ -568,14 +472,9 @@ export function ChatPage() {
 
       setAttachmentBusyId(message.id);
       try {
-        const token = getAccessToken();
-        const response = await fetch(buildMessageAttachmentUrl(message.attachment_key), {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        });
-        if (!response.ok) {
-          throw new Error("download");
-        }
-        const ciphertext = new Uint8Array(await response.arrayBuffer());
+        const ciphertext = new Uint8Array(
+          await downloadMessageAttachmentBytes(message.attachment_key),
+        );
         const decrypted = await decryptAttachmentFromPeer(
           message,
           ciphertext,
@@ -700,15 +599,7 @@ export function ChatPage() {
           if (caption) formData.append("message", caption);
         }
 
-        const token = getAccessToken();
-        const response = await fetch(buildApiUrl(`/messages/${activePeer}/upload`), {
-          method: "POST",
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-          body: formData,
-        });
-        if (!response.ok) {
-          throw new Error("upload");
-        }
+        await uploadPeerAttachment(activePeer, formData);
         await loadMessagesForPeer(activePeer);
         void loadConversations();
         if (activePeerMessageKey) {
@@ -746,10 +637,7 @@ export function ChatPage() {
         senderKey,
         activePeerMessageKey,
       );
-      await apiFetch(`/messages/${activePeer}`, {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
+      await sendPeerMessage(activePeer, payload);
       await loadMessagesForPeer(activePeer);
       void loadConversations();
       setSecureStatus(null);
@@ -955,7 +843,7 @@ export function ChatPage() {
                 const hasAttachment = !!m.attachment_key;
                 const isSecureAttachment = m.attachment_is_e2e ?? false;
                 const downloadUrl = m.attachment_key
-                  ? buildMessageAttachmentUrl(m.attachment_key)
+                  ? getMessageAttachmentUrl(m.attachment_key)
                   : "";
                 const isImage =
                   !isSecureAttachment && (m.attachment_mime?.startsWith("image/") ?? false);

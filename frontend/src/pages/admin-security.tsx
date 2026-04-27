@@ -21,7 +21,6 @@ import {
   Sheet,
   SheetContent,
 } from "@/components/ui/sheet";
-import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import {
   formatAdminDateTime,
@@ -43,6 +42,12 @@ import {
 } from "@/components/ui-shell";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import {
+  createIpWhitelistEntry,
+  deleteIpWhitelistEntry,
+  fetchAdminSecurityWorkspace,
+  saveAdminMaintenance,
+} from "@/pages/admin/data/admin-api";
 
 interface IpEntry {
   id: string;
@@ -129,12 +134,12 @@ export function AdminSecurityPage() {
     setLoading(true);
     setError("");
     try {
-      const [ipList, geoList, analyticsPayload, settings] = await Promise.all([
-        apiFetch<IpEntry[]>("/admin/ip-whitelist"),
-        apiFetch<GeoLogin[]>("/admin/login-geo"),
-        apiFetch<AuditAnalyticsPayload>("/admin/audit-analytics").catch(() => null),
-        apiFetch<{ key: string; value: string }[]>("/admin/settings"),
-      ]);
+      const { ipList, geoList, analyticsPayload, settings } =
+        await fetchAdminSecurityWorkspace<
+          IpEntry,
+          GeoLogin,
+          AuditAnalyticsPayload
+        >();
 
       setIps(ipList);
       setGeo(geoList);
@@ -201,12 +206,9 @@ export function AdminSecurityPage() {
     setFlash(null);
 
     try {
-      await apiFetch("/admin/maintenance", {
-        method: "POST",
-        body: JSON.stringify({
-          enabled,
-          message: maintDraftMsg.trim() || null,
-        }),
+      await saveAdminMaintenance({
+        enabled,
+        message: maintDraftMsg.trim() || null,
       });
       closeMaintenanceSheet(false);
       setFlash({ tone: "success", text: t.settings_updated });
@@ -228,12 +230,9 @@ export function AdminSecurityPage() {
     setIpError("");
     setFlash(null);
     try {
-      await apiFetch("/admin/ip-whitelist", {
-        method: "POST",
-        body: JSON.stringify({
-          cidr: newCidr.trim(),
-          description: newDesc.trim() || null,
-        }),
+      await createIpWhitelistEntry({
+        cidr: newCidr.trim(),
+        description: newDesc.trim() || null,
       });
       closeIpSheet(false);
       setFlash({ tone: "success", text: t.settings_updated });
@@ -251,7 +250,7 @@ export function AdminSecurityPage() {
     setDeleteBusyId(id);
     setFlash(null);
     try {
-      await apiFetch(`/admin/ip-whitelist/${id}/delete`, { method: "POST" });
+      await deleteIpWhitelistEntry(id);
       await load();
     } catch (deleteError) {
       setFlash({
@@ -780,4 +779,3 @@ export function AdminSecurityPage() {
     </>
   );
 }
-

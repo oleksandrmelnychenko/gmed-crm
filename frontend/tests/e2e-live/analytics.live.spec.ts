@@ -7,29 +7,47 @@ import {
 } from "./support/live-helpers";
 
 const REPORTS_WORKSPACE_HEADING = "Berichtsarbeitsbereich";
+const DASHBOARD_HEADING = /Guten (Morgen|Tag|Abend),/i;
+const SALES_KPI_HEADING = "Vertriebs-KPI-Ubersicht";
+const PIPELINE_HEADING = "Prognose-Pipeline";
+const COLLECTIONS_HEADING = "Forderungsprognose";
+const FOLLOWUP_HEADING = "Nachsorge-Prognose";
 
 function reportExportSection(page: Page, heading: string) {
   return page
     .getByRole("heading", { name: heading })
     .locator(
-      "xpath=ancestor::*[.//button[normalize-space()='CSV exportieren']][1]",
+      "xpath=ancestor::*[.//button[contains(normalize-space(), 'CSV exportieren')]][1]",
     );
 }
 
 async function expectCsvDownloadFromSection(
   page: Page,
   heading: string,
+  sectionName: string,
   filename: string,
 ) {
   const section = reportExportSection(page, heading);
   const exportButton = section.getByRole("button", {
-    name: "CSV exportieren",
+    name: /CSV exportieren/i,
   });
   await expect(exportButton).toBeVisible();
-  const downloadPromise = page.waitForEvent("download");
+  const exportResponsePromise = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      url.pathname.endsWith("/api/v1/stats/reports/export") &&
+      url.searchParams.get("section") === sectionName
+    );
+  });
   await exportButton.click();
-  const download = await downloadPromise;
-  expect(download.suggestedFilename()).toBe(filename);
+  const exportResponse = await exportResponsePromise;
+  expect(exportResponse.ok()).toBe(true);
+  await expect
+    .poll(
+      () => exportResponse.headers()["content-disposition"] ?? "",
+      { timeout: 5_000 },
+    )
+    .toContain(filename);
 }
 
 test.describe("analytics live workflows", () => {
@@ -49,13 +67,13 @@ test.describe("analytics live workflows", () => {
 
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { name: "CEO-Read-Model" }),
+      page.getByRole("heading", { name: DASHBOARD_HEADING }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Risikobild Patientenmanagement" }),
+      page.getByRole("heading", { name: "Leistungsmix" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Abrechnungsrisiken" }),
+      page.getByRole("heading", { name: "Top-Kliniken" }),
     ).toBeVisible();
 
     await page.goto("/reports");
@@ -66,16 +84,16 @@ test.describe("analytics live workflows", () => {
       page.getByRole("heading", { name: "Abrechnungs-KPI-Scorecard" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Sales-KPI-Scorecard" }),
+      page.getByRole("heading", { name: SALES_KPI_HEADING }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Forecast-Pipeline" }),
+      page.getByRole("heading", { name: PIPELINE_HEADING }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Forderungs-Forecast" }),
+      page.getByRole("heading", { name: COLLECTIONS_HEADING }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Follow-up-Forecast" }),
+      page.getByRole("heading", { name: FOLLOWUP_HEADING }),
     ).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Länderbericht" }),
@@ -101,13 +119,13 @@ test.describe("analytics live workflows", () => {
 
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { name: "CEO-Read-Model" }),
+      page.getByRole("heading", { name: DASHBOARD_HEADING }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Risikobild Patientenmanagement" }),
+      page.getByRole("heading", { name: "Leistungsmix" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Abrechnungsrisiken" }),
+      page.getByRole("heading", { name: "Top-Kliniken" }),
     ).toBeVisible();
 
     await page.goto("/reports");
@@ -118,10 +136,10 @@ test.describe("analytics live workflows", () => {
       page.getByRole("heading", { name: "Abrechnungs-KPI-Scorecard" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Sales-KPI-Scorecard" }),
+      page.getByRole("heading", { name: SALES_KPI_HEADING }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Forecast-Pipeline" }),
+      page.getByRole("heading", { name: PIPELINE_HEADING }),
     ).toBeVisible();
   });
 
@@ -150,8 +168,8 @@ test.describe("analytics live workflows", () => {
       page.getByRole("heading", { name: "Arzt-Drill-down" }),
     ).toBeVisible();
 
-    await expectCsvDownloadFromSection(page, "Klinikbericht", "clinic-report.csv");
-    await expectCsvDownloadFromSection(page, "Arzt-Drill-down", "doctor-report.csv");
+    await expectCsvDownloadFromSection(page, "Klinikbericht", "clinics", "clinic-report.csv");
+    await expectCsvDownloadFromSection(page, "Arzt-Drill-down", "doctors", "doctor-report.csv");
   });
 
   test("sales can open sales-safe reports without restricted executive sections", async ({
@@ -173,7 +191,7 @@ test.describe("analytics live workflows", () => {
       page.getByRole("heading", { name: REPORTS_WORKSPACE_HEADING }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Sales-KPI-Scorecard" }),
+      page.getByRole("heading", { name: SALES_KPI_HEADING }),
     ).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Leistung medizinischer Anbieter" }),
@@ -185,11 +203,13 @@ test.describe("analytics live workflows", () => {
     await expectCsvDownloadFromSection(
       page,
       "Leistung medizinischer Anbieter",
+      "medical_providers",
       "medical-provider-report.csv",
     );
     await expectCsvDownloadFromSection(
       page,
       "Länderbericht",
+      "countries",
       "country-report.csv",
     );
 
@@ -200,7 +220,7 @@ test.describe("analytics live workflows", () => {
       page.getByRole("heading", { name: "Arzt-Drill-down" }),
     ).toHaveCount(0);
     await expect(
-      page.getByRole("heading", { name: "Forderungs-Forecast" }),
+      page.getByRole("heading", { name: COLLECTIONS_HEADING }),
     ).toHaveCount(0);
     await expect(
       page.getByRole("heading", { name: "Klinikbericht" }),
@@ -223,27 +243,21 @@ test.describe("analytics live workflows", () => {
 
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { name: "Meine KPI-Karte als Patientenmanager" }),
+      page.getByRole("heading", { name: DASHBOARD_HEADING }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Risikobild Patientenmanagement" }),
+      page.getByRole("heading", { name: "Leistungsmix" }),
     ).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "CEO-Read-Model" }),
-    ).toHaveCount(0);
-    await expect(
-      page.getByRole("heading", { name: "Abrechnungsrisiken" }),
-    ).toHaveCount(0);
 
     await page.goto("/reports");
     await expect(
       page.getByRole("heading", { name: REPORTS_WORKSPACE_HEADING }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Forecast-Pipeline" }),
+      page.getByRole("heading", { name: PIPELINE_HEADING }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Follow-up-Forecast" }),
+      page.getByRole("heading", { name: FOLLOWUP_HEADING }),
     ).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Klinikauslastung nächste 30 Tage" }),
@@ -252,10 +266,10 @@ test.describe("analytics live workflows", () => {
       page.getByRole("heading", { name: "Abrechnungs-KPI-Scorecard" }),
     ).toHaveCount(0);
     await expect(
-      page.getByRole("heading", { name: "Sales-KPI-Scorecard" }),
+      page.getByRole("heading", { name: SALES_KPI_HEADING }),
     ).toHaveCount(0);
     await expect(
-      page.getByRole("heading", { name: "Forderungs-Forecast" }),
+      page.getByRole("heading", { name: COLLECTIONS_HEADING }),
     ).toHaveCount(0);
   });
 
@@ -275,17 +289,8 @@ test.describe("analytics live workflows", () => {
 
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { name: "Abrechnungsrisiken" }),
+      page.getByRole("heading", { name: DASHBOARD_HEADING }),
     ).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "CEO-Read-Model" }),
-    ).toHaveCount(0);
-    await expect(
-      page.getByRole("heading", { name: "Risikobild Patientenmanagement" }),
-    ).toHaveCount(0);
-    await expect(
-      page.getByRole("heading", { name: "Meine KPI-Karte als Patientenmanager" }),
-    ).toHaveCount(0);
 
     await page.goto("/reports");
     await expect(
@@ -295,10 +300,10 @@ test.describe("analytics live workflows", () => {
       page.getByRole("heading", { name: "Abrechnungs-KPI-Scorecard" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Forderungs-Forecast" }),
+      page.getByRole("heading", { name: COLLECTIONS_HEADING }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Sales-KPI-Scorecard" }),
+      page.getByRole("heading", { name: SALES_KPI_HEADING }),
     ).toHaveCount(0);
   });
 
@@ -330,11 +335,13 @@ test.describe("analytics live workflows", () => {
     await expectCsvDownloadFromSection(
       page,
       "Arzt-Drill-down",
+      "doctors",
       "doctor-report.csv",
     );
     await expectCsvDownloadFromSection(
       page,
       "Kostenentwicklung Anbieter",
+      "provider_costs",
       "provider-cost-report.csv",
     );
 
@@ -342,7 +349,7 @@ test.describe("analytics live workflows", () => {
       page.getByRole("heading", { name: "Länderbericht" }),
     ).toHaveCount(0);
     await expect(
-      page.getByRole("heading", { name: "Sales-KPI-Scorecard" }),
+      page.getByRole("heading", { name: SALES_KPI_HEADING }),
     ).toHaveCount(0);
   });
 });

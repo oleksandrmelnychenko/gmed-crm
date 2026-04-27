@@ -39,7 +39,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { apiFetch, downloadApiFile } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Translations } from "@/lib/i18n";
 import {
@@ -54,6 +53,16 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { cn } from "@/lib/utils";
+import {
+  createPatientPrivacyRequest,
+  downloadPatientComplianceExport,
+  executeCompliancePrivacyRequest,
+  fetchComplianceDashboard,
+  fetchCompliancePrivacyQueue,
+  fetchPatientComplianceWorkspace,
+  reviewCompliancePrivacyRequest,
+  savePatientConsent,
+} from "@/pages/admin/data/admin-api";
 
 interface ConsentTypeSummary {
   consent_type: string;
@@ -392,10 +401,8 @@ export function AdminCompliancePage() {
   const loadConsentDashboard = useCallback(async () => {
     setLoading(true);
     try {
-      const [dash, exp] = await Promise.all([
-        apiFetch<ConsentDashboard>("/admin/compliance/consents"),
-        apiFetch<ExpiredConsent[]>("/admin/compliance/consents/expired"),
-      ]);
+      const { dashboard: dash, expired: exp } =
+        await fetchComplianceDashboard<ConsentDashboard, ExpiredConsent>();
       setDashboard(dash);
       setExpired(exp);
     } catch {
@@ -409,9 +416,7 @@ export function AdminCompliancePage() {
   const loadPrivacyQueue = useCallback(async () => {
     setPrivacyQueueLoading(true);
     try {
-      const items = await apiFetch<PrivacyRequestRecord[]>(
-        "/admin/compliance/privacy-requests",
-      );
+      const items = await fetchCompliancePrivacyQueue<PrivacyRequestRecord>();
       setPrivacyQueue(items);
     } catch {
       setPrivacyQueue([]);
@@ -425,14 +430,11 @@ export function AdminCompliancePage() {
     setPatientError("");
 
     try {
-      const [consents, privacyRequests] = await Promise.all([
-        apiFetch<PatientConsentRecord[]>(
-          `/admin/compliance/patient/${patientId}/consents`,
-        ),
-        apiFetch<PrivacyRequestRecord[]>(
-          `/admin/compliance/patient/${patientId}/privacy-requests`,
-        ),
-      ]);
+      const { consents, privacyRequests } =
+        await fetchPatientComplianceWorkspace<
+          PatientConsentRecord,
+          PrivacyRequestRecord
+        >(patientId);
       setPatientConsents(consents);
       setPatientPrivacyRequests(privacyRequests);
     } catch (error) {
@@ -499,15 +501,12 @@ export function AdminCompliancePage() {
     setActionError("");
 
     try {
-      await apiFetch(`/admin/compliance/patient/${targetPatientId}/consents`, {
-        method: "POST",
-        body: JSON.stringify({
-          consent_type: consentType,
-          action,
-          note: consentNote.trim() || undefined,
-          expires_at:
-            action === "grant" ? consentExpiresAt.trim() || undefined : undefined,
-        }),
+      await savePatientConsent(targetPatientId, {
+        consent_type: consentType,
+        action,
+        note: consentNote.trim() || undefined,
+        expires_at:
+          action === "grant" ? consentExpiresAt.trim() || undefined : undefined,
       });
 
       setActivePatientId(targetPatientId);
@@ -536,17 +535,11 @@ export function AdminCompliancePage() {
     setActionError("");
 
     try {
-      await apiFetch(
-        `/admin/compliance/patient/${targetPatientId}/privacy-requests`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            request_type: privacyRequestType,
-            source: "patient_request",
-            reason: privacyReason.trim() || undefined,
-          }),
-        },
-      );
+      await createPatientPrivacyRequest(targetPatientId, {
+        request_type: privacyRequestType,
+        source: "patient_request",
+        reason: privacyReason.trim() || undefined,
+      });
 
       setActivePatientId(targetPatientId);
       setPrivacyReason("");
@@ -572,10 +565,7 @@ export function AdminCompliancePage() {
     setActionError("");
 
     try {
-      await apiFetch(`/admin/compliance/privacy-requests/${requestId}/review`, {
-        method: "POST",
-        body: JSON.stringify({ action }),
-      });
+      await reviewCompliancePrivacyRequest(requestId, { action });
 
       await Promise.all([
         loadPrivacyQueue(),
@@ -609,10 +599,7 @@ export function AdminCompliancePage() {
     setActionError("");
 
     try {
-      const payload = await apiFetch<unknown>(
-        `/admin/compliance/privacy-requests/${requestId}/execute`,
-        { method: "POST" },
-      );
+      const payload = await executeCompliancePrivacyRequest<unknown>(requestId);
       setExportResult(JSON.stringify(payload, null, 2));
 
       await Promise.all([
@@ -664,10 +651,7 @@ export function AdminCompliancePage() {
     setExportResult(null);
 
     try {
-      const filename = await downloadApiFile(
-        `/admin/compliance/patient/${targetPatientId}/export?format=zip`,
-        `${targetPatientId}-dsgvo-export.zip`,
-      );
+      const filename = await downloadPatientComplianceExport(targetPatientId);
       setExportResult(`${t.compliance_downloaded} ${filename}`);
     } catch (error) {
       setExportResult(
@@ -1506,4 +1490,3 @@ export function AdminCompliancePage() {
     </div>
   );
 }
-

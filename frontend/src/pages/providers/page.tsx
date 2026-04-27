@@ -45,7 +45,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
@@ -56,9 +55,57 @@ import {
   ColumnFilterSelectPopover,
   KpiInlineStat,
   PaginationControls,
-  type ColumnFilterKind,
   type SortDir,
 } from "@/components/data-table";
+import {
+  createProvider,
+  deleteProvider,
+  deleteProviderDoctor,
+  deleteProviderService,
+  fetchProviderDetail,
+  fetchProviders,
+  saveProviderDoctor,
+  saveProviderService,
+  setProviderActive,
+  updateProvider,
+} from "./data/provider-api";
+import {
+  DEFAULT_FILTERS,
+  DEFAULT_PROVIDER_COLUMN_ORDER,
+  PROVIDER_COLUMN_META,
+  blankDoctorForm,
+  blankProviderForm,
+  blankServiceForm,
+  buildProvidersQuery,
+  compareProvidersByColumn,
+  compactDate,
+  compactDateTime,
+  doctorToForm,
+  humanizeCode,
+  moneyLabel,
+  patientLabel,
+  providerColumnText,
+  providerMeta,
+  providerPermissions,
+  providerToForm,
+  providerTypeLabel,
+  serviceToForm,
+  toDoctorPayload,
+  toProviderPayload,
+  toServicePayload,
+  type ProviderColumnKey,
+} from "./model/list-model";
+import type {
+  DoctorFormState,
+  DoctorSummary,
+  ProviderDetail,
+  ProviderFilters,
+  ProviderFormState,
+  ProviderPermissions,
+  ProviderSummary,
+  ServiceFormState,
+  ServiceItem,
+} from "./model/types";
 import {
   PageHeader,
   inputClass as shellInputClassName,
@@ -66,266 +113,8 @@ import {
   textareaClass as shellTextareaClass,
 } from "@/components/ui-shell";
 
-type ProviderType = "medical" | "non_medical";
-
-type ProviderSummary = {
-  id: string;
-  name: string;
-  provider_type: ProviderType;
-  legal_name: string | null;
-  tax_id: string | null;
-  address_city: string | null;
-  address_country: string | null;
-  fachbereich: string | null;
-  phone: string | null;
-  email: string | null;
-  is_active: boolean;
-  has_contract: boolean;
-  doctor_count: number;
-  patient_count: number;
-  appointment_count: number;
-  service_count: number;
-  concierge_service_count: number;
-  open_concierge_service_count: number;
-  rating_count: number;
-  avg_rating: number | null;
-  last_interaction_at: string | null;
-  created_at: string;
-};
-
-type LinkedPatient = {
-  id: string;
-  patient_id: string;
-  first_name: string;
-  last_name: string;
-  appointment_count: number;
-  leistung_count: number;
-  concierge_count: number;
-  last_interaction_at: string;
-};
-
-type InteractionItem = {
-  kind: string;
-  id: string;
-  patient_id: string;
-  patient_name: string;
-  doctor_id: string | null;
-  doctor_name: string | null;
-  order_id: string | null;
-  order_number: string | null;
-  status: string;
-  title: string;
-  appointment_type: string | null;
-  location: string | null;
-  notes: string | null;
-  occurred_at: string;
-  quantity: string | null;
-  unit_price: string | null;
-  currency: string | null;
-};
-
-type DoctorSummary = {
-  id: string;
-  provider_id: string;
-  name: string;
-  title: string | null;
-  fachbereich: string | null;
-  languages: string[];
-  phone: string | null;
-  email: string | null;
-  license_number: string | null;
-  licensing_country: string | null;
-  licensing_valid_until: string | null;
-  notes: string | null;
-  patient_count: number;
-  appointment_count: number;
-  created_at: string;
-};
-
-type ServiceItem = {
-  id: string;
-  provider_id: string;
-  service_name: string;
-  description: string | null;
-  price: string;
-  currency: string;
-  valid_from: string;
-  valid_to: string | null;
-  created_at: string;
-};
-
-export type ProviderDetail = {
-  id: string;
-  name: string;
-  provider_type: ProviderType;
-  legal_name: string | null;
-  tax_id: string | null;
-  address_street: string | null;
-  address_city: string | null;
-  address_zip: string | null;
-  address_country: string | null;
-  phone: string | null;
-  email: string | null;
-  website: string | null;
-  fachbereich: string | null;
-  kooperationsvertrag: unknown;
-  notes: string | null;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-  doctors: DoctorSummary[];
-  services: ServiceItem[];
-  linked_patients: LinkedPatient[];
-  interactions: InteractionItem[];
-};
-
-type CreateResponse = {
-  id: string;
-  created_at?: string;
-};
-
-type ProviderFilters = {
-  search: string;
-  providerType: string;
-  activeOnly: string;
-  city: string;
-  country: string;
-  fachbereich: string;
-  doctorName: string;
-  doctorFachbereich: string;
-  serviceName: string;
-  hasContract: string;
-  ratingGte: string;
-};
-
-type ProviderFormState = {
-  name: string;
-  providerType: ProviderType;
-  legalName: string;
-  taxId: string;
-  addressStreet: string;
-  addressCity: string;
-  addressZip: string;
-  addressCountry: string;
-  phone: string;
-  email: string;
-  website: string;
-  fachbereich: string;
-  contractText: string;
-  notes: string;
-};
-
-type DoctorFormState = {
-  id: string;
-  name: string;
-  title: string;
-  fachbereich: string;
-  languages: string;
-  phone: string;
-  email: string;
-  licenseNumber: string;
-  licensingCountry: string;
-  licensingValidUntil: string;
-  notes: string;
-};
-
-type ServiceFormState = {
-  id: string;
-  serviceName: string;
-  description: string;
-  price: string;
-  currency: string;
-  validFrom: string;
-  validTo: string;
-};
-
-export type ProviderPermissions = {
-  canViewPage: boolean;
-  canManageRegistry: boolean;
-  forceNonMedical: boolean;
-};
-
-const DEFAULT_FILTERS: ProviderFilters = {
-  search: "",
-  providerType: "",
-  activeOnly: "true",
-  city: "",
-  country: "",
-  fachbereich: "",
-  doctorName: "",
-  doctorFachbereich: "",
-  serviceName: "",
-  hasContract: "",
-  ratingGte: "",
-};
-
 const selectTriggerClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
-
-type ProviderColumnKey =
-  | "status"
-  | "no"
-  | "provider"
-  | "type"
-  | "location"
-  | "fachbereich"
-  | "doctors"
-  | "patients"
-  | "contract";
-
-const PROVIDER_COLUMN_META: Record<
-  ProviderColumnKey,
-  { labelKey: string; widthClass?: string; sortable?: boolean; filter: ColumnFilterKind }
-> = {
-  status: { labelKey: "patients_col_status", widthClass: "w-[110px]", sortable: true, filter: "select" },
-  no: { labelKey: "patients_col_no", widthClass: "w-[56px]", sortable: true, filter: "text" },
-  provider: { labelKey: "providers_title", sortable: true, filter: "text" },
-  type: { labelKey: "providers_type", widthClass: "w-[120px]", sortable: true, filter: "select" },
-  location: { labelKey: "providers_city", widthClass: "w-[160px]", sortable: true, filter: "text" },
-  fachbereich: { labelKey: "providers_fachbereich", widthClass: "w-[160px]", sortable: true, filter: "text" },
-  doctors: { labelKey: "providers_doctors", widthClass: "w-[90px]", sortable: true, filter: "text" },
-  patients: { labelKey: "providers_linked_patients", widthClass: "w-[90px]", sortable: true, filter: "text" },
-  contract: { labelKey: "providers_contract", widthClass: "w-[110px]", sortable: true, filter: "select" },
-};
-
-const DEFAULT_PROVIDER_COLUMN_ORDER: ProviderColumnKey[] = [
-  "status",
-  "no",
-  "provider",
-  "type",
-  "location",
-  "fachbereich",
-  "doctors",
-  "patients",
-  "contract",
-];
-
-function providerColumnText(
-  p: ProviderSummary,
-  key: ProviderColumnKey,
-  tr: Record<string, string>,
-): string {
-  switch (key) {
-    case "status":
-      return p.is_active ? (tr.common_active ?? "active") : (tr.common_inactive ?? "inactive");
-    case "no":
-      return "";
-    case "provider":
-      return [p.name, p.legal_name, p.tax_id].filter(Boolean).join(" ");
-    case "type":
-      return p.provider_type;
-    case "location":
-      return [p.address_city, p.address_country].filter(Boolean).join(" ");
-    case "fachbereich":
-      return p.fachbereich ?? "";
-    case "doctors":
-      return String(p.doctor_count);
-    case "patients":
-      return String(p.patient_count);
-    case "contract":
-      return p.has_contract ? "with" : "without";
-  }
-}
 
 function ProviderCell({
   colKey,
@@ -440,277 +229,6 @@ function ProviderCell({
   }
 }
 
-function compareProvidersByColumn(
-  a: ProviderSummary,
-  b: ProviderSummary,
-  key: ProviderColumnKey,
-): number {
-  switch (key) {
-    case "status":
-      return Number(b.is_active) - Number(a.is_active);
-    case "no":
-      return 0;
-    case "provider":
-      return (a.name ?? "").localeCompare(b.name ?? "");
-    case "type":
-      return (a.provider_type ?? "").localeCompare(b.provider_type ?? "");
-    case "location": {
-      const al = `${a.address_city ?? ""} ${a.address_country ?? ""}`.trim().toLowerCase();
-      const bl = `${b.address_city ?? ""} ${b.address_country ?? ""}`.trim().toLowerCase();
-      return al.localeCompare(bl);
-    }
-    case "fachbereich":
-      return (a.fachbereich ?? "").localeCompare(b.fachbereich ?? "");
-    case "doctors":
-      return a.doctor_count - b.doctor_count;
-    case "patients":
-      return a.patient_count - b.patient_count;
-    case "contract":
-      return Number(b.has_contract) - Number(a.has_contract);
-  }
-}
-
-function providerPermissions(role?: string): ProviderPermissions {
-  switch (role) {
-    case "ceo":
-    case "patient_manager":
-      return { canViewPage: true, canManageRegistry: true, forceNonMedical: false };
-    case "concierge":
-      return { canViewPage: true, canManageRegistry: false, forceNonMedical: true };
-    case "billing":
-    case "sales":
-      return { canViewPage: true, canManageRegistry: false, forceNonMedical: false };
-    default:
-      return { canViewPage: false, canManageRegistry: false, forceNonMedical: false };
-  }
-}
-
-function blankProviderForm(providerType: ProviderType = "medical"): ProviderFormState {
-  return {
-    name: "",
-    providerType,
-    legalName: "",
-    taxId: "",
-    addressStreet: "",
-    addressCity: "",
-    addressZip: "",
-    addressCountry: "",
-    phone: "",
-    email: "",
-    website: "",
-    fachbereich: "",
-    contractText: "",
-    notes: "",
-  };
-}
-
-function blankDoctorForm(): DoctorFormState {
-  return {
-    id: "",
-    name: "",
-    title: "",
-    fachbereich: "",
-    languages: "",
-    phone: "",
-    email: "",
-    licenseNumber: "",
-    licensingCountry: "",
-    licensingValidUntil: "",
-    notes: "",
-  };
-}
-
-function blankServiceForm(): ServiceFormState {
-  return {
-    id: "",
-    serviceName: "",
-    description: "",
-    price: "",
-    currency: "EUR",
-    validFrom: new Date().toLocaleDateString("en-CA"),
-    validTo: "",
-  };
-}
-
-function toOptional(value: string) {
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-}
-
-function parseCommaList(value: string) {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function providerTypeLabel(value: string, tr: Record<string, string>) {
-  return value === "non_medical" ? tr.providers_type_non_medical : tr.providers_type_medical;
-}
-
-function compactDateTime(value?: string | null, fallback = "Not set") {
-  if (!value) return fallback;
-  try {
-    return new Intl.DateTimeFormat("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(value));
-  } catch {
-    return value;
-  }
-}
-
-function compactDate(value?: string | null, fallback = "Not set") {
-  if (!value) return fallback;
-  try {
-    return new Intl.DateTimeFormat("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }).format(new Date(`${value}T00:00:00`));
-  } catch {
-    return value;
-  }
-}
-
-function stringifyContract(value: unknown) {
-  if (value === null || value === undefined || value === "") return "";
-  if (typeof value === "string") return value;
-  if (typeof value === "object" && value && "summary" in value) {
-    const summary = (value as { summary?: unknown }).summary;
-    if (typeof summary === "string") return summary;
-  }
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return "";
-  }
-}
-
-function parseContract(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-    return JSON.parse(trimmed);
-  }
-  return { summary: trimmed };
-}
-
-function buildProvidersQuery(filters: ProviderFilters, forceNonMedical: boolean) {
-  const params = new URLSearchParams();
-  const providerType = forceNonMedical ? "non_medical" : filters.providerType;
-  if (filters.search.trim()) params.set("search", filters.search.trim());
-  if (providerType) params.set("provider_type", providerType);
-  if (filters.activeOnly) params.set("active_only", filters.activeOnly);
-  if (filters.city.trim()) params.set("city", filters.city.trim());
-  if (filters.country.trim()) params.set("country", filters.country.trim());
-  if (filters.fachbereich.trim()) params.set("fachbereich", filters.fachbereich.trim());
-  if (filters.doctorName.trim()) params.set("doctor_name", filters.doctorName.trim());
-  if (filters.doctorFachbereich.trim()) {
-    params.set("doctor_fachbereich", filters.doctorFachbereich.trim());
-  }
-  if (filters.serviceName.trim()) params.set("service_name", filters.serviceName.trim());
-  if (filters.hasContract) params.set("has_contract", filters.hasContract);
-  if (filters.ratingGte) params.set("rating_gte", filters.ratingGte);
-  const query = params.toString();
-  return query ? `/providers?${query}` : "/providers";
-}
-
-function providerToForm(detail: ProviderDetail): ProviderFormState {
-  return {
-    name: detail.name,
-    providerType: detail.provider_type,
-    legalName: detail.legal_name ?? "",
-    taxId: detail.tax_id ?? "",
-    addressStreet: detail.address_street ?? "",
-    addressCity: detail.address_city ?? "",
-    addressZip: detail.address_zip ?? "",
-    addressCountry: detail.address_country ?? "",
-    phone: detail.phone ?? "",
-    email: detail.email ?? "",
-    website: detail.website ?? "",
-    fachbereich: detail.fachbereich ?? "",
-    contractText: stringifyContract(detail.kooperationsvertrag),
-    notes: detail.notes ?? "",
-  };
-}
-
-function doctorToForm(doctor: DoctorSummary): DoctorFormState {
-  return {
-    id: doctor.id,
-    name: doctor.name,
-    title: doctor.title ?? "",
-    fachbereich: doctor.fachbereich ?? "",
-    languages: doctor.languages?.join(", ") ?? "",
-    phone: doctor.phone ?? "",
-    email: doctor.email ?? "",
-    licenseNumber: doctor.license_number ?? "",
-    licensingCountry: doctor.licensing_country ?? "",
-    licensingValidUntil: doctor.licensing_valid_until ?? "",
-    notes: doctor.notes ?? "",
-  };
-}
-
-function serviceToForm(service: ServiceItem): ServiceFormState {
-  return {
-    id: service.id,
-    serviceName: service.service_name,
-    description: service.description ?? "",
-    price: service.price,
-    currency: service.currency || "EUR",
-    validFrom: service.valid_from || new Date().toLocaleDateString("en-CA"),
-    validTo: service.valid_to ?? "",
-  };
-}
-
-function toProviderPayload(form: ProviderFormState, forceNonMedical: boolean) {
-  return {
-    name: form.name.trim(),
-    provider_type: forceNonMedical ? "non_medical" : form.providerType,
-    legal_name: toOptional(form.legalName),
-    tax_id: toOptional(form.taxId),
-    address_street: toOptional(form.addressStreet),
-    address_city: toOptional(form.addressCity),
-    address_zip: toOptional(form.addressZip),
-    address_country: toOptional(form.addressCountry),
-    phone: toOptional(form.phone),
-    email: toOptional(form.email),
-    website: toOptional(form.website),
-    fachbereich: toOptional(form.fachbereich),
-    kooperationsvertrag: parseContract(form.contractText),
-    notes: toOptional(form.notes),
-  };
-}
-
-function toDoctorPayload(form: DoctorFormState) {
-  return {
-    name: form.name.trim(),
-    title: toOptional(form.title),
-    fachbereich: toOptional(form.fachbereich),
-    languages: parseCommaList(form.languages),
-    phone: toOptional(form.phone),
-    email: toOptional(form.email),
-    license_number: toOptional(form.licenseNumber),
-    licensing_country: toOptional(form.licensingCountry),
-    licensing_valid_until: toOptional(form.licensingValidUntil),
-    notes: toOptional(form.notes),
-  };
-}
-
-function toServicePayload(form: ServiceFormState) {
-  return {
-    service_name: form.serviceName.trim(),
-    description: toOptional(form.description),
-    price: Number.parseFloat(form.price || "0"),
-    currency: toOptional(form.currency) ?? "EUR",
-    valid_from: toOptional(form.validFrom),
-    valid_to: toOptional(form.validTo),
-  };
-}
-
 function cardClass(extra?: string) {
   return cn(
     "rounded-[1.75rem] border border-border/70 bg-card shadow-[0_20px_60px_rgba(15,23,42,0.05)]",
@@ -772,33 +290,6 @@ function EmptyPanel({
       <p className="mt-2 text-sm leading-6 text-slate-600">{text}</p>
     </div>
   );
-}
-
-function humanizeCode(value: string) {
-  return value.replaceAll("_", " ");
-}
-
-function moneyLabel(price: string, currency: string) {
-  const numeric = Number.parseFloat(price);
-  if (!Number.isFinite(numeric)) return `${price} ${currency}`.trim();
-  try {
-    return new Intl.NumberFormat("en-GB", {
-      style: "currency",
-      currency: currency || "EUR",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(numeric);
-  } catch {
-    return `${numeric.toFixed(2)} ${currency}`.trim();
-  }
-}
-
-function patientLabel(patient: LinkedPatient) {
-  return `${patient.patient_id} · ${patient.first_name} ${patient.last_name}`;
-}
-
-function providerMeta(provider: ProviderSummary | ProviderDetail) {
-  return [provider.address_city, provider.address_country].filter(Boolean).join(", ");
 }
 
 function ProvidersPage() {
@@ -1011,7 +502,7 @@ function ProvidersPage() {
     setListBusy(true);
     setListError("");
 
-    void apiFetch<ProviderSummary[]>(providersPath)
+    void fetchProviders(providersPath)
       .then((items) => {
         if (cancelled) return;
         startTransition(() => setProviders(items));
@@ -1041,7 +532,7 @@ function ProvidersPage() {
     setDoctorError("");
     setServiceError("");
 
-    void apiFetch<ProviderDetail>(`/providers/${selectedId}`)
+    void fetchProviderDetail(selectedId)
       .then((item) => {
         if (cancelled) return;
         startTransition(() => {
@@ -1102,10 +593,7 @@ function ProvidersPage() {
 
     try {
       const payload = toProviderPayload(createForm, permissions.forceNonMedical);
-      const created = await apiFetch<CreateResponse>("/providers", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
+      const created = await createProvider(payload);
       setCreateOpen(false);
       staffGo(`/providers/${created.id}`);
     } catch (error) {
@@ -1124,10 +612,7 @@ function ProvidersPage() {
 
     try {
       const payload = toProviderPayload(providerForm, permissions.forceNonMedical);
-      await apiFetch(`/providers/${detail.id}/update`, {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
+      await updateProvider(detail.id, payload);
       refreshList();
       refreshDetail();
     } catch (error) {
@@ -1144,9 +629,7 @@ function ProvidersPage() {
     setProviderError("");
 
     try {
-      await apiFetch(`/providers/${detail.id}/${active ? "activate" : "deactivate"}`, {
-        method: "POST",
-      });
+      await setProviderActive(detail.id, active);
       refreshList();
       refreshDetail();
     } catch (error) {
@@ -1168,7 +651,7 @@ function ProvidersPage() {
     setProviderError("");
 
     try {
-      await apiFetch(`/providers/${detail.id}/delete`, { method: "POST" });
+      await deleteProvider(detail.id);
       setDetailOpen(false);
       setSelectedId("");
       setDetail(null);
@@ -1188,13 +671,7 @@ function ProvidersPage() {
     setDoctorError("");
 
     try {
-      const path = doctorForm.id
-        ? `/providers/${detail.id}/doctors/${doctorForm.id}/update`
-        : `/providers/${detail.id}/doctors`;
-      await apiFetch(path, {
-        method: "POST",
-        body: JSON.stringify(toDoctorPayload(doctorForm)),
-      });
+      await saveProviderDoctor(detail.id, doctorForm.id, toDoctorPayload(doctorForm));
       setDoctorForm(blankDoctorForm());
       refreshList();
       refreshDetail();
@@ -1213,9 +690,7 @@ function ProvidersPage() {
     setDoctorError("");
 
     try {
-      await apiFetch(`/providers/${detail.id}/doctors/${doctorId}/delete`, {
-        method: "POST",
-      });
+      await deleteProviderDoctor(detail.id, doctorId);
       if (doctorForm.id === doctorId) {
         setDoctorForm(blankDoctorForm());
       }
@@ -1236,13 +711,7 @@ function ProvidersPage() {
     setServiceError("");
 
     try {
-      const path = serviceForm.id
-        ? `/providers/${detail.id}/services/${serviceForm.id}/update`
-        : `/providers/${detail.id}/services`;
-      await apiFetch(path, {
-        method: "POST",
-        body: JSON.stringify(toServicePayload(serviceForm)),
-      });
+      await saveProviderService(detail.id, serviceForm.id, toServicePayload(serviceForm));
       setServiceForm(blankServiceForm());
       refreshDetail();
     } catch (error) {
@@ -1260,9 +729,7 @@ function ProvidersPage() {
     setServiceError("");
 
     try {
-      await apiFetch(`/providers/${detail.id}/services/${serviceId}/delete`, {
-        method: "POST",
-      });
+      await deleteProviderService(detail.id, serviceId);
       if (serviceForm.id === serviceId) {
         setServiceForm(blankServiceForm());
       }
@@ -2859,4 +2326,3 @@ function ServiceFormFields({
 }
 
 export { ProvidersPage };
-

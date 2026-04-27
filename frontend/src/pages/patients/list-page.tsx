@@ -10,7 +10,9 @@ import {
 import { exportCsv } from "@/components/data-table/csv-export";
 import { formatRelativeTime } from "@/components/data-table/relative-time";
 import {
+  DEFAULT_PATIENT_FROZEN_COLUMNS,
   DEFAULT_PATIENT_HIDDEN_COLUMNS,
+  MAX_PATIENT_FROZEN_COLUMNS,
   PATIENT_COLUMN_GROUPS,
 } from "./ui/patients-columns";
 
@@ -26,7 +28,6 @@ import {
   patientPermissions,
 } from "./model/list-model";
 import { usePatientDetailSheetData } from "./data/use-patient-detail-sheet-data";
-import { usePatientsListActions } from "./data/use-patients-list-actions";
 import { usePatientsListData } from "./data/use-patients-list-data";
 import { usePatientDetailSheetSession } from "./ui/hooks/use-patient-detail-sheet-session";
 import { usePatientsListTableModel } from "./ui/hooks/use-patients-list-table-model";
@@ -64,6 +65,7 @@ export function PatientsPage() {
     detailVersion,
     filterPredicates,
     filters,
+    frozenColumns,
     handleCreateOpenChange,
     handleDetailOpenChange,
     helpOpen,
@@ -73,13 +75,12 @@ export function PatientsPage() {
     refreshList,
     searchInputRef,
     selectedId,
-    selectedIds,
     setDensity,
     setFilterPredicates,
     setFilters,
+    setFrozenColumns,
     setHelpOpen,
     setHiddenColumns,
-    setSelectedIds,
     setSortStack,
     sortStack,
     syncQuery,
@@ -98,8 +99,6 @@ export function PatientsPage() {
     listError,
     patients,
     providers,
-    setListError,
-    setPatients,
   } = usePatientsListData({
     canViewPage: permissions.canViewPage,
     commonFailedLoad,
@@ -129,14 +128,10 @@ export function PatientsPage() {
   const { columns, metrics, sortedAndFilteredPatients } = usePatientsListTableModel({
     deferredSearch,
     filterPredicates,
+    frozenColumns,
     patients,
     sortStack,
     tr,
-  });
-  const { handleToggleArchive } = usePatientsListActions({
-    failedToggleMessage: "Failed to update patient status",
-    setListError,
-    setPatients,
   });
   const {
     assignmentBusy,
@@ -178,6 +173,7 @@ export function PatientsPage() {
   }
 
   const anyTopFilterActive =
+    filters.search.trim() !== "" ||
     filters.activeOnly !== "true" ||
     filters.providerId !== "" ||
     filters.doctorId !== "" ||
@@ -234,6 +230,7 @@ export function PatientsPage() {
         <PatientsListToolbar
           anyTopFilterActive={anyTopFilterActive}
           columns={columns}
+          defaultFrozenColumns={DEFAULT_PATIENT_FROZEN_COLUMNS}
           defaultHiddenColumns={DEFAULT_PATIENT_HIDDEN_COLUMNS}
           deferredSearchPlaceholder={t.common_search}
           density={density}
@@ -241,12 +238,15 @@ export function PatientsPage() {
           exportLabel={t.common_export ?? "Export"}
           filterPredicates={filterPredicates}
           filters={filters}
+          frozenColumns={frozenColumns}
           groupLabels={PATIENT_COLUMN_GROUPS}
           hiddenColumns={hiddenColumns}
           lastUpdatedText={lastUpdated ? formatRelativeTime(lastUpdated) : null}
           listBusy={listBusy}
+          maxFrozenColumns={MAX_PATIENT_FROZEN_COLUMNS}
           onActiveFilterChange={(value) => {
             setFilters((current) => ({ ...current, activeOnly: value }));
+            syncQuery({ active: value === "true" ? null : value || null });
           }}
           onClearAll={clearAllFilters}
           onDensityChange={setDensity}
@@ -262,6 +262,7 @@ export function PatientsPage() {
             exportCsv(sortedAndFilteredPatients, visibleCols, `patients-${stamp}.csv`);
           }}
           onFiltersChange={setFilterPredicates}
+          onFrozenColumnsChange={setFrozenColumns}
           onHiddenColumnsChange={setHiddenColumns}
           onProviderFilterChange={(value) => {
             setFilters((current) => ({ ...current, providerId: value, doctorId: "" }));
@@ -270,9 +271,11 @@ export function PatientsPage() {
           onRefresh={refreshList}
           onSearchChange={(value) => {
             setFilters((current) => ({ ...current, search: value }));
+            syncQuery({ q: value.trim() ? value : null });
           }}
           onSearchEscape={(input) => {
             setFilters((current) => ({ ...current, search: "" }));
+            syncQuery({ q: null });
             input.blur();
           }}
           onShortcutsOpen={openShortcutsDialog}
@@ -318,18 +321,16 @@ export function PatientsPage() {
           }}
           emptyLabel={t.patients_no_match}
           filteredCount={sortedAndFilteredPatients.length}
+          frozenColumns={frozenColumns}
           hiddenColumns={hiddenColumns}
           loading={listBusy && patients.length === 0}
+          maxFrozenColumns={MAX_PATIENT_FROZEN_COLUMNS}
           onCloseDetail={() => handleDetailOpenChange(false)}
           onOpenPatient={handleOpenPatient}
-          onSelectedIdsChange={setSelectedIds}
-          onSelectionReset={() => setSelectedIds([])}
+          onFrozenColumnsChange={setFrozenColumns}
           onSortChange={setSortStack}
-          onToggleArchive={handleToggleArchive}
-          permissionsCanCreateEdit={permissions.canCreateEdit}
           rows={sortedAndFilteredPatients}
           selectedId={selectedId}
-          selectedIds={selectedIds}
           sortStack={sortStack}
           t={tr}
           totalCount={patients.length}

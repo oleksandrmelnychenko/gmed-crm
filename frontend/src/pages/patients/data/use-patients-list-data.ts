@@ -10,6 +10,8 @@ import {
   type ProviderOption,
 } from "../model/list-model";
 
+const PATIENTS_LOOKUP_CACHE_TTL_MS = 60_000;
+
 type UsePatientsListDataArgs = {
   canViewPage: boolean;
   commonFailedLoad: string;
@@ -40,7 +42,9 @@ export function usePatientsListData({
     if (!canViewPage) return;
     let cancelled = false;
 
-    void apiFetch<ProviderOption[]>("/providers")
+    void apiFetch<ProviderOption[]>("/providers", {
+      cacheTtlMs: PATIENTS_LOOKUP_CACHE_TTL_MS,
+    })
       .then((items) => {
         if (!cancelled) {
           startTransition(() => setProviders(items));
@@ -61,7 +65,9 @@ export function usePatientsListData({
     if (!filters.providerId) return;
 
     let cancelled = false;
-    void apiFetch<DoctorOption[]>(`/providers/${filters.providerId}/doctors`)
+    void apiFetch<DoctorOption[]>(`/providers/${filters.providerId}/doctors`, {
+      cacheTtlMs: PATIENTS_LOOKUP_CACHE_TTL_MS,
+    })
       .then((items) => {
         if (!cancelled) {
           startTransition(() => setDoctorOptions(items));
@@ -88,6 +94,8 @@ export function usePatientsListData({
         if (!cancelled) {
           const filtered = filters.activeOnly === "false"
             ? items.filter((patient) => !patient.is_active)
+            : filters.activeOnly === "true"
+              ? items.filter((patient) => patient.is_active)
             : items;
           startTransition(() => setPatients(filtered));
           setListError("");

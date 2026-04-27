@@ -1,0 +1,1 @@
+export { SopsPage } from "./page";

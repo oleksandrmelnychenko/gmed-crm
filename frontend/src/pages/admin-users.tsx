@@ -22,7 +22,6 @@ import {
   PageHeader,
   TabLoader,
 } from "@/components/ui-shell";
-import { apiFetch } from "@/lib/api";
 import { useSheetDirtyGuard } from "@/hooks/use-sheet-dirty-guard";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -38,6 +37,13 @@ import {
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  createAdminUser,
+  fetchAdminUsers,
+  resetAdminUserPassword,
+  setAdminUserActive,
+  updateAdminUser,
+} from "@/pages/admin/data/admin-api";
 
 interface User {
   id: string;
@@ -126,7 +132,7 @@ export function AdminUsersPage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await apiFetch<User[]>("/users");
+      const data = await fetchAdminUsers<User>();
       setUsers(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -166,9 +172,11 @@ export function AdminUsersPage() {
     setCreating(true);
     setCreateError(null);
     try {
-      await apiFetch<User>("/users", {
-        method: "POST",
-        body: JSON.stringify({ email: newEmail, name: newName, password: newPassword, role: newRole }),
+      await createAdminUser<User>({
+        email: newEmail,
+        name: newName,
+        password: newPassword,
+        role: newRole,
       });
       closeCreateSheet();
       void loadUsers();
@@ -236,10 +244,7 @@ export function AdminUsersPage() {
     if (!editUser) return;
     setEuSaving(true);
     try {
-      await apiFetch(`/users/${editUser.id}/update`, {
-        method: "POST",
-        body: JSON.stringify({ name: euName, email: euEmail, role: euRole }),
-      });
+      await updateAdminUser(editUser.id, { name: euName, email: euEmail, role: euRole });
       closeEditSheet();
       void loadUsers();
     } finally {
@@ -249,16 +254,12 @@ export function AdminUsersPage() {
 
   const resetPassword = async () => {
     if (!editUser || euPassword.length < 8) return;
-    await apiFetch(`/users/${editUser.id}/reset-password`, {
-      method: "POST",
-      body: JSON.stringify({ new_password: euPassword }),
-    });
+    await resetAdminUserPassword(editUser.id, { new_password: euPassword });
     setEuPassword("");
   };
 
   const toggleActive = async (userId: string, currentlyActive: boolean) => {
-    const path = currentlyActive ? `/users/${userId}/deactivate` : `/users/${userId}/activate`;
-    await apiFetch(path, { method: "POST" });
+    await setAdminUserActive(userId, !currentlyActive);
     void loadUsers();
   };
 

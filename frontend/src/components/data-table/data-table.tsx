@@ -23,7 +23,6 @@ import { useOutsideClose } from "./use-outside-close";
 const HEADER_HEIGHT = 36;
 
 type DataTableRowStyle = CSSProperties & {
-  "--dt-current-row-bg": string;
   "--dt-row-bg": string;
   "--dt-row-hover-bg": string;
 };
@@ -245,14 +244,14 @@ export function DataTable<T>({
         <div
           role="row"
           aria-rowindex={1}
-          className="sticky top-0 z-20 grid items-center border-b border-border/70 bg-card text-xs font-medium text-muted-foreground shadow-sm"
+          className="data-table-header-row sticky top-0 z-20 grid items-center bg-card text-xs font-medium text-muted-foreground"
           style={{
             gridTemplateColumns: gridTemplate,
             height: HEADER_HEIGHT,
           }}
         >
           {selectionEnabled ? (
-            <div className="sticky left-0 z-30 flex h-full items-center justify-center border-r border-border/50 bg-card px-2 shadow-[1px_0_0_color-mix(in_oklch,var(--border)_70%,transparent)]">
+            <div className="sticky left-0 z-30 flex h-full items-center justify-center border-r border-b border-border/50 bg-card px-2 shadow-[1px_0_0_color-mix(in_oklch,var(--border)_70%,transparent)]">
               <SelectCheckbox
                 checked={allSelected}
                 indeterminate={someSelected}
@@ -282,8 +281,8 @@ export function DataTable<T>({
                 onClick={(e) => handleSortClick(col, e)}
                 onContextMenu={(e) => handleColumnContextMenu(col, e)}
                 className={cn(
-                  "flex h-full items-center gap-1 px-2 text-left",
-                  col.sortable && "cursor-pointer hover:bg-muted/80",
+                  "data-table-header-cell flex h-full items-center gap-1 border-b border-border/70 bg-card px-2 text-left",
+                  col.sortable && "cursor-pointer hover:bg-muted/65",
                   pinStyle.className,
                   isPinned && "bg-card shadow-[1px_0_0_color-mix(in_oklch,var(--border)_70%,transparent)]",
                 )}
@@ -324,7 +323,7 @@ export function DataTable<T>({
           })}
           {rowActions ? (
             <div
-              className="sticky right-0 z-30 flex h-full items-center justify-end border-l border-border/50 bg-card px-2 shadow-[-1px_0_0_color-mix(in_oklch,var(--border)_70%,transparent)]"
+              className="sticky right-0 z-30 flex h-full items-center justify-end border-l border-b border-border/50 bg-card px-2 shadow-[-1px_0_0_color-mix(in_oklch,var(--border)_70%,transparent)]"
               style={{ gridColumn: `${visibleCols.length + (selectionEnabled ? 2 : 1)}` }}
             />
           ) : null}
@@ -357,7 +356,7 @@ export function DataTable<T>({
                   data-state={isSelected ? "selected" : undefined}
                   onClick={() => onRowClick?.(row)}
                   onDoubleClick={() => onRowDoubleClick?.(row)}
-                  className="data-table-row group/row absolute inset-x-0 grid cursor-pointer items-center border-b border-border/45 transition-colors"
+                  className="data-table-row group/row absolute inset-x-0 grid cursor-pointer items-center border-b border-border/45 transition-[background-color,box-shadow]"
                   style={{
                     top: vRow.start,
                     height: vRow.size,
@@ -530,32 +529,28 @@ function rowToneStyle(opts: {
 }): DataTableRowStyle {
   if (opts.isSelected) {
     return {
-      "--dt-current-row-bg": "var(--dt-row-bg)",
       "--dt-row-bg": "color-mix(in oklch, var(--primary) 8%, var(--card))",
-      "--dt-row-hover-bg": "color-mix(in oklch, var(--primary) 12%, var(--card))",
+      "--dt-row-hover-bg": "color-mix(in oklch, var(--primary) 14%, var(--card))",
     };
   }
 
   if (opts.isActive) {
     return {
-      "--dt-current-row-bg": "var(--dt-row-bg)",
       "--dt-row-bg": "color-mix(in oklch, var(--muted) 72%, var(--card))",
-      "--dt-row-hover-bg": "color-mix(in oklch, var(--muted) 84%, var(--card))",
+      "--dt-row-hover-bg": "color-mix(in oklch, var(--primary) 7%, color-mix(in oklch, var(--muted) 84%, var(--card)))",
     };
   }
 
   if (opts.isOdd) {
     return {
-      "--dt-current-row-bg": "var(--dt-row-bg)",
       "--dt-row-bg": "color-mix(in oklch, var(--muted) 55%, var(--card))",
-      "--dt-row-hover-bg": "color-mix(in oklch, var(--muted) 75%, var(--card))",
+      "--dt-row-hover-bg": "color-mix(in oklch, var(--primary) 5%, color-mix(in oklch, var(--muted) 78%, var(--card)))",
     };
   }
 
   return {
-    "--dt-current-row-bg": "var(--dt-row-bg)",
     "--dt-row-bg": "var(--card)",
-    "--dt-row-hover-bg": "color-mix(in oklch, var(--muted) 58%, var(--card))",
+    "--dt-row-hover-bg": "color-mix(in oklch, var(--primary) 5%, color-mix(in oklch, var(--muted) 68%, var(--card)))",
   };
 }
 

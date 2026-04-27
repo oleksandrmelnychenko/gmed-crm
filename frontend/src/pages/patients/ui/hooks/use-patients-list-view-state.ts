@@ -17,7 +17,10 @@ import {
   DEFAULT_PATIENT_FILTERS as DEFAULT_FILTERS,
   type PatientFilters,
 } from "../../model/list-model";
-import { DEFAULT_PATIENT_HIDDEN_COLUMNS } from "../patients-columns";
+import {
+  DEFAULT_PATIENT_FROZEN_COLUMNS,
+  DEFAULT_PATIENT_HIDDEN_COLUMNS,
+} from "../patients-columns";
 
 type QueryPatch = Record<string, string | null>;
 
@@ -26,8 +29,15 @@ export function usePatientsListViewState() {
   const [filters, setFilters] = useState<PatientFilters>(() => {
     if (typeof window === "undefined") return DEFAULT_FILTERS;
     const params = new URLSearchParams(window.location.search);
+    const tableState = readDataTableState(params);
+    const activeParam = params.get("active");
     return {
       ...DEFAULT_FILTERS,
+      search: tableState.search ?? "",
+      activeOnly:
+        activeParam === "" || activeParam === "false" || activeParam === "true"
+          ? activeParam
+          : DEFAULT_FILTERS.activeOnly,
       providerId: params.get("provider") ?? "",
       doctorId: params.get("doctor") ?? "",
     };
@@ -62,8 +72,12 @@ export function usePatientsListViewState() {
     DEFAULT_PATIENT_HIDDEN_COLUMNS,
     1,
   );
+  const [frozenColumns, setFrozenColumns] = useVersionedLocalStorage<string[]>(
+    "patients.frozenColumns",
+    DEFAULT_PATIENT_FROZEN_COLUMNS,
+    1,
+  );
   const [density, setDensity] = useLocalStorage<DensityLevel>("patients.density", "compact");
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const viewMode = useResponsiveViewMode();
 
   const syncQuery = useCallback((next: QueryPatch) => {
@@ -138,8 +152,16 @@ export function usePatientsListViewState() {
   const clearAllFilters = useCallback(() => {
     setFilters(DEFAULT_FILTERS);
     setFilterPredicatesState([]);
-    syncQuery({ provider: null, doctor: null, patient: null });
-  }, [syncQuery]);
+    const params = writeDataTableState(new URLSearchParams(searchParams), {
+      filters: [],
+      search: "",
+    });
+    params.delete("provider");
+    params.delete("doctor");
+    params.delete("active");
+    params.delete("patient");
+    setSearchParams(params, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   return {
     clearAllFilters,
@@ -150,6 +172,7 @@ export function usePatientsListViewState() {
     detailVersion,
     filterPredicates,
     filters,
+    frozenColumns,
     handleCreateOpenChange,
     handleDetailOpenChange,
     helpOpen,
@@ -160,13 +183,12 @@ export function usePatientsListViewState() {
     refreshList,
     searchInputRef,
     selectedId,
-    selectedIds,
     setDensity,
     setFilterPredicates,
     setFilters,
+    setFrozenColumns,
     setHelpOpen,
     setHiddenColumns,
-    setSelectedIds,
     setSortStack,
     sortStack,
     syncQuery,

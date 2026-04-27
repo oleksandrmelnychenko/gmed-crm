@@ -3,7 +3,7 @@
  * Re-exports the existing apiFetch from @/lib/api and adds convenience helpers.
  */
 
-import { apiFetch, buildApiUrl, getAccessToken } from "@/lib/api";
+import { apiFetch, buildApiUrl, clearApiCache, getAccessToken } from "@/lib/api";
 
 export { apiFetch };
 
@@ -45,5 +45,6 @@ export async function uploadFile<T>(path: string, formData: FormData): Promise<T
     throw new Error(body?.message ?? body?.error ?? `${res.status} ${res.statusText}`);
   }
 
+  clearApiCache();
   return res.json() as Promise<T>;
 }

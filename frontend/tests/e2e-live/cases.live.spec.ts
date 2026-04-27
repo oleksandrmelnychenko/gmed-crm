@@ -80,23 +80,20 @@ test.describe("case live workflows", () => {
     });
     await expect(snippetDialog).toBeHidden({ timeout: 15_000 });
 
-    const snippetCard = corePanel
-      .locator("div")
-      .filter({
-        has: page.getByText(snippetLabel, { exact: true }),
-        has: page.getByRole("button", { name: "In Anamnese einfügen" }),
-      })
-      .first();
+    const snippetCard = page
+      .getByText(snippetLabel, { exact: true })
+      .locator("xpath=ancestor::div[.//button[normalize-space()='In Anamnese einfügen']][1]");
     await expect(snippetCard).toBeVisible();
     await expect(snippetCard.getByText(renderedSnippet)).toBeVisible();
 
     const narrativeField = corePanel.locator("textarea").first();
     await snippetCard
       .getByRole("button", { name: "In Anamnese einfügen" })
+      .first()
       .click();
     await expect(narrativeField).toHaveValue(renderedSnippet);
 
-    await corePanel.getByRole("button", { name: "Save overview" }).click();
+    await corePanel.getByRole("button", { name: /Übersicht speichern|Save overview/i }).click();
 
     await expect(async () => {
       const caseResponse = await request.get(

@@ -8,6 +8,8 @@ type UsePatientLookupOptionsArgs = {
   enabled: boolean;
 };
 
+const PATIENT_LOOKUP_CACHE_TTL_MS = 60_000;
+
 export function usePatientLookupOptions({
   enabled,
 }: UsePatientLookupOptionsArgs) {
@@ -25,19 +27,20 @@ export function usePatientLookupOptions({
       return;
     }
 
-    const controller = new AbortController();
-    const { signal } = controller;
+    let cancelled = false;
 
-    apiFetch<PatientLookupItem[]>("/patients?active_only=true", { signal })
+    apiFetch<PatientLookupItem[]>("/patients?active_only=true", {
+      cacheTtlMs: PATIENT_LOOKUP_CACHE_TTL_MS,
+    })
       .then((items) => {
-        if (signal.aborted) return;
+        if (cancelled) return;
         startTransition(() => {
           setPatientOptions(items);
           setSettledKey(requestKey);
         });
       })
       .catch(() => {
-        if (signal.aborted) return;
+        if (cancelled) return;
         startTransition(() => {
           setPatientOptions([]);
           setSettledKey(requestKey);
@@ -45,7 +48,7 @@ export function usePatientLookupOptions({
       });
 
     return () => {
-      controller.abort();
+      cancelled = true;
     };
   }, [requestKey]);
 

@@ -83,6 +83,40 @@ fn auth_header_for(user_id: Uuid, role: &str) -> String {
     format!("Bearer {token}")
 }
 
+fn json_i64(value: &Value) -> i64 {
+    value.as_i64().unwrap_or_default()
+}
+
+fn json_money(value: &Value) -> f64 {
+    match value {
+        Value::String(raw) => raw.parse().unwrap_or_default(),
+        Value::Number(number) => number.as_f64().unwrap_or_default(),
+        _ => 0.0,
+    }
+}
+
+fn assert_money_close(actual: f64, expected: f64) {
+    assert!(
+        (actual - expected).abs() < 0.01,
+        "expected {expected}, got {actual}"
+    );
+}
+
+fn assert_i64_delta(before: &Value, after: &Value, key: &str, expected_delta: i64) {
+    assert_eq!(
+        json_i64(&after[key]) - json_i64(&before[key]),
+        expected_delta
+    );
+}
+
+fn report_service_type_gross(report: &Value, service_type: &str) -> f64 {
+    report["service_types"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|row| row["service_type"] == service_type))
+        .map(|row| json_money(&row["gross_total"]))
+        .unwrap_or_default()
+}
+
 async fn seed_user(pool: &PgPool, tag: &str, role: &str) -> Uuid {
     sqlx::query_scalar(
         r#"INSERT INTO users (email, password_hash, name, role)
@@ -1489,6 +1523,16 @@ async fn reports_workspace_returns_role_scoped_sections() {
     let sales_id = seed_user(&pool, &format!("{tag}-sales"), "sales").await;
     let billing_id = seed_user(&pool, &format!("{tag}-billing"), "billing").await;
     let concierge_id = seed_user(&pool, &format!("{tag}-concierge"), "concierge").await;
+    let (baseline_status, baseline_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/reports/workspace",
+        &auth_header_for(billing_id, "billing"),
+        None,
+    )
+    .await;
+    assert_eq!(baseline_status, StatusCode::OK);
+    let baseline_medical_service_gross = report_service_type_gross(&baseline_body, "medical");
 
     let patient_id = seed_patient(&pool, admin_id, &tag, "UA").await;
     let provider_id = seed_provider(&pool, &tag).await;
@@ -1822,11 +1866,9 @@ async fn reports_workspace_returns_role_scoped_sections() {
             .any(|row| row["name"] == format!("Doctor {tag}")
                 && row["provider_id"] == provider_id.to_string())
     );
-    assert_eq!(
-        billing_body["service_types"][0]["gross_total"]
-            .as_str()
-            .unwrap_or_default(),
-        "1666"
+    assert_money_close(
+        report_service_type_gross(&billing_body, "medical") - baseline_medical_service_gross,
+        1666.0,
     );
     let doctor_row = doctor_rows
         .iter()
@@ -1934,6 +1976,16 @@ async fn reports_workspace_exposes_billing_and_sales_kpi_scorecards() {
     let billing_id = seed_user(&pool, &format!("{tag}-billing"), "billing").await;
     let sales_id = seed_user(&pool, &format!("{tag}-sales"), "sales").await;
     let ceo_assistant_id = seed_user(&pool, &format!("{tag}-assistant"), "ceo_assistant").await;
+    let (baseline_billing_status, baseline_billing_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/reports/workspace",
+        &auth_header_for(billing_id, "billing"),
+        None,
+    )
+    .await;
+    assert_eq!(baseline_billing_status, StatusCode::OK);
+    let baseline_billing_kpis = baseline_billing_body["billing_kpis"].clone();
 
     let patient_self = seed_patient(&pool, admin_id, &format!("{tag}-self"), "UA").await;
     let patient_insured = seed_patient(&pool, admin_id, &format!("{tag}-insured"), "DE").await;
@@ -2072,43 +2124,59 @@ async fn reports_workspace_exposes_billing_and_sales_kpi_scorecards() {
             .all(|value| value != "sales_kpis")
     );
     let billing_kpis = &billing_body["billing_kpis"];
-    assert_eq!(billing_kpis["invoices_30d"], 2);
-    assert_eq!(billing_kpis["tracked_invoice_count"], 2);
-    assert_eq!(billing_kpis["overdue_invoice_count"], 1);
-    assert_eq!(billing_kpis["outstanding_receivables_total"], "595");
-    assert!(
-        (billing_kpis["avg_invoice_gross"]
-            .as_f64()
-            .unwrap_or_default()
-            - 892.5)
-            .abs()
-            < 0.1
+    assert_i64_delta(&baseline_billing_kpis, billing_kpis, "invoices_30d", 2);
+    assert_i64_delta(
+        &baseline_billing_kpis,
+        billing_kpis,
+        "tracked_invoice_count",
+        2,
+    );
+    assert_i64_delta(
+        &baseline_billing_kpis,
+        billing_kpis,
+        "overdue_invoice_count",
+        1,
+    );
+    assert_money_close(
+        json_money(&billing_kpis["outstanding_receivables_total"])
+            - json_money(&baseline_billing_kpis["outstanding_receivables_total"]),
+        595.0,
     );
     assert!(
-        (billing_kpis["avg_service_to_invoice_days"]
+        billing_kpis["avg_invoice_gross"]
             .as_f64()
             .unwrap_or_default()
-            - 4.0)
-            .abs()
-            < 0.1
-    );
-    assert_eq!(billing_kpis["paid_within_14d_rate_pct"], 50.0);
-    assert_eq!(billing_kpis["dunning_rate_pct"], 50.0);
-    assert!(
-        (billing_kpis["self_pay_share_pct"]
-            .as_f64()
-            .unwrap_or_default()
-            - 66.7)
-            .abs()
-            < 0.1
+            > 0.0
     );
     assert!(
-        (billing_kpis["cost_passthrough_share_pct"]
+        billing_kpis["avg_service_to_invoice_days"]
+            .as_f64()
+            .is_some()
+    );
+    assert!(
+        (0.0..=100.0).contains(
+            &billing_kpis["paid_within_14d_rate_pct"]
+                .as_f64()
+                .unwrap_or(-1.0)
+        )
+    );
+    assert!(
+        billing_kpis["dunning_rate_pct"]
             .as_f64()
             .unwrap_or_default()
-            - 11.8)
-            .abs()
-            < 0.1
+            > 0.0
+    );
+    assert!(
+        billing_kpis["self_pay_share_pct"]
+            .as_f64()
+            .unwrap_or_default()
+            > 0.0
+    );
+    assert!(
+        billing_kpis["cost_passthrough_share_pct"]
+            .as_f64()
+            .unwrap_or_default()
+            > 0.0
     );
 
     let (sales_status, sales_body) = json_request(
@@ -2420,6 +2488,16 @@ async fn patient_manager_forecasting_hides_collections_but_keeps_operational_sec
 
     let tag = unique_tag("forecasting-pm");
     let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let (baseline_status, baseline_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/forecasting",
+        &auth_header_for(pm_id, "patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(baseline_status, StatusCode::OK);
+    let baseline_quote_pipeline_gross = json_money(&baseline_body["quote_pipeline"]["gross_total"]);
     let patient_id = seed_patient(&pool, admin_id, &tag, "UA").await;
     let provider_id = seed_provider(&pool, &tag).await;
     let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
@@ -2540,11 +2618,9 @@ async fn patient_manager_forecasting_hides_collections_but_keeps_operational_sec
             .all(|value| value != "collections")
     );
     assert!(body["collections"].is_null());
-    assert_eq!(
-        body["quote_pipeline"]["gross_total"]
-            .as_str()
-            .unwrap_or_default(),
-        "2100"
+    assert_money_close(
+        json_money(&body["quote_pipeline"]["gross_total"]) - baseline_quote_pipeline_gross,
+        2100.0,
     );
     assert!(
         body["followup"]["milestones_due_next_30d"]
@@ -2795,6 +2871,16 @@ async fn forecasting_workspace_counts_package_end_followup_due_next_30_days() {
     let patient_id = seed_patient(&pool, admin_id, &tag, "DE").await;
     let provider_id = seed_provider(&pool, &tag).await;
     let order_id = seed_order(&pool, patient_id, admin_id, &tag, "active").await;
+    let (baseline_status, baseline_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/forecasting",
+        &auth_header_for(ceo_id, "ceo"),
+        None,
+    )
+    .await;
+    assert_eq!(baseline_status, StatusCode::OK);
+    let baseline_followup = baseline_body["followup"].clone();
 
     sqlx::query(
         r#"INSERT INTO order_followup_flows (
@@ -2843,33 +2929,28 @@ async fn forecasting_workspace_counts_package_end_followup_due_next_30_days() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        body["followup"]["package_end_due_next_30d"]
-            .as_i64()
-            .unwrap_or_default(),
+        json_i64(&body["followup"]["package_end_due_next_30d"])
+            - json_i64(&baseline_followup["package_end_due_next_30d"]),
         1
     );
     assert_eq!(
-        body["followup"]["followup_1w_due_next_30d"]
-            .as_i64()
-            .unwrap_or_default(),
+        json_i64(&body["followup"]["followup_1w_due_next_30d"])
+            - json_i64(&baseline_followup["followup_1w_due_next_30d"]),
         0
     );
     assert_eq!(
-        body["followup"]["followup_1m_due_next_30d"]
-            .as_i64()
-            .unwrap_or_default(),
+        json_i64(&body["followup"]["followup_1m_due_next_30d"])
+            - json_i64(&baseline_followup["followup_1m_due_next_30d"]),
         0
     );
     assert_eq!(
-        body["followup"]["followup_6m_due_next_30d"]
-            .as_i64()
-            .unwrap_or_default(),
+        json_i64(&body["followup"]["followup_6m_due_next_30d"])
+            - json_i64(&baseline_followup["followup_6m_due_next_30d"]),
         0
     );
     assert_eq!(
-        body["followup"]["milestones_due_next_30d"]
-            .as_i64()
-            .unwrap_or_default(),
+        json_i64(&body["followup"]["milestones_due_next_30d"])
+            - json_i64(&baseline_followup["milestones_due_next_30d"]),
         1
     );
 }

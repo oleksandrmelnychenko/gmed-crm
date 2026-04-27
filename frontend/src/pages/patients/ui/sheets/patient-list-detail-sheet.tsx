@@ -47,7 +47,12 @@ import {
   type PatientsDictionary,
   type StaffOption,
 } from "../../model/list-model";
-import { parseFunctionalLabels, formInputClassName, humanizeFunctionalLabel } from "../shared/patient-form-primitives";
+import {
+  functionalLabelChipClass,
+  humanizeFunctionalLabel,
+  parseFunctionalLabels,
+  formInputClassName,
+} from "../shared/patient-form-primitives";
 import { PatientFormFields } from "../shared/patient-form-fields";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
@@ -123,7 +128,7 @@ function PatientOverviewSection({
           <Badge
             key={`${detail.id}-${label}`}
             variant="outline"
-            className="rounded-full border-amber-200 bg-amber-50 text-amber-700"
+            className={cn("rounded-full", functionalLabelChipClass(label))}
           >
             {humanizeFunctionalLabel(label)}
           </Badge>

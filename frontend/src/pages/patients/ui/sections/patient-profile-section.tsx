@@ -21,6 +21,7 @@ import type {
   PatientVitalMeasurement,
 } from "../../model/detail-resource-types";
 import { LegalStatusPill } from "../shared/legal-status-pill";
+import { humanizeFunctionalLabel } from "../shared/patient-form-primitives";
 import { WorkspaceSectionIntro } from "../shared/workspace-primitives";
 
 const loadPatientLegalPreviewSheets = () => import("../sheets/patient-legal-preview-sheets");
@@ -308,7 +309,13 @@ export function PatientProfileTab({
             <InfoRow label={t.patients_languages} value={fieldValue(detail.languages, t.common_not_set)} onEdit={editAction} editLabel={editPatientFieldLabel(t.patients_languages)} />
             <InfoRow
               label={l("Funktionale Labels", "Функциональные метки", "Functional labels")}
-              value={fieldValue(detail.functional_labels, t.common_not_set)}
+              value={
+                detail.functional_labels?.length
+                  ? detail.functional_labels
+                      .map((label) => humanizeFunctionalLabel(label))
+                      .join(", ")
+                  : t.common_not_set
+              }
               onEdit={editAction}
               editLabel={editPatientFieldLabel(l("Funktionale Labels", "Функциональные метки", "Functional labels"))}
             />

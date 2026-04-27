@@ -22,121 +22,35 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-
-type SopItem = {
-  id: string;
-  title: string;
-  category: string;
-  summary?: string | null;
-  body_markdown: string;
-  status: string;
-  approval_required_role?: string | null;
-  target_roles: string[];
-  requires_ack: boolean;
-  revision_no: number;
-  created_by_name?: string | null;
-  created_by_role: string;
-  approved_by_name?: string | null;
-  approved_at?: string | null;
-  review_note?: string | null;
-  created_at: string;
-  updated_at: string;
-  assigned_user_count: number;
-  target_user_ids: string[];
-  my_ack_status?: string | null;
-  my_acknowledged_at?: string | null;
-  pending_ack_count: number;
-  acknowledged_count: number;
-  can_edit: boolean;
-  can_review: boolean;
-  can_request_ack: boolean;
-  can_acknowledge: boolean;
-};
-
-type EligibleUser = {
-  id: string;
-  name: string;
-  role: string;
-};
-
-type EligibleUsersPayload = {
-  allowed_target_roles: string[];
-  eligible_users: EligibleUser[];
-};
-
-type SopFormState = {
-  title: string;
-  category: string;
-  summary: string;
-  bodyMarkdown: string;
-  requiresAck: boolean;
-  targetRoles: string[];
-  targetUserIds: string[];
-};
-
-function emptyForm(): SopFormState {
-  return {
-    title: "",
-    category: "sop",
-    summary: "",
-    bodyMarkdown: "",
-    requiresAck: false,
-    targetRoles: [],
-    targetUserIds: [],
-  };
-}
+import { statusTone } from "./appearance/status-appearance";
+import {
+  acknowledgeSop,
+  fetchSopsWorkspace,
+  requestSopAcknowledgement,
+  reviewSop,
+  saveSopContent,
+} from "./data/sops-api";
+import {
+  approvalRoleLabel,
+  categoryLabel,
+  emptyForm,
+  formDescription,
+  formatDate,
+  reviewQueueCopy,
+  roleCanCreate,
+  roleCanOpenLearning,
+  roleCanReview,
+} from "./model/sops-model";
+import type { EligibleUser, SopFormState, SopItem } from "./model/types";
 
 function card(extra?: string) {
   return cn(
     "rounded-[1.75rem] border border-border/70 bg-card shadow-[0_20px_60px_rgba(15,23,42,0.05)]",
     extra,
   );
-}
-
-function categoryLabel(value: string) {
-  if (value === "sop") return "SOP";
-  if (value === "handbook") return "Handbook";
-  if (value === "training") return "Training";
-  return value;
-}
-
-function statusTone(value: string) {
-  if (value === "approved") return "bg-emerald-100 text-emerald-700 hover:bg-emerald-100";
-  if (value === "pending_approval") return "bg-amber-100 text-amber-700 hover:bg-amber-100";
-  if (value === "rejected") return "bg-rose-100 text-rose-700 hover:bg-rose-100";
-  if (value === "archived") return "bg-slate-200 text-slate-700 hover:bg-slate-200";
-  return "bg-slate-100 text-slate-700 hover:bg-slate-100";
-}
-
-function roleCanOpenLearning(role?: string) {
-  return role !== undefined && role !== "patient";
-}
-
-function roleCanCreate(role?: string) {
-  return role === "ceo" || role === "patient_manager" || role === "teamlead_interpreter";
-}
-
-function roleCanReview(role?: string) {
-  return role === "ceo" || role === "patient_manager";
-}
-
-function formatDate(value?: string | null) {
-  if (!value) return "Not set";
-  try {
-    return new Intl.DateTimeFormat("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(value));
-  } catch {
-    return value;
-  }
 }
 
 function metricCard(label: string, value: string | number, icon: ElementType) {
@@ -152,39 +66,6 @@ function metricCard(label: string, value: string | number, icon: ElementType) {
       <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-950">{value}</p>
     </article>
   );
-}
-
-function approvalRoleLabel(value?: string | null) {
-  if (value === "ceo") return "CEO approval";
-  if (value === "patient_manager") return "Patient-manager approval";
-  return "Approval";
-}
-
-function reviewQueueCopy(role?: string) {
-  if (role === "patient_manager") {
-    return {
-      metric: "PM review queue",
-      title: "Patient-manager approval queue",
-      description:
-        "Interpreter-team SOPs waiting for patient-manager approval before they become visible.",
-    };
-  }
-
-  return {
-    metric: "CEO review queue",
-    title: "CEO approval queue",
-    description: "Team-authored SOPs waiting for CEO approval before they become visible.",
-  };
-}
-
-function formDescription(role?: string) {
-  if (role === "ceo") {
-    return "Create role-scoped SOP, handbook or training content. CEO content is published immediately.";
-  }
-  if (role === "patient_manager") {
-    return "Create role-scoped SOP, handbook or training content. Patient-manager content is routed to CEO approval.";
-  }
-  return "Create interpreter-team SOP content. Teamlead interpreter content is routed to patient-manager approval and can target interpreters only.";
 }
 
 export function SopsPage() {
@@ -227,11 +108,10 @@ export function SopsPage() {
       else setRefreshing(true);
 
       try {
-        const [library, eligible, queue] = await Promise.all([
-          apiFetch<SopItem[]>("/sops").catch(() => []),
-          canCreate ? apiFetch<EligibleUsersPayload>("/sops/eligible-users").catch(() => null) : Promise.resolve(null),
-          canReviewQueue ? apiFetch<SopItem[]>("/sops/review-queue").catch(() => []) : Promise.resolve([]),
-        ]);
+        const { library, eligible, queue } = await fetchSopsWorkspace(
+          canCreate,
+          canReviewQueue,
+        );
 
         if (cancelled) return;
         setItems(library);
@@ -302,17 +182,14 @@ export function SopsPage() {
     setNotice("");
 
     try {
-      await apiFetch(editing ? `/sops/${editing.id}/update` : "/sops", {
-        method: "POST",
-        body: JSON.stringify({
-          title: form.title,
-          category: form.category,
-          summary: form.summary || null,
-          body_markdown: form.bodyMarkdown,
-          target_roles: form.targetRoles,
-          target_user_ids: form.targetUserIds,
-          requires_ack: form.requiresAck,
-        }),
+      await saveSopContent(editing?.id ?? null, {
+        title: form.title,
+        category: form.category,
+        summary: form.summary || null,
+        body_markdown: form.bodyMarkdown,
+        target_roles: form.targetRoles,
+        target_user_ids: form.targetUserIds,
+        requires_ack: form.requiresAck,
       });
       setFormOpen(false);
       resetForm();
@@ -327,7 +204,7 @@ export function SopsPage() {
 
   async function requestAck(item: SopItem) {
     try {
-      await apiFetch(`/sops/${item.id}/request-acknowledgement`, { method: "POST" });
+      await requestSopAcknowledgement(item.id);
       setNotice("Acknowledgement request sent.");
       setVersion((value) => value + 1);
     } catch (err) {
@@ -337,7 +214,7 @@ export function SopsPage() {
 
   async function acknowledge(item: SopItem) {
     try {
-      await apiFetch(`/sops/${item.id}/acknowledge`, { method: "POST" });
+      await acknowledgeSop(item.id);
       setNotice("Acknowledgement recorded.");
       setVersion((value) => value + 1);
     } catch (err) {
@@ -354,9 +231,9 @@ export function SopsPage() {
     setNotice("");
 
     try {
-      await apiFetch(`/sops/${reviewItem.id}/review`, {
-        method: "POST",
-        body: JSON.stringify({ decision: reviewDecision, note: reviewNote || null }),
+      await reviewSop(reviewItem.id, {
+        decision: reviewDecision,
+        note: reviewNote || null,
       });
       setReviewOpen(false);
       setReviewItem(null);

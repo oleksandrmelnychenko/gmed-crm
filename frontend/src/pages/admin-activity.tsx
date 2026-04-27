@@ -36,10 +36,10 @@ import {
   Sheet,
   SheetContent,
 } from "@/components/ui/sheet";
-import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { formatAdminDateTime } from "@/pages/admin-pages.helpers";
+import { fetchAdminActivity } from "@/pages/admin/data/admin-api";
 import {
   Banner,
   EmptyCell,
@@ -141,9 +141,7 @@ export function AdminActivityPage() {
     setLoading(true);
     setError("");
     try {
-      let url = "/admin/activity?limit=300";
-      if (action) url += `&action=${encodeURIComponent(action)}`;
-      const data = await apiFetch<ActivityRow[]>(url);
+      const data = await fetchAdminActivity<ActivityRow>(action);
       startTransition(() => setActivities(data));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : t.common_error);

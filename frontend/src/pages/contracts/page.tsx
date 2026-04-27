@@ -52,456 +52,76 @@ import {
   SheetContent,
 } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
+import {
+  contractStatusClassName,
+  quoteStatusClassName,
+} from "./appearance/status-appearance";
+import {
+  CONTRACT_STATUSES,
+  DEFAULT_AGENCY_SERVICE_FILTERS,
+  DEFAULT_CONTRACT_FILTERS,
+  DEFAULT_QUOTE_FILTERS,
+  QUOTE_STATUSES,
+  agencyServiceToForm,
+  blankAgencyServiceForm,
+  blankContractForm,
+  blankQuoteForm,
+  buildAgencyServicesPath,
+  buildContractsPath,
+  buildQuotesPath,
+  buildSearchParams,
+  contractToStatusForm,
+  contractsPermissions,
+  enumLabel,
+  formatCurrency,
+  formatDate,
+  formatDateTime,
+  orderOptionLabel,
+  patientOptionLabel,
+  quoteToStatusForm,
+  toOptional,
+  valueToInput,
+} from "./model/contracts-model";
+import {
+  createContract,
+  createQuote,
+  fetchAgencyServices,
+  fetchContract,
+  fetchContracts,
+  fetchContractsLookups,
+  fetchQuoteWorkspace,
+  fetchQuotes,
+  saveAgencyService,
+  updateContractStatus,
+  updateQuoteStatus,
+} from "./data/contracts-api";
+import type {
+  AgencyServiceFilters,
+  AgencyServiceFormState,
+  AgencyServiceItem,
+  ContractFilters,
+  ContractFormState,
+  ContractItem,
+  ContractStatus,
+  ContractStatusFormState,
+  ContractsTab,
+  OrderOption,
+  PatientOption,
+  QuoteFilters,
+  QuoteFormState,
+  QuoteItem,
+  QuoteLineItemRow,
+  QuoteStatus,
+  QuoteStatusFormState,
+  QuoteVersionItem,
+} from "./model/types";
 
-type ContractsTab = "contracts" | "quotes";
-type ContractStatus = "draft" | "sent" | "signed" | "expired" | "terminated";
-type QuoteStatus = "draft" | "sent" | "accepted" | "rejected" | "expired";
-
-type ContractItem = {
-  id: string;
-  patient_id: string;
-  patient_name: string;
-  patient_pid: string;
-  contract_number: string;
-  status: ContractStatus | string;
-  signed_at: string | null;
-  valid_from: string | null;
-  valid_to: string | null;
-  conditions: Record<string, unknown> | null;
-  created_at: string;
-  updated_at: string;
-};
-
-type QuoteLineItem = {
-  description: string;
-  quantity: string;
-  unit_price: string;
-  vat_rate: string;
-  is_cost_passthrough: boolean;
-  line_net: string;
-  line_vat: string;
-  line_gross: string;
-  provider_id?: string | null;
-  doctor_id?: string | null;
-  notes?: string | null;
-};
-
-type QuoteItem = {
-  id: string;
-  order_id: string;
-  order_number: string;
-  contract_id: string | null;
-  patient_id: string;
-  patient_name: string;
-  patient_pid: string;
-  quote_number: string;
-  status: QuoteStatus | string;
-  total_net: unknown;
-  total_vat: unknown;
-  total_gross: unknown;
-  valid_until: string | null;
-  paid_amount: unknown;
-  paid_at: string | null;
-  notes: string | null;
-  version_count?: number;
-  current_version_number?: number;
-  created_at: string;
-  updated_at: string;
-  line_items?: QuoteLineItem[];
-};
-
-type QuoteVersionItem = {
-  id: string;
-  quote_id: string;
-  version_number: number;
-  order_id: string;
-  quote_number: string;
-  status: QuoteStatus | string;
-  total_net: unknown;
-  total_vat: unknown;
-  total_gross: unknown;
-  valid_until: string | null;
-  paid_amount: unknown;
-  paid_at: string | null;
-  notes: string | null;
-  change_reason: string | null;
-  line_item_count: number;
-  created_at: string;
-  created_by_name: string;
-  created_by_role: string;
-};
-
-type QuoteLineItemRow = QuoteLineItem & {
-  id: string;
-};
-
-type PatientOption = {
-  id: string;
-  patient_id: string;
-  first_name?: string;
-  last_name?: string;
-};
-
-type OrderOption = {
-  id: string;
-  order_number: string;
-  patient_id: string;
-  patient_name: string;
-  patient_pid: string;
-  phase: string;
-  status: string;
-  total_estimated?: unknown;
-};
-
-type ContractFilters = {
-  search: string;
-  patientId: string;
-  status: string;
-};
-
-type QuoteFilters = {
-  search: string;
-  patientId: string;
-  orderId: string;
-  status: string;
-};
-
-type ContractFormState = {
-  patientId: string;
-  status: ContractStatus;
-  validFrom: string;
-  validTo: string;
-  signedAt: string;
-  conditionsText: string;
-};
-
-type ContractStatusFormState = {
-  status: ContractStatus;
-  validFrom: string;
-  validTo: string;
-  signedAt: string;
-  conditionsText: string;
-};
-
-type QuoteFormState = {
-  orderId: string;
-  validUntil: string;
-  notes: string;
-};
-
-type QuoteStatusFormState = {
-  status: QuoteStatus;
-  paidAmount: string;
-  notes: string;
-};
-
-type AgencyServiceItem = {
-  id: string;
-  service_key: string;
-  service_name: string;
-  description: string | null;
-  unit_label: string;
-  unit_price: unknown;
-  currency: string;
-  vat_rate: unknown;
-  is_active: boolean;
-  valid_from: string | null;
-  valid_to: string | null;
-  created_at: string | null;
-  updated_at: string | null;
-};
-
-type AgencyServiceFilters = {
-  search: string;
-  activeOnly: string;
-};
-
-type AgencyServiceFormState = {
-  id: string;
-  serviceKey: string;
-  serviceName: string;
-  description: string;
-  unitLabel: string;
-  unitPrice: string;
-  currency: string;
-  vatRate: string;
-  isActive: boolean;
-  validFrom: string;
-  validTo: string;
-};
-
-type ContractsPermissions = {
-  canViewPage: boolean;
-  canCreateContract: boolean;
-  canManageContract: boolean;
-  canCreateQuote: boolean;
-  canManageQuote: boolean;
-  canManageCatalog: boolean;
-};
-
-const CONTRACT_STATUSES: ContractStatus[] = [
-  "draft",
-  "sent",
-  "signed",
-  "expired",
-  "terminated",
-];
-const QUOTE_STATUSES: QuoteStatus[] = [
-  "draft",
-  "sent",
-  "accepted",
-  "rejected",
-  "expired",
-];
-const DEFAULT_CONTRACT_FILTERS: ContractFilters = {
-  search: "",
-  patientId: "",
-  status: "",
-};
-const DEFAULT_QUOTE_FILTERS: QuoteFilters = {
-  search: "",
-  patientId: "",
-  orderId: "",
-  status: "",
-};
-const DEFAULT_AGENCY_SERVICE_FILTERS: AgencyServiceFilters = {
-  search: "",
-  activeOnly: "true",
-};
 const selectTriggerClassName = cn("w-full", shellInputClassName, "justify-between");
 const textareaClassName = shellTextareaClass;
-
-function contractsPermissions(role?: string): ContractsPermissions {
-  const canView =
-    role === "ceo" ||
-    role === "ceo_assistant" ||
-    role === "patient_manager" ||
-    role === "billing";
-  const canManage = role === "ceo" || role === "patient_manager" || role === "billing";
-  return {
-    canViewPage: canView,
-    canCreateContract: canManage,
-    canManageContract: canManage,
-    canCreateQuote: canManage,
-    canManageQuote: canManage,
-    canManageCatalog: canManage,
-  };
-}
-
-function buildContractsPath(filters: ContractFilters) {
-  const params = new URLSearchParams();
-  if (filters.search.trim()) params.set("search", filters.search.trim());
-  if (filters.patientId) params.set("patient_id", filters.patientId);
-  if (filters.status) params.set("status", filters.status);
-  return params.size ? `/framework-contracts?${params.toString()}` : "/framework-contracts";
-}
-
-function buildQuotesPath(filters: QuoteFilters) {
-  const params = new URLSearchParams();
-  if (filters.search.trim()) params.set("search", filters.search.trim());
-  if (filters.patientId) params.set("patient_id", filters.patientId);
-  if (filters.orderId) params.set("order_id", filters.orderId);
-  if (filters.status) params.set("status", filters.status);
-  return params.size ? `/quotes?${params.toString()}` : "/quotes";
-}
-
-function buildAgencyServicesPath(filters: AgencyServiceFilters) {
-  const params = new URLSearchParams();
-  if (filters.search.trim()) params.set("search", filters.search.trim());
-  if (filters.activeOnly === "true") params.set("active_only", "true");
-  if (filters.activeOnly === "false") params.set("active_only", "false");
-  return params.size ? `/agency-services?${params.toString()}` : "/agency-services";
-}
-
-function blankContractForm(patientId = ""): ContractFormState {
-  return {
-    patientId,
-    status: "draft",
-    validFrom: "",
-    validTo: "",
-    signedAt: "",
-    conditionsText: "",
-  };
-}
-
-function blankQuoteForm(orderId = ""): QuoteFormState {
-  return {
-    orderId,
-    validUntil: "",
-    notes: "",
-  };
-}
-
-function blankAgencyServiceForm(lang: "de" | "ru" = "de"): AgencyServiceFormState {
-  return {
-    id: "",
-    serviceKey: "",
-    serviceName: "",
-    description: "",
-    unitLabel: lang === "de" ? "Einheit" : "ед.",
-    unitPrice: "",
-    currency: "EUR",
-    vatRate: "19",
-    isActive: true,
-    validFrom: "",
-    validTo: "",
-  };
-}
-
-function contractToStatusForm(contract: ContractItem): ContractStatusFormState {
-  return {
-    status: (contract.status as ContractStatus) ?? "draft",
-    validFrom: contract.valid_from ?? "",
-    validTo: contract.valid_to ?? "",
-    signedAt: contract.signed_at ? toDateTimeLocal(contract.signed_at) : "",
-    conditionsText: contract.conditions ? JSON.stringify(contract.conditions, null, 2) : "",
-  };
-}
-
-function quoteToStatusForm(quote: QuoteItem): QuoteStatusFormState {
-  return {
-    status: (quote.status as QuoteStatus) ?? "draft",
-    paidAmount: valueToInput(quote.paid_amount),
-    notes: quote.notes ?? "",
-  };
-}
-
-function agencyServiceToForm(service: AgencyServiceItem): AgencyServiceFormState {
-  return {
-    id: service.id,
-    serviceKey: service.service_key,
-    serviceName: service.service_name,
-    description: service.description ?? "",
-    unitLabel: service.unit_label,
-    unitPrice: valueToInput(service.unit_price),
-    currency: service.currency,
-    vatRate: valueToInput(service.vat_rate),
-    isActive: service.is_active,
-    validFrom: service.valid_from ?? "",
-    validTo: service.valid_to ?? "",
-  };
-}
-
-function toOptional(value: string) {
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-}
-
-function valueToInput(value: unknown) {
-  if (value === null || value === undefined) return "";
-  return String(value);
-}
-
-function toDateTimeLocal(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const pad = (part: number) => String(part).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-function formatDateTime(
-  value?: string | null,
-  locale = "de-DE",
-  emptyLabel = "-",
-) {
-  if (!value) return emptyLabel;
-  try {
-    return new Intl.DateTimeFormat(locale, {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(value));
-  } catch {
-    return value;
-  }
-}
-
-function formatDate(
-  value?: string | null,
-  locale = "de-DE",
-  emptyLabel = "-",
-) {
-  if (!value) return emptyLabel;
-  try {
-    return new Intl.DateTimeFormat(locale, {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }).format(new Date(`${value}T00:00:00`));
-  } catch {
-    return value;
-  }
-}
-
-function enumLabel(value: string, labels: Record<string, string>) {
-  return labels[value] ?? value.replaceAll("_", " ");
-}
-
-function formatCurrency(value: unknown) {
-  const numeric = typeof value === "number" ? value : Number(value ?? 0);
-  if (!Number.isFinite(numeric)) return "EUR 0.00";
-  return new Intl.NumberFormat("de-DE", {
-    style: "currency",
-    currency: "EUR",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(numeric);
-}
-
-function contractStatusClassName(status: string) {
-  switch (status) {
-    case "signed":
-      return "border-emerald-200 bg-emerald-50 text-emerald-700";
-    case "sent":
-      return "border-sky-200 bg-sky-50 text-sky-700";
-    case "expired":
-    case "terminated":
-      return "border-rose-200 bg-rose-50 text-rose-700";
-    default:
-      return "border-amber-200 bg-amber-50 text-amber-700";
-  }
-}
-
-function quoteStatusClassName(status: string) {
-  switch (status) {
-    case "accepted":
-      return "border-emerald-200 bg-emerald-50 text-emerald-700";
-    case "sent":
-      return "border-sky-200 bg-sky-50 text-sky-700";
-    case "rejected":
-    case "expired":
-      return "border-rose-200 bg-rose-50 text-rose-700";
-    default:
-      return "border-amber-200 bg-amber-50 text-amber-700";
-  }
-}
-
-function patientOptionLabel(patient: PatientOption) {
-  return `${patient.patient_id} · ${[patient.first_name, patient.last_name].filter(Boolean).join(" ")}`;
-}
-
-function orderOptionLabel(order: OrderOption) {
-  return `${order.order_number} · ${order.patient_pid} · ${order.patient_name}`;
-}
-
-function buildSearchParams(
-  current: URLSearchParams,
-  patch: Record<string, string | null | undefined>,
-) {
-  const next = new URLSearchParams(current);
-  for (const [key, value] of Object.entries(patch)) {
-    if (value === null || value === undefined || value === "") next.delete(key);
-    else next.set(key, value);
-  }
-  return next;
-}
 
 export function ContractsPage() {
   const { user } = useAuth();
@@ -1390,10 +1010,8 @@ export function ContractsPage() {
       setOptionsLoading(true);
       setOptionsError(null);
       try {
-        const [patientsResult, ordersResult] = await Promise.all([
-          apiFetch<PatientOption[]>("/patients?active_only=false"),
-          apiFetch<OrderOption[]>("/orders"),
-        ]);
+        const { patients: patientsResult, orders: ordersResult } =
+          await fetchContractsLookups();
         if (ignore) return;
         setPatients(patientsResult);
         setOrders(ordersResult);
@@ -1416,7 +1034,7 @@ export function ContractsPage() {
       setContractsLoading(true);
       setContractsError(null);
       try {
-        const data = await apiFetch<ContractItem[]>(buildContractsPath(contractQuery));
+        const data = await fetchContracts(buildContractsPath(contractQuery));
         if (!ignore) setContracts(data);
       } catch (error) {
         if (!ignore) setContractsError(error instanceof Error ? error.message : t.common_error);
@@ -1436,7 +1054,7 @@ export function ContractsPage() {
       setQuotesLoading(true);
       setQuotesError(null);
       try {
-        const data = await apiFetch<QuoteItem[]>(buildQuotesPath(quoteQuery));
+        const data = await fetchQuotes(buildQuotesPath(quoteQuery));
         if (!ignore) setQuotes(data);
       } catch (error) {
         if (!ignore) setQuotesError(error instanceof Error ? error.message : t.common_error);
@@ -1456,9 +1074,7 @@ export function ContractsPage() {
       setAgencyServicesLoading(true);
       setAgencyServicesError(null);
       try {
-        const data = await apiFetch<AgencyServiceItem[]>(
-          buildAgencyServicesPath(agencyServiceQuery),
-        );
+        const data = await fetchAgencyServices(buildAgencyServicesPath(agencyServiceQuery));
         if (!ignore) setAgencyServices(data);
       } catch (error) {
         if (!ignore) {
@@ -1487,7 +1103,7 @@ export function ContractsPage() {
       setContractDetailLoading(true);
       setContractDetailError(null);
       try {
-        const data = await apiFetch<ContractItem>(`/framework-contracts/${selectedContractId}`);
+        const data = await fetchContract(selectedContractId);
         if (ignore) return;
         setContractDetail(data);
         setContractStatusForm(contractToStatusForm(data));
@@ -1520,10 +1136,7 @@ export function ContractsPage() {
       setQuoteDetailError(null);
       setQuoteVersionsError(null);
       try {
-        const [data, versions] = await Promise.all([
-          apiFetch<QuoteItem>(`/quotes/${selectedQuoteId}`),
-          apiFetch<QuoteVersionItem[]>(`/quotes/${selectedQuoteId}/versions`),
-        ]);
+        const { quote: data, versions } = await fetchQuoteWorkspace(selectedQuoteId);
         if (ignore) return;
         setQuoteDetail(data);
         setQuoteVersions(versions);
@@ -1567,10 +1180,7 @@ export function ContractsPage() {
           : null,
         conditions,
       };
-      const result = await apiFetch<{ id: string } & Partial<ContractItem>>("/framework-contracts", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
+      const result = await createContract(payload);
       setCreateContractOpen(false);
       setCreateContractForm(blankContractForm(contractFilters.patientId));
       setContractsReloadToken((current) => current + 1);
@@ -1591,16 +1201,10 @@ export function ContractsPage() {
     setCreateQuoteBusy(true);
     setCreateQuoteError(null);
     try {
-      const result = await apiFetch<{ id: string }>(
-        `/orders/${createQuoteForm.orderId}/quotes`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            valid_until: toOptional(createQuoteForm.validUntil),
-            notes: toOptional(createQuoteForm.notes),
-          }),
-        },
-      );
+      const result = await createQuote(createQuoteForm.orderId, {
+        valid_until: toOptional(createQuoteForm.validUntil),
+        notes: toOptional(createQuoteForm.notes),
+      });
       setCreateQuoteOpen(false);
       setCreateQuoteForm(blankQuoteForm(quoteFilters.orderId));
       setQuotesReloadToken((current) => current + 1);
@@ -1632,13 +1236,7 @@ export function ContractsPage() {
         valid_to: toOptional(agencyServiceForm.validTo),
       };
 
-      const path = agencyServiceForm.id
-        ? `/agency-services/${agencyServiceForm.id}/update`
-        : "/agency-services";
-      await apiFetch(path, {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
+      await saveAgencyService(agencyServiceForm.id, payload);
       setAgencyServiceSheetOpen(false);
       setAgencyServiceForm(blankAgencyServiceForm(lang));
       setAgencyServicesReloadToken((current) => current + 1);
@@ -1682,17 +1280,14 @@ export function ContractsPage() {
       if (rawConditions) {
         conditions = JSON.parse(rawConditions) as Record<string, unknown>;
       }
-      await apiFetch<ContractItem>(`/framework-contracts/${selectedContractId}/status`, {
-        method: "POST",
-        body: JSON.stringify({
-          status: contractStatusForm.status,
-          valid_from: toOptional(contractStatusForm.validFrom),
-          valid_to: toOptional(contractStatusForm.validTo),
-          signed_at: toOptional(contractStatusForm.signedAt)
-            ? new Date(contractStatusForm.signedAt).toISOString()
-            : null,
-          conditions,
-        }),
+      await updateContractStatus(selectedContractId, {
+        status: contractStatusForm.status,
+        valid_from: toOptional(contractStatusForm.validFrom),
+        valid_to: toOptional(contractStatusForm.validTo),
+        signed_at: toOptional(contractStatusForm.signedAt)
+          ? new Date(contractStatusForm.signedAt).toISOString()
+          : null,
+        conditions,
       });
       setContractsReloadToken((current) => current + 1);
     } catch (error) {
@@ -1707,15 +1302,12 @@ export function ContractsPage() {
     setQuoteStatusBusy(true);
     setQuoteStatusError(null);
     try {
-      await apiFetch<QuoteItem>(`/quotes/${selectedQuoteId}/status`, {
-        method: "POST",
-        body: JSON.stringify({
-          status: quoteStatusForm.status,
-          paid_amount: toOptional(quoteStatusForm.paidAmount)
-            ? Number(quoteStatusForm.paidAmount)
-            : null,
-          notes: toOptional(quoteStatusForm.notes),
-        }),
+      await updateQuoteStatus(selectedQuoteId, {
+        status: quoteStatusForm.status,
+        paid_amount: toOptional(quoteStatusForm.paidAmount)
+          ? Number(quoteStatusForm.paidAmount)
+          : null,
+        notes: toOptional(quoteStatusForm.notes),
       });
       setQuotesReloadToken((current) => current + 1);
     } catch (error) {
@@ -2986,5 +2578,3 @@ function EmptyState({
     </div>
   );
 }
-
-

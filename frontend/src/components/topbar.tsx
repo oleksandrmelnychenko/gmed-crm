@@ -11,40 +11,22 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
-import { apiFetch } from "@/lib/api";
 import { useNavState } from "@/lib/nav-state";
 import { staffHrefIfAllowed } from "@/lib/staff-route-access";
 import { useLang } from "@/lib/i18n";
-
-interface Notification {
-  id: string;
-  kind: string;
-  title: string;
-  body: string | null;
-  entity_type?: string | null;
-  entity_id?: string | null;
-  is_read: boolean;
-  created_at: string;
-}
-
-interface ActiveSession {
-  user_id: string;
-  user_name: string;
-  user_email: string;
-  role: string;
-}
-
-interface ActiveAnnouncement {
-  title: string;
-  message: string;
-  variant: string;
-}
-
-interface ChatMessage {
-  from_user: string;
-  message: string;
-  created_at: string;
-}
+import {
+  fetchNotificationPanelWorkspace,
+  fetchTopbarChatMessages,
+  fetchTopbarPresence,
+  markAllNotificationsRead,
+  markNotificationRead,
+  markTopbarChatRead,
+  sendTopbarChatMessage,
+  type ActiveAnnouncement,
+  type ActiveSession,
+  type ChatMessage,
+  type Notification,
+} from "@/components/topbar-data";
 
 function initials(name: string) {
   return name
@@ -117,13 +99,10 @@ export function Topbar() {
     let cancelled = false;
 
     async function load() {
-      const [countPayload, onlinePayload] = await Promise.all([
-        apiFetch<{ count: number }>("/notifications/unread-count").catch(() => null),
-        apiFetch<ActiveSession[]>("/users/online").catch(() => []),
-      ]);
+      const presence = await fetchTopbarPresence();
       if (cancelled) return;
-      setUnread(countPayload?.count ?? 0);
-      setOnlineUsers(onlinePayload);
+      setUnread(presence.unreadCount);
+      setOnlineUsers(presence.onlineUsers);
     }
 
     void load();
@@ -296,20 +275,22 @@ function NotificationPanel({
   const [announcements, setAnnouncements] = useState<ActiveAnnouncement[]>([]);
 
   useEffect(() => {
-    apiFetch<Notification[]>("/notifications").then(setNotifs).catch(() => {});
-    apiFetch<ActiveAnnouncement[]>("/announcements/active")
-      .then(setAnnouncements)
+    fetchNotificationPanelWorkspace()
+      .then((workspace) => {
+        setNotifs(workspace.notifications);
+        setAnnouncements(workspace.announcements);
+      })
       .catch(() => {});
   }, []);
 
   const markAll = () => {
-    apiFetch("/notifications/read-all", { method: "POST" }).catch(() => {});
+    markAllNotificationsRead().catch(() => {});
     onUnreadChange(0);
     setNotifs((prev) => prev.map((n) => ({ ...n, is_read: true })));
   };
 
   const markOne = (id: string) => {
-    apiFetch(`/notifications/${id}/read`, { method: "POST" }).catch(() => {});
+    markNotificationRead(id).catch(() => {});
     setNotifs((prev) =>
       prev.map((n) => (n.id === id ? { ...n, is_read: true } : n))
     );
@@ -421,12 +402,10 @@ function UsersPanel({
   const openChat = (u: ActiveSession) => {
     setChatUser(u);
     setChatInput("");
-    apiFetch<ChatMessage[]>(`/messages/${u.user_id}`)
+    fetchTopbarChatMessages(u.user_id)
       .then(setChatMsgs)
       .catch(() => {});
-    apiFetch(`/messages/${u.user_id}/read`, { method: "POST" }).catch(
-      () => {}
-    );
+    markTopbarChatRead(u.user_id).catch(() => {});
   };
 
   const sendMsg = (e: FormEvent) => {
@@ -435,13 +414,8 @@ function UsersPanel({
     const uid = chatUser.user_id;
     const msg = chatInput;
     setChatInput("");
-    apiFetch(`/messages/${uid}`, {
-      method: "POST",
-      body: JSON.stringify({ message: msg }),
-    })
-      .then(() =>
-        apiFetch<ChatMessage[]>(`/messages/${uid}`).then(setChatMsgs)
-      )
+    sendTopbarChatMessage(uid, msg)
+      .then(() => fetchTopbarChatMessages(uid).then(setChatMsgs))
       .catch(() => {});
   };
 

@@ -48,7 +48,6 @@ import {
   Sheet,
   SheetContent,
 } from "@/components/ui/sheet";
-import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import {
   getLang,
@@ -62,7 +61,32 @@ import {
   CASE_TEXT_SNIPPET_PLACEHOLDERS,
   appendSnippetToNarrative,
   renderCaseTextSnippet,
-} from "./cases.snippets";
+} from "../cases.snippets";
+import { statusBadgeClass } from "./appearance/status-appearance";
+import {
+  confirmMedicationExpiry,
+  createCase,
+  fetchCaseDetail,
+  fetchCaseLookups,
+  fetchCaseTextSnippets,
+  fetchCases,
+  saveCaseAllergien,
+  saveCaseCardiology,
+  saveCaseGastroenterology,
+  saveCaseImpfstatus,
+  saveCaseMedikamente,
+  saveCaseNeurology,
+  saveCaseOperationen,
+  saveCaseOrthopedics,
+  saveCaseOverview,
+  saveCasePain,
+  saveCasePulmonology,
+  saveCaseSymptome,
+  saveCaseTextSnippet,
+  saveCaseUrology,
+  saveCaseVegetative,
+  saveCaseVorerkrankungen,
+} from "./data/case-api";
 
 type CaseStatus = "open" | "in_progress" | "closed";
 
@@ -401,6 +425,10 @@ type CasesPageProps = {
   embedded?: boolean;
   embeddedPatientId?: string | null;
   embeddedCaseId?: string | null;
+  embeddedSheetClassName?: string;
+  embeddedSheetModal?: boolean | "trap-focus";
+  embeddedSheetShowOverlay?: boolean;
+  embeddedSheetSide?: "left" | "right";
   onCloseCaseSheet?: () => void;
 };
 
@@ -479,19 +507,6 @@ function caseStatusLabel(
     case "in_progress": return tr.cases_in_progress;
     case "closed": return tr.cases_closed;
     default: return status;
-  }
-}
-
-function statusBadgeClass(status: string) {
-  switch (status) {
-    case "open":
-      return "border-sky-200 bg-sky-100 text-sky-700";
-    case "in_progress":
-      return "border-amber-200 bg-amber-100 text-amber-700";
-    case "closed":
-      return "border-emerald-200 bg-emerald-100 text-emerald-700";
-    default:
-      return "border-border bg-muted text-foreground";
   }
 }
 
@@ -1003,6 +1018,10 @@ export function CasesPage({
   embedded = false,
   embeddedPatientId = null,
   embeddedCaseId = null,
+  embeddedSheetClassName,
+  embeddedSheetModal = false,
+  embeddedSheetShowOverlay = false,
+  embeddedSheetSide = "right",
   onCloseCaseSheet,
 }: CasesPageProps = {}) {
   const { t } = useLang();
@@ -1275,10 +1294,7 @@ export function CasesPage({
     if (!permissions.canViewPage) return;
     let cancelled = false;
 
-    void Promise.all([
-      apiFetch<PatientOption[]>("/patients").catch(() => []),
-      apiFetch<DoctorOption[]>("/cases/meta/doctors").catch(() => []),
-    ]).then(([patientItems, doctorItems]) => {
+    void fetchCaseLookups().then(({ patients: patientItems, doctors: doctorItems }) => {
       if (!cancelled) {
         startTransition(() => {
           setPatients(patientItems);
@@ -1305,7 +1321,7 @@ export function CasesPage({
     setSnippetsBusy(true);
     setSnippetsError("");
 
-    void apiFetch<CaseTextSnippet[]>("/cases/text-snippets")
+    void fetchCaseTextSnippets()
       .then((items) => {
         if (!cancelled) {
           startTransition(() => setSnippets(items));
@@ -1382,7 +1398,7 @@ export function CasesPage({
     setListBusy(true);
     setListError("");
 
-    void apiFetch<CaseRosterItem[]>(casesPath)
+    void fetchCases(casesPath)
       .then((items) => {
         if (!cancelled) {
           startTransition(() => setCases(items));
@@ -1419,7 +1435,7 @@ export function CasesPage({
     setDetailBusy(true);
     setDetailError("");
 
-    void apiFetch<CaseDetail>(`/cases/${selectedId}`)
+    void fetchCaseDetail(selectedId)
       .then((item) => {
         if (cancelled) return;
         startTransition(() => {
@@ -1629,15 +1645,12 @@ export function CasesPage({
     setCreateError("");
 
     try {
-      const created = await apiFetch<{ id: string }>("/cases", {
-        method: "POST",
-          body: JSON.stringify({
-            patient_id: createForm.patientId,
-            hauptanfragegrund: toOptionalText(createForm.hauptanfragegrund),
-            aktuelle_anamnese: toOptionalText(createForm.aktuelleAnamnese),
-            zuweiser_doctor_id: toOptionalText(createForm.zuweiserDoctorId),
-            zuweiser: toOptionalText(createForm.zuweiser),
-          }),
+      const created = await createCase({
+        patient_id: createForm.patientId,
+        hauptanfragegrund: toOptionalText(createForm.hauptanfragegrund),
+        aktuelle_anamnese: toOptionalText(createForm.aktuelleAnamnese),
+        zuweiser_doctor_id: toOptionalText(createForm.zuweiserDoctorId),
+        zuweiser: toOptionalText(createForm.zuweiser),
       });
       setCreateOpen(false);
       setCreateForm(DEFAULT_CREATE_FORM);
@@ -1714,17 +1727,11 @@ export function CasesPage({
     setSnippetSaveError("");
 
     try {
-      const path = snippetForm.id
-        ? `/cases/text-snippets/${snippetForm.id}/update`
-        : "/cases/text-snippets";
-      await apiFetch(path, {
-        method: "POST",
-        body: JSON.stringify({
-          label: snippetForm.label,
-          category: toOptionalText(snippetForm.category) ?? "general",
-          body: snippetForm.body,
-          is_active: snippetForm.is_active,
-        }),
+      await saveCaseTextSnippet(snippetForm.id, {
+        label: snippetForm.label,
+        category: toOptionalText(snippetForm.category) ?? "general",
+        body: snippetForm.body,
+        is_active: snippetForm.is_active,
       });
       setSnippetDialogOpen(false);
       setSnippetForm(DEFAULT_CASE_TEXT_SNIPPET_FORM);
@@ -1751,14 +1758,11 @@ export function CasesPage({
     await runSectionSave(
       "overview",
       () =>
-        apiFetch(`/cases/${detail.id}/anamnesis`, {
-          method: "POST",
-          body: JSON.stringify({
-            hauptanfragegrund: toOptionalText(overviewForm.hauptanfragegrund),
-            aktuelle_anamnese: toOptionalText(overviewForm.aktuelle_anamnese),
-            zuweiser_doctor_id: toOptionalText(overviewForm.zuweiser_doctor_id),
-            zuweiser: toOptionalText(overviewForm.zuweiser),
-          }),
+        saveCaseOverview(detail.id, {
+          hauptanfragegrund: toOptionalText(overviewForm.hauptanfragegrund),
+          aktuelle_anamnese: toOptionalText(overviewForm.aktuelle_anamnese),
+          zuweiser_doctor_id: toOptionalText(overviewForm.zuweiser_doctor_id),
+          zuweiser: toOptionalText(overviewForm.zuweiser),
         }),
       t.common_failed_update,
     );
@@ -1770,9 +1774,8 @@ export function CasesPage({
     await runSectionSave(
       "vorerkrankungen",
       () =>
-        apiFetch(`/cases/${detail.id}/vorerkrankungen`, {
-          method: "POST",
-          body: JSON.stringify({ items: sanitizeVorerkrankungen(vorerkrankungen) }),
+        saveCaseVorerkrankungen(detail.id, {
+          items: sanitizeVorerkrankungen(vorerkrankungen),
         }),
       t.common_failed_update,
     );
@@ -1784,10 +1787,7 @@ export function CasesPage({
     await runSectionSave(
       "allergien",
       () =>
-        apiFetch(`/cases/${detail.id}/allergien`, {
-          method: "POST",
-          body: JSON.stringify({ items: sanitizeAllergien(allergien) }),
-        }),
+        saveCaseAllergien(detail.id, { items: sanitizeAllergien(allergien) }),
       t.common_failed_update,
     );
   }
@@ -1798,10 +1798,7 @@ export function CasesPage({
     await runSectionSave(
       "operationen",
       () =>
-        apiFetch(`/cases/${detail.id}/operationen`, {
-          method: "POST",
-          body: JSON.stringify({ items: sanitizeOperationen(operationen) }),
-        }),
+        saveCaseOperationen(detail.id, { items: sanitizeOperationen(operationen) }),
       t.common_failed_update,
     );
   }
@@ -1812,10 +1809,7 @@ export function CasesPage({
     await runSectionSave(
       "medikamente",
       () =>
-        apiFetch(`/cases/${detail.id}/medikamente`, {
-          method: "POST",
-          body: JSON.stringify({ items: sanitizeMedikamente(medikamente) }),
-        }),
+        saveCaseMedikamente(detail.id, { items: sanitizeMedikamente(medikamente) }),
       t.common_failed_update,
     );
   }
@@ -1824,10 +1818,7 @@ export function CasesPage({
     if (!detail) return;
     await runSectionSave(
       "medikamente",
-      () =>
-        apiFetch(`/cases/${detail.id}/medikamente/${medicationId}/expiry-confirm`, {
-          method: "POST",
-        }),
+      () => confirmMedicationExpiry(detail.id, medicationId),
       caseText(
         "Prüfung des Ablaufs der Medikamentengültigkeit konnte nicht bestätigt werden",
         "Не удалось подтвердить проверку окончания срока действия лекарства",
@@ -1842,10 +1833,7 @@ export function CasesPage({
     await runSectionSave(
       "pain",
       () =>
-        apiFetch(`/cases/${detail.id}/pain`, {
-          method: "POST",
-          body: JSON.stringify({ items: sanitizePainRecords(painRecords) }),
-        }),
+        saveCasePain(detail.id, { items: sanitizePainRecords(painRecords) }),
       t.common_failed_update,
     );
   }
@@ -1856,10 +1844,7 @@ export function CasesPage({
     await runSectionSave(
       "symptome",
       () =>
-        apiFetch(`/cases/${detail.id}/symptome`, {
-          method: "POST",
-          body: JSON.stringify({ items: sanitizeSymptome(symptome) }),
-        }),
+        saveCaseSymptome(detail.id, { items: sanitizeSymptome(symptome) }),
       t.common_failed_update,
     );
   }
@@ -1869,11 +1854,7 @@ export function CasesPage({
     if (!detail) return;
     await runSectionSave(
       "cardiology",
-      () =>
-        apiFetch(`/cases/${detail.id}/cardiology`, {
-          method: "POST",
-          body: JSON.stringify(cardiologyToPayload(cardiology)),
-        }),
+      () => saveCaseCardiology(detail.id, cardiologyToPayload(cardiology)),
       t.common_failed_update,
     );
   }
@@ -1884,10 +1865,10 @@ export function CasesPage({
     await runSectionSave(
       "gastroenterology",
       () =>
-        apiFetch(`/cases/${detail.id}/gastroenterology`, {
-          method: "POST",
-          body: JSON.stringify(gastroenterologyToPayload(gastroenterology)),
-        }),
+        saveCaseGastroenterology(
+          detail.id,
+          gastroenterologyToPayload(gastroenterology),
+        ),
       t.common_failed_update,
     );
   }
@@ -1897,11 +1878,7 @@ export function CasesPage({
     if (!detail) return;
     await runSectionSave(
       "orthopedics",
-      () =>
-        apiFetch(`/cases/${detail.id}/orthopedics`, {
-          method: "POST",
-          body: JSON.stringify(orthopedicsToPayload(orthopedics)),
-        }),
+      () => saveCaseOrthopedics(detail.id, orthopedicsToPayload(orthopedics)),
       t.common_failed_update,
     );
   }
@@ -1911,11 +1888,7 @@ export function CasesPage({
     if (!detail) return;
     await runSectionSave(
       "neurology",
-      () =>
-        apiFetch(`/cases/${detail.id}/neurology`, {
-          method: "POST",
-          body: JSON.stringify(neurologyToPayload(neurology)),
-        }),
+      () => saveCaseNeurology(detail.id, neurologyToPayload(neurology)),
       t.common_failed_update,
     );
   }
@@ -1925,11 +1898,7 @@ export function CasesPage({
     if (!detail) return;
     await runSectionSave(
       "pulmonology",
-      () =>
-        apiFetch(`/cases/${detail.id}/pulmonology`, {
-          method: "POST",
-          body: JSON.stringify(pulmonologyToPayload(pulmonology)),
-        }),
+      () => saveCasePulmonology(detail.id, pulmonologyToPayload(pulmonology)),
       t.common_failed_update,
     );
   }
@@ -1939,11 +1908,7 @@ export function CasesPage({
     if (!detail) return;
     await runSectionSave(
       "urology",
-      () =>
-        apiFetch(`/cases/${detail.id}/urology`, {
-          method: "POST",
-          body: JSON.stringify(urologyToPayload(urology)),
-        }),
+      () => saveCaseUrology(detail.id, urologyToPayload(urology)),
       t.common_failed_update,
     );
   }
@@ -1954,15 +1919,12 @@ export function CasesPage({
     await runSectionSave(
       "vegetative",
       () =>
-        apiFetch(`/cases/${detail.id}/vegetative`, {
-          method: "POST",
-          body: JSON.stringify({
-            appetit_durst: toOptionalText(vegetative.appetit_durst),
-            koerpergroesse: numericInputToValue(vegetative.koerpergroesse),
-            gewicht: numericInputToValue(vegetative.gewicht),
-            gewichtsveraenderung: toOptionalText(vegetative.gewichtsveraenderung),
-            grund: toOptionalText(vegetative.grund),
-          }),
+        saveCaseVegetative(detail.id, {
+          appetit_durst: toOptionalText(vegetative.appetit_durst),
+          koerpergroesse: numericInputToValue(vegetative.koerpergroesse),
+          gewicht: numericInputToValue(vegetative.gewicht),
+          gewichtsveraenderung: toOptionalText(vegetative.gewichtsveraenderung),
+          grund: toOptionalText(vegetative.grund),
         }),
       t.common_failed_update,
     );
@@ -1974,9 +1936,8 @@ export function CasesPage({
     await runSectionSave(
       "impfstatus",
       () =>
-        apiFetch(`/cases/${detail.id}/impfstatus`, {
-          method: "POST",
-          body: JSON.stringify({ status_text: toOptionalText(impfstatus) }),
+        saveCaseImpfstatus(detail.id, {
+          status_text: toOptionalText(impfstatus),
         }),
       t.common_failed_update,
     );
@@ -2328,6 +2289,7 @@ export function CasesPage({
 
       <Sheet
         open={detailOpen}
+        modal={embedded ? embeddedSheetModal : undefined}
         onOpenChange={(open) => {
           setDetailOpen(open);
           if (!open) {
@@ -2345,7 +2307,18 @@ export function CasesPage({
           }
         }}
       >
-        <SheetContent side="right" className="w-full overflow-y-auto border-l border-border p-0 sm:max-w-[980px]">
+        <SheetContent
+          side={embedded ? embeddedSheetSide : "right"}
+          showOverlay={embedded ? embeddedSheetShowOverlay : true}
+          className={cn(
+            "w-full overflow-y-auto p-0",
+            embedded && embeddedSheetSide === "left"
+              ? "border-r border-border"
+              : "border-l border-border",
+            embedded ? "z-[60] sm:max-w-[48vw] xl:max-w-[760px]" : "sm:max-w-[980px]",
+            embeddedSheetClassName,
+          )}
+        >
           <AdminSheetScaffold
             title={detail?.case_id ?? selectedSummary?.case_id ?? t.cases_title}
             description={caseText(

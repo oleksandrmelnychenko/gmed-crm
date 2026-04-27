@@ -34,246 +34,66 @@ import {
   Banner as ShellBanner,
   PageHeader,
   StatusBadge,
-  type StatusTone,
   inputClass as shellInputClassName,
   selectClass as shellSelectClassName,
   textareaClass as shellTextareaClass,
   tokens,
 } from "@/components/ui-shell";
-import { apiFetch, buildApiUrl, getAccessToken } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { PatientInvoicesPage } from "@/pages/patients/portal-invoices-page";
 import { cn } from "@/lib/utils";
-
-type InvoiceType = "advance" | "interim" | "final";
-type InvoiceStatus = "draft" | "sent" | "partially_paid" | "paid" | "overdue" | "cancelled";
-
-type InvoiceLineItem = {
-  description: string;
-  quantity: string;
-  unit_price: string;
-  vat_rate: string;
-  is_cost_passthrough: boolean;
-  line_net: string;
-  line_vat: string;
-  line_gross: string;
-  external_document_id?: string | null;
-  notes?: string | null;
-};
-
-type SupportingDocument = {
-  id: string;
-  auto_name: string;
-  original_filename?: string | null;
-  art?: string | null;
-  category?: string | null;
-};
-
-type InvoiceItem = {
-  id: string;
-  quote_id: string | null;
-  quote_number: string | null;
-  order_id: string;
-  order_number: string;
-  contract_id: string | null;
-  patient_id: string;
-  patient_name: string;
-  patient_pid: string;
-  invoice_number: string;
-  invoice_type: InvoiceType | string;
-  status: InvoiceStatus | string;
-  issued_at: string;
-  due_date: string | null;
-  total_net: unknown;
-  total_vat: unknown;
-  total_gross: unknown;
-  paid_amount: unknown;
-  balance_due: unknown;
-  paid_at: string | null;
-  notes: string | null;
-  created_at: string;
-  updated_at: string;
-  line_items?: InvoiceLineItem[];
-  supporting_documents?: SupportingDocument[];
-};
-
-type InvoiceListResponse = {
-  items: InvoiceItem[];
-  page: number;
-  per_page: number;
-  total: number;
-  total_pages: number;
-};
-
-type DunningEvent = {
-  id: string;
-  invoice_id: string;
-  level: "first" | "second" | "collections" | string;
-  note: string | null;
-  due_date_snapshot: string | null;
-  balance_due: unknown;
-  sent_at: string;
-  created_at: string;
-  created_by_name?: string;
-  created_by_role?: string;
-};
-
-type AccountingEntry = {
-  id: string;
-  entry_date: string;
-  direction: string;
-  category: string;
-  description: string;
-  amount_net: string;
-  amount_vat: string;
-  amount_gross: string;
-  currency: string;
-  invoice_number?: string | null;
-  external_invoice_number?: string | null;
-  order_number?: string | null;
-  patient_pid?: string | null;
-  patient_name?: string | null;
-};
-
-type AccountingLedgerPayload = {
-  year: number;
-  summary: {
-    income_gross: string;
-    expense_gross: string;
-    net_surplus: string;
-    service_revenue_gross: string;
-    cost_passthrough_revenue_gross: string;
-    provider_expense_gross: string;
-  };
-  monthly: Array<{
-    period: string;
-    income_gross: string;
-    expense_gross: string;
-    net_surplus: string;
-  }>;
-  entries: AccountingEntry[];
-};
-type AccountingMonthlyItem = AccountingLedgerPayload["monthly"][number];
-
-type PatientOption = { id: string; patient_id: string; first_name?: string; last_name?: string };
-type OrderOption = { id: string; order_number: string; patient_id: string; patient_name: string; patient_pid: string };
-type QuoteOption = { id: string; order_id: string; order_number: string; patient_id: string; patient_name: string; patient_pid: string; quote_number: string; total_gross: unknown };
-
-type Filters = { search: string; patientId: string; orderId: string; quoteId: string; status: string; invoiceType: string };
-type CreateForm = { quoteId: string; invoiceType: InvoiceType; dueDate: string; notes: string };
-type StatusForm = { status: InvoiceStatus; dueDate: string; paidAmount: string; notes: string };
-type DunningForm = { note: string };
-
-const INVOICE_TYPES: InvoiceType[] = ["advance", "interim", "final"];
-const INVOICE_STATUSES: InvoiceStatus[] = ["draft", "sent", "partially_paid", "paid", "overdue", "cancelled"];
-const DEFAULT_FILTERS: Filters = { search: "", patientId: "", orderId: "", quoteId: "", status: "", invoiceType: "" };
-const DEFAULT_INVOICE_PAGE_SIZE = 12;
-const EMPTY_ACCOUNTING_SUMMARY: AccountingLedgerPayload["summary"] = {
-  income_gross: "0.00",
-  expense_gross: "0.00",
-  net_surplus: "0.00",
-  service_revenue_gross: "0.00",
-  cost_passthrough_revenue_gross: "0.00",
-  provider_expense_gross: "0.00",
-};
+import {
+  dunningLevelTone,
+  invoiceTypeTone,
+  statusBadgeClass,
+} from "./appearance/status-appearance";
+import {
+  createDunningEvent,
+  createInvoice,
+  fetchAccountingLedger,
+  fetchAccountingLedgerExportBlob,
+  fetchInvoiceLookups,
+  fetchInvoicePdfBlob,
+  fetchInvoiceWorkspace,
+  fetchInvoices,
+  updateInvoiceStatus,
+} from "./data/invoice-api";
+import {
+  DEFAULT_FILTERS,
+  EMPTY_ACCOUNTING_SUMMARY,
+  INVOICE_STATUSES,
+  INVOICE_TYPES,
+  blankCreateForm,
+  buildInvoicesPath,
+  buildSearchParams,
+  enumLabel,
+  formatCurrency,
+  formatDate,
+  formatDateTime,
+  invoiceToStatusForm,
+  invoicesPermissions,
+  nextDunningLevel,
+} from "./model/invoice-model";
+import type {
+  AccountingEntry,
+  AccountingLedgerPayload,
+  AccountingMonthlyItem,
+  CreateForm,
+  DunningEvent,
+  DunningForm,
+  Filters,
+  InvoiceItem,
+  InvoiceStatus,
+  InvoiceType,
+  OrderOption,
+  PatientOption,
+  QuoteOption,
+  StatusForm,
+} from "./model/types";
 const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
-
-function permissions(role?: string) {
-  return {
-    canView:
-      role === "ceo" ||
-      role === "ceo_assistant" ||
-      role === "patient_manager" ||
-      role === "billing",
-    canCreate: role === "ceo" || role === "patient_manager" || role === "billing",
-    canManage: role === "ceo" || role === "billing",
-    canAccounting: role === "ceo" || role === "ceo_assistant" || role === "billing",
-  };
-}
-
-function buildInvoicesPath(filters: Filters, page: number, perPage = DEFAULT_INVOICE_PAGE_SIZE) {
-  const params = new URLSearchParams();
-  if (filters.search.trim()) params.set("search", filters.search.trim());
-  if (filters.patientId) params.set("patient_id", filters.patientId);
-  if (filters.orderId) params.set("order_id", filters.orderId);
-  if (filters.quoteId) params.set("quote_id", filters.quoteId);
-  if (filters.status) params.set("status", filters.status);
-  if (filters.invoiceType) params.set("invoice_type", filters.invoiceType);
-  params.set("page", String(page));
-  params.set("per_page", String(perPage));
-  return params.size ? `/invoices?${params.toString()}` : "/invoices";
-}
-
-function buildSearchParams(current: URLSearchParams, patch: Record<string, string | null | undefined>) {
-  const next = new URLSearchParams(current);
-  for (const [key, value] of Object.entries(patch)) {
-    if (!value) next.delete(key);
-    else next.set(key, value);
-  }
-  return next;
-}
-
-function blankCreateForm(quoteId = ""): CreateForm {
-  return { quoteId, invoiceType: "final", dueDate: "", notes: "" };
-}
-
-function invoiceToStatusForm(invoice: InvoiceItem): StatusForm {
-  return {
-    status: (invoice.status as InvoiceStatus) ?? "draft",
-    dueDate: invoice.due_date ?? "",
-    paidAmount: invoice.paid_amount === null || invoice.paid_amount === undefined ? "" : String(invoice.paid_amount),
-    notes: invoice.notes ?? "",
-  };
-}
-
-function formatDate(
-  value?: string | null,
-  locale = "de-DE",
-  emptyLabel = "-",
-) {
-  if (!value) return emptyLabel;
-  try { return new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short", year: "numeric" }).format(new Date(`${value}T00:00:00`)); }
-  catch { return value; }
-}
-
-function formatDateTime(
-  value?: string | null,
-  locale = "de-DE",
-  emptyLabel = "-",
-) {
-  if (!value) return emptyLabel;
-  try { return new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value)); }
-  catch { return value; }
-}
-
-function formatCurrency(value: unknown, locale = "de-DE") {
-  const numeric = typeof value === "number" ? value : Number(value ?? 0);
-  if (!Number.isFinite(numeric)) {
-    return new Intl.NumberFormat(locale, {
-      style: "currency",
-      currency: "EUR",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(0);
-  }
-  return new Intl.NumberFormat(locale, { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(numeric);
-}
-
-async function fetchProtectedBlob(path: string) {
-  const token = getAccessToken();
-  const response = await fetch(buildApiUrl(path), {
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-  });
-
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
-  }
-
-  return response.blob();
-}
 
 function openPdfBlobPreview(blob: Blob, popupMessage: string) {
   const url = URL.createObjectURL(blob);
@@ -287,12 +107,12 @@ function openPdfBlobPreview(blob: Blob, popupMessage: string) {
 }
 
 async function openInvoicePdfPreview(invoiceId: string, popupMessage: string) {
-  const blob = await fetchProtectedBlob(`/invoices/${invoiceId}/pdf`);
+  const blob = await fetchInvoicePdfBlob(invoiceId);
   openPdfBlobPreview(blob, popupMessage);
 }
 
 async function downloadInvoicePdf(invoiceId: string, filename: string) {
-  const blob = await fetchProtectedBlob(`/invoices/${invoiceId}/pdf`);
+  const blob = await fetchInvoicePdfBlob(invoiceId);
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -304,7 +124,7 @@ async function downloadInvoicePdf(invoiceId: string, filename: string) {
 }
 
 async function downloadAccountingLedgerExport(year: string) {
-  const blob = await fetchProtectedBlob(`/invoices/accounting-ledger/export?year=${year}`);
+  const blob = await fetchAccountingLedgerExportBlob(year);
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -315,56 +135,12 @@ async function downloadAccountingLedgerExport(year: string) {
   URL.revokeObjectURL(url);
 }
 
-function statusBadgeClass(status: string): StatusTone {
-  switch (status) {
-    case "paid": return "success";
-    case "partially_paid": return "warning";
-    case "sent": return "info";
-    case "overdue":
-    case "cancelled": return "error";
-    default: return "neutral";
-  }
-}
-
-function invoiceTypeTone(invoiceType: string): StatusTone {
-  switch (invoiceType) {
-    case "advance": return "warning";
-    case "interim": return "info";
-    case "final": return "success";
-    default: return "neutral";
-  }
-}
-
-function dunningLevelTone(level: string): StatusTone {
-  switch (level) {
-    case "first":
-      return "warning";
-    case "second":
-    case "collections":
-      return "error";
-    default:
-      return "neutral";
-  }
-}
-
-function nextDunningLevel(events: DunningEvent[]) {
-  const levels = new Set(events.map((event) => event.level));
-  if (!levels.has("first")) return "first";
-  if (!levels.has("second")) return "second";
-  if (!levels.has("collections")) return "collections";
-  return null;
-}
-
-function enumLabel(value: string, labels: Record<string, string>) {
-  return labels[value] ?? value.replaceAll("_", " ");
-}
-
 function StaffInvoicesPage() {
   const { t, lang } = useLang();
   const { staffGo } = useStaffNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
-  const access = permissions(user?.role);
+  const access = invoicesPermissions(user?.role);
   const locale = lang === "de" ? "de-DE" : "ru-RU";
   const formatMoney = (value: unknown) => formatCurrency(value, locale);
   const text = {
@@ -866,11 +642,11 @@ function StaffInvoicesPage() {
     let ignore = false;
     async function loadOptions() {
       try {
-        const [patientsResult, ordersResult, quotesResult] = await Promise.all([
-          apiFetch<PatientOption[]>("/patients?active_only=false"),
-          canLoadOrderOptions ? apiFetch<OrderOption[]>("/orders") : Promise.resolve([]),
-          canLoadQuoteOptions ? apiFetch<QuoteOption[]>("/quotes") : Promise.resolve([]),
-        ]);
+        const {
+          patients: patientsResult,
+          orders: ordersResult,
+          quotes: quotesResult,
+        } = await fetchInvoiceLookups(canLoadOrderOptions, canLoadQuoteOptions);
         if (ignore) return;
         setPatients(patientsResult);
         setOrders(ordersResult);
@@ -891,9 +667,7 @@ function StaffInvoicesPage() {
     async function loadInvoices() {
       setListBusy(true);
       try {
-        const data = await apiFetch<InvoiceListResponse>(
-          buildInvoicesPath(effectiveFilters, invoicePage),
-        );
+        const data = await fetchInvoices(buildInvoicesPath(effectiveFilters, invoicePage));
         if (!ignore) {
           setInvoices(Array.isArray(data.items) ? data.items : []);
           setInvoiceTotal(typeof data.total === "number" ? data.total : 0);
@@ -940,10 +714,8 @@ function StaffInvoicesPage() {
     async function loadDetail() {
       setDetailBusy(true);
       try {
-        const [data, dunning] = await Promise.all([
-          apiFetch<InvoiceItem>(`/invoices/${selectedInvoiceId}`),
-          apiFetch<DunningEvent[]>(`/invoices/${selectedInvoiceId}/dunning`),
-        ]);
+        const { invoice: data, dunning } =
+          await fetchInvoiceWorkspace(selectedInvoiceId);
         if (!ignore) {
           setDetail(data);
           setDunningEvents(dunning);
@@ -975,9 +747,7 @@ function StaffInvoicesPage() {
     async function loadAccountingLedger() {
       setAccountingBusy(true);
       try {
-        const data = await apiFetch<AccountingLedgerPayload>(
-          `/invoices/accounting-ledger?year=${encodeURIComponent(accountingYear)}`,
-        );
+        const data = await fetchAccountingLedger(accountingYear);
         if (!ignore) {
           setAccountingLedger(data);
           setAccountingError(null);
@@ -1006,13 +776,10 @@ function StaffInvoicesPage() {
     }
     setCreateBusy(true);
     try {
-      const created = await apiFetch<InvoiceItem>(`/quotes/${createForm.quoteId}/invoices`, {
-        method: "POST",
-        body: JSON.stringify({
-          invoice_type: createForm.invoiceType,
-          due_date: createForm.dueDate || null,
-          notes: createForm.notes.trim() || null,
-        }),
+      const created = await createInvoice(createForm.quoteId, {
+        invoice_type: createForm.invoiceType,
+        due_date: createForm.dueDate || null,
+        notes: createForm.notes.trim() || null,
       });
       setCreateOpen(false);
       setCreateForm(blankCreateForm(filters.quoteId));
@@ -1031,14 +798,13 @@ function StaffInvoicesPage() {
     if (!selectedInvoiceId) return;
     setStatusBusy(true);
     try {
-      await apiFetch<InvoiceItem>(`/invoices/${selectedInvoiceId}/status`, {
-        method: "POST",
-        body: JSON.stringify({
-          status: statusForm.status,
-          due_date: statusForm.dueDate || null,
-          paid_amount: statusForm.paidAmount.trim() ? Number(statusForm.paidAmount) : null,
-          notes: statusForm.notes.trim() || null,
-        }),
+      await updateInvoiceStatus(selectedInvoiceId, {
+        status: statusForm.status,
+        due_date: statusForm.dueDate || null,
+        paid_amount: statusForm.paidAmount.trim()
+          ? Number(statusForm.paidAmount)
+          : null,
+        notes: statusForm.notes.trim() || null,
       });
       setStatusError(null);
       setReloadToken((current) => current + 1);
@@ -1053,12 +819,9 @@ function StaffInvoicesPage() {
     if (!selectedInvoiceId || !nextDunning) return;
     setDunningBusy(true);
     try {
-      const created = await apiFetch<DunningEvent>(`/invoices/${selectedInvoiceId}/dunning`, {
-        method: "POST",
-        body: JSON.stringify({
-          level: nextDunning,
-          note: dunningForm.note.trim() || null,
-        }),
+      const created = await createDunningEvent(selectedInvoiceId, {
+        level: nextDunning,
+        note: dunningForm.note.trim() || null,
       });
       setDunningEvents((current) => [...current, created]);
       setDunningForm({ note: "" });

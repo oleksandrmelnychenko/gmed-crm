@@ -11,6 +11,7 @@ import type { PatientSummary } from "../../model/list-model";
 type UsePatientsListTableModelArgs = {
   deferredSearch: string;
   filterPredicates: FilterPredicate[];
+  frozenColumns: string[];
   patients: PatientSummary[];
   sortStack: SortStack;
   tr: Record<string, string>;
@@ -26,6 +27,7 @@ type PatientsMetrics = {
 export function usePatientsListTableModel({
   deferredSearch,
   filterPredicates,
+  frozenColumns,
   patients,
   sortStack,
   tr,
@@ -43,7 +45,20 @@ export function usePatientsListTableModel({
     );
   }, [patients]);
 
-  const columns = useMemo(() => buildPatientColumns(tr, patients), [tr, patients]);
+  const baseColumns = useMemo(() => buildPatientColumns(tr, patients), [tr, patients]);
+
+  const columns = useMemo(() => {
+    const frozenSet = new Set(frozenColumns);
+    return baseColumns.map((column) => {
+      const nextPinned: ColumnDef<PatientSummary>["pinned"] = frozenSet.has(column.id)
+        ? "left"
+        : column.pinned === "right"
+          ? "right"
+          : undefined;
+      if (column.pinned === nextPinned) return column;
+      return { ...column, pinned: nextPinned };
+    });
+  }, [baseColumns, frozenColumns]);
 
   const accessors = useMemo(() => {
     const map: Record<string, ColumnDef<PatientSummary>["accessor"]> = {};

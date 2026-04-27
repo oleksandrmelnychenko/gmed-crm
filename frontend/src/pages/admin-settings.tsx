@@ -20,7 +20,6 @@ import {
   Sheet,
   SheetContent,
 } from "@/components/ui/sheet";
-import { apiFetch } from "@/lib/api";
 import { useSheetDirtyGuard } from "@/hooks/use-sheet-dirty-guard";
 import { useLang } from "@/lib/i18n";
 import {
@@ -44,6 +43,14 @@ import {
 } from "@/components/ui-shell";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import {
+  approvePendingMfaLogin,
+  fetchAdminSettingsWorkspace,
+  rejectPendingMfaLogin,
+  revokeAdminUserSessions,
+  revokeAllAdminSessions,
+  saveAdminSetting,
+} from "@/pages/admin/data/admin-api";
 
 interface SettingRow {
   key: string;
@@ -202,11 +209,8 @@ export function AdminSettingsPage() {
     setLoading(true);
     setError("");
     try {
-      const [settingsRows, sessionRows, pendingRows] = await Promise.all([
-        apiFetch<SettingRow[]>("/admin/settings"),
-        apiFetch<SessionRow[]>("/admin/sessions"),
-        apiFetch<PendingLogin[]>("/admin/mfa/pending"),
-      ]);
+      const { settingsRows, sessionRows, pendingRows } =
+        await fetchAdminSettingsWorkspace<SettingRow, SessionRow, PendingLogin>();
       setSettings(settingsRows);
       setSessions(sessionRows);
       setPending(pendingRows);
@@ -300,10 +304,7 @@ export function AdminSettingsPage() {
     setFlash(null);
     try {
       for (const field of changedFields) {
-        await apiFetch(`/admin/settings/${field.key}`, {
-          method: "POST",
-          body: JSON.stringify({ value: editValues[field.key] ?? "" }),
-        });
+        await saveAdminSetting(field.key, editValues[field.key] ?? "");
       }
       setFlash({ tone: "success", text: t.settings_updated });
       setSelectedGroupId(null);
@@ -323,7 +324,7 @@ export function AdminSettingsPage() {
     setActionBusyKey(`session:${userId}`);
     setFlash(null);
     try {
-      await apiFetch(`/admin/sessions/user/${userId}/revoke`, { method: "POST" });
+      await revokeAdminUserSessions(userId);
       setFlash({ tone: "success", text: t.settings_updated });
       await load();
     } catch (actionError) {
@@ -341,7 +342,7 @@ export function AdminSettingsPage() {
     setActionBusyKey("sessions:all");
     setFlash(null);
     try {
-      await apiFetch("/admin/sessions/revoke-all", { method: "POST" });
+      await revokeAllAdminSessions();
       setFlash({ tone: "success", text: t.settings_updated });
       await load();
     } catch (actionError) {
@@ -358,7 +359,7 @@ export function AdminSettingsPage() {
     setActionBusyKey(`mfa:approve:${id}`);
     setFlash(null);
     try {
-      await apiFetch(`/admin/mfa/pending/${id}/approve`, { method: "POST" });
+      await approvePendingMfaLogin(id);
       setFlash({ tone: "success", text: t.settings_updated });
       await load();
     } catch (actionError) {
@@ -375,7 +376,7 @@ export function AdminSettingsPage() {
     setActionBusyKey(`mfa:reject:${id}`);
     setFlash(null);
     try {
-      await apiFetch(`/admin/mfa/pending/${id}/reject`, { method: "POST" });
+      await rejectPendingMfaLogin(id);
       setFlash({ tone: "success", text: t.settings_updated });
       await load();
     } catch (actionError) {
@@ -824,4 +825,3 @@ export function AdminSettingsPage() {
     </>
   );
 }
-

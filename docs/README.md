@@ -43,10 +43,12 @@
 - `architecture/03_frontend-workspace-refactor-plan_ua.md` - канонічний tracker frontend-рефактора `app-shell -> record-workspace -> appointments split`
 - `architecture/04_frontend-patients-workspace-refactor-plan_ua.md` - канонічний tracker наступного frontend-рефактора `record-workspace -> patients split`
 - `architecture/05_frontend-dashboard-refactor-plan_ua.md` - канонічний tracker dashboard route/staff dashboard refactor і route-level perf split
+- `architecture/06_frontend-feature-pages-refactor-plan_ua.md` - канонічний tracker наступної хвилі міграції root feature pages до патерну `appointments` / `patients`
 
 ### Testing
 
 - `testing/user-stories-excel-backlog-audit_ua.md` - аудит 1:1 між Excel `User Stories` і `requirements/03_product-backlog_ua.md`
+- `testing/customer-source-test-traceability_ua.md` - актуальна звірка трьох клієнтських source-файлів з automated proof і явними gaps
 - `testing/full-docs-backlog-reconciliation_ua.md` - повна звірка `requirements/`, `backlog/`, `architecture/`, planning docs і current-state коду
 - `testing/backlog-proof-matrix_ua.md` - канонічна матриця `MVP backlog -> Rust proof -> live browser proof`
 - `testing/04_rbac-e2e-test-plan_ua.md` - current-state RBAC / browser verification plan і правила coverage
@@ -59,16 +61,16 @@
 
 ### Поточний Freeze Status
 
-Станом на `2026-04-15` current-state зріз підтверджений повним freeze pass:
+Станом на `2026-04-27` current-state зріз підтверджений повним freeze pass:
 
-- `cargo fmt --all`
-- `cargo clippy --workspace --all-targets -- -D warnings`
-- `cargo test --workspace`
-- `frontend npm test`
+- `cargo fmt --all -- --check`
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`
+- Rust domain/API/server tests in bounded batches (`495` tests)
+- `frontend npm run test` (`245` tests)
 - `frontend npm run lint`
 - `frontend npm run build`
-- `frontend npm run test:e2e` (`22/22`)
-- `frontend npm run test:e2e:live` (`47/47`)
+- `frontend npm run test:e2e` (`43/43`)
+- `frontend npm run test:e2e:live` (`84/84`)
 
 Детальний status і незакриті інтеграційні/engineering tails дивись у `testing/full-docs-backlog-reconciliation_ua.md` і `testing/current-state-gap-audit_ua.md`.
 Для normalization / commit slicing / canonical test infra дивись `testing/worktree-stabilization-inventory_ua.md`.
@@ -87,6 +89,7 @@
 
 Якщо треба побачити **повну current-state звірку** між `docs/` і реальним кодом:
 
+- почни з `testing/customer-source-test-traceability_ua.md`, якщо питання саме про три клієнтські source-файли
 - почни з `testing/full-docs-backlog-reconciliation_ua.md`
 - якщо треба побачити саме `backlog -> proof` по MVP epic-ах:
   `testing/backlog-proof-matrix_ua.md`

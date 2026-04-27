@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Columns3, RotateCcw, Search } from "lucide-react";
+import { Check, ChevronDown, Columns3, Pin, PinOff, RotateCcw, Search } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -13,13 +13,21 @@ export type ColumnVisibilityMenuProps<T> = {
   hiddenColumns: readonly string[];
   onChange: (hidden: string[]) => void;
   defaultHidden?: readonly string[];
+  frozenColumns?: readonly string[];
+  onFrozenColumnsChange?: (frozen: string[]) => void;
+  defaultFrozen?: readonly string[];
+  maxFrozenColumns?: number;
   groupLabels?: Record<string, string>;
   buttonLabel?: string;
   searchPlaceholder?: string;
   resetLabel?: string;
   showAllLabel?: string;
   hideAllLabel?: string;
+  noMatchLabel?: string;
   requiredNoteLabel?: string;
+  freezeLabel?: string;
+  unfreezeLabel?: string;
+  frozenNoteLabel?: string;
   className?: string;
 };
 
@@ -28,13 +36,21 @@ export function ColumnVisibilityMenu<T>({
   hiddenColumns,
   onChange,
   defaultHidden = [],
+  frozenColumns = [],
+  onFrozenColumnsChange,
+  defaultFrozen = [],
+  maxFrozenColumns = 4,
   groupLabels = {},
   buttonLabel = "Columns",
   searchPlaceholder = "Search columns",
   resetLabel = "Reset",
   showAllLabel = "Show all",
   hideAllLabel = "Hide all",
+  noMatchLabel = "No match",
   requiredNoteLabel = "required",
+  freezeLabel = "Freeze",
+  unfreezeLabel = "Unfreeze",
+  frozenNoteLabel = "frozen",
   className,
 }: ColumnVisibilityMenuProps<T>) {
   const [open, setOpen] = useState(false);
@@ -44,6 +60,8 @@ export function ColumnVisibilityMenu<T>({
 
   const totalVisible = columns.filter((c) => !hiddenColumns.includes(c.id)).length;
   const totalCols = columns.length;
+  const frozenSet = useMemo(() => new Set(frozenColumns), [frozenColumns]);
+  const totalFrozen = frozenColumns.filter((id) => columns.some((column) => column.id === id)).length;
 
   const grouped = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -70,6 +88,19 @@ export function ColumnVisibilityMenu<T>({
       ? hiddenColumns.filter((id) => id !== col.id)
       : [...hiddenColumns, col.id];
     onChange(next);
+    if (!isHidden && frozenSet.has(col.id)) {
+      onFrozenColumnsChange?.(frozenColumns.filter((id) => id !== col.id));
+    }
+  };
+
+  const toggleFrozen = (col: ColumnDef<T>) => {
+    if (!onFrozenColumnsChange) return;
+    if (frozenSet.has(col.id)) {
+      onFrozenColumnsChange(frozenColumns.filter((id) => id !== col.id));
+      return;
+    }
+    if (frozenColumns.length >= maxFrozenColumns) return;
+    onFrozenColumnsChange([...frozenColumns, col.id]);
   };
 
   const showAll = () => {
@@ -81,9 +112,14 @@ export function ColumnVisibilityMenu<T>({
   const hideAll = () => {
     const nextHidden = columns.filter((c) => !c.required).map((c) => c.id);
     onChange(nextHidden);
+    if (onFrozenColumnsChange) {
+      const requiredIds = new Set(columns.filter((c) => c.required).map((c) => c.id));
+      onFrozenColumnsChange(frozenColumns.filter((id) => requiredIds.has(id)));
+    }
   };
   const resetToDefault = () => {
     onChange(defaultHidden.slice());
+    onFrozenColumnsChange?.(defaultFrozen.slice());
   };
 
   return (
@@ -100,6 +136,12 @@ export function ColumnVisibilityMenu<T>({
         <span>
           {buttonLabel} <span className="tabular-nums text-muted-foreground">({totalVisible} / {totalCols})</span>
         </span>
+        {onFrozenColumnsChange ? (
+          <span className="inline-flex items-center gap-0.5 text-muted-foreground">
+            <Pin className="size-3" />
+            <span className="tabular-nums">{totalFrozen}</span>
+          </span>
+        ) : null}
         <ChevronDown className="size-3.5 text-muted-foreground" />
       </Button>
       {open ? (
@@ -118,7 +160,7 @@ export function ColumnVisibilityMenu<T>({
           </div>
           <div className="max-h-80 overflow-y-auto p-1">
             {grouped.length === 0 ? (
-              <div className="px-3 py-4 text-center text-xs text-muted-foreground">No match</div>
+              <div className="px-3 py-4 text-center text-xs text-muted-foreground">{noMatchLabel}</div>
             ) : (
               grouped.map(([groupKey, cols]) => (
                 <div key={groupKey || "default"} className="mb-2 last:mb-0">
@@ -130,33 +172,67 @@ export function ColumnVisibilityMenu<T>({
                   {cols.map((col) => {
                     const isHidden = hiddenColumns.includes(col.id);
                     const isVisible = !isHidden;
+                    const isFrozen = frozenSet.has(col.id);
+                    const freezeDisabled =
+                      !onFrozenColumnsChange ||
+                      (isHidden && !isFrozen) ||
+                      (!isFrozen && frozenColumns.length >= maxFrozenColumns);
+                    const freezeTitle = isFrozen
+                      ? `${unfreezeLabel} ${col.label}`
+                      : `${freezeLabel} ${col.label}`;
                     return (
-                      <button
+                      <div
                         key={col.id}
-                        type="button"
-                        role="menuitemcheckbox"
-                        aria-checked={isVisible}
-                        disabled={col.required}
-                        onClick={() => toggle(col)}
                         className={cn(
                           "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors",
-                          "hover:bg-muted focus-visible:bg-muted focus-visible:outline-none",
-                          col.required && "cursor-not-allowed opacity-60",
+                          "hover:bg-muted focus-within:bg-muted",
                         )}
                       >
-                        <span
+                        <button
+                          type="button"
+                          role="menuitemcheckbox"
+                          aria-checked={isVisible}
+                          disabled={col.required}
+                          onClick={() => toggle(col)}
                           className={cn(
-                            "flex size-4 items-center justify-center rounded border border-border",
-                            isVisible && "border-primary bg-primary text-primary-foreground",
+                            "flex min-w-0 flex-1 items-center gap-2 text-left focus-visible:outline-none",
+                            col.required && "cursor-not-allowed opacity-60",
                           )}
                         >
-                          {isVisible ? <Check className="size-3" /> : null}
-                        </span>
-                        <span className="flex-1 truncate">{col.label}</span>
-                        {col.required ? (
-                          <span className="text-[10px] uppercase text-muted-foreground">{requiredNoteLabel}</span>
+                          <span
+                            className={cn(
+                              "flex size-4 shrink-0 items-center justify-center rounded border border-border",
+                              isVisible && "border-primary bg-primary text-primary-foreground",
+                            )}
+                          >
+                            {isVisible ? <Check className="size-3" /> : null}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate">{col.label}</span>
+                          {col.required ? (
+                            <span className="text-[10px] uppercase text-muted-foreground">{requiredNoteLabel}</span>
+                          ) : null}
+                          {isFrozen ? (
+                            <span className="text-[10px] uppercase text-muted-foreground">{frozenNoteLabel}</span>
+                          ) : null}
+                        </button>
+                        {onFrozenColumnsChange ? (
+                          <button
+                            type="button"
+                            aria-label={freezeTitle}
+                            title={freezeTitle}
+                            disabled={freezeDisabled}
+                            onClick={() => toggleFrozen(col)}
+                            className={cn(
+                              "inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground",
+                              "hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+                              isFrozen && "bg-primary/10 text-primary",
+                              freezeDisabled && "pointer-events-none opacity-40",
+                            )}
+                          >
+                            {isFrozen ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
+                          </button>
                         ) : null}
-                      </button>
+                      </div>
                     );
                   })}
                 </div>

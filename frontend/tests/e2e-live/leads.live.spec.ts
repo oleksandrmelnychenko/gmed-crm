@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import {
   authenticateApiClient,
@@ -8,10 +8,8 @@ import {
 
 function leadCard(page: Page, leadName: string) {
   return page
-    .locator('[role="button"][aria-label]')
-    .filter({
-      has: page.getByRole("heading", { name: leadName, exact: true }),
-    })
+    .getByRole("row")
+    .filter({ hasText: leadName })
     .first();
 }
 
@@ -28,6 +26,28 @@ function leadConvertButton(page: Page, leadName: string) {
   return leadCard(page, leadName).getByRole("button", { name: "Convert", exact: true });
 }
 
+async function selectLeadGateOption(
+  page: Page,
+  sheet: Locator,
+  label: string,
+  option: string,
+) {
+  const field = sheet
+    .locator("label")
+    .filter({ hasText: new RegExp(`^${label}$`) })
+    .first()
+    .locator("xpath=parent::*");
+  await field.getByRole("combobox").click();
+  await page.getByRole("option", { name: option, exact: true }).click();
+}
+
+async function fillLeadGateDate(sheet: Locator, value: string) {
+  const [year, month, day] = value.split("-");
+  await sheet.getByRole("spinbutton", { name: "Year" }).fill(year);
+  await sheet.getByRole("spinbutton", { name: "Month" }).fill(month);
+  await sheet.getByRole("spinbutton", { name: "Day" }).fill(day);
+}
+
 test.describe("lead live workflows", () => {
   test("patient manager can complete blocked lead gate data and convert it into a patient", async ({
     page,
@@ -41,9 +61,9 @@ test.describe("lead live workflows", () => {
 
     await expect(detailSheet.getByText(/Conversion blocked/i)).toBeVisible();
 
-    await detailSheet.getByLabel("Date of birth").fill("1991-01-01");
-    await detailSheet.getByLabel("Legal sex").selectOption("female");
-    await detailSheet.getByLabel("Compliance status").selectOption("signed");
+    await fillLeadGateDate(detailSheet, "1991-01-01");
+    await selectLeadGateOption(page, detailSheet, "Legal sex", "female");
+    await selectLeadGateOption(page, detailSheet, "Compliance status", "signed");
     await detailSheet
       .locator("label")
       .filter({ hasText: "Healthcare consent available" })
@@ -77,7 +97,9 @@ test.describe("lead live workflows", () => {
     await expect(
       page.getByRole("heading", { name: new RegExp(scenario.leads.blocked.name, "i") }),
     ).toBeVisible();
-    await expect(page.getByRole("tab", { name: "Workflow" })).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: /Arbeitsablauf|Workflow/i }),
+    ).toBeVisible();
 
     const patientId = new URL(page.url()).pathname.split("/").pop()!;
     expect(patientId).toBeTruthy();
@@ -283,7 +305,7 @@ test.describe("lead live workflows", () => {
     await page.getByRole("button", { name: /Neuer Lead|New lead/i }).click();
     const createDialog = page.getByRole("dialog");
     await expect(
-      createDialog.getByRole("heading", { name: /Create lead/i }),
+      createDialog.getByRole("heading", { name: /Neuer Lead|Create lead/i }),
     ).toBeVisible();
     const createInputs = createDialog.locator("input");
     await createInputs.nth(0).fill("Sales");
@@ -306,9 +328,9 @@ test.describe("lead live workflows", () => {
     await expect(detailSheet).toBeVisible();
     await expect(detailSheet.getByText(/Conversion blocked/i)).toBeVisible();
 
-    await detailSheet.getByLabel("Date of birth").fill("1992-02-02");
-    await detailSheet.getByLabel("Legal sex").selectOption("female");
-    await detailSheet.getByLabel("Compliance status").selectOption("signed");
+    await fillLeadGateDate(detailSheet, "1992-02-02");
+    await selectLeadGateOption(page, detailSheet, "Legal sex", "female");
+    await selectLeadGateOption(page, detailSheet, "Compliance status", "signed");
     await detailSheet
       .locator("label")
       .filter({ hasText: "Healthcare consent available" })
@@ -338,9 +360,7 @@ test.describe("lead live workflows", () => {
     const qualifiedLeadResponse = await qualifyResponse;
     expect(qualifiedLeadResponse.ok()).toBe(true);
 
-    await expect(
-      refreshedLeadCard.getByText("qualified", { exact: true }),
-    ).toBeVisible();
+    await expect(refreshedLeadCard.getByText(/Qualified/i)).toBeVisible();
     await expect(
       refreshedLeadCard.getByRole("button", { name: "Convert", exact: true }),
     ).toHaveCount(0);

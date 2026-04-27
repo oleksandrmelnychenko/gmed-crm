@@ -6,6 +6,7 @@ export const CHAT_E2E_UNAVAILABLE = "[Encrypted message unavailable on this devi
 
 const STORAGE_KEY = "gmed_chat_e2e_keyring_v1";
 const HKDF_INFO = new TextEncoder().encode("gmed-chat-e2e-v1");
+let ensureServerMessageKeyPromise: Promise<MessageKeyRecord> | null = null;
 
 export interface MessageKeyRecord {
   algorithm: string;
@@ -272,7 +273,7 @@ async function deriveBackupKey(
   );
 }
 
-export async function ensureServerMessageKey(): Promise<MessageKeyRecord> {
+async function ensureServerMessageKeyOnce(): Promise<MessageKeyRecord> {
   let ring = readKeyRing();
   let active =
     (ring.activeFingerprint && ring.keys[ring.activeFingerprint]) || null;
@@ -301,6 +302,17 @@ export async function ensureServerMessageKey(): Promise<MessageKeyRecord> {
   }
 
   return active;
+}
+
+export async function ensureServerMessageKey(): Promise<MessageKeyRecord> {
+  if (ensureServerMessageKeyPromise) return ensureServerMessageKeyPromise;
+
+  ensureServerMessageKeyPromise = ensureServerMessageKeyOnce();
+  try {
+    return await ensureServerMessageKeyPromise;
+  } finally {
+    ensureServerMessageKeyPromise = null;
+  }
 }
 
 export function getLocalMessageKey(fingerprint?: string | null) {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   blankPatientForm,
+  buildPatientsPath,
   computeAge,
   parseLanguages,
   patientDisplayName,
@@ -34,6 +35,23 @@ describe("patientPermissions", () => {
   it("undefined role has no access", () => {
     const perms = patientPermissions(undefined);
     expect(perms.canViewPage).toBe(false);
+  });
+});
+
+describe("buildPatientsPath", () => {
+  it("keeps active-only as the default query", () => {
+    expect(buildPatientsPath({ search: "", activeOnly: "true", providerId: "", doctorId: "" }))
+      .toBe("/patients?active_only=true");
+  });
+
+  it("does not send active_only for all patients", () => {
+    expect(buildPatientsPath({ search: "", activeOnly: "", providerId: "", doctorId: "" }))
+      .toBe("/patients");
+  });
+
+  it("sends inactive-only explicitly", () => {
+    expect(buildPatientsPath({ search: "", activeOnly: "false", providerId: "", doctorId: "" }))
+      .toBe("/patients?active_only=false");
   });
 });
 

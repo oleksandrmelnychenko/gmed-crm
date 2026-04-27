@@ -14,7 +14,6 @@ import {
   TabLoader,
   tokens,
 } from "@/components/ui-shell";
-import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +38,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  createAdminAnnouncement,
+  deleteAdminAnnouncement,
+  fetchAdminAnnouncements,
+} from "@/pages/admin/data/admin-api";
 
 interface Announcement {
   id: string;
@@ -89,7 +93,7 @@ export function AdminAnnouncementsPage() {
     setLoading(true);
     setError("");
     try {
-      setItems(await apiFetch<Announcement[]>("/admin/announcements"));
+      setItems(await fetchAdminAnnouncements<Announcement>());
     } catch (loadError) {
       setItems([]);
       setError(loadError instanceof Error ? loadError.message : t.common_error);
@@ -120,16 +124,13 @@ export function AdminAnnouncementsPage() {
         return;
       }
 
-      await apiFetch("/admin/announcements", {
-        method: "POST",
-        body: JSON.stringify({
-          title: fTitle,
-          message: fMsg,
-          variant: fVariant,
-          is_active: true,
-          starts_at: null,
-          ends_at: normalizedEndsAt || null,
-        }),
+      await createAdminAnnouncement({
+        title: fTitle,
+        message: fMsg,
+        variant: fVariant,
+        is_active: true,
+        starts_at: null,
+        ends_at: normalizedEndsAt || null,
       });
       setShowCreate(false);
       setFTitle("");
@@ -147,7 +148,7 @@ export function AdminAnnouncementsPage() {
   };
 
   const onDelete = async (id: string) => {
-    await apiFetch(`/admin/announcements/${id}/delete`, { method: "POST" });
+    await deleteAdminAnnouncement(id);
     void load();
   };
 
