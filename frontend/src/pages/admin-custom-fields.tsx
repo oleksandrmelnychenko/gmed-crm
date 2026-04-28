@@ -360,7 +360,7 @@ export function AdminCustomFieldsPage() {
       {loading ? <TabLoader /> : null}
 
       {!loading ? (
-        <AdminToolbar>
+        <AdminToolbar className="rounded-none border-0 bg-transparent p-0 shadow-none">
           <NativeComboboxSelect value={filterEntity}
             onChange={(event) => setFilterEntity(event.target.value ?? "")} className="h-8 w-[240px] rounded-lg bg-card text-[13px]">
               <option value="">{t.providers_all}</option>

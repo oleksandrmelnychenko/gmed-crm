@@ -1467,7 +1467,7 @@ export function ContractsPage() {
           }
         >
           <div className="space-y-4 border-b border-border px-4 py-4">
-            <AdminToolbar>
+            <AdminToolbar className="rounded-none border-0 bg-transparent p-0 shadow-none">
               <div className="relative min-w-[260px] flex-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -1587,7 +1587,7 @@ export function ContractsPage() {
           <TabsContent value="contracts" className="space-y-4">
             <AdminTableCard title={titleWithDot(text.contractsTab)} description={t.contracts_subtitle} count={contracts.length}>
               <div className="space-y-4 border-b border-border px-4 py-4">
-                <AdminToolbar>
+                <AdminToolbar className="rounded-none border-0 bg-transparent p-0 shadow-none">
                   <div className="relative min-w-[260px] flex-1">
                     <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
@@ -1695,7 +1695,7 @@ export function ContractsPage() {
           <TabsContent value="quotes" className="space-y-4">
             <AdminTableCard title={titleWithDot(text.quotesTab)} description={t.contracts_subtitle} count={quotes.length}>
               <div className="space-y-4 border-b border-border px-4 py-4">
-                <AdminToolbar>
+                <AdminToolbar className="rounded-none border-0 bg-transparent p-0 shadow-none">
                   <div className="relative min-w-[240px] flex-1">
                     <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                     <Input

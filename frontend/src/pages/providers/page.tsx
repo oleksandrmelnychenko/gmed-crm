@@ -721,7 +721,7 @@ function ProvidersPage() {
           />
         </div>
 
-        <div className="relative z-30 flex flex-col gap-2 rounded-lg border border-border bg-card/80 p-2 shadow-sm">
+        <div className="relative z-30 flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
             <div className="relative min-w-[240px] flex-1 sm:max-w-sm">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
