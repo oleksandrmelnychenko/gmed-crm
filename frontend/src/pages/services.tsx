@@ -32,6 +32,9 @@ import {
   EmptyCell,
   PageHeader,
   StatCard,
+  inputClass as shellInputClassName,
+  selectClass as shellSelectClassName,
+  textareaClass as shellTextareaClassName,
 } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -135,10 +138,9 @@ const STAFF_SERVICES_REALTIME_EVENTS = [
   "concierge_service.cancelled",
   "concierge_service.billing_ready",
 ] as const;
-const formInputClassName =
-  "h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground shadow-xs outline-none transition focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50";
-const formTextareaClassName =
-  "min-h-24 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground shadow-xs outline-none transition focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50";
+const formInputClassName = shellInputClassName;
+const formSelectClassName = cn(shellSelectClassName, "shadow-none");
+const formTextareaClassName = cn(shellTextareaClassName, "min-h-24");
 const SERVICE_KIND_OPTIONS = [
   "hotel",
   "transfer",
@@ -900,7 +902,7 @@ function StaffServicesPage() {
                       onChange={(event) =>
                         setCreateForm((current) => ({ ...current, patientId: event.target.value }))
                       }
-                      className={formInputClassName}
+                      className={formSelectClassName}
                     >
                       <option value="">{l("Auswählen", "Выбрать", "Select")}</option>
                       {patients.map((patient) => (
@@ -920,7 +922,7 @@ function StaffServicesPage() {
                       onChange={(event) =>
                         setCreateForm((current) => ({ ...current, serviceKind: event.target.value }))
                       }
-                      className={formInputClassName}
+                      className={formSelectClassName}
                     >
                       {SERVICE_KIND_OPTIONS.map((kind) => (
                         <option key={kind} value={kind}>
@@ -941,7 +943,7 @@ function StaffServicesPage() {
                     onChange={(event) =>
                       setCreateForm((current) => ({ ...current, title: event.target.value }))
                     }
-                    className="h-9 rounded-lg bg-background"
+                    className={formInputClassName}
                   />
                 </label>
 
@@ -955,7 +957,7 @@ function StaffServicesPage() {
                       onChange={(event) =>
                         setCreateForm((current) => ({ ...current, providerId: event.target.value }))
                       }
-                      className={formInputClassName}
+                      className={formSelectClassName}
                     >
                       <option value="">{l("Optional", "Опционально", "Optional")}</option>
                       {providers.map((provider) => (
@@ -978,7 +980,7 @@ function StaffServicesPage() {
                           assignedConciergeId: event.target.value,
                         }))
                       }
-                      className={formInputClassName}
+                      className={formSelectClassName}
                     >
                       <option value="">{l("Nicht zugewiesen", "Не назначен", "Unassigned")}</option>
                       {conciergeStaff.map((member) => (
@@ -1001,7 +1003,7 @@ function StaffServicesPage() {
                       onChange={(event) =>
                         setCreateForm((current) => ({ ...current, startsAt: event.target.value }))
                       }
-                      className="h-9 rounded-lg bg-background"
+                      className={formInputClassName}
                     />
                   </label>
                   <label className="space-y-1.5 text-sm">
@@ -1014,7 +1016,7 @@ function StaffServicesPage() {
                       onChange={(event) =>
                         setCreateForm((current) => ({ ...current, endsAt: event.target.value }))
                       }
-                      className="h-9 rounded-lg bg-background"
+                      className={formInputClassName}
                     />
                   </label>
                 </div>
@@ -1033,7 +1035,7 @@ function StaffServicesPage() {
                           costEstimate: event.target.value,
                         }))
                       }
-                      className="h-9 rounded-lg bg-background"
+                      className={formInputClassName}
                     />
                   </label>
                   <label className="space-y-1.5 text-sm">
@@ -1046,7 +1048,7 @@ function StaffServicesPage() {
                       onChange={(event) =>
                         setCreateForm((current) => ({ ...current, actualCost: event.target.value }))
                       }
-                      className="h-9 rounded-lg bg-background"
+                      className={formInputClassName}
                     />
                   </label>
                   <label className="space-y-1.5 text-sm">
@@ -1059,7 +1061,7 @@ function StaffServicesPage() {
                       onChange={(event) =>
                         setCreateForm((current) => ({ ...current, currency: event.target.value }))
                       }
-                      className="h-9 rounded-lg bg-background uppercase"
+                      className={cn(formInputClassName, "uppercase")}
                     />
                   </label>
                 </div>
@@ -1077,7 +1079,7 @@ function StaffServicesPage() {
                           bookingReference: event.target.value,
                         }))
                       }
-                      className="h-9 rounded-lg bg-background"
+                      className={formInputClassName}
                     />
                   </label>
                   <label className="space-y-1.5 text-sm">
@@ -1089,7 +1091,7 @@ function StaffServicesPage() {
                       onChange={(event) =>
                         setCreateForm((current) => ({ ...current, vendorName: event.target.value }))
                       }
-                      className="h-9 rounded-lg bg-background"
+                      className={formInputClassName}
                     />
                   </label>
                 </div>
@@ -1103,7 +1105,7 @@ function StaffServicesPage() {
                     onChange={(event) =>
                       setCreateForm((current) => ({ ...current, vendorContact: event.target.value }))
                     }
-                    className="h-9 rounded-lg bg-background"
+                    className={formInputClassName}
                   />
                 </label>
 

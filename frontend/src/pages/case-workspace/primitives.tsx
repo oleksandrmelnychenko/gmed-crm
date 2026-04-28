@@ -61,17 +61,10 @@ type FieldProps = {
   hint?: string;
 };
 
-export function Field({ label, children, required, hint }: FieldProps) {
+export function Field({ label, children, hint }: FieldProps) {
   return (
     <label className="flex flex-col gap-1.5">
-      <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] leading-tight text-slate-600">
-        {required ? (
-          <span
-            aria-hidden
-            title="Required"
-            className="size-1.5 shrink-0 rounded-full bg-orange-500"
-          />
-        ) : null}
+      <span className="text-[11.5px] font-medium leading-tight text-muted-foreground">
         {label}
       </span>
       {children}
