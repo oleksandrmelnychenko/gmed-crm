@@ -21,7 +21,7 @@ import { clearApiCache } from "@/lib/api";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
-import { useRealtimeSubscription } from "@/lib/realtime";
+import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import {
   buildInterpreterMobileAgendaSections,
   buildAppointmentTimelineEvents,
@@ -111,7 +111,9 @@ import {
 import { MobileDetailSheet, preloadMobileDetailSheet } from "@/pages/appointments/ui/sheets/mobile-detail-sheet";
 import type {
   AppointmentCommunicationEntry,
+  AppointmentWorkspaceTab,
   AppointmentListItem,
+  CalendarEventExtendedProps,
   CalendarView,
   ChecklistItem,
   ConciergeServiceEntry,
@@ -1018,6 +1020,21 @@ function StaffAppointmentsPage() {
     setOperationalScope,
   });
 
+  const defaultDetailTabForAppointment = useCallback(
+    (appointmentId: string): AppointmentWorkspaceTab => {
+      const appointment = appointmentsIndex.get(appointmentId);
+      return appointment?.type === "non_medical" ? "services" : "overview";
+    },
+    [appointmentsIndex],
+  );
+
+  useEffect(() => {
+    const appointmentParam = searchParams.get("appointment");
+    if (!appointmentParam || searchParams.get("detailTab")) return;
+    if (defaultDetailTabForAppointment(appointmentParam) !== "services") return;
+    syncQuery({ detailTab: "services" });
+  }, [defaultDetailTabForAppointment, searchParams, syncQuery]);
+
   const closeDetailWorkspace = useCallback(
     (clearQuery = true) => {
       setDetailOpen(false);
@@ -1267,7 +1284,8 @@ function StaffAppointmentsPage() {
     refreshDetail();
   }, [refreshDetail, reportAppointmentsNotice]);
 
-  const openDetailSheet = useCallback((id: string) => {
+  const openDetailSheet = useCallback((id: string, detailTabOverride?: AppointmentWorkspaceTab) => {
+    const nextDetailTab = detailTabOverride ?? defaultDetailTabForAppointment(id);
     void (isMobile
       ? preloadMobileDetailSheet()
       : loadDesktopDetailWorkspaceContent());
@@ -1278,9 +1296,10 @@ function StaffAppointmentsPage() {
     });
     syncQuery({
       appointment: id,
-      detailTab: "overview",
+      detailTab: nextDetailTab,
     });
   }, [
+    defaultDetailTabForAppointment,
     dismissCalendarQuickActionMenu,
     isMobile,
     setDetailOpen,
@@ -1337,44 +1356,70 @@ function StaffAppointmentsPage() {
     [openDetailSheet, refreshAppointments, refreshDetail, reportAppointmentsNotice],
   );
 
-  useRealtimeSubscription(APPOINTMENT_REALTIME_EVENTS, (event) => {
+  useDebouncedRealtimeSubscription(APPOINTMENT_REALTIME_EVENTS, (_event, events) => {
     clearApiCache("/appointments");
-    const eventAppointmentId =
-      typeof event.payload?.appointment_id === "string"
-        ? event.payload.appointment_id
-        : null;
-    if (event.entity_type === "concierge_service") {
-      clearApiCache("/concierge-services");
-      if (detailOpen) {
-        refreshDetail();
+
+    let shouldRefreshAppointments = false;
+    let shouldRefreshDetail = false;
+
+    for (const event of events) {
+      const eventAppointmentId =
+        typeof event.payload?.appointment_id === "string"
+          ? event.payload.appointment_id
+          : null;
+
+      if (event.entity_type === "concierge_service") {
+        clearApiCache("/concierge-services");
+        if (detailOpen) {
+          shouldRefreshDetail = true;
+        }
+        continue;
       }
-      return;
+
+      if (
+        event.entity_type === "appointment_checklist" ||
+        event.entity_type === "reminder" ||
+        event.entity_type === "task"
+      ) {
+        clearApiCache("/tasks");
+        if (eventAppointmentId) {
+          clearApiCache(`/appointments/${eventAppointmentId}/checklist`);
+          clearApiCache(`/appointments/${eventAppointmentId}/reminders`);
+        }
+        if (detailOpen && selectedId && eventAppointmentId === selectedId) {
+          shouldRefreshDetail = true;
+        }
+        shouldRefreshAppointments = true;
+        continue;
+      }
+
+      if (
+        event.entity_type === "appointment" &&
+        detailOpen &&
+        selectedId &&
+        event.entity_id === selectedId
+      ) {
+        shouldRefreshDetail = true;
+        continue;
+      }
+
+      shouldRefreshAppointments = true;
     }
-    if (
-      event.entity_type === "appointment_checklist" ||
-      event.entity_type === "reminder" ||
-      event.entity_type === "task"
-    ) {
-      clearApiCache("/tasks");
-      if (eventAppointmentId) {
-        clearApiCache(`/appointments/${eventAppointmentId}/checklist`);
-        clearApiCache(`/appointments/${eventAppointmentId}/reminders`);
-      }
-      if (detailOpen && selectedId && eventAppointmentId === selectedId) {
-        refreshDetail();
-      }
-      refreshAppointments();
-      return;
-    }
-    if (event.entity_type === "appointment" && detailOpen && selectedId && event.entity_id === selectedId) {
+
+    if (shouldRefreshDetail) {
       refreshDetail();
-      return;
     }
-    refreshAppointments();
-  });
+    if (shouldRefreshAppointments) {
+      refreshAppointments();
+    }
+  }, 250);
 
   function handleEventClick(info: EventClickArg) {
-    openDetailSheet(info.event.id);
+    const props = info.event.extendedProps as CalendarEventExtendedProps;
+    openDetailSheet(
+      info.event.id,
+      props.appointmentType === "non_medical" ? "services" : undefined,
+    );
   }
 
   const renderCalendarEventContent = useCallback(

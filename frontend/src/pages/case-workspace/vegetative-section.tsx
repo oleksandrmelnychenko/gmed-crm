@@ -197,10 +197,10 @@ function VegetativeSectionForm({
           />
         </Field>
 
-        <div className="flex justify-end border-t border-slate-100 pt-4">
+        <div className="flex justify-end border-t border-border/60 pt-4">
           <Button
             type="submit"
-            className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+            className="h-9 rounded-lg"
             disabled={busy || !canEdit}
           >
             {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}

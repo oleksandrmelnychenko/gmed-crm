@@ -48,7 +48,10 @@
       "Bash(npm --prefix frontend run typecheck)",
       "Bash(npm --prefix frontend test -- --run src/lib/api.test.ts)",
       "PowerShell($path = 'c:\\\\Users\\\\123\\\\Downloads\\\\dev\\\\frontend\\\\src\\\\pages\\\\leads\\\\page.tsx'; $lines = Get-Content -LiteralPath $path; $before = $lines[0..1821]; $after = $lines[2554..\\($lines.Length - 1\\)]; $new = $before + $after; Set-Content -LiteralPath $path -Value $new -Encoding UTF8)",
-      "Bash(git check-ignore *)"
+      "Bash(git check-ignore *)",
+      "Bash(grep -n \"^import { useCallback\\\\|useCallback,\" frontend/src/pages/leads/page.tsx)",
+      "Bash(grep -n \"@/lib/api\\\\b\\\\|@/lib/secure-persist\\\\|^import { useCallback\\\\|useCallback,\" frontend/src/pages/providers/page.tsx)",
+      "Bash(grep -n \"@/lib/api\\\\b\\\\|@/lib/secure-persist\\\\|^import { useCallback\\\\|useCallback,\" frontend/src/pages/cases/page.tsx)"
     ],
     "additionalDirectories": [
       "C:\\Users\\123\\Downloads\\dev\\frontend",

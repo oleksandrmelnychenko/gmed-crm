@@ -50,7 +50,7 @@ import {
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
-import { useRealtimeSubscription } from "@/lib/realtime";
+import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import {
   feedbackSourceLabel,
@@ -505,11 +505,11 @@ function PatientFeedbackWorkspace() {
   const [version, setVersion] = useState(0);
   const [activeFeedbackId, setActiveFeedbackId] = useState("");
 
-  useRealtimeSubscription(FEEDBACK_REALTIME_EVENTS, () => {
+  useDebouncedRealtimeSubscription(FEEDBACK_REALTIME_EVENTS, () => {
     clearApiCache("/me/feedback");
     clearApiCache("/me/appointments");
     setVersion((value) => value + 1);
-  });
+  }, 250);
 
   useEffect(() => {
     let cancelled = false;
@@ -895,12 +895,12 @@ function StaffFeedbackWorkspace() {
   const [reviewNote, setReviewNote] = useState("");
   const [captureOpen, setCaptureOpen] = useState(false);
 
-  useRealtimeSubscription(FEEDBACK_REALTIME_EVENTS, () => {
+  useDebouncedRealtimeSubscription(FEEDBACK_REALTIME_EVENTS, () => {
     if (!canViewWorkspace) return;
     clearApiCache("/feedback");
     clearApiCache("/feedback/summary");
     setVersion((value) => value + 1);
-  });
+  }, 250);
 
   useEffect(() => {
     let cancelled = false;
@@ -1639,11 +1639,6 @@ function StaffFeedbackWorkspace() {
             <form className="flex h-full flex-col" onSubmit={(event) => void handleReview(event)}>
               <AdminSheetScaffold
                 title={l("Feedback prüfen", "Проверить отзыв", "Review feedback")}
-                description={l(
-                  "Mark as reviewed or archive with an internal note.",
-                  "Отметьте как проверено или отправьте в архив с заметкой.",
-                  "Mark as reviewed or archive with an internal note.",
-                )}
                 footer={
                   <SheetFormFooter
                     cancelLabel={l("Schließen", "Закрыть", "Close")}

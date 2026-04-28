@@ -225,8 +225,11 @@ export function patientDisplayName(patient: Pick<PatientSummary, "first_name" | 
 export function buildPatientsPath(filters: PatientFilters) {
   const params = new URLSearchParams();
   if (filters.search.trim()) params.set("search", filters.search.trim());
-  if (filters.activeOnly === "true") params.set("active_only", "true");
-  else if (filters.activeOnly === "false") params.set("active_only", "false");
+  // Server defaults active_only=true, so we always pass it explicitly:
+  //   "true"   → only active rows from the server
+  //   "false"  → only inactive (server returns all, client filters)
+  //   ""       → "All" filter, also returns all from the server
+  params.set("active_only", filters.activeOnly === "true" ? "true" : "false");
   if (filters.providerId) params.set("provider_id", filters.providerId);
   if (filters.doctorId) params.set("doctor_id", filters.doctorId);
   const query = params.toString();

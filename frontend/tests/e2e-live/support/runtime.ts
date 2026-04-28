@@ -101,10 +101,17 @@ export function parseDockerPort(output: string) {
   return parsed;
 }
 
+function cargoTargetDir() {
+  const configured = process.env.CARGO_TARGET_DIR;
+  if (!configured) return path.join(REPO_ROOT, "target");
+  return path.isAbsolute(configured)
+    ? configured
+    : path.join(REPO_ROOT, configured);
+}
+
 export function backendExecutablePath() {
   return path.join(
-    REPO_ROOT,
-    "target",
+    cargoTargetDir(),
     "debug",
     process.platform === "win32" ? "gmed-server.exe" : "gmed-server",
   );

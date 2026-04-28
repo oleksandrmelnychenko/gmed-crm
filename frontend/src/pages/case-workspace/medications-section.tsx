@@ -112,19 +112,19 @@ export function MedicationsSection() {
       renderCard={(item) => (
         <>
           <div className="flex items-center gap-2">
-            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-orange-500" />
-            <p className="truncate text-sm font-semibold text-slate-950">
+            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+            <p className="truncate text-sm font-medium text-foreground">
               {item.handelsname || tri(lang, "Ohne Namen", "Без названия", "Untitled")}
             </p>
           </div>
           {item.wirkstoff ? (
-            <p className="truncate text-[12.5px] text-slate-500">{item.wirkstoff}</p>
+            <p className="truncate text-xs text-muted-foreground">{item.wirkstoff}</p>
           ) : null}
           <div className="flex flex-wrap gap-1.5">
             {item.dosis ? (
               <Badge
                 variant="outline"
-                className="rounded-full border-slate-200 bg-slate-50 text-[11px] font-medium text-slate-600"
+                className="rounded-full border-border/60 bg-muted/25 text-[11px] font-medium text-muted-foreground"
               >
                 {item.dosis} {item.dosis_einheit ?? ""}
               </Badge>
@@ -132,7 +132,7 @@ export function MedicationsSection() {
             {item.einnahmeschema ? (
               <Badge
                 variant="outline"
-                className="rounded-full border-slate-200 bg-slate-50 text-[11px] font-medium text-slate-600"
+                className="rounded-full border-border/60 bg-muted/25 text-[11px] font-medium text-muted-foreground"
               >
                 {item.einnahmeschema}
               </Badge>
@@ -140,7 +140,7 @@ export function MedicationsSection() {
             {item.med_typ ? (
               <Badge
                 variant="outline"
-                className="rounded-full border-slate-200 bg-slate-50 text-[11px] font-medium text-slate-600"
+                className="rounded-full border-border/60 bg-muted/25 text-[11px] font-medium text-muted-foreground"
               >
                 {item.med_typ}
               </Badge>
@@ -310,7 +310,7 @@ export function MedicationsSection() {
           </Field>
 
           {form.is_expired && form.pending_expiry_confirmation ? (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-[12.5px] text-amber-800">
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[12.5px] text-amber-800">
               <div className="flex items-center gap-1.5 font-semibold">
                 <AlertTriangle className="size-3.5" />
                 {tri(

@@ -1,5 +1,6 @@
 import {
   startTransition,
+  useCallback,
   useDeferredValue,
   useEffect,
   useMemo,
@@ -58,9 +59,10 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
+import { useSecurePersistedState } from "@/lib/secure-persist";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
-import { useRealtimeSubscription } from "@/lib/realtime";
+import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import type { CreateLeadBody, LeadDetail, LeadsStats, MonthlyEntry, StatusCount } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
@@ -164,7 +166,48 @@ export function LeadsPage() {
   const failedLoadMessage = t.common_failed_load;
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = useMemo(() => leadPermissions(user?.role), [user?.role]);
-  const [filters, setFilters] = useState<LeadFilters>(DEFAULT_FILTERS);
+  type PersistedLeadFilters = Pick<LeadFilters, "status" | "source" | "country" | "includeArchived">;
+  const [persistedLeadFilters, setPersistedLeadFilters] = useSecurePersistedState<PersistedLeadFilters>(
+    "leads.filters",
+    {
+      status: DEFAULT_FILTERS.status,
+      source: DEFAULT_FILTERS.source,
+      country: DEFAULT_FILTERS.country,
+      includeArchived: DEFAULT_FILTERS.includeArchived,
+    },
+    {
+      schemaVersion: 1,
+      validate: (value): value is PersistedLeadFilters =>
+        Boolean(value) &&
+        typeof value === "object" &&
+        typeof (value as Record<string, unknown>).status === "string" &&
+        typeof (value as Record<string, unknown>).source === "string" &&
+        typeof (value as Record<string, unknown>).country === "string" &&
+        typeof (value as Record<string, unknown>).includeArchived === "string",
+    },
+  );
+  const [filters, setFiltersState] = useState<LeadFilters>(() => ({
+    ...DEFAULT_FILTERS,
+    status: persistedLeadFilters.status,
+    source: persistedLeadFilters.source,
+    country: persistedLeadFilters.country,
+    includeArchived: persistedLeadFilters.includeArchived,
+  }));
+  const setFilters: typeof setFiltersState = useCallback(
+    (value: LeadFilters | ((prev: LeadFilters) => LeadFilters)) => {
+      setFiltersState((prev) => {
+        const next = typeof value === "function" ? (value as (p: LeadFilters) => LeadFilters)(prev) : value;
+        setPersistedLeadFilters({
+          status: next.status,
+          source: next.source,
+          country: next.country,
+          includeArchived: next.includeArchived,
+        });
+        return next;
+      });
+    },
+    [setPersistedLeadFilters],
+  );
   const deferredSearch = useDeferredValue(filters.search);
   const [version, setVersion] = useState(0);
 
@@ -470,22 +513,24 @@ export function LeadsPage() {
     setVersion((current) => current + 1);
   }
 
-  useRealtimeSubscription(LEAD_REALTIME_EVENTS, (event) => {
+  useDebouncedRealtimeSubscription(LEAD_REALTIME_EVENTS, (_event, events) => {
     if (!permissions.canViewPage) return;
     clearApiCache("/leads");
     clearApiCache("/stats/leads");
     clearApiCache("/stats/leads/monthly");
     clearApiCache("/stats/leads/by-status");
-    if (event.entity_type === "lead" && event.entity_id) {
-      clearApiCache(`/leads/${event.entity_id}`);
+    for (const event of events) {
+      if (event.entity_type === "lead" && event.entity_id) {
+        clearApiCache(`/leads/${event.entity_id}`);
+      }
     }
-    if (selectedLeadId && selectedLeadId !== event.entity_id) {
+    if (selectedLeadId) {
       clearApiCache(`/leads/${selectedLeadId}`);
     }
     startTransition(() => {
       setVersion((current) => current + 1);
     });
-  });
+  }, 250);
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

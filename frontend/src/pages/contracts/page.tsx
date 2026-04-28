@@ -52,7 +52,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
-import { useRealtimeSubscription } from "@/lib/realtime";
+import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 import {
@@ -472,29 +472,31 @@ export function ContractsPage() {
   const deferredQuoteSearch = useDeferredValue(quoteFilters.search);
   const deferredAgencyServiceSearch = useDeferredValue(agencyServiceFilters.search);
 
-  useRealtimeSubscription(CONTRACT_REALTIME_EVENTS, (event) => {
+  useDebouncedRealtimeSubscription(CONTRACT_REALTIME_EVENTS, (_event, events) => {
     if (!permissions.canViewPage) return;
     clearApiCache("/framework-contracts");
     clearApiCache("/quotes");
     clearApiCache("/orders");
 
-    if (event.entity_type === "framework_contract" && event.entity_id) {
-      clearApiCache(`/framework-contracts/${event.entity_id}`);
-    }
-    if (event.entity_type === "quote" && event.entity_id) {
-      clearApiCache(`/quotes/${event.entity_id}`);
-      clearApiCache(`/quotes/${event.entity_id}/versions`);
-    }
+    for (const event of events) {
+      if (event.entity_type === "framework_contract" && event.entity_id) {
+        clearApiCache(`/framework-contracts/${event.entity_id}`);
+      }
+      if (event.entity_type === "quote" && event.entity_id) {
+        clearApiCache(`/quotes/${event.entity_id}`);
+        clearApiCache(`/quotes/${event.entity_id}/versions`);
+      }
 
-    const orderId =
-      typeof event.payload?.order_id === "string" ? event.payload.order_id : "";
-    if (orderId) {
-      clearApiCache(`/orders/${orderId}`);
+      const orderId =
+        typeof event.payload?.order_id === "string" ? event.payload.order_id : "";
+      if (orderId) {
+        clearApiCache(`/orders/${orderId}`);
+      }
     }
-    if (selectedContractId && selectedContractId !== event.entity_id) {
+    if (selectedContractId) {
       clearApiCache(`/framework-contracts/${selectedContractId}`);
     }
-    if (selectedQuoteId && selectedQuoteId !== event.entity_id) {
+    if (selectedQuoteId) {
       clearApiCache(`/quotes/${selectedQuoteId}`);
       clearApiCache(`/quotes/${selectedQuoteId}/versions`);
     }
@@ -503,7 +505,7 @@ export function ContractsPage() {
       setContractsReloadToken((current) => current + 1);
       setQuotesReloadToken((current) => current + 1);
     });
-  });
+  }, 250);
 
   const contractQuery = useMemo(
     () => ({ ...contractFilters, search: deferredContractSearch }),
@@ -1370,7 +1372,6 @@ export function ContractsPage() {
       <div className="space-y-6">
         <PageHeader
           title={text.workspaceTitle}
-          description={text.workspaceDescription}
           actions={
             <>
               <Button

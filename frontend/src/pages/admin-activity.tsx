@@ -33,7 +33,9 @@ import {
   Sheet,
   SheetContent,
 } from "@/components/ui/sheet";
+import { clearApiCache } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { formatAdminDateTime } from "@/pages/admin-pages.helpers";
 import { fetchAdminActivity } from "@/pages/admin/data/admin-api";
@@ -55,6 +57,116 @@ interface ActivityRow {
   context: Record<string, unknown> | null;
   created_at: string;
 }
+
+const ADMIN_ACTIVITY_REALTIME_EVENTS = [
+  "access_policy.updated",
+  "access_policy.reset",
+  "announcement.created",
+  "announcement.updated",
+  "announcement.deleted",
+  "appointment.created",
+  "appointment.updated",
+  "appointment.status_changed",
+  "appointment_checklist.created",
+  "appointment_checklist.completed",
+  "appointment_request.created",
+  "appointment_request.reviewed",
+  "appointment_request.converted",
+  "case.created",
+  "case.updated",
+  "case.medication_expiry_confirmed",
+  "case.medication_expiry_flagged",
+  "concierge_service.created",
+  "concierge_service.updated",
+  "concierge_service.cancelled",
+  "concierge_service.billing_ready",
+  "consent.granted",
+  "consent.revoked",
+  "custom_field.created",
+  "custom_field.updated",
+  "custom_field.deleted",
+  "document.uploaded",
+  "document.payment_proof_uploaded",
+  "document.generated",
+  "document.updated",
+  "document.deleted",
+  "document.portal_released",
+  "document.portal_revoked",
+  "document.translation_requested",
+  "document.translation_updated",
+  "feedback.submitted",
+  "feedback.reviewed",
+  "framework_contract.created",
+  "framework_contract.status_changed",
+  "invoice.created",
+  "invoice.status_changed",
+  "invoice.dunning_created",
+  "invoice.overdue_marked",
+  "lead.created",
+  "lead.updated",
+  "lead.status_changed",
+  "lead.converted",
+  "lead.failed_resolved",
+  "notification_channel.created",
+  "notification_channel.updated",
+  "notification_channel.deleted",
+  "order.created",
+  "order.phase_changed",
+  "order.process_gates_updated",
+  "order.debt_management_updated",
+  "order.planning_preparation_updated",
+  "order.execution_flow_updated",
+  "order.followup_flow_updated",
+  "order.external_invoice_created",
+  "order.external_invoice_updated",
+  "order.external_invoice_overdue",
+  "order.leistung_added",
+  "order.leistung_approved",
+  "patient.created",
+  "patient.updated",
+  "patient.assigned",
+  "patient.assignment_revoked",
+  "patient.activated",
+  "patient.deactivated",
+  "pending_login.approved",
+  "pending_login.rejected",
+  "privacy_request.created",
+  "privacy_request.reviewed",
+  "privacy_request.executed",
+  "provider.created",
+  "provider.updated",
+  "provider.deleted",
+  "provider.activated",
+  "provider.deactivated",
+  "provider.doctor_created",
+  "provider.doctor_updated",
+  "provider.doctor_deleted",
+  "provider.service_created",
+  "provider.service_updated",
+  "provider.service_deleted",
+  "quote.created",
+  "quote.status_changed",
+  "reminder.created",
+  "reminder.completed",
+  "security.ip_whitelist_added",
+  "security.ip_whitelist_deleted",
+  "session.revoked",
+  "session.revoked_all",
+  "system_setting.updated",
+  "system_setting.maintenance_toggled",
+  "task.created",
+  "task.status_changed",
+  "user.created",
+  "user.updated",
+  "user.deactivated",
+  "user.activated",
+  "user.password_reset",
+  "user.unlocked",
+  "user.force_password_reset",
+  "user.mfa_toggled",
+  "workflow_checklist_item.created",
+  "workflow_checklist_item.completed",
+] as const;
 
 function actionTone(action: string) {
   switch (action) {
@@ -151,6 +263,11 @@ export function AdminActivityPage() {
   useEffect(() => {
     void loadData(filterAction);
   }, [filterAction, loadData]);
+
+  useDebouncedRealtimeSubscription(ADMIN_ACTIVITY_REALTIME_EVENTS, () => {
+    clearApiCache("/admin/activity");
+    void loadData(filterAction);
+  }, 300);
 
   const actionOptions = useMemo(() => {
     const values = new Set(activities.map((item) => item.action));

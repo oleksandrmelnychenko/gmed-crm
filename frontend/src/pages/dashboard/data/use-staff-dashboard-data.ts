@@ -1,7 +1,7 @@
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 
 import { apiFetch, clearApiCache } from "@/lib/api";
-import { useRealtimeSubscription } from "@/lib/realtime";
+import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 
 import type {
   ClinicalPayload,
@@ -188,13 +188,13 @@ export function useStaffDashboardData(period: Period) {
     };
   }, [period, refreshVersion]);
 
-  useRealtimeSubscription(STAFF_DASHBOARD_REALTIME_EVENTS, () => {
+  useDebouncedRealtimeSubscription(STAFF_DASHBOARD_REALTIME_EVENTS, () => {
     clearStaffDashboardCache();
     if (!overviewLoadedRef.current) {
       setLoading(true);
     }
     setRefreshVersion((version) => version + 1);
-  });
+  }, 300);
 
   const newPatientsThisMonth = useMemo(() => {
     const now = new Date();

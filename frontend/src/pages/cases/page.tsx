@@ -1,5 +1,6 @@
 import {
   startTransition,
+  useCallback,
   useDeferredValue,
   useEffect,
   useMemo,
@@ -45,6 +46,7 @@ import {
   SheetContent,
 } from "@/components/ui/sheet";
 import { clearApiCache } from "@/lib/api";
+import { useSecurePersistedState } from "@/lib/secure-persist";
 import { useAuth } from "@/lib/auth";
 import {
   getLang,
@@ -52,7 +54,7 @@ import {
   type Translations,
   useLang,
 } from "@/lib/i18n";
-import { useRealtimeSubscription } from "@/lib/realtime";
+import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 import {
@@ -1035,7 +1037,37 @@ export function CasesPage({
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = useMemo(() => casePermissions(user?.role), [user?.role]);
 
-  const [filters, setFilters] = useState<CaseFilters>(DEFAULT_FILTERS);
+  type PersistedCaseFilters = Pick<CaseFilters, "status" | "patientId">;
+  const [persistedCaseFilters, setPersistedCaseFilters] = useSecurePersistedState<PersistedCaseFilters>(
+    "cases.filters",
+    { status: DEFAULT_FILTERS.status, patientId: DEFAULT_FILTERS.patientId },
+    {
+      schemaVersion: 1,
+      validate: (value): value is PersistedCaseFilters =>
+        Boolean(value) &&
+        typeof value === "object" &&
+        typeof (value as Record<string, unknown>).status === "string" &&
+        typeof (value as Record<string, unknown>).patientId === "string",
+    },
+  );
+  const [filters, setFiltersState] = useState<CaseFilters>(() => ({
+    ...DEFAULT_FILTERS,
+    status: persistedCaseFilters.status,
+    patientId: persistedCaseFilters.patientId,
+  }));
+  const setFilters: typeof setFiltersState = useCallback(
+    (value) => {
+      setFiltersState((prev) => {
+        const next = typeof value === "function" ? (value as (p: CaseFilters) => CaseFilters)(prev) : value;
+        setPersistedCaseFilters({
+          status: next.status,
+          patientId: next.patientId,
+        });
+        return next;
+      });
+    },
+    [setPersistedCaseFilters],
+  );
   const deferredSearch = useDeferredValue(filters.search);
   const [patients, setPatients] = useState<PatientOption[]>([]);
   const [doctors, setDoctors] = useState<DoctorOption[]>([]);
@@ -1104,24 +1136,28 @@ export function CasesPage({
     () => patients.find((patient) => patient.id === (detail?.patient_id ?? selectedSummary?.patient_id)),
     [detail?.patient_id, patients, selectedSummary?.patient_id],
   );
-  useRealtimeSubscription(CASE_REALTIME_EVENTS, (event) => {
+
+  useDebouncedRealtimeSubscription(CASE_REALTIME_EVENTS, (_event, events) => {
     if (!permissions.canViewPage) return;
     clearApiCache("/cases");
-    if (event.entity_type === "case" && event.entity_id) {
-      clearApiCache(`/cases/${event.entity_id}`);
-      clearApiCache(`/cases/${event.entity_id}/history`);
+    const selectedWasUpdated = events.some((event) => event.entity_id === selectedId);
+    for (const event of events) {
+      if (event.entity_type === "case" && event.entity_id) {
+        clearApiCache(`/cases/${event.entity_id}`);
+        clearApiCache(`/cases/${event.entity_id}/history`);
+      }
     }
-    if (selectedId && selectedId !== event.entity_id) {
+    if (selectedId) {
       clearApiCache(`/cases/${selectedId}`);
       clearApiCache(`/cases/${selectedId}/history`);
     }
     startTransition(() => {
       setListVersion((current) => current + 1);
-      if (!selectedId || selectedId === event.entity_id) {
+      if (!selectedId || selectedWasUpdated) {
         setDetailVersion((current) => current + 1);
       }
     });
-  });
+  }, 250);
   const snippetContext = useMemo(
     () => ({
       patientName:
@@ -1396,6 +1432,7 @@ export function CasesPage({
     permissions.canCreate,
     searchParams,
     selectedId,
+    setFilters,
     setSearchParams,
   ]);
 

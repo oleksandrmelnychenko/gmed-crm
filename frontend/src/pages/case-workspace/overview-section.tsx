@@ -5,7 +5,6 @@ import { LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useLang } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
 import {
   CASE_TEXT_SNIPPET_PLACEHOLDERS,
   appendSnippetToNarrative,
@@ -239,10 +238,10 @@ function OverviewSectionForm({
           />
         </Field>
 
-        <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+        <div className="rounded-xl border border-border/50 bg-muted/25 p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="text-sm font-semibold text-slate-900">
+              <p className="text-sm font-medium text-foreground">
                 {tri(
                   lang,
                   "Textbausteine",
@@ -250,7 +249,7 @@ function OverviewSectionForm({
                   "Text snippets",
                 )}
               </p>
-              <p className="mt-1 text-xs leading-relaxed text-slate-500">
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                 {tri(
                   lang,
                   "Wiederverwendbare Fragmente zum Einfügen in den Anamnese-Text.",
@@ -259,12 +258,12 @@ function OverviewSectionForm({
                 )}
               </p>
             </div>
-            <code className="rounded-xl bg-white px-3 py-1 text-[11px] text-slate-500">
+            <code className="rounded-lg border border-border/50 bg-card px-3 py-1 text-[11px] text-muted-foreground">
               {CASE_TEXT_SNIPPET_PLACEHOLDERS.join(" · ")}
             </code>
           </div>
           {activeSnippets.length === 0 ? (
-            <p className="mt-3 text-sm text-slate-500">
+            <p className="mt-3 text-sm text-muted-foreground">
               {tri(
                 lang,
                 "Keine aktiven Textbausteine vorhanden.",
@@ -282,19 +281,19 @@ function OverviewSectionForm({
                 return (
                   <div
                     key={snippet.id}
-                    className="rounded-2xl border border-slate-200 bg-white p-4"
+                    className="rounded-xl border border-border/50 bg-card p-4"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-slate-900">
+                        <p className="truncate text-sm font-medium text-foreground">
                           {snippet.label}
                         </p>
-                        <p className="truncate text-xs text-slate-500">
+                        <p className="truncate text-xs text-muted-foreground">
                           {snippet.category}
                         </p>
                       </div>
                     </div>
-                    <p className="mt-3 whitespace-pre-wrap text-sm text-slate-700">
+                    <p className="mt-3 whitespace-pre-wrap text-sm text-foreground">
                       {rendered}
                     </p>
                     <div className="mt-3 flex justify-end">
@@ -302,7 +301,7 @@ function OverviewSectionForm({
                         type="button"
                         variant="outline"
                         size="sm"
-                        className="rounded-2xl"
+                        className="h-8 rounded-lg"
                         onClick={() => insertSnippet(snippet)}
                         disabled={!canEdit}
                       >
@@ -316,10 +315,10 @@ function OverviewSectionForm({
           )}
         </div>
 
-        <div className="flex justify-end border-t border-slate-100 pt-4">
+        <div className="flex justify-end border-t border-border/60 pt-4">
           <Button
             type="submit"
-            className={cn("rounded-2xl bg-slate-950 text-white hover:bg-slate-800")}
+            className="h-9 rounded-lg"
             disabled={busy || !canEdit}
           >
             {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}

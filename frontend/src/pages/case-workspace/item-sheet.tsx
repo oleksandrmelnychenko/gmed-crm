@@ -64,22 +64,22 @@ export function CaseItemEditSheet({
       <SheetContent
         side="right"
         className={cn(
-          "flex flex-col gap-0 border-l border-slate-200 p-0",
+          "flex flex-col gap-0 border-l border-border bg-card p-0",
           width === "wide" ? "w-full sm:max-w-[720px]" : "w-full sm:max-w-[520px]",
         )}
       >
-        <SheetHeader className="shrink-0 border-b border-slate-200 bg-gradient-to-b from-orange-50/40 to-transparent px-5 py-4">
+        <SheetHeader className="shrink-0 border-b border-border bg-card px-5 py-4">
           <div className="flex items-center gap-2">
             <span
               aria-hidden
-              className="size-2 shrink-0 rounded-full bg-orange-500 shadow-[0_0_0_3px_rgba(249,115,22,0.15)]"
+              className="size-2 shrink-0 rounded-full bg-[var(--brand)]"
             />
-            <SheetTitle className="text-[15px] font-semibold tracking-tight text-slate-950">
+            <SheetTitle className="text-sm font-semibold text-foreground">
               {title}
             </SheetTitle>
           </div>
           {description ? (
-            <SheetDescription className="text-[12.5px] leading-relaxed text-slate-500">
+            <SheetDescription className="text-xs leading-relaxed text-muted-foreground">
               {description}
             </SheetDescription>
           ) : null}
@@ -100,7 +100,7 @@ export function CaseItemEditSheet({
             {children}
           </div>
 
-          <footer className="shrink-0 border-t border-slate-200 bg-slate-50/60 px-5 py-3">
+          <footer className="shrink-0 border-t border-border bg-muted/25 px-5 py-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 {mode === "edit" && onDelete ? (
@@ -108,7 +108,7 @@ export function CaseItemEditSheet({
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="rounded-2xl border-rose-200 text-rose-700 hover:bg-rose-50"
+                    className="h-8 rounded-lg border-rose-200 text-rose-700 hover:bg-rose-50"
                     onClick={() => void onDelete()}
                     disabled={busy || !canDelete}
                   >
@@ -121,7 +121,7 @@ export function CaseItemEditSheet({
                 <Button
                   type="button"
                   variant="outline"
-                  className="rounded-2xl"
+                  className="h-9 rounded-lg"
                   onClick={() => onOpenChange(false)}
                   disabled={busy}
                 >
@@ -129,7 +129,7 @@ export function CaseItemEditSheet({
                 </Button>
                 <Button
                   type="submit"
-                  className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                  className="h-9 rounded-lg"
                   disabled={busy || !canSubmit}
                 >
                   {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}

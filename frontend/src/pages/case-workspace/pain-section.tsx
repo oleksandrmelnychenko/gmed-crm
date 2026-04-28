@@ -92,8 +92,8 @@ export function PainSection() {
       renderCard={(item) => (
         <>
           <div className="flex items-center gap-2">
-            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-orange-500" />
-            <p className="truncate text-sm font-semibold text-slate-950">
+            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+            <p className="truncate text-sm font-medium text-foreground">
               {item.lokalisierung ||
                 tri(lang, "Ohne Lokalisation", "Без локализации", "No location")}
             </p>
@@ -110,7 +110,7 @@ export function PainSection() {
             {item.seit_wann ? (
               <Badge
                 variant="outline"
-                className="rounded-full border-slate-200 bg-slate-50 text-[11px] font-medium text-slate-600"
+                className="rounded-full border-border/60 bg-muted/25 text-[11px] font-medium text-muted-foreground"
               >
                 {tri(lang, "seit", "с", "since")} {item.seit_wann}
               </Badge>
@@ -118,15 +118,15 @@ export function PainSection() {
             {item.qualitaet ? (
               <Badge
                 variant="outline"
-                className="rounded-full border-slate-200 bg-slate-50 text-[11px] font-medium text-slate-600"
+                className="rounded-full border-border/60 bg-muted/25 text-[11px] font-medium text-muted-foreground"
               >
                 {item.qualitaet}
               </Badge>
             ) : null}
           </div>
           {item.ursache ? (
-            <p className="line-clamp-3 whitespace-pre-wrap text-[13px] leading-relaxed text-slate-600">
-              <span className="mr-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">
+            <p className="line-clamp-3 whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">
+              <span className="mr-1 text-[11.5px] font-medium text-muted-foreground">
                 {tri(lang, "Ursache", "Причина", "Cause")}:
               </span>
               {item.ursache}

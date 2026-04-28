@@ -26,7 +26,7 @@ import {
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { getLang, useLang } from "@/lib/i18n";
-import { useRealtimeSubscription } from "@/lib/realtime";
+import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 
@@ -1378,11 +1378,13 @@ export function PatientDetailPage() {
   }, [id]);
   const reloadTab = useCallback(() => setTabVersion((v) => v + 1), []);
 
-  useRealtimeSubscription(PATIENT_DETAIL_REALTIME_EVENTS, (event) => {
+  useDebouncedRealtimeSubscription(PATIENT_DETAIL_REALTIME_EVENTS, (_event, events) => {
     if (!id) return;
-    const matchesCurrentPatient =
-      event.patient_id === id ||
-      (event.entity_type === "patient" && event.entity_id === id);
+    const matchesCurrentPatient = events.some(
+      (event) =>
+        event.patient_id === id ||
+        (event.entity_type === "patient" && event.entity_id === id),
+    );
     if (!matchesCurrentPatient) return;
 
     clearApiCache(`/patients/${id}`);
@@ -1396,7 +1398,7 @@ export function PatientDetailPage() {
     clearApiCache(`/patients/${id}/timeline`);
     clearApiCache(`/patients/${id}/workflow-checklist`);
     reload();
-  });
+  }, 250);
 
   void reloadTab;
   void blankPatientCardEntryForm;

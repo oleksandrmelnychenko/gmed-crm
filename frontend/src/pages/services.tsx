@@ -40,7 +40,7 @@ import {
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
-import { useRealtimeSubscription } from "@/lib/realtime";
+import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { toRfc3339 } from "@/pages/appointments/model/workflow-helpers";
 import {
@@ -415,10 +415,10 @@ function StaffServicesPage() {
     user?.role === "patient_manager" ||
     user?.role === "concierge";
 
-  useRealtimeSubscription(STAFF_SERVICES_REALTIME_EVENTS, () => {
+  useDebouncedRealtimeSubscription(STAFF_SERVICES_REALTIME_EVENTS, () => {
     clearApiCache("/concierge-services");
     setVersion((value) => value + 1);
-  });
+  }, 250);
 
   const baseColumns = useMemo(() => buildServiceColumns(l), [l]);
   const columns = useMemo<ColumnDef<StaffConciergeService>[]>(() => {

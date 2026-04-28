@@ -60,7 +60,7 @@ import {
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
-import { useRealtimeSubscription } from "@/lib/realtime";
+import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 import {
@@ -1000,33 +1000,33 @@ export function OrdersPage() {
     syncQuery({ order: null });
   }
 
-  useRealtimeSubscription(ORDER_REALTIME_EVENTS, (event) => {
+  useDebouncedRealtimeSubscription(ORDER_REALTIME_EVENTS, (_event, events) => {
     if (!permissions.canViewPage) return;
-    const eventOrderId =
-      typeof event.payload?.order_id === "string" ? event.payload.order_id : null;
     clearApiCache("/orders");
     clearApiCache("/orders/debt-management");
-    if (event.entity_type === "order" && event.entity_id) {
-      clearApiCache(`/orders/${event.entity_id}`);
-      clearApiCache(`/orders/${event.entity_id}/workflow-checklist`);
-      clearApiCache(`/documents?order_id=${event.entity_id}`);
+
+    for (const event of events) {
+      const eventOrderId =
+        typeof event.payload?.order_id === "string" ? event.payload.order_id : null;
+      if (event.entity_type === "order" && event.entity_id) {
+        clearApiCache(`/orders/${event.entity_id}`);
+        clearApiCache(`/orders/${event.entity_id}/workflow-checklist`);
+        clearApiCache(`/documents?order_id=${event.entity_id}`);
+      }
+      if (eventOrderId) {
+        clearApiCache(`/orders/${eventOrderId}`);
+        clearApiCache(`/orders/${eventOrderId}/workflow-checklist`);
+        clearApiCache(`/documents?order_id=${eventOrderId}`);
+      }
     }
-    if (eventOrderId) {
-      clearApiCache(`/orders/${eventOrderId}`);
-      clearApiCache(`/orders/${eventOrderId}/workflow-checklist`);
-      clearApiCache(`/documents?order_id=${eventOrderId}`);
-    }
-    if (
-      selectedOrderId &&
-      selectedOrderId !== event.entity_id &&
-      selectedOrderId !== eventOrderId
-    ) {
+
+    if (selectedOrderId) {
       clearApiCache(`/orders/${selectedOrderId}`);
       clearApiCache(`/orders/${selectedOrderId}/workflow-checklist`);
       clearApiCache(`/documents?order_id=${selectedOrderId}`);
     }
     triggerReload();
-  });
+  }, 250);
 
   const ensureProviderDoctors = useCallback(
     async (providerId: string) => {

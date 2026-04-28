@@ -84,26 +84,26 @@ export function PreconditionsSection() {
       renderCard={(item) => (
         <>
           <div className="flex items-center gap-2">
-            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-orange-500" />
-            <p className="truncate text-sm font-semibold text-slate-950">
+            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+            <p className="truncate text-sm font-medium text-foreground">
               {item.erkrankung || tri(lang, "Ohne Namen", "Без названия", "Untitled")}
             </p>
           </div>
           {item.erstdiagnose ? (
             <Badge
               variant="outline"
-              className="self-start rounded-full border-slate-200 bg-slate-50 text-[11px] font-medium text-slate-600"
+              className="self-start rounded-full border-border/60 bg-muted/25 text-[11px] font-medium text-muted-foreground"
             >
               {tri(lang, "Erstdiagnose", "Первый диагноз", "First diagnosis")}:{" "}
               {item.erstdiagnose}
             </Badge>
           ) : null}
           {item.notiz ? (
-            <p className="line-clamp-3 whitespace-pre-wrap text-[13px] leading-relaxed text-slate-600">
+            <p className="line-clamp-3 whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">
               {item.notiz}
             </p>
           ) : (
-            <p className="text-[12px] italic text-slate-400">
+            <p className="text-xs italic text-muted-foreground">
               {tri(lang, "Keine Notiz", "Без заметки", "No note")}
             </p>
           )}

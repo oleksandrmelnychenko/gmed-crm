@@ -1,6 +1,7 @@
 import {
   useEffect,
   useRef,
+  useState,
   type ReactNode,
 } from "react";
 
@@ -23,7 +24,21 @@ export type RealtimeEvent = {
   payload?: Record<string, unknown>;
 };
 
+export type RealtimeConnectionStatus =
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "disconnected";
+
+export type RealtimeConnectionSnapshot = {
+  status: RealtimeConnectionStatus;
+  attempt: number;
+  userId: string | null;
+  updatedAt: number;
+};
+
 const REALTIME_EVENT_NAME = "gmed:realtime-event";
+const REALTIME_CONNECTION_EVENT_NAME = "gmed:realtime-connection";
 const BASE_RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
 const STATS_CACHE_EVENT_PREFIXES = [
@@ -50,6 +65,32 @@ const STATS_CACHE_EVENT_PREFIXES = [
 ] as const;
 
 type RealtimeCustomEvent = CustomEvent<RealtimeEvent>;
+type RealtimeConnectionCustomEvent = CustomEvent<RealtimeConnectionSnapshot>;
+
+let latestConnectionSnapshot: RealtimeConnectionSnapshot = {
+  status: "disconnected",
+  attempt: 0,
+  userId: null,
+  updatedAt: Date.now(),
+};
+
+function dispatchConnectionSnapshot(
+  status: RealtimeConnectionStatus,
+  attempt: number,
+  userId: string | null,
+) {
+  latestConnectionSnapshot = {
+    status,
+    attempt,
+    userId,
+    updatedAt: Date.now(),
+  };
+  window.dispatchEvent(
+    new CustomEvent(REALTIME_CONNECTION_EVENT_NAME, {
+      detail: latestConnectionSnapshot,
+    }),
+  );
+}
 
 function cursorStorageKey(userId: string) {
   return `gmed:realtime:last-seq:${userId}`;
@@ -141,7 +182,12 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
   const userId = user?.id ?? "";
 
   useEffect(() => {
-    if (loading || !userId) return;
+    if (loading) return;
+
+    if (!userId) {
+      dispatchConnectionSnapshot("disconnected", 0, null);
+      return;
+    }
 
     let socket: WebSocket | null = null;
     let reconnectTimer: number | null = null;
@@ -168,12 +214,17 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
         MAX_RECONNECT_DELAY_MS,
       );
       attempt += 1;
+      dispatchConnectionSnapshot("reconnecting", attempt, userId);
       reconnectTimer = window.setTimeout(connect, delay);
     }
 
     function connect() {
       const token = getAccessToken();
-      if (!token || stopped) return;
+      if (stopped) return;
+      if (!token) {
+        dispatchConnectionSnapshot("disconnected", attempt, userId);
+        return;
+      }
 
       socket = new WebSocket(buildApiWebSocketUrl("/events/ws", {
         token,
@@ -181,6 +232,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       }));
       socket.onopen = () => {
         attempt = 0;
+        dispatchConnectionSnapshot("connected", attempt, userId);
       };
       socket.onmessage = (message) => {
         if (typeof message.data !== "string") return;
@@ -214,6 +266,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       };
     }
 
+    dispatchConnectionSnapshot("connecting", attempt, userId);
     connect();
 
     return () => {
@@ -222,10 +275,33 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
         window.clearTimeout(reconnectTimer);
       }
       socket?.close();
+      dispatchConnectionSnapshot("disconnected", 0, userId);
     };
   }, [loading, userId]);
 
   return children;
+}
+
+export function useRealtimeConnectionStatus() {
+  const [snapshot, setSnapshot] = useState<RealtimeConnectionSnapshot>(
+    latestConnectionSnapshot,
+  );
+
+  useEffect(() => {
+    function onConnectionChange(event: Event) {
+      setSnapshot((event as RealtimeConnectionCustomEvent).detail);
+    }
+
+    window.addEventListener(REALTIME_CONNECTION_EVENT_NAME, onConnectionChange);
+    return () => {
+      window.removeEventListener(
+        REALTIME_CONNECTION_EVENT_NAME,
+        onConnectionChange,
+      );
+    };
+  }, []);
+
+  return snapshot;
 }
 
 export function useRealtimeSubscription(
@@ -253,4 +329,50 @@ export function useRealtimeSubscription(
       window.removeEventListener(REALTIME_EVENT_NAME, onRealtimeEvent);
     };
   }, [eventTypeKey]);
+}
+
+export function useDebouncedRealtimeSubscription(
+  eventTypes: readonly string[],
+  handler: (event: RealtimeEvent, events: readonly RealtimeEvent[]) => void,
+  delayMs = 250,
+) {
+  const latestHandlerRef = useRef(handler);
+  const queuedEventsRef = useRef<RealtimeEvent[]>([]);
+  const timerRef = useRef<number | null>(null);
+  const eventTypeKey = eventTypes.join("\u0000");
+
+  useEffect(() => {
+    latestHandlerRef.current = handler;
+  }, [handler]);
+
+  useRealtimeSubscription(eventTypes, (event) => {
+    if (delayMs <= 0) {
+      latestHandlerRef.current(event, [event]);
+      return;
+    }
+
+    queuedEventsRef.current.push(event);
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+    }
+    timerRef.current = window.setTimeout(() => {
+      timerRef.current = null;
+      const events = queuedEventsRef.current;
+      queuedEventsRef.current = [];
+      const latestEvent = events[events.length - 1];
+      if (latestEvent) {
+        latestHandlerRef.current(latestEvent, events);
+      }
+    }, delayMs);
+  });
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) {
+        window.clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      queuedEventsRef.current = [];
+    };
+  }, [delayMs, eventTypeKey]);
 }

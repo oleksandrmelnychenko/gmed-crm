@@ -98,8 +98,8 @@ export function SurgeriesSection() {
       renderCard={(item) => (
         <>
           <div className="flex items-center gap-2">
-            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-orange-500" />
-            <p className="truncate text-sm font-semibold text-slate-950">
+            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+            <p className="truncate text-sm font-medium text-foreground">
               {item.grund || tri(lang, "Ohne Grund", "Без причины", "Untitled")}
             </p>
           </div>
@@ -107,7 +107,7 @@ export function SurgeriesSection() {
             {item.datum ? (
               <Badge
                 variant="outline"
-                className="rounded-full border-slate-200 bg-slate-50 text-[11px] font-medium text-slate-600"
+                className="rounded-full border-border/60 bg-muted/25 text-[11px] font-medium text-muted-foreground"
               >
                 {item.datum}
               </Badge>
@@ -115,14 +115,14 @@ export function SurgeriesSection() {
             {item.arzt ? (
               <Badge
                 variant="outline"
-                className="rounded-full border-slate-200 bg-slate-50 text-[11px] font-medium text-slate-600"
+                className="rounded-full border-border/60 bg-muted/25 text-[11px] font-medium text-muted-foreground"
               >
                 {item.arzt}
               </Badge>
             ) : null}
           </div>
           {item.notiz ? (
-            <p className="line-clamp-3 whitespace-pre-wrap text-[13px] leading-relaxed text-slate-600">
+            <p className="line-clamp-3 whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">
               {item.notiz}
             </p>
           ) : null}

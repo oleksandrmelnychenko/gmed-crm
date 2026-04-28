@@ -23,7 +23,7 @@ import { useAuth } from "@/lib/auth";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { useRealtimeSubscription } from "@/lib/realtime";
+import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 
 import {
   canAssignTarget,
@@ -165,13 +165,13 @@ export function PatientsPage() {
     refreshDetail();
   }
 
-  useRealtimeSubscription(PATIENT_REALTIME_EVENTS, (event) => {
+  useDebouncedRealtimeSubscription(PATIENT_REALTIME_EVENTS, (_event, events) => {
     clearApiCache("/patients");
-    if (selectedId && event.entity_id === selectedId) {
+    if (selectedId && events.some((event) => event.entity_id === selectedId)) {
       refreshDetail();
     }
     refreshList();
-  });
+  }, 250);
 
   if (!permissions.canViewPage) {
     return (

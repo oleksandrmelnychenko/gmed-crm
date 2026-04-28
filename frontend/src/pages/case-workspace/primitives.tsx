@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { tokens } from "@/components/ui-shell";
 import { cn } from "@/lib/utils";
 
 type PanelProps = {
@@ -22,25 +23,26 @@ export function Panel({
   return (
     <section
       className={cn(
-        "rounded-[1.75rem] border border-slate-200/80 bg-white p-6 shadow-[0_18px_48px_rgba(15,23,42,0.05)]",
+        "space-y-3 rounded-xl p-3.5",
+        tokens.surface.softCard,
         className,
       )}
     >
-      <header className="flex items-start justify-between gap-4">
+      <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             {accent ? (
               <span
                 aria-hidden
-                className="size-2 shrink-0 rounded-full bg-orange-500 shadow-[0_0_0_3px_rgba(249,115,22,0.15)]"
+                className="size-2 shrink-0 rounded-full bg-[var(--brand)]"
               />
             ) : null}
-            <h3 className="text-[15px] font-semibold tracking-tight text-slate-950">
+            <h3 className={cn(tokens.text.sectionTitle, "truncate")}>
               {title}
             </h3>
           </div>
           {description ? (
-            <p className="mt-1.5 text-[13px] leading-relaxed text-slate-500">
+            <p className="mt-1 max-w-3xl text-xs leading-relaxed text-muted-foreground">
               {description}
             </p>
           ) : null}
@@ -49,7 +51,7 @@ export function Panel({
           <div className="flex shrink-0 items-center gap-2">{action}</div>
         ) : null}
       </header>
-      <div className="mt-5 border-t border-slate-100 pt-5">{children}</div>
+      <div className="space-y-3">{children}</div>
     </section>
   );
 }
@@ -61,15 +63,24 @@ type FieldProps = {
   hint?: string;
 };
 
-export function Field({ label, children, hint }: FieldProps) {
+export function Field({ label, children, required, hint }: FieldProps) {
   return (
     <label className="flex flex-col gap-1.5">
-      <span className="text-[11.5px] font-medium leading-tight text-muted-foreground">
+      <span className="flex items-center gap-1.5 text-[11.5px] font-medium leading-tight text-muted-foreground">
+        {required ? (
+          <span
+            aria-hidden
+            title="Required"
+            className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]"
+          />
+        ) : null}
         {label}
       </span>
       {children}
       {hint ? (
-        <span className="text-[11.5px] leading-snug text-slate-500">{hint}</span>
+        <span className="text-[11.5px] leading-snug text-muted-foreground">
+          {hint}
+        </span>
       ) : null}
     </label>
   );
@@ -96,8 +107,8 @@ export function Banner({ tone, children }: BannerProps) {
 }
 
 export const inputBaseClassName =
-  "h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
+  "h-9 w-full rounded-lg border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
 export const textareaBaseClassName =
-  "min-h-[128px] w-full rounded-xl border border-input bg-card px-3 py-2.5 text-sm leading-relaxed text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
+  "min-h-[80px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm leading-relaxed text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
 export const nativeSelectClassName =
-  "h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
+  "h-9 w-full rounded-lg border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";

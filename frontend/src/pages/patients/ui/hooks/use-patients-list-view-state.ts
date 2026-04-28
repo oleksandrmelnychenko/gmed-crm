@@ -12,11 +12,24 @@ import type { DensityLevel, FilterPredicate, SortStack } from "@/components/data
 import { useLocalStorage, useVersionedLocalStorage } from "@/components/data-table/use-local-storage";
 import { useResponsiveViewMode } from "@/components/data-table/use-responsive-view-mode";
 import { readDataTableState, writeDataTableState } from "@/components/data-table/url-state";
+import { useSecurePersistedState } from "@/lib/secure-persist";
 
 import {
   DEFAULT_PATIENT_FILTERS as DEFAULT_FILTERS,
   type PatientFilters,
 } from "../../model/list-model";
+
+type PersistedPatientFilters = Pick<PatientFilters, "activeOnly" | "providerId" | "doctorId">;
+
+function isValidPersistedFilters(value: unknown): value is PersistedPatientFilters {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.activeOnly === "string" &&
+    typeof v.providerId === "string" &&
+    typeof v.doctorId === "string"
+  );
+}
 import {
   DEFAULT_PATIENT_FROZEN_COLUMNS,
   DEFAULT_PATIENT_HIDDEN_COLUMNS,
@@ -26,22 +39,47 @@ type QueryPatch = Record<string, string | null>;
 
 export function usePatientsListViewState() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [filters, setFilters] = useState<PatientFilters>(() => {
+  const [persistedFilters, setPersistedFilters] = useSecurePersistedState<PersistedPatientFilters>(
+    "patients.filters",
+    {
+      activeOnly: DEFAULT_FILTERS.activeOnly,
+      providerId: DEFAULT_FILTERS.providerId,
+      doctorId: DEFAULT_FILTERS.doctorId,
+    },
+    { schemaVersion: 1, validate: isValidPersistedFilters },
+  );
+  const [filters, setFiltersState] = useState<PatientFilters>(() => {
     if (typeof window === "undefined") return DEFAULT_FILTERS;
     const params = new URLSearchParams(window.location.search);
     const tableState = readDataTableState(params);
     const activeParam = params.get("active");
+    const providerParam = params.get("provider");
+    const doctorParam = params.get("doctor");
     return {
       ...DEFAULT_FILTERS,
       search: tableState.search ?? "",
       activeOnly:
         activeParam === "" || activeParam === "false" || activeParam === "true"
           ? activeParam
-          : DEFAULT_FILTERS.activeOnly,
-      providerId: params.get("provider") ?? "",
-      doctorId: params.get("doctor") ?? "",
+          : persistedFilters.activeOnly,
+      providerId: providerParam ?? persistedFilters.providerId,
+      doctorId: doctorParam ?? persistedFilters.doctorId,
     };
   });
+  const setFilters: typeof setFiltersState = useCallback(
+    (value) => {
+      setFiltersState((prev) => {
+        const next = typeof value === "function" ? (value as (p: PatientFilters) => PatientFilters)(prev) : value;
+        setPersistedFilters({
+          activeOnly: next.activeOnly,
+          providerId: next.providerId,
+          doctorId: next.doctorId,
+        });
+        return next;
+      });
+    },
+    [setPersistedFilters],
+  );
   const deferredSearch = useDeferredValue(filters.search);
   const [listVersion, setListVersion] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
@@ -161,7 +199,7 @@ export function usePatientsListViewState() {
     params.delete("active");
     params.delete("patient");
     setSearchParams(params, { replace: true });
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setFilters, setSearchParams]);
 
   return {
     clearAllFilters,

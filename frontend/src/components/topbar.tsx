@@ -15,7 +15,12 @@ import { clearApiCache } from "@/lib/api";
 import { useNavState } from "@/lib/nav-state";
 import { staffHrefIfAllowed } from "@/lib/staff-route-access";
 import { useLang } from "@/lib/i18n";
-import { useRealtimeSubscription } from "@/lib/realtime";
+import {
+  useDebouncedRealtimeSubscription,
+  useRealtimeConnectionStatus,
+  useRealtimeSubscription,
+  type RealtimeConnectionStatus,
+} from "@/lib/realtime";
 import {
   fetchNotificationPanelWorkspace,
   fetchTopbarChatMessages,
@@ -63,6 +68,57 @@ function roleDisplay(role: string) {
     .join(" ");
 }
 
+function realtimeStatusLabel(
+  status: RealtimeConnectionStatus,
+  attempt: number,
+  lang: string,
+) {
+  const isDe = lang === "de";
+  if (status === "connected") {
+    return isDe ? "Realtime verbunden" : "Realtime подключен";
+  }
+  if (status === "connecting") {
+    return isDe ? "Realtime verbindet..." : "Realtime подключается...";
+  }
+  if (status === "reconnecting") {
+    return isDe
+      ? `Realtime verbindet erneut (${attempt})`
+      : `Realtime переподключается (${attempt})`;
+  }
+  return isDe ? "Realtime getrennt" : "Realtime отключен";
+}
+
+function RealtimeConnectionIndicator({
+  status,
+  attempt,
+  lang,
+}: {
+  status: RealtimeConnectionStatus;
+  attempt: number;
+  lang: string;
+}) {
+  const tone =
+    status === "connected"
+      ? "bg-emerald-500"
+      : status === "disconnected"
+        ? "bg-rose-500"
+        : "bg-amber-500 animate-pulse";
+  const label = realtimeStatusLabel(status, attempt, lang);
+
+  return (
+    <div
+      className="flex size-8 items-center justify-center rounded-lg"
+      title={label}
+      aria-label={label}
+    >
+      <span
+        aria-hidden
+        className={`size-2.5 rounded-full border border-background shadow-sm ${tone}`}
+      />
+    </div>
+  );
+}
+
 function notificationHref(item: Notification) {
   if (!item.entity_id || !item.entity_type) return null;
   if (item.entity_type === "message_peer") return `/chat?peer=${item.entity_id}`;
@@ -87,6 +143,7 @@ export function Topbar() {
   const { lang, setLang, t } = useLang();
   const navigate = useNavigate();
   const { toggle: toggleNav } = useNavState();
+  const realtimeConnection = useRealtimeConnectionStatus();
   const [unread, setUnread] = useState(0);
   const [onlineUsers, setOnlineUsers] = useState<ActiveSession[]>([]);
   const isPatientPortal = user?.role === "patient";
@@ -133,18 +190,19 @@ export function Topbar() {
     };
   }, [isPatientPortal]);
 
-  useRealtimeSubscription(TOPBAR_REALTIME_EVENTS, (event) => {
+  useDebouncedRealtimeSubscription(TOPBAR_REALTIME_EVENTS, (_event, events) => {
     if (isPatientPortal) return;
-    if (event.type.startsWith("announcement.")) {
+    if (events.some((event) => event.type.startsWith("announcement."))) {
       clearApiCache("/announcements/active");
-      return;
     }
+    if (events.every((event) => event.type.startsWith("announcement."))) return;
+
     clearApiCache("/notifications");
     void fetchTopbarPresence().then((presence) => {
       setUnread(presence.unreadCount);
       setOnlineUsers(presence.onlineUsers);
     });
-  });
+  }, 150);
 
   const toggleLang = () => {
     setLang(lang === "de" ? "ru" : "de");
@@ -171,6 +229,12 @@ export function Topbar() {
         </div>
 
         <div className="flex items-center gap-2">
+          <RealtimeConnectionIndicator
+            status={realtimeConnection.status}
+            attempt={realtimeConnection.attempt}
+            lang={lang}
+          />
+
           {/* Online users avatars */}
           {!isPatientPortal && onlineUsers.length > 0 && (
             <OnlineAvatars
@@ -317,14 +381,15 @@ function NotificationPanel({
     loadWorkspace();
   }, [loadWorkspace]);
 
-  useRealtimeSubscription(TOPBAR_REALTIME_EVENTS, (event) => {
-    if (event.type.startsWith("announcement.")) {
+  useDebouncedRealtimeSubscription(TOPBAR_REALTIME_EVENTS, (_event, events) => {
+    if (events.some((event) => event.type.startsWith("announcement."))) {
       clearApiCache("/announcements/active");
-    } else {
+    }
+    if (events.some((event) => !event.type.startsWith("announcement."))) {
       clearApiCache("/notifications");
     }
     loadWorkspace();
-  });
+  }, 150);
 
   const markAll = () => {
     markAllNotificationsRead().catch(() => {});

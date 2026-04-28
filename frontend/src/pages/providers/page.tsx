@@ -1,5 +1,6 @@
 import {
   startTransition,
+  useCallback,
   useDeferredValue,
   useEffect,
   useMemo,
@@ -112,7 +113,8 @@ import {
   textareaClass as shellTextareaClass,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
-import { useRealtimeSubscription } from "@/lib/realtime";
+import { useSecurePersistedState } from "@/lib/secure-persist";
+import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 
 const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
@@ -213,10 +215,37 @@ function ProvidersPage() {
   const { staffGo } = useStaffNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = useMemo(() => providerPermissions(user?.role), [user?.role]);
-  const [filters, setFilters] = useState<ProviderFilters>(() => {
-    const base = {
+  type PersistedProviderFilters = Pick<
+    ProviderFilters,
+    "providerType" | "activeOnly" | "hasContract"
+  >;
+  const persistedDefaults: PersistedProviderFilters = {
+    providerType: permissions.forceNonMedical ? "non_medical" : DEFAULT_FILTERS.providerType,
+    activeOnly: DEFAULT_FILTERS.activeOnly,
+    hasContract: DEFAULT_FILTERS.hasContract,
+  };
+  const [persistedProviderFilters, setPersistedProviderFilters] =
+    useSecurePersistedState<PersistedProviderFilters>(
+      "providers.filters",
+      persistedDefaults,
+      {
+        schemaVersion: 1,
+        validate: (value): value is PersistedProviderFilters =>
+          Boolean(value) &&
+          typeof value === "object" &&
+          typeof (value as Record<string, unknown>).providerType === "string" &&
+          typeof (value as Record<string, unknown>).activeOnly === "string" &&
+          typeof (value as Record<string, unknown>).hasContract === "string",
+      },
+    );
+  const [filters, setFiltersState] = useState<ProviderFilters>(() => {
+    const base: ProviderFilters = {
       ...DEFAULT_FILTERS,
-      providerType: permissions.forceNonMedical ? "non_medical" : DEFAULT_FILTERS.providerType,
+      providerType: permissions.forceNonMedical
+        ? "non_medical"
+        : persistedProviderFilters.providerType,
+      activeOnly: persistedProviderFilters.activeOnly,
+      hasContract: persistedProviderFilters.hasContract,
     };
     if (typeof window === "undefined") return base;
 
@@ -242,6 +271,22 @@ function ProvidersPage() {
         hasContract === "true" || hasContract === "false" ? hasContract : base.hasContract,
     };
   });
+  const setFilters: typeof setFiltersState = useCallback(
+    (value) => {
+      setFiltersState((prev) => {
+        const next = typeof value === "function"
+          ? (value as (p: ProviderFilters) => ProviderFilters)(prev)
+          : value;
+        setPersistedProviderFilters({
+          providerType: next.providerType,
+          activeOnly: next.activeOnly,
+          hasContract: next.hasContract,
+        });
+        return next;
+      });
+    },
+    [setPersistedProviderFilters],
+  );
   const deferredSearch = useDeferredValue(filters.search);
   const [filterPredicates, setFilterPredicatesState] = useState<FilterPredicate[]>(() => {
     if (typeof window === "undefined") return [];
@@ -454,7 +499,7 @@ function ProvidersPage() {
           : { ...current, providerType: "non_medical" },
       );
     }
-  }, [permissions.forceNonMedical]);
+  }, [permissions.forceNonMedical, setFilters]);
 
   function refreshList() {
     setListVersion((current) => current + 1);
@@ -464,16 +509,19 @@ function ProvidersPage() {
     setDetailVersion((current) => current + 1);
   }
 
-  useRealtimeSubscription(PROVIDER_REALTIME_EVENTS, (event) => {
+  useDebouncedRealtimeSubscription(PROVIDER_REALTIME_EVENTS, (_event, events) => {
     if (!permissions.canViewPage) return;
     clearApiCache("/providers");
-    if (event.entity_type === "provider" && event.entity_id) {
-      clearApiCache(`/providers/${event.entity_id}`);
-      clearApiCache(`/providers/${event.entity_id}/patients`);
-      clearApiCache(`/providers/${event.entity_id}/templates`);
-      clearApiCache(`/appointments?provider_id=${event.entity_id}`);
+    const selectedWasUpdated = events.some((event) => event.entity_id === selectedId);
+    for (const event of events) {
+      if (event.entity_type === "provider" && event.entity_id) {
+        clearApiCache(`/providers/${event.entity_id}`);
+        clearApiCache(`/providers/${event.entity_id}/patients`);
+        clearApiCache(`/providers/${event.entity_id}/templates`);
+        clearApiCache(`/appointments?provider_id=${event.entity_id}`);
+      }
     }
-    if (selectedId && selectedId !== event.entity_id) {
+    if (selectedId) {
       clearApiCache(`/providers/${selectedId}`);
       clearApiCache(`/providers/${selectedId}/patients`);
       clearApiCache(`/providers/${selectedId}/templates`);
@@ -481,11 +529,11 @@ function ProvidersPage() {
     }
     startTransition(() => {
       setListVersion((current) => current + 1);
-      if (!selectedId || selectedId === event.entity_id) {
+      if (!selectedId || selectedWasUpdated) {
         setDetailVersion((current) => current + 1);
       }
     });
-  });
+  }, 250);
 
   function openProvider(id: string) {
     staffGo(`/providers/${id}`);

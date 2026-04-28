@@ -22,7 +22,7 @@ export function StatusBadge({
     <Badge
       variant="outline"
       className={cn(
-        "rounded-full text-[10px]",
+        "rounded-full font-mono text-[10px] font-semibold uppercase tracking-[0.03em]",
         STATUS_TONE[resolvedTone],
         className,
       )}

@@ -29,7 +29,7 @@ import { clearApiCache } from "@/lib/api";
 import { Banner as ShellBanner, PageHeader, StatusBadge, tokens } from "@/components/ui-shell";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
-import { useRealtimeSubscription } from "@/lib/realtime";
+import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { fetchReportsExport, fetchReportsWorkspace } from "./data/reports-api";
 import {
@@ -881,11 +881,11 @@ export function ReportsPage() {
   const [exportingSection, setExportingSection] = useState<string>("");
   const [detail, setDetail] = useState<ReportDetailState>(null);
 
-  useRealtimeSubscription(REPORTS_REALTIME_EVENTS, () => {
+  useDebouncedRealtimeSubscription(REPORTS_REALTIME_EVENTS, () => {
     if (!roleCanOpenReports(user?.role)) return;
     clearReportsStatsCache();
     setVersion((value) => value + 1);
-  });
+  }, 300);
 
   useEffect(() => {
     if (!roleCanOpenReports(user?.role)) {
@@ -1661,7 +1661,6 @@ export function ReportsPage() {
     <div className="space-y-4">
       <PageHeader
         title={titleWithDot(text.workspaceTitle)}
-        description={text.workspaceDescription}
         actions={
           <Button
             variant="outline"
@@ -1697,9 +1696,6 @@ export function ReportsPage() {
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.billing.title)}</h2>
-                  <p className={cn("mt-1", tokens.text.muted)}>
-                    {text.billing.description}
-                  </p>
                 </div>
                 <Badge variant="secondary">
                   {text.billing.trackedInvoices(data.billing_kpis.tracked_invoice_count)}
@@ -1755,9 +1751,6 @@ export function ReportsPage() {
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.sales.title)}</h2>
-                  <p className={cn("mt-1", tokens.text.muted)}>
-                    {text.sales.description}
-                  </p>
                 </div>
                 <Badge variant="secondary">
                   {text.sales.leadCountries(data.sales_kpis.active_lead_country_count)}
@@ -1827,9 +1820,6 @@ export function ReportsPage() {
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.forecast.pipelineTitle)}</h2>
-                        <p className={cn("mt-1", tokens.text.muted)}>
-                          {text.forecast.pipelineDescription}
-                        </p>
                       </div>
                       <Badge variant="secondary">
                         {text.forecast.quotes(forecasting.quote_pipeline.open_quotes)}

@@ -99,17 +99,17 @@ function SpecialtySectionContent<T extends Record<string, unknown>>({
 
         <label
           className={cn(
-            "flex cursor-pointer items-center justify-between gap-3 rounded-lg px-4 py-3 transition",
+            "flex cursor-pointer items-center justify-between gap-3 rounded-xl px-4 py-3 transition-colors",
             isRelevant
               ? "border border-primary/35 bg-primary/5"
-              : tokens.surface.mutedCard,
+              : cn(tokens.surface.mutedCard, "hover:bg-muted/30"),
           )}
         >
           <div>
-            <p className="text-sm font-semibold text-foreground">
+            <p className="text-sm font-medium text-foreground">
               {tri(lang, "Fachrelevant", "Относится к специальности", "Specialty relevant")}
             </p>
-            <p className="mt-0.5 text-[12.5px] leading-relaxed text-muted-foreground">
+            <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
               {tri(
                 lang,
                 "Aktivieren, wenn dieser Fachbereich für den Fall berücksichtigt werden soll.",
@@ -129,8 +129,8 @@ function SpecialtySectionContent<T extends Record<string, unknown>>({
 
         {booleanFlags.length > 0 ? (
           <div>
-            <p className="mb-2 inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-600">
-              <span aria-hidden className="size-1.5 rounded-full bg-orange-500" />
+            <p className="mb-2 inline-flex items-center gap-1.5 text-[11.5px] font-medium text-muted-foreground">
+              <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
               {tri(lang, "Leitsymptome", "Ключевые симптомы", "Key signs")}
             </p>
             <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
@@ -140,10 +140,10 @@ function SpecialtySectionContent<T extends Record<string, unknown>>({
                   <label
                     key={flag.key}
                     className={cn(
-                      "flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm transition",
+                      "flex cursor-pointer items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm transition-colors",
                       checked
                         ? "border border-primary/35 bg-primary/5 text-foreground"
-                        : cn(tokens.surface.card, "hover:bg-muted/30"),
+                        : cn(tokens.surface.card, "text-foreground hover:bg-muted/30"),
                     )}
                   >
                     <input
@@ -185,10 +185,10 @@ function SpecialtySectionContent<T extends Record<string, unknown>>({
           ))}
         </div>
 
-        <div className="flex justify-end border-t border-slate-100 pt-4">
+        <div className="flex justify-end border-t border-border/60 pt-4">
           <Button
             type="submit"
-            className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+            className="h-9 rounded-lg"
             disabled={busy || !canEdit}
           >
             {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}

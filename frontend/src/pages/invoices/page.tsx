@@ -43,7 +43,7 @@ import {
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
-import { useRealtimeSubscription } from "@/lib/realtime";
+import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { PatientInvoicesPage } from "@/pages/patients/portal-invoices-page";
 import { cn } from "@/lib/utils";
@@ -374,18 +374,20 @@ function StaffInvoicesPage() {
     filters.status !== "" ||
     filters.invoiceType !== "";
 
-  useRealtimeSubscription(STAFF_INVOICE_REALTIME_EVENTS, (event) => {
+  useDebouncedRealtimeSubscription(STAFF_INVOICE_REALTIME_EVENTS, (_event, events) => {
     if (!access.canView) return;
     clearApiCache("/invoices");
     clearApiCache("/invoices/accounting-ledger");
-    if (event.entity_type === "invoice") {
-      clearApiCache(`/invoices/${event.entity_id}`);
+    for (const event of events) {
+      if (event.entity_type === "invoice") {
+        clearApiCache(`/invoices/${event.entity_id}`);
+      }
     }
     if (selectedInvoiceId) {
       clearApiCache(`/invoices/${selectedInvoiceId}`);
     }
     setReloadToken((current) => current + 1);
-  });
+  }, 250);
 
   const invoiceTableColumns: ColumnDef<InvoiceItem>[] = [
       {

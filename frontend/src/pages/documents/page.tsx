@@ -65,7 +65,7 @@ import {
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { getLang, t as translateCatalog, useLang } from "@/lib/i18n";
-import { useRealtimeSubscription } from "@/lib/realtime";
+import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { PatientDocumentsPage } from "@/pages/patients/portal-documents-page";
 import { cn } from "@/lib/utils";
 import {
@@ -563,15 +563,17 @@ function StaffDocumentsPage() {
   const [shareError, setShareError] = useState("");
   const [portalBusy, setPortalBusy] = useState(false);
 
-  useRealtimeSubscription(STAFF_DOCUMENT_REALTIME_EVENTS, (event) => {
+  useDebouncedRealtimeSubscription(STAFF_DOCUMENT_REALTIME_EVENTS, (_event, events) => {
     if (!canView) return;
     clearApiCache("/documents");
     clearApiCache("/documents/intake-queue");
-    if (event.entity_type === "document") {
-      clearApiCache(`/documents/${event.entity_id}`);
+    for (const event of events) {
+      if (event.entity_type === "document") {
+        clearApiCache(`/documents/${event.entity_id}`);
+      }
     }
     startTransition(() => setVersion((current) => current + 1));
-  });
+  }, 250);
 
   const selectedTemplate = useMemo(
     () =>

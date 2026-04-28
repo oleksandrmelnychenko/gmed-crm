@@ -1,8 +1,8 @@
 import { useMemo } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { CountBadge } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
 
 import { type CaseHistoryEntry, useCaseWorkspace } from "./context";
 import { Panel } from "./primitives";
@@ -45,25 +45,15 @@ export function HistorySection() {
         "Append-only history of changes in this case.",
       )}
       action={
-        <span
-          className={cn(
-            "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em]",
-            history.length > 0
-              ? "border-orange-200 bg-orange-50 text-orange-700"
-              : "border-slate-200 bg-slate-50 text-slate-500",
-          )}
-        >
-          {history.length > 0 ? (
-            <span aria-hidden className="size-1.5 rounded-full bg-orange-500" />
-          ) : null}
+        <CountBadge>
           {detail?.version_count ?? history.length}{" "}
           {tri(lang, "Revisionen", "ревизий", "revisions")}
-        </span>
+        </CountBadge>
       }
     >
       {history.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/70 px-5 py-10 text-center">
-          <p className="text-sm font-semibold text-slate-700">
+        <div className="rounded-xl border border-dashed border-border/60 bg-muted/25 px-4 py-8 text-center">
+          <p className="text-sm font-medium text-foreground">
             {tri(
               lang,
               "Noch keine Revisionen.",
@@ -71,7 +61,7 @@ export function HistorySection() {
               "No revisions yet.",
             )}
           </p>
-          <p className="mt-1 text-[13px] leading-relaxed text-slate-500">
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
             {tri(
               lang,
               "Jede Speicherung erzeugt einen Eintrag in der Historie.",
@@ -99,29 +89,31 @@ function HistoryRow({
   lang: string;
 }) {
   return (
-    <li className="rounded-2xl border border-slate-200 bg-white p-4">
+    <li className="rounded-xl border border-border/50 bg-card px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-orange-500" />
-        <p className="text-sm font-semibold text-slate-950">
+        <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+        <p className="text-sm font-medium text-foreground">
           {entry.section || tri(lang, "Unbekannt", "Неизвестно", "Unknown")}
         </p>
         <Badge
           variant="outline"
-          className="rounded-full border-slate-200 bg-slate-50 text-[11px] font-medium text-slate-600"
+          className="rounded-full border-border/60 bg-muted/25 text-[11px] font-medium text-muted-foreground"
         >
           {formatDateTime(lang, entry.created_at)}
         </Badge>
       </div>
-      <p className="mt-2 text-[13px] text-slate-600">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">
+      <p className="mt-2 text-[13px] text-muted-foreground">
+        <span className="text-[11.5px] font-medium text-muted-foreground">
           {tri(lang, "Geändert von", "Изменено", "Changed by")}
         </span>
         {" · "}
-        <span className="text-slate-800">
+        <span className="text-foreground">
           {entry.changed_by_name || entry.changed_by}
         </span>
         {entry.changed_by_role ? (
-          <span className="ml-1 text-slate-500">({entry.changed_by_role})</span>
+          <span className="ml-1 text-muted-foreground">
+            ({entry.changed_by_role})
+          </span>
         ) : null}
       </p>
     </li>

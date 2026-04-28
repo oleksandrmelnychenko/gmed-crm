@@ -35,7 +35,7 @@ type CasePatientSummary = {
 const STATUS_BADGE_CLASS: Record<string, string> = {
   open: "border-emerald-200 bg-emerald-50 text-emerald-700",
   in_progress: "border-amber-200 bg-amber-50 text-amber-700",
-  closed: "border-slate-200 bg-slate-50 text-slate-600",
+  closed: "border-border/60 bg-muted/25 text-muted-foreground",
 };
 
 function tri(lang: string, de: string, ru: string, en: string) {
@@ -136,14 +136,14 @@ function CaseWorkspaceContent() {
 
   return (
     <div className="flex flex-col gap-6">
-      <header className="rounded-[1.75rem] border border-slate-200/80 bg-gradient-to-b from-orange-50/40 to-white p-6 shadow-[0_18px_48px_rgba(15,23,42,0.05)]">
+      <header className="rounded-xl border border-border/60 bg-muted/20 px-4 py-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2.5">
             <span
               aria-hidden
-              className="size-2.5 shrink-0 rounded-full bg-orange-500 shadow-[0_0_0_4px_rgba(249,115,22,0.15)]"
+              className="size-2 shrink-0 rounded-full bg-[var(--brand)]"
             />
-            <h1 className="text-xl font-semibold tracking-tight text-slate-950">
+            <h1 className="text-base font-semibold text-foreground">
               {detail?.case_id ?? caseId}
             </h1>
             {detail?.status ? (
@@ -152,14 +152,14 @@ function CaseWorkspaceContent() {
                 className={cn(
                   "rounded-full",
                   STATUS_BADGE_CLASS[detail.status] ??
-                    "border-slate-200 bg-white text-slate-700",
+                    "border-border/60 bg-muted/25 text-foreground",
                 )}
               >
                 {detail.status}
               </Badge>
             ) : null}
           </div>
-          <p className="mt-2 text-[13px] leading-relaxed text-slate-500">
+          <p className="mt-2 max-w-3xl text-xs leading-relaxed text-muted-foreground">
             {tri(
               lang,
               "Workspace für den ausgewählten Patientenfall. Die Sektionen werden aus der linken Navigation geöffnet.",
@@ -168,8 +168,8 @@ function CaseWorkspaceContent() {
             )}
           </p>
           {patientLabelText ? (
-            <p className="mt-3 inline-flex items-center gap-2 text-sm text-slate-700">
-              <span aria-hidden className="size-1.5 rounded-full bg-slate-400" />
+            <p className="mt-3 inline-flex items-center gap-2 text-sm text-foreground">
+              <span aria-hidden className="size-1.5 rounded-full bg-muted-foreground/60" />
               {patientLabelText}
             </p>
           ) : null}
@@ -183,7 +183,7 @@ function CaseWorkspaceContent() {
       ) : null}
 
       {loading ? (
-        <div className="flex min-h-[280px] items-center justify-center rounded-[1.75rem] border border-slate-200/80 bg-white text-sm text-slate-500">
+        <div className="flex min-h-[280px] items-center justify-center rounded-xl border border-border/50 bg-card text-sm text-muted-foreground">
           <LoaderCircle className="mr-2 size-4 animate-spin" />
           {t.common_loading}
         </div>

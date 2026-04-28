@@ -72,8 +72,8 @@ export function SymptomsSection() {
       renderCard={(item) => (
         <>
           <div className="flex items-center gap-2">
-            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-orange-500" />
-            <p className="truncate text-sm font-semibold text-slate-950">
+            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+            <p className="truncate text-sm font-medium text-foreground">
               {item.beschreibung ||
                 tri(lang, "Ohne Beschreibung", "Без описания", "Untitled")}
             </p>
@@ -81,7 +81,7 @@ export function SymptomsSection() {
           {item.fachrichtung ? (
             <Badge
               variant="outline"
-              className="self-start rounded-full border-slate-200 bg-slate-50 text-[11px] font-medium text-slate-600"
+              className="self-start rounded-full border-border/60 bg-muted/25 text-[11px] font-medium text-muted-foreground"
             >
               {item.fachrichtung}
             </Badge>

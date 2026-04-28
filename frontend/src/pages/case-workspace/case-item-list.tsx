@@ -2,6 +2,7 @@ import { useCallback, useState, type FormEvent, type ReactNode } from "react";
 import { Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { CountBadge } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -166,25 +167,15 @@ export function CaseItemList<T>({
         description={description}
         action={
           <>
-            <span
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em]",
-                populated
-                  ? "border-orange-200 bg-orange-50 text-orange-700"
-                  : "border-slate-200 bg-slate-50 text-slate-500",
-              )}
-            >
-              {populated ? (
-                <span aria-hidden className="size-1.5 rounded-full bg-orange-500" />
-              ) : null}
+            <CountBadge>
               {items.length} {tri(lang, "Einträge", "записей", "items")}
-            </span>
+            </CountBadge>
             {canEdit ? (
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                className="rounded-2xl"
+                className="h-8 rounded-lg"
                 onClick={openCreate}
                 disabled={busy}
               >
@@ -202,10 +193,10 @@ export function CaseItemList<T>({
         ) : null}
 
         {!populated ? (
-          <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/70 px-5 py-10 text-center">
-            <p className="text-sm font-semibold text-slate-700">{emptyTitle}</p>
+          <div className="rounded-xl border border-dashed border-border/60 bg-muted/25 px-4 py-8 text-center">
+            <p className="text-sm font-medium text-foreground">{emptyTitle}</p>
             {emptyHint ? (
-              <p className="mt-1 text-[13px] leading-relaxed text-slate-500">
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                 {emptyHint}
               </p>
             ) : null}
@@ -213,7 +204,7 @@ export function CaseItemList<T>({
               <Button
                 type="button"
                 variant="outline"
-                className="mt-4 rounded-2xl"
+                className="mt-4 h-8 rounded-lg"
                 onClick={openCreate}
                 disabled={busy}
               >
@@ -231,8 +222,8 @@ export function CaseItemList<T>({
                 onClick={() => openEdit(index)}
                 disabled={busy || !canEdit}
                 className={cn(
-                  "group relative flex flex-col gap-2 rounded-2xl border border-slate-200 bg-white p-4 text-left transition",
-                  "hover:border-orange-300 hover:shadow-[0_6px_22px_rgba(15,23,42,0.05)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300",
+                  "group relative flex flex-col gap-2 rounded-xl border border-border/50 bg-card px-4 py-3 text-left transition-colors",
+                  "hover:border-border hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
                   "disabled:opacity-60 disabled:cursor-not-allowed",
                 )}
               >

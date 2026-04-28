@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
 import { buildApiUrl, clearApiCache } from "@/lib/api";
+import { clearSecurePersistedState } from "@/lib/secure-persist";
 
 export interface User {
   id: string;
@@ -76,6 +77,7 @@ function clearTokens() {
   localStorage.removeItem(ACCESS_TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
   clearApiCache();
+  clearSecurePersistedState();
 }
 
 function isPendingLoginResponse(

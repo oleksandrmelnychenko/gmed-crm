@@ -74,20 +74,20 @@ export function AllergiesSection() {
       renderCard={(item) => (
         <>
           <div className="flex items-center gap-2">
-            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-orange-500" />
-            <p className="truncate text-sm font-semibold text-slate-950">
+            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+            <p className="truncate text-sm font-medium text-foreground">
               {item.allergie || tri(lang, "Ohne Namen", "Без названия", "Untitled")}
             </p>
           </div>
           {item.reaktion ? (
-            <p className="line-clamp-3 whitespace-pre-wrap text-[13px] leading-relaxed text-slate-600">
-              <span className="mr-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">
+            <p className="line-clamp-3 whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">
+              <span className="mr-1 text-[11.5px] font-medium text-muted-foreground">
                 {tri(lang, "Reaktion", "Реакция", "Reaction")}:
               </span>
               {item.reaktion}
             </p>
           ) : (
-            <p className="text-[12px] italic text-slate-400">
+            <p className="text-xs italic text-muted-foreground">
               {tri(lang, "Keine Reaktion erfasst", "Реакция не указана", "No reaction recorded")}
             </p>
           )}
