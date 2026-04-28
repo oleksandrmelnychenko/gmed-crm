@@ -29,8 +29,10 @@ export const appointmentMetaPillClassName =
   "rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600";
 export const appointmentMiniPillClassName =
   "rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600";
-export const appointmentToggleCardClassName =
-  "flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-700";
+export const appointmentToggleCardClassName = cn(
+  "flex items-start gap-3 rounded-lg px-4 py-3 text-sm text-foreground",
+  tokens.surface.mutedCard,
+);
 export const appointmentWhiteSelectControlClassName = selectClass;
 export const appointmentWhiteTextareaControlClassName = textareaClass;
 export const appointmentSlateTextareaControlClassName = textareaClass;

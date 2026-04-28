@@ -33,3 +33,5 @@ export const selectClass =
   "h-9 w-full rounded-lg border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
 export const textareaClass =
   "min-h-[80px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
+export const checkboxClass =
+  "size-4 shrink-0 cursor-pointer rounded border-border/60 bg-card accent-[var(--brand)] text-[var(--brand)] focus:ring-[var(--brand)]/30 disabled:cursor-not-allowed disabled:opacity-50";

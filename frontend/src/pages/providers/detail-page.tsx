@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { checkboxClass, tokens } from "@/components/ui-shell";
 import {
   Tabs,
   TabsContent,
@@ -690,9 +691,10 @@ export function ProviderDetailPage() {
                   </NativeComboboxSelect>
                 </div>
                 <div className="flex flex-wrap items-center gap-5 md:col-span-2">
-                  <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                  <label className="inline-flex items-center gap-2 text-sm text-foreground">
                     <input
                       type="checkbox"
+                      className={checkboxClass}
                       checked={templateForm.isMedical}
                       onChange={(event) =>
                         setTemplateForm((current) => ({
@@ -703,9 +705,10 @@ export function ProviderDetailPage() {
                     />
                     {l("Medizinische Daten", "Медицинские данные", "Medical data")}
                   </label>
-                  <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                  <label className="inline-flex items-center gap-2 text-sm text-foreground">
                     <input
                       type="checkbox"
+                      className={checkboxClass}
                       checked={templateForm.isActive}
                       onChange={(event) =>
                         setTemplateForm((current) => ({
@@ -716,9 +719,10 @@ export function ProviderDetailPage() {
                     />
                     {l("Aktiv", "Активно", "Active")}
                   </label>
-                  <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                  <label className="inline-flex items-center gap-2 text-sm text-foreground">
                     <input
                       type="checkbox"
+                      className={checkboxClass}
                       checked={templateForm.autoSendOnConfirmedAppointment}
                       onChange={(event) =>
                         setTemplateForm((current) => ({
@@ -746,11 +750,12 @@ export function ProviderDetailPage() {
                     return (
                       <div
                         key={language}
-                        className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                        className={cn("rounded-lg p-4", tokens.surface.mutedCard)}
                       >
-                        <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-800">
+                        <label className="inline-flex items-center gap-2 text-sm font-medium text-foreground">
                           <input
                             type="checkbox"
+                            className={checkboxClass}
                             checked={checked}
                             onChange={(event) =>
                               toggleLanguage(language, event.target.checked)

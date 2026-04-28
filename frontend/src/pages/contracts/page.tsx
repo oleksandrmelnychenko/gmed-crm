@@ -35,9 +35,11 @@ import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import {
   PageHeader,
+  checkboxClass,
   inputClass as shellInputClassName,
   selectClass as shellSelectClassName,
   textareaClass as shellTextareaClass,
+  tokens,
 } from "@/components/ui-shell";
 import { Input } from "@/components/ui/input";
 import { Banner as ShellBanner } from "@/components/record-workspace/recipes";
@@ -1943,14 +1945,19 @@ export function ContractsPage() {
                     }
                   />
                 </Field>
-                <label className="sm:col-span-2 flex items-center gap-2 text-sm text-foreground">
+                <label
+                  className={cn(
+                    "sm:col-span-2 flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-foreground",
+                    tokens.surface.mutedCard,
+                  )}
+                >
                   <input
                     type="checkbox"
                     checked={agencyServiceForm.isActive}
                     onChange={(event) =>
                       setAgencyServiceForm((current) => ({ ...current, isActive: event.target.checked }))
                     }
-                    className="size-4 rounded border-border"
+                    className={checkboxClass}
                   />
                   {text.itemIsActive}
                 </label>

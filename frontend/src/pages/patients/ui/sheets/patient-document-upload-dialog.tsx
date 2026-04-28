@@ -20,7 +20,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/components/ui/toast";
-import { selectClass } from "@/components/ui-shell";
+import { checkboxClass, selectClass } from "@/components/ui-shell";
 
 import { uploadPatientDocument } from "../../data/patient-detail-mutations";
 import type {
@@ -291,9 +291,10 @@ function PatientDocumentUploadDialog({
                 ))}
               </NativeComboboxSelect>
             </div>
-            <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+            <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-3 py-2 text-sm text-foreground">
               <input
                 type="checkbox"
+                className={checkboxClass}
                 checked={form.isMedical}
                 onChange={(event) =>
                   setForm((current) => ({

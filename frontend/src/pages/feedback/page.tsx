@@ -41,6 +41,7 @@ import {
   PageHeader,
   StatusBadge,
   SuccessBanner,
+  checkboxClass,
   selectClass as shellSelectClassName,
   textareaClass as shellTextareaClass,
   tokens,
@@ -315,7 +316,7 @@ function ScoreGrid({
           onChange={(event) =>
             setForm((current) => ({ ...current, complicationReported: event.target.checked }))
           }
-          className="size-4 rounded border-border"
+          className={checkboxClass}
         />
         <span className="text-sm text-muted-foreground">
           {l(

@@ -11,7 +11,7 @@ import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Banner } from "@/components/ui-shell";
+import { Banner, checkboxClass } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { apiFetch } from "@/lib/api";
@@ -543,7 +543,7 @@ function AppointmentBillingHandoffSection({
             />
           </Field>
           <div className="md:col-span-2 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <label className="flex items-center gap-2 text-sm text-slate-600">
+            <label className="flex items-center gap-2 text-sm text-foreground">
               <input
                 type="checkbox"
                 checked={form.createTask}
@@ -553,7 +553,7 @@ function AppointmentBillingHandoffSection({
                     createTask: event.target.checked,
                   }))
                 }
-                className="size-4 rounded border-border/60 text-[var(--brand)] focus:ring-[var(--brand)]/30"
+                className={checkboxClass}
               />
               Mirror this billing handoff as a task
             </label>

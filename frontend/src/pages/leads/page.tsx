@@ -51,6 +51,7 @@ import {
   PageHeader,
   StatusBadge,
   SuccessBanner,
+  checkboxClass,
   inputClass as shellInputClassName,
   selectClass as shellSelectClassName,
   textareaClass as shellTextareaClass,
@@ -1068,9 +1069,10 @@ export function LeadsPage() {
                       </div>
 
                       <div className="grid gap-3 md:grid-cols-2">
-                        <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                        <label className={cn("flex items-start gap-3 rounded-lg px-4 py-3 text-sm text-foreground", tokens.surface.mutedCard)}>
                           <input
                             type="checkbox"
+                            className={checkboxClass}
                             checked={gateForm.consentHealthcare}
                             onChange={(event) =>
                               setGateForm((current) =>
@@ -1085,9 +1087,10 @@ export function LeadsPage() {
                           />
                           <span>Healthcare consent available</span>
                         </label>
-                        <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                        <label className={cn("flex items-start gap-3 rounded-lg px-4 py-3 text-sm text-foreground", tokens.surface.mutedCard)}>
                           <input
                             type="checkbox"
+                            className={checkboxClass}
                             checked={gateForm.consentPrivacyPractices}
                             onChange={(event) =>
                               setGateForm((current) =>

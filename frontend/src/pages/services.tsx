@@ -32,6 +32,7 @@ import {
   EmptyCell,
   PageHeader,
   StatCard,
+  checkboxClass,
   inputClass as shellInputClassName,
   selectClass as shellSelectClassName,
   textareaClass as shellTextareaClassName,
@@ -739,12 +740,12 @@ function StaffServicesPage() {
             />
           </div>
 
-          <label className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-input bg-background px-2.5 text-[13px] text-foreground">
+          <label className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-input bg-card px-2.5 text-[13px] text-foreground">
             <input
               type="checkbox"
               checked={mineOnly}
               onChange={(event) => setMineOnly(event.target.checked)}
-              className="size-3.5 rounded border-slate-300"
+              className={checkboxClass}
             />
             {l("Meine", "Мои", "Mine")}
           </label>

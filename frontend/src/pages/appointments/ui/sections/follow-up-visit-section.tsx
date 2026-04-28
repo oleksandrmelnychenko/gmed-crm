@@ -13,9 +13,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Banner,
+  checkboxClass,
 } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { apiFetch } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import {
   appointmentElevatedSectionCardClassName,
   appointmentSelectControlClassName,
@@ -525,7 +527,7 @@ function AppointmentFollowUpVisitSection({
                   linkOrder: event.target.checked,
                 }))
               }
-              className="mt-0.5 size-4 rounded border-border/60 text-[var(--brand)] focus:ring-[var(--brand)]/30"
+              className={cn(checkboxClass, "mt-0.5")}
             />
             <span>{tr.providers_linked_patients}</span>
           </label>
@@ -541,7 +543,7 @@ function AppointmentFollowUpVisitSection({
                   createReminder: event.target.checked,
                 }))
               }
-              className="mt-0.5 size-4 rounded border-border/60 text-[var(--brand)] focus:ring-[var(--brand)]/30"
+              className={cn(checkboxClass, "mt-0.5")}
             />
             <span>Create a preparation reminder on the new follow-up visit.</span>
           </label>

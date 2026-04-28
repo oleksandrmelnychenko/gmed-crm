@@ -2,6 +2,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { checkboxClass, tokens } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -98,17 +99,17 @@ function SpecialtySectionContent<T extends Record<string, unknown>>({
 
         <label
           className={cn(
-            "flex cursor-pointer items-center justify-between gap-3 rounded-2xl border px-4 py-3 transition",
+            "flex cursor-pointer items-center justify-between gap-3 rounded-lg px-4 py-3 transition",
             isRelevant
-              ? "border-orange-300 bg-orange-50/60"
-              : "border-slate-200 bg-slate-50/60",
+              ? "border border-primary/35 bg-primary/5"
+              : tokens.surface.mutedCard,
           )}
         >
           <div>
-            <p className="text-sm font-semibold text-slate-900">
+            <p className="text-sm font-semibold text-foreground">
               {tri(lang, "Fachrelevant", "Относится к специальности", "Specialty relevant")}
             </p>
-            <p className="mt-0.5 text-[12.5px] leading-relaxed text-slate-500">
+            <p className="mt-0.5 text-[12.5px] leading-relaxed text-muted-foreground">
               {tri(
                 lang,
                 "Aktivieren, wenn dieser Fachbereich für den Fall berücksichtigt werden soll.",
@@ -119,7 +120,7 @@ function SpecialtySectionContent<T extends Record<string, unknown>>({
           </div>
           <input
             type="checkbox"
-            className="size-4 rounded border-slate-300 text-orange-600 focus:ring-orange-500"
+            className={checkboxClass}
             checked={isRelevant}
             onChange={() => toggleBoolean("is_relevant" as keyof T & string)}
             disabled={!canEdit || busy}
@@ -139,15 +140,15 @@ function SpecialtySectionContent<T extends Record<string, unknown>>({
                   <label
                     key={flag.key}
                     className={cn(
-                      "flex cursor-pointer items-center gap-2.5 rounded-xl border px-3 py-2.5 text-sm transition",
+                      "flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm transition",
                       checked
-                        ? "border-orange-200 bg-orange-50/70 text-slate-900"
-                        : "border-slate-200 bg-white text-slate-700 hover:border-slate-300",
+                        ? "border border-primary/35 bg-primary/5 text-foreground"
+                        : cn(tokens.surface.card, "hover:bg-muted/30"),
                     )}
                   >
                     <input
                       type="checkbox"
-                      className="size-4 rounded border-slate-300 text-orange-600 focus:ring-orange-500"
+                      className={checkboxClass}
                       checked={checked}
                       onChange={() => toggleBoolean(flag.key)}
                       disabled={!canEdit || busy}

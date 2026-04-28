@@ -17,6 +17,7 @@ import { toast } from "@/components/ui/toast";
 import {
   Field as FormField,
   Section as FormSection,
+  checkboxClass,
   inputClass as formInputClassName,
   textareaClass as formTextareaClassName,
 } from "@/components/ui-shell";
@@ -456,7 +457,7 @@ function PatientProfileEditorSheet({
                               event.target.checked as PatientLegalStatus[typeof key]
                             )
                           }
-                          className="size-3.5 accent-[var(--brand)] cursor-pointer"
+                          className={checkboxClass}
                         />
                         {item.label}
                       </label>

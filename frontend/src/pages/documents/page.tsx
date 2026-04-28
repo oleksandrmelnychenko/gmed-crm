@@ -41,6 +41,7 @@ import {
   PageHeader,
   Section,
   TabLoader,
+  checkboxClass,
   inputClass as shellInputClassName,
   selectClass as shellSelectClassName,
   textareaClass as shellTextareaClass,
@@ -2287,7 +2288,7 @@ function StaffDocumentsPage() {
                                   ),
                             }))
                           }
-                          className="mt-0.5 size-4 rounded border-input"
+                          className={cn(checkboxClass, "mt-0.5")}
                         />
                         <span>
                           <span className="block font-medium text-foreground">
@@ -2567,7 +2568,7 @@ function StaffDocumentsPage() {
                     isMedical: event.target.checked,
                   }))
                 }
-                className="size-4 rounded border-input"
+                className={checkboxClass}
               />
               {t.documents_mark_medical_data}
             </label>
@@ -3366,7 +3367,7 @@ function StaffDocumentsPage() {
                           </NativeComboboxSelect>
                         </Field>
                       </div>
-                      <label className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-muted/25 px-3 py-2 text-sm text-foreground">
+                      <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
                         <input
                           type="checkbox"
                           checked={editForm.isMedical}
@@ -3380,7 +3381,7 @@ function StaffDocumentsPage() {
                                 : current,
                             )
                           }
-                          className="size-4 rounded border-input"
+                          className={checkboxClass}
                         />
                         {t.documents_mark_medical_data}
                       </label>
@@ -3632,7 +3633,7 @@ function StaffDocumentsPage() {
                                 : current,
                             )
                           }
-                          className="size-4 rounded border-input"
+                          className={checkboxClass}
                         />
                         {t.documents_mark_medical_data}
                       </label>
@@ -4039,7 +4040,7 @@ function StaffDocumentsPage() {
                               requiresConfirmation: event.target.checked,
                             }))
                           }
-                          className="size-4 rounded border-input"
+                          className={checkboxClass}
                         />
                         {t.documents_require_confirmation}
                       </label>

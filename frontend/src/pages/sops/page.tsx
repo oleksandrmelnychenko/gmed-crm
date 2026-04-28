@@ -33,6 +33,7 @@ import {
   Banner as ShellBanner,
   PageHeader,
   SuccessBanner,
+  checkboxClass,
   inputClass as shellInputClassName,
   selectClass as shellSelectClassName,
   textareaClass as shellTextareaClass,
@@ -1272,6 +1273,7 @@ export function SopsPage() {
                         >
                           <input
                             type="checkbox"
+                            className={checkboxClass}
                             checked={form.targetRoles.includes(role)}
                             onChange={(event) =>
                               setForm((current) => ({
@@ -1305,6 +1307,7 @@ export function SopsPage() {
                       >
                         <input
                           type="checkbox"
+                          className={checkboxClass}
                           checked={form.targetUserIds.includes(item.id)}
                           onChange={(event) =>
                             setForm((current) => ({
@@ -1333,6 +1336,7 @@ export function SopsPage() {
               >
                 <input
                   type="checkbox"
+                  className={checkboxClass}
                   checked={form.requiresAck}
                   onChange={(event) =>
                     setForm((current) => ({

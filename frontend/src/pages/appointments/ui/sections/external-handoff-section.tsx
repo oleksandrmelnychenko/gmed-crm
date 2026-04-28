@@ -12,6 +12,7 @@ import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { checkboxClass } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { apiFetch } from "@/lib/api";
@@ -619,7 +620,7 @@ function AppointmentExternalHandoffSection({
                       createTask: event.target.checked,
                     }))
                   }
-                  className="mt-0.5 size-4 rounded border-border/60 text-[var(--brand)] focus:ring-[var(--brand)]/30"
+                  className={cn(checkboxClass, "mt-0.5")}
                 />
                 <span>
                   Mirror this communication as an internal task when assignee

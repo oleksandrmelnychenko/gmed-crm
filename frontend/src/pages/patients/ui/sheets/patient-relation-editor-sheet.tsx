@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/components/ui/toast";
-import { inputClass, selectClass } from "@/components/ui-shell";
+import { checkboxClass, inputClass, selectClass } from "@/components/ui-shell";
 
 import { usePatientLookupOptions } from "../../data/use-patient-lookup-options";
 import { upsertPatientRelation } from "../../data/patient-detail-mutations";
@@ -348,6 +348,7 @@ function PatientRelationEditorSheet({
         <label className="flex items-center gap-2 rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground">
           <input
             type="checkbox"
+            className={checkboxClass}
             checked={form.isEmergencyContact}
             onChange={(event) =>
               setForm((current) => ({

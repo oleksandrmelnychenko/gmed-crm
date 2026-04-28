@@ -11,8 +11,10 @@ import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { checkboxClass } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { apiFetch } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import {
   appointmentElevatedSectionCardClassName,
   appointmentMetaPillClassName,
@@ -349,7 +351,7 @@ function AppointmentDoctorFollowUpSection({
                       createTask: event.target.checked,
                     }))
                   }
-                  className="mt-0.5 size-4 rounded border-border/60 text-[var(--brand)] focus:ring-[var(--brand)]/30"
+                  className={cn(checkboxClass, "mt-0.5")}
                 />
                 <span>
                   Mirror this directive as an operational task for execution and
@@ -637,7 +639,7 @@ function AppointmentPackageEndSection({
                       createTask: event.target.checked,
                     }))
                   }
-                  className="mt-0.5 size-4 rounded border-border/60 text-[var(--brand)] focus:ring-[var(--brand)]/30"
+                  className={cn(checkboxClass, "mt-0.5")}
                 />
                 <span>{tr.providers_linked_patients}</span>
               </label>

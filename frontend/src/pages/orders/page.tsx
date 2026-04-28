@@ -51,6 +51,7 @@ import {
 import {
   PageHeader,
   StatusBadge,
+  checkboxClass,
   inputClass as shellInputClassName,
   selectClass as shellSelectClassName,
   textareaClass as shellTextareaClass,
@@ -2982,9 +2983,10 @@ export function OrdersPage() {
                                   "Заметка по плану лечения",
                                 )}
                               />
-                              <label className="flex items-center gap-2 text-sm text-slate-700">
+                              <label className="flex items-center gap-2 text-sm text-foreground">
                                 <input
                                   type="checkbox"
+                                  className={checkboxClass}
                                   checked={planningForm.nonMedicalRequired}
                                   onChange={(event) =>
                                     setPlanningForm((current) => ({
@@ -2998,9 +3000,10 @@ export function OrdersPage() {
                                   "Немедицинские услуги требуются",
                                 )}
                               </label>
-                              <label className="flex items-center gap-2 text-sm text-slate-700">
+                              <label className="flex items-center gap-2 text-sm text-foreground">
                                 <input
                                   type="checkbox"
+                                  className={checkboxClass}
                                   checked={planningForm.interpreterRequired}
                                   onChange={(event) =>
                                     setPlanningForm((current) => ({
@@ -5460,7 +5463,7 @@ export function OrdersPage() {
               </div>
             </div>
 
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <div className={cn("rounded-lg px-4 py-3", tokens.surface.mutedCard)}>
               <label className="flex items-start gap-3">
                 <input
                   type="checkbox"
@@ -5474,13 +5477,13 @@ export function OrdersPage() {
                         : "",
                     }))
                   }
-                  className="mt-1 size-4 rounded border-slate-300"
+                  className={cn(checkboxClass, "mt-1")}
                 />
                 <span>
-                  <div className="text-sm font-medium text-slate-900">
+                  <div className="text-sm font-medium text-foreground">
                     {t.orders_treat_as_cost_pass_through}
                   </div>
-                  <div className="mt-1 text-sm text-slate-500">
+                  <div className="mt-1 text-sm text-muted-foreground">
                     {t.orders_cost_pass_through_hint}
                   </div>
                 </span>

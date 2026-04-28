@@ -34,6 +34,7 @@ import {
 } from "@/components/admin-page-patterns";
 import {
   PageHeader,
+  checkboxClass,
   inputClass as shellInputClassName,
   selectClass as shellSelectClass,
   textareaClass as shellTextareaClass,
@@ -2674,9 +2675,10 @@ export function CasesPage({
                               rows={8}
                             />
                           </Field>
-                          <label className="flex items-center gap-3 rounded-xl border border-border bg-white px-3 py-2 text-sm text-foreground">
+                          <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-3 py-2 text-sm text-foreground">
                             <input
                               type="checkbox"
+                              className={checkboxClass}
                               checked={snippetForm.is_active}
                               onChange={(event) =>
                                 setSnippetForm((current) => ({
@@ -2955,9 +2957,10 @@ export function CasesPage({
                   <form onSubmit={handleSaveCardiology} className="space-y-4">
                     {sectionErrors.cardiology ? <Banner tone="error">{sectionErrors.cardiology}</Banner> : null}
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <label className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-foreground">
+                      <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
                         <input
                           type="checkbox"
+                          className={checkboxClass}
                           checked={cardiology.is_relevant}
                           onChange={(event) =>
                             setCardiology((current) => ({
@@ -2977,10 +2980,11 @@ export function CasesPage({
                       ].map(([key, label]) => (
                         <label
                           key={key}
-                          className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-foreground"
+                          className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground"
                         >
                           <input
                             type="checkbox"
+                            className={checkboxClass}
                             checked={Boolean(cardiology[key as keyof CardiologyAssessment])}
                             onChange={(event) =>
                               setCardiology((current) => ({
@@ -3053,9 +3057,10 @@ export function CasesPage({
                       <Banner tone="error">{sectionErrors.gastroenterology}</Banner>
                     ) : null}
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <label className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-foreground">
+                      <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
                         <input
                           type="checkbox"
+                          className={checkboxClass}
                           checked={gastroenterology.is_relevant}
                           onChange={(event) =>
                             setGastroenterology((current) => ({
@@ -3076,10 +3081,11 @@ export function CasesPage({
                       ].map(([key, label]) => (
                         <label
                           key={key}
-                          className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-foreground"
+                          className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground"
                         >
                           <input
                             type="checkbox"
+                            className={checkboxClass}
                             checked={Boolean(
                               gastroenterology[key as keyof GastroenterologyAssessment],
                             )}
@@ -3207,9 +3213,10 @@ export function CasesPage({
                       <Banner tone="error">{sectionErrors.orthopedics}</Banner>
                     ) : null}
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <label className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-foreground">
+                      <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
                         <input
                           type="checkbox"
+                          className={checkboxClass}
                           checked={orthopedics.is_relevant}
                           onChange={(event) =>
                             setOrthopedics((current) => ({
@@ -3228,10 +3235,11 @@ export function CasesPage({
                       ].map(([key, label]) => (
                         <label
                           key={key}
-                          className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-foreground"
+                          className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground"
                         >
                           <input
                             type="checkbox"
+                            className={checkboxClass}
                             checked={Boolean(orthopedics[key as keyof OrthopedicsAssessment])}
                             onChange={(event) =>
                               setOrthopedics((current) => ({
@@ -3355,9 +3363,10 @@ export function CasesPage({
                       <Banner tone="error">{sectionErrors.neurology}</Banner>
                     ) : null}
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <label className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-foreground">
+                      <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
                         <input
                           type="checkbox"
+                          className={checkboxClass}
                           checked={neurology.is_relevant}
                           onChange={(event) =>
                             setNeurology((current) => ({
@@ -3378,10 +3387,11 @@ export function CasesPage({
                       ].map(([key, label]) => (
                         <label
                           key={key}
-                          className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-foreground"
+                          className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground"
                         >
                           <input
                             type="checkbox"
+                            className={checkboxClass}
                             checked={Boolean(neurology[key as keyof NeurologyAssessment])}
                             onChange={(event) =>
                               setNeurology((current) => ({
@@ -3493,9 +3503,10 @@ export function CasesPage({
                       <Banner tone="error">{sectionErrors.pulmonology}</Banner>
                     ) : null}
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <label className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-foreground">
+                      <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
                         <input
                           type="checkbox"
+                          className={checkboxClass}
                           checked={pulmonology.is_relevant}
                           onChange={(event) =>
                             setPulmonology((current) => ({
@@ -3515,10 +3526,11 @@ export function CasesPage({
                       ].map(([key, label]) => (
                         <label
                           key={key}
-                          className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-foreground"
+                          className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground"
                         >
                           <input
                             type="checkbox"
+                            className={checkboxClass}
                             checked={Boolean(pulmonology[key as keyof PulmonologyAssessment])}
                             onChange={(event) =>
                               setPulmonology((current) => ({
@@ -3642,9 +3654,10 @@ export function CasesPage({
                       <Banner tone="error">{sectionErrors.urology}</Banner>
                     ) : null}
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <label className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-foreground">
+                      <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
                         <input
                           type="checkbox"
+                          className={checkboxClass}
                           checked={urology.is_relevant}
                           onChange={(event) =>
                             setUrology((current) => ({
@@ -3665,10 +3678,11 @@ export function CasesPage({
                       ].map(([key, label]) => (
                         <label
                           key={key}
-                          className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-foreground"
+                          className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground"
                         >
                           <input
                             type="checkbox"
+                            className={checkboxClass}
                             checked={Boolean(urology[key as keyof UrologyAssessment])}
                             onChange={(event) =>
                               setUrology((current) => ({

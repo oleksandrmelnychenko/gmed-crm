@@ -5,7 +5,7 @@ import {
   AdminSheetScaffold,
   SheetActionsFooter,
 } from "@/components/admin-page-patterns";
-import { EmptyCell, tokens } from "@/components/ui-shell";
+import { EmptyCell, checkboxClass, tokens } from "@/components/ui-shell";
 import {
   Sheet,
   SheetContent,
@@ -59,7 +59,7 @@ export function AppointmentClinicalToggleCard({
         checked={checked}
         disabled={disabled}
         onChange={(event) => onChange(event.target.checked)}
-        className="mt-0.5 size-4 rounded border-border/60 text-[var(--brand)] focus:ring-[var(--brand)]/30"
+        className={cn(checkboxClass, "mt-0.5")}
       />
       <span className="min-w-0 space-y-1">
         <span className="block text-sm font-medium text-foreground">{title}</span>

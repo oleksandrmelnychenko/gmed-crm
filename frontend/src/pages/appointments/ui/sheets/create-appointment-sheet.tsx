@@ -10,11 +10,13 @@ import { Plus, LoaderCircle } from "lucide-react";
 
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import {
   Banner,
+  checkboxClass,
   inputClass,
   selectClass,
   textareaClass,
@@ -467,7 +469,7 @@ function CreateAppointmentSheet({
                               : current.repeatCount,
                         }))
                       }
-                      className="mt-0.5 size-4 rounded border-input bg-card text-[var(--brand)]"
+                      className={cn(checkboxClass, "mt-0.5")}
                     />
                     <span>
                       <span className="block font-medium text-foreground">
