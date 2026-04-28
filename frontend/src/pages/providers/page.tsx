@@ -151,6 +151,15 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+function titleWithDot(title: ReactNode) {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+      <span>{title}</span>
+    </span>
+  );
+}
+
 function Banner({ tone, children }: { tone: "error" | "warning"; children: ReactNode }) {
   return (
     <div
@@ -1034,7 +1043,7 @@ function ProvidersPage() {
                 {permissions.canManageRegistry || permissions.canViewPage ? (
                   <section className="rounded-xl border border-border/50 bg-card/40 p-4 space-y-3">
                     <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
-                      {l("Anbieterprofil", "Профиль провайдера", "Provider profile")}
+                      {titleWithDot(l("Anbieterprofil", "Профиль провайдера", "Provider profile"))}
                     </h3>
                     <ProviderFormFields
                       form={providerForm}
@@ -1336,7 +1345,11 @@ function DoctorSection({
       <div className="flex items-center justify-between gap-3">
         <div>
             <h3 className="text-sm font-semibold text-slate-950">
-              {detail.provider_type === "non_medical" ? l("Kontakte", "Контакты", "Contacts") : t.providers_doctors}
+              {titleWithDot(
+                detail.provider_type === "non_medical"
+                  ? l("Kontakte", "Контакты", "Contacts")
+                  : t.providers_doctors,
+              )}
             </h3>
             <p className="mt-1 text-sm text-slate-600">
               {detail.provider_type === "non_medical"
@@ -1468,7 +1481,7 @@ function DoctorSection({
           <div className="flex items-center justify-between gap-3">
             <div>
               <h4 className="text-sm font-semibold text-slate-950">
-                {form.id ? t.providers_doctor_detail : t.providers_doctor_new}
+                {titleWithDot(form.id ? t.providers_doctor_detail : t.providers_doctor_new)}
               </h4>
               <p className="mt-1 text-sm text-slate-600">
                 {t.providers_doctors_hint}
@@ -1536,7 +1549,9 @@ function ServiceSection({
     <section className={cardClass("p-5")}>
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-slate-950">{l("Servicekatalog", "Каталог сервисов", "Service catalog")}</h3>
+          <h3 className="text-sm font-semibold text-slate-950">
+            {titleWithDot(l("Servicekatalog", "Каталог сервисов", "Service catalog"))}
+          </h3>
           <p className="mt-1 text-sm text-slate-600">
             {t.providers_services_description}
           </p>
@@ -1623,7 +1638,7 @@ function ServiceSection({
           <div className="flex items-center justify-between gap-3">
             <div>
               <h4 className="text-sm font-semibold text-slate-950">
-                {form.id ? t.providers_service_detail : t.providers_service_new}
+                {titleWithDot(form.id ? t.providers_service_detail : t.providers_service_new)}
               </h4>
               <p className="mt-1 text-sm text-slate-600">
                 {t.providers_services_hint}
@@ -1677,7 +1692,9 @@ export function LinkedPatientsSection({
     <section className={cardClass("p-5")}>
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-slate-950">{l("Verknüpfte Patienten", "Связанные пациенты", "Linked patients")}</h3>
+          <h3 className="text-sm font-semibold text-slate-950">
+            {titleWithDot(l("Verknüpfte Patienten", "Связанные пациенты", "Linked patients"))}
+          </h3>
           <p className="mt-1 text-sm text-slate-600">
             {t.providers_linked_patients_description}
           </p>
@@ -1780,7 +1797,9 @@ export function InteractionHistorySection({
     <section className={cardClass("p-5")}>
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-slate-950">{l("Interaktionsverlauf", "История взаимодействий", "Interaction history")}</h3>
+          <h3 className="text-sm font-semibold text-slate-950">
+            {titleWithDot(l("Interaktionsverlauf", "История взаимодействий", "Interaction history"))}
+          </h3>
           <p className="mt-1 text-sm text-slate-600">
             {t.providers_interactions_description}
           </p>
