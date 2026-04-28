@@ -1,13 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
-import {
-  Select as ShadSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { TabsContent } from "@/components/ui/tabs";
 import {
   CountBadge,
@@ -213,54 +207,32 @@ export function PatientTimelineTab({
               ))}
             </div>
             <div className="grid gap-3 lg:grid-cols-[180px_220px_240px_minmax(0,1fr)_auto]">
-              <ShadSelect value={timelineRangeFilter} onValueChange={(value) => onTimelineRangeFilterChange((value as PatientTimelineRangeFilter) ?? "all")}>
-                <SelectTrigger className={cn("w-full", formInputClassName)}>
-                  <SelectValue>
-                    {localizedTimelineRangeOptions.find((option) => option.value === timelineRangeFilter)?.label ?? ""}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
+              <NativeComboboxSelect value={timelineRangeFilter}
+                onChange={(event) => onTimelineRangeFilterChange((event.target.value as PatientTimelineRangeFilter) ?? "all")} className={cn("w-full", formInputClassName)}>
                   {localizedTimelineRangeOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
+                    <option key={option.value} value={option.value}>
                       {option.label}
-                    </SelectItem>
+                    </option>
                   ))}
-                </SelectContent>
-              </ShadSelect>
-              <ShadSelect value={timelineCategoryFilter} onValueChange={(value) => onTimelineCategoryFilterChange(value ?? "all")}>
-                <SelectTrigger className={cn("w-full", formInputClassName)}>
-                  <SelectValue>
-                    {timelineCategoryFilter === "all"
-                      ? l("Alle Kategorien", "Все категории", "All categories")
-                      : localizeTimelineCategory(timelineCategoryFilter, l)}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{l("Alle Kategorien", "Все категории", "All categories")}</SelectItem>
+                </NativeComboboxSelect>
+              <NativeComboboxSelect value={timelineCategoryFilter}
+                onChange={(event) => onTimelineCategoryFilterChange(event.target.value ?? "all")} className={cn("w-full", formInputClassName)}>
+                  <option value="all">{l("Alle Kategorien", "Все категории", "All categories")}</option>
                   {timelineCategoryOptions.map((category) => (
-                    <SelectItem key={category} value={category}>
+                    <option key={category} value={category}>
                       {localizeTimelineCategory(category, l)}
-                    </SelectItem>
+                    </option>
                   ))}
-                </SelectContent>
-              </ShadSelect>
-              <ShadSelect value={timelineSourceFilter} onValueChange={(value) => onTimelineSourceFilterChange(value ?? "all")}>
-                <SelectTrigger className={cn("w-full", formInputClassName)}>
-                  <SelectValue>
-                    {timelineSourceFilter === "all"
-                      ? l("Alle Quellen", "Все источники", "All sources")
-                      : localizeTimelineSource(timelineSourceFilter, l)}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{l("Alle Quellen", "Все источники", "All sources")}</SelectItem>
+                </NativeComboboxSelect>
+              <NativeComboboxSelect value={timelineSourceFilter}
+                onChange={(event) => onTimelineSourceFilterChange(event.target.value ?? "all")} className={cn("w-full", formInputClassName)}>
+                  <option value="all">{l("Alle Quellen", "Все источники", "All sources")}</option>
                   {timelineSourceOptions.map((source) => (
-                    <SelectItem key={source} value={source}>
+                    <option key={source} value={source}>
                       {localizeTimelineSource(source, l)}
-                    </SelectItem>
+                    </option>
                   ))}
-                </SelectContent>
-              </ShadSelect>
+                </NativeComboboxSelect>
               <Input
                 value={timelineSearch}
                 onChange={(event) => onTimelineSearchChange(event.target.value)}

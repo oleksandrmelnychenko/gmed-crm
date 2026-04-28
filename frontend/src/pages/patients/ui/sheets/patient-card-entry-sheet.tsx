@@ -2,15 +2,9 @@ import { useEffect, useState, type FormEvent } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select as ShadSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { toast } from "@/components/ui/toast";
 import { selectClass, textareaClass } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
@@ -181,30 +175,20 @@ export function PatientCardEntrySheet({
           >
             {l("Kategorie", "Категория", "Category")}
           </Label>
-          <ShadSelect
+          <NativeComboboxSelect
             value={form.category}
-            onValueChange={(value) =>
-              setForm((current) => ({
+
+
+            onChange={(event) => setForm((current) => ({
                 ...current,
-                category: (value ?? CATEGORY_OPTIONS[0]) as CategoryValue,
-              }))
-            }
-          >
-            <SelectTrigger id="patient-card-entry-category" className={cn("w-full", selectClass)}>
-              <SelectValue
-                placeholder={l("Kategorie wahlen", "Выберите категорию", "Select category")}
-              >
-                {form.category ? categoryLabel(form.category, l) : null}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
+                category: (event.target.value ?? CATEGORY_OPTIONS[0]) as CategoryValue,
+              }))} id="patient-card-entry-category" className={cn("w-full", selectClass)}>
               {CATEGORY_OPTIONS.map((option) => (
-                <SelectItem key={option} value={option}>
+                <option key={option} value={option}>
                   {categoryLabel(option, l)}
-                </SelectItem>
+                </option>
               ))}
-            </SelectContent>
-          </ShadSelect>
+            </NativeComboboxSelect>
         </div>
       </div>
 

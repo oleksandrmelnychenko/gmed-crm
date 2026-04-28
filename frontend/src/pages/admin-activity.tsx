@@ -27,14 +27,8 @@ import {
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Sheet,
   SheetContent,
@@ -321,24 +315,18 @@ export function AdminActivityPage() {
             />
           </div>
 
-          <Select
+          <NativeComboboxSelect
             value={filterAction}
-            onValueChange={(value) => setFilterAction(value && value !== "__all__" ? value : "")}
-          >
-            <SelectTrigger size="sm" className="h-8 w-[240px] rounded-lg bg-card text-[13px]">
-              <SelectValue placeholder={t.activity_filter_action}>
-                {filterAction ? actionLabel(filterAction) : t.activity_filter_action}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">{t.providers_all}</SelectItem>
+
+
+            onChange={(event) => setFilterAction(event.target.value && event.target.value !== "__all__" ? event.target.value : "")} className="h-8 w-[240px] rounded-lg bg-card text-[13px]">
+              <option value="__all__">{t.providers_all}</option>
               {actionOptions.map((value) => (
-                <SelectItem key={value} value={value}>
+                <option key={value} value={value}>
                   {actionLabel(value)}
-                </SelectItem>
+                </option>
               ))}
-            </SelectContent>
-          </Select>
+            </NativeComboboxSelect>
 
           {anyFilterActive ? (
             <Button

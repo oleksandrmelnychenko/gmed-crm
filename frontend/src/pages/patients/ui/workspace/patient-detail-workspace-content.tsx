@@ -1,17 +1,12 @@
 import { lazy, Suspense, type FormEvent } from "react";
 
-import { Printer, SquarePen } from "lucide-react";
+import { SquarePen } from "lucide-react";
 
 import { TabLoader } from "@/components/record-workspace";
 import { StatusActionPill } from "@/components/status-action-pill";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Select as ShadSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-} from "@/components/ui/select";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   Tabs,
   TabsList,
@@ -613,30 +608,21 @@ export function PatientDetailWorkspaceContent(props: PatientDetailWorkspaceConte
           <p className="mt-0.5 text-[12px] font-mono text-muted-foreground">{detail.patient_id}</p>
         </div>
         {canPrintPatientLabel ? (
-          <ShadSelect
+          <NativeComboboxSelect
             value=""
-            onValueChange={(value) => {
-              if (!value) return;
-              onPrintPatientLabel(value as PatientLabelFormatId);
-            }}
+
             disabled={patientLabelBusy}
-          >
-            <SelectTrigger className="h-9 rounded-lg bg-card text-[13px] gap-1.5 w-auto">
-              {patientLabelBusy ? (
-                <span className="inline-block size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-              ) : (
-                <Printer className="size-3.5" />
-              )}
-              <span>{l("Etikett drucken", "Печать наклейки", "Print sticker")}</span>
-            </SelectTrigger>
-            <SelectContent align="end">
+
+            onChange={(event) => {
+              if (!event.target.value) return;
+              onPrintPatientLabel(event.target.value as PatientLabelFormatId);
+            }} className="h-9 rounded-lg bg-card text-[13px] gap-1.5 w-auto">
               {PATIENT_LABEL_FORMAT_OPTIONS.map((option) => (
-                <SelectItem key={option.id} value={option.id}>
+                <option key={option.id} value={option.id}>
                   {option.label}
-                </SelectItem>
+                </option>
               ))}
-            </SelectContent>
-          </ShadSelect>
+            </NativeComboboxSelect>
         ) : null}
         {canEditPatientProfile ? (
           <Button size="sm" className="h-9 rounded-lg gap-1.5 px-3.5" onClick={onOpenProfileEditor}>

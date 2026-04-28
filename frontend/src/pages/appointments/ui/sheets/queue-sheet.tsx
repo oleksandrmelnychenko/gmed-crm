@@ -1,4 +1,4 @@
-import { memo, useMemo, useState, type FormEvent } from "react";
+import { memo, useState, type FormEvent } from "react";
 
 import {
   CheckCircle2,
@@ -9,18 +9,13 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
-import {
-  Select as ShadSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   EmptyCell,
   ListItem,
   inputClass,
+  selectClass,
   textareaClass,
 } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
@@ -225,14 +220,6 @@ function QueueSheet({
   const [activeScheduleRequestId, setActiveScheduleRequestId] = useState("");
   const [scheduleForm, setScheduleForm] = useState<RequestScheduleFormState | null>(null);
   const [scheduleError, setScheduleError] = useState("");
-  const staffLabelIndex = useMemo(
-    () => new Map(staff.map((member) => [member.id, staffLabel(member)])),
-    [staff],
-  );
-  const interpreterLabelIndex = useMemo(
-    () => new Map(interpreters.map((member) => [member.id, staffLabel(member)])),
-    [interpreters],
-  );
 
   function resetScheduleForm() {
     setActiveScheduleRequestId("");
@@ -468,63 +455,47 @@ function QueueSheet({
                           <span className="text-[11.5px] font-medium leading-tight text-muted-foreground">
                             {t.patients_assign_owner}
                           </span>
-                          <ShadSelect
+                          <NativeComboboxSelect
                             value={scheduleForm.ownerUserId}
-                            onValueChange={(value) =>
+                            onChange={(event) =>
                               setScheduleForm((current) =>
                                 current
-                                  ? { ...current, ownerUserId: value ?? "" }
+                                  ? { ...current, ownerUserId: event.target.value }
                                   : current,
                               )
                             }
+                            className={selectClass}
                           >
-                            <SelectTrigger className={cn("w-full", inputClass)}>
-                              <SelectValue>
-                                {scheduleForm.ownerUserId
-                                  ? staffLabelIndex.get(scheduleForm.ownerUserId)
-                                  : t.common_not_set}
-                              </SelectValue>
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="">{t.common_not_set}</SelectItem>
-                              {staff.map((member) => (
-                                <SelectItem key={member.id} value={member.id}>
-                                  {staffLabel(member)}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </ShadSelect>
+                            <option value="">{t.common_not_set}</option>
+                            {staff.map((member) => (
+                              <option key={member.id} value={member.id}>
+                                {staffLabel(member)}
+                              </option>
+                            ))}
+                          </NativeComboboxSelect>
                         </label>
                         <label className="flex flex-col gap-1.5">
                           <span className="text-[11.5px] font-medium leading-tight text-muted-foreground">
                             {tr.role_interpreter ?? appointmentText("Dolmetscher", "Переводчик", "Interpreter")}
                           </span>
-                          <ShadSelect
+                          <NativeComboboxSelect
                             value={scheduleForm.interpreterId}
-                            onValueChange={(value) =>
+                            onChange={(event) =>
                               setScheduleForm((current) =>
                                 current
-                                  ? { ...current, interpreterId: value ?? "" }
+                                  ? { ...current, interpreterId: event.target.value }
                                   : current,
                               )
                             }
+                            className={selectClass}
                           >
-                            <SelectTrigger className={cn("w-full", inputClass)}>
-                              <SelectValue>
-                                {scheduleForm.interpreterId
-                                  ? interpreterLabelIndex.get(scheduleForm.interpreterId)
-                                  : t.common_not_set}
-                              </SelectValue>
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="">{t.common_not_set}</SelectItem>
-                              {interpreters.map((member) => (
-                                <SelectItem key={member.id} value={member.id}>
-                                  {staffLabel(member)}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </ShadSelect>
+                            <option value="">{t.common_not_set}</option>
+                            {interpreters.map((member) => (
+                              <option key={member.id} value={member.id}>
+                                {staffLabel(member)}
+                              </option>
+                            ))}
+                          </NativeComboboxSelect>
                         </label>
                         <label className="flex flex-col gap-1.5 md:col-span-2">
                           <span className="text-[11.5px] font-medium leading-tight text-muted-foreground">

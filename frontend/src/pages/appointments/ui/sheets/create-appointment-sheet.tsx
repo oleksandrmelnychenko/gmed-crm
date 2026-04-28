@@ -10,19 +10,13 @@ import { Plus, LoaderCircle } from "lucide-react";
 
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
-import {
-  Select as ShadSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Banner,
   inputClass,
+  selectClass,
   textareaClass,
 } from "@/components/ui-shell";
 import {
@@ -69,6 +63,7 @@ import {
 } from "@/pages/appointments/ui/shared/schedule-panels";
 
 const createSheetInputClassName = inputClass;
+const createSheetSelectClassName = selectClass;
 const createSheetTextareaClassName = textareaClass;
 
 export type CreateAppointmentSheetProps = {
@@ -126,32 +121,6 @@ function CreateAppointmentSheet({
     }),
     [tr.common_doctor, tr.common_provider, tr.patients_assign_owner],
   );
-  const patientLabelIndex = useMemo(
-    () =>
-      new Map(
-        patients.map((item) => [
-          item.id,
-          `${item.patient_id} · ${patientName(item)}`,
-        ]),
-      ),
-    [patients],
-  );
-  const providerLabelIndex = useMemo(
-    () => new Map(providers.map((item) => [item.id, providerLabel(item)])),
-    [providers],
-  );
-  const doctorLabelIndex = useMemo(
-    () => new Map(doctors.map((item) => [item.id, doctorLabel(item)])),
-    [doctors],
-  );
-  const staffLabelIndex = useMemo(
-    () => new Map(staff.map((item) => [item.id, staffLabel(item)])),
-    [staff],
-  );
-  const interpreterLabelIndex = useMemo(
-    () => new Map(interpreters.map((item) => [item.id, staffLabel(item)])),
-    [interpreters],
-  );
   const localWarnings = useMemo(
     () =>
       buildLocalScheduleWarnings(
@@ -197,22 +166,6 @@ function CreateAppointmentSheet({
     form.interpreterId,
   ]);
   const debouncedConflictQuery = useDebouncedValue(conflictQuery);
-  const selectedPatientLabel =
-    (form.patientId ? patientLabelIndex.get(form.patientId) : undefined) ??
-    t.orders_patient;
-  const selectedProviderLabel =
-    (form.providerId ? providerLabelIndex.get(form.providerId) : undefined) ??
-    t.common_not_set;
-  const selectedDoctorLabel =
-    (form.doctorId ? doctorLabelIndex.get(form.doctorId) : undefined) ??
-    t.common_not_set;
-  const selectedOwnerLabel =
-    (form.ownerUserId ? staffLabelIndex.get(form.ownerUserId) : undefined) ??
-    t.common_not_set;
-  const selectedInterpreterLabel =
-    (form.interpreterId
-      ? interpreterLabelIndex.get(form.interpreterId)
-      : undefined) ?? t.common_not_set;
 
   useEffect(() => {
     if (!form.providerId) {
@@ -374,56 +327,46 @@ function CreateAppointmentSheet({
                 {sectionTitle(appointmentText("Termin und Zeit", "Прием и время", "Appointment and timing"))}
                 <div className="grid gap-4 md:grid-cols-3">
                   <Field compact label={t.orders_patient}>
-                    <ShadSelect
+                    <NativeComboboxSelect
                       value={form.patientId}
-                      onValueChange={(value) =>
+                      onChange={(event) =>
                         setForm((current) => ({
                           ...current,
-                          patientId: value ?? "",
+                          patientId: event.target.value,
                         }))
                       }
+                      className={createSheetSelectClassName}
                     >
-                      <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                        <SelectValue>{selectedPatientLabel}</SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="">{t.orders_patient}</SelectItem>
-                        {patients.map((patient) => (
-                          <SelectItem key={patient.id} value={patient.id}>
-                            {patient.patient_id} · {patientName(patient)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </ShadSelect>
+                      <option value="">{t.orders_patient}</option>
+                      {patients.map((patient) => (
+                        <option key={patient.id} value={patient.id}>
+                          {patient.patient_id} · {patientName(patient)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
                   </Field>
                   <Field compact label={t.appointments_type}>
-                    <ShadSelect
+                    <NativeComboboxSelect
                       value={form.appointmentType}
-                      onValueChange={(value) =>
+                      onChange={(event) =>
                         setForm((current) => ({
                           ...current,
                           appointmentType:
-                            (value as AppointmentKind) ?? current.appointmentType,
+                            event.target.value as AppointmentKind,
                           carePathKind:
-                            value === "medical" ? current.carePathKind : "regular",
-                          providerId: value === "internal" ? "" : current.providerId,
-                          doctorId: value === "internal" ? "" : current.doctorId,
+                            event.target.value === "medical" ? current.carePathKind : "regular",
+                          providerId: event.target.value === "internal" ? "" : current.providerId,
+                          doctorId: event.target.value === "internal" ? "" : current.doctorId,
                         }))
                       }
+                      className={createSheetSelectClassName}
                     >
-                      <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                        <SelectValue>
-                          {appointmentTypeLabel(form.appointmentType, tr)}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {TYPE_OPTIONS.map((value) => (
-                          <SelectItem key={value} value={value}>
-                            {appointmentTypeLabel(value, tr)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </ShadSelect>
+                      {TYPE_OPTIONS.map((value) => (
+                        <option key={value} value={value}>
+                          {appointmentTypeLabel(value, tr)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
                   </Field>
                   <Field
                     compact
@@ -433,28 +376,24 @@ function CreateAppointmentSheet({
                       "Care path",
                     )}
                   >
-                    <ShadSelect
+                    <NativeComboboxSelect
                       value={form.carePathKind}
-                      onValueChange={(value) =>
+                      onChange={(event) =>
                         setForm((current) => ({
                           ...current,
                           carePathKind:
-                            (value as AppointmentCarePathKind) ?? current.carePathKind,
+                            event.target.value as AppointmentCarePathKind,
                         }))
                       }
                       disabled={form.appointmentType !== "medical"}
+                      className={createSheetSelectClassName}
                     >
-                      <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                        <SelectValue>{carePathKindLabel(form.carePathKind)}</SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {CARE_PATH_KIND_OPTIONS.map((value) => (
-                          <SelectItem key={value} value={value}>
-                            {carePathKindLabel(value)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </ShadSelect>
+                      {CARE_PATH_KIND_OPTIONS.map((value) => (
+                        <option key={value} value={value}>
+                          {carePathKindLabel(value)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
                   </Field>
                 </div>
                 <Field compact label={t.appointments_title_col}>
@@ -542,30 +481,23 @@ function CreateAppointmentSheet({
                   {form.repeatEnabled ? (
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                       <Field compact label="Frequency">
-                        <ShadSelect
+                        <NativeComboboxSelect
                           value={form.repeatFrequency}
-                          onValueChange={(value) =>
+                          onChange={(event) =>
                             setForm((current) => ({
                               ...current,
                               repeatFrequency:
-                                (value as AppointmentRecurrenceFrequency) ??
-                                current.repeatFrequency,
+                                event.target.value as AppointmentRecurrenceFrequency,
                             }))
                           }
+                          className={createSheetSelectClassName}
                         >
-                          <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                            <SelectValue>
-                              {recurrenceFrequencyLabel(form.repeatFrequency)}
-                            </SelectValue>
-                          </SelectTrigger>
-                          <SelectContent>
-                            {RECURRENCE_FREQUENCY_OPTIONS.map((value) => (
-                              <SelectItem key={value} value={value}>
-                                {recurrenceFrequencyLabel(value)}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </ShadSelect>
+                          {RECURRENCE_FREQUENCY_OPTIONS.map((value) => (
+                            <option key={value} value={value}>
+                              {recurrenceFrequencyLabel(value)}
+                            </option>
+                          ))}
+                        </NativeComboboxSelect>
                       </Field>
                       <Field compact label="Every">
                         <Input
@@ -632,53 +564,45 @@ function CreateAppointmentSheet({
                 {sectionTitle(appointmentText("Provider und Arzt", "Провайдер и врач", "Provider and doctor"))}
                 <div className="grid gap-4 md:grid-cols-2">
                   <Field compact label={t.common_provider}>
-                    <ShadSelect
+                    <NativeComboboxSelect
                       value={form.providerId}
-                      onValueChange={(value) =>
+                      onChange={(event) =>
                         setForm((current) => ({
                           ...current,
-                          providerId: value ?? "",
+                          providerId: event.target.value,
                           doctorId: "",
                         }))
                       }
                       disabled={form.appointmentType === "internal"}
+                      className={createSheetSelectClassName}
                     >
-                      <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                        <SelectValue>{selectedProviderLabel}</SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="">{t.common_not_set}</SelectItem>
-                        {providers.map((provider) => (
-                          <SelectItem key={provider.id} value={provider.id}>
-                            {providerLabel(provider)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </ShadSelect>
+                      <option value="">{t.common_not_set}</option>
+                      {providers.map((provider) => (
+                        <option key={provider.id} value={provider.id}>
+                          {providerLabel(provider)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
                   </Field>
                   <Field compact label={t.common_doctor}>
-                    <ShadSelect
+                    <NativeComboboxSelect
                       value={form.doctorId}
-                      onValueChange={(value) =>
+                      onChange={(event) =>
                         setForm((current) => ({
                           ...current,
-                          doctorId: value ?? "",
+                          doctorId: event.target.value,
                         }))
                       }
                       disabled={!form.providerId}
+                      className={createSheetSelectClassName}
                     >
-                      <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                        <SelectValue>{selectedDoctorLabel}</SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="">{t.common_not_set}</SelectItem>
-                        {doctors.map((doctor) => (
-                          <SelectItem key={doctor.id} value={doctor.id}>
-                            {doctorLabel(doctor)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </ShadSelect>
+                      <option value="">{t.common_not_set}</option>
+                      {doctors.map((doctor) => (
+                        <option key={doctor.id} value={doctor.id}>
+                          {doctorLabel(doctor)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
                   </Field>
                 </div>
         </section>
@@ -686,50 +610,42 @@ function CreateAppointmentSheet({
                 {sectionTitle(appointmentText("Koordination und Notizen", "Координация и заметки", "Coordination and notes"))}
                 <div className="grid gap-4 md:grid-cols-2">
                   <Field compact label={t.patients_assign_owner}>
-                    <ShadSelect
+                    <NativeComboboxSelect
                       value={form.ownerUserId}
-                      onValueChange={(value) =>
+                      onChange={(event) =>
                         setForm((current) => ({
                           ...current,
-                          ownerUserId: value ?? "",
+                          ownerUserId: event.target.value,
                         }))
                       }
+                      className={createSheetSelectClassName}
                     >
-                      <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                        <SelectValue>{selectedOwnerLabel}</SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="">{t.common_not_set}</SelectItem>
-                        {staff.map((member) => (
-                          <SelectItem key={member.id} value={member.id}>
-                            {staffLabel(member)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </ShadSelect>
+                      <option value="">{t.common_not_set}</option>
+                      {staff.map((member) => (
+                        <option key={member.id} value={member.id}>
+                          {staffLabel(member)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
                   </Field>
                   <Field compact label={interpreterFieldLabel}>
-                    <ShadSelect
+                    <NativeComboboxSelect
                       value={form.interpreterId}
-                      onValueChange={(value) =>
+                      onChange={(event) =>
                         setForm((current) => ({
                           ...current,
-                          interpreterId: value ?? "",
+                          interpreterId: event.target.value,
                         }))
                       }
+                      className={createSheetSelectClassName}
                     >
-                      <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                        <SelectValue>{selectedInterpreterLabel}</SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="">{tr.common_not_set}</SelectItem>
-                        {interpreters.map((member) => (
-                          <SelectItem key={member.id} value={member.id}>
-                            {staffLabel(member)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </ShadSelect>
+                      <option value="">{tr.common_not_set}</option>
+                      {interpreters.map((member) => (
+                        <option key={member.id} value={member.id}>
+                          {staffLabel(member)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
                   </Field>
                 </div>
                 <div className="grid gap-4 md:grid-cols-2">

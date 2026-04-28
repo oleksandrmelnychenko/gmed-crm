@@ -2,15 +2,9 @@ import { useEffect, useState, type FormEvent } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select as ShadSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   inputClass,
   selectClass,
@@ -191,28 +185,20 @@ export function PatientMedicalOrderSheet({
           <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-type">
             {l("Anordnungstyp", "Tip naznacheniya", "Order type")}
           </Label>
-          <ShadSelect
+          <NativeComboboxSelect
             value={form.orderType}
-            onValueChange={(value) =>
-              setForm((current) => ({
+
+
+            onChange={(event) => setForm((current) => ({
                 ...current,
-                orderType: (value ?? ORDER_TYPE_OPTIONS[0]) as OrderType,
-              }))
-            }
-          >
-            <SelectTrigger id="patient-medical-order-type" className={cn("w-full", selectClass)}>
-              <SelectValue placeholder={l("Typ waehlen", "Vyberite tip", "Select order type")}>
-                {form.orderType ? orderTypeLabel(form.orderType, l) : null}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
+                orderType: (event.target.value ?? ORDER_TYPE_OPTIONS[0]) as OrderType,
+              }))} id="patient-medical-order-type" className={cn("w-full", selectClass)}>
               {ORDER_TYPE_OPTIONS.map((option) => (
-                <SelectItem key={option} value={option}>
+                <option key={option} value={option}>
                   {orderTypeLabel(option, l)}
-                </SelectItem>
+                </option>
               ))}
-            </SelectContent>
-          </ShadSelect>
+            </NativeComboboxSelect>
         </div>
         <div className="flex flex-col gap-1.5 md:col-span-2">
           <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-title">

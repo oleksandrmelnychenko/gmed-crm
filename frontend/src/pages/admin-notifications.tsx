@@ -31,13 +31,7 @@ import {
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   Sheet,
   SheetContent,
@@ -411,42 +405,22 @@ export function AdminNotificationsPage() {
             />
           </div>
 
-          <Select value={typeFilter} onValueChange={(value) => setTypeFilter(value ?? "")}>
-            <SelectTrigger size="sm" className="h-8 w-[240px] rounded-lg bg-card text-[13px]">
-              <SelectValue>
-                {typeFilter === "smtp"
-                  ? t.notif_smtp
-                  : typeFilter === "webhook"
-                    ? t.notif_webhook
-                    : t.notif_type}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">{t.providers_all}</SelectItem>
-              <SelectItem value="smtp">{t.notif_smtp}</SelectItem>
-              <SelectItem value="webhook">{t.notif_webhook}</SelectItem>
-            </SelectContent>
-          </Select>
+          <NativeComboboxSelect value={typeFilter}
+            onChange={(event) => setTypeFilter(event.target.value ?? "")} className="h-8 w-[240px] rounded-lg bg-card text-[13px]">
+              <option value="">{t.providers_all}</option>
+              <option value="smtp">{t.notif_smtp}</option>
+              <option value="webhook">{t.notif_webhook}</option>
+            </NativeComboboxSelect>
 
-          <Select
+          <NativeComboboxSelect
             value={statusFilter}
-            onValueChange={(value) => setStatusFilter(value ?? "")}
-          >
-            <SelectTrigger size="sm" className="h-8 w-[240px] rounded-lg bg-card text-[13px]">
-              <SelectValue>
-                {statusFilter === "active"
-                  ? t.common_active
-                  : statusFilter === "inactive"
-                    ? t.common_inactive
-                    : t.users_status}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">{t.providers_all}</SelectItem>
-              <SelectItem value="active">{t.common_active}</SelectItem>
-              <SelectItem value="inactive">{t.common_inactive}</SelectItem>
-            </SelectContent>
-          </Select>
+
+
+            onChange={(event) => setStatusFilter(event.target.value ?? "")} className="h-8 w-[240px] rounded-lg bg-card text-[13px]">
+              <option value="">{t.providers_all}</option>
+              <option value="active">{t.common_active}</option>
+              <option value="inactive">{t.common_inactive}</option>
+            </NativeComboboxSelect>
 
           {anyFilterActive ? (
             <Button
@@ -562,18 +536,14 @@ export function AdminNotificationsPage() {
                     />
                   </Field>
                   <Field label={t.notif_type} htmlFor="channel-type">
-                    <Select value={formType} onValueChange={(value) => setFormType(value ?? "smtp")}>
-                      <SelectTrigger
+                    <NativeComboboxSelect value={formType}
+                      onChange={(event) => setFormType(event.target.value ?? "smtp")}
                         id="channel-type"
                         className="!h-9 w-full rounded-lg bg-card"
                       >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="smtp">{t.notif_smtp}</SelectItem>
-                        <SelectItem value="webhook">{t.notif_webhook}</SelectItem>
-                      </SelectContent>
-                    </Select>
+                        <option value="smtp">{t.notif_smtp}</option>
+                        <option value="webhook">{t.notif_webhook}</option>
+                      </NativeComboboxSelect>
                   </Field>
                 </div>
 

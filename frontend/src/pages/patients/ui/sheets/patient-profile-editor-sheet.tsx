@@ -11,14 +11,8 @@ import {
   parseFunctionalLabels,
 } from "../shared/patient-form-primitives";
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
-import {
-  Select as ShadSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { toast } from "@/components/ui/toast";
 import {
   Field as FormField,
@@ -354,41 +348,20 @@ function PatientProfileEditorSheet({
                     />
                   </FormField>
                   <FormField label={l("Versicherungstyp", "Тип страхования", "Insurance type")}>
-                    <ShadSelect
+                    <NativeComboboxSelect
                       value={form.insuranceType || "__unset__"}
-                      onValueChange={(value) =>
-                        updateField(
+
+
+                      onChange={(event) => updateField(
                           "insuranceType",
-                          value === "__unset__" ? "" : value ?? ""
-                        )
-                      }
-                    >
-                      <SelectTrigger className={cn("w-full", formInputClassName)}>
-                        <SelectValue>
-                          {(() => {
-                            switch (form.insuranceType) {
-                              case "private":
-                                return l("Privat", "Частная", "Private");
-                              case "public":
-                                return l("Gesetzlich", "Государственная", "Public");
-                              case "self_pay":
-                                return l("Selbstzahler", "Самооплата", "Self pay");
-                              case "foreign":
-                                return l("Ausland", "Иностранная", "Foreign");
-                              default:
-                                return dictionary.common_not_set;
-                            }
-                          })()}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__unset__">{dictionary.common_not_set}</SelectItem>
-                        <SelectItem value="private">{l("Privat", "Частная", "Private")}</SelectItem>
-                        <SelectItem value="public">{l("Gesetzlich", "Государственная", "Public")}</SelectItem>
-                        <SelectItem value="self_pay">{l("Selbstzahler", "Самооплата", "Self pay")}</SelectItem>
-                        <SelectItem value="foreign">{l("Ausland", "Иностранная", "Foreign")}</SelectItem>
-                      </SelectContent>
-                    </ShadSelect>
+                          event.target.value === "__unset__" ? "" : event.target.value ?? ""
+                        )} className={cn("w-full", formInputClassName)}>
+                        <option value="__unset__">{dictionary.common_not_set}</option>
+                        <option value="private">{l("Privat", "Частная", "Private")}</option>
+                        <option value="public">{l("Gesetzlich", "Государственная", "Public")}</option>
+                        <option value="self_pay">{l("Selbstzahler", "Самооплата", "Self pay")}</option>
+                        <option value="foreign">{l("Ausland", "Иностранная", "Foreign")}</option>
+                      </NativeComboboxSelect>
                   </FormField>
                 </div>
               </FormSection>
@@ -491,25 +464,17 @@ function PatientProfileEditorSheet({
                   })}
                 </div>
                 <FormField label={l("Vertragsstatus", "Статус договора", "Contract status")}>
-                  <ShadSelect
+                  <NativeComboboxSelect
                     value={form.legalStatus.contractStatus}
-                    onValueChange={(value) =>
-                      updateLegalStatusField("contractStatus", value ?? "")
-                    }
-                  >
-                    <SelectTrigger className={cn("w-full", formInputClassName)}>
-                      <SelectValue>
-                        {statusLabel(form.legalStatus.contractStatus)}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
+
+
+                    onChange={(event) => updateLegalStatusField("contractStatus", event.target.value ?? "")} className={cn("w-full", formInputClassName)}>
                       {PATIENT_CONTRACT_STATUS_OPTIONS.map((status) => (
-                        <SelectItem key={status} value={status}>
+                        <option key={status} value={status}>
                           {statusLabel(status)}
-                        </SelectItem>
+                        </option>
                       ))}
-                    </SelectContent>
-                  </ShadSelect>
+                    </NativeComboboxSelect>
                 </FormField>
                 <FormField label={l("Notizen", "Заметки", "Notes")}>
                   <textarea

@@ -2,13 +2,7 @@ import { useMemo } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Select as ShadSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { TabsContent } from "@/components/ui/tabs";
 import {
   CountBadge,
@@ -269,26 +263,18 @@ export function PatientDocumentsTab({
               ))}
             </div>
             <div className="grid gap-3 md:grid-cols-[minmax(0,260px)_auto]">
-              <ShadSelect
+              <NativeComboboxSelect
                 value={documentCategoryFilter}
-                onValueChange={(value) => onDocumentCategoryFilterChange(value ?? "all")}
-              >
-                <SelectTrigger className={cn("w-full", formInputClassName)}>
-                  <SelectValue>
-                    {documentCategoryFilter === "all"
-                      ? l("Alle Dokumentarten", "Все типы документов", "All document types")
-                      : localizeDocumentCode(documentCategoryFilter, l)}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{l("Alle Dokumentarten", "Все типы документов", "All document types")}</SelectItem>
+
+
+                onChange={(event) => onDocumentCategoryFilterChange(event.target.value ?? "all")} className={cn("w-full", formInputClassName)}>
+                  <option value="all">{l("Alle Dokumentarten", "Все типы документов", "All document types")}</option>
                   {documentCategoryOptions.map((category) => (
-                    <SelectItem key={category} value={category}>
+                    <option key={category} value={category}>
                       {localizeDocumentCode(category, l)}
-                    </SelectItem>
+                    </option>
                   ))}
-                </SelectContent>
-              </ShadSelect>
+                </NativeComboboxSelect>
               <div className="flex items-center text-xs text-muted-foreground">
                 {l("Angezeigt", "Показано", "Showing")} {filteredDocuments.length} {l("von", "из", "of")} {documents.length}
               </div>

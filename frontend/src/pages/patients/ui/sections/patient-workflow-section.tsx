@@ -2,15 +2,9 @@ import type { FormEvent } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select as ShadSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { TabsContent } from "@/components/ui/tabs";
 import {
   CountBadge,
@@ -286,49 +280,34 @@ export function PatientWorkflowTab({
                       <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-workflow-owner">
                         {l("Verantwortlich", "Ответственный", "Owner")}
                       </Label>
-                      <ShadSelect
+                      <NativeComboboxSelect
                         value={workflowForm.ownerUserId}
-                        onValueChange={(value) => onWorkflowOwnerChange(value ?? "")}
-                      >
-                        <SelectTrigger id="patient-workflow-owner" className={cn("w-full", formInputClassName)}>
-                          <SelectValue>
-                            {workflowForm.ownerUserId
-                              ? (() => {
-                                  const owner = activeWorkflowAssignees.find((item) => item.user_id === workflowForm.ownerUserId);
-                                  return owner ? `${owner.user_name} · ${roleLabel(owner.user_role)}` : workflowForm.ownerUserId;
-                                })()
-                              : l("Aktueller Benutzer", "Текущий пользователь", "Current user")}
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="">{l("Aktueller Benutzer", "Текущий пользователь", "Current user")}</SelectItem>
+
+
+                        onChange={(event) => onWorkflowOwnerChange(event.target.value ?? "")} id="patient-workflow-owner" className={cn("w-full", formInputClassName)}>
+                          <option value="">{l("Aktueller Benutzer", "Текущий пользователь", "Current user")}</option>
                           {activeWorkflowAssignees.map((item) => (
-                            <SelectItem key={item.user_id} value={item.user_id}>
+                            <option key={item.user_id} value={item.user_id}>
                               {item.user_name} · {roleLabel(item.user_role)}
-                            </SelectItem>
+                            </option>
                           ))}
-                        </SelectContent>
-                      </ShadSelect>
+                        </NativeComboboxSelect>
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-workflow-priority">
                         {l("Priorität", "Приоритет", "Priority")}
                       </Label>
-                      <ShadSelect
+                      <NativeComboboxSelect
                         value={workflowForm.priority}
-                        onValueChange={(value) => onWorkflowPriorityChange(value ?? workflowForm.priority)}
-                      >
-                        <SelectTrigger id="patient-workflow-priority" className={cn("w-full", formInputClassName)}>
-                          <SelectValue>{priorityLabel(workflowForm.priority)}</SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
+
+
+                        onChange={(event) => onWorkflowPriorityChange(event.target.value ?? workflowForm.priority)} id="patient-workflow-priority" className={cn("w-full", formInputClassName)}>
                           {["low", "normal", "high", "urgent"].map((priority) => (
-                            <SelectItem key={priority} value={priority}>
+                            <option key={priority} value={priority}>
                               {priorityLabel(priority)}
-                            </SelectItem>
+                            </option>
                           ))}
-                        </SelectContent>
-                      </ShadSelect>
+                        </NativeComboboxSelect>
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-workflow-due">

@@ -10,7 +10,6 @@ import {
 import { useSearchParams } from "react-router-dom";
 import {
   CheckCircle2,
-  Filter,
   LoaderCircle,
   Plus,
   RefreshCw,
@@ -32,6 +31,7 @@ import { SplitView } from "@/components/data-table/split-view";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   Dialog,
   DialogClose,
@@ -42,13 +42,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import {
-  Select as ShadSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Sheet,
   SheetContent,
@@ -637,10 +630,6 @@ export function LeadsPage() {
     filters.search.trim() !== "" ||
     filters.status !== "" ||
     filters.includeArchived !== "false";
-  const archiveFilterLabel =
-    filters.includeArchived === "true"
-      ? l("Mit Archiv", "С архивом", "With archive")
-      : l("Aktive Leads", "Активные лиды", "Active leads");
 
   const paneTabs: Array<{
     key: LeadPaneTab;
@@ -1015,58 +1004,52 @@ export function LeadsPage() {
                           />
                         </LeadField>
                         <LeadField label="Legal sex" htmlFor="lead-gate-legal-sex">
-                          <ShadSelect
+                          <NativeComboboxSelect
                             value={gateForm.legalSex || "__unset__"}
-                            onValueChange={(value) =>
+                            onChange={(event) =>
                               setGateForm((current) =>
                                 current
                                   ? {
                                       ...current,
                                       legalSex:
-                                        value && value !== "__unset__" ? value : "",
+                                        event.target.value && event.target.value !== "__unset__"
+                                          ? event.target.value
+                                          : "",
                                     }
                                   : current
                               )
                             }
+                            className={selectClassName}
                           >
-                            <SelectTrigger className={selectClassName}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__unset__">{t.common_not_set}</SelectItem>
-                              {LEGAL_SEX_OPTIONS.map((option) => (
-                                <SelectItem key={option} value={option}>
-                                  {option}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </ShadSelect>
+                            <option value="__unset__">{t.common_not_set}</option>
+                            {LEGAL_SEX_OPTIONS.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </NativeComboboxSelect>
                         </LeadField>
                         <LeadField
                           label="Compliance status"
                           htmlFor="lead-gate-compliance-status"
                         >
-                          <ShadSelect
+                          <NativeComboboxSelect
                             value={gateForm.complianceStatus}
-                            onValueChange={(value) =>
+                            onChange={(event) =>
                               setGateForm((current) =>
                                 current
-                                  ? { ...current, complianceStatus: value ?? "" }
+                                  ? { ...current, complianceStatus: event.target.value }
                                   : current
                               )
                             }
+                            className={selectClassName}
                           >
-                            <SelectTrigger className={selectClassName}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {COMPLIANCE_OPTIONS.map((option) => (
-                                <SelectItem key={option} value={option}>
-                                  {option}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </ShadSelect>
+                            {COMPLIANCE_OPTIONS.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </NativeComboboxSelect>
                         </LeadField>
                         <LeadField label={t.patients_notes} htmlFor="lead-gate-notes">
                           <Input
@@ -1184,25 +1167,21 @@ export function LeadsPage() {
                       <form className="mt-4 space-y-4" onSubmit={handleResolveFailedLead}>
                         <div className="grid gap-4 md:grid-cols-2">
                           <LeadField label="Resolution" htmlFor="lead-failed-resolution">
-                            <ShadSelect
+                            <NativeComboboxSelect
                               value={failedLeadForm.resolution}
-                              onValueChange={(value) =>
+                              onChange={(event) =>
                                 setFailedLeadForm((current) => ({
                                   ...current,
-                                  resolution: (value === "delete" ? "delete" : "archive"),
+                                  resolution: event.target.value === "delete" ? "delete" : "archive",
                                 }))
                               }
-                            >
-                              <SelectTrigger className={selectClassName}>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="archive">Archive</SelectItem>
-                                {user?.role === "patient_manager" || user?.role === "ceo" ? (
-                                  <SelectItem value="delete">Delete and anonymize</SelectItem>
-                                ) : null}
-                              </SelectContent>
-                            </ShadSelect>
+                            className={selectClassName}
+                          >
+                            <option value="archive">Archive</option>
+                            {user?.role === "patient_manager" || user?.role === "ceo" ? (
+                              <option value="delete">Delete and anonymize</option>
+                            ) : null}
+                          </NativeComboboxSelect>
                           </LeadField>
                           <LeadField label="Failure reason" htmlFor="lead-failed-reason">
                             <Input
@@ -1546,37 +1525,30 @@ export function LeadsPage() {
               />
             </div>
 
-            <ShadSelect
+            <NativeComboboxSelect
               value={filters.status || "__all__"}
-              onValueChange={(value) => {
-                const status = value && value !== "__all__" ? value : "";
+              onChange={(event) => {
+                const status = event.target.value && event.target.value !== "__all__" ? event.target.value : "";
                 setFilters((current) => ({
                   ...current,
                   status,
                   includeArchived: status === "archived" ? "true" : current.includeArchived,
                 }));
               }}
+              className={cn(selectClassName, "h-8 w-[190px] bg-background text-[13px]")}
             >
-              <SelectTrigger size="sm" className="h-8 w-[190px] bg-background text-[13px]">
-                <Filter className="mr-1 size-3.5 text-muted-foreground" />
-                <SelectValue>
-                  {filters.status ? statusLabel(filters.status) : t.users_status}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">{t.providers_all}</SelectItem>
-                {STATUS_OPTIONS.map((status) => (
-                  <SelectItem key={status} value={status}>
-                    {statusLabel(status)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </ShadSelect>
+              <option value="__all__">{t.users_status}</option>
+              {STATUS_OPTIONS.map((status) => (
+                <option key={status} value={status}>
+                  {statusLabel(status)}
+                </option>
+              ))}
+            </NativeComboboxSelect>
 
-            <ShadSelect
+            <NativeComboboxSelect
               value={filters.includeArchived || "false"}
-              onValueChange={(value) => {
-                const includeArchived = value === "true" ? "true" : "false";
+              onChange={(event) => {
+                const includeArchived = event.target.value === "true" ? "true" : "false";
                 setFilters((current) => ({
                   ...current,
                   includeArchived,
@@ -1586,19 +1558,15 @@ export function LeadsPage() {
                       : current.status,
                 }));
               }}
+              className={cn(selectClassName, "h-8 w-[170px] bg-background text-[13px]")}
             >
-              <SelectTrigger size="sm" className="h-8 w-[170px] bg-background text-[13px]">
-                <SelectValue>{archiveFilterLabel}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="false">
-                  {l("Aktive Leads", "Активные лиды", "Active leads")}
-                </SelectItem>
-                <SelectItem value="true">
-                  {l("Mit Archiv", "С архивом", "With archive")}
-                </SelectItem>
-              </SelectContent>
-            </ShadSelect>
+              <option value="false">
+                {l("Aktive Leads", "Активные лиды", "Active leads")}
+              </option>
+              <option value="true">
+                {l("Mit Archiv", "С архивом", "With archive")}
+              </option>
+            </NativeComboboxSelect>
 
             <div className="ml-auto flex items-center gap-1">
               <Button

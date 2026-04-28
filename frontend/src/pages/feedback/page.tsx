@@ -31,13 +31,7 @@ import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Select as ShadSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   Sheet,
   SheetContent,
@@ -216,21 +210,17 @@ function scoreField(
 ) {
   return (
     <Field label={label}>
-      <ShadSelect
+      <NativeComboboxSelect
         value={value}
-        onValueChange={(nextValue) => onChange(nextValue ?? value)}
+        onChange={(event) => onChange(event.target.value || value)}
+        className={selectClassName}
       >
-        <SelectTrigger className={selectClassName}>
-          <SelectValue>{value}</SelectValue>
-        </SelectTrigger>
-        <SelectContent>
-          {options.map((option) => (
-            <SelectItem key={option} value={option}>
-              {option}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </ShadSelect>
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </NativeComboboxSelect>
     </Field>
   );
 }
@@ -303,21 +293,20 @@ function ScoreGrid({
         scoreOptions,
       )}
       <Field label={l("Behandlungserfolg", "Успех лечения", "Treatment success")}>
-        <ShadSelect
+        <NativeComboboxSelect
           value={form.treatmentSuccess}
-          onValueChange={(value) =>
-            setForm((current) => ({ ...current, treatmentSuccess: value ?? current.treatmentSuccess }))
+          onChange={(event) =>
+            setForm((current) => ({
+              ...current,
+              treatmentSuccess: event.target.value || current.treatmentSuccess,
+            }))
           }
+          className={selectClassName}
         >
-          <SelectTrigger className={selectClassName}>
-            <SelectValue>{treatmentSuccessLabel(form.treatmentSuccess)}</SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="yes">{l("Ja", "Да", "Yes")}</SelectItem>
-            <SelectItem value="partial">{l("Teilweise", "Частично", "Partial")}</SelectItem>
-            <SelectItem value="no">{l("Nein", "Нет", "No")}</SelectItem>
-          </SelectContent>
-        </ShadSelect>
+          <option value="yes">{l("Ja", "Да", "Yes")}</option>
+          <option value="partial">{l("Teilweise", "Частично", "Partial")}</option>
+          <option value="no">{l("Nein", "Нет", "No")}</option>
+        </NativeComboboxSelect>
       </Field>
       <label className={cn("flex items-center gap-3 rounded-lg px-3 py-2", tokens.surface.mutedCard)}>
         <input
@@ -791,36 +780,28 @@ function PatientFeedbackWorkspace() {
         >
           <form className="space-y-3 p-4" onSubmit={(event) => void handleSubmit(event)}>
             <Field label={l("Termin", "Визит", "Appointment")}>
-              <ShadSelect
+              <NativeComboboxSelect
                 value={form.appointmentId || "__general__"}
-                onValueChange={(value) =>
+                onChange={(event) =>
                   setForm((current) => ({
                     ...current,
-                    appointmentId: value === "__general__" || !value ? "" : value,
+                    appointmentId:
+                      event.target.value === "__general__" || !event.target.value
+                        ? ""
+                        : event.target.value,
                   }))
                 }
+                className={selectClassName}
               >
-                <SelectTrigger className={selectClassName}>
-                  <SelectValue>
-                    {form.appointmentId
-                      ? (() => {
-                          const appointment = availableAppointments.find((item) => item.id === form.appointmentId);
-                          return appointment ? appointmentOptionLabel(appointment) : form.appointmentId;
-                        })()
-                      : l("Allgemeines Feedback", "Общий отзыв", "General feedback")}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__general__">
+                <option value="__general__">
                     {l("Allgemeines Feedback", "Общий отзыв", "General feedback")}
-                  </SelectItem>
-                  {availableAppointments.map((item) => (
-                    <SelectItem key={item.id} value={item.id}>
-                      {appointmentOptionLabel(item)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </ShadSelect>
+                  </option>
+                {availableAppointments.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {appointmentOptionLabel(item)}
+                  </option>
+                ))}
+              </NativeComboboxSelect>
             </Field>
 
             <ScoreGrid l={l} form={form} setForm={setForm} />
@@ -1598,69 +1579,50 @@ function StaffFeedbackWorkspace() {
               }
             >
               <Field label={l("Patient", "Пациент", "Patient")}>
-                <ShadSelect
+                <NativeComboboxSelect
                   value={selectedPatientId || "__empty__"}
-                  onValueChange={(value) => setSelectedPatientId(value === "__empty__" || !value ? "" : value)}
+                  onChange={(event) =>
+                    setSelectedPatientId(
+                      event.target.value === "__empty__" || !event.target.value ? "" : event.target.value,
+                    )
+                  }
+                  className={selectClassName}
                 >
-                  <SelectTrigger className={selectClassName}>
-                    <SelectValue>
-                      {selectedPatientId
-                        ? patientLabel(
-                            patients.find((item) => item.id === selectedPatientId) ?? {
-                              id: selectedPatientId,
-                              patient_id: selectedPatientId,
-                              first_name: "",
-                              last_name: "",
-                            },
-                          )
-                        : l("Patient auswählen", "Выберите пациента", "Select patient")}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__empty__">
-                      {l("Patient auswählen", "Выберите пациента", "Select patient")}
-                    </SelectItem>
-                    {patients.map((item) => (
-                      <SelectItem key={item.id} value={item.id}>
-                        {patientLabel(item)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </ShadSelect>
+                  <option value="__empty__">
+                    {l("Patient auswählen", "Выберите пациента", "Select patient")}
+                  </option>
+                  {patients.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {patientLabel(item)}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
               </Field>
 
               <Field label={l("Termin", "Визит", "Appointment")}>
-                <ShadSelect
+                <NativeComboboxSelect
                   value={form.appointmentId || "__general__"}
-                  onValueChange={(value) =>
+                  onChange={(event) =>
                     setForm((current) => ({
                       ...current,
-                      appointmentId: value === "__general__" || !value ? "" : value,
+                      appointmentId:
+                        event.target.value === "__general__" || !event.target.value
+                          ? ""
+                          : event.target.value,
                     }))
                   }
                   disabled={!selectedPatientId}
+                  className={selectClassName}
                 >
-                  <SelectTrigger className={selectClassName}>
-                    <SelectValue>
-                      {form.appointmentId
-                        ? (() => {
-                            const appointment = patientAppointments.find((item) => item.id === form.appointmentId);
-                            return appointment ? appointmentOptionLabel(appointment) : form.appointmentId;
-                          })()
-                        : l("Allgemeines Feedback", "Общий отзыв", "General feedback")}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__general__">
-                      {l("Allgemeines Feedback", "Общий отзыв", "General feedback")}
-                    </SelectItem>
-                    {patientAppointments.map((item) => (
-                      <SelectItem key={item.id} value={item.id}>
-                        {appointmentOptionLabel(item)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </ShadSelect>
+                  <option value="__general__">
+                    {l("Allgemeines Feedback", "Общий отзыв", "General feedback")}
+                  </option>
+                  {patientAppointments.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {appointmentOptionLabel(item)}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
               </Field>
 
               <ScoreGrid l={l} form={form} setForm={setForm} />
@@ -1696,18 +1658,14 @@ function StaffFeedbackWorkspace() {
                 <AdminTableCard title={titleWithDot(l("Review actions", "Действия проверки", "Review actions"))}>
                   <div className="space-y-3 p-3">
                     <Field label={l("Prüfstatus", "Статус проверки", "Review status")}>
-                      <ShadSelect
+                      <NativeComboboxSelect
                         value={reviewStatus}
-                        onValueChange={(value) => setReviewStatus(value ?? reviewStatus)}
+                        onChange={(event) => setReviewStatus(event.target.value || reviewStatus)}
+                        className={selectClassName}
                       >
-                        <SelectTrigger className={selectClassName}>
-                          <SelectValue>{feedbackReviewStatusLabel(reviewStatus, l)}</SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="reviewed">{l("Geprüft", "Проверено", "Reviewed")}</SelectItem>
-                          <SelectItem value="archived">{l("Archiviert", "В архиве", "Archived")}</SelectItem>
-                        </SelectContent>
-                      </ShadSelect>
+                        <option value="reviewed">{l("Geprüft", "Проверено", "Reviewed")}</option>
+                        <option value="archived">{l("Archiviert", "В архиве", "Archived")}</option>
+                      </NativeComboboxSelect>
                     </Field>
                     <Field label={l("Prüfnotiz", "Заметка по проверке", "Review note")}>
                       <textarea

@@ -21,6 +21,7 @@ import { useSearchParams } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import type { CaseRosterItem } from "@/components/cases-roster-section";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
@@ -34,16 +35,10 @@ import {
 import {
   PageHeader,
   inputClass as shellInputClassName,
+  selectClass as shellSelectClass,
   textareaClass as shellTextareaClass,
 } from "@/components/ui-shell";
 import { Input } from "@/components/ui/input";
-import {
-  Select as ShadSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Sheet,
   SheetContent,
@@ -479,6 +474,7 @@ const DEFAULT_CASE_TEXT_SNIPPET_FORM: CaseTextSnippetFormState = {
 };
 
 const inputClassName = shellInputClassName;
+const selectClassName = shellSelectClass;
 const textareaClassName = shellTextareaClass;
 const CASE_REALTIME_EVENTS = [
   "case.created",
@@ -1107,23 +1103,6 @@ export function CasesPage({
     () => patients.find((patient) => patient.id === (detail?.patient_id ?? selectedSummary?.patient_id)),
     [detail?.patient_id, patients, selectedSummary?.patient_id],
   );
-  const selectedFilterPatient = useMemo(
-    () => patients.find((patient) => patient.id === filters.patientId) ?? null,
-    [patients, filters.patientId],
-  );
-  const selectedCreatePatient = useMemo(
-    () => patients.find((patient) => patient.id === createForm.patientId) ?? null,
-    [patients, createForm.patientId],
-  );
-  const selectedCreateReferrerDoctor = useMemo(
-    () => doctors.find((doctor) => doctor.id === createForm.zuweiserDoctorId) ?? null,
-    [doctors, createForm.zuweiserDoctorId],
-  );
-  const selectedOverviewReferrerDoctor = useMemo(
-    () => doctors.find((doctor) => doctor.id === overviewForm.zuweiser_doctor_id) ?? null,
-    [doctors, overviewForm.zuweiser_doctor_id],
-  );
-
   useRealtimeSubscription(CASE_REALTIME_EVENTS, (event) => {
     if (!permissions.canViewPage) return;
     clearApiCache("/cases");
@@ -2068,55 +2047,38 @@ export function CasesPage({
               />
             </div>
 
-            <ShadSelect
+            <NativeComboboxSelect
               value={filters.status || "__all__"}
-              onValueChange={(value) =>
-                setFilters((current) => ({
-                  ...current,
-                  status: value && value !== "__all__" ? value : "",
-                }))}
-            >
-              <SelectTrigger className="h-8 w-[220px] rounded-lg bg-card text-[13px]">
-                <SelectValue>
-                  {filters.status ? caseStatusLabel(filters.status, t) : t.providers_all}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">{t.providers_all}</SelectItem>
-                {CASE_STATUSES.map((status) => (
-                  <SelectItem key={status} value={status}>
-                    {caseStatusLabel(status, t)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </ShadSelect>
 
-            <ShadSelect
+
+              onChange={(event) => setFilters((current) => ({
+                  ...current,
+                  status: event.target.value && event.target.value !== "__all__" ? event.target.value : "",
+                }))} className={cn(selectClassName, "h-8 w-[220px] bg-card text-[13px]")}>
+                <option value="__all__">{t.providers_all}</option>
+                {CASE_STATUSES.map((status) => (
+                  <option key={status} value={status}>
+                    {caseStatusLabel(status, t)}
+                  </option>
+                ))}
+              </NativeComboboxSelect>
+
+            <NativeComboboxSelect
               value={filters.patientId || "__all__"}
-              onValueChange={(value) => {
-                const patientId = value && value !== "__all__" ? value : "";
+
+
+              onChange={(event) => {
+                const patientId = event.target.value && event.target.value !== "__all__" ? event.target.value : "";
                 setFilters((current) => ({ ...current, patientId }));
                 updateQuery({ patient: patientId || null });
-              }}
-            >
-              <SelectTrigger className="h-8 w-[260px] rounded-lg bg-card text-[13px]">
-                <SelectValue>
-                  {selectedFilterPatient
-                    ? patientLabel(selectedFilterPatient)
-                    : filters.patientId
-                      ? filters.patientId
-                      : t.providers_all}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">{t.providers_all}</SelectItem>
+              }} className={cn(selectClassName, "h-8 w-[260px] bg-card text-[13px]")}>
+                <option value="__all__">{t.providers_all}</option>
                 {patients.map((patient) => (
-                  <SelectItem key={patient.id} value={patient.id}>
+                  <option key={patient.id} value={patient.id}>
                     {patientLabel(patient)}
-                  </SelectItem>
+                  </option>
                 ))}
-              </SelectContent>
-            </ShadSelect>
+              </NativeComboboxSelect>
 
             {filters.search.trim() || filters.status || filters.patientId ? (
               <Button
@@ -2219,27 +2181,21 @@ export function CasesPage({
               >
                 {createError ? <Banner tone="error">{createError}</Banner> : null}
                 <Field label={t.cases_patient} required>
-                  <ShadSelect
+                  <NativeComboboxSelect
                     value={createForm.patientId || "__none__"}
-                    onValueChange={(value) => {
-                      const patientId = value && value !== "__none__" ? value : "";
+
+
+                    onChange={(event) => {
+                      const patientId = event.target.value && event.target.value !== "__none__" ? event.target.value : "";
                       setCreateForm((current) => ({ ...current, patientId }));
-                    }}
-                  >
-                    <SelectTrigger className={cn("w-full", inputClassName)}>
-                      <SelectValue>
-                        {selectedCreatePatient ? patientLabel(selectedCreatePatient) : t.cases_patient}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">{t.cases_patient}</SelectItem>
+                    }} className={selectClassName}>
+                      <option value="__none__">{t.cases_patient}</option>
                       {patients.map((patient) => (
-                        <SelectItem key={patient.id} value={patient.id}>
+                        <option key={patient.id} value={patient.id}>
                           {patientLabel(patient)}
-                        </SelectItem>
+                        </option>
                       ))}
-                    </SelectContent>
-                  </ShadSelect>
+                    </NativeComboboxSelect>
                 </Field>
 
                 <Field label={t.cases_reason} required>
@@ -2270,34 +2226,26 @@ export function CasesPage({
                 </Field>
 
                 <Field label={t.cases_referrer}>
-                  <ShadSelect
+                  <NativeComboboxSelect
                     value={createForm.zuweiserDoctorId || "__none__"}
-                    onValueChange={(value) => {
-                      const doctorId = value && value !== "__none__" ? value : "";
+
+
+                    onChange={(event) => {
+                      const doctorId = event.target.value && event.target.value !== "__none__" ? event.target.value : "";
                       const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
                       setCreateForm((current) => ({
                         ...current,
                         zuweiserDoctorId: doctorId,
                         zuweiser: selectedDoctor ? selectedDoctor.name : current.zuweiser,
                       }));
-                    }}
-                  >
-                    <SelectTrigger className={cn("w-full", inputClassName)}>
-                      <SelectValue>
-                        {selectedCreateReferrerDoctor
-                          ? doctorOptionLabel(selectedCreateReferrerDoctor)
-                          : t.common_not_set}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">{t.common_not_set}</SelectItem>
+                    }} className={selectClassName}>
+                      <option value="__none__">{t.common_not_set}</option>
                       {doctors.map((doctor) => (
-                        <SelectItem key={doctor.id} value={doctor.id}>
+                        <option key={doctor.id} value={doctor.id}>
                           {doctorOptionLabel(doctor)}
-                        </SelectItem>
+                        </option>
                       ))}
-                    </SelectContent>
-                  </ShadSelect>
+                    </NativeComboboxSelect>
                 </Field>
 
                 <Field
@@ -2495,36 +2443,26 @@ export function CasesPage({
                         />
                       </Field>
                       <Field label={t.cases_referrer}>
-                        <ShadSelect
+                        <NativeComboboxSelect
                           value={overviewForm.zuweiser_doctor_id || "__none__"}
-                          onValueChange={(value) => {
-                            const doctorId = value && value !== "__none__" ? value : "";
+
+
+                          onChange={(event) => {
+                            const doctorId = event.target.value && event.target.value !== "__none__" ? event.target.value : "";
                             const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
                             setOverviewForm((current) => ({
                               ...current,
                               zuweiser_doctor_id: doctorId,
                               zuweiser: selectedDoctor ? selectedDoctor.name : current.zuweiser,
                             }));
-                          }}
-                        >
-                          <SelectTrigger className="h-10 w-full rounded-xl bg-muted/20">
-                            <SelectValue>
-                              {selectedOverviewReferrerDoctor
-                                ? doctorOptionLabel(selectedOverviewReferrerDoctor)
-                                : overviewForm.zuweiser_doctor_id
-                                  ? (overviewForm.zuweiser || overviewForm.zuweiser_doctor_id)
-                                  : t.common_not_set}
-                            </SelectValue>
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">{t.common_not_set}</SelectItem>
+                          }} className={selectClassName}>
+                            <option value="__none__">{t.common_not_set}</option>
                             {doctors.map((doctor) => (
-                              <SelectItem key={doctor.id} value={doctor.id}>
+                              <option key={doctor.id} value={doctor.id}>
                                 {doctorOptionLabel(doctor)}
-                              </SelectItem>
+                              </option>
                             ))}
-                          </SelectContent>
-                        </ShadSelect>
+                          </NativeComboboxSelect>
                       </Field>
                       <Field label={caseText("Bezeichnung des Zuweisers", "Наименование направившего врача", "Referrer label")}>
                         <Input
@@ -2823,10 +2761,12 @@ export function CasesPage({
                         <Field label={t.appointments_date}><Input type="date" value={item.datum ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { datum: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_reason} required><Input value={item.grund} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { grund: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={caseText("Arzt aus Register", "Врач из реестра", "Doctor registry")}>
-                          <ShadSelect
+                          <NativeComboboxSelect
                             value={item.arzt_id || "__none__"}
-                            onValueChange={(value) => {
-                              const doctorId = value && value !== "__none__" ? value : "";
+
+
+                            onChange={(event) => {
+                              const doctorId = event.target.value && event.target.value !== "__none__" ? event.target.value : "";
                               const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
                               setOperationen((current) =>
                                 updateItemAtIndex(current, index, {
@@ -2836,27 +2776,14 @@ export function CasesPage({
                                     : (current[index]?.arzt ?? ""),
                                 }),
                               );
-                            }}
-                          >
-                            <SelectTrigger className="h-10 w-full rounded-xl bg-white">
-                              <SelectValue>
-                                {(() => {
-                                  if (!item.arzt_id) return t.common_not_set;
-                                  const selectedDoctor = doctors.find((doctor) => doctor.id === item.arzt_id);
-                                  if (selectedDoctor) return doctorOptionLabel(selectedDoctor);
-                                  return item.arzt_registry_name ?? item.arzt ?? item.arzt_id;
-                                })()}
-                              </SelectValue>
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__none__">{t.common_not_set}</SelectItem>
+                            }} className={selectClassName}>
+                              <option value="__none__">{t.common_not_set}</option>
                               {doctors.map((doctor) => (
-                                <SelectItem key={doctor.id} value={doctor.id}>
+                                <option key={doctor.id} value={doctor.id}>
                                   {doctorOptionLabel(doctor)}
-                                </SelectItem>
+                                </option>
                               ))}
-                            </SelectContent>
-                          </ShadSelect>
+                            </NativeComboboxSelect>
                         </Field>
                         <Field label={caseText("Freitext Arzt", "Наименование врача", "Doctor label")}><Input value={item.arzt ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { arzt: event.target.value }))} className="h-10 rounded-xl bg-white" placeholder={caseText("Altbestand / manuelle Angabe", "Устаревшее / ручной ввод", "Legacy / manual fallback")} /></Field>
                         <Field label={t.cases_note}><Input value={item.notiz ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { notiz: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
@@ -2895,10 +2822,12 @@ export function CasesPage({
                         <Field label={t.providers_service_valid_from}><Input value={item.seit ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { seit: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_reason}><Input value={item.grund ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { grund: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={caseText("Arzt aus Register", "Врач из реестра", "Doctor registry")}>
-                          <ShadSelect
+                          <NativeComboboxSelect
                             value={item.verordnender_arzt_id || "__none__"}
-                            onValueChange={(value) => {
-                              const doctorId = value && value !== "__none__" ? value : "";
+
+
+                            onChange={(event) => {
+                              const doctorId = event.target.value && event.target.value !== "__none__" ? event.target.value : "";
                               const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
                               setMedikamente((current) =>
                                 updateItemAtIndex(current, index, {
@@ -2908,33 +2837,14 @@ export function CasesPage({
                                     : (current[index]?.verordnender_arzt ?? ""),
                                 }),
                               );
-                            }}
-                          >
-                            <SelectTrigger className="h-10 w-full rounded-xl bg-white">
-                              <SelectValue>
-                                {(() => {
-                                  if (!item.verordnender_arzt_id) return t.common_not_set;
-                                  const selectedDoctor = doctors.find(
-                                    (doctor) => doctor.id === item.verordnender_arzt_id,
-                                  );
-                                  if (selectedDoctor) return doctorOptionLabel(selectedDoctor);
-                                  return (
-                                    item.verordnender_arzt_registry_name ??
-                                    item.verordnender_arzt ??
-                                    item.verordnender_arzt_id
-                                  );
-                                })()}
-                              </SelectValue>
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__none__">{t.common_not_set}</SelectItem>
+                            }} className={selectClassName}>
+                              <option value="__none__">{t.common_not_set}</option>
                               {doctors.map((doctor) => (
-                                <SelectItem key={doctor.id} value={doctor.id}>
+                                <option key={doctor.id} value={doctor.id}>
                                   {doctorOptionLabel(doctor)}
-                                </SelectItem>
+                                </option>
                               ))}
-                            </SelectContent>
-                          </ShadSelect>
+                            </NativeComboboxSelect>
                         </Field>
                         <Field label={caseText("Freitext Arzt", "Наименование врача", "Doctor label")}><Input value={item.verordnender_arzt ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { verordnender_arzt: event.target.value }))} className="h-10 rounded-xl bg-white" placeholder={caseText("Altbestand / manuelle Angabe", "Устаревшее / ручной ввод", "Legacy / manual fallback")} /></Field>
                         <Field label={t.patients_notes}><Input value={item.anmerkung ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { anmerkung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>

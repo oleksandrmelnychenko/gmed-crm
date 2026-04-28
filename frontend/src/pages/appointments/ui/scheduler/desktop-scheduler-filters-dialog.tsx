@@ -4,13 +4,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { cn } from "@/lib/utils";
 import type {
   OperationalScope,
@@ -65,50 +59,46 @@ export function DesktopSchedulerFiltersDialog({
           </DialogHeader>
           <div className="grid gap-3 pt-1">
             <Field compact label={operationalScopeLabel}>
-              <Select
+              <NativeComboboxSelect
                 value={activeOperationalScope}
-                onValueChange={(value) =>
-                  onApplyOperationalScope((value as OperationalScope) ?? "all")
-                }
-              >
-                <SelectTrigger className={cn("w-full", controlClassName)}>
-                  <SelectValue>{selectedOperationalScopeLabel}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {scopeOptions.map((option) => (
-                    <SelectItem
-                      key={`scheduler-sheet-${option.id}`}
-                      value={option.id}
-                    >
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field compact label={quickScopeLabel}>
-              <Select
-                value={schedulerQuickScopeValue}
-                onValueChange={(value) =>
-                  onApplySchedulerQuickScope(
-                    (value as SchedulerQuickScope) ?? "all",
+                onChange={(event) =>
+                  onApplyOperationalScope(
+                    (event.target.value as OperationalScope) || "all",
                   )
                 }
+                title={selectedOperationalScopeLabel}
+                className={cn("w-full", controlClassName)}
               >
-                <SelectTrigger className={cn("w-full", controlClassName)}>
-                  <SelectValue>{selectedSchedulerQuickScopeLabel}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {schedulerQuickScopeOptions.map((option) => (
-                    <SelectItem
-                      key={`scheduler-quick-${option.id}`}
-                      value={option.id}
-                    >
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                {scopeOptions.map((option) => (
+                  <option
+                    key={`scheduler-sheet-${option.id}`}
+                    value={option.id}
+                  >
+                    {option.label}
+                  </option>
+                ))}
+              </NativeComboboxSelect>
+            </Field>
+            <Field compact label={quickScopeLabel}>
+              <NativeComboboxSelect
+                value={schedulerQuickScopeValue}
+                onChange={(event) =>
+                  onApplySchedulerQuickScope(
+                    (event.target.value as SchedulerQuickScope) || "all",
+                  )
+                }
+                title={selectedSchedulerQuickScopeLabel}
+                className={cn("w-full", controlClassName)}
+              >
+                {schedulerQuickScopeOptions.map((option) => (
+                  <option
+                    key={`scheduler-quick-${option.id}`}
+                    value={option.id}
+                  >
+                    {option.label}
+                  </option>
+                ))}
+              </NativeComboboxSelect>
             </Field>
           </div>
         </DialogContent>

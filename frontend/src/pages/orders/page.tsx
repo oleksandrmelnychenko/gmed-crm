@@ -17,7 +17,6 @@ import {
   CheckCircle2,
   ChevronRight,
   ClipboardList,
-  Filter,
   LoaderCircle,
   Plus,
   RefreshCw,
@@ -45,13 +44,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select as ShadSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Sheet,
   SheetContent,
@@ -721,21 +713,6 @@ export function OrdersPage() {
     () =>
       filters.providerId ? (providerDoctors[filters.providerId] ?? []) : [],
     [filters.providerId, providerDoctors],
-  );
-  const selectedFilterPatient = useMemo(
-    () => patients.find((patient) => patient.id === filters.patientId) ?? null,
-    [filters.patientId, patients],
-  );
-  const selectedFilterProvider = useMemo(
-    () =>
-      providers.find((provider) => provider.id === filters.providerId) ?? null,
-    [filters.providerId, providers],
-  );
-  const selectedFilterDoctor = useMemo(
-    () =>
-      filterDoctorOptions.find((doctor) => doctor.id === filters.doctorId) ??
-      null,
-    [filterDoctorOptions, filters.doctorId],
   );
   const leistungDoctorOptions = useMemo(
     () =>
@@ -2054,86 +2031,71 @@ export function OrdersPage() {
             />
           </div>
 
-          <ShadSelect
+          <NativeComboboxSelect
             value={filters.phase || "__all__"}
-            onValueChange={(value) =>
+            onChange={(event) =>
               setFilters((current) => ({
                 ...current,
-                phase: value && value !== "__all__" ? value : "",
+                phase:
+                  event.target.value && event.target.value !== "__all__"
+                    ? event.target.value
+                    : "",
               }))
             }
+            className={cn(selectClassName, "h-8 w-[170px] bg-background text-[13px]")}
           >
-            <SelectTrigger size="sm" className="h-8 w-[170px] bg-background text-[13px]">
-              <Filter className="mr-1 size-3.5 text-muted-foreground" />
-              <SelectValue>
-                {filters.phase ? phaseLabel(filters.phase) : t.orders_phase}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">{t.providers_all}</SelectItem>
-              {ORDER_PHASES.map((phase) => (
-                <SelectItem key={phase} value={phase}>
-                  {phaseLabel(phase)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </ShadSelect>
+            <option value="__all__">{t.orders_phase}</option>
+            {ORDER_PHASES.map((phase) => (
+              <option key={phase} value={phase}>
+                {phaseLabel(phase)}
+              </option>
+            ))}
+          </NativeComboboxSelect>
 
-          <ShadSelect
+          <NativeComboboxSelect
             value={filters.status || "__all__"}
-            onValueChange={(value) =>
+            onChange={(event) =>
               setFilters((current) => ({
                 ...current,
-                status: value && value !== "__all__" ? value : "",
+                status:
+                  event.target.value && event.target.value !== "__all__"
+                    ? event.target.value
+                    : "",
               }))
             }
+            className={cn(selectClassName, "h-8 w-[160px] bg-background text-[13px]")}
           >
-            <SelectTrigger size="sm" className="h-8 w-[160px] bg-background text-[13px]">
-              <SelectValue>
-                {filters.status ? orderStatusLabel(filters.status) : t.users_status}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">{t.providers_all}</SelectItem>
-              {ORDER_STATUSES.map((status) => (
-                <SelectItem key={status} value={status}>
-                  {orderStatusLabel(status)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </ShadSelect>
+            <option value="__all__">{t.users_status}</option>
+            {ORDER_STATUSES.map((status) => (
+              <option key={status} value={status}>
+                {orderStatusLabel(status)}
+              </option>
+            ))}
+          </NativeComboboxSelect>
 
-          <ShadSelect
+          <NativeComboboxSelect
             value={filters.patientId || "__all__"}
-            onValueChange={(value) => {
-              const patientId = value && value !== "__all__" ? value : "";
+            onChange={(event) => {
+              const patientId = event.target.value && event.target.value !== "__all__" ? event.target.value : "";
               setFilters((current) => ({ ...current, patientId }));
               syncQuery({ patient: patientId || null });
             }}
+            className={cn(selectClassName, "h-8 w-[210px] bg-background text-[13px]")}
           >
-            <SelectTrigger size="sm" className="h-8 w-[210px] bg-background text-[13px]">
-              <SelectValue>
-                {selectedFilterPatient
-                  ? patientLabel(selectedFilterPatient, l("Patient", "Пациент"))
-                  : l("Alle Patienten", "Все пациенты")}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">
-                {l("Alle Patienten", "Все пациенты")}
-              </SelectItem>
-              {patients.map((patient) => (
-                <SelectItem key={patient.id} value={patient.id}>
-                  {patientLabel(patient, l("Patient", "Пациент"))}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </ShadSelect>
+            <option value="__all__">
+              {l("Alle Patienten", "Все пациенты")}
+            </option>
+            {patients.map((patient) => (
+              <option key={patient.id} value={patient.id}>
+                {patientLabel(patient, l("Patient", "Пациент"))}
+              </option>
+            ))}
+          </NativeComboboxSelect>
 
-          <ShadSelect
+          <NativeComboboxSelect
             value={filters.providerId || "__all__"}
-            onValueChange={(value) => {
-              const providerId = value && value !== "__all__" ? value : "";
+            onChange={(event) => {
+              const providerId = event.target.value && event.target.value !== "__all__" ? event.target.value : "";
               setFilters((current) => ({
                 ...current,
                 providerId,
@@ -2141,51 +2103,35 @@ export function OrdersPage() {
               }));
               syncQuery({ provider: providerId || null, doctor: null });
             }}
+            className={cn(selectClassName, "h-8 w-[210px] bg-background text-[13px]")}
           >
-            <SelectTrigger size="sm" className="h-8 w-[210px] bg-background text-[13px]">
-              <SelectValue>
-                {selectedFilterProvider
-                  ? `${selectedFilterProvider.name}${selectedFilterProvider.address_city ? ` (${selectedFilterProvider.address_city})` : ""}`
-                  : t.common_provider}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">{t.providers_all}</SelectItem>
-              {providers.map((provider) => (
-                <SelectItem key={provider.id} value={provider.id}>
-                  {provider.name}
-                  {provider.address_city ? ` (${provider.address_city})` : ""}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </ShadSelect>
+            <option value="__all__">{t.common_provider}</option>
+            {providers.map((provider) => (
+              <option key={provider.id} value={provider.id}>
+                {provider.name}
+                {provider.address_city ? ` (${provider.address_city})` : ""}
+              </option>
+            ))}
+          </NativeComboboxSelect>
 
-          <ShadSelect
+          <NativeComboboxSelect
             value={filters.doctorId || "__all__"}
-            onValueChange={(value) => {
-              const doctorId = value && value !== "__all__" ? value : "";
+            onChange={(event) => {
+              const doctorId = event.target.value && event.target.value !== "__all__" ? event.target.value : "";
               setFilters((current) => ({ ...current, doctorId }));
               syncQuery({ doctor: doctorId || null });
             }}
             disabled={!filters.providerId}
+            className={cn(selectClassName, "h-8 w-[190px] bg-background text-[13px]")}
           >
-            <SelectTrigger size="sm" className="h-8 w-[190px] bg-background text-[13px]">
-              <SelectValue>
-                {selectedFilterDoctor
-                  ? `${selectedFilterDoctor.name}${selectedFilterDoctor.fachbereich ? ` (${selectedFilterDoctor.fachbereich})` : ""}`
-                  : l("Arzt", "Врач")}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">{t.providers_all}</SelectItem>
-              {filterDoctorOptions.map((doctor) => (
-                <SelectItem key={doctor.id} value={doctor.id}>
-                  {doctor.name}
-                  {doctor.fachbereich ? ` (${doctor.fachbereich})` : ""}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </ShadSelect>
+            <option value="__all__">{l("Arzt", "Врач")}</option>
+            {filterDoctorOptions.map((doctor) => (
+              <option key={doctor.id} value={doctor.id}>
+                {doctor.name}
+                {doctor.fachbereich ? ` (${doctor.fachbereich})` : ""}
+              </option>
+            ))}
+          </NativeComboboxSelect>
 
           <div className="ml-auto flex items-center gap-1">
             <Button
@@ -5095,10 +5041,13 @@ export function OrdersPage() {
 
             <div className="space-y-1.5">
               <Label>{t.orders_patient}</Label>
-              <ShadSelect
+              <NativeComboboxSelect
                 value={createForm.patientId || "__empty__"}
-                onValueChange={(value) => {
-                  const patientId = value && value !== "__empty__" ? value : "";
+                onChange={(event) => {
+                  const patientId =
+                    event.target.value && event.target.value !== "__empty__"
+                      ? event.target.value
+                      : "";
                   setCreateError(null);
                   setCreateRecheck(null);
                   setCreateForm((current) => ({
@@ -5106,33 +5055,15 @@ export function OrdersPage() {
                     patientId,
                   }));
                 }}
+                className={selectClassName}
               >
-                <SelectTrigger className={selectClassName}>
-                  <SelectValue>
-                    {createForm.patientId
-                      ? patientLabel(
-                          patients.find(
-                            (patient) => patient.id === createForm.patientId,
-                          ) ?? {
-                            id: createForm.patientId,
-                            patient_id: createForm.patientId,
-                            first_name: "",
-                            last_name: "",
-                          },
-                          l("Patient", "Пациент"),
-                        )
-                      : t.orders_patient}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__empty__">{t.orders_patient}</SelectItem>
-                  {patients.map((patient) => (
-                    <SelectItem key={patient.id} value={patient.id}>
-                      {patientLabel(patient, l("Patient", "Пациент"))}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </ShadSelect>
+                <option value="__empty__">{t.orders_patient}</option>
+                {patients.map((patient) => (
+                  <option key={patient.id} value={patient.id}>
+                    {patientLabel(patient, l("Patient", "Пациент"))}
+                  </option>
+                ))}
+              </NativeComboboxSelect>
             </div>
 
             {createForm.patientId ? (

@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import { Download, Filter, Info, RefreshCw, Search, X } from "lucide-react";
+import { Download, Info, RefreshCw, Search, X } from "lucide-react";
 
 import { ColumnVisibilityMenu } from "@/components/data-table/column-visibility-menu";
 import { DensityToggle } from "@/components/data-table/density-toggle";
@@ -12,14 +12,8 @@ import type {
   SortStack,
 } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
-import {
-  Select as ShadSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 import type { PatientSummary } from "../../model/list-model";
@@ -156,63 +150,36 @@ export function PatientsListToolbar({
           />
         </div>
 
-        <ShadSelect value={filters.providerId} onValueChange={(value) => onProviderFilterChange(value ?? "")}>
-          <SelectTrigger size="sm" className="h-8 w-[220px] bg-background text-[13px]">
-            <SelectValue>
-              {filters.providerId
-                ? providers.find((provider) => provider.id === filters.providerId)?.name ?? filters.providerId
-                : t.common_provider}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="">{t.providers_all}</SelectItem>
+        <NativeComboboxSelect value={filters.providerId}
+          onChange={(event) => onProviderFilterChange(event.target.value ?? "")} className="h-8 w-[220px] bg-background text-[13px]">
+            <option value="">{t.providers_all}</option>
             {providers.map((provider) => (
-              <SelectItem key={provider.id} value={provider.id}>
+              <option key={provider.id} value={provider.id}>
                 {provider.name}{provider.address_city ? ` · ${provider.address_city}` : ""}
-              </SelectItem>
+              </option>
             ))}
-          </SelectContent>
-        </ShadSelect>
+          </NativeComboboxSelect>
 
-        <ShadSelect
+        <NativeComboboxSelect
           value={filters.doctorId}
-          onValueChange={(value) => onDoctorFilterChange(value ?? "")}
-          disabled={!filters.providerId}
-        >
-          <SelectTrigger size="sm" className="h-8 w-[200px] bg-background text-[13px]">
-            <SelectValue>
-              {filters.doctorId
-                ? doctors.find((doctor) => doctor.id === filters.doctorId)?.name ?? filters.doctorId
-                : t.common_doctor}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="">{t.providers_all}</SelectItem>
-            {doctors.map((doctor) => (
-              <SelectItem key={doctor.id} value={doctor.id}>
-                {doctor.title ? `${doctor.title} ` : ""}{doctor.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </ShadSelect>
 
-        <ShadSelect value={filters.activeOnly} onValueChange={(value) => onActiveFilterChange(value ?? "")}>
-          <SelectTrigger size="sm" className="h-8 bg-background text-[13px]">
-            <Filter className="mr-1 size-3.5 text-muted-foreground" />
-            <SelectValue>
-              {filters.activeOnly === "true"
-                ? t.common_active
-                : filters.activeOnly === "false"
-                  ? t.common_inactive
-                  : t.providers_all}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="">{t.providers_all}</SelectItem>
-            <SelectItem value="true">{t.common_active}</SelectItem>
-            <SelectItem value="false">{t.common_inactive}</SelectItem>
-          </SelectContent>
-        </ShadSelect>
+          disabled={!filters.providerId}
+
+          onChange={(event) => onDoctorFilterChange(event.target.value ?? "")} className="h-8 w-[200px] bg-background text-[13px]">
+            <option value="">{t.providers_all}</option>
+            {doctors.map((doctor) => (
+              <option key={doctor.id} value={doctor.id}>
+                {doctor.title ? `${doctor.title} ` : ""}{doctor.name}
+              </option>
+            ))}
+          </NativeComboboxSelect>
+
+        <NativeComboboxSelect value={filters.activeOnly}
+          onChange={(event) => onActiveFilterChange(event.target.value ?? "")} className="h-8 bg-background text-[13px]">
+            <option value="">{t.providers_all}</option>
+            <option value="true">{t.common_active}</option>
+            <option value="false">{t.common_inactive}</option>
+          </NativeComboboxSelect>
 
         <div className="ml-auto flex items-center gap-1">
           {lastUpdatedText ? (

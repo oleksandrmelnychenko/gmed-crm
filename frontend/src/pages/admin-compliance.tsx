@@ -25,14 +25,8 @@ import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Translations } from "@/lib/i18n";
@@ -1475,21 +1469,17 @@ export function AdminCompliancePage() {
               >
                 <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
                   <Field label={t.compliance_consent_type_label}>
-                    <Select
+                    <NativeComboboxSelect
                       value={consentType}
-                      onValueChange={(value) => setConsentType(value ?? CONSENT_TYPE_VALUES[0])}
-                    >
-                      <SelectTrigger className="h-9 w-full rounded-lg bg-card">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
+
+
+                      onChange={(event) => setConsentType(event.target.value ?? CONSENT_TYPE_VALUES[0])} className="h-9 w-full rounded-lg bg-card">
                         {CONSENT_TYPE_VALUES.map((value) => (
-                          <SelectItem key={value} value={value}>
+                          <option key={value} value={value}>
                             {consentTypeLabel(value, t)}
-                          </SelectItem>
+                          </option>
                         ))}
-                      </SelectContent>
-                    </Select>
+                      </NativeComboboxSelect>
                   </Field>
                   <Field label={t.compliance_operational_note} htmlFor="consent-note">
                     <textarea
@@ -1545,25 +1535,19 @@ export function AdminCompliancePage() {
               >
                 <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
                   <Field label={t.compliance_request_type_label}>
-                    <Select
+                    <NativeComboboxSelect
                       value={privacyRequestType}
-                      onValueChange={(value) =>
-                        setPrivacyRequestType(
-                          (value ?? PRIVACY_REQUEST_TYPE_VALUES[0]) as PrivacyRequestType,
-                        )
-                      }
-                    >
-                      <SelectTrigger className="h-9 w-full rounded-lg bg-card">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
+
+
+                      onChange={(event) => setPrivacyRequestType(
+                          (event.target.value ?? PRIVACY_REQUEST_TYPE_VALUES[0]) as PrivacyRequestType,
+                        )} className="h-9 w-full rounded-lg bg-card">
                         {PRIVACY_REQUEST_TYPE_VALUES.map((value) => (
-                          <SelectItem key={value} value={value}>
+                          <option key={value} value={value}>
                             {privacyRequestTypeLabel(value, t)}
-                          </SelectItem>
+                          </option>
                         ))}
-                      </SelectContent>
-                    </Select>
+                      </NativeComboboxSelect>
                   </Field>
                   <Field label={t.compliance_request_reason} htmlFor="privacy-request-reason">
                     <textarea

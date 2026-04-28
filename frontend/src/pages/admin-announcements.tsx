@@ -23,14 +23,8 @@ import { useRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Sheet,
   SheetContent,
@@ -355,17 +349,13 @@ export function AdminAnnouncementsPage() {
                     />
                   </Field>
                   <Field label={t.ann_variant} htmlFor="announcement-variant">
-                    <Select value={fVariant} onValueChange={(value) => setFVariant(value ?? "info")}>
-                      <SelectTrigger id="announcement-variant" className="!h-9 w-full rounded-lg bg-card">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="info">{t.ann_info}</SelectItem>
-                        <SelectItem value="warning">{t.ann_warning}</SelectItem>
-                        <SelectItem value="error">{t.common_error}</SelectItem>
-                        <SelectItem value="success">{t.ann_success}</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <NativeComboboxSelect value={fVariant}
+                      onChange={(event) => setFVariant(event.target.value ?? "info")} id="announcement-variant" className="!h-9 w-full rounded-lg bg-card">
+                        <option value="info">{t.ann_info}</option>
+                        <option value="warning">{t.ann_warning}</option>
+                        <option value="error">{t.common_error}</option>
+                        <option value="success">{t.ann_success}</option>
+                      </NativeComboboxSelect>
                   </Field>
                 </div>
                 <Field label={`${t.ann_message} *`} htmlFor="announcement-message">

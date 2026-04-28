@@ -13,14 +13,8 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
-import {
-  Select as ShadSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Banner, tokens } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -305,27 +299,14 @@ function AssignmentsSection({
         <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] pt-1">
           <div className="space-y-1">
             <div className="text-[12px] font-medium text-muted-foreground">{t.patients_assign_owner}</div>
-            <ShadSelect value={selectedAssignee} onValueChange={(v) => onAssigneeChange(v ?? "")}>
-              <SelectTrigger className={cn("w-full", formInputClassName)}>
-                <SelectValue>
-                  {selectedAssignee
-                    ? (() => {
-                        const selected = assignableStaff.find((item) => item.id === selectedAssignee);
-                        return selected
-                          ? `${selected.name} · ${getPatientRoleLabel(selected.role, tr)}`
-                          : selectedAssignee;
-                      })()
-                    : t.patients_assign_owner}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
+            <NativeComboboxSelect value={selectedAssignee}
+              onChange={(event) => onAssigneeChange(event.target.value ?? "")} className={cn("w-full", formInputClassName)}>
                 {assignableStaff.map((item) => (
-                  <SelectItem key={item.id} value={item.id}>
+                  <option key={item.id} value={item.id}>
                     {item.name} · {getPatientRoleLabel(item.role, tr)}
-                  </SelectItem>
+                  </option>
                 ))}
-              </SelectContent>
-            </ShadSelect>
+              </NativeComboboxSelect>
           </div>
           <div className="flex items-end">
             <Button

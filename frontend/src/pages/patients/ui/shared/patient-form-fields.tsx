@@ -1,19 +1,9 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
-import {
-  Select as ShadSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import type { PatientFormState } from "../../model/list-model";
-import {
-  getPatientGenderLabel,
-  getPatientInsuranceLabel,
-} from "../../model/list-formatters";
 import {
   Field,
   FormSection,
@@ -34,7 +24,6 @@ export function PatientFormFields({
   includeBirthAndGender = false,
 }: PatientFormFieldsProps) {
   const { t, lang } = useLang();
-  const tr = t as unknown as Record<string, string>;
   const l = (de: string, ru: string, en: string) =>
     lang === "de" ? de : lang === "ru" ? ru : en;
 
@@ -79,16 +68,12 @@ export function PatientFormFields({
               />
             </Field>
             <Field label={t.patients_gender}>
-              <ShadSelect value={form.gender} onValueChange={(v) => onChange("gender", v ?? "male")}>
-                <SelectTrigger className={cn("w-full", formInputClassName)}>
-                  <SelectValue>{getPatientGenderLabel(form.gender, tr)}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="male">{t.gender_male}</SelectItem>
-                  <SelectItem value="female">{t.gender_female}</SelectItem>
-                  <SelectItem value="diverse">{t.gender_diverse}</SelectItem>
-                </SelectContent>
-              </ShadSelect>
+              <NativeComboboxSelect value={form.gender}
+                onChange={(event) => onChange("gender", event.target.value ?? "male")} className={cn("w-full", formInputClassName)}>
+                  <option value="male">{t.gender_male}</option>
+                  <option value="female">{t.gender_female}</option>
+                  <option value="diverse">{t.gender_diverse}</option>
+                </NativeComboboxSelect>
             </Field>
           </div>
         ) : null}
@@ -205,18 +190,14 @@ export function PatientFormFields({
             />
           </Field>
           <Field label={t.patients_insurance_type}>
-            <ShadSelect value={form.insuranceType} onValueChange={(v) => onChange("insuranceType", v ?? "")}>
-              <SelectTrigger className={cn("w-full", formInputClassName)}>
-                <SelectValue>{getPatientInsuranceLabel(form.insuranceType, tr)}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">{t.common_not_set}</SelectItem>
-                <SelectItem value="private">{t.insurance_private}</SelectItem>
-                <SelectItem value="public">{t.insurance_public}</SelectItem>
-                <SelectItem value="self_pay">{t.insurance_self_pay}</SelectItem>
-                <SelectItem value="foreign">{t.insurance_foreign}</SelectItem>
-              </SelectContent>
-            </ShadSelect>
+            <NativeComboboxSelect value={form.insuranceType}
+              onChange={(event) => onChange("insuranceType", event.target.value ?? "")} className={cn("w-full", formInputClassName)}>
+                <option value="">{t.common_not_set}</option>
+                <option value="private">{t.insurance_private}</option>
+                <option value="public">{t.insurance_public}</option>
+                <option value="self_pay">{t.insurance_self_pay}</option>
+                <option value="foreign">{t.insurance_foreign}</option>
+              </NativeComboboxSelect>
           </Field>
         </div>
       </FormSection>

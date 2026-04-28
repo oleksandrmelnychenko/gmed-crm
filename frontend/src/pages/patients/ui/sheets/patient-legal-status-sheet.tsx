@@ -2,14 +2,8 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Check, LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Label } from "@/components/ui/label";
-import {
-  Select as ShadSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { toast } from "@/components/ui/toast";
 import { selectClass, textareaClass } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
@@ -144,23 +138,17 @@ export function PatientLegalStatusSheet({
         >
           {l("Vertragsstatus", "Статус договора", "Contract status")}
         </Label>
-        <ShadSelect
+        <NativeComboboxSelect
           value={form.contractStatus}
-          onValueChange={(value) =>
-            setForm((current) => ({ ...current, contractStatus: value ?? "not_started" }))
-          }
-        >
-          <SelectTrigger id="patient-legal-contract-status" className={cn("w-full", selectClass)}>
-            <SelectValue>{contractStatusLabel(form.contractStatus, l)}</SelectValue>
-          </SelectTrigger>
-          <SelectContent>
+
+
+          onChange={(event) => setForm((current) => ({ ...current, contractStatus: event.target.value ?? "not_started" }))} id="patient-legal-contract-status" className={cn("w-full", selectClass)}>
             {PATIENT_CONTRACT_STATUS_OPTIONS.map((option) => (
-              <SelectItem key={option} value={option}>
+              <option key={option} value={option}>
                 {contractStatusLabel(option, l)}
-              </SelectItem>
+              </option>
             ))}
-          </SelectContent>
-        </ShadSelect>
+          </NativeComboboxSelect>
       </div>
 
       <div className="flex flex-col gap-2">

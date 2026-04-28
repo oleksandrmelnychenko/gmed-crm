@@ -30,13 +30,7 @@ import { useRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -389,16 +383,12 @@ export function AdminUsersPage() {
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_role}</Label>
-                  <Select value={newRole} onValueChange={(v) => setNewRole(v ?? "")}>
-                    <SelectTrigger className="h-9 w-full rounded-lg bg-card">
-                      <SelectValue>{roleLabel(newRole)}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
+                  <NativeComboboxSelect value={newRole}
+                    onChange={(event) => setNewRole(event.target.value ?? "")} className="h-9 w-full rounded-lg bg-card">
                       {ROLE_KEYS.map((key) => (
-                        <SelectItem key={key} value={key}>{roleLabel(key)}</SelectItem>
+                        <option key={key} value={key}>{roleLabel(key)}</option>
                       ))}
-                    </SelectContent>
-                  </Select>
+                    </NativeComboboxSelect>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
@@ -465,16 +455,12 @@ export function AdminUsersPage() {
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_role}</Label>
-                  <Select value={euRole} onValueChange={(v) => setEuRole(v ?? "")}>
-                    <SelectTrigger className="h-9 w-full rounded-lg bg-card">
-                      <SelectValue>{roleLabel(euRole)}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
+                  <NativeComboboxSelect value={euRole}
+                    onChange={(event) => setEuRole(event.target.value ?? "")} className="h-9 w-full rounded-lg bg-card">
                       {ROLE_KEYS.map((key) => (
-                        <SelectItem key={key} value={key}>{roleLabel(key)}</SelectItem>
+                        <option key={key} value={key}>{roleLabel(key)}</option>
                       ))}
-                    </SelectContent>
-                  </Select>
+                    </NativeComboboxSelect>
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">

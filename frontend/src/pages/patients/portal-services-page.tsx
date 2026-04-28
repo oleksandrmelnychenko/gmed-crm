@@ -3,14 +3,8 @@ import { Building2, LoaderCircle, RefreshCw, Send } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Banner,
   CountBadge,
@@ -147,27 +141,6 @@ export function PatientServicesPage() {
     () => services.filter((item) => item.status === "completed"),
     [services],
   );
-  const serviceTypeLabel = (value: string) => {
-    switch (value) {
-      case "hotel":
-        return t.services_type_hotel;
-      case "transfer":
-        return t.services_type_transfer;
-      case "vip_terminal":
-        return t.services_type_vip_terminal;
-      case "flight":
-        return t.services_type_flight;
-      case "chauffeur":
-        return t.services_type_chauffeur;
-      case "translation_support":
-        return t.services_type_translation_support;
-      case "other":
-        return t.services_type_other;
-      default:
-        return t.services_type_other;
-    }
-  };
-
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setRequestBusy(true);
@@ -328,28 +301,22 @@ export function PatientServicesPage() {
 
           <form className="space-y-4" onSubmit={(event) => void handleSubmit(event)}>
             <Field label={t.services_form_service_type}>
-              <Select
+              <NativeComboboxSelect
                 value={form.serviceKind}
-                onValueChange={(value) =>
-                  setForm((current) => ({
+
+
+                onChange={(event) => setForm((current) => ({
                     ...current,
-                    serviceKind: value ?? "hotel",
-                  }))
-                }
-              >
-                <SelectTrigger className={cn("w-full", inputClass)}>
-                  <SelectValue>{serviceTypeLabel(form.serviceKind)}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="hotel">{t.services_type_hotel}</SelectItem>
-                  <SelectItem value="transfer">{t.services_type_transfer}</SelectItem>
-                  <SelectItem value="vip_terminal">{t.services_type_vip_terminal}</SelectItem>
-                  <SelectItem value="flight">{t.services_type_flight}</SelectItem>
-                  <SelectItem value="chauffeur">{t.services_type_chauffeur}</SelectItem>
-                  <SelectItem value="translation_support">{t.services_type_translation_support}</SelectItem>
-                  <SelectItem value="other">{t.services_type_other}</SelectItem>
-                </SelectContent>
-              </Select>
+                    serviceKind: event.target.value ?? "hotel",
+                  }))} className={cn("w-full", inputClass)}>
+                  <option value="hotel">{t.services_type_hotel}</option>
+                  <option value="transfer">{t.services_type_transfer}</option>
+                  <option value="vip_terminal">{t.services_type_vip_terminal}</option>
+                  <option value="flight">{t.services_type_flight}</option>
+                  <option value="chauffeur">{t.services_type_chauffeur}</option>
+                  <option value="translation_support">{t.services_type_translation_support}</option>
+                  <option value="other">{t.services_type_other}</option>
+                </NativeComboboxSelect>
             </Field>
 
             <Field label={t.services_form_title} htmlFor="portal-service-title">

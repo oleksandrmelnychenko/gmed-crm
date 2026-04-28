@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   Dialog,
   DialogContent,
@@ -13,13 +14,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select as ShadSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { inputClass, selectClass } from "@/components/ui-shell";
 
@@ -162,18 +156,15 @@ export function PatientFinancialDialogs({
             <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="contract-status">
               {l("Status", "Status", "Status")}
             </Label>
-            <ShadSelect value={contractCreateForm.status} onValueChange={(value) => onContractCreateStatusChange(value ?? contractCreateForm.status)}>
-              <SelectTrigger id="contract-status" className={selectClass}>
-                <SelectValue>{patientDetailStatusLabel(contractCreateForm.status)}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
+            <NativeComboboxSelect
+              value={contractCreateForm.status}
+              onChange={(event) => onContractCreateStatusChange(event.target.value ?? contractCreateForm.status)} id="contract-status" className={selectClass}>
                 {contractStatusOptions.map((status) => (
-                  <SelectItem key={status} value={status}>
+                  <option key={status} value={status}>
                     {patientDetailStatusLabel(status)}
-                  </SelectItem>
+                  </option>
                 ))}
-              </SelectContent>
-            </ShadSelect>
+              </NativeComboboxSelect>
           </div>
           <div className="flex flex-col gap-1.5">
             <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="contract-signed-at">
@@ -230,18 +221,15 @@ export function PatientFinancialDialogs({
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="contract-status-edit">{l("Status", "Статус", "Status")}</Label>
-                <ShadSelect value={contractStatusForm.status} onValueChange={(value) => onContractStatusValueChange(value ?? contractStatusForm.status)}>
-                  <SelectTrigger id="contract-status-edit" className="w-full">
-                    <SelectValue>{patientDetailStatusLabel(contractStatusForm.status)}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
+                <NativeComboboxSelect
+                  value={contractStatusForm.status}
+                  onChange={(event) => onContractStatusValueChange(event.target.value ?? contractStatusForm.status)} id="contract-status-edit" className={selectClass}>
                     {contractStatusOptions.map((status) => (
-                      <SelectItem key={status} value={status}>
+                      <option key={status} value={status}>
                         {patientDetailStatusLabel(status)}
-                      </SelectItem>
+                      </option>
                     ))}
-                  </SelectContent>
-                </ShadSelect>
+                  </NativeComboboxSelect>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="contract-signed-at-edit">{l("Unterzeichnet am", "Подписано", "Signed at")}</Label>
@@ -301,18 +289,15 @@ export function PatientFinancialDialogs({
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="invoice-status-edit">{l("Status", "Статус", "Status")}</Label>
-                  <ShadSelect value={invoiceStatusForm.status} onValueChange={(value) => onInvoiceStatusValueChange(value ?? invoiceStatusForm.status)}>
-                    <SelectTrigger id="invoice-status-edit" className="w-full">
-                      <SelectValue>{patientDetailStatusLabel(invoiceStatusForm.status)}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
+                  <NativeComboboxSelect
+                    value={invoiceStatusForm.status}
+                    onChange={(event) => onInvoiceStatusValueChange(event.target.value ?? invoiceStatusForm.status)} id="invoice-status-edit" className={selectClass}>
                       {invoiceStatusOptions.map((status) => (
-                        <SelectItem key={status} value={status}>
+                        <option key={status} value={status}>
                           {patientDetailStatusLabel(status)}
-                        </SelectItem>
+                        </option>
                       ))}
-                    </SelectContent>
-                  </ShadSelect>
+                    </NativeComboboxSelect>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="invoice-due-date-edit">{l("Fälligkeitsdatum", "Срок", "Due date")}</Label>

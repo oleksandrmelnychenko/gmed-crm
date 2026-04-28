@@ -12,7 +12,6 @@ import { useSearchParams } from "react-router-dom";
 import {
   CalendarClock,
   Download,
-  Filter,
   LoaderCircle,
   Plus,
   RefreshCw,
@@ -31,13 +30,6 @@ import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select as ShadSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import {
   Banner as ShellBanner,
@@ -366,19 +358,6 @@ function StaffInvoicesPage() {
       return true;
     });
   }, [filters.orderId, filters.patientId, quotes]);
-  const selectedFilterPatient = useMemo(
-    () => patients.find((patient) => patient.id === filters.patientId) ?? null,
-    [patients, filters.patientId],
-  );
-  const selectedFilterOrder = useMemo(
-    () => filteredOrders.find((order) => order.id === filters.orderId) ?? null,
-    [filteredOrders, filters.orderId],
-  );
-  const selectedFilterQuote = useMemo(
-    () => filteredQuotes.find((quote) => quote.id === filters.quoteId) ?? null,
-    [filteredQuotes, filters.quoteId],
-  );
-
   const selectedCreateQuote = useMemo(() => quotes.find((quote) => quote.id === createForm.quoteId) ?? null, [quotes, createForm.quoteId]);
   const stats = useMemo(() => {
     const paid = invoices.filter((invoice) => invoice.status === "paid").length;
@@ -1186,10 +1165,10 @@ function StaffInvoicesPage() {
               />
             </div>
 
-            <ShadSelect
+            <NativeComboboxSelect
               value={filters.patientId || "__all__"}
-              onValueChange={(value) => {
-                const patientId = value && value !== "__all__" ? value : "";
+              onChange={(event) => {
+                const patientId = event.target.value && event.target.value !== "__all__" ? event.target.value : "";
                 setFilters((current) => ({
                   ...current,
                   patientId,
@@ -1207,33 +1186,22 @@ function StaffInvoicesPage() {
                 setInvoicePage(1);
                 syncQuery({ patient: patientId || null, order: null, quote: null });
               }}
+              className={cn(selectClassName, "h-8 w-[210px] bg-background text-[13px]")}
             >
-              <SelectTrigger size="sm" className="h-8 w-[210px] bg-background text-[13px]">
-                <SelectValue>
-                  {selectedFilterPatient
-                    ? `${selectedFilterPatient.patient_id} | ${[
-                        selectedFilterPatient.first_name,
-                        selectedFilterPatient.last_name,
-                      ]
-                        .filter(Boolean)
-                        .join(" ")}`
-                    : t.invoices_patient}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">{t.providers_all}</SelectItem>
-                {patients.map((patient) => (
-                  <SelectItem key={patient.id} value={patient.id}>
-                    {`${patient.patient_id} | ${[patient.first_name, patient.last_name].filter(Boolean).join(" ")}`}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </ShadSelect>
+              <option value="__all__">{t.invoices_patient}</option>
+              {patients.map((patient) => (
+                <option key={patient.id} value={patient.id}>
+                  {`${patient.patient_id} | ${[patient.first_name, patient.last_name]
+                    .filter(Boolean)
+                    .join(" ")}`}
+                </option>
+              ))}
+            </NativeComboboxSelect>
 
-            <ShadSelect
+            <NativeComboboxSelect
               value={filters.orderId || "__all__"}
-              onValueChange={(value) => {
-                const orderId = value && value !== "__all__" ? value : "";
+              onChange={(event) => {
+                const orderId = event.target.value && event.target.value !== "__all__" ? event.target.value : "";
                 setFilters((current) => ({
                   ...current,
                   orderId,
@@ -1246,102 +1214,77 @@ function StaffInvoicesPage() {
                 setInvoicePage(1);
                 syncQuery({ order: orderId || null, quote: null });
               }}
+              className={cn(selectClassName, "h-8 w-[210px] bg-background text-[13px]")}
             >
-              <SelectTrigger size="sm" className="h-8 w-[210px] bg-background text-[13px]">
-                <SelectValue>
-                  {selectedFilterOrder
-                    ? `${selectedFilterOrder.order_number} | ${selectedFilterOrder.patient_pid}`
-                    : text.allOrders}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">{text.allOrders}</SelectItem>
-                {filteredOrders.map((order) => (
-                  <SelectItem key={order.id} value={order.id}>
-                    {`${order.order_number} | ${order.patient_pid} | ${order.patient_name}`}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </ShadSelect>
+              <option value="__all__">{text.allOrders}</option>
+              {filteredOrders.map((order) => (
+                <option key={order.id} value={order.id}>
+                  {`${order.order_number} | ${order.patient_pid} | ${order.patient_name}`}
+                </option>
+              ))}
+            </NativeComboboxSelect>
 
-            <ShadSelect
+            <NativeComboboxSelect
               value={filters.quoteId || "__all__"}
-              onValueChange={(value) => {
-                const quoteId = value && value !== "__all__" ? value : "";
+              onChange={(event) => {
+                const quoteId = event.target.value && event.target.value !== "__all__" ? event.target.value : "";
                 setFilters((current) => ({ ...current, quoteId }));
                 setInvoicePage(1);
                 syncQuery({ quote: quoteId || null });
               }}
+              className={cn(selectClassName, "h-8 w-[190px] bg-background text-[13px]")}
             >
-              <SelectTrigger size="sm" className="h-8 w-[190px] bg-background text-[13px]">
-                <SelectValue>
-                  {selectedFilterQuote
-                    ? `${selectedFilterQuote.quote_number} | ${selectedFilterQuote.patient_pid}`
-                    : text.allQuotes}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">{text.allQuotes}</SelectItem>
-                {filteredQuotes.map((quote) => (
-                  <SelectItem key={quote.id} value={quote.id}>
-                    {`${quote.quote_number} | ${quote.order_number} | ${quote.patient_pid}`}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </ShadSelect>
+              <option value="__all__">{text.allQuotes}</option>
+              {filteredQuotes.map((quote) => (
+                <option key={quote.id} value={quote.id}>
+                  {`${quote.quote_number} | ${quote.order_number} | ${quote.patient_pid}`}
+                </option>
+              ))}
+            </NativeComboboxSelect>
 
-            <ShadSelect
+            <NativeComboboxSelect
               value={filters.status || "__all__"}
-              onValueChange={(value) => {
+              onChange={(event) => {
                 setFilters((current) => ({
                   ...current,
-                  status: value && value !== "__all__" ? value : "",
+                  status:
+                    event.target.value && event.target.value !== "__all__"
+                      ? event.target.value
+                      : "",
                 }));
                 setInvoicePage(1);
               }}
+              className={cn(selectClassName, "h-8 w-[160px] bg-background text-[13px]")}
             >
-              <SelectTrigger size="sm" className="h-8 w-[160px] bg-background text-[13px]">
-                <Filter className="mr-1 size-3.5 text-muted-foreground" />
-                <SelectValue>
-                  {filters.status ? invoiceStatusLabel(filters.status) : t.invoices_status}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">{t.providers_all}</SelectItem>
-                {INVOICE_STATUSES.map((status) => (
-                  <SelectItem key={status} value={status}>
-                    {invoiceStatusLabel(status)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </ShadSelect>
+              <option value="__all__">{t.invoices_status}</option>
+              {INVOICE_STATUSES.map((status) => (
+                <option key={status} value={status}>
+                  {invoiceStatusLabel(status)}
+                </option>
+              ))}
+            </NativeComboboxSelect>
 
-            <ShadSelect
+            <NativeComboboxSelect
               value={filters.invoiceType || "__all__"}
-              onValueChange={(value) => {
+              onChange={(event) => {
                 setFilters((current) => ({
                   ...current,
-                  invoiceType: value && value !== "__all__" ? value : "",
+                  invoiceType:
+                    event.target.value && event.target.value !== "__all__"
+                      ? event.target.value
+                      : "",
                 }));
                 setInvoicePage(1);
               }}
+              className={cn(selectClassName, "h-8 w-[150px] bg-background text-[13px]")}
             >
-              <SelectTrigger size="sm" className="h-8 w-[150px] bg-background text-[13px]">
-                <SelectValue>
-                  {filters.invoiceType
-                    ? invoiceTypeLabel(filters.invoiceType)
-                    : t.invoices_type}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">{t.providers_all}</SelectItem>
-                {INVOICE_TYPES.map((invoiceType) => (
-                  <SelectItem key={invoiceType} value={invoiceType}>
-                    {invoiceTypeLabel(invoiceType)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </ShadSelect>
+              <option value="__all__">{t.invoices_type}</option>
+              {INVOICE_TYPES.map((invoiceType) => (
+                <option key={invoiceType} value={invoiceType}>
+                  {invoiceTypeLabel(invoiceType)}
+                </option>
+              ))}
+            </NativeComboboxSelect>
 
             <div className="ml-auto flex items-center gap-1">
               <Button
@@ -1464,50 +1407,44 @@ function StaffInvoicesPage() {
               {createError ? <ShellBanner tone="error">{createError}</ShellBanner> : null}
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label={t.contracts_type} className="sm:col-span-2">
-                  <ShadSelect
+                  <NativeComboboxSelect
                     value={createForm.quoteId || "__empty__"}
-                    onValueChange={(value) =>
+                    onChange={(event) =>
                       setCreateForm((current) => ({
                         ...current,
-                        quoteId: value && value !== "__empty__" ? value : "",
+                        quoteId:
+                          event.target.value && event.target.value !== "__empty__"
+                            ? event.target.value
+                            : "",
                       }))
                     }
+                    className={selectClassName}
                   >
-                    <SelectTrigger className={selectClassName}>
-                      <SelectValue>
-                        {selectedCreateQuote
-                          ? `${selectedCreateQuote.quote_number} | ${selectedCreateQuote.order_number} | ${selectedCreateQuote.patient_pid}`
-                          : text.chooseQuote}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__empty__">{text.chooseQuote}</SelectItem>
-                      {filteredQuotes.map((quote) => (
-                        <SelectItem key={quote.id} value={quote.id}>
-                          {`${quote.quote_number} | ${quote.order_number} | ${quote.patient_pid}`}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </ShadSelect>
+                    <option value="__empty__">{text.chooseQuote}</option>
+                    {filteredQuotes.map((quote) => (
+                      <option key={quote.id} value={quote.id}>
+                        {`${quote.quote_number} | ${quote.order_number} | ${quote.patient_pid}`}
+                      </option>
+                    ))}
+                  </NativeComboboxSelect>
                 </Field>
                 <Field label={t.invoices_type}>
-                  <ShadSelect
+                  <NativeComboboxSelect
                     value={createForm.invoiceType}
-                    onValueChange={(value) =>
-                      setCreateForm((current) => ({ ...current, invoiceType: value as InvoiceType }))
+                    onChange={(event) =>
+                      setCreateForm((current) => ({
+                        ...current,
+                        invoiceType: event.target.value as InvoiceType,
+                      }))
                     }
+                    className={selectClassName}
                   >
-                    <SelectTrigger className={selectClassName}>
-                      <SelectValue>{invoiceTypeLabel(createForm.invoiceType)}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {INVOICE_TYPES.map((invoiceType) => (
-                        <SelectItem key={invoiceType} value={invoiceType}>
-                          {invoiceTypeLabel(invoiceType)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </ShadSelect>
+                    {INVOICE_TYPES.map((invoiceType) => (
+                      <option key={invoiceType} value={invoiceType}>
+                        {invoiceTypeLabel(invoiceType)}
+                      </option>
+                    ))}
+                  </NativeComboboxSelect>
                 </Field>
                 <Field label={t.invoices_due_at}>
                   <Input

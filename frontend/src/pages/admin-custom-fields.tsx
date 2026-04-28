@@ -21,13 +21,7 @@ import { useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -295,18 +289,14 @@ export function AdminCustomFieldsPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_entity_type}</Label>
-                    <Select value={fEntity} onValueChange={(value) => setFEntity(value ?? ENTITY_TYPES[0] ?? "patient")}>
-                      <SelectTrigger className="h-9 w-full rounded-lg bg-card">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
+                    <NativeComboboxSelect value={fEntity}
+                      onChange={(event) => setFEntity(event.target.value ?? ENTITY_TYPES[0] ?? "patient")} className="h-9 w-full rounded-lg bg-card">
                         {ENTITY_TYPES.map((et) => (
-                          <SelectItem key={et} value={et}>
+                          <option key={et} value={et}>
                             {et.charAt(0).toUpperCase() + et.slice(1)}
-                          </SelectItem>
+                          </option>
                         ))}
-                      </SelectContent>
-                    </Select>
+                      </NativeComboboxSelect>
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_field_key} *</Label>
@@ -331,18 +321,14 @@ export function AdminCustomFieldsPage() {
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_field_type}</Label>
-                    <Select value={fType} onValueChange={(value) => setFType(value ?? FIELD_TYPES[0] ?? "text")}>
-                      <SelectTrigger className="h-9 w-full rounded-lg bg-card">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
+                    <NativeComboboxSelect value={fType}
+                      onChange={(event) => setFType(event.target.value ?? FIELD_TYPES[0] ?? "text")} className="h-9 w-full rounded-lg bg-card">
                         {FIELD_TYPES.map((ft) => (
-                          <SelectItem key={ft} value={ft}>
+                          <option key={ft} value={ft}>
                             {ft.charAt(0).toUpperCase() + ft.slice(1)}
-                          </SelectItem>
+                          </option>
                         ))}
-                      </SelectContent>
-                    </Select>
+                      </NativeComboboxSelect>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
@@ -375,19 +361,15 @@ export function AdminCustomFieldsPage() {
 
       {!loading ? (
         <AdminToolbar>
-          <Select value={filterEntity} onValueChange={(value) => setFilterEntity(value ?? "")}>
-            <SelectTrigger className="h-8 w-[240px] rounded-lg bg-card text-[13px]">
-              <SelectValue placeholder={t.providers_all} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">{t.providers_all}</SelectItem>
+          <NativeComboboxSelect value={filterEntity}
+            onChange={(event) => setFilterEntity(event.target.value ?? "")} className="h-8 w-[240px] rounded-lg bg-card text-[13px]">
+              <option value="">{t.providers_all}</option>
               {ENTITY_TYPES.map((et) => (
-                <SelectItem key={et} value={et}>
+                <option key={et} value={et}>
                   {et.charAt(0).toUpperCase() + et.slice(1)}
-                </SelectItem>
+                </option>
               ))}
-            </SelectContent>
-          </Select>
+            </NativeComboboxSelect>
 
           {filterEntity ? (
             <Button

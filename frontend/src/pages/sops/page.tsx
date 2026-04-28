@@ -26,20 +26,15 @@ import { DataTable } from "@/components/data-table/data-table";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
-import {
-  Select as ShadSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import {
   Banner as ShellBanner,
   PageHeader,
   SuccessBanner,
   inputClass as shellInputClassName,
+  selectClass as shellSelectClassName,
   textareaClass as shellTextareaClass,
   tokens,
 } from "@/components/ui-shell";
@@ -65,10 +60,7 @@ import {
 } from "./model/sops-model";
 import type { EligibleUser, SopFormState, SopItem } from "./model/types";
 
-const selectTriggerClassName = cn(
-  "w-full justify-between",
-  shellInputClassName,
-);
+const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
 
 function titleWithDot(title: ReactNode) {
@@ -1228,21 +1220,20 @@ export function SopsPage() {
                   />
                 </Field>
                 <Field label={text.formCategory}>
-                  <ShadSelect
+                  <NativeComboboxSelect
                     value={form.category}
-                    onValueChange={(value) =>
-                      setForm((current) => ({ ...current, category: value ?? "sop" }))
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        category: event.target.value as SopFormState["category"],
+                      }))
                     }
+                    className={selectClassName}
                   >
-                    <SelectTrigger className={selectTriggerClassName}>
-                      <SelectValue>{categoryLabel(form.category)}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="sop">{categoryLabel("sop")}</SelectItem>
-                      <SelectItem value="handbook">{categoryLabel("handbook")}</SelectItem>
-                      <SelectItem value="training">{categoryLabel("training")}</SelectItem>
-                    </SelectContent>
-                  </ShadSelect>
+                    <option value="sop">{categoryLabel("sop")}</option>
+                    <option value="handbook">{categoryLabel("handbook")}</option>
+                    <option value="training">{categoryLabel("training")}</option>
+                  </NativeComboboxSelect>
                 </Field>
                 <Field label={text.formSummary} className="sm:col-span-2">
                   <Input
@@ -1384,18 +1375,14 @@ export function SopsPage() {
                 </AdminTableCard>
               ) : null}
               <Field label={text.reviewDecision}>
-                <ShadSelect
+                <NativeComboboxSelect
                   value={reviewDecision}
-                  onValueChange={(value) => setReviewDecision(value ?? "approve")}
+                  onChange={(event) => setReviewDecision(event.target.value)}
+                  className={selectClassName}
                 >
-                  <SelectTrigger className={selectTriggerClassName}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="approve">{text.reviewApprove}</SelectItem>
-                    <SelectItem value="reject">{text.reviewReject}</SelectItem>
-                  </SelectContent>
-                </ShadSelect>
+                  <option value="approve">{text.reviewApprove}</option>
+                  <option value="reject">{text.reviewReject}</option>
+                </NativeComboboxSelect>
               </Field>
               <Field label={text.reviewNote}>
                 <textarea

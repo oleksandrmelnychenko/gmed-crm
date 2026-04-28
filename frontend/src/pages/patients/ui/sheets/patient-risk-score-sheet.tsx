@@ -2,15 +2,9 @@ import { useEffect, useState, type FormEvent } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select as ShadSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   inputClass,
   selectClass,
@@ -213,28 +207,20 @@ export function PatientRiskScoreSheet({
           <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-type">
             {l("Score-Typ", "Tip skora", "Score type")}
           </Label>
-          <ShadSelect
+          <NativeComboboxSelect
             value={form.scoreType}
-            onValueChange={(value) =>
-              setForm((current) => ({
+
+
+            onChange={(event) => setForm((current) => ({
                 ...current,
-                scoreType: (value ?? SCORE_TYPE_OPTIONS[0]) as ScoreType,
-              }))
-            }
-          >
-            <SelectTrigger id="patient-risk-score-type" className={cn("w-full", selectClass)}>
-              <SelectValue placeholder={l("Typ waehlen", "Vyberite tip", "Select score type")}>
-                {form.scoreType ? scoreTypeLabel(form.scoreType, l) : null}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
+                scoreType: (event.target.value ?? SCORE_TYPE_OPTIONS[0]) as ScoreType,
+              }))} id="patient-risk-score-type" className={cn("w-full", selectClass)}>
               {SCORE_TYPE_OPTIONS.map((option) => (
-                <SelectItem key={option} value={option}>
+                <option key={option} value={option}>
                   {scoreTypeLabel(option, l)}
-                </SelectItem>
+                </option>
               ))}
-            </SelectContent>
-          </ShadSelect>
+            </NativeComboboxSelect>
         </div>
         <div className="flex flex-col gap-1.5">
           <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-value">

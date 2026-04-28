@@ -2,14 +2,8 @@ import { LoaderCircle, UserX } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Label } from "@/components/ui/label";
-import {
-  Select as ShadSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { TabsContent } from "@/components/ui/tabs";
 import {
   CountBadge,
@@ -148,30 +142,17 @@ export function PatientCuratorsTab({
               >
                 {l("Verantwortliche Person", "Ответственный сотрудник", "Assigned staff member")}
               </Label>
-              <ShadSelect
+              <NativeComboboxSelect
                 value={selectedAssignee}
-                onValueChange={(value) => onSelectedAssigneeChange(value ?? "")}
-              >
-                <SelectTrigger id="patient-curator-assign" className={cn("w-full", formInputClassName)}>
-                  <SelectValue>
-                    {selectedAssignee
-                      ? (() => {
-                          const selectedStaff = assignableStaff.find((item) => item.id === selectedAssignee);
-                          return selectedStaff
-                            ? `${selectedStaff.name} · ${roleLabel(selectedStaff.role, tr)}`
-                            : selectedAssignee;
-                        })()
-                      : t.patients_assign_owner}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
+
+
+                onChange={(event) => onSelectedAssigneeChange(event.target.value ?? "")} id="patient-curator-assign" className={cn("w-full", formInputClassName)}>
                   {assignableStaff.map((staff) => (
-                    <SelectItem key={staff.id} value={staff.id}>
+                    <option key={staff.id} value={staff.id}>
                       {staff.name} · {roleLabel(staff.role, tr)}
-                    </SelectItem>
+                    </option>
                   ))}
-                </SelectContent>
-              </ShadSelect>
+                </NativeComboboxSelect>
             </div>
             <div className="flex items-end">
               <Button

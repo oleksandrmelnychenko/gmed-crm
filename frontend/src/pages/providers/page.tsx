@@ -27,6 +27,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import {
   AdminSheetScaffold,
@@ -37,13 +38,6 @@ import {
   Sheet,
   SheetContent,
 } from "@/components/ui/sheet";
-import {
-  Select as ShadSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { useLang } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
@@ -120,7 +114,7 @@ import {
 import { clearApiCache } from "@/lib/api";
 import { useRealtimeSubscription } from "@/lib/realtime";
 
-const selectTriggerClassName = shellSelectClassName;
+const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
 const DEFAULT_PROVIDER_SORT: SortStack = [{ field: "provider", dir: "asc" }];
 const PROVIDER_REALTIME_EVENTS = [
@@ -745,66 +739,36 @@ function ProvidersPage() {
               />
             </div>
 
-            <ShadSelect
+            <NativeComboboxSelect
               value={filters.providerType}
-              onValueChange={(value) => setServerFilter("providerType", value ?? "", "provider_type")}
+              onChange={(event) => setServerFilter("providerType", event.target.value, "provider_type")}
               disabled={permissions.forceNonMedical}
+              className={cn(selectClassName, "h-8 w-[170px] bg-background text-[13px]")}
             >
-              <SelectTrigger size="sm" className="h-8 w-[170px] bg-background text-[13px]">
-                <SelectValue>
-                  {filters.providerType === "medical"
-                    ? t.providers_type_medical
-                    : filters.providerType === "non_medical"
-                      ? t.providers_type_non_medical
-                      : t.providers_all}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">{t.providers_all}</SelectItem>
-                <SelectItem value="medical">{t.providers_type_medical}</SelectItem>
-                <SelectItem value="non_medical">{t.providers_type_non_medical}</SelectItem>
-              </SelectContent>
-            </ShadSelect>
+              <option value="">{t.providers_all}</option>
+              <option value="medical">{t.providers_type_medical}</option>
+              <option value="non_medical">{t.providers_type_non_medical}</option>
+            </NativeComboboxSelect>
 
-            <ShadSelect
+            <NativeComboboxSelect
               value={filters.activeOnly}
-              onValueChange={(value) => setServerFilter("activeOnly", value ?? "", "active")}
+              onChange={(event) => setServerFilter("activeOnly", event.target.value, "active")}
+              className={cn(selectClassName, "h-8 w-[140px] bg-background text-[13px]")}
             >
-              <SelectTrigger size="sm" className="h-8 w-[140px] bg-background text-[13px]">
-                <SelectValue>
-                  {filters.activeOnly === "true"
-                    ? t.common_active
-                    : filters.activeOnly === "false"
-                      ? t.common_inactive
-                      : t.providers_all}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">{t.providers_all}</SelectItem>
-                <SelectItem value="true">{t.common_active}</SelectItem>
-                <SelectItem value="false">{t.common_inactive}</SelectItem>
-              </SelectContent>
-            </ShadSelect>
+              <option value="">{t.providers_all}</option>
+              <option value="true">{t.common_active}</option>
+              <option value="false">{t.common_inactive}</option>
+            </NativeComboboxSelect>
 
-            <ShadSelect
+            <NativeComboboxSelect
               value={filters.hasContract}
-              onValueChange={(value) => setServerFilter("hasContract", value ?? "", "contract")}
+              onChange={(event) => setServerFilter("hasContract", event.target.value, "contract")}
+              className={cn(selectClassName, "h-8 w-[160px] bg-background text-[13px]")}
             >
-              <SelectTrigger size="sm" className="h-8 w-[160px] bg-background text-[13px]">
-                <SelectValue>
-                  {filters.hasContract === "true"
-                    ? t.providers_contract_with
-                    : filters.hasContract === "false"
-                      ? t.providers_contract_without
-                      : t.providers_contract}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">{t.providers_all}</SelectItem>
-                <SelectItem value="true">{t.providers_contract_with}</SelectItem>
-                <SelectItem value="false">{t.providers_contract_without}</SelectItem>
-              </SelectContent>
-            </ShadSelect>
+              <option value="">{t.providers_contract}</option>
+              <option value="true">{t.providers_contract_with}</option>
+              <option value="false">{t.providers_contract_without}</option>
+            </NativeComboboxSelect>
 
             <div className="ml-auto flex items-center gap-1">
               <Button
@@ -1966,15 +1930,15 @@ function ProviderFormFields({
         </Field>
 
         <Field label={t.providers_type}>
-          <ShadSelect value={forceNonMedical ? "non_medical" : form.providerType} onValueChange={(v) => onChange("providerType", v ?? "medical")} disabled={disabled || forceNonMedical}>
-            <SelectTrigger className={selectTriggerClassName}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="medical">{t.providers_type_medical}</SelectItem>
-              <SelectItem value="non_medical">{t.providers_type_non_medical}</SelectItem>
-            </SelectContent>
-          </ShadSelect>
+          <NativeComboboxSelect
+            value={forceNonMedical ? "non_medical" : form.providerType}
+            onChange={(event) => onChange("providerType", event.target.value || "medical")}
+            disabled={disabled || forceNonMedical}
+            className={selectClassName}
+          >
+            <option value="medical">{t.providers_type_medical}</option>
+            <option value="non_medical">{t.providers_type_non_medical}</option>
+          </NativeComboboxSelect>
         </Field>
       </div>
 

@@ -2,15 +2,9 @@ import { useEffect, useState, type FormEvent } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select as ShadSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   inputClass,
   selectClass,
@@ -214,28 +208,22 @@ export function PatientAppointmentSheet({
           >
             {l("Typ", "Tip", "Type")}
           </Label>
-          <ShadSelect
+          <NativeComboboxSelect
             value={form.appointmentType}
-            onValueChange={(value) =>
-              setForm((current) => ({
+
+
+            onChange={(event) => setForm((current) => ({
                 ...current,
-                appointmentType: (value as AppointmentKind) ?? current.appointmentType,
+                appointmentType: (event.target.value as AppointmentKind) ?? current.appointmentType,
                 carePathKind:
-                  value === "medical" ? current.carePathKind : "regular",
-              }))
-            }
-          >
-            <SelectTrigger id="patient-appointment-type" className={cn("w-full", selectClass)}>
-              <SelectValue>{typeLabel(form.appointmentType, l)}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
+                  event.target.value === "medical" ? current.carePathKind : "regular",
+              }))} id="patient-appointment-type" className={cn("w-full", selectClass)}>
               {TYPE_OPTIONS.map((option) => (
-                <SelectItem key={option} value={option}>
+                <option key={option} value={option}>
                   {typeLabel(option, l)}
-                </SelectItem>
+                </option>
               ))}
-            </SelectContent>
-          </ShadSelect>
+            </NativeComboboxSelect>
         </div>
         <div className="flex flex-col gap-1.5">
           <Label
@@ -244,27 +232,21 @@ export function PatientAppointmentSheet({
           >
             {l("Versorgungspfad", "Traektoriya lecheniya", "Care path")}
           </Label>
-          <ShadSelect
+          <NativeComboboxSelect
             value={form.carePathKind}
-            onValueChange={(value) =>
-              setForm((current) => ({
-                ...current,
-                carePathKind: (value as CarePathKind) ?? current.carePathKind,
-              }))
-            }
+
             disabled={form.appointmentType !== "medical"}
-          >
-            <SelectTrigger id="patient-appointment-care-path" className={cn("w-full", selectClass)}>
-              <SelectValue>{carePathLabel(form.carePathKind, l)}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
+
+            onChange={(event) => setForm((current) => ({
+                ...current,
+                carePathKind: (event.target.value as CarePathKind) ?? current.carePathKind,
+              }))} id="patient-appointment-care-path" className={cn("w-full", selectClass)}>
               {CARE_PATH_KIND_OPTIONS.map((option) => (
-                <SelectItem key={option} value={option}>
+                <option key={option} value={option}>
                   {carePathLabel(option, l)}
-                </SelectItem>
+                </option>
               ))}
-            </SelectContent>
-          </ShadSelect>
+            </NativeComboboxSelect>
         </div>
       </div>
 
