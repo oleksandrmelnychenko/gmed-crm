@@ -43,12 +43,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Sheet,
   SheetContent,
 } from "@/components/ui/sheet";
 import {
+  Field,
   PageHeader,
   StatusBadge,
   checkboxClass,
@@ -198,6 +198,7 @@ type EmptyStateProps = {
   action?: ReactNode;
 };
 
+const inputClassName = shellInputClassName;
 const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
 const ORDER_DEFAULT_FROZEN_COLUMNS = ["order_number", "patient"];
@@ -2535,101 +2536,113 @@ export function OrdersPage() {
                               )}
                             </div>
                             <div className="mt-4 grid gap-3">
-                              <NativeComboboxSelect
-                                value={processGateForm.debtStatus}
-                                onChange={(event) =>
-                                  setProcessGateForm((current) => ({
-                                    ...current,
-                                    debtStatus: event.target.value,
-                                  }))
-                                }
-                                className={selectClassName}
-                              >
-                                {[
-                                  "review_required",
-                                  "payment_plan",
-                                  "awaiting_payment",
-                                  "escalated",
-                                  "cleared",
-                                  "not_required",
-                                ].map((status) => (
-                                  <option key={status} value={status}>
-                                    {debtStatusLabel(status)}
+                              <Field label={l("Debt-Status", "Статус debt")}>
+                                <NativeComboboxSelect
+                                  value={processGateForm.debtStatus}
+                                  onChange={(event) =>
+                                    setProcessGateForm((current) => ({
+                                      ...current,
+                                      debtStatus: event.target.value,
+                                    }))
+                                  }
+                                  className={selectClassName}
+                                >
+                                  {[
+                                    "review_required",
+                                    "payment_plan",
+                                    "awaiting_payment",
+                                    "escalated",
+                                    "cleared",
+                                    "not_required",
+                                  ].map((status) => (
+                                    <option key={status} value={status}>
+                                      {debtStatusLabel(status)}
+                                    </option>
+                                  ))}
+                                </NativeComboboxSelect>
+                              </Field>
+                              <Field label={l("Owner", "Ответственный")}>
+                                <NativeComboboxSelect
+                                  value={processGateForm.debtOwnerUserId}
+                                  onChange={(event) =>
+                                    setProcessGateForm((current) => ({
+                                      ...current,
+                                      debtOwnerUserId: event.target.value,
+                                    }))
+                                  }
+                                  className={selectClassName}
+                                >
+                                  <option value="">
+                                    {l(
+                                      "Aktuellen Owner beibehalten",
+                                      "Оставить текущего ответственного",
+                                    )}
                                   </option>
-                                ))}
-                              </NativeComboboxSelect>
-                              <NativeComboboxSelect
-                                value={processGateForm.debtOwnerUserId}
-                                onChange={(event) =>
-                                  setProcessGateForm((current) => ({
-                                    ...current,
-                                    debtOwnerUserId: event.target.value,
-                                  }))
-                                }
-                                className={selectClassName}
-                              >
-                                <option value="">
-                                  {l(
-                                    "Aktuellen Owner beibehalten",
-                                    "Оставить текущего ответственного",
+                                  {debtOwnerOptions.map((item) => (
+                                    <option
+                                      key={item.user_id}
+                                      value={item.user_id}
+                                    >
+                                      {item.user_name} · {roleLabel(item.user_role)}
+                                    </option>
+                                  ))}
+                                </NativeComboboxSelect>
+                              </Field>
+                              <Field label={l("Nachstes Review", "Следующее ревью")}>
+                                <Input
+                                  type="datetime-local"
+                                  value={processGateForm.debtNextReviewAt}
+                                  onChange={(event) =>
+                                    setProcessGateForm((current) => ({
+                                      ...current,
+                                      debtNextReviewAt: event.target.value,
+                                    }))
+                                  }
+                                  className={inputClassName}
+                                />
+                              </Field>
+                              <Field label={l("Letzter Kontakt", "Последний контакт")}>
+                                <Input
+                                  type="datetime-local"
+                                  value={processGateForm.debtLastContactAt}
+                                  onChange={(event) =>
+                                    setProcessGateForm((current) => ({
+                                      ...current,
+                                      debtLastContactAt: event.target.value,
+                                    }))
+                                  }
+                                  className={inputClassName}
+                                />
+                              </Field>
+                              <Field label={l("Debt-Notiz", "Заметка по debt-workflow")}>
+                                <textarea
+                                  value={processGateForm.debtNote}
+                                  onChange={(event) =>
+                                    setProcessGateForm((current) => ({
+                                      ...current,
+                                      debtNote: event.target.value,
+                                    }))
+                                  }
+                                  className={textareaClassName}
+                                  placeholder={l(
+                                    "Notiz zum Debt-Workflow",
+                                    "Заметка по debt-workflow",
                                   )}
-                                </option>
-                                {debtOwnerOptions.map((item) => (
-                                  <option
-                                    key={item.user_id}
-                                    value={item.user_id}
-                                  >
-                                    {item.user_name} · {roleLabel(item.user_role)}
-                                  </option>
-                                ))}
-                              </NativeComboboxSelect>
-                              <Input
-                                type="datetime-local"
-                                value={processGateForm.debtNextReviewAt}
-                                onChange={(event) =>
-                                  setProcessGateForm((current) => ({
-                                    ...current,
-                                    debtNextReviewAt: event.target.value,
-                                  }))
-                                }
-                                className="h-10 rounded-xl bg-white"
-                              />
-                              <Input
-                                type="datetime-local"
-                                value={processGateForm.debtLastContactAt}
-                                onChange={(event) =>
-                                  setProcessGateForm((current) => ({
-                                    ...current,
-                                    debtLastContactAt: event.target.value,
-                                  }))
-                                }
-                                className="h-10 rounded-xl bg-white"
-                              />
-                              <textarea
-                                value={processGateForm.debtNote}
-                                onChange={(event) =>
-                                  setProcessGateForm((current) => ({
-                                    ...current,
-                                    debtNote: event.target.value,
-                                  }))
-                                }
-                                className={textareaClassName}
-                                placeholder={l(
-                                  "Notiz zum Debt-Workflow",
-                                  "Заметка по debt-workflow",
-                                )}
-                              />
-                              <textarea
-                                value={processGateForm.debtResolutionNote}
-                                onChange={(event) =>
-                                  setProcessGateForm((current) => ({
-                                    ...current,
-                                    debtResolutionNote: event.target.value,
-                                  }))
-                                }
-                                className={textareaClassName}
-                                placeholder={l("Losungsnotiz", "Заметка по решению")}
-                              />
+                                />
+                              </Field>
+                              <Field label={l("Losungsnotiz", "Заметка по решению")}>
+                                <textarea
+                                  value={processGateForm.debtResolutionNote}
+                                  onChange={(event) =>
+                                    setProcessGateForm((current) => ({
+                                      ...current,
+                                      debtResolutionNote: event.target.value,
+                                    }))
+                                  }
+                                  className={textareaClassName}
+                                  placeholder={l("Losungsnotiz", "Заметка по решению")}
+                                />
+                              </Field>
                               <div className="grid gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-3 text-xs text-slate-500">
                                 <div>
                                   {l("Owner", "Ответственный")}:{" "}
@@ -3725,40 +3738,44 @@ export function OrdersPage() {
                               </NativeComboboxSelect>
                             </div>
                             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
-                              <Input
-                                type="date"
-                                value={followupForm.packageEndDate}
-                                onChange={(event) =>
-                                  setFollowupForm((current) => ({
-                                    ...current,
-                                    packageEndDate: event.target.value,
-                                  }))
-                                }
-                                className="h-10 rounded-xl bg-white"
-                              />
-                              <NativeComboboxSelect
-                                value={followupForm.packageEndStatus}
-                                onChange={(event) =>
-                                  setFollowupForm((current) => ({
-                                    ...current,
-                                    packageEndStatus: event.target.value,
-                                  }))
-                                }
-                              className={selectClassName}
-                            >
-                              <option value="not_required">
-                                {l("Paketende nicht erforderlich", "Завершение пакета не требуется")}
-                              </option>
-                              <option value="pending">
-                                {l("Paketende ausstehend", "Завершение пакета ожидается")}
-                              </option>
-                              <option value="scheduled">
-                                {l("Paketende geplant", "Завершение пакета запланировано")}
-                              </option>
-                              <option value="completed">
-                                {l("Paketende abgeschlossen", "Завершение пакета завершено")}
-                              </option>
-                            </NativeComboboxSelect>
+                              <Field label={l("Paketende", "Завершение пакета")}>
+                                <Input
+                                  type="date"
+                                  value={followupForm.packageEndDate}
+                                  onChange={(event) =>
+                                    setFollowupForm((current) => ({
+                                      ...current,
+                                      packageEndDate: event.target.value,
+                                    }))
+                                  }
+                                  className={inputClassName}
+                                />
+                              </Field>
+                              <Field label={l("Paketende-Status", "Статус завершения пакета")}>
+                                <NativeComboboxSelect
+                                  value={followupForm.packageEndStatus}
+                                  onChange={(event) =>
+                                    setFollowupForm((current) => ({
+                                      ...current,
+                                      packageEndStatus: event.target.value,
+                                    }))
+                                  }
+                                  className={selectClassName}
+                                >
+                                  <option value="not_required">
+                                    {l("Paketende nicht erforderlich", "Завершение пакета не требуется")}
+                                  </option>
+                                  <option value="pending">
+                                    {l("Paketende ausstehend", "Завершение пакета ожидается")}
+                                  </option>
+                                  <option value="scheduled">
+                                    {l("Paketende geplant", "Завершение пакета запланировано")}
+                                  </option>
+                                  <option value="completed">
+                                    {l("Paketende abgeschlossen", "Завершение пакета завершено")}
+                                  </option>
+                                </NativeComboboxSelect>
+                              </Field>
                             </div>
                             <NativeComboboxSelect
                               value={followupForm.resultsHandoffStatus}
@@ -4200,10 +4217,11 @@ export function OrdersPage() {
                           className="rounded-2xl border border-slate-200 bg-white p-4"
                         >
                           <div className="grid gap-4 md:grid-cols-2">
-                            <div className="space-y-2 md:col-span-2">
-                              <Label htmlFor="order-workflow-item">
-                                {l("Checklistenpunkt", "Пункт чеклиста")}
-                              </Label>
+                            <Field
+                              className="md:col-span-2"
+                              htmlFor="order-workflow-item"
+                              label={l("Checklistenpunkt", "Пункт чеклиста")}
+                            >
                               <Input
                                 id="order-workflow-item"
                                 value={workflowForm.itemText}
@@ -4213,17 +4231,17 @@ export function OrdersPage() {
                                     itemText: event.target.value,
                                   }))
                                 }
-                                className="h-10 rounded-xl bg-slate-50"
+                                className={inputClassName}
                                 placeholder={l(
                                   "Eskalationsanruf, Klinik-Nachverfolgung, Dokumentenübergabe ...",
                                   "Эскалационный звонок, follow-up с клиникой, передача документа...",
                                 )}
                               />
-                            </div>
-                            <div className="space-y-2">
-                              <Label htmlFor="order-workflow-owner">
-                                {l("Verantwortlich", "Ответственный")}
-                              </Label>
+                            </Field>
+                            <Field
+                              htmlFor="order-workflow-owner"
+                              label={l("Verantwortlich", "Ответственный")}
+                            >
                               <NativeComboboxSelect
                                 id="order-workflow-owner"
                                 className={selectClassName}
@@ -4245,11 +4263,11 @@ export function OrdersPage() {
                                   </option>
                                 ))}
                               </NativeComboboxSelect>
-                            </div>
-                            <div className="space-y-2">
-                              <Label htmlFor="order-workflow-priority">
-                                {l("Priorität", "Приоритет")}
-                              </Label>
+                            </Field>
+                            <Field
+                              htmlFor="order-workflow-priority"
+                              label={l("Priorität", "Приоритет")}
+                            >
                               <NativeComboboxSelect
                                 id="order-workflow-priority"
                                 className={selectClassName}
@@ -4269,11 +4287,11 @@ export function OrdersPage() {
                                   ),
                                 )}
                               </NativeComboboxSelect>
-                            </div>
-                            <div className="space-y-2">
-                              <Label htmlFor="order-workflow-due">
-                                {l("Fällig am", "Срок")}
-                              </Label>
+                            </Field>
+                            <Field
+                              htmlFor="order-workflow-due"
+                              label={l("Fällig am", "Срок")}
+                            >
                               <Input
                                 id="order-workflow-due"
                                 type="datetime-local"
@@ -4284,9 +4302,9 @@ export function OrdersPage() {
                                     dueDate: event.target.value,
                                   }))
                                 }
-                                className="h-10 rounded-xl bg-slate-50"
+                                className={inputClassName}
                               />
-                            </div>
+                            </Field>
                           </div>
                           <div className="mt-4 flex justify-end">
                             <Button
@@ -4682,8 +4700,7 @@ export function OrdersPage() {
                           </div>
                         ) : null}
                         <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                          <div>
-                            <Label>{l("Rechnungsnummer", "Номер счёта")}</Label>
+                          <Field label={l("Rechnungsnummer", "Номер счёта")}>
                             <Input
                               value={externalInvoiceForm.externalInvoiceNumber}
                               onChange={(event) =>
@@ -4692,11 +4709,10 @@ export function OrdersPage() {
                                   externalInvoiceNumber: event.target.value,
                                 }))
                               }
-                              className="mt-1 h-10 rounded-xl bg-white"
+                              className={inputClassName}
                             />
-                          </div>
-                          <div>
-                            <Label>{t.common_provider}</Label>
+                          </Field>
+                          <Field label={t.common_provider}>
                             <NativeComboboxSelect
                               value={externalInvoiceForm.providerId}
                               onChange={(event) =>
@@ -4705,7 +4721,7 @@ export function OrdersPage() {
                                   providerId: event.target.value,
                                 }))
                               }
-                              className={`mt-1 ${selectClassName}`}
+                              className={selectClassName}
                             >
                               <option value="">{t.common_not_set}</option>
                               {providers.map((provider) => (
@@ -4714,9 +4730,8 @@ export function OrdersPage() {
                                 </option>
                               ))}
                             </NativeComboboxSelect>
-                          </div>
-                          <div>
-                            <Label>{l("Rechnungsdatum", "Дата счёта")}</Label>
+                          </Field>
+                          <Field label={l("Rechnungsdatum", "Дата счёта")}>
                             <Input
                               type="date"
                               value={externalInvoiceForm.invoiceDate}
@@ -4726,11 +4741,10 @@ export function OrdersPage() {
                                   invoiceDate: event.target.value,
                                 }))
                               }
-                              className="mt-1 h-10 rounded-xl bg-white"
+                              className={inputClassName}
                             />
-                          </div>
-                          <div>
-                            <Label>{l("Fälligkeitsdatum", "Срок оплаты")}</Label>
+                          </Field>
+                          <Field label={l("Fälligkeitsdatum", "Срок оплаты")}>
                             <Input
                               type="date"
                               value={externalInvoiceForm.dueDate}
@@ -4740,11 +4754,10 @@ export function OrdersPage() {
                                   dueDate: event.target.value,
                                 }))
                               }
-                              className="mt-1 h-10 rounded-xl bg-white"
+                              className={inputClassName}
                             />
-                          </div>
-                          <div>
-                            <Label>{l("Netto", "Нетто")}</Label>
+                          </Field>
+                          <Field label={l("Netto", "Нетто")}>
                             <Input
                               value={externalInvoiceForm.amountNet}
                               onChange={(event) =>
@@ -4753,11 +4766,10 @@ export function OrdersPage() {
                                   amountNet: event.target.value,
                                 }))
                               }
-                              className="mt-1 h-10 rounded-xl bg-white"
+                              className={inputClassName}
                             />
-                          </div>
-                          <div>
-                            <Label>{l("MwSt.", "НДС")}</Label>
+                          </Field>
+                          <Field label={l("MwSt.", "НДС")}>
                             <Input
                               value={externalInvoiceForm.amountVat}
                               onChange={(event) =>
@@ -4766,11 +4778,10 @@ export function OrdersPage() {
                                   amountVat: event.target.value,
                                 }))
                               }
-                              className="mt-1 h-10 rounded-xl bg-white"
+                              className={inputClassName}
                             />
-                          </div>
-                          <div>
-                            <Label>{l("Brutto", "Брутто")}</Label>
+                          </Field>
+                          <Field label={l("Brutto", "Брутто")}>
                             <Input
                               value={externalInvoiceForm.amountGross}
                               onChange={(event) =>
@@ -4779,11 +4790,10 @@ export function OrdersPage() {
                                   amountGross: event.target.value,
                                 }))
                               }
-                              className="mt-1 h-10 rounded-xl bg-white"
+                              className={inputClassName}
                             />
-                          </div>
-                          <div>
-                            <Label>{l("Status", "Статус")}</Label>
+                          </Field>
+                          <Field label={l("Status", "Статус")}>
                             <NativeComboboxSelect
                               value={externalInvoiceForm.status}
                               onChange={(event) =>
@@ -4793,7 +4803,7 @@ export function OrdersPage() {
                                     .value as ExternalInvoiceStatus,
                                 }))
                               }
-                              className={`mt-1 ${selectClassName}`}
+                              className={selectClassName}
                             >
                               {EXTERNAL_INVOICE_STATUSES.map((status) => (
                                 <option key={status} value={status}>
@@ -4801,9 +4811,8 @@ export function OrdersPage() {
                                 </option>
                               ))}
                             </NativeComboboxSelect>
-                          </div>
-                          <div className="md:col-span-2 xl:col-span-4">
-                            <Label>{t.patients_notes}</Label>
+                          </Field>
+                          <Field className="md:col-span-2 xl:col-span-4" label={t.patients_notes}>
                             <textarea
                               value={externalInvoiceForm.notes}
                               onChange={(event) =>
@@ -4812,9 +4821,9 @@ export function OrdersPage() {
                                   notes: event.target.value,
                                 }))
                               }
-                              className={`mt-1 ${textareaClassName}`}
+                              className={textareaClassName}
                             />
-                          </div>
+                          </Field>
                         </div>
                         <div className="mt-4 flex justify-end">
                           <Button
@@ -5042,8 +5051,7 @@ export function OrdersPage() {
               </div>
             ) : null}
 
-            <div className="space-y-1.5">
-              <Label>{t.orders_patient}</Label>
+            <Field label={t.orders_patient}>
               <NativeComboboxSelect
                 value={createForm.patientId || "__empty__"}
                 onChange={(event) => {
@@ -5067,7 +5075,7 @@ export function OrdersPage() {
                   </option>
                 ))}
               </NativeComboboxSelect>
-            </div>
+            </Field>
 
             {createForm.patientId ? (
               <div className={cn("rounded-xl p-4", tokens.surface.mutedCard)}>
@@ -5309,8 +5317,7 @@ export function OrdersPage() {
               </div>
             ) : null}
 
-            <div>
-              <Label>{l("Bedarfs- / Intake-Notiz", "Заметка по потребности / intake")}</Label>
+            <Field label={l("Bedarfs- / Intake-Notiz", "Заметка по потребности / intake")}>
               <textarea
                 value={createForm.needsDescription}
                 onChange={(event) =>
@@ -5319,10 +5326,10 @@ export function OrdersPage() {
                     needsDescription: event.target.value,
                   }))
                 }
-                className={`mt-1 ${textareaClassName}`}
+                className={textareaClassName}
                 placeholder={tx.patients_notes}
               />
-            </div>
+            </Field>
 
             </AdminSheetScaffold>
           </form>
@@ -5342,8 +5349,7 @@ export function OrdersPage() {
             ) : null}
 
             <div className="grid gap-4 md:grid-cols-2">
-              <div>
-                <Label>{l("Beschreibung", "Описание")}</Label>
+              <Field label={l("Beschreibung", "Описание")}>
                 <Input
                   required
                   value={leistungForm.description}
@@ -5353,11 +5359,10 @@ export function OrdersPage() {
                       description: event.target.value,
                     }))
                   }
-                  className="mt-1"
+                  className={inputClassName}
                 />
-              </div>
-              <div>
-                <Label>{l("Notizen", "Заметки")}</Label>
+              </Field>
+              <Field label={l("Notizen", "Заметки")}>
                 <Input
                   value={leistungForm.notes}
                   onChange={(event) =>
@@ -5366,14 +5371,13 @@ export function OrdersPage() {
                       notes: event.target.value,
                     }))
                   }
-                  className="mt-1"
+                  className={inputClassName}
                 />
-              </div>
+              </Field>
             </div>
 
             <div className="grid gap-4 md:grid-cols-3">
-              <div>
-                <Label>{l("Menge", "Количество")}</Label>
+              <Field label={l("Menge", "Количество")}>
                 <Input
                   value={leistungForm.quantity}
                   onChange={(event) =>
@@ -5382,11 +5386,10 @@ export function OrdersPage() {
                       quantity: event.target.value,
                     }))
                   }
-                  className="mt-1"
+                  className={inputClassName}
                 />
-              </div>
-              <div>
-                <Label>{l("Einzelpreis", "Цена за единицу")}</Label>
+              </Field>
+              <Field label={l("Einzelpreis", "Цена за единицу")}>
                 <Input
                   value={leistungForm.unitPrice}
                   onChange={(event) =>
@@ -5395,11 +5398,10 @@ export function OrdersPage() {
                       unitPrice: event.target.value,
                     }))
                   }
-                  className="mt-1"
+                  className={inputClassName}
                 />
-              </div>
-              <div>
-                <Label>{l("MwSt. %", "НДС %")}</Label>
+              </Field>
+              <Field label={l("MwSt. %", "НДС %")}>
                 <Input
                   value={leistungForm.vatRate}
                   onChange={(event) =>
@@ -5408,14 +5410,13 @@ export function OrdersPage() {
                       vatRate: event.target.value,
                     }))
                   }
-                  className="mt-1"
+                  className={inputClassName}
                 />
-              </div>
+              </Field>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
-              <div>
-                <Label>{l("Provider", "Провайдер")}</Label>
+              <Field label={l("Provider", "Провайдер")}>
                 <NativeComboboxSelect
                   value={leistungForm.providerId}
                   onChange={(event) => {
@@ -5426,7 +5427,7 @@ export function OrdersPage() {
                       doctorId: "",
                     }));
                   }}
-                  className={`mt-1 ${selectClassName}`}
+                  className={selectClassName}
                 >
                   <option value="">{t.common_provider}</option>
                   {providers.map((provider) => (
@@ -5438,9 +5439,8 @@ export function OrdersPage() {
                     </option>
                   ))}
                 </NativeComboboxSelect>
-              </div>
-              <div>
-                <Label>{l("Arzt", "Врач")}</Label>
+              </Field>
+              <Field label={l("Arzt", "Врач")}>
                 <NativeComboboxSelect
                   value={leistungForm.doctorId}
                   onChange={(event) =>
@@ -5449,7 +5449,7 @@ export function OrdersPage() {
                       doctorId: event.target.value,
                     }))
                   }
-                  className={`mt-1 ${selectClassName}`}
+                  className={selectClassName}
                   disabled={!leistungForm.providerId}
                 >
                   <option value="">{t.common_doctor}</option>
@@ -5460,7 +5460,7 @@ export function OrdersPage() {
                     </option>
                   ))}
                 </NativeComboboxSelect>
-              </div>
+              </Field>
             </div>
 
             <div className={cn("rounded-lg px-4 py-3", tokens.surface.mutedCard)}>
@@ -5491,8 +5491,7 @@ export function OrdersPage() {
             </div>
 
             {leistungForm.isCostPassthrough ? (
-              <div>
-                <Label>{t.orders_supporting_document}</Label>
+              <Field label={t.orders_supporting_document}>
                 <NativeComboboxSelect
                   value={leistungForm.externalDocumentId}
                   onChange={(event) =>
@@ -5501,7 +5500,7 @@ export function OrdersPage() {
                       externalDocumentId: event.target.value,
                     }))
                   }
-                  className={`mt-1 ${selectClassName}`}
+                  className={selectClassName}
                 >
                   <option value="">
                     {t.orders_supporting_document_select_hint}
@@ -5521,7 +5520,7 @@ export function OrdersPage() {
                 <p className="mt-2 text-xs text-slate-500">
                   {t.orders_supporting_document_pin_hint}
                 </p>
-              </div>
+              </Field>
             ) : null}
 
             <div className="flex items-center justify-end gap-2">
