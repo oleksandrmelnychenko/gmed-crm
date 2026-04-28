@@ -139,7 +139,7 @@ const STAFF_SERVICES_REALTIME_EVENTS = [
   "concierge_service.billing_ready",
 ] as const;
 const formInputClassName = shellInputClassName;
-const formSelectClassName = cn(shellSelectClassName, "shadow-none");
+const formSelectClassName = shellSelectClassName;
 const formTextareaClassName = cn(shellTextareaClassName, "min-h-24");
 const SERVICE_KIND_OPTIONS = [
   "hotel",
