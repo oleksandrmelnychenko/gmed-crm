@@ -11,7 +11,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Banner } from "@/components/ui-shell";
-import { AptKpi } from "@/pages/appointments/ui/shared/workspace-primitives";
+import { AdminInlineMetric } from "@/components/admin-page-patterns";
 
 type AppointmentsPageChromeProps = {
   title: string;
@@ -63,10 +63,10 @@ export function AppointmentsPageChrome({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <h1 className="text-[22px] font-semibold leading-tight tracking-tight text-foreground">
-            {title}
-          </h1>
+        <h1 className="text-[22px] font-semibold leading-tight tracking-tight text-foreground">
+          {title}
+        </h1>
+        <div className="flex items-center gap-2">
           {canCreate ? (
             <Button
               type="button"
@@ -78,52 +78,52 @@ export function AppointmentsPageChrome({
               {createLabel}
             </Button>
           ) : null}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-9 w-9 rounded-lg p-0 text-muted-foreground"
+            onClick={onRefresh}
+            title={refreshTitle}
+          >
+            <RefreshCw className="size-3.5" />
+          </Button>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-9 w-9 rounded-lg p-0 text-muted-foreground"
-          onClick={onRefresh}
-          title={refreshTitle}
-        >
-          <RefreshCw className="size-3.5" />
-        </Button>
       </div>
 
-      <div className="grid grid-cols-2 divide-x divide-border/60 xl:grid-cols-6">
-        <AptKpi
+      <div className="flex flex-wrap gap-x-8 gap-y-4">
+        <AdminInlineMetric
           icon={CalendarDays}
           tone="sky"
           label={todayLabel}
           value={todayAppointments}
         />
-        <AptKpi
+        <AdminInlineMetric
           icon={CheckCircle2}
           tone="emerald"
           label={activeLabel}
           value={activeAppointments}
         />
-        <AptKpi
+        <AdminInlineMetric
           icon={Clock3}
           tone="amber"
           label={pendingLabel}
           value={pendingInterpreterResponses}
         />
-        <AptKpi
+        <AdminInlineMetric
           icon={ClipboardList}
           tone="sky"
           label={requestLabel}
           value={appointmentRequestCount}
         />
-        <AptKpi
+        <AdminInlineMetric
           icon={AlertTriangle}
           tone="rose"
           label={attentionLabel}
           value={attentionCount}
         />
-        <AptKpi
+        <AdminInlineMetric
           icon={UsersRound}
-          tone="neutral"
+          tone="slate"
           label={totalLabel}
           value={totalAppointments}
         />

@@ -262,11 +262,24 @@
 
 .appointments-calendar-shell .fc .fc-button {
   border-radius: 999px;
-  box-shadow: none;
+  box-shadow: none !important;
   padding-inline: 0.9rem;
   padding-block: 0.55rem;
-  font-size: 0.8rem;
-  font-weight: 600;
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.2;
+  text-transform: none;
+}
+
+.appointments-calendar-shell .fc .fc-button:focus,
+.appointments-calendar-shell .fc .fc-button:focus-visible,
+.appointments-calendar-shell .fc .fc-button-primary:focus,
+.appointments-calendar-shell .fc .fc-button-primary:focus-visible,
+.appointments-calendar-shell .fc .fc-button-primary:not(:disabled):active:focus,
+.appointments-calendar-shell .fc .fc-button-primary:not(:disabled).fc-button-active:focus {
+  outline: none !important;
+  box-shadow: none !important;
 }
 
 .appointments-calendar-shell .fc .fc-timegrid-slot,

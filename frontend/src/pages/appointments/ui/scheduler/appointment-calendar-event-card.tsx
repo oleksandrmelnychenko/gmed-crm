@@ -340,14 +340,16 @@ export function AppointmentCalendarEventCard({
                     {props.patientName}
                   </div>
                 </div>
-                <div className="min-w-0">
-                  <div className="text-[11.5px] font-medium leading-tight text-muted-foreground">
-                    {appointmentText("Arzt/Provider", "Doctor/Provider", "Doctor/Provider")}
+                {personLine ? (
+                  <div className="min-w-0">
+                    <div className="text-[11.5px] font-medium leading-tight text-muted-foreground">
+                      {appointmentText("Arzt/Provider", "Doctor/Provider", "Doctor/Provider")}
+                    </div>
+                    <div className="mt-0.5 truncate text-[0.72rem] text-foreground">
+                      {personLine}
+                    </div>
                   </div>
-                  <div className="mt-0.5 truncate text-[0.72rem] text-foreground">
-                    {personLine}
-                  </div>
-                </div>
+                ) : null}
               </div>
               {props.recurrenceFrequency ? (
                 <div className="mt-2 rounded-lg border border-border/70 bg-muted/25 p-2">
