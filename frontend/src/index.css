@@ -321,8 +321,8 @@
 
 .appointments-calendar-shell .fc .fc-daygrid-day-top {
   position: absolute;
-  top: 0.35rem;
-  right: 0.35rem;
+  top: 0;
+  right: 0;
   left: auto;
   z-index: 8;
   pointer-events: auto;
@@ -330,6 +330,7 @@
 
 .appointments-calendar-shell .fc .fc-daygrid-day-number {
   position: relative;
+  padding: 1px 4px;
   z-index: 9;
   font-weight: 600;
   color: var(--brand);
@@ -489,6 +490,12 @@
   gap: 0.24rem;
 }
 
+.appointments-calendar-shell .fc .fc-dayGridMonth-view .fc-daygrid-event-harness {
+  margin-bottom: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
 .appointments-calendar-shell .fc .fc-dayGridMonth-view .fc-apt-event-row-primary {
   font-size: 0.71rem;
   line-height: 1.2;
@@ -507,9 +514,23 @@
 }
 
 .appointments-calendar-shell .fc .fc-dayGridMonth-view .fc-apt-event-tag {
-  max-width: 7.2rem;
-  padding: 0.12rem 0.42rem;
-  font-size: 0.52rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  max-width: 100%;
+  height: 1.25rem;
+  border-radius: 9999px;
+  border: 1px solid color-mix(in oklch, var(--apt-event-accent) 26%, white);
+  background: color-mix(in oklch, var(--apt-event-accent) 12%, white);
+  color: color-mix(in oklch, var(--apt-event-accent) 82%, black);
+  padding: 0 0.5rem;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1;
+  text-transform: none;
+  white-space: nowrap;
 }
 
 .appointments-calendar-shell .fc .fc-dayGridMonth-view .fc-apt-event-time {

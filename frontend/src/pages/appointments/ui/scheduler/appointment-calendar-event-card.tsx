@@ -30,6 +30,55 @@ type AppointmentCalendarEventCardProps = {
 
 const MONTH_TOOLTIP_WIDTH_PX = 432;
 
+type StatusBadgePalette = {
+  borderColor: string;
+  backgroundColor: string;
+  color: string;
+};
+
+function resolveStatusBadgePalette(props: CalendarEventExtendedProps): StatusBadgePalette {
+  if (props.isBlocked) {
+    return {
+      borderColor: "#f6e8ce",
+      backgroundColor: "#fff8ed",
+      color: "#ad7a2f",
+    };
+  }
+  if (props.appointmentStatus === "completed") {
+    return {
+      borderColor: "#d7efe2",
+      backgroundColor: "#effaf4",
+      color: "#2d8b61",
+    };
+  }
+  if (props.appointmentStatus === "cancelled") {
+    return {
+      borderColor: "#f7dddf",
+      backgroundColor: "#fff3f4",
+      color: "#b44f4f",
+    };
+  }
+  if (props.appointmentType === "non_medical") {
+    return {
+      borderColor: "#eadffd",
+      backgroundColor: "#f7f3ff",
+      color: "#7a4ea7",
+    };
+  }
+  if (props.appointmentType === "internal") {
+    return {
+      borderColor: "#e4e9f2",
+      backgroundColor: "#f5f7fb",
+      color: "#58637a",
+    };
+  }
+  return {
+    borderColor: "#d9e8fb",
+    backgroundColor: "#f3f8ff",
+    color: "#2f6fbf",
+  };
+}
+
 function resolveCalendarLocale(lang: string): string {
   if (lang === "de") return "de-DE";
   if (lang === "ru") return "ru-RU";
@@ -93,6 +142,7 @@ export function AppointmentCalendarEventCard({
   const monthTooltipTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const props = arg.event.extendedProps as CalendarEventExtendedProps;
+  const statusBadgePalette = resolveStatusBadgePalette(props);
   const statusOrTypeLabel = props.isBlocked
     ? appointmentText("Blockiert", "Заблокировано", "Blocked")
     : props.appointmentStatus === "completed"
@@ -147,7 +197,7 @@ export function AppointmentCalendarEventCard({
     .join("  ");
   const personLine = props.doctorName || props.providerName || props.ownerName || "";
   const daySecondaryLine = [
-    statusOrTypeLabel,
+    isMonthView ? null : statusOrTypeLabel,
     eventTimeRange,
     props.patientName,
     secondaryLine,
@@ -239,6 +289,11 @@ export function AppointmentCalendarEventCard({
       {daySecondaryLine ? (
         <div className="fc-apt-event-row-secondary">{daySecondaryLine}</div>
       ) : null}
+      {isMonthView ? (
+        <div className="mt-auto pt-1">
+          <div className="fc-apt-event-tag">{statusOrTypeLabel}</div>
+        </div>
+      ) : null}
 
       {canOpenMonthTooltip && isMonthTooltipOpen
         ? createPortal(
@@ -262,7 +317,8 @@ export function AppointmentCalendarEventCard({
                 </div>
                 <Badge
                   variant="outline"
-                  className="rounded-full text-[10px] w-fit border-emerald-200 bg-emerald-50 text-emerald-700"
+                  className="rounded-full text-[10px] w-fit"
+                  style={statusBadgePalette}
                 >
                   {statusOrTypeLabel}
                 </Badge>
