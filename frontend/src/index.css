@@ -513,7 +513,9 @@
   min-height: 1.05rem;
 }
 
-.appointments-calendar-shell .fc .fc-dayGridMonth-view .fc-apt-event-tag {
+.appointments-calendar-shell .fc .fc-dayGridMonth-view .fc-apt-event-tag,
+.appointments-calendar-shell .fc .fc-timeGridDay-view .fc-apt-event-tag,
+.appointments-calendar-shell .fc .fc-listWeek-view .fc-apt-event-tag {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -763,19 +765,25 @@
 }
 
 .appointments-calendar-shell .fc-apt-event-tag {
-  max-width: 8rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  max-width: 100%;
+  height: 1.25rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   border-radius: 999px;
-  border: 1px solid color-mix(in oklch, var(--apt-event-accent) 22%, transparent);
-  background: color-mix(in oklch, var(--apt-event-accent) 10%, white);
-  padding: 0.13rem 0.42rem;
-  font-size: 0.54rem;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--apt-event-accent);
+  border: 1px solid color-mix(in oklch, var(--apt-event-accent) 26%, white);
+  background: color-mix(in oklch, var(--apt-event-accent) 12%, white);
+  color: color-mix(in oklch, var(--apt-event-accent) 82%, black);
+  padding: 0 0.5rem;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1;
+  text-transform: none;
 }
 
 .appointments-calendar-shell .fc-apt-event-title,

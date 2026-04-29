@@ -166,8 +166,10 @@ export function AppointmentCalendarEventCard({
       ? `${appointmentText("Dolmetscher", "Переводчик", "Interpreter")}: ${props.interpreterName}`
       : null;
 
-  const isListView = arg.view.type.startsWith("list");
   const isMonthView = arg.view.type === "dayGridMonth";
+  const isWeekView = arg.view.type === "timeGridWeek";
+  const isDayView = arg.view.type === "timeGridDay";
+  const isAllView = arg.view.type === "listWeek";
   const canQuickManage =
     canManageStatus &&
     !props.isBlocked &&
@@ -176,9 +178,8 @@ export function AppointmentCalendarEventCard({
 
   const eventTimeRange = formatEventTimeRange(arg, lang);
   const eventDurationMinutes = resolveEventDurationMinutes(arg);
-  const canListQuickManage = isListView && canQuickManage;
-  const canGridQuickManage = !isListView && canQuickManage;
-  const canOpenMonthTooltip = !isListView && isMonthView;
+  const canTooltipQuickManage = canQuickManage;
+  const canOpenMonthTooltip = isMonthView || isWeekView || isDayView || isAllView;
   const [isMonthTooltipOpen, setIsMonthTooltipOpen] = useState(false);
   const [monthActionScope, setMonthActionScope] =
     useState<AppointmentRecurringActionScope>("single");
@@ -197,7 +198,7 @@ export function AppointmentCalendarEventCard({
     .join("  ");
   const personLine = props.doctorName || props.providerName || props.ownerName || "";
   const daySecondaryLine = [
-    isMonthView ? null : statusOrTypeLabel,
+    isMonthView || isDayView || isAllView ? null : statusOrTypeLabel,
     eventTimeRange,
     props.patientName,
     secondaryLine,
@@ -270,7 +271,7 @@ export function AppointmentCalendarEventCard({
           aria-haspopup="menu"
           aria-expanded={isMonthTooltipOpen}
           aria-controls={`appointment-quick-actions-${arg.event.id}`}
-          className={`absolute top-1 right-1 z-10 inline-flex size-5 items-center justify-center rounded-md border border-border/60 bg-background/85 text-muted-foreground transition-[opacity,color,background-color] hover:bg-background hover:text-foreground ${
+          className={`absolute top-1 right-1 z-10 inline-flex size-5 cursor-pointer items-center justify-center rounded-md border border-border/60 bg-background/85 text-muted-foreground transition-[opacity,color,background-color] hover:bg-background hover:text-foreground ${
             isMonthTooltipOpen
               ? "opacity-100 pointer-events-auto"
               : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
@@ -289,8 +290,8 @@ export function AppointmentCalendarEventCard({
       {daySecondaryLine ? (
         <div className="fc-apt-event-row-secondary">{daySecondaryLine}</div>
       ) : null}
-      {isMonthView ? (
-        <div className="mt-auto pt-1">
+      {isMonthView || isDayView || isAllView ? (
+        <div className={isMonthView ? "mt-auto pt-1" : "mt-1"}>
           <div className="fc-apt-event-tag">{statusOrTypeLabel}</div>
         </div>
       ) : null}
@@ -382,7 +383,7 @@ export function AppointmentCalendarEventCard({
                 >
                   {dictionary.appointments_open_detail}
                 </button>
-                {canGridQuickManage && props.appointmentStatus !== "confirmed" ? (
+                {canTooltipQuickManage && props.appointmentStatus !== "confirmed" ? (
                   <button
                     type="button"
                     className="h-10 flex-1 border-r border-border/70 bg-background px-2 text-[11px] font-medium text-foreground whitespace-nowrap transition-colors hover:bg-muted/60 cursor-pointer last:border-r-0"
@@ -395,7 +396,7 @@ export function AppointmentCalendarEventCard({
                     {dictionary.common_confirm}
                   </button>
                 ) : null}
-                {canGridQuickManage ? (
+                {canTooltipQuickManage ? (
                   <button
                     type="button"
                     className="h-10 flex-1 border-r border-border/70 bg-background px-2 text-[11px] font-medium text-foreground whitespace-nowrap transition-colors hover:bg-muted/60 cursor-pointer last:border-r-0"
@@ -408,7 +409,7 @@ export function AppointmentCalendarEventCard({
                     {dictionary.dash_completed}
                   </button>
                 ) : null}
-                {canGridQuickManage && props.recurrenceFrequency ? (
+                {canTooltipQuickManage && props.recurrenceFrequency ? (
                   <button
                     type="button"
                     className="h-10 flex-1 border-r border-border/70 bg-destructive/10 px-2 text-[11px] font-medium text-destructive whitespace-nowrap transition-colors hover:bg-destructive/20 cursor-pointer last:border-r-0"
@@ -431,47 +432,6 @@ export function AppointmentCalendarEventCard({
           )
         : null}
 
-      {canListQuickManage ? (
-        <div className="mt-2 flex flex-wrap gap-1">
-          {props.appointmentStatus !== "confirmed" ? (
-            <button
-              type="button"
-              className="rounded-full border border-border/60 bg-background px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground"
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                void onStatusChange(arg.event.id, "confirmed");
-              }}
-            >
-              {dictionary.common_confirm}
-            </button>
-          ) : null}
-          <button
-            type="button"
-            className="rounded-full border border-border/60 bg-background px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground"
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              void onStatusChange(arg.event.id, "completed");
-            }}
-          >
-            {dictionary.dash_completed}
-          </button>
-          {props.recurrenceFrequency ? (
-            <button
-              type="button"
-              className="rounded-full border border-destructive/30 bg-destructive/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-destructive"
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                void onStatusChange(arg.event.id, "cancelled", "following");
-              }}
-            >
-              {dictionary.appointments_cancel_this_and_following}
-            </button>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   );
 }
