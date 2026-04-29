@@ -6,12 +6,12 @@ import type {
 } from "@/pages/appointments/model/types";
 
 export function appointmentEventClass(item: AppointmentListItem) {
-  if (item.is_blocked) return "fc-apt-event fc-apt-event-blocked";
-  if (item.status === "completed") return "fc-apt-event fc-apt-event-completed";
-  if (item.status === "cancelled") return "fc-apt-event fc-apt-event-cancelled";
-  if (item.type === "non_medical") return "fc-apt-event fc-apt-event-concierge";
-  if (item.type === "internal") return "fc-apt-event fc-apt-event-internal";
-  return "fc-apt-event fc-apt-event-medical";
+  if (item.is_blocked) return "fc-apt-event-blocked";
+  if (item.status === "completed") return "fc-apt-event-completed";
+  if (item.status === "cancelled") return "fc-apt-event-cancelled";
+  if (item.type === "non_medical") return "fc-apt-event-concierge";
+  if (item.type === "internal") return "fc-apt-event-internal";
+  return "fc-apt-event-medical";
 }
 
 export function toCalendarEvent(

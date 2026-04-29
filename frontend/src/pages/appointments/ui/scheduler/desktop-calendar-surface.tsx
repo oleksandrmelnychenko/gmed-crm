@@ -256,6 +256,7 @@ export function DesktopCalendarSurface({
             hour12: false,
             omitZeroMinute: false,
           }}
+          eventDisplay="block"
           displayEventEnd={false}
           initialView={calendarView}
           initialDate={calendarDate}

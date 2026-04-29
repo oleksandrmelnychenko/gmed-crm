@@ -1000,7 +1000,6 @@ function StaffAppointmentsPage() {
     activeCalendarQuickActionScope,
     dismissCalendarQuickActionMenu,
     handleCalendarQuickActionScopeChange,
-    openCalendarQuickActionLayer,
   } = useAppointmentCalendarQuickActions({
     appointmentsIndex,
   });
@@ -1428,17 +1427,13 @@ function StaffAppointmentsPage() {
         arg={arg}
         lang={lang}
         canManageStatus={permissions.canManageStatus}
-        activeQuickActionAppointmentId={
-          calendarQuickActionMenu?.appointmentId ?? null
-        }
         dictionary={tr}
-        onOpenQuickActions={openCalendarQuickActionLayer}
+        onOpenDetail={openDetailSheet}
         onStatusChange={performStatusChange}
       />
     ),
     [
-      calendarQuickActionMenu?.appointmentId,
-      openCalendarQuickActionLayer,
+      openDetailSheet,
       performStatusChange,
       permissions.canManageStatus,
       lang,
