@@ -1,0 +1,38 @@
+project_name = "gmed"
+environment  = "dev"
+aws_region   = "eu-central-1"
+
+vpc_cidr           = "10.42.0.0/16"
+public_subnet_cidr = "10.42.10.0/24"
+
+# Restrict this to your office/VPN/public IP range.
+allowed_ssh_cidrs = ["203.0.113.10/32"]
+allowed_http_cidrs = ["0.0.0.0/0"]
+
+instance_type     = "t4g.micro"
+cpu_architecture  = "arm64"
+associate_eip     = true
+root_volume_size_gb = 30
+
+# Optional: if you already have an EC2 key pair.
+key_name = null
+
+app_repo_url = "https://github.com/oleksandrmelnychenko/gmed-crm.git"
+app_branch   = "main"
+
+backend_port  = 3000
+frontend_port = 8080
+
+ssm_parameter_names = {
+  database_url                  = "/gmed/dev/DATABASE_URL"
+  jwt_secret                    = "/gmed/dev/JWT_SECRET"
+  message_encryption_keys       = "/gmed/dev/MESSAGE_ENCRYPTION_KEYS"
+  message_encryption_key_active = "/gmed/dev/MESSAGE_ENCRYPTION_KEY_ACTIVE"
+  audit_ip_salt                 = "/gmed/dev/AUDIT_IP_SALT"
+  cors_origin                   = "/gmed/dev/CORS_ORIGIN"
+}
+
+monthly_budget_usd  = 60
+budget_email        = "you@example.com"
+cpu_alarm_threshold = 80
+

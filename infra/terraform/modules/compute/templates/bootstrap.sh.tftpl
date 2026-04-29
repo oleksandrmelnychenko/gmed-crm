@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
+
+apt-get update
+apt-get install -y --no-install-recommends \
+  ca-certificates \
+  curl \
+  git \
+  jq \
+  unzip \
+  docker.io \
+  docker-compose-plugin \
+  awscli
+
+systemctl enable docker
+systemctl start docker
+
+mkdir -p /opt/gmed
+cd /opt/gmed
+
+if [[ ! -d repo/.git ]]; then
+  git clone --depth 1 --branch "${app_branch}" "${app_repo_url}" repo
+else
+  cd repo
+  git fetch origin "${app_branch}"
+  git checkout "${app_branch}"
+  git reset --hard "origin/${app_branch}"
+  cd ..
+fi
+
+fetch_ssm() {
+  local param_name="$1"
+  aws ssm get-parameter \
+    --name "$param_name" \
+    --with-decryption \
+    --region "${aws_region}" \
+    --query 'Parameter.Value' \
+    --output text
+}
+
+DATABASE_URL="$(fetch_ssm "${database_url_param}")"
+JWT_SECRET="$(fetch_ssm "${jwt_secret_param}")"
+MESSAGE_ENCRYPTION_KEYS="$(fetch_ssm "${keys_param}")"
+MESSAGE_ENCRYPTION_KEY_ACTIVE="$(fetch_ssm "${active_key_param}")"
+AUDIT_IP_SALT="$(fetch_ssm "${audit_salt_param}")"
+CORS_ORIGIN="$(fetch_ssm "${cors_origin_param}")"
+
+cat > /opt/gmed/release.env <<EOF
+GMED_DATABASE_URL=${DATABASE_URL}
+GMED_JWT_SECRET=${JWT_SECRET}
+GMED_MESSAGE_ENCRYPTION_KEYS=${MESSAGE_ENCRYPTION_KEYS}
+GMED_MESSAGE_ENCRYPTION_KEY_ACTIVE=${MESSAGE_ENCRYPTION_KEY_ACTIVE}
+GMED_AUDIT_IP_SALT=${AUDIT_IP_SALT}
+GMED_CORS_ORIGIN=${CORS_ORIGIN}
+BACKEND_PORT=${backend_port}
+FRONTEND_PORT=${frontend_port}
+EOF
+
+chmod 600 /opt/gmed/release.env
+
+cd /opt/gmed/repo
+docker compose \
+  --env-file /opt/gmed/release.env \
+  -f docker-compose.yml \
+  -f docker-compose.release.yml \
+  up -d --build
+
