@@ -295,6 +295,15 @@ function titleWithDot(title: ReactNode) {
   );
 }
 
+function eyebrowWithDot(label: ReactNode) {
+  return (
+    <span className={cn("inline-flex items-center gap-2", tokens.text.eyebrow)}>
+      <span aria-hidden className="size-2 rounded-full bg-amber-500" />
+      <span>{label}</span>
+    </span>
+  );
+}
+
 export function OrdersPage() {
   const { t, lang } = useLang();
   const tx = t as unknown as Record<string, string>;
@@ -309,6 +318,13 @@ export function OrdersPage() {
   const permissions = orderPermissions(user?.role);
   const locale = lang === "de" ? "de-DE" : "ru-RU";
   const l = useCallback((de: string, ru: string) => (lang === "de" ? de : ru), [lang]);
+  const normalizeLeistungDescription = useCallback(
+    (value: string) =>
+      value === "Discovery and provider shortlist"
+        ? l("Bedarfsklärung", "Уточнение потребности")
+        : value,
+    [l],
+  );
   const phaseLabels = useMemo(
     () => ({
       discovery: l("Bedarfsklärung", "Уточнение потребности"),
@@ -1941,7 +1957,7 @@ export function OrdersPage() {
               {debtQueueError}
             </div>
           ) : debtQueueLoading ? (
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+            <div className="rounded-2xl border border-border px-4 py-5 text-sm text-muted-foreground">
               <LoaderCircle className="mb-2 size-4 animate-spin" />
               {l(
                 "Debt-Management-Queue wird geladen...",
@@ -1962,17 +1978,17 @@ export function OrdersPage() {
                   key={item.order_id}
                   type="button"
                   onClick={() => openOrder(item.order_id, item.patient_id)}
-                  className="rounded-2xl border border-slate-200 bg-white px-4 py-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md"
+                  className="rounded-2xl border border-border px-4 py-4 text-left transition hover:-translate-y-0.5 hover:border-border"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <div className="font-mono text-xs font-semibold tracking-[0.16em] text-slate-500">
+                      <div className="font-mono text-xs font-semibold tracking-[0.16em] text-muted-foreground">
                         {item.order_number}
                       </div>
-                      <div className="mt-2 text-sm font-semibold text-slate-950">
+                      <div className="mt-2 text-sm font-semibold text-foreground">
                         {item.patient_name}
                       </div>
-                      <div className="mt-1 text-xs text-slate-500">
+                      <div className="mt-1 text-xs text-muted-foreground">
                         {item.patient_code}
                       </div>
                     </div>
@@ -1983,7 +1999,7 @@ export function OrdersPage() {
                       {debtStatusLabel(item.effective_status)}
                     </Badge>
                   </div>
-                  <div className="mt-4 space-y-2 text-sm text-slate-600">
+                  <div className="mt-4 space-y-2 text-sm text-muted-foreground">
                     <div>
                       {item.blocking_reason
                         ? localizedBlockingReason(item.blocking_reason)
@@ -2308,7 +2324,7 @@ export function OrdersPage() {
                           label={tx.patients_created}
                           value={
                             <span className="inline-flex items-center gap-2">
-                              <CalendarClock className="size-4 text-slate-500" />
+                              <CalendarClock className="size-4 text-muted-foreground" />
                               {formatDateTimeLabel(orderDetail.created_at)}
                             </span>
                           }
@@ -2317,7 +2333,7 @@ export function OrdersPage() {
                           label={tx.common_loading}
                           value={
                             <span className="inline-flex items-center gap-2">
-                              <RefreshCw className="size-4 text-slate-500" />
+                              <RefreshCw className="size-4 text-muted-foreground" />
                               {formatDateTimeLabel(orderDetail.updated_at)}
                             </span>
                           }
@@ -2353,7 +2369,7 @@ export function OrdersPage() {
                     </AdminTableCard>
 
                     <AdminTableCard
-                      title={titleWithDot(tx.providers_linked_patients)}
+                      title={eyebrowWithDot(l("Bedarfsklärung", "Уточнение потребности"))}
                       description={l(
                         "Direkt in Patienten-, Fall- und Terminkontexte springen, ohne Filter manuell neu aufzubauen.",
                         "Переходите в соседние контексты пациента, кейса и приёмов без ручной пересборки фильтров.",
@@ -2525,11 +2541,11 @@ export function OrdersPage() {
 
                       <div className="grid gap-4 xl:grid-cols-3">
                         {canManageDebt ? (
-                          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                          <div className="rounded-2xl border border-border p-4">
                             <div className="text-sm font-semibold text-foreground">
-                              {l("Debt-Management", "Debt-management")}
+                              {titleWithDot(l("Debt-Management", "Debt-management"))}
                             </div>
-                            <div className="mt-1 text-sm text-slate-500">
+                            <div className="mt-1 text-sm text-muted-foreground">
                               {l(
                                 "Aktiven Debt-Workflow nachverfolgen, Owner zuweisen und den nachsten Review-Punkt setzen.",
                                 "Отслеживать активный debt-workflow, назначать ответственного и ставить следующую точку ревью.",
@@ -2643,7 +2659,7 @@ export function OrdersPage() {
                                   placeholder={l("Losungsnotiz", "Заметка по решению")}
                                 />
                               </Field>
-                              <div className="grid gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-3 text-xs text-slate-500">
+                              <div className="grid gap-2 rounded-2xl border border-border px-3 py-3 text-xs text-muted-foreground">
                                 <div>
                                   {l("Owner", "Ответственный")}:{" "}
                                   {orderDetail.process_gates.debt_management
@@ -2693,11 +2709,11 @@ export function OrdersPage() {
                         ) : null}
 
                         {user?.role === "billing" || user?.role === "ceo" ? (
-                          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                          <div className="rounded-2xl border border-border p-4">
                             <div className="text-sm font-semibold text-foreground">
-                              {l("Billing-Release", "Billing-release")}
+                              {titleWithDot(l("Billing-Release", "Billing-release"))}
                             </div>
-                            <div className="mt-1 text-sm text-slate-500">
+                            <div className="mt-1 text-sm text-muted-foreground">
                               {l(
                                 "Billing entscheidet, ob die Durchfuhrung ausserhalb der Paketdeckung weiterlaufen darf.",
                                 "Биллинг решает, может ли исполнение продолжаться вне покрытия пакетом.",
@@ -2752,11 +2768,11 @@ export function OrdersPage() {
 
                         {user?.role === "patient_manager" ||
                         user?.role === "ceo" ? (
-                          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                          <div className="rounded-2xl border border-border p-4">
                             <div className="text-sm font-semibold text-foreground">
-                              {l("Paketdeckung", "Покрытие пакетом")}
+                              {titleWithDot(l("Paketdeckung", "Покрытие пакетом"))}
                             </div>
-                            <div className="mt-1 text-sm text-slate-500">
+                            <div className="mt-1 text-sm text-muted-foreground">
                               {l(
                                 "Bestehende Paketdeckung kann Wiederholungsleistungen ohne separates Billing-Release freigeben.",
                                 "Действующее покрытие пакетом может разблокировать повторную работу без отдельного billing-release.",
@@ -2954,11 +2970,13 @@ export function OrdersPage() {
                       {user?.role === "patient_manager" ||
                       user?.role === "ceo" ? (
                         <div className="grid gap-4 xl:grid-cols-2">
-                          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                          <div className="rounded-2xl border border-border p-4">
                             <div className="text-sm font-semibold text-foreground">
-                              {l("Planungssteuerung", "Управление планированием")}
+                              {titleWithDot(
+                                l("Planungssteuerung", "Управление планированием"),
+                              )}
                             </div>
-                            <div className="mt-1 text-sm text-slate-500">
+                            <div className="mt-1 text-sm text-muted-foreground">
                               {l(
                                 "Behandlungsplan fixieren, Bedarf an nicht-medizinischen Leistungen oder Dolmetscher-Support markieren und Vorbereitungsunterlagen steuern.",
                                 "Зафиксировать план лечения, отметить необходимость немедицинских услуг или поддержки переводчика и провести подготовительные документы.",
@@ -3097,11 +3115,13 @@ export function OrdersPage() {
                             </div>
                           </div>
 
-                          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                          <div className="rounded-2xl border border-border p-4">
                             <div className="text-sm font-semibold text-foreground">
-                              {l("Operative Übergabe", "Операционная передача")}
+                              {titleWithDot(
+                                l("Operative Übergabe", "Операционная передача"),
+                              )}
                             </div>
-                            <div className="mt-1 text-sm text-slate-500">
+                            <div className="mt-1 text-sm text-muted-foreground">
                               {l(
                                 "Verknüpfte Arbeitsbereiche nutzen, um medizinische Slots, nicht-medizinische Leistungen, Dolmetscher-Zuweisung und Vorbereitungsunterlagen zu bestätigen.",
                                 "Используйте связанные рабочие пространства, чтобы подтвердить медицинские слоты, немедицинские услуги, назначение переводчика и подготовительные документы.",
@@ -3152,7 +3172,7 @@ export function OrdersPage() {
                               </Button>
                               {orderDetail.planning_preparation
                                 .treatment_plan_note ? (
-                                <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+                                <div className="rounded-xl border border-border px-4 py-3 text-sm text-muted-foreground">
                                   {
                                     orderDetail.planning_preparation
                                       .treatment_plan_note
@@ -3285,11 +3305,13 @@ export function OrdersPage() {
                       ) : null}
 
                       <div className="grid gap-4 xl:grid-cols-2">
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="rounded-2xl border border-border p-4">
                           <div className="text-sm font-semibold text-foreground">
-                            {l("Steuerung der Durchführung", "Управление исполнением")}
+                            {titleWithDot(
+                              l("Steuerung der Durchführung", "Управление исполнением"),
+                            )}
                           </div>
-                          <div className="mt-1 text-sm text-slate-500">
+                          <div className="mt-1 text-sm text-muted-foreground">
                             {l(
                               "Ankunft, Leistungsumfang und Klärung von Abweichungen oder Zwischenfällen bestätigen.",
                               "Подтвердить прибытие, объём оказанных услуг и то, что отклонения исполнения закрыты.",
@@ -3449,11 +3471,13 @@ export function OrdersPage() {
                           </fieldset>
                         </div>
 
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="rounded-2xl border border-border p-4">
                           <div className="text-sm font-semibold text-foreground">
-                            {l("Nachweise der Durchführung", "Подтверждения исполнения")}
+                            {titleWithDot(
+                              l("Nachweise der Durchführung", "Подтверждения исполнения"),
+                            )}
                           </div>
-                          <div className="mt-1 text-sm text-slate-500">
+                          <div className="mt-1 text-sm text-muted-foreground">
                             {l(
                               "Verknüpfte Arbeitsbereiche nutzen, um die restliche operative Spur zu schließen.",
                               "Используйте связанные рабочие пространства, чтобы закрыть оставшийся операционный след.",
@@ -3647,11 +3671,13 @@ export function OrdersPage() {
                       ) : null}
 
                       <div className="grid gap-4 xl:grid-cols-2">
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="rounded-2xl border border-border p-4">
                           <div className="text-sm font-semibold text-foreground">
-                            {l("Steuerung der Nachsorge", "Управление follow-up")}
+                            {titleWithDot(
+                              l("Steuerung der Nachsorge", "Управление follow-up"),
+                            )}
                           </div>
-                          <div className="mt-1 text-sm text-slate-500">
+                          <div className="mt-1 text-sm text-muted-foreground">
                             {l(
                               "Markieren, welche Meilensteine erforderlich sind und ob die finale Übergabe an den Patienten vollständig ist.",
                               "Отметьте, какие этапы обязательны и завершена ли финальная передача пациенту.",
@@ -3829,14 +3855,16 @@ export function OrdersPage() {
                           </fieldset>
                         </div>
 
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="rounded-2xl border border-border p-4">
                           <div className="text-sm font-semibold text-foreground">
-                            {l(
+                            {titleWithDot(
+                              l(
                               "Empfohlene Meilenstein-Anker",
                               "Рекомендуемые контрольные даты",
+                            ),
                             )}
                           </div>
-                          <div className="mt-1 text-sm text-slate-500">
+                          <div className="mt-1 text-sm text-muted-foreground">
                             {l(
                               "Bestehende Termin-Presets und Portalsichtbarkeit lesen diese auftragsbezogenen Meilensteine aus.",
                               "Текущие пресеты приёмов и видимость в портале читают эти вехи уровня заказа.",
@@ -3955,7 +3983,7 @@ export function OrdersPage() {
                               "rounded-full border px-3 py-2 text-sm transition",
                               phaseDraft === phase
                                 ? phaseClassName(phase)
-                                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300",
+                                : "border-border text-muted-foreground hover:border-border",
                               disabled && "cursor-not-allowed opacity-60",
                             )}
                           >
@@ -3991,7 +4019,7 @@ export function OrdersPage() {
                       ) : (
                         <Badge
                           variant="outline"
-                          className="rounded-full border-slate-200 bg-slate-100 text-slate-600"
+                          className="rounded-full border-border bg-muted/50 text-muted-foreground"
                         >
                           {l("Billing nur lesend", "Только чтение для биллинга")}
                         </Badge>
@@ -3999,7 +4027,7 @@ export function OrdersPage() {
                     </div>
                   </div>
                   {orderDetail.lifecycle?.stage_entered_at ? (
-                    <p className="mt-4 text-sm text-slate-600">
+                    <p className="mt-4 text-sm text-muted-foreground">
                       {l("Aktuelle Phase seit", "Текущая фаза с")}{" "}
                       {formatDateTimeLabel(orderDetail.lifecycle.stage_entered_at)}.
                     </p>
@@ -4028,16 +4056,16 @@ export function OrdersPage() {
                       {orderDetail.lifecycle.history.map((event, index) => (
                         <div
                           key={`${event.created_at}-${event.to_stage}-${index}`}
-                          className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                          className="rounded-2xl border border-border px-4 py-3"
                         >
                           <div className="flex flex-wrap items-center justify-between gap-3">
                             <div>
-                              <p className="text-sm font-medium text-slate-900">
+                              <p className="text-sm font-medium text-foreground">
                                 {event.from_stage
                                   ? `${phaseLabel(event.from_stage)} -> ${phaseLabel(event.to_stage)}`
                                   : phaseLabel(event.to_stage)}
                               </p>
-                              <p className="mt-1 text-xs uppercase tracking-[0.14em] text-slate-500">
+                              <p className="mt-1 text-xs uppercase tracking-[0.14em] text-muted-foreground">
                                 {transitionKindLabel(event.transition_kind)}
                               </p>
                             </div>
@@ -4046,7 +4074,7 @@ export function OrdersPage() {
                             </span>
                           </div>
                           {event.note ? (
-                            <p className="mt-2 text-sm text-slate-600">
+                            <p className="mt-2 text-sm text-muted-foreground">
                               {event.note}
                             </p>
                           ) : null}
@@ -4098,14 +4126,14 @@ export function OrdersPage() {
                           {workflowChecklistGroups.map((group) => (
                             <div
                               key={group.key}
-                              className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                              className="rounded-2xl border border-border p-4"
                             >
                               <div className="flex items-center justify-between gap-3">
                                 <div>
-                                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                                     {group.label}
                                   </p>
-                                  <p className="mt-1 text-sm text-slate-600">
+                                  <p className="mt-1 text-sm text-muted-foreground">
                                     {
                                       group.items.filter(
                                         (item) => !item.is_completed,
@@ -4117,7 +4145,7 @@ export function OrdersPage() {
                                 </div>
                                 <Badge
                                   variant="outline"
-                                  className="rounded-full border-slate-200 bg-white text-slate-700"
+                                  className="rounded-full border-border text-muted-foreground"
                                 >
                                   {group.items.length} {l("Punkte", "пункт(ов)")}
                                 </Badge>
@@ -4130,13 +4158,13 @@ export function OrdersPage() {
                                       "rounded-2xl border px-4 py-4",
                                       item.is_completed
                                         ? "border-emerald-200 bg-emerald-50/70"
-                                        : "border-slate-200 bg-white",
+                                        : "border-border",
                                     )}
                                   >
                                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                                       <div className="min-w-0">
                                         <div className="flex flex-wrap items-center gap-2">
-                                          <p className="text-sm font-medium text-slate-950">
+                                          <p className="text-sm font-medium text-foreground">
                                             {item.item_text}
                                           </p>
                                           <Badge
@@ -4167,7 +4195,7 @@ export function OrdersPage() {
                                                 : item.linked_task_status ?? l("offen", "открыто")}
                                           </Badge>
                                         </div>
-                                        <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-500">
+                                        <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
                                           <span>
                                             {l("Verantwortlich", "Ответственный")}:{" "}
                                             {item.owner_name
@@ -4214,7 +4242,7 @@ export function OrdersPage() {
                       {permissions.canManagePhase ? (
                         <form
                           onSubmit={handleAddWorkflowItem}
-                          className="rounded-2xl border border-slate-200 bg-white p-4"
+                          className="rounded-2xl border border-border p-4"
                         >
                           <div className="grid gap-4 md:grid-cols-2">
                             <Field
@@ -4339,42 +4367,46 @@ export function OrdersPage() {
 
                 {shouldRenderOrderSection("services") ? (
                   <>
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                      <StatCard
+                    <div className="flex flex-wrap gap-6 rounded-xl border border-border bg-card px-4 py-3">
+                      <AdminInlineMetric
+                        icon={ClipboardList}
                         label={tx.providers_services}
                         value={String(leistungMetrics.total)}
                         description={l(
                           "Aktuelle Leistungspositionen in diesem Auftrag.",
-                          "Текущие позиции услуг в этом заказе.",
+                          "\u0422\u0435\u043a\u0443\u0449\u0438\u0435 \u043f\u043e\u0437\u0438\u0446\u0438\u0438 \u0443\u0441\u043b\u0443\u0433 \u0432 \u044d\u0442\u043e\u043c \u0437\u0430\u043a\u0430\u0437\u0435.",
                         )}
-                        icon={<ClipboardList className="size-4" />}
+                        tone="sky"
                       />
-                      <StatCard
-                        label={l("Zur Freigabe", "Ждут утверждения")}
+                      <AdminInlineMetric
+                        icon={CheckCircle2}
+                        label={l("Zur Freigabe", "\u0416\u0434\u0443\u0442 \u0443\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u044f")}
                         value={String(leistungMetrics.delivered)}
                         description={l(
                           "Leistungspositionen, die auf PM-Freigabe warten.",
-                          "Позиции услуг, ожидающие утверждения PM.",
+                          "\u041f\u043e\u0437\u0438\u0446\u0438\u0438 \u0443\u0441\u043b\u0443\u0433, \u043e\u0436\u0438\u0434\u0430\u044e\u0449\u0438\u0435 \u0443\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u044f PM.",
                         )}
-                        icon={<CheckCircle2 className="size-4" />}
+                        tone="amber"
                       />
-                      <StatCard
-                        label={l("Freigegeben", "Утверждено")}
+                      <AdminInlineMetric
+                        icon={Wallet}
+                        label={l("Freigegeben", "\u0423\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u043e")}
                         value={String(leistungMetrics.approved)}
                         description={l(
                           "Bereits freigegebene Leistungspositionen in diesem Auftrag.",
-                          "Позиции услуг, уже утверждённые в текущем заказе.",
+                          "\u041f\u043e\u0437\u0438\u0446\u0438\u0438 \u0443\u0441\u043b\u0443\u0433, \u0443\u0436\u0435 \u0443\u0442\u0432\u0435\u0440\u0436\u0434\u0451\u043d\u043d\u044b\u0435 \u0432 \u0442\u0435\u043a\u0443\u0449\u0435\u043c \u0437\u0430\u043a\u0430\u0437\u0435.",
                         )}
-                        icon={<Wallet className="size-4" />}
+                        tone="emerald"
                       />
-                      <StatCard
+                      <AdminInlineMetric
+                        icon={Building2}
                         label={tx.contracts_total}
                         value={formatMoney(leistungMetrics.gross)}
                         description={l(
                           "Menge x Preis uber alle sichtbaren Leistungspositionen.",
-                          "Количество x цена по всем видимым позициям услуг.",
+                          "\u041a\u043e\u043b\u0438\u0447\u0435\u0441\u0442\u0432\u043e x \u0446\u0435\u043d\u0430 \u043f\u043e \u0432\u0441\u0435\u043c \u0432\u0438\u0434\u0438\u043c\u044b\u043c \u043f\u043e\u0437\u0438\u0446\u0438\u044f\u043c \u0443\u0441\u043b\u0443\u0433.",
                         )}
-                        icon={<Building2 className="size-4" />}
+                        tone="slate"
                       />
                     </div>
 
@@ -4414,13 +4446,13 @@ export function OrdersPage() {
                       {orderDetail.leistungen.map((leistung) => (
                         <div
                           key={leistung.id}
-                          className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                          className="rounded-2xl border border-border p-4"
                         >
                           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                             <div className="space-y-3">
                               <div className="flex flex-wrap items-center gap-2">
-                                <div className="text-base font-semibold text-slate-950">
-                                  {leistung.description}
+                                <div className="text-base font-semibold text-foreground">
+                                  {normalizeLeistungDescription(leistung.description)}
                                 </div>
                                 <Badge
                                   variant="outline"
@@ -4595,7 +4627,7 @@ export function OrdersPage() {
                               </div>
 
                               {leistung.notes ? (
-                                <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+                                <div className="rounded-xl border border-border px-4 py-3 text-sm text-muted-foreground">
                                   {leistung.notes}
                                 </div>
                               ) : null}
@@ -4679,14 +4711,16 @@ export function OrdersPage() {
                     {permissions.canManageExternalInvoices ? (
                       <form
                         onSubmit={handleCreateExternalInvoice}
-                        className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                        className="rounded-2xl border border-border p-4"
                       >
                         <div className="flex items-start justify-between gap-4">
                           <div>
                             <h3 className="text-sm font-semibold text-foreground">
-                              {l("Externe Rechnung erfassen", "Зарегистрировать внешний счёт")}
+                              {titleWithDot(
+                                l("Externe Rechnung erfassen", "Зарегистрировать внешний счёт"),
+                              )}
                             </h3>
-                            <p className="mt-1 text-sm text-slate-500">
+                            <p className="mt-1 text-sm text-muted-foreground">
                               {l(
                                 "Für eingehende Klinik- oder Partnerrechnungen verwenden, die ein Fristen-Tracking brauchen.",
                                 "Используйте для входящих счетов клиник или партнёров, по которым нужно отслеживать дедлайны.",
@@ -4858,12 +4892,12 @@ export function OrdersPage() {
                           (invoice) => (
                             <div
                               key={invoice.id}
-                              className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                              className="rounded-2xl border border-border p-4"
                             >
                               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                                 <div className="space-y-3">
                                   <div className="flex flex-wrap items-center gap-2">
-                                    <div className="text-base font-semibold text-slate-950">
+                                    <div className="text-base font-semibold text-foreground">
                                       {invoice.external_invoice_number}
                                     </div>
                                     <Badge
@@ -4930,7 +4964,7 @@ export function OrdersPage() {
                                     />
                                   </div>
                                   {invoice.notes ? (
-                                    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+                                    <div className="rounded-xl border border-border px-4 py-3 text-sm text-muted-foreground">
                                       {invoice.notes}
                                     </div>
                                   ) : null}
@@ -5517,7 +5551,7 @@ export function OrdersPage() {
                     </option>
                   ))}
                 </NativeComboboxSelect>
-                <p className="mt-2 text-xs text-slate-500">
+                <p className="mt-2 text-xs text-muted-foreground">
                   {t.orders_supporting_document_pin_hint}
                 </p>
               </Field>
@@ -5544,3 +5578,8 @@ export function OrdersPage() {
     </div>
   );
 }
+
+
+
+
+
