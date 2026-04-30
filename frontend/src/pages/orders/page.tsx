@@ -36,12 +36,6 @@ import {
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Sheet,
@@ -5370,12 +5364,22 @@ export function OrdersPage() {
         </SheetContent>
       </Sheet>
 
-      <Dialog open={leistungOpen} onOpenChange={resetLeistungDialog}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{l("Leistung hinzufugen", "Добавить Leistung")}</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={handleAddLeistung} className="space-y-4">
+      <Sheet open={leistungOpen} onOpenChange={resetLeistungDialog}>
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
+          <form onSubmit={handleAddLeistung} className="flex h-full min-h-0 flex-col">
+            <AdminSheetScaffold
+              title={l("Leistung hinzufugen", "\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c Leistung")}
+              footer={
+                <SheetFormFooter
+                  cancelLabel={t.common_cancel}
+                  submitLabel={t.common_save}
+                  submittingLabel={t.common_save}
+                  submitting={leistungSaving}
+                  submitDisabled={leistungSaving}
+                  onCancel={() => resetLeistungDialog(false)}
+                />
+              }
+            >
             {leistungError ? (
               <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                 {leistungError}
@@ -5557,24 +5561,10 @@ export function OrdersPage() {
               </Field>
             ) : null}
 
-            <div className="flex items-center justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => resetLeistungDialog(false)}
-              >
-                {t.common_cancel}
-              </Button>
-              <Button type="submit" disabled={leistungSaving}>
-                {leistungSaving ? (
-                  <LoaderCircle className="mr-2 size-4 animate-spin" />
-                ) : null}
-                {t.common_save}
-              </Button>
-            </div>
+            </AdminSheetScaffold>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
