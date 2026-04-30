@@ -17,7 +17,6 @@ import {
   AdminSheetScaffold,
   AdminInlineMetric,
   AdminTableCard,
-  AdminToolbar,
 } from "@/components/admin-page-patterns";
 import { DataTable } from "@/components/data-table/data-table";
 import type { ColumnDef } from "@/components/data-table/types";
@@ -1960,17 +1959,15 @@ export function ReportsPage() {
                 description={text.clinicReport.description}
                 count={data.clinics.length}
                 accessory={
-                  <AdminToolbar>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={exportingSection === "clinics"}
-                      onClick={() => void exportSection("clinics")}
-                    >
-                      {exportingSection === "clinics" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
-                      {text.exportCsv}
-                    </Button>
-                  </AdminToolbar>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={exportingSection === "clinics"}
+                    onClick={() => void exportSection("clinics")}
+                  >
+                    {exportingSection === "clinics" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
+                    {text.exportCsv}
+                  </Button>
                 }
               >
                 <div className="p-3">
@@ -2010,17 +2007,15 @@ export function ReportsPage() {
                 description={text.serviceTypeReport.description}
                 count={data.service_types.length}
                 accessory={
-                  <AdminToolbar>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={exportingSection === "service_types"}
-                      onClick={() => void exportSection("service_types")}
-                    >
-                      {exportingSection === "service_types" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
-                      {text.exportCsv}
-                    </Button>
-                  </AdminToolbar>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={exportingSection === "service_types"}
+                    onClick={() => void exportSection("service_types")}
+                  >
+                    {exportingSection === "service_types" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
+                    {text.exportCsv}
+                  </Button>
                 }
               >
                 <div className="p-3">
@@ -2040,17 +2035,15 @@ export function ReportsPage() {
                 description={text.medicalProviders.description}
                 count={data.medical_providers.length}
                 accessory={
-                  <AdminToolbar>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={exportingSection === "medical_providers"}
-                      onClick={() => void exportSection("medical_providers")}
-                    >
-                      {exportingSection === "medical_providers" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
-                      {text.exportCsv}
-                    </Button>
-                  </AdminToolbar>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={exportingSection === "medical_providers"}
+                    onClick={() => void exportSection("medical_providers")}
+                  >
+                    {exportingSection === "medical_providers" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
+                    {text.exportCsv}
+                  </Button>
                 }
               >
                 <div className="p-3">
@@ -2075,10 +2068,10 @@ export function ReportsPage() {
                 description={text.providerCosts.description}
                 count={visibleProviderCosts.length}
                 accessory={
-                    <AdminToolbar>
-                      {selectedClinic ? (
-                        <Badge variant="outline">{selectedClinic.name}</Badge>
-                      ) : null}
+                  <div className="flex items-center gap-2">
+                    {selectedClinic ? (
+                      <Badge variant="outline">{selectedClinic.name}</Badge>
+                    ) : null}
                     <Button
                       variant="outline"
                       size="sm"
@@ -2088,7 +2081,7 @@ export function ReportsPage() {
                       {exportingSection === "provider_costs" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
                       {text.exportCsv}
                     </Button>
-                  </AdminToolbar>
+                  </div>
                 }
               >
                 <div className="p-3">
@@ -2119,17 +2112,15 @@ export function ReportsPage() {
                 description={text.nonMedicalProviders.description}
                 count={data.non_medical_providers.length}
                 accessory={
-                  <AdminToolbar>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={exportingSection === "non_medical_providers"}
-                      onClick={() => void exportSection("non_medical_providers")}
-                    >
-                      {exportingSection === "non_medical_providers" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
-                      {text.exportCsv}
-                    </Button>
-                  </AdminToolbar>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={exportingSection === "non_medical_providers"}
+                    onClick={() => void exportSection("non_medical_providers")}
+                  >
+                    {exportingSection === "non_medical_providers" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
+                    {text.exportCsv}
+                  </Button>
                 }
               >
                 <div className="p-3">
@@ -2154,17 +2145,15 @@ export function ReportsPage() {
                 description={text.countries.description}
                 count={data.countries.length}
                 accessory={
-                  <AdminToolbar>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={exportingSection === "countries"}
-                      onClick={() => void exportSection("countries")}
-                    >
-                      {exportingSection === "countries" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
-                      {text.exportCsv}
-                    </Button>
-                  </AdminToolbar>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={exportingSection === "countries"}
+                    onClick={() => void exportSection("countries")}
+                  >
+                    {exportingSection === "countries" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
+                    {text.exportCsv}
+                  </Button>
                 }
               >
                 <div className="p-3">
@@ -2184,10 +2173,10 @@ export function ReportsPage() {
                 description={text.doctors.description}
                 count={visibleDoctors.length}
                 accessory={
-                    <AdminToolbar>
-                      {selectedClinic ? (
-                        <Badge variant="outline">{selectedClinic.name}</Badge>
-                      ) : null}
+                  <div className="flex items-center gap-2">
+                    {selectedClinic ? (
+                      <Badge variant="outline">{selectedClinic.name}</Badge>
+                    ) : null}
                     <Button
                       variant="outline"
                       size="sm"
@@ -2197,7 +2186,7 @@ export function ReportsPage() {
                       {exportingSection === "doctors" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
                       {text.exportCsv}
                     </Button>
-                  </AdminToolbar>
+                  </div>
                 }
               >
                 <div className="p-3">
