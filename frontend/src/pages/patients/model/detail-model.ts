@@ -213,6 +213,23 @@ export function resolvePatientTimelineRoute(
       return access.canViewContracts ? `/contracts?contract=${item.entity_id}` : null;
     case "invoice":
       return access.canViewInvoices ? `/invoices?invoice=${item.entity_id}` : null;
+    case "service_package":
+    case "service_package_consumption":
+      return access.patientId && access.canViewInvoices
+        ? `/patients/${access.patientId}?tab=invoices`
+        : null;
+    case "recommendation":
+      return access.patientId
+        ? `/patients/${access.patientId}?tab=timeline&entity_type=recommendation`
+        : null;
+    case "translation_request":
+      return access.patientId && access.canOpenDocumentsWorkspace
+        ? `/patients/${access.patientId}?tab=documents`
+        : null;
+    case "service_group":
+      return access.patientId
+        ? `/patients/${access.patientId}?tab=orders`
+        : null;
     case "compliance":
       return access.canOpenComplianceWorkspace ? "/admin/compliance" : null;
     default:

@@ -9,7 +9,10 @@ import type {
   PortalFeedbackItem,
   PortalFollowupMilestoneItem,
   PortalInvoiceItem,
+  PortalNextActionsResponse,
   PortalPrivacyRequest,
+  PortalRecommendationItem,
+  PortalTranslationRequestItem,
   PortalUploadedDocumentItem,
 } from "@/pages/patients/model/portal-shared";
 
@@ -17,12 +20,12 @@ type JsonPayload = Record<string, unknown>;
 
 const PORTAL_CACHE_TTL_MS = 15_000;
 
-function postJson(path: string, payload?: JsonPayload) {
+function postJson<T = unknown>(path: string, payload?: JsonPayload) {
   const init: RequestInit = { method: "POST" };
   if (payload !== undefined) {
     init.body = JSON.stringify(payload);
   }
-  return apiFetch(path, init);
+  return apiFetch<T>(path, init);
 }
 
 export async function fetchPatientPortalWorkspace() {
@@ -31,6 +34,8 @@ export async function fetchPatientPortalWorkspace() {
     services,
     documents,
     invoices,
+    recommendations,
+    nextActions,
     privacyRequests,
     feedback,
     documentAlerts,
@@ -49,6 +54,12 @@ export async function fetchPatientPortalWorkspace() {
     apiFetch<PortalInvoiceItem[]>("/me/invoices", {
       cacheTtlMs: PORTAL_CACHE_TTL_MS,
     }).catch(() => []),
+    apiFetch<PortalRecommendationItem[]>("/me/recommendations", {
+      cacheTtlMs: PORTAL_CACHE_TTL_MS,
+    }).catch(() => []),
+    apiFetch<PortalNextActionsResponse>("/me/next-actions", {
+      cacheTtlMs: PORTAL_CACHE_TTL_MS,
+    }).catch(() => ({ items: [], total: 0 })),
     apiFetch<PortalPrivacyRequest[]>("/me/privacy-requests", {
       cacheTtlMs: PORTAL_CACHE_TTL_MS,
     }).catch(() => []),
@@ -67,6 +78,8 @@ export async function fetchPatientPortalWorkspace() {
     services,
     documents,
     invoices,
+    recommendations,
+    nextActions: nextActions.items,
     privacyRequests,
     feedback,
     documentAlerts,
@@ -103,7 +116,7 @@ export function createPortalAppointmentRequest(payload: JsonPayload) {
 }
 
 export async function fetchPortalDocumentsWorkspace() {
-  const [releasedDocuments, uploadedDocuments, documentAlerts] = await Promise.all([
+  const [releasedDocuments, uploadedDocuments, documentAlerts, translationRequests] = await Promise.all([
     apiFetch<PortalDocumentItem[]>("/me/documents", {
       cacheTtlMs: PORTAL_CACHE_TTL_MS,
     }),
@@ -115,9 +128,12 @@ export async function fetchPortalDocumentsWorkspace() {
     }).catch(
       () => null,
     ),
+    apiFetch<PortalTranslationRequestItem[]>("/me/translation-requests", {
+      cacheTtlMs: PORTAL_CACHE_TTL_MS,
+    }).catch(() => []),
   ]);
 
-  return { releasedDocuments, uploadedDocuments, documentAlerts };
+  return { releasedDocuments, uploadedDocuments, documentAlerts, translationRequests };
 }
 
 export function uploadPortalDocument(formData: FormData) {
@@ -129,6 +145,48 @@ export function uploadPortalDocument(formData: FormData) {
 
 export function confirmPortalDocument(documentId: string) {
   return postJson(`/me/documents/${documentId}/confirm`);
+}
+
+export function requestPortalDocumentTranslation(documentId: string, payload: JsonPayload) {
+  return postJson<PortalTranslationRequestItem>(
+    `/me/documents/${documentId}/translation-requests`,
+    payload,
+  );
+}
+
+export function fetchPortalTranslationRequests() {
+  return apiFetch<PortalTranslationRequestItem[]>("/me/translation-requests", {
+    cacheTtlMs: PORTAL_CACHE_TTL_MS,
+  });
+}
+
+export function fetchPortalRecommendations() {
+  return apiFetch<PortalRecommendationItem[]>("/me/recommendations", {
+    cacheTtlMs: PORTAL_CACHE_TTL_MS,
+  });
+}
+
+export function decidePortalRecommendation(recommendationId: string, payload: JsonPayload) {
+  return postJson<PortalRecommendationItem>(
+    `/me/recommendations/${recommendationId}/decision`,
+    payload,
+  );
+}
+
+export function requestRecommendationAppointment(
+  recommendationId: string,
+  payload?: JsonPayload,
+) {
+  return postJson<PortalRecommendationItem>(
+    `/me/recommendations/${recommendationId}/appointment-request`,
+    payload,
+  );
+}
+
+export function fetchPortalNextActions() {
+  return apiFetch<PortalNextActionsResponse>("/me/next-actions", {
+    cacheTtlMs: PORTAL_CACHE_TTL_MS,
+  });
 }
 
 export function fetchPortalServices() {

@@ -11,6 +11,7 @@ pub mod rate_limit;
 pub mod realtime;
 pub mod routes;
 pub mod security_headers;
+pub mod services;
 pub mod settings;
 pub mod state;
 pub mod telemetry;

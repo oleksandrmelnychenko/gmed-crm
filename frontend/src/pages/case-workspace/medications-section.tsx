@@ -1,11 +1,17 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import {
+  fetchMedicationEquivalents,
+  type GermanEquivalent,
+} from "@/lib/api/clinical";
 import { useLang } from "@/lib/i18n";
 
 import { CaseItemList } from "./case-item-list";
+import { MedicationEquivalentsPanel } from "./medication-equivalents-panel";
 import {
   type CaseWorkspaceDoctor,
   type MedikamentItem,
@@ -61,6 +67,7 @@ const MED_TYP_OPTIONS: Array<{
 export function MedicationsSection() {
   const { t, lang } = useLang();
   const {
+    caseId,
     detail,
     doctors,
     permissions,
@@ -68,9 +75,77 @@ export function MedicationsSection() {
     sectionError,
     saveMedications,
   } = useCaseWorkspace();
+  const medications = useMemo(
+    () => detail?.medikamente ?? [],
+    [detail?.medikamente],
+  );
+  const medicationOptions = useMemo(
+    () =>
+      medications.filter(
+        (item): item is MedikamentItem & { id: string } => Boolean(item.id),
+      ),
+    [medications],
+  );
+  const [equivalentMedicationId, setEquivalentMedicationId] = useState("");
+  const [includeEquivalentCandidates, setIncludeEquivalentCandidates] =
+    useState(false);
+  const [equivalentCandidates, setEquivalentCandidates] = useState<
+    GermanEquivalent[]
+  >([]);
+  const [equivalentLoading, setEquivalentLoading] = useState(false);
+  const [equivalentError, setEquivalentError] = useState("");
+
+  useEffect(() => {
+    if (
+      equivalentMedicationId &&
+      medicationOptions.some((item) => item.id === equivalentMedicationId)
+    ) {
+      return;
+    }
+    setEquivalentMedicationId(medicationOptions[0]?.id ?? "");
+  }, [equivalentMedicationId, medicationOptions]);
+
+  const selectedEquivalentMedication =
+    medicationOptions.find((item) => item.id === equivalentMedicationId) ??
+    medicationOptions[0] ??
+    null;
+
+  useEffect(() => {
+    setEquivalentCandidates([]);
+    setEquivalentError("");
+  }, [equivalentMedicationId]);
+
+  async function handleFindEquivalent() {
+    if (!selectedEquivalentMedication?.id) return;
+    setEquivalentLoading(true);
+    setEquivalentError("");
+    try {
+      const payload = await fetchMedicationEquivalents(
+        caseId,
+        selectedEquivalentMedication.id,
+        includeEquivalentCandidates,
+      );
+      setEquivalentCandidates(payload.candidates);
+    } catch (error) {
+      setEquivalentCandidates([]);
+      setEquivalentError(
+        error instanceof Error
+          ? error.message
+          : tri(
+              lang,
+              "Failed to load medication equivalents.",
+              "Failed to load medication equivalents.",
+              "Failed to load medication equivalents.",
+            ),
+      );
+    } finally {
+      setEquivalentLoading(false);
+    }
+  }
 
   return (
-    <CaseItemList<MedikamentItem>
+    <>
+      <CaseItemList<MedikamentItem>
       title={tri(lang, "Medikamente", "Медикаменты", "Medications")}
       description={tri(
         lang,
@@ -78,7 +153,7 @@ export function MedicationsSection() {
         "Текущая медикация, дозировка, срок и назначивший врач.",
         "Current medications, dosing, expiry, and prescriber.",
       )}
-      items={detail?.medikamente ?? []}
+      items={medications}
       blankItem={BLANK}
       cloneItem={(item) => ({ ...BLANK, ...item })}
       isValid={(form) => form.handelsname.trim().length > 0}
@@ -333,5 +408,46 @@ export function MedicationsSection() {
         </>
       )}
     />
+      {selectedEquivalentMedication ? (
+        <div className="mt-4 space-y-3">
+          <Field
+            label={tri(
+              lang,
+              "Medication for German equivalent lookup",
+              "Medication for German equivalent lookup",
+              "Medication for German equivalent lookup",
+            )}
+          >
+            <NativeComboboxSelect
+              value={selectedEquivalentMedication.id}
+              onChange={(event) => setEquivalentMedicationId(event.target.value)}
+              className={nativeSelectClassName}
+              disabled={equivalentLoading}
+            >
+              {medicationOptions.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.handelsname}
+                  {item.wirkstoff ? ` - ${item.wirkstoff}` : ""}
+                </option>
+              ))}
+            </NativeComboboxSelect>
+          </Field>
+          <MedicationEquivalentsPanel
+            medicationName={selectedEquivalentMedication.handelsname}
+            medicationSubstance={selectedEquivalentMedication.wirkstoff}
+            candidates={equivalentCandidates}
+            includeCandidates={includeEquivalentCandidates}
+            loading={equivalentLoading}
+            error={equivalentError || undefined}
+            onFind={() => void handleFindEquivalent()}
+            onToggleCandidates={(next) => {
+              setIncludeEquivalentCandidates(next);
+              setEquivalentCandidates([]);
+              setEquivalentError("");
+            }}
+          />
+        </div>
+      ) : null}
+    </>
   );
 }

@@ -308,6 +308,35 @@ describe("resolvePatientTimelineRoute", () => {
       )
     ).toBe("/orders/order-1?patient=patient-1");
   });
+
+  it("routes new patient-bound timeline entities back to the patient workspace", () => {
+    const access = {
+      patientId: "patient-1",
+      canOpenDocumentsWorkspace: true,
+      canViewContracts: true,
+      canViewInvoices: true,
+      canOpenComplianceWorkspace: true,
+    };
+
+    expect(
+      resolvePatientTimelineRoute(
+        { entity_type: "service_package", entity_id: "package-1" },
+        access,
+      ),
+    ).toBe("/patients/patient-1?tab=invoices");
+    expect(
+      resolvePatientTimelineRoute(
+        { entity_type: "translation_request", entity_id: "request-1" },
+        access,
+      ),
+    ).toBe("/patients/patient-1?tab=documents");
+    expect(
+      resolvePatientTimelineRoute(
+        { entity_type: "recommendation", entity_id: "recommendation-1" },
+        access,
+      ),
+    ).toBe("/patients/patient-1?tab=timeline&entity_type=recommendation");
+  });
 });
 
 describe("normalizePatientDetailTab", () => {

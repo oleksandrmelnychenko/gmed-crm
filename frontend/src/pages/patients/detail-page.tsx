@@ -1074,9 +1074,12 @@ export function PatientDetailPage() {
     contracts,
     documentAlerts,
     documents,
+    financialLedger,
+    financialSummary,
     invoices,
     orders,
     relations,
+    servicePackages,
     tabLoading,
     timeline,
     timelineTotal,
@@ -1394,7 +1397,10 @@ export function PatientDetailPage() {
     clearApiCache(`/patients/${id}/documents`);
     clearApiCache(`/patients/${id}/document-alerts`);
     clearApiCache(`/patients/${id}/framework-contracts`);
+    clearApiCache(`/patients/${id}/financial-ledger`);
+    clearApiCache(`/patients/${id}/financial-summary`);
     clearApiCache(`/patients/${id}/invoices`);
+    clearApiCache(`/patients/${id}/service-packages`);
     clearApiCache(`/patients/${id}/timeline`);
     clearApiCache(`/patients/${id}/workflow-checklist`);
     reload();
@@ -1971,6 +1977,8 @@ export function PatientDetailPage() {
         fieldValue={fieldVal}
         filteredDocuments={filteredDocuments}
         filteredTimeline={filteredTimeline}
+        financialLedger={financialLedger}
+        financialSummary={financialSummary}
         formatDate={fmtDate}
         formatDateTime={fmtDateTime}
         formatMoney={fmtMoney}
@@ -2103,6 +2111,7 @@ export function PatientDetailPage() {
         roleColors={ROLE_COLORS}
         roleLabel={roleLbl}
         selectedAssignee={selectedAssignee}
+        servicePackages={servicePackages}
         staffGo={staffGo}
         statusColors={STATUS_COLORS}
         statusBadgeClasses={STATUS_BADGE_CLASSES}

@@ -82,6 +82,7 @@ export type TranslationRequest = {
   source_language: string | null;
   source_text: string | null;
   translated_text: string | null;
+  request_source: string;
   requested_by: string;
   requested_by_name: string | null;
   translated_by: string | null;
@@ -90,6 +91,11 @@ export type TranslationRequest = {
   completed_at: string | null;
   translated_at: string | null;
   updated_at: string;
+  document_name?: string | null;
+  document_art?: string | null;
+  document_category?: string | null;
+  patient_pid?: string | null;
+  patient_name?: string | null;
 };
 
 export type TranslationWorkspaceDraft = {
@@ -111,7 +117,15 @@ export type DocumentTextExtraction = {
 };
 
 export type StaffOption = { id: string; name: string; role: string };
-export type CategoryOption = { key: string; label: string };
+export type CategoryOption = {
+  key: string;
+  label: string;
+  is_medical?: boolean;
+  description?: string | null;
+  portal_group?: string;
+  sort_order?: number;
+  patient_visible?: boolean;
+};
 export type CategoriesResponse = { categories: CategoryOption[]; arts: string[] };
 export type PatientOption = {
   id: string;

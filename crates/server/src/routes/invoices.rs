@@ -60,6 +60,11 @@ pub fn router() -> Router<AppState> {
         .route("/invoices/{invoice_id}/pdf", get(download_invoice_pdf))
         .route("/invoices/{invoice_id}/status", post(update_invoice_status))
         .route(
+            "/invoices/{invoice_id}/visibility",
+            post(update_invoice_visibility),
+        )
+        .route("/invoices/{invoice_id}/payer", post(update_invoice_payer))
+        .route(
             "/invoices/{invoice_id}/dunning",
             get(list_dunning_events).post(create_dunning_event),
         )
@@ -89,6 +94,7 @@ struct ListMyInvoicesQuery {
 #[derive(Deserialize)]
 struct AccountingLedgerQuery {
     year: Option<i32>,
+    patient_id: Option<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -120,6 +126,25 @@ struct UpdateInvoiceStatusRequest {
     due_date: Option<String>,
     paid_amount: Option<MoneyInput>,
     notes: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct UpdateInvoiceVisibilityRequest {
+    portal_visible: Option<bool>,
+    hide_amounts_from_patient: Option<bool>,
+    line_items_visible_to_patient: Option<bool>,
+    pdf_visible_to_patient: Option<bool>,
+    visibility_note: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct UpdateInvoicePayerRequest {
+    payer_patient_relation_id: Option<Uuid>,
+    payer_contact_name: Option<String>,
+    payer_contact_email: Option<String>,
+    payer_contact_phone: Option<String>,
+    payer_contact_relationship: Option<String>,
+    payer_notes: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -242,6 +267,9 @@ struct InvoicePdfContext {
     invoice_number: String,
     invoice_type: String,
     status: String,
+    portal_visible: bool,
+    hide_amounts_from_patient: bool,
+    pdf_visible_to_patient: bool,
     issued_at: DateTime<Utc>,
     due_date: Option<NaiveDate>,
     total_net: String,
@@ -304,6 +332,10 @@ fn can_manage_invoice_finance(role: Role) -> bool {
     matches!(role, Role::Ceo | Role::Billing)
 }
 
+fn can_manage_invoice_visibility(role: Role) -> bool {
+    matches!(role, Role::Ceo | Role::Billing)
+}
+
 fn can_read_accounting_ledger(role: Role) -> bool {
     matches!(role, Role::Ceo | Role::CeoAssistant | Role::Billing)
 }
@@ -343,6 +375,83 @@ fn invoice_is_patient_visible(status: &str) -> bool {
     status != "draft"
 }
 
+fn invoice_portal_visibility_payload(
+    portal_visible: bool,
+    hide_amounts_from_patient: bool,
+    line_items_visible_to_patient: bool,
+    pdf_visible_to_patient: bool,
+) -> Value {
+    let visible_to_patient = portal_visible;
+    let amounts_visible_to_patient = visible_to_patient && !hide_amounts_from_patient;
+    let line_items_visible_to_patient = amounts_visible_to_patient && line_items_visible_to_patient;
+    let pdf_visible_to_patient =
+        visible_to_patient && amounts_visible_to_patient && pdf_visible_to_patient;
+
+    let redaction_reason = if !visible_to_patient {
+        Some("invoice_hidden_from_patient")
+    } else if !amounts_visible_to_patient {
+        Some("amounts_hidden_from_patient")
+    } else if !line_items_visible_to_patient {
+        Some("line_items_hidden_from_patient")
+    } else {
+        None
+    };
+
+    serde_json::json!({
+        "visible_to_patient": visible_to_patient,
+        "amounts_visible_to_patient": amounts_visible_to_patient,
+        "line_items_visible_to_patient": line_items_visible_to_patient,
+        "pdf_visible_to_patient": pdf_visible_to_patient,
+        "redaction_reason": redaction_reason,
+    })
+}
+
+fn row_invoice_portal_visibility(row: &sqlx::postgres::PgRow) -> Value {
+    invoice_portal_visibility_payload(
+        row.try_get::<bool, _>("portal_visible").unwrap_or(true),
+        row.try_get::<bool, _>("hide_amounts_from_patient")
+            .unwrap_or(false),
+        row.try_get::<bool, _>("line_items_visible_to_patient")
+            .unwrap_or(true),
+        row.try_get::<bool, _>("pdf_visible_to_patient")
+            .unwrap_or(true),
+    )
+}
+
+fn redact_patient_invoice_payload(invoice: &mut Value) {
+    let Some(visibility) = invoice.get("portal_visibility").cloned() else {
+        return;
+    };
+    let amounts_visible = visibility
+        .get("amounts_visible_to_patient")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let line_items_visible = visibility
+        .get("line_items_visible_to_patient")
+        .and_then(Value::as_bool)
+        .unwrap_or(amounts_visible);
+
+    let Some(map) = invoice.as_object_mut() else {
+        return;
+    };
+
+    if !amounts_visible {
+        for key in [
+            "total_net",
+            "total_vat",
+            "total_gross",
+            "paid_amount",
+            "balance_due",
+        ] {
+            map.insert(key.to_string(), Value::Null);
+        }
+    }
+
+    if !line_items_visible {
+        map.insert("line_items".to_string(), serde_json::json!([]));
+    }
+}
+
 fn gen_invoice_number(seq: i64) -> String {
     format!("INV-{}-{:04}", Utc::now().format("%Y%m%d"), seq)
 }
@@ -353,6 +462,15 @@ fn parse_optional_date(value: Option<&str>) -> Result<Option<NaiveDate>, &'stati
             .map(Some)
             .map_err(|_| "Invalid date (YYYY-MM-DD)"),
         _ => Ok(None),
+    }
+}
+
+fn normalize_optional(value: Option<&str>) -> Option<String> {
+    let trimmed = value?.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
     }
 }
 
@@ -1837,12 +1955,22 @@ async fn load_invoice_detail(
         r#"SELECT i.id, i.quote_id, i.order_id, i.patient_id, i.invoice_number, i.invoice_type,
                   i.status, i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
                   i.paid_amount, i.paid_at, i.line_items, i.notes, i.created_at, i.updated_at,
+                  i.portal_visible, i.hide_amounts_from_patient, i.line_items_visible_to_patient,
+                  i.pdf_visible_to_patient, i.visibility_note, i.visibility_updated_at,
+                  i.payer_patient_relation_id, i.payer_contact_name, i.payer_contact_email,
+                  i.payer_contact_phone, i.payer_contact_relationship, i.payer_notes,
+                  i.payer_updated_at,
                   o.order_number, o.contract_id, q.quote_number,
-                  p.first_name, p.last_name, p.patient_id AS patient_pid
+                  p.first_name, p.last_name, p.patient_id AS patient_pid,
+                  pr.relation_type AS payer_relation_type,
+                  COALESCE(NULLIF(trim(concat_ws(' ', rp.first_name, rp.last_name)), ''), pr.related_name) AS payer_relation_patient_name,
+                  rp.patient_id AS payer_relation_patient_pid
            FROM invoices i
            JOIN orders o ON o.id = i.order_id
            JOIN patients p ON p.id = i.patient_id
            LEFT JOIN quotes q ON q.id = i.quote_id
+           LEFT JOIN patient_relations pr ON pr.id = i.payer_patient_relation_id
+           LEFT JOIN patients rp ON rp.id = pr.related_patient_id
            WHERE i.id = $1"#,
     )
     .bind(invoice_id)
@@ -1942,6 +2070,25 @@ async fn load_invoice_detail(
         "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
         "line_items": line_items,
         "supporting_documents": supporting_documents,
+        "portal_visible": row.try_get::<bool, _>("portal_visible").unwrap_or(true),
+        "hide_amounts_from_patient": row.try_get::<bool, _>("hide_amounts_from_patient").unwrap_or(false),
+        "line_items_visible_to_patient": row.try_get::<bool, _>("line_items_visible_to_patient").unwrap_or(true),
+        "pdf_visible_to_patient": row.try_get::<bool, _>("pdf_visible_to_patient").unwrap_or(true),
+        "portal_visibility": row_invoice_portal_visibility(&row),
+        "visibility_note": row.try_get::<Option<String>, _>("visibility_note").unwrap_or_default(),
+        "visibility_updated_at": row.try_get::<Option<DateTime<Utc>>, _>("visibility_updated_at").unwrap_or_default().map(|v| v.to_rfc3339()),
+        "payer": {
+            "patient_relation_id": row.try_get::<Option<Uuid>, _>("payer_patient_relation_id").unwrap_or_default(),
+            "contact_name": row.try_get::<Option<String>, _>("payer_contact_name").unwrap_or_default(),
+            "contact_email": row.try_get::<Option<String>, _>("payer_contact_email").unwrap_or_default(),
+            "contact_phone": row.try_get::<Option<String>, _>("payer_contact_phone").unwrap_or_default(),
+            "contact_relationship": row.try_get::<Option<String>, _>("payer_contact_relationship").unwrap_or_default(),
+            "relation_type": row.try_get::<Option<String>, _>("payer_relation_type").unwrap_or_default(),
+            "relation_patient_name": row.try_get::<Option<String>, _>("payer_relation_patient_name").unwrap_or_default(),
+            "relation_patient_pid": row.try_get::<Option<String>, _>("payer_relation_patient_pid").unwrap_or_default(),
+            "notes": row.try_get::<Option<String>, _>("payer_notes").unwrap_or_default(),
+            "updated_at": row.try_get::<Option<DateTime<Utc>>, _>("payer_updated_at").unwrap_or_default().map(|v| v.to_rfc3339()),
+        },
         "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
         "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
         "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
@@ -1956,6 +2103,7 @@ async fn load_invoice_pdf_context(
         r#"SELECT i.id, i.patient_id, i.invoice_number, i.invoice_type, i.status,
                   i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
                   i.paid_amount, i.line_items, i.notes,
+                  i.portal_visible, i.hide_amounts_from_patient, i.pdf_visible_to_patient,
                   o.order_number, q.quote_number,
                   p.patient_id AS patient_pid, p.title, p.first_name, p.last_name,
                   p.birth_date, p.languages
@@ -2019,6 +2167,13 @@ async fn load_invoice_pdf_context(
             .unwrap_or_default(),
         invoice_type: row.try_get::<String, _>("invoice_type").unwrap_or_default(),
         status: row.try_get::<String, _>("status").unwrap_or_default(),
+        portal_visible: row.try_get::<bool, _>("portal_visible").unwrap_or(true),
+        hide_amounts_from_patient: row
+            .try_get::<bool, _>("hide_amounts_from_patient")
+            .unwrap_or(false),
+        pdf_visible_to_patient: row
+            .try_get::<bool, _>("pdf_visible_to_patient")
+            .unwrap_or(true),
         issued_at: row
             .try_get::<DateTime<Utc>, _>("issued_at")
             .unwrap_or_else(|_| Utc::now()),
@@ -2500,6 +2655,8 @@ async fn list_my_invoices(
         r#"SELECT i.id, i.quote_id, i.order_id, i.patient_id, i.invoice_number, i.invoice_type,
                   i.status, i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
                   i.paid_amount, i.paid_at, i.notes, i.created_at, i.updated_at,
+                  i.portal_visible, i.hide_amounts_from_patient, i.line_items_visible_to_patient,
+                  i.pdf_visible_to_patient,
                   o.order_number, q.quote_number,
                   COALESCE((
                     SELECT count(*)::bigint
@@ -2524,6 +2681,7 @@ async fn list_my_invoices(
            LEFT JOIN quotes q ON q.id = i.quote_id
            WHERE i.patient_id = $2
              AND i.status <> 'draft'
+             AND i.portal_visible = true
              AND ($3::text IS NULL OR i.status = $3)
            ORDER BY i.issued_at DESC, i.created_at DESC"#,
     )
@@ -2544,7 +2702,7 @@ async fn list_my_invoices(
                         .try_get::<Decimal, _>("paid_amount")
                         .unwrap_or(Decimal::ZERO);
 
-                    serde_json::json!({
+                    let mut invoice = serde_json::json!({
                         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
                         "quote_id": row.try_get::<Option<Uuid>, _>("quote_id").unwrap_or_default(),
                         "quote_number": row.try_get::<Option<String>, _>("quote_number").unwrap_or_default(),
@@ -2567,7 +2725,10 @@ async fn list_my_invoices(
                         "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
                         "payment_proof_count": row.try_get::<i64, _>("payment_proof_count").unwrap_or(0),
                         "last_payment_proof_at": row.try_get::<Option<DateTime<Utc>>, _>("last_payment_proof_at").unwrap_or_default().map(|value| value.to_rfc3339()),
-                    })
+                        "portal_visibility": row_invoice_portal_visibility(&row),
+                    });
+                    redact_patient_invoice_payload(&mut invoice);
+                    invoice
                 })
                 .collect::<Vec<_>>();
             Json(items).into_response()
@@ -2614,6 +2775,14 @@ async fn get_my_invoice(
             .and_then(Value::as_str)
             .unwrap_or_default(),
     ) {
+        return err(StatusCode::NOT_FOUND, "Invoice not found");
+    }
+    if !invoice
+        .get("portal_visibility")
+        .and_then(|value| value.get("visible_to_patient"))
+        .and_then(Value::as_bool)
+        .unwrap_or(true)
+    {
         return err(StatusCode::NOT_FOUND, "Invoice not found");
     }
 
@@ -2665,6 +2834,7 @@ async fn get_my_invoice(
         );
     }
 
+    redact_patient_invoice_payload(&mut invoice);
     Json(invoice).into_response()
 }
 
@@ -2690,6 +2860,11 @@ async fn get_accounting_ledger(
     }
 
     let year = accounting_ledger_year(&query);
+    if let Some(patient_id) = query.patient_id
+        && let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await
+    {
+        return resp;
+    }
     let rows = match sqlx::query(
         r#"SELECT ae.id, ae.entry_date, ae.direction, ae.category, ae.description,
                   ae.amount_net, ae.amount_vat, ae.amount_gross, ae.currency,
@@ -2701,9 +2876,11 @@ async fn get_accounting_ledger(
            LEFT JOIN orders o ON o.id = ae.order_id
            LEFT JOIN patients p ON p.id = ae.patient_id
            WHERE EXTRACT(YEAR FROM ae.entry_date) = $1
+             AND ($2::uuid IS NULL OR ae.patient_id = $2)
            ORDER BY ae.entry_date DESC, ae.created_at DESC"#,
     )
     .bind(year)
+    .bind(query.patient_id)
     .fetch_all(&state.db)
     .await
     {
@@ -2821,6 +2998,11 @@ async fn export_accounting_ledger(
     }
 
     let year = accounting_ledger_year(&query);
+    if let Some(patient_id) = query.patient_id
+        && let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await
+    {
+        return resp;
+    }
     let rows = match sqlx::query(
         r#"SELECT ae.entry_date, ae.direction, ae.category, ae.description,
                   ae.amount_net, ae.amount_vat, ae.amount_gross, ae.currency,
@@ -2832,9 +3014,11 @@ async fn export_accounting_ledger(
            LEFT JOIN orders o ON o.id = ae.order_id
            LEFT JOIN patients p ON p.id = ae.patient_id
            WHERE EXTRACT(YEAR FROM ae.entry_date) = $1
+             AND ($2::uuid IS NULL OR ae.patient_id = $2)
            ORDER BY ae.entry_date DESC, ae.created_at DESC"#,
     )
     .bind(year)
+    .bind(query.patient_id)
     .fetch_all(&state.db)
     .await
     {
@@ -2954,6 +3138,8 @@ async fn list_invoices(
         r#"SELECT i.id, i.quote_id, i.order_id, i.patient_id, i.invoice_number, i.invoice_type,
                   i.status, i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
                   i.paid_amount, i.paid_at, i.created_at, i.updated_at,
+                  i.portal_visible, i.hide_amounts_from_patient, i.line_items_visible_to_patient,
+                  i.pdf_visible_to_patient, i.payer_contact_name, i.payer_contact_relationship,
                   o.order_number, q.quote_number, p.first_name, p.last_name, p.patient_id AS patient_pid
            FROM invoices i
            JOIN orders o ON o.id = i.order_id
@@ -3022,6 +3208,15 @@ async fn list_invoices(
                     "paid_amount": decimal_to_string(paid_amount),
                     "balance_due": decimal_to_string((total_gross - paid_amount).max(Decimal::ZERO)),
                     "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
+                    "portal_visible": row.try_get::<bool, _>("portal_visible").unwrap_or(true),
+                    "hide_amounts_from_patient": row.try_get::<bool, _>("hide_amounts_from_patient").unwrap_or(false),
+                    "line_items_visible_to_patient": row.try_get::<bool, _>("line_items_visible_to_patient").unwrap_or(true),
+                    "pdf_visible_to_patient": row.try_get::<bool, _>("pdf_visible_to_patient").unwrap_or(true),
+                    "portal_visibility": row_invoice_portal_visibility(&row),
+                    "payer": {
+                        "contact_name": row.try_get::<Option<String>, _>("payer_contact_name").unwrap_or_default(),
+                        "contact_relationship": row.try_get::<Option<String>, _>("payer_contact_relationship").unwrap_or_default(),
+                    },
                     "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
                     "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
                 }));
@@ -3278,8 +3473,11 @@ async fn download_my_invoice_pdf(
     if context.patient_id != patient_id {
         return err(StatusCode::NOT_FOUND, "Invoice not found");
     }
-    if !invoice_is_patient_visible(&context.status) {
+    if !invoice_is_patient_visible(&context.status) || !context.portal_visible {
         return err(StatusCode::NOT_FOUND, "Invoice not found");
+    }
+    if context.hide_amounts_from_patient || !context.pdf_visible_to_patient {
+        return err(StatusCode::FORBIDDEN, "Invoice PDF is hidden from patient");
     }
 
     let pdf_bytes = match build_invoice_pdf(&context) {
@@ -3518,6 +3716,263 @@ async fn create_dunning_event(
             err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to create invoice dunning event",
+            )
+        }
+    }
+}
+
+async fn update_invoice_visibility(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(invoice_id): Path<Uuid>,
+    Json(body): Json<UpdateInvoiceVisibilityRequest>,
+) -> axum::response::Response {
+    if !can_manage_invoice_visibility(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let current = match sqlx::query(
+        r#"SELECT patient_id, portal_visible, hide_amounts_from_patient,
+                  line_items_visible_to_patient, pdf_visible_to_patient
+           FROM invoices
+           WHERE id = $1"#,
+    )
+    .bind(invoice_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice visibility context");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update invoice visibility",
+            );
+        }
+    };
+
+    let patient_id = current.try_get::<Uuid, _>("patient_id").unwrap_or_default();
+    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+        return resp;
+    }
+
+    let portal_visible = body
+        .portal_visible
+        .unwrap_or_else(|| current.try_get::<bool, _>("portal_visible").unwrap_or(true));
+    let hide_amounts = body.hide_amounts_from_patient.unwrap_or_else(|| {
+        current
+            .try_get::<bool, _>("hide_amounts_from_patient")
+            .unwrap_or(false)
+    });
+    let line_items_visible = if !portal_visible || hide_amounts {
+        false
+    } else {
+        body.line_items_visible_to_patient.unwrap_or_else(|| {
+            current
+                .try_get::<bool, _>("line_items_visible_to_patient")
+                .unwrap_or(true)
+        })
+    };
+    let pdf_visible = if !portal_visible || hide_amounts {
+        false
+    } else {
+        body.pdf_visible_to_patient.unwrap_or_else(|| {
+            current
+                .try_get::<bool, _>("pdf_visible_to_patient")
+                .unwrap_or(true)
+        })
+    };
+    let visibility_note = normalize_optional(body.visibility_note.as_deref());
+
+    match sqlx::query(
+        r#"UPDATE invoices
+           SET portal_visible = $2,
+               hide_amounts_from_patient = $3,
+               line_items_visible_to_patient = $4,
+               pdf_visible_to_patient = $5,
+               visibility_note = $6,
+               visibility_updated_by = $7,
+               visibility_updated_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(invoice_id)
+    .bind(portal_visible)
+    .bind(hide_amounts)
+    .bind(line_items_visible)
+    .bind(pdf_visible)
+    .bind(visibility_note.clone())
+    .bind(auth.user_id)
+    .execute(&state.db)
+    .await
+    {
+        Ok(result) if result.rows_affected() > 0 => {
+            write_invoice_audit(
+                &state,
+                auth.user_id,
+                "invoice_visibility_changed",
+                invoice_id,
+                serde_json::json!({
+                    "patient_id": patient_id,
+                    "portal_visible": portal_visible,
+                    "hide_amounts_from_patient": hide_amounts,
+                    "line_items_visible_to_patient": line_items_visible,
+                    "pdf_visible_to_patient": pdf_visible,
+                    "visibility_note": visibility_note,
+                }),
+            )
+            .await;
+
+            crate::realtime::publish_invoice_event(
+                &state,
+                Some(auth.user_id),
+                "invoice.visibility_changed",
+                invoice_id,
+                serde_json::json!({
+                    "patient_id": patient_id,
+                    "portal_visibility": invoice_portal_visibility_payload(
+                        portal_visible,
+                        hide_amounts,
+                        line_items_visible,
+                        pdf_visible,
+                    ),
+                }),
+            )
+            .await;
+
+            match load_invoice_detail(&state, invoice_id, &auth).await {
+                Ok(Some(invoice)) => Json(invoice).into_response(),
+                Ok(None) => err(StatusCode::NOT_FOUND, "Invoice not found"),
+                Err(resp) => resp,
+            }
+        }
+        Ok(_) => err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "update invoice visibility");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update invoice visibility",
+            )
+        }
+    }
+}
+
+async fn update_invoice_payer(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(invoice_id): Path<Uuid>,
+    Json(body): Json<UpdateInvoicePayerRequest>,
+) -> axum::response::Response {
+    if !can_manage_invoice_visibility(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let row = match sqlx::query("SELECT patient_id FROM invoices WHERE id = $1")
+        .bind(invoice_id)
+        .fetch_optional(&state.db)
+        .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice payer context");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update invoice payer",
+            );
+        }
+    };
+
+    let patient_id = row.try_get::<Uuid, _>("patient_id").unwrap_or_default();
+    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+        return resp;
+    }
+
+    if let Some(relation_id) = body.payer_patient_relation_id {
+        let relation_matches = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM patient_relations WHERE id = $1 AND patient_id = $2)",
+        )
+        .bind(relation_id)
+        .bind(patient_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(false);
+        if !relation_matches {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Payer relation does not belong to invoice patient",
+            );
+        }
+    }
+
+    let payer_contact_name = normalize_optional(body.payer_contact_name.as_deref());
+    let payer_contact_email = normalize_optional(body.payer_contact_email.as_deref());
+    let payer_contact_phone = normalize_optional(body.payer_contact_phone.as_deref());
+    let payer_contact_relationship = normalize_optional(body.payer_contact_relationship.as_deref());
+    let payer_notes = normalize_optional(body.payer_notes.as_deref());
+
+    match sqlx::query(
+        r#"UPDATE invoices
+           SET payer_patient_relation_id = $2,
+               payer_contact_name = $3,
+               payer_contact_email = $4,
+               payer_contact_phone = $5,
+               payer_contact_relationship = $6,
+               payer_notes = $7,
+               payer_updated_by = $8,
+               payer_updated_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(invoice_id)
+    .bind(body.payer_patient_relation_id)
+    .bind(payer_contact_name.clone())
+    .bind(payer_contact_email.clone())
+    .bind(payer_contact_phone.clone())
+    .bind(payer_contact_relationship.clone())
+    .bind(payer_notes.clone())
+    .bind(auth.user_id)
+    .execute(&state.db)
+    .await
+    {
+        Ok(result) if result.rows_affected() > 0 => {
+            write_invoice_audit(
+                &state,
+                auth.user_id,
+                "payer_assigned",
+                invoice_id,
+                serde_json::json!({
+                    "patient_id": patient_id,
+                    "payer_patient_relation_id": body.payer_patient_relation_id,
+                    "payer_contact_name": payer_contact_name,
+                    "payer_contact_relationship": payer_contact_relationship,
+                }),
+            )
+            .await;
+
+            crate::realtime::publish_invoice_event(
+                &state,
+                Some(auth.user_id),
+                "invoice.payer_changed",
+                invoice_id,
+                serde_json::json!({
+                    "patient_id": patient_id,
+                    "payer_patient_relation_id": body.payer_patient_relation_id,
+                }),
+            )
+            .await;
+
+            match load_invoice_detail(&state, invoice_id, &auth).await {
+                Ok(Some(invoice)) => Json(invoice).into_response(),
+                Ok(None) => err(StatusCode::NOT_FOUND, "Invoice not found"),
+                Err(resp) => resp,
+            }
+        }
+        Ok(_) => err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "update invoice payer");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update invoice payer",
             )
         }
     }

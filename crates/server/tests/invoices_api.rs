@@ -304,6 +304,33 @@ async fn create_invoice(
     body
 }
 
+async fn seed_sent_invoice_direct(
+    pool: &PgPool,
+    order_id: Uuid,
+    patient_id: Uuid,
+    created_by: Uuid,
+    tag: &str,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+                order_id, patient_id, invoice_number, invoice_type, status,
+                total_net, total_vat, total_gross, paid_amount, line_items, created_by
+           ) VALUES (
+                $1, $2, $3, 'final', 'sent',
+                100, 19, 119, 0,
+                '[{"description":"Consultation","quantity":"1","unit_price":"100","vat_rate":"19","line_net":"100","line_vat":"19","line_gross":"119"}]'::jsonb,
+                $4
+           ) RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("INV-{tag}"))
+    .bind(created_by)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
 fn current_ledger_year() -> String {
     chrono::Utc::now().format("%Y").to_string()
 }
@@ -419,6 +446,85 @@ async fn invoice_creation_from_quote_marks_order_services_invoiced() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["items"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn patient_invoice_amount_redaction_hides_api_amounts_and_blocks_pdf() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("invoice-redaction");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let invoice_id = seed_sent_invoice_direct(&pool, order_id, patient_id, billing_id, &tag).await;
+
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let patient_bearer = auth_header_for(patient_user_id, "patient");
+
+    let (status, updated) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/visibility"),
+        &billing_bearer,
+        Some(json!({
+            "portal_visible": true,
+            "hide_amounts_from_patient": true,
+            "visibility_note": "paid by family"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(updated["hide_amounts_from_patient"], true);
+    assert_eq!(
+        updated["portal_visibility"]["amounts_visible_to_patient"],
+        false
+    );
+    assert_eq!(
+        updated["portal_visibility"]["pdf_visible_to_patient"],
+        false
+    );
+
+    let (status, invoices) =
+        json_request(&app, "GET", "/api/v1/me/invoices", &patient_bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let item = invoices
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"].as_str() == Some(&invoice_id.to_string()))
+        .expect("redacted invoice visible in portal list");
+    assert!(item["total_gross"].is_null());
+    assert!(item["balance_due"].is_null());
+    assert_eq!(
+        item["portal_visibility"]["redaction_reason"].as_str(),
+        Some("amounts_hidden_from_patient")
+    );
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/me/invoices/{invoice_id}"),
+        &patient_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(detail["total_net"].is_null());
+    assert_eq!(detail["line_items"].as_array().unwrap().len(), 0);
+
+    let (status, _, _) = binary_request(
+        &app,
+        "GET",
+        &format!("/api/v1/me/invoices/{invoice_id}/pdf"),
+        &patient_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

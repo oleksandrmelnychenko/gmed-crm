@@ -28,6 +28,9 @@ import type {
   ContractItem,
   DocumentAlerts,
   DocumentItem,
+  PatientFinancialLedger,
+  PatientFinancialSummary,
+  PatientServicePackageItem,
   InvoiceItem,
   OrderItem,
   RelationItem,
@@ -248,6 +251,8 @@ type PatientDetailWorkspaceContentProps = {
   fieldValue: FieldValueFn;
   filteredDocuments: DocumentItem[];
   filteredTimeline: PatientTimelineItem[];
+  financialLedger: PatientFinancialLedger | null;
+  financialSummary: PatientFinancialSummary | null;
   formatDate: DateFormatter;
   formatDateTime: DateTimeFormatter;
   formatMoney: MoneyFormatter;
@@ -351,6 +356,7 @@ type PatientDetailWorkspaceContentProps = {
   roleColors: Record<string, string>;
   roleLabel: (value: string | null | undefined, tr: PatientsDictionary) => string;
   selectedAssignee: string;
+  servicePackages: PatientServicePackageItem[];
   staffGo: (to: string) => void;
   statusColors: Record<string, string>;
   statusBadgeClasses: Record<string, string>;
@@ -442,6 +448,8 @@ export function PatientDetailWorkspaceContent(props: PatientDetailWorkspaceConte
     fieldValue,
     filteredDocuments,
     filteredTimeline,
+    financialLedger,
+    financialSummary,
     formatDate,
     formatDateTime,
     formatMoney,
@@ -541,6 +549,7 @@ export function PatientDetailWorkspaceContent(props: PatientDetailWorkspaceConte
     roleColors,
     roleLabel,
     selectedAssignee,
+    servicePackages,
     staffGo,
     statusColors,
     statusBadgeClasses,
@@ -862,6 +871,9 @@ export function PatientDetailWorkspaceContent(props: PatientDetailWorkspaceConte
               invoiceOverdueCount={invoiceOverdueCount}
               invoiceOutstandingAmount={invoiceOutstandingAmount}
               invoicePaidAmountTotal={invoicePaidAmountTotal}
+              financialSummary={financialSummary}
+              financialLedger={financialLedger}
+              servicePackages={servicePackages}
               canManageInvoices={canManageInvoices}
               onOpenInvoice={onOpenInvoice}
               onManageInvoice={onManageInvoice}

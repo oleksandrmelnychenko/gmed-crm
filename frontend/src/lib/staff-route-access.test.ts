@@ -15,8 +15,10 @@ const SAMPLE_PATHS = [
   "/chat",
   "/feedback",
   "/reports",
+  "/recommendations",
   "/contracts",
   "/invoices",
+  "/finance-catalog",
   "/documents",
   "/documents/00000000-0000-0000-0000-000000000001",
   "/appointments",
@@ -33,6 +35,7 @@ const SAMPLE_PATHS = [
   "/patients",
   "/patients/00000000-0000-0000-0000-000000000005",
   "/services",
+  "/privacy",
   "/admin",
   "/admin/access",
   "/admin/activity",
@@ -77,11 +80,15 @@ describe("canAccessStaffRoute", () => {
   });
 
   it("blocks high-risk workspace boundaries across sales concierge and billing", () => {
+    expect(canAccessStaffRoute("ceo", "/recommendations")).toBe(true);
+    expect(canAccessStaffRoute("sales", "/recommendations")).toBe(false);
     expect(canAccessStaffRoute("sales", "/documents")).toBe(false);
     expect(canAccessStaffRoute("sales", "/contracts")).toBe(false);
     expect(canAccessStaffRoute("sales", "/invoices")).toBe(false);
+    expect(canAccessStaffRoute("sales", "/finance-catalog")).toBe(false);
     expect(canAccessStaffRoute("concierge", "/contracts")).toBe(false);
     expect(canAccessStaffRoute("concierge", "/invoices")).toBe(false);
+    expect(canAccessStaffRoute("billing", "/finance-catalog")).toBe(true);
     expect(canAccessStaffRoute("billing", "/cases")).toBe(false);
     expect(canAccessStaffRoute("billing", "/documents")).toBe(true);
     expect(canAccessStaffRoute("billing", "/invoices")).toBe(true);
@@ -203,9 +210,9 @@ describe("canAccessStaffRoute", () => {
     expect(canAccessStaffRoute("ceo_assistant", "/services")).toBe(false);
   });
 
-  it("keeps patient privacy out of the staff shell", () => {
+  it("keeps patient privacy out of non-ceo staff shell", () => {
     for (const role of ALL_STAFF_ROLES) {
-      expect(canAccessStaffRoute(role, "/privacy")).toBe(false);
+      expect(canAccessStaffRoute(role, "/privacy")).toBe(role === "ceo");
     }
   });
 
@@ -218,6 +225,7 @@ describe("canAccessPatientPortalRoute", () => {
   it("allows only mounted patient portal shell routes", () => {
     expect(canAccessPatientPortalRoute("/")).toBe(true);
     expect(canAccessPatientPortalRoute("/chat")).toBe(true);
+    expect(canAccessPatientPortalRoute("/recommendations")).toBe(true);
     expect(canAccessPatientPortalRoute("/privacy")).toBe(true);
     expect(canAccessPatientPortalRoute("/documents?tab=portal")).toBe(true);
     expect(canAccessPatientPortalRoute("/reports")).toBe(false);
@@ -263,6 +271,7 @@ describe("listPatientPortalNavItems", () => {
       "/",
       "/chat",
       "/appointments",
+      "/recommendations",
       "/documents",
       "/services",
       "/invoices",

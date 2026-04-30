@@ -4,6 +4,14 @@ import { Download, LoaderCircle, RefreshCw, ShieldCheck, Upload } from "lucide-r
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { clearApiCache } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
@@ -11,8 +19,14 @@ import { localizeRequiredDocumentLabel } from "@/lib/required-document-labels";
 import {
   confirmPortalDocument,
   fetchPortalDocumentsWorkspace,
+  requestPortalDocumentTranslation,
   uploadPortalDocument,
 } from "@/pages/patients/data/portal-api";
+import {
+  PORTAL_DOCUMENT_CATEGORY_TABS,
+  portalDocumentCategoryKey,
+  type PortalDocumentCategoryKey,
+} from "@/pages/patients/model/portal-document-categories";
 import {
   documentTone,
   downloadPortalDocument,
@@ -20,11 +34,13 @@ import {
   formatPortalDateTime,
   formatPortalFileSize,
   portalStatusLabel,
+  translationRequestTone,
   uploadedDocumentTone,
 } from "@/pages/patients/model/portal-shared";
 import type {
   PortalDocumentAlertsSummary,
   PortalDocumentItem,
+  PortalTranslationRequestItem,
   PortalUploadedDocumentItem,
 } from "@/pages/patients/model/portal-shared";
 import { cn } from "@/lib/utils";
@@ -47,6 +63,7 @@ export function PatientDocumentsPage() {
   const [documents, setDocuments] = useState<PortalDocumentItem[]>([]);
   const [documentAlerts, setDocumentAlerts] = useState<PortalDocumentAlertsSummary | null>(null);
   const [uploads, setUploads] = useState<PortalUploadedDocumentItem[]>([]);
+  const [translationRequests, setTranslationRequests] = useState<PortalTranslationRequestItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -58,6 +75,12 @@ export function PatientDocumentsPage() {
   const [uploadName, setUploadName] = useState("");
   const [uploadNotes, setUploadNotes] = useState("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [activeCategory, setActiveCategory] = useState<PortalDocumentCategoryKey>("all");
+  const [translationDocument, setTranslationDocument] = useState<PortalDocumentItem | null>(null);
+  const [translationLanguage, setTranslationLanguage] = useState("en");
+  const [translationNote, setTranslationNote] = useState("");
+  const [translationBusy, setTranslationBusy] = useState(false);
+  const [translationError, setTranslationError] = useState("");
   const [version, setVersion] = useState(0);
   const l = useCallback(
     (de: string, ru: string, en: string) =>
@@ -68,6 +91,7 @@ export function PatientDocumentsPage() {
   useRealtimeSubscription(PORTAL_DOCUMENT_REALTIME_EVENTS, () => {
     clearApiCache("/me/documents");
     clearApiCache("/me/document-alerts");
+    clearApiCache("/me/translation-requests");
     setVersion((value) => value + 1);
   });
 
@@ -88,6 +112,7 @@ export function PatientDocumentsPage() {
           setDocuments(workspace.releasedDocuments);
           setDocumentAlerts(workspace.documentAlerts);
           setUploads(workspace.uploadedDocuments);
+          setTranslationRequests(workspace.translationRequests);
           setError("");
         });
       } catch (err) {
@@ -110,6 +135,21 @@ export function PatientDocumentsPage() {
   const pending = useMemo(
     () => documents.filter((item) => item.requires_confirmation && !item.confirmed).length,
     [documents],
+  );
+  const categoryCounts = useMemo(() => {
+    const counts = new Map<PortalDocumentCategoryKey, number>([["all", documents.length]]);
+    for (const item of documents) {
+      const key = portalDocumentCategoryKey(item);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [documents]);
+  const visibleDocuments = useMemo(
+    () =>
+      activeCategory === "all"
+        ? documents
+        : documents.filter((item) => portalDocumentCategoryKey(item) === activeCategory),
+    [activeCategory, documents],
   );
 
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
@@ -176,6 +216,36 @@ export function PatientDocumentsPage() {
       setError(err instanceof Error ? err.message : l("Dokument konnte nicht heruntergeladen werden.", "Не удалось скачать документ.", "Failed to download document."));
     } finally {
       setBusyId(null);
+    }
+  }
+
+  function openTranslationDialog(item: PortalDocumentItem) {
+    setTranslationDocument(item);
+    setTranslationLanguage("en");
+    setTranslationNote("");
+    setTranslationError("");
+  }
+
+  async function handleRequestTranslation() {
+    if (!translationDocument) return;
+
+    setTranslationBusy(true);
+    setTranslationError("");
+    setNotice("");
+
+    try {
+      await requestPortalDocumentTranslation(translationDocument.id, {
+        requested_language: translationLanguage,
+        note: translationNote.trim() || undefined,
+      });
+      setNotice(l("Übersetzungsanfrage wurde an das Betreuungsteam gesendet.", "Запрос на перевод отправлен команде сопровождения.", "Translation request sent to the care team."));
+      setTranslationDocument(null);
+      clearApiCache("/me/translation-requests");
+      setVersion((value) => value + 1);
+    } catch (err) {
+      setTranslationError(err instanceof Error ? err.message : l("Übersetzung konnte nicht angefragt werden.", "Не удалось запросить перевод.", "Failed to request translation."));
+    } finally {
+      setTranslationBusy(false);
     }
   }
 
@@ -298,6 +368,30 @@ export function PatientDocumentsPage() {
         </section>
       ) : null}
 
+      <section className="rounded-[1.75rem] border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap gap-2">
+          {PORTAL_DOCUMENT_CATEGORY_TABS.map((tab) => {
+            const count = categoryCounts.get(tab.key) ?? 0;
+            const label = lang === "de" ? tab.label.de : lang === "ru" ? tab.label.ru : tab.label.en;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveCategory(tab.key)}
+                className={cn(
+                  "rounded-2xl border px-4 py-2 text-sm transition",
+                  activeCategory === tab.key
+                    ? "border-sky-300 bg-sky-50 text-sky-800"
+                    : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100",
+                )}
+              >
+                {label} <span className="font-semibold">{count}</span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
       <section className="grid gap-6 xl:grid-cols-[1.2fr_0.9fr]">
         <section className="space-y-4">
           <div className="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm">
@@ -311,16 +405,19 @@ export function PatientDocumentsPage() {
             </div>
           </div>
 
-          {documents.length === 0 ? (
+          {visibleDocuments.length === 0 ? (
             <section className="rounded-[1.75rem] border border-dashed border-slate-200 bg-white px-6 py-12 text-center shadow-sm">
-              <p className="text-base font-semibold text-slate-950">{l("Noch keine Dokumente freigegeben", "Документы пока не опубликованы", "No documents released yet")}</p>
+              <p className="text-base font-semibold text-slate-950">{l("Keine Dokumente in dieser Kategorie", "Нет документов в этой категории", "No documents in this category")}</p>
               <p className="mt-2 text-sm text-slate-500">
                 {l("Ihr Betreuungsteam veröffentlicht Dateien hier, sobald sie für den Portalzugang freigegeben sind.", "Команда сопровождения опубликует здесь файлы, как только они будут допущены к доступу через портал.", "Your care team will publish files here once they are cleared for portal access.")}
               </p>
             </section>
           ) : (
-            documents.map((item) => {
+            visibleDocuments.map((item) => {
               const busy = busyId === item.id;
+              const documentTranslationRequests = translationRequests.filter(
+                (request) => request.document_id === item.id,
+              );
 
               return (
                 <article
@@ -380,7 +477,36 @@ export function PatientDocumentsPage() {
                         {l("Empfang bestätigen", "Подтвердить получение", "Confirm receipt")}
                       </Button>
                     ) : null}
+                    <Button
+                      variant="outline"
+                      className="rounded-2xl"
+                      disabled={busy}
+                      onClick={() => openTranslationDialog(item)}
+                    >
+                      {l("Übersetzung anfragen", "Запросить перевод", "Request translation")}
+                    </Button>
                   </div>
+
+                  {documentTranslationRequests.length > 0 ? (
+                    <div className="mt-4 space-y-2">
+                      {documentTranslationRequests.map((request) => (
+                        <div
+                          key={request.id}
+                          className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"
+                        >
+                          <span>
+                            {l("Übersetzung", "Перевод", "Translation")} {request.requested_language.toUpperCase()} · {formatPortalDateTime(request.requested_at)}
+                          </span>
+                          <Badge
+                            variant="outline"
+                            className={cn("rounded-full", translationRequestTone(request.status))}
+                          >
+                            {portalStatusLabel(request.status)}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                 </article>
               );
             })
@@ -505,6 +631,75 @@ export function PatientDocumentsPage() {
           </section>
         </section>
       </section>
+
+      <Dialog
+        open={Boolean(translationDocument)}
+        onOpenChange={(open) => {
+          if (!open && !translationBusy) {
+            setTranslationDocument(null);
+            setTranslationError("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              {l("Übersetzung anfragen", "Запросить перевод", "Request translation")}
+            </DialogTitle>
+            <DialogDescription>
+              {translationDocument?.auto_name ??
+                l("Dokument auswählen", "Выберите документ", "Select document")}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Field label={l("Zielsprache", "Язык перевода", "Target language")}>
+              <NativeComboboxSelect
+                value={translationLanguage}
+                onChange={(event) => setTranslationLanguage(event.target.value)}
+                className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
+              >
+                <option value="de">{l("Deutsch", "Немецкий", "German")}</option>
+                <option value="en">{l("Englisch", "Английский", "English")}</option>
+                <option value="uk">{l("Ukrainisch", "Украинский", "Ukrainian")}</option>
+                <option value="ru">{l("Russisch", "Русский", "Russian")}</option>
+              </NativeComboboxSelect>
+            </Field>
+            <Field label={l("Notiz", "Заметка", "Note")}>
+              <textarea
+                value={translationNote}
+                onChange={(event) => setTranslationNote(event.target.value)}
+                placeholder={l("Optionaler Kontext für das Betreuungsteam", "Необязательный контекст для команды сопровождения", "Optional context for the care team")}
+                className="min-h-[110px] w-full rounded-2xl border border-slate-200 bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
+              />
+            </Field>
+            {translationError ? (
+              <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                {translationError}
+              </div>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-2xl"
+              disabled={translationBusy}
+              onClick={() => setTranslationDocument(null)}
+            >
+              {l("Abbrechen", "Отмена", "Cancel")}
+            </Button>
+            <Button
+              type="button"
+              className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+              disabled={translationBusy}
+              onClick={() => void handleRequestTranslation()}
+            >
+              {translationBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+              {l("Anfrage senden", "Отправить запрос", "Send request")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

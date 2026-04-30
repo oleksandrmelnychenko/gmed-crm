@@ -19,9 +19,11 @@ import {
   formatPortalDate,
   formatPortalDateTime,
   invoiceStatusTone,
+  nextActionTone,
   portalStatusLabel,
   privacyRequestLabel,
   privacyStatusTone,
+  recommendationStatusTone,
 } from "@/pages/patients/model/portal-shared";
 import type {
   PortalAppointmentItem,
@@ -30,7 +32,9 @@ import type {
   PortalDocumentItem,
   PortalFeedbackItem,
   PortalInvoiceItem,
+  PortalNextActionItem,
   PortalPrivacyRequest,
+  PortalRecommendationItem,
 } from "@/pages/patients/model/portal-shared";
 import { cn } from "@/lib/utils";
 
@@ -60,6 +64,12 @@ const PATIENT_DASHBOARD_REALTIME_EVENTS = [
   "document.portal_released",
   "document.portal_revoked",
   "document.confirmed",
+  "document.translation_requested",
+  "document.translation_updated",
+  "recommendation.created",
+  "recommendation.updated",
+  "recommendation.patient_decision",
+  "recommendation.appointment_requested",
   "invoice.created",
   "invoice.status_changed",
   "invoice.dunning_created",
@@ -84,6 +94,8 @@ export function PatientDashboardPage() {
   const [appointments, setAppointments] = useState<PortalAppointmentItem[]>([]);
   const [services, setServices] = useState<PortalConciergeServiceItem[]>([]);
   const [invoices, setInvoices] = useState<PortalInvoiceItem[]>([]);
+  const [recommendations, setRecommendations] = useState<PortalRecommendationItem[]>([]);
+  const [nextActions, setNextActions] = useState<PortalNextActionItem[]>([]);
   const [requests, setRequests] = useState<PortalPrivacyRequest[]>([]);
   const [feedback, setFeedback] = useState<PortalFeedbackItem[]>([]);
   const [error, setError] = useState("");
@@ -104,6 +116,9 @@ export function PatientDashboardPage() {
     clearApiCache("/me/documents");
     clearApiCache("/me/document-alerts");
     clearApiCache("/me/invoices");
+    clearApiCache("/me/recommendations");
+    clearApiCache("/me/next-actions");
+    clearApiCache("/me/translation-requests");
     clearApiCache("/me/privacy-requests");
     clearApiCache("/me/feedback");
     clearApiCache("/me/followup-milestones");
@@ -130,6 +145,8 @@ export function PatientDashboardPage() {
           setDocuments(workspace.documents);
           setDocumentAlerts(workspace.documentAlerts);
           setInvoices(workspace.invoices);
+          setRecommendations(workspace.recommendations);
+          setNextActions(workspace.nextActions);
           setRequests(workspace.privacyRequests);
           setFeedback(workspace.feedback);
           setError("");
@@ -183,6 +200,8 @@ export function PatientDashboardPage() {
   const recentDocuments = useMemo(() => documents.slice(0, 4), [documents]);
   const recentAppointments = useMemo(() => appointments.slice(0, 4), [appointments]);
   const recentInvoices = useMemo(() => invoices.slice(0, 4), [invoices]);
+  const topNextActions = useMemo(() => nextActions.slice(0, 6), [nextActions]);
+  const recentRecommendations = useMemo(() => recommendations.slice(0, 4), [recommendations]);
   const recentRequests = useMemo(() => requests.slice(0, 4), [requests]);
 
   async function handleExportData() {
@@ -359,6 +378,115 @@ export function PatientDashboardPage() {
           </div>
         </section>
       ) : null}
+
+      <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+        <section className={shellCard("p-5")}>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-950">
+                {l("Nächste Schritte", "Следующие действия", "Next actions")}
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                {l("Ein konsolidierter Block aus Terminen, Empfehlungen, Dokumenten und sichtbaren Rechnungen.", "Единый блок из визитов, рекомендаций, документов и видимых счетов.", "A consolidated block from appointments, recommendations, documents and visible invoices.")}
+              </p>
+            </div>
+            <a href="/recommendations" className="text-sm font-medium text-sky-700 hover:text-sky-800">
+              {l("Empfehlungen", "Рекомендации", "Recommendations")}
+            </a>
+          </div>
+          <div className="mt-5 space-y-3">
+            {topNextActions.length === 0 ? (
+              <EmptyState message={l("Aktuell sind keine offenen Portal-Aktionen vorhanden.", "Сейчас нет открытых действий в портале.", "No open portal actions right now.")} />
+            ) : (
+              topNextActions.map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded-[1.35rem] border border-slate-200 bg-slate-50/80 px-4 py-4"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-950">{item.title}</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {[item.description, item.due_at ? formatPortalDateTime(item.due_at) : null]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                    </div>
+                    <Badge
+                      variant="outline"
+                      className={cn("rounded-full", nextActionTone(item.kind, item.priority))}
+                    >
+                      {item.kind.replaceAll("_", " ")}
+                    </Badge>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                    {item.amount ? (
+                      <p className="text-xs font-semibold text-slate-700">
+                        {formatPortalCurrency(item.amount)}
+                      </p>
+                    ) : (
+                      <span />
+                    )}
+                    <a href={item.action_url} className="text-xs font-medium text-sky-700 hover:text-sky-800">
+                      {item.action_label}
+                    </a>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+
+        <section className={shellCard("p-5")}>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-950">
+                {l("Empfehlungen", "Рекомендации", "Recommendations")}
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                {l("Vom Betreuungsteam freigegebene medizinische Empfehlungen.", "Медицинские рекомендации, опубликованные командой сопровождения.", "Care-team recommendations released to your portal.")}
+              </p>
+            </div>
+            <a href="/recommendations" className="text-sm font-medium text-sky-700 hover:text-sky-800">
+              {l("Alle öffnen", "Открыть все", "Open all")}
+            </a>
+          </div>
+          <div className="mt-5 space-y-3">
+            {recentRecommendations.length === 0 ? (
+              <EmptyState message={l("Noch keine Empfehlungen freigegeben.", "Пока нет опубликованных рекомендаций.", "No recommendations released yet.")} />
+            ) : (
+              recentRecommendations.map((item) => (
+                <div
+                  key={item.recommendation_id || item.id}
+                  className="rounded-[1.35rem] border border-slate-200 bg-slate-50/80 px-4 py-4"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-950">{item.title}</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {[item.source_doctor_name, item.recommendation_type.replaceAll("_", " ")]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                    </div>
+                    <Badge
+                      variant="outline"
+                      className={cn("rounded-full", recommendationStatusTone(item.status))}
+                    >
+                      {portalStatusLabel(item.status)}
+                    </Badge>
+                  </div>
+                  <p className="mt-3 text-xs text-slate-500">
+                    {item.due_at
+                      ? `${l("Fällig", "Срок", "Due")} ${formatPortalDateTime(item.due_at)}`
+                      : l("Ohne Frist", "Без срока", "No due date")}
+                  </p>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+      </section>
 
       <section className="grid gap-4 md:grid-cols-5">
         <MetricCard label={l("Kommende Termine", "Предстоящие визиты", "Upcoming visits")} value={upcomingAppointments} description={l(`${releasedDocuments} freigegebene Dokumente`, `${releasedDocuments} опубликованных документа`, `${releasedDocuments} released documents`)} />

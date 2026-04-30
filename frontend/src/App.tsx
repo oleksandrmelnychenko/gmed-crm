@@ -38,6 +38,12 @@ const PatientsPage = lazy(() =>
   })),
 );
 
+const PatientRecommendationsPage = lazy(() =>
+  import("@/pages/patients/portal-recommendations-page").then((module) => ({
+    default: module.PatientRecommendationsPage,
+  })),
+);
+
 const LeadsPage = lazy(() =>
   import("@/pages/leads").then((module) => ({
     default: module.LeadsPage,
@@ -59,6 +65,12 @@ const ContractsPage = lazy(() =>
 const InvoicesPage = lazy(() =>
   import("@/pages/invoices").then((module) => ({
     default: module.InvoicesPage,
+  })),
+);
+
+const FinanceCatalogPage = lazy(() =>
+  import("@/pages/finance-catalog").then((module) => ({
+    default: module.FinanceCatalogPage,
   })),
 );
 
@@ -200,12 +212,14 @@ export default function App() {
                     <Route path="leads" element={<LeadsPage />} />
                     <Route path="patients" element={<PatientsPage />} />
                     <Route path="patients/:id" element={<PatientDetailPage />} />
+                    <Route path="recommendations" element={<PatientRecommendationsPage />} />
                     <Route path="providers" element={<ProvidersPage />} />
                     <Route path="providers/:id" element={<ProviderDetailPage />} />
                     <Route path="orders" element={<OrdersPage />} />
                     <Route path="orders/:orderId" element={<OrdersPage />} />
                     <Route path="contracts" element={<ContractsPage />} />
                     <Route path="invoices" element={<InvoicesPage />} />
+                    <Route path="finance-catalog" element={<FinanceCatalogPage />} />
                     <Route path="documents" element={<DocumentsPage />} />
                     <Route path="services" element={<ServicesPage />} />
                     <Route path="feedback" element={<FeedbackPage />} />

@@ -243,6 +243,12 @@ export function fetchTranslationRequests(documentId: string) {
   return apiFetch<TranslationRequest[]>(`/documents/${documentId}/translation-requests`);
 }
 
+export function fetchTranslationRequestQueue() {
+  return apiFetch<TranslationRequest[]>(
+    "/documents/translation-requests?status=pending,in_progress",
+  );
+}
+
 export function createTranslationRequest(documentId: string, payload: JsonPayload) {
   return postJson<void>(`/documents/${documentId}/translation-requests`, payload);
 }

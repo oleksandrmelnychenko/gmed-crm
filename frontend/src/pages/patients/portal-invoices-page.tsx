@@ -34,6 +34,14 @@ function shellCard(extra?: string) {
   return cn("rounded-[1.75rem] border border-slate-200 bg-white shadow-sm", extra);
 }
 
+function invoiceAmountsVisible(invoice: PortalInvoiceItem) {
+  return invoice.portal_visibility?.amounts_visible_to_patient ?? true;
+}
+
+function invoicePdfVisible(invoice: PortalInvoiceItem) {
+  return invoice.portal_visibility?.pdf_visible_to_patient ?? true;
+}
+
 const PORTAL_INVOICE_REALTIME_EVENTS = [
   "invoice.created",
   "invoice.status_changed",
@@ -148,7 +156,16 @@ export function PatientInvoicesPage() {
   }, [selectedInvoiceId, version, l]);
 
   const totalBalance = useMemo(
-    () => invoices.reduce((sum, item) => sum + Number(item.balance_due ?? 0), 0),
+    () =>
+      invoices.reduce(
+        (sum, item) =>
+          invoiceAmountsVisible(item) ? sum + Number(item.balance_due ?? 0) : sum,
+        0,
+      ),
+    [invoices],
+  );
+  const hiddenAmountCount = useMemo(
+    () => invoices.filter((item) => !invoiceAmountsVisible(item)).length,
     [invoices],
   );
   const overdueCount = useMemo(
@@ -258,7 +275,7 @@ export function PatientInvoicesPage() {
 
       <section className="grid gap-4 md:grid-cols-3">
         <MetricCard label={l("Sichtbare Rechnungen", "Видимые счета", "Visible invoices")} value={String(invoices.length)} />
-        <MetricCard label={l("Offener Saldo", "Остаток к оплате", "Outstanding balance")} value={formatPortalCurrency(totalBalance)} />
+        <MetricCard label={l("Offener Saldo", "Остаток к оплате", "Outstanding balance")} value={hiddenAmountCount > 0 ? l("Teilweise verborgen", "Частично скрыто", "Partly hidden") : formatPortalCurrency(totalBalance)} />
         <MetricCard label={l("Fehlender Zahlungsnachweis", "Отсутствует подтверждение оплаты", "Missing payment proof")} value={String(proofPendingCount)} description={l(`${overdueCount} überfällig`, `${overdueCount} просрочено`, `${overdueCount} overdue`)} />
       </section>
 
@@ -272,6 +289,7 @@ export function PatientInvoicesPage() {
       ) : (
         <section className="grid gap-4 xl:grid-cols-2">
           {invoices.map((invoice) => {
+            const amountsVisible = invoiceAmountsVisible(invoice);
             const balanceDue = Number(invoice.balance_due ?? 0);
 
             return (
@@ -304,8 +322,8 @@ export function PatientInvoicesPage() {
                   </div>
                 </div>
                 <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                  <MetricChip label={l("Gesamt", "Итого", "Total")} value={formatPortalCurrency(invoice.total_gross)} />
-                  <MetricChip label={l("Offen", "Открыто", "Open")} value={formatPortalCurrency(balanceDue)} />
+                  <MetricChip label={l("Gesamt", "Итого", "Total")} value={amountsVisible ? formatPortalCurrency(invoice.total_gross) : l("Verborgen", "Скрыто", "Hidden")} />
+                  <MetricChip label={l("Offen", "Открыто", "Open")} value={amountsVisible ? formatPortalCurrency(balanceDue) : l("Verborgen", "Скрыто", "Hidden")} />
                   <MetricChip
                     label={l("Zahlungsnachweis", "Подтверждение оплаты", "Payment proof")}
                     value={invoice.last_payment_proof_at ? `${l("Hochgeladen", "Загружено", "Uploaded")} ${formatPortalDate(invoice.last_payment_proof_at)}` : l("Nicht hochgeladen", "Не загружено", "Not uploaded")}
@@ -354,7 +372,7 @@ export function PatientInvoicesPage() {
                       <Button
                         type="button"
                         variant="outline"
-                        className="rounded-2xl"
+                        className={cn("rounded-2xl", !invoicePdfVisible(detail) && "hidden")}
                         onClick={() =>
                           void openPortalInvoicePdf(detail.id).catch((err) => {
                             setDetailError(err instanceof Error ? err.message : l("Rechnungs-PDF konnte nicht geöffnet werden.", "Не удалось открыть PDF счета.", "Failed to open invoice PDF."));
@@ -366,7 +384,7 @@ export function PatientInvoicesPage() {
                       <Button
                         type="button"
                         variant="outline"
-                        className="rounded-2xl"
+                        className={cn("rounded-2xl", !invoicePdfVisible(detail) && "hidden")}
                         onClick={() =>
                           void downloadPortalInvoicePdf(detail.id, `${detail.invoice_number}.pdf`).catch((err) => {
                             setDetailError(err instanceof Error ? err.message : l("Rechnungs-PDF konnte nicht heruntergeladen werden.", "Не удалось скачать PDF счета.", "Failed to download invoice PDF."));
@@ -389,8 +407,8 @@ export function PatientInvoicesPage() {
                     <Detail label={l("Fällig am", "Срок оплаты", "Due date")} value={formatPortalDate(detail.due_date)} />
                     <Detail label={l("Auftrag", "Заказ", "Order")} value={detail.order_number} />
                     <Detail label={l("Angebot", "Предложение", "Quote")} value={detail.quote_number || l("Nicht festgelegt", "Не указано", "Not set")} />
-                    <Detail label={l("Brutto gesamt", "Итого брутто", "Total gross")} value={formatPortalCurrency(detail.total_gross)} />
-                    <Detail label={l("Offener Saldo", "Остаток к оплате", "Open balance")} value={formatPortalCurrency(detail.balance_due)} />
+                    <Detail label={l("Brutto gesamt", "Итого брутто", "Total gross")} value={invoiceAmountsVisible(detail) ? formatPortalCurrency(detail.total_gross) : l("Verborgen", "Скрыто", "Hidden")} />
+                    <Detail label={l("Offener Saldo", "Остаток к оплате", "Open balance")} value={invoiceAmountsVisible(detail) ? formatPortalCurrency(detail.balance_due) : l("Verborgen", "Скрыто", "Hidden")} />
                   </div>
                   {detail.notes ? (
                     <div className={cn("mt-4 rounded-xl px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>

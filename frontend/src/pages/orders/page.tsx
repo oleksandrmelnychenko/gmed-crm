@@ -42,6 +42,7 @@ import {
   SheetContent,
 } from "@/components/ui/sheet";
 import {
+  Banner,
   Field,
   PageHeader,
   StatusBadge,
@@ -57,6 +58,12 @@ import { useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
+import {
+  fetchOrderServiceGroup,
+  fetchOrderServiceGroups,
+  generateServiceGroupLines,
+  type OrderServiceGroup,
+} from "@/lib/api/clinical";
 import {
   orderPhaseTone,
   orderStatusTone,
@@ -146,6 +153,7 @@ import type {
   WorkflowChecklistFormState,
   WorkflowChecklistResponse,
 } from "./model/types";
+import { OrderServiceGroupPanel } from "./ui/order-service-group-panel";
 
 const ORDER_REALTIME_EVENTS = [
   "order.created",
@@ -654,6 +662,16 @@ export function OrdersPage() {
     routeOrderId || null,
   );
   const [orderDetail, setOrderDetail] = useState<OrderDetail | null>(null);
+  const [orderServiceGroups, setOrderServiceGroups] = useState<
+    OrderServiceGroup[]
+  >([]);
+  const [serviceGroupsLoading, setServiceGroupsLoading] = useState(false);
+  const [serviceGroupsError, setServiceGroupsError] = useState<string | null>(
+    null,
+  );
+  const [generatingServiceGroupId, setGeneratingServiceGroupId] = useState<
+    string | null
+  >(null);
   const [workflowChecklist, setWorkflowChecklist] =
     useState<WorkflowChecklistResponse | null>(null);
   const [workflowAssignments, setWorkflowAssignments] = useState<
@@ -970,6 +988,10 @@ export function OrdersPage() {
   const resetOrderWorkspace = useCallback(() => {
     setSelectedOrderId(null);
     setOrderDetail(null);
+    setOrderServiceGroups([]);
+    setServiceGroupsError(null);
+    setServiceGroupsLoading(false);
+    setGeneratingServiceGroupId(null);
     setWorkflowChecklist(null);
     setWorkflowAssignments([]);
     setDetailError(null);
@@ -1333,6 +1355,10 @@ export function OrdersPage() {
     if (!selectedOrderId) {
       setOrderDetail(null);
       setOrderDocuments([]);
+      setOrderServiceGroups([]);
+      setServiceGroupsError(null);
+      setServiceGroupsLoading(false);
+      setGeneratingServiceGroupId(null);
       setWorkflowChecklist(null);
       setWorkflowAssignments([]);
       setPhaseDraft("");
@@ -1394,6 +1420,61 @@ export function OrdersPage() {
     }
 
     void loadDetail();
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadNonce, selectedOrderId]);
+
+  useEffect(() => {
+    if (!selectedOrderId) {
+      setOrderServiceGroups([]);
+      setServiceGroupsError(null);
+      setServiceGroupsLoading(false);
+      return;
+    }
+
+    const currentOrderId = selectedOrderId;
+    let cancelled = false;
+    setServiceGroupsLoading(true);
+    setServiceGroupsError(null);
+
+    async function loadServiceGroups() {
+      try {
+        const groups = await fetchOrderServiceGroups(currentOrderId);
+        const detailedGroups = await Promise.all(
+          groups.map(async (group) => {
+            try {
+              const detail = await fetchOrderServiceGroup(group.id);
+              return {
+                ...group,
+                ...detail,
+                generated_line_count:
+                  detail.generated_line_count ?? group.generated_line_count,
+              };
+            } catch {
+              return {
+                ...group,
+                participants: group.participants ?? [],
+              };
+            }
+          }),
+        );
+        if (cancelled) return;
+        setOrderServiceGroups(detailedGroups);
+      } catch (error) {
+        if (cancelled) return;
+        setOrderServiceGroups([]);
+        setServiceGroupsError(
+          error instanceof Error
+            ? error.message
+            : "Failed to load service groups",
+        );
+      } finally {
+        if (!cancelled) setServiceGroupsLoading(false);
+      }
+    }
+
+    void loadServiceGroups();
     return () => {
       cancelled = true;
     };
@@ -1713,6 +1794,23 @@ export function OrdersPage() {
       );
     } finally {
       setApprovingLeistungId(null);
+    }
+  }
+
+  async function handleGenerateServiceGroupLines(serviceGroupId: string) {
+    setGeneratingServiceGroupId(serviceGroupId);
+    setServiceGroupsError(null);
+    try {
+      await generateServiceGroupLines(serviceGroupId);
+      triggerReload();
+    } catch (error) {
+      setServiceGroupsError(
+        error instanceof Error
+          ? error.message
+          : "Failed to generate service group lines",
+      );
+    } finally {
+      setGeneratingServiceGroupId(null);
     }
   }
 
@@ -4403,6 +4501,41 @@ export function OrdersPage() {
                         tone="slate"
                       />
                     </div>
+
+                    {serviceGroupsLoading ||
+                    serviceGroupsError ||
+                    orderServiceGroups.length > 0 ? (
+                      <div className="space-y-3">
+                        {serviceGroupsError ? (
+                          <Banner tone="error" withIcon>
+                            {serviceGroupsError}
+                          </Banner>
+                        ) : null}
+                        {serviceGroupsLoading ? (
+                          <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-5 text-sm text-muted-foreground">
+                            Loading split service groups
+                          </div>
+                        ) : null}
+                        {orderServiceGroups.map((group) => (
+                          <OrderServiceGroupPanel
+                            key={group.id}
+                            group={{
+                              ...group,
+                              participants: group.participants ?? [],
+                            }}
+                            generating={generatingServiceGroupId === group.id}
+                            onGenerate={
+                              permissions.canAddLeistung
+                                ? () =>
+                                    void handleGenerateServiceGroupLines(
+                                      group.id,
+                                    )
+                                : undefined
+                            }
+                          />
+                        ))}
+                      </div>
+                    ) : null}
 
                     <SectionCard
                       title={tx.providers_services}

@@ -4144,6 +4144,76 @@ async fn get_patient_timeline(
 
             UNION ALL
 
+            SELECT 'recommendation'::text AS entity_type,
+                   pr.id AS entity_id,
+                   pr.title AS title,
+                   pr.recommendation_type AS category,
+                   pr.status AS status,
+                   COALESCE(pr.due_at, pr.created_at) AS happened_at,
+                   concat_ws(' / ', doctor.name, pr.priority) AS source_label
+            FROM patient_recommendations pr
+            LEFT JOIN provider_doctors doctor ON doctor.id = pr.source_doctor_id
+            WHERE pr.patient_id = $1
+
+            UNION ALL
+
+            SELECT 'translation_request'::text AS entity_type,
+                   dtr.id AS entity_id,
+                   concat('Translation request: ', dtr.requested_language, ' - ', COALESCE(d.auto_name, d.original_filename, 'Document')) AS title,
+                   dtr.request_source AS category,
+                   dtr.status AS status,
+                   COALESCE(dtr.completed_at, dtr.requested_at) AS happened_at,
+                   concat_ws(' / ', dtr.requested_language, u.name) AS source_label
+            FROM document_translation_requests dtr
+            LEFT JOIN documents d ON d.id = dtr.document_id
+            LEFT JOIN users u ON u.id = dtr.requested_by
+            WHERE dtr.patient_id = $1
+
+            UNION ALL
+
+            SELECT 'service_package'::text AS entity_type,
+                   psp.id AS entity_id,
+                   sp.name AS title,
+                   'service_package'::text AS category,
+                   psp.status AS status,
+                   psp.assigned_at AS happened_at,
+                   concat_ws(' / ', o.order_number, psp.payer_contact_relationship) AS source_label
+            FROM patient_service_packages psp
+            JOIN service_packages sp ON sp.id = psp.package_id
+            LEFT JOIN orders o ON o.id = psp.order_id
+            WHERE psp.patient_id = $1
+
+            UNION ALL
+
+            SELECT 'service_package_consumption'::text AS entity_type,
+                   spc.id AS entity_id,
+                   COALESCE(spi.description, sp.name, 'Package consumption') AS title,
+                   'package_consumption'::text AS category,
+                   spc.approval_status AS status,
+                   spc.consumed_at AS happened_at,
+                   concat_ws(' / ', sp.name, o.order_number) AS source_label
+            FROM service_package_consumptions spc
+            JOIN patient_service_packages psp ON psp.id = spc.patient_service_package_id
+            JOIN service_packages sp ON sp.id = psp.package_id
+            LEFT JOIN service_package_items spi ON spi.id = spc.package_item_id
+            LEFT JOIN orders o ON o.id = spc.order_id
+            WHERE psp.patient_id = $1
+
+            UNION ALL
+
+            SELECT 'service_group'::text AS entity_type,
+                   osg.id AS entity_id,
+                   osg.group_title AS title,
+                   'service_group'::text AS category,
+                   osg.status AS status,
+                   COALESCE((osg.service_date::timestamp AT TIME ZONE 'UTC'), osg.created_at) AS happened_at,
+                   o.order_number AS source_label
+            FROM order_service_groups osg
+            JOIN orders o ON o.id = osg.order_id
+            WHERE o.patient_id = $1
+
+            UNION ALL
+
             SELECT 'card_entry'::text AS entity_type,
                    e.id AS entity_id,
                    CASE

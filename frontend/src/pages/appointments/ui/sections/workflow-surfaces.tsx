@@ -19,9 +19,14 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
+import {
+  fetchInterpreterSuggestions,
+  type InterpreterSuggestion,
+} from "@/lib/api/clinical";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { buildAppointmentWorkflowSummary } from "@/pages/appointments/model/selectors";
+import { InterpreterSuggestionsPanel } from "@/pages/appointments/ui/sections/interpreter-suggestions-panel";
 import {
   appointmentSectionCardClassName,
   appointmentMetaPillClassName,
@@ -479,11 +484,53 @@ function AppointmentInterpreterSection({
     detail.interpreter_id ?? "",
   );
   const [busyAction, setBusyAction] = useState<string>("");
+  const [suggestions, setSuggestions] = useState<InterpreterSuggestion[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
 
   useEffect(() => {
     setAssignInterpreterId(detail.interpreter_id ?? "");
     setBusyAction("");
   }, [detail.id, detail.interpreter_id]);
+
+  useEffect(() => {
+    if (!canAssign || detail.is_blocked) {
+      setSuggestions([]);
+      setSuggestionsLoading(false);
+      setSuggestionsError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setSuggestionsLoading(true);
+    setSuggestionsError(null);
+
+    fetchInterpreterSuggestions(detail.id)
+      .then((items) => {
+        if (cancelled) return;
+        setSuggestions(items);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setSuggestions([]);
+        setSuggestionsError(
+          error instanceof Error
+            ? error.message
+            : appointmentText(
+                "Failed to load interpreter suggestions.",
+                "Failed to load interpreter suggestions.",
+                "Failed to load interpreter suggestions.",
+              ),
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setSuggestionsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canAssign, detail.id, detail.is_blocked]);
 
   async function handleAssignInterpreter(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -584,6 +631,15 @@ function AppointmentInterpreterSection({
               </Button>
             </div>
           </form>
+          <div className="mt-4">
+            <InterpreterSuggestionsPanel
+              suggestions={suggestions}
+              selectedInterpreterId={assignInterpreterId}
+              loading={suggestionsLoading}
+              error={suggestionsError ?? undefined}
+              onSelect={setAssignInterpreterId}
+            />
+          </div>
         </section>
       ) : null}
       {canRespond && detail.interpreter_id === currentUserId ? (

@@ -92,6 +92,14 @@ export type PortalInvoiceLineItem = {
   notes?: string | null;
 };
 
+export type InvoicePortalVisibility = {
+  visible_to_patient: boolean;
+  amounts_visible_to_patient: boolean;
+  line_items_visible_to_patient: boolean;
+  pdf_visible_to_patient: boolean;
+  redaction_reason: string | null;
+};
+
 export type PortalInvoiceItem = {
   id: string;
   quote_id: string | null;
@@ -116,6 +124,84 @@ export type PortalInvoiceItem = {
   payment_proof_count?: number;
   last_payment_proof_at?: string | null;
   line_items?: PortalInvoiceLineItem[];
+  portal_visibility?: InvoicePortalVisibility;
+};
+
+export type PortalRecommendationItem = {
+  recommendation_id: string;
+  id: string;
+  patient_id: string;
+  title: string;
+  description: string | null;
+  recommendation_type: string;
+  source_doctor_id: string | null;
+  source_doctor_name: string | null;
+  source_appointment_id: string | null;
+  source_appointment_title: string | null;
+  source_document_id: string | null;
+  source_document_name: string | null;
+  due_at: string | null;
+  priority: string;
+  status: string;
+  portal_visible: boolean;
+  patient_decision: string | null;
+  decision_note: string | null;
+  decided_at: string | null;
+  appointment_request_id: string | null;
+  appointment_request_status: string | null;
+  created_by: string | null;
+  created_by_name: string | null;
+  updated_by: string | null;
+  updated_by_name: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PortalNextActionItem = {
+  id: string;
+  kind: string;
+  entity_type: string;
+  entity_id: string;
+  title: string;
+  description: string | null;
+  status: string;
+  priority: string;
+  due_at: string | null;
+  action_label: string;
+  action_url: string;
+  amount?: string | null;
+  currency?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type PortalNextActionsResponse = {
+  items: PortalNextActionItem[];
+  total: number;
+};
+
+export type PortalTranslationRequestItem = {
+  id: string;
+  document_id: string;
+  patient_id: string | null;
+  requested_language: string;
+  status: string;
+  note: string | null;
+  source_language: string | null;
+  source_text: string | null;
+  translated_text: string | null;
+  request_source: string;
+  requested_by: string;
+  requested_by_name: string | null;
+  translated_by: string | null;
+  translated_by_name: string | null;
+  requested_at: string;
+  completed_at: string | null;
+  translated_at: string | null;
+  updated_at: string;
+  document_name: string | null;
+  original_filename: string | null;
+  document_art: string | null;
+  document_category: string | null;
 };
 
 export type PortalAppointmentItem = {
@@ -413,6 +499,7 @@ export function formatPortalFileSize(value?: number | null) {
 }
 
 export function formatPortalCurrency(value: unknown) {
+  if (value === null || value === undefined) return portalNotSetLabel();
   const numeric = typeof value === "number" ? value : Number(value ?? 0);
   const formatter = new Intl.NumberFormat(portalLocale(), {
     style: "currency",
@@ -492,6 +579,33 @@ export function invoiceStatusTone(status: string) {
     return "border-rose-200 bg-rose-50 text-rose-700";
   }
   return "border-slate-200 bg-slate-100 text-slate-700";
+}
+
+export function recommendationStatusTone(status: string) {
+  if (status === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (status === "declined" || status === "cancelled") {
+    return "border-rose-200 bg-rose-50 text-rose-700";
+  }
+  if (status === "superseded") return "border-slate-300 bg-slate-100 text-slate-700";
+  return "border-sky-200 bg-sky-50 text-sky-700";
+}
+
+export function nextActionTone(kind: string, priority?: string | null) {
+  if (priority === "urgent" || priority === "high") {
+    return "border-rose-200 bg-rose-50 text-rose-700";
+  }
+  if (kind === "invoice_payment" || kind === "package_approval") {
+    return "border-amber-200 bg-amber-50 text-amber-700";
+  }
+  if (kind === "document_confirmation") return "border-sky-200 bg-sky-50 text-sky-700";
+  return "border-emerald-200 bg-emerald-50 text-emerald-700";
+}
+
+export function translationRequestTone(status: string) {
+  if (status === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (status === "cancelled") return "border-rose-200 bg-rose-50 text-rose-700";
+  if (status === "in_progress") return "border-sky-200 bg-sky-50 text-sky-700";
+  return "border-amber-200 bg-amber-50 text-amber-700";
 }
 
 export function invoiceTypeTone(invoiceType: string) {

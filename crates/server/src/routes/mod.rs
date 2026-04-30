@@ -11,9 +11,12 @@ pub mod contracts;
 pub mod custom_fields;
 pub(crate) mod debt_management;
 pub mod documents;
+pub mod drug_products;
 pub mod e2e_support;
 pub mod feedback;
 pub mod health;
+pub mod interpreter_patient_history;
+pub mod interpreters;
 pub mod invoices;
 pub mod key_rotation;
 pub mod leads;
@@ -21,12 +24,19 @@ pub mod me;
 pub mod messages;
 pub mod notifications;
 pub mod orders;
+pub mod patient_financials;
+pub mod patient_document_requests;
 pub mod patients;
+pub mod patient_next_actions;
+pub mod patient_recommendations;
 pub mod providers;
 pub mod realtime;
+pub mod service_packages;
+pub mod order_service_groups;
 pub mod sops;
 pub mod stats;
 pub mod tasks;
+pub mod tax_profiles;
 pub mod user_notifications;
 pub mod users;
 pub mod workflow_checklists;
@@ -49,6 +59,16 @@ pub fn protected_router() -> Router<AppState> {
         .merge(contracts::router())
         .merge(leads::router())
         .merge(orders::router())
+        .merge(patient_financials::router())
+        .merge(patient_recommendations::router())
+        .merge(patient_next_actions::router())
+        .merge(patient_document_requests::router())
+        .merge(service_packages::router())
+        .merge(tax_profiles::router())
+        .merge(interpreters::router())
+        .merge(interpreter_patient_history::router())
+        .merge(order_service_groups::router())
+        .merge(drug_products::router())
         .merge(appointments::router())
         .merge(tasks::router())
         .merge(stats::router())

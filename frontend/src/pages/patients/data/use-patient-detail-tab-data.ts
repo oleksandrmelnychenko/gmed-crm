@@ -9,6 +9,9 @@ import type {
   ContractItem,
   DocumentAlerts,
   DocumentItem,
+  PatientFinancialLedger,
+  PatientFinancialSummary,
+  PatientServicePackageItem,
   InvoiceItem,
   OrderItem,
   RelationItem,
@@ -38,9 +41,12 @@ type TabState = {
   contracts: ContractItem[];
   documentAlerts: DocumentAlerts | null;
   documents: DocumentItem[];
+  financialLedger: PatientFinancialLedger | null;
+  financialSummary: PatientFinancialSummary | null;
   invoices: InvoiceItem[];
   orders: OrderItem[];
   relations: RelationItem[];
+  servicePackages: PatientServicePackageItem[];
   timeline: PatientTimelineItem[];
   timelineTotal: number;
   workflowChecklist: WorkflowChecklistResponse | null;
@@ -52,9 +58,12 @@ const EMPTY_TAB_STATE: TabState = {
   contracts: [],
   documentAlerts: null,
   documents: [],
+  financialLedger: null,
+  financialSummary: null,
   invoices: [],
   orders: [],
   relations: [],
+  servicePackages: [],
   timeline: [],
   timelineTotal: 0,
   workflowChecklist: null,
@@ -181,10 +190,31 @@ export function usePatientDetailTabData({
             break;
           }
           case "invoices": {
-            const result = await apiFetch<InvoiceItem[]>(`/patients/${id}/invoices`, { signal });
+            const [result, financialSummary, financialLedger, servicePackages] =
+              await Promise.all([
+                apiFetch<InvoiceItem[]>(`/patients/${id}/invoices`, { signal }),
+                apiFetch<PatientFinancialSummary>(
+                  `/patients/${id}/financial-summary`,
+                  { signal },
+                ).catch(() => null),
+                apiFetch<PatientFinancialLedger>(
+                  `/patients/${id}/financial-ledger`,
+                  { signal },
+                ).catch(() => null),
+                apiFetch<PatientServicePackageItem[]>(
+                  `/patients/${id}/service-packages`,
+                  { signal },
+                ).catch(() => []),
+              ]);
             if (signal.aborted) return;
             startTransition(() => {
-              setState((current) => ({ ...current, invoices: result }));
+              setState((current) => ({
+                ...current,
+                financialLedger,
+                financialSummary,
+                invoices: result,
+                servicePackages,
+              }));
               setSettledKey(requestKey);
             });
             break;
@@ -246,7 +276,13 @@ export function usePatientDetailTabData({
               case "contracts":
                 return { ...current, contracts: [] };
               case "invoices":
-                return { ...current, invoices: [] };
+                return {
+                  ...current,
+                  financialLedger: null,
+                  financialSummary: null,
+                  invoices: [],
+                  servicePackages: [],
+                };
               case "workflow":
                 return { ...current, workflowChecklist: null };
               case "timeline":

@@ -112,6 +112,79 @@ export type InvoiceItem = {
   quote_number?: string | null;
 };
 
+export type PatientFinancialBreakdownByOrder = {
+  order_id: string | null;
+  invoice_id: string;
+  invoice_number: string;
+  status: string;
+  revenue_net: string;
+  revenue_vat: string;
+  revenue_gross: string;
+  paid_amount: string;
+  open_balance: string;
+};
+
+export type PatientFinancialBreakdownByService = {
+  service_type: string;
+  revenue_net: string;
+  revenue_gross: string;
+};
+
+export type PatientFinancialSummary = {
+  patient_id: string;
+  currency: string;
+  revenue_net: string;
+  revenue_vat: string;
+  revenue_gross: string;
+  paid_amount: string;
+  open_balance: string;
+  overdue_amount: string;
+  expenses_net: string | null;
+  expenses_vat: string | null;
+  expenses_gross: string | null;
+  margin_net: string | null;
+  margin_percent: string | null;
+  margin_visible: boolean;
+  breakdown_by_order: PatientFinancialBreakdownByOrder[];
+  breakdown_by_service_type: PatientFinancialBreakdownByService[];
+  issues: string[];
+};
+
+export type PatientFinancialLedgerEntry = {
+  id: string;
+  entry_date: string;
+  direction: string;
+  category: string;
+  description: string;
+  amount_net: string;
+  amount_vat: string;
+  amount_gross: string;
+  currency: string;
+  invoice_number?: string | null;
+  external_invoice_number?: string | null;
+  order_number?: string | null;
+};
+
+export type PatientFinancialLedger = {
+  patient_id: string;
+  margin_visible: boolean;
+  entries: PatientFinancialLedgerEntry[];
+};
+
+export type PatientServicePackageItem = {
+  patient_service_package_id: string;
+  package_id: string;
+  package_name: string;
+  status: string;
+  package_item_id?: string | null;
+  description?: string | null;
+  included_quantity: string;
+  used_quantity: string;
+  remaining_quantity: string;
+  overage_quantity: string;
+  requires_patient_approval: boolean;
+};
+
 export type DunningEvent = {
   id: string;
   invoice_id: string;

@@ -580,6 +580,10 @@ pub fn router() -> Router<AppState> {
         .route("/documents/meta/categories", get(list_document_categories))
         .route("/documents/shares/bulk", post(create_bulk_document_shares))
         .route(
+            "/documents/translation-requests",
+            get(list_document_translation_request_queue),
+        )
+        .route(
             "/documents/translation-requests/{request_id}/update",
             post(update_document_translation_request),
         )
@@ -6292,6 +6296,35 @@ fn normalize_translation_request_status(value: &str) -> Option<&'static str> {
     }
 }
 
+fn parse_translation_queue_statuses(
+    value: Option<&str>,
+) -> Result<Vec<&'static str>, axum::response::Response> {
+    let raw = value.unwrap_or("pending,in_progress");
+    let mut statuses = Vec::new();
+    for part in raw.split(',') {
+        let trimmed = part.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Some(status) = normalize_translation_request_status(trimmed) else {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid translation request status",
+            ));
+        };
+        if !statuses.contains(&status) {
+            statuses.push(status);
+        }
+    }
+
+    if statuses.is_empty() {
+        statuses.push("pending");
+        statuses.push("in_progress");
+    }
+
+    Ok(statuses)
+}
+
 fn document_translation_request_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
     json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
@@ -6303,6 +6336,7 @@ fn document_translation_request_json(row: &sqlx::postgres::PgRow) -> serde_json:
         "source_language": row.try_get::<Option<String>, _>("source_language").unwrap_or_default(),
         "source_text": row.try_get::<Option<String>, _>("source_text").unwrap_or_default(),
         "translated_text": row.try_get::<Option<String>, _>("translated_text").unwrap_or_default(),
+        "request_source": row.try_get::<String, _>("request_source").unwrap_or_else(|_| "staff".to_string()),
         "requested_by": row.try_get::<Uuid, _>("requested_by").unwrap_or_else(|_| Uuid::nil()),
         "requested_by_name": row.try_get::<Option<String>, _>("requested_by_name").unwrap_or_default(),
         "translated_by": row.try_get::<Option<Uuid>, _>("translated_by").unwrap_or_default(),
@@ -6311,6 +6345,11 @@ fn document_translation_request_json(row: &sqlx::postgres::PgRow) -> serde_json:
         "requested_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("requested_at").unwrap_or_else(|_| chrono::Utc::now()),
         "completed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("completed_at").unwrap_or_default(),
         "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").unwrap_or_else(|_| chrono::Utc::now()),
+        "document_name": row.try_get::<Option<String>, _>("document_name").unwrap_or_default(),
+        "document_art": row.try_get::<Option<String>, _>("document_art").unwrap_or_default(),
+        "document_category": row.try_get::<Option<String>, _>("document_category").unwrap_or_default(),
+        "patient_pid": row.try_get::<Option<String>, _>("patient_pid").unwrap_or_default(),
+        "patient_name": row.try_get::<Option<String>, _>("patient_name").unwrap_or_default(),
     })
 }
 
@@ -6342,6 +6381,13 @@ fn document_text_extraction_json(row: &sqlx::postgres::PgRow) -> serde_json::Val
         "extracted_by": row.try_get::<Option<Uuid>, _>("text_extracted_by").unwrap_or_default(),
         "extracted_by_name": row.try_get::<Option<String>, _>("text_extracted_by_name").unwrap_or_default(),
     })
+}
+
+#[derive(Deserialize, Default)]
+struct DocumentTranslationQueueQuery {
+    status: Option<String>,
+    source: Option<String>,
+    patient_id: Option<Uuid>,
 }
 
 async fn fetch_document_row(
@@ -9011,6 +9057,104 @@ async fn list_document_versions(
         .collect();
 
     Json(items).into_response()
+}
+
+async fn list_document_translation_request_queue(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Query(query): Query<DocumentTranslationQueueQuery>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::CeoAssistant,
+        Role::PatientManager,
+        Role::TeamleadInterpreter,
+        Role::Interpreter,
+        Role::Concierge,
+        Role::Billing,
+    ]) {
+        return resp;
+    }
+
+    let statuses = match parse_translation_queue_statuses(query.status.as_deref()) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let source = match query.source.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        Some("staff") => Some("staff"),
+        Some("patient_portal") => Some("patient_portal"),
+        Some(_) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid translation request source",
+            );
+        }
+        None => None,
+    };
+    let can_view_all = matches!(auth.role, Role::Ceo | Role::CeoAssistant | Role::Billing);
+    let status_sql = statuses
+        .iter()
+        .map(|status| format!("'{status}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let sql = format!(
+        r#"SELECT dtr.id, dtr.document_id, dtr.patient_id, dtr.requested_language,
+                  dtr.status, dtr.note, dtr.source_language, dtr.source_text,
+                  dtr.translated_text, dtr.requested_by, dtr.translated_by,
+                  dtr.request_source, dtr.requested_at, dtr.completed_at,
+                  dtr.translated_at, dtr.updated_at,
+                  requester.name AS requested_by_name,
+                  translator.name AS translated_by_name,
+                  d.auto_name AS document_name,
+                  d.art AS document_art,
+                  d.category AS document_category,
+                  p.patient_id AS patient_pid,
+                  trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name
+           FROM document_translation_requests dtr
+           JOIN documents d ON d.id = dtr.document_id
+           LEFT JOIN patients p ON p.id = dtr.patient_id
+           LEFT JOIN users requester ON requester.id = dtr.requested_by
+           LEFT JOIN users translator ON translator.id = dtr.translated_by
+           WHERE dtr.status IN ({status_sql})
+             AND ($1::text IS NULL OR dtr.request_source = $1)
+             AND ($2::uuid IS NULL OR dtr.patient_id = $2)
+             AND (
+                $3::boolean = true
+                OR EXISTS (
+                    SELECT 1
+                    FROM patient_assignments pa
+                    WHERE pa.patient_id = dtr.patient_id
+                      AND pa.user_id = $4
+                      AND pa.revoked_at IS NULL
+                )
+             )
+           ORDER BY dtr.requested_at DESC, dtr.created_at DESC
+           LIMIT 100"#
+    );
+
+    match sqlx::query(&sql)
+        .bind(source)
+        .bind(query.patient_id)
+        .bind(can_view_all)
+        .bind(auth.user_id)
+        .fetch_all(&state.db)
+        .await
+    {
+        Ok(rows) => Json(
+            rows.iter()
+                .map(document_translation_request_json)
+                .collect::<Vec<_>>(),
+        )
+        .into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "list document translation queue");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load translation queue",
+            )
+        }
+    }
 }
 
 async fn list_document_translation_requests(
@@ -11776,9 +11920,9 @@ async fn list_document_categories(
     }
 
     let categories = match sqlx::query(
-        r#"SELECT id, name_en
+        r#"SELECT id, name_en, is_medical, description, portal_group, sort_order, patient_visible
            FROM ref_document_categories
-           ORDER BY name_en"#,
+           ORDER BY sort_order, name_en"#,
     )
     .fetch_all(&state.db)
     .await
@@ -11789,6 +11933,11 @@ async fn list_document_categories(
                 json!({
                     "key": row.try_get::<String, _>("id").unwrap_or_default(),
                     "label": row.try_get::<String, _>("name_en").unwrap_or_default(),
+                    "is_medical": row.try_get::<bool, _>("is_medical").unwrap_or(false),
+                    "description": row.try_get::<Option<String>, _>("description").unwrap_or_default(),
+                    "portal_group": row.try_get::<String, _>("portal_group").unwrap_or_else(|_| "other".to_string()),
+                    "sort_order": row.try_get::<i32, _>("sort_order").unwrap_or(100),
+                    "patient_visible": row.try_get::<bool, _>("patient_visible").unwrap_or(true),
                 })
             })
             .collect::<Vec<_>>(),

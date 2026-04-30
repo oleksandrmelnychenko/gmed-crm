@@ -51,6 +51,13 @@ export const ROLES_CONTRACTS_INVOICES = [
   "billing",
 ] as const satisfies readonly StaffRole[];
 
+export const ROLES_FINANCE_CATALOG = [
+  "ceo",
+  "ceo_assistant",
+  "patient_manager",
+  "billing",
+] as const satisfies readonly StaffRole[];
+
 export const ROLES_DOCUMENTS = [
   "ceo",
   "ceo_assistant",
@@ -285,6 +292,12 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     nav: { section: "main", labelKey: "nav_reports" },
   },
   {
+    id: "recommendations",
+    match: "exact",
+    path: "/recommendations",
+    roles: ["ceo"],
+  },
+  {
     id: "contracts",
     match: "exact",
     path: "/contracts",
@@ -297,6 +310,13 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     path: "/invoices",
     roles: ROLES_CONTRACTS_INVOICES,
     nav: { section: "crm", labelKey: "nav_invoices" },
+  },
+  {
+    id: "finance-catalog",
+    match: "exact",
+    path: "/finance-catalog",
+    roles: ROLES_FINANCE_CATALOG,
+    nav: { section: "crm", labelKey: "nav_finance_catalog" },
   },
   {
     id: "orders",
@@ -348,6 +368,12 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     nav: { section: "crm", labelKey: "nav_my_services" },
   },
   {
+    id: "privacy",
+    match: "exact",
+    path: "/privacy",
+    roles: ["ceo"],
+  },
+  {
     id: "dashboard",
     match: "exact",
     path: "/",
@@ -360,6 +386,7 @@ const PATIENT_PORTAL_NAV_ITEMS: readonly PatientPortalNavItem[] = [
   { id: "dashboard", to: "/", labelKey: "nav_dashboard" },
   { id: "chat", to: "/chat", labelKey: "nav_chat" },
   { id: "appointments", to: "/appointments", labelKey: "nav_my_appointments" },
+  { id: "recommendations", to: "/recommendations", labelKey: "nav_my_recommendations" },
   { id: "documents", to: "/documents", labelKey: "nav_my_documents" },
   { id: "services", to: "/services", labelKey: "nav_my_services" },
   { id: "invoices", to: "/invoices", labelKey: "nav_my_invoices" },

@@ -90,6 +90,7 @@ import {
   fetchDocumentVersions,
   fetchDocuments,
   fetchPatientDocumentContext,
+  fetchTranslationRequestQueue,
   fetchTranslationRequests,
   generateDocument,
   openDocumentPreview,
@@ -520,6 +521,9 @@ function StaffDocumentsPage() {
   const [translationRequests, setTranslationRequests] = useState<
     TranslationRequest[]
   >([]);
+  const [translationQueue, setTranslationQueue] = useState<TranslationRequest[]>([]);
+  const [translationQueueBusy, setTranslationQueueBusy] = useState(false);
+  const [translationQueueError, setTranslationQueueError] = useState("");
   const [translationDrafts, setTranslationDrafts] = useState<
     Record<string, TranslationWorkspaceDraft>
   >({});
@@ -567,6 +571,8 @@ function StaffDocumentsPage() {
     if (!canView) return;
     clearApiCache("/documents");
     clearApiCache("/documents/intake-queue");
+    clearApiCache("/documents/translation-requests");
+    clearApiCache("/documents/translation-requests?status=pending,in_progress");
     for (const event of events) {
       if (event.entity_type === "document") {
         clearApiCache(`/documents/${event.entity_id}`);
@@ -700,6 +706,44 @@ function StaffDocumentsPage() {
       active = false;
     };
   }, [canManageIntake, documentsFailedLoadIntakeQueueText, version]);
+
+  useEffect(() => {
+    if (!canRequestTranslation && !canUpdateTranslation) {
+      setTranslationQueue([]);
+      setTranslationQueueBusy(false);
+      setTranslationQueueError("");
+      return;
+    }
+    let active = true;
+    async function loadTranslationQueue() {
+      setTranslationQueueBusy(true);
+      setTranslationQueueError("");
+      try {
+        const rows = await fetchTranslationRequestQueue();
+        if (!active) return;
+        startTransition(() => setTranslationQueue(rows));
+      } catch (nextError) {
+        if (!active) return;
+        setTranslationQueue([]);
+        setTranslationQueueError(
+          nextError instanceof Error
+            ? nextError.message
+            : t.documents_failed_load_document,
+        );
+      } finally {
+        if (active) setTranslationQueueBusy(false);
+      }
+    }
+    void loadTranslationQueue();
+    return () => {
+      active = false;
+    };
+  }, [
+    canRequestTranslation,
+    canUpdateTranslation,
+    t.documents_failed_load_document,
+    version,
+  ]);
 
   useEffect(() => {
     setSelectedDocumentIds((current) =>
@@ -1232,6 +1276,8 @@ function StaffDocumentsPage() {
         note: translationForm.note.trim() || null,
       });
       await reloadTranslationRequests(detail.id);
+      clearApiCache("/documents/translation-requests?status=pending,in_progress");
+      setVersion((current) => current + 1);
       setTranslationForm({ requestedLanguage: "en", note: "" });
       setNotice(t.documents_translation_created);
     } catch (nextError) {
@@ -1292,6 +1338,8 @@ function StaffDocumentsPage() {
         translated_text: draft.translatedText.trim() || null,
       });
       await reloadTranslationRequests(detail.id);
+      clearApiCache("/documents/translation-requests?status=pending,in_progress");
+      setVersion((current) => current + 1);
       setNotice(
         successMessage ??
           t.documents_translation_marked.replace(
@@ -1737,6 +1785,91 @@ function StaffDocumentsPage() {
                       size="sm"
                       className="h-8 rounded-lg"
                       onClick={() => openDocument(item.id)}
+                    >
+                      {t.documents_open_document}
+                    </Button>
+                  </div>
+                </ListItem>
+              ))}
+            </div>
+          )}
+        </Section>
+      ) : null}
+
+      {(canRequestTranslation || canUpdateTranslation) &&
+      (translationQueueBusy || translationQueueError || translationQueue.length > 0) ? (
+        <Section
+          className="border-sky-200 bg-sky-50/40"
+          title={
+            <span>
+              {t.documents_translation_requests}
+              <span className="ml-2 font-normal text-muted-foreground">
+                · {l("Portal- und Staff-Anfragen", "Запросы портала и сотрудников", "Portal and staff requests")}
+              </span>
+            </span>
+          }
+          accessory={
+            <Badge
+              variant="outline"
+              className="rounded-full border-sky-200 bg-sky-50 text-sky-700"
+            >
+              {translationQueue.length} {t.documents_pending}
+            </Badge>
+          }
+        >
+          {translationQueueError ? <Banner tone="error">{translationQueueError}</Banner> : null}
+          {translationQueueBusy ? (
+            <TabLoader />
+          ) : translationQueue.length === 0 ? (
+            <EmptyCell>{t.documents_no_translation_requests}</EmptyCell>
+          ) : (
+            <div className="grid gap-2 xl:grid-cols-2">
+              {translationQueue.map((request) => (
+                <ListItem key={request.id}>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">
+                        {request.document_name || request.document_id}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {[request.patient_pid, request.patient_name, request.document_category]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Badge
+                        variant="outline"
+                        className={cn("rounded-full", translationStatusBadge(request.status))}
+                      >
+                        {formatTranslationStatusLabel(request.status, t)}
+                      </Badge>
+                      <Badge
+                        variant="outline"
+                        className="rounded-full border-border/60 bg-card text-foreground"
+                      >
+                        {formatLanguageLabel(request.requested_language)}
+                      </Badge>
+                    </div>
+                  </div>
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    {formatDateTime(request.requested_at)}
+                    {request.request_source === "patient_portal"
+                      ? l(" · Patient portal", " · Портал пациента", " · Patient portal")
+                      : l(" · Staff", " · Сотрудник", " · Staff")}
+                  </p>
+                  {request.note ? (
+                    <div className="mt-3 rounded-xl border border-border/60 bg-muted/25 px-3 py-2 text-sm text-muted-foreground">
+                      {request.note}
+                    </div>
+                  ) : null}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 rounded-lg"
+                      onClick={() => openDocument(request.document_id)}
                     >
                       {t.documents_open_document}
                     </Button>

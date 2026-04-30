@@ -27,6 +27,7 @@ import {
   SlidersHorizontal,
   Stethoscope,
   UserCog,
+  Wallet,
   UsersRound,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
@@ -68,7 +69,9 @@ const NAV_ICONS: Record<string, React.ElementType> = {
   orders: ClipboardList,
   contracts: FileSignature,
   invoices: ReceiptText,
+  "finance-catalog": Wallet,
   documents: FolderOpen,
+  recommendations: ClipboardList,
   services: ConciergeBell,
   privacy: Shield,
   cases: FileHeart,
