@@ -176,6 +176,7 @@ async fn patient_sees_only_portal_visible_recommendations_and_can_decide() {
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
     seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
 
     let pm_auth = auth_header_for(pm_id, "patient_manager");
     let patient_auth = auth_header_for(patient_user_id, "patient");
@@ -188,6 +189,7 @@ async fn patient_sees_only_portal_visible_recommendations_and_can_decide() {
         Some(json!({
             "title": "Book cardiology follow-up",
             "recommendation_type": "follow_up",
+            "source_order_id": order_id,
             "portal_visible": true
         })),
     )
@@ -221,6 +223,33 @@ async fn patient_sees_only_portal_visible_recommendations_and_can_decide() {
     let rows = list.as_array().expect("recommendation list");
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["title"], "Book cardiology follow-up");
+    assert_eq!(rows[0]["source_order_id"], json!(order_id));
+    assert!(
+        rows[0]["source_order_number"]
+            .as_str()
+            .is_some_and(|value| value.starts_with("ORD-agent2-rec-"))
+    );
+
+    let (status, actions) =
+        json_request(&app, "GET", "/api/v1/me/next-actions", &patient_auth, None).await;
+    assert_eq!(status, StatusCode::OK, "{actions}");
+    let recommendation_titles: Vec<String> = actions["items"]
+        .as_array()
+        .expect("next action items")
+        .iter()
+        .filter(|item| item["kind"] == "recommendation")
+        .filter_map(|item| item["title"].as_str().map(ToString::to_string))
+        .collect();
+    assert!(
+        recommendation_titles
+            .iter()
+            .any(|title| title == "Book cardiology follow-up")
+    );
+    assert!(
+        !recommendation_titles
+            .iter()
+            .any(|title| title == "Internal staff-only note")
+    );
 
     let (status, decision) = json_request(
         &app,

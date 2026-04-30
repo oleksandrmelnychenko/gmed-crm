@@ -59,10 +59,14 @@ import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 import {
+  createOrderServiceGroup,
   fetchOrderServiceGroup,
+  fetchOrderServiceGroupLinePreview,
   fetchOrderServiceGroups,
   generateServiceGroupLines,
+  type CreateOrderServiceGroupInput,
   type OrderServiceGroup,
+  type OrderServiceGroupLinePreview,
 } from "@/lib/api/clinical";
 import {
   orderPhaseTone,
@@ -153,7 +157,10 @@ import type {
   WorkflowChecklistFormState,
   WorkflowChecklistResponse,
 } from "./model/types";
-import { OrderServiceGroupPanel } from "./ui/order-service-group-panel";
+import {
+  OrderServiceGroupPanel,
+  OrderServiceGroupWizard,
+} from "./ui/order-service-group-panel";
 
 const ORDER_REALTIME_EVENTS = [
   "order.created",
@@ -665,10 +672,17 @@ export function OrdersPage() {
   const [orderServiceGroups, setOrderServiceGroups] = useState<
     OrderServiceGroup[]
   >([]);
+  const [serviceGroupPreviews, setServiceGroupPreviews] = useState<
+    Record<string, OrderServiceGroupLinePreview>
+  >({});
   const [serviceGroupsLoading, setServiceGroupsLoading] = useState(false);
   const [serviceGroupsError, setServiceGroupsError] = useState<string | null>(
     null,
   );
+  const [serviceGroupWizardError, setServiceGroupWizardError] = useState<
+    string | null
+  >(null);
+  const [serviceGroupCreating, setServiceGroupCreating] = useState(false);
   const [generatingServiceGroupId, setGeneratingServiceGroupId] = useState<
     string | null
   >(null);
@@ -989,7 +1003,10 @@ export function OrdersPage() {
     setSelectedOrderId(null);
     setOrderDetail(null);
     setOrderServiceGroups([]);
+    setServiceGroupPreviews({});
     setServiceGroupsError(null);
+    setServiceGroupWizardError(null);
+    setServiceGroupCreating(false);
     setServiceGroupsLoading(false);
     setGeneratingServiceGroupId(null);
     setWorkflowChecklist(null);
@@ -1428,6 +1445,7 @@ export function OrdersPage() {
   useEffect(() => {
     if (!selectedOrderId) {
       setOrderServiceGroups([]);
+      setServiceGroupPreviews({});
       setServiceGroupsError(null);
       setServiceGroupsLoading(false);
       return;
@@ -1461,9 +1479,26 @@ export function OrdersPage() {
         );
         if (cancelled) return;
         setOrderServiceGroups(detailedGroups);
+        const previews = await Promise.all(
+          detailedGroups.map(async (group) => {
+            try {
+              return [
+                group.id,
+                await fetchOrderServiceGroupLinePreview(group.id),
+              ] as const;
+            } catch {
+              return null;
+            }
+          }),
+        );
+        if (cancelled) return;
+        setServiceGroupPreviews(
+          Object.fromEntries(previews.filter(Boolean) as Array<readonly [string, OrderServiceGroupLinePreview]>),
+        );
       } catch (error) {
         if (cancelled) return;
         setOrderServiceGroups([]);
+        setServiceGroupPreviews({});
         setServiceGroupsError(
           error instanceof Error
             ? error.message
@@ -1797,11 +1832,14 @@ export function OrdersPage() {
     }
   }
 
-  async function handleGenerateServiceGroupLines(serviceGroupId: string) {
+  async function handleGenerateServiceGroupLines(
+    serviceGroupId: string,
+    overrideDuplicates = false,
+  ) {
     setGeneratingServiceGroupId(serviceGroupId);
     setServiceGroupsError(null);
     try {
-      await generateServiceGroupLines(serviceGroupId);
+      await generateServiceGroupLines(serviceGroupId, overrideDuplicates);
       triggerReload();
     } catch (error) {
       setServiceGroupsError(
@@ -1811,6 +1849,28 @@ export function OrdersPage() {
       );
     } finally {
       setGeneratingServiceGroupId(null);
+    }
+  }
+
+  async function handleCreateServiceGroup(input: CreateOrderServiceGroupInput) {
+    if (!selectedOrderId) {
+      setServiceGroupWizardError("Select an order first");
+      return;
+    }
+    setServiceGroupCreating(true);
+    setServiceGroupWizardError(null);
+    try {
+      await createOrderServiceGroup(selectedOrderId, input);
+      triggerReload();
+    } catch (error) {
+      setServiceGroupWizardError(
+        error instanceof Error
+          ? error.message
+          : "Failed to create service group",
+      );
+      throw error;
+    } finally {
+      setServiceGroupCreating(false);
     }
   }
 
@@ -4502,6 +4562,19 @@ export function OrdersPage() {
                       />
                     </div>
 
+                    {permissions.canAddLeistung ? (
+                      <OrderServiceGroupWizard
+                        providers={providers}
+                        providerDoctors={providerDoctors}
+                        creating={serviceGroupCreating}
+                        error={serviceGroupWizardError}
+                        onLoadProviderDoctors={(providerId) =>
+                          void ensureProviderDoctors(providerId)
+                        }
+                        onCreate={handleCreateServiceGroup}
+                      />
+                    ) : null}
+
                     {serviceGroupsLoading ||
                     serviceGroupsError ||
                     orderServiceGroups.length > 0 ? (
@@ -4523,12 +4596,14 @@ export function OrdersPage() {
                               ...group,
                               participants: group.participants ?? [],
                             }}
+                            preview={serviceGroupPreviews[group.id] ?? null}
                             generating={generatingServiceGroupId === group.id}
                             onGenerate={
                               permissions.canAddLeistung
-                                ? () =>
+                                ? (overrideDuplicates) =>
                                     void handleGenerateServiceGroupLines(
                                       group.id,
+                                      overrideDuplicates,
                                     )
                                 : undefined
                             }

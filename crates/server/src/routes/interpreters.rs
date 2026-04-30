@@ -44,7 +44,9 @@ async fn get_interpreter_suggestions(
     Extension(auth): Extension<AuthUser>,
     Path(appointment_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::PatientManager, Role::TeamleadInterpreter, Role::Ceo]) {
+    if let Err(resp) =
+        auth.require_any_role(&[Role::PatientManager, Role::TeamleadInterpreter, Role::Ceo])
+    {
         return resp;
     }
 
@@ -98,7 +100,9 @@ async fn list_interpreter_languages(
     Extension(auth): Extension<AuthUser>,
     Path(interpreter_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::TeamleadInterpreter, Role::PatientManager, Role::Ceo]) {
+    if let Err(resp) =
+        auth.require_any_role(&[Role::TeamleadInterpreter, Role::PatientManager, Role::Ceo])
+    {
         return resp;
     }
 
@@ -262,7 +266,10 @@ async fn ensure_patient_scope(
         .await
         .map_err(|error| {
             tracing::error!(error = %error, patient_id = %patient_id, "validate patient scope");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate access")
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate access",
+            )
         })?;
     if assigned {
         Ok(())

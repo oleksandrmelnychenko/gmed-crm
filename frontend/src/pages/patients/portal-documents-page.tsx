@@ -525,14 +525,18 @@ export function PatientDocumentsPage() {
               <Upload className="mt-1 size-5 text-sky-700" />
             </div>
             <form className="mt-5 space-y-4" onSubmit={(event) => void handleUpload(event)}>
-              <Field label={l("Upload-Typ", "Тип загрузки", "Upload type")}>
+              <Field label={l("Kategorie", "Категория", "Category")}>
                 <NativeComboboxSelect
                   value={uploadKind}
                   onChange={(event) => setUploadKind(event.target.value)}
                   className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                 >
                   <option value="general">{l("Allgemein", "Общий", "General")}</option>
-                  <option value="medical_record">{l("Medizinischer Befund", "Медицинский документ", "Medical record")}</option>
+                  <option value="correspondence">{l("Korrespondenz", "Переписка", "Correspondence")}</option>
+                  <option value="analyses">{l("Analysen", "Анализы", "Analyses")}</option>
+                  <option value="conclusions">{l("Befunde / Schluesse", "Заключения", "Conclusions")}</option>
+                  <option value="invoices">{l("Rechnungen", "Счета", "Invoices")}</option>
+                  <option value="translations">{l("Uebersetzungen", "Переводы", "Translations")}</option>
                   <option value="insurance_document">{l("Versicherungsdokument", "Страховой документ", "Insurance document")}</option>
                 </NativeComboboxSelect>
               </Field>
@@ -602,7 +606,7 @@ export function PatientDocumentsPage() {
                           </div>
                           <p className="mt-3 text-sm font-semibold text-slate-950">{item.auto_name}</p>
                           <p className="mt-1 text-xs text-slate-500">
-                            {[item.order_number, item.appointment_title, formatPortalFileSize(item.file_size)].filter(Boolean).join(" · ")}
+                            {[item.category, item.order_number, item.appointment_title, formatPortalFileSize(item.file_size)].filter(Boolean).join(" · ")}
                           </p>
                         </div>
                         <Button

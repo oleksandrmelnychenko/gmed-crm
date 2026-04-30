@@ -1,10 +1,11 @@
 use axum::{
     Json, Router,
-    extract::{Extension, State},
+    extract::{Extension, Path, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::get,
+    routing::{get, post},
 };
+use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use sqlx::Row;
@@ -20,6 +21,7 @@ pub fn router() -> Router<AppState> {
             "/tax-profiles",
             get(list_tax_profiles).post(create_tax_profile),
         )
+        .route("/tax-profiles/{profile_id}", post(update_tax_profile))
         .route("/tax-profiles/catalog", get(list_catalog_tax_profiles))
 }
 
@@ -32,6 +34,8 @@ struct CreateTaxProfileRequest {
     vat_category: Option<String>,
     is_default: Option<bool>,
     is_active: Option<bool>,
+    valid_from: Option<String>,
+    valid_to: Option<String>,
 }
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
@@ -99,6 +103,18 @@ fn normalize_optional(value: Option<&str>) -> Option<String> {
         None
     } else {
         Some(trimmed.to_string())
+    }
+}
+
+fn parse_optional_date(
+    value: Option<&str>,
+    field: &'static str,
+) -> Result<Option<NaiveDate>, String> {
+    match value {
+        Some(raw) if !raw.trim().is_empty() => NaiveDate::parse_from_str(raw.trim(), "%Y-%m-%d")
+            .map(Some)
+            .map_err(|_| format!("Invalid {field} (YYYY-MM-DD)")),
+        _ => Ok(None),
     }
 }
 
@@ -188,11 +204,44 @@ async fn create_tax_profile(
     if !valid_vat_category(&vat_category) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid vat_category");
     }
+    let valid_from = match parse_optional_date(body.valid_from.as_deref(), "valid_from") {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
+    };
+    let valid_to = match parse_optional_date(body.valid_to.as_deref(), "valid_to") {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
+    };
 
-    match sqlx::query(
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "begin create tax profile");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create tax profile",
+            );
+        }
+    };
+
+    if body.is_default.unwrap_or(false)
+        && let Err(e) =
+            sqlx::query("UPDATE tax_profiles SET is_default = false WHERE is_default = true")
+                .execute(&mut *tx)
+                .await
+    {
+        tracing::error!(error = %e, "clear default tax profile");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update tax profile defaults",
+        );
+    }
+
+    let row = match sqlx::query(
         r#"INSERT INTO tax_profiles (
-                profile_key, name, description, vat_rate, vat_category, is_default, is_active
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                profile_key, name, description, vat_rate, vat_category,
+                is_default, is_active, valid_from, valid_to
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, CURRENT_DATE), $9)
            RETURNING id"#,
     )
     .bind(profile_key)
@@ -202,27 +251,162 @@ async fn create_tax_profile(
     .bind(vat_category)
     .bind(body.is_default.unwrap_or(false))
     .bind(body.is_active.unwrap_or(true))
-    .fetch_one(&state.db)
+    .bind(valid_from)
+    .bind(valid_to)
+    .fetch_one(&mut *tx)
     .await
     {
-        Ok(row) => (
-            StatusCode::CREATED,
-            Json(serde_json::json!({
-                "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
-            })),
-        )
-            .into_response(),
+        Ok(row) => row,
         Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("23505") => {
-            err(StatusCode::CONFLICT, "Tax profile already exists")
+            return err(StatusCode::CONFLICT, "Tax profile already exists");
         }
         Err(e) => {
             tracing::error!(error = %e, "create tax profile");
-            err(
+            return err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to create tax profile",
-            )
+            );
+        }
+    };
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "commit create tax profile");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create tax profile",
+        );
+    }
+
+    (
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+        })),
+    )
+        .into_response()
+}
+
+async fn update_tax_profile(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(profile_id): Path<Uuid>,
+    Json(body): Json<CreateTaxProfileRequest>,
+) -> axum::response::Response {
+    if !can_manage_tax_profiles(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let profile_key = match normalize_required_key(&body.profile_key, "profile_key") {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let name = match normalize_required_text(&body.name, "name") {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let vat_rate = body.vat_rate.unwrap_or(Decimal::ZERO).round_dp(2);
+    if vat_rate < Decimal::ZERO {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "vat_rate must be non-negative",
+        );
+    }
+    let vat_category = body
+        .vat_category
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("custom")
+        .to_string();
+    if !valid_vat_category(&vat_category) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid vat_category");
+    }
+    let valid_from = match parse_optional_date(body.valid_from.as_deref(), "valid_from") {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
+    };
+    let valid_to = match parse_optional_date(body.valid_to.as_deref(), "valid_to") {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
+    };
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, profile_id = %profile_id, "begin update tax profile");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update tax profile",
+            );
+        }
+    };
+
+    if body.is_default.unwrap_or(false) {
+        if let Err(e) = sqlx::query("UPDATE tax_profiles SET is_default = false WHERE id <> $1")
+            .bind(profile_id)
+            .execute(&mut *tx)
+            .await
+        {
+            tracing::error!(error = %e, profile_id = %profile_id, "clear default tax profiles");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update tax profile defaults",
+            );
         }
     }
+
+    let result = match sqlx::query(
+        r#"UPDATE tax_profiles
+           SET profile_key = $2,
+               name = $3,
+               description = $4,
+               vat_rate = $5,
+               vat_category = $6,
+               is_default = $7,
+               is_active = $8,
+               valid_from = COALESCE($9, valid_from),
+               valid_to = $10
+           WHERE id = $1"#,
+    )
+    .bind(profile_id)
+    .bind(profile_key)
+    .bind(name)
+    .bind(normalize_optional(body.description.as_deref()))
+    .bind(vat_rate)
+    .bind(vat_category)
+    .bind(body.is_default.unwrap_or(false))
+    .bind(body.is_active.unwrap_or(true))
+    .bind(valid_from)
+    .bind(valid_to)
+    .execute(&mut *tx)
+    .await
+    {
+        Ok(result) => result,
+        Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("23505") => {
+            return err(StatusCode::CONFLICT, "Tax profile already exists");
+        }
+        Err(e) => {
+            tracing::error!(error = %e, profile_id = %profile_id, "update tax profile");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update tax profile",
+            );
+        }
+    };
+    if result.rows_affected() == 0 {
+        return err(StatusCode::NOT_FOUND, "Tax profile not found");
+    }
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, profile_id = %profile_id, "commit update tax profile");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update tax profile",
+        );
+    }
+
+    Json(serde_json::json!({
+        "id": profile_id,
+    }))
+    .into_response()
 }
 
 async fn list_catalog_tax_profiles(

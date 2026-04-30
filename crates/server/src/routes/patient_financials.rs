@@ -1,7 +1,7 @@
 use axum::{
     Json, Router,
     extract::{Extension, Path, Query, State},
-    http::StatusCode,
+    http::{StatusCode, header},
     response::IntoResponse,
     routing::get,
 };
@@ -27,6 +27,10 @@ pub fn router() -> Router<AppState> {
             "/patients/{patient_id}/financial-ledger",
             get(get_patient_financial_ledger),
         )
+        .route(
+            "/patients/{patient_id}/financial-ledger/export",
+            get(export_patient_financial_ledger),
+        )
 }
 
 #[derive(Deserialize)]
@@ -34,6 +38,7 @@ struct PatientFinancialQuery {
     from: Option<String>,
     to: Option<String>,
     order_id: Option<Uuid>,
+    package_id: Option<Uuid>,
     include_pass_through: Option<bool>,
     currency: Option<String>,
 }
@@ -144,12 +149,20 @@ async fn get_patient_financial_summary(
              AND ($2::date IS NULL OR issued_at::date >= $2)
              AND ($3::date IS NULL OR issued_at::date <= $3)
              AND ($4::uuid IS NULL OR order_id = $4)
+             AND ($5::uuid IS NULL OR EXISTS (
+                    SELECT 1
+                    FROM patient_service_packages psp
+                    WHERE psp.patient_id = invoices.patient_id
+                      AND psp.package_id = $5
+                      AND (psp.order_id IS NULL OR psp.order_id = invoices.order_id)
+             ))
            ORDER BY issued_at DESC, created_at DESC"#,
     )
     .bind(patient_id)
     .bind(from)
     .bind(to)
     .bind(query.order_id)
+    .bind(query.package_id)
     .fetch_all(&state.db)
     .await
     {
@@ -173,12 +186,20 @@ async fn get_patient_financial_summary(
              AND ($2::date IS NULL OR entry_date >= $2)
              AND ($3::date IS NULL OR entry_date <= $3)
              AND ($4::uuid IS NULL OR order_id = $4)
-             AND ($5::boolean = true OR category <> 'cost_passthrough_revenue')"#,
+             AND ($5::uuid IS NULL OR EXISTS (
+                    SELECT 1
+                    FROM patient_service_packages psp
+                    WHERE psp.patient_id = accounting_entries.patient_id
+                      AND psp.package_id = $5
+                      AND (psp.order_id IS NULL OR psp.order_id = accounting_entries.order_id)
+             ))
+             AND ($6::boolean = true OR category <> 'cost_passthrough_revenue')"#,
     )
     .bind(patient_id)
     .bind(from)
     .bind(to)
     .bind(query.order_id)
+    .bind(query.package_id)
     .bind(include_pass_through)
     .fetch_one(&state.db)
     .await
@@ -296,6 +317,7 @@ async fn get_patient_financial_summary(
             "from": from.map(|value| value.to_string()),
             "to": to.map(|value| value.to_string()),
             "order_id": query.order_id,
+            "package_id": query.package_id,
             "include_pass_through": include_pass_through,
         },
         "revenue_net": decimal_to_string(revenue_net),
@@ -352,12 +374,20 @@ async fn get_patient_financial_ledger(
              AND ($2::date IS NULL OR ae.entry_date >= $2)
              AND ($3::date IS NULL OR ae.entry_date <= $3)
              AND ($4::uuid IS NULL OR ae.order_id = $4)
+             AND ($5::uuid IS NULL OR EXISTS (
+                    SELECT 1
+                    FROM patient_service_packages psp
+                    WHERE psp.patient_id = ae.patient_id
+                      AND psp.package_id = $5
+                      AND (psp.order_id IS NULL OR psp.order_id = ae.order_id)
+             ))
            ORDER BY ae.entry_date DESC, ae.created_at DESC"#,
     )
     .bind(patient_id)
     .bind(from)
     .bind(to)
     .bind(query.order_id)
+    .bind(query.package_id)
     .fetch_all(&state.db)
     .await
     {
@@ -400,4 +430,136 @@ async fn get_patient_financial_ledger(
             )
         }
     }
+}
+
+fn csv_escape(value: &str) -> String {
+    if value.contains([',', '"', '\n']) {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
+    }
+}
+
+async fn export_patient_financial_ledger(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_id): Path<Uuid>,
+    Query(query): Query<PatientFinancialQuery>,
+) -> axum::response::Response {
+    if !can_read_patient_financials(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+        return resp;
+    }
+
+    let from = match parse_query_date(query.from.as_deref(), "from") {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
+    };
+    let to = match parse_query_date(query.to.as_deref(), "to") {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
+    };
+    let margin_allowed = can_read_profit_margin(auth.role);
+
+    let rows = match sqlx::query(
+        r#"SELECT ae.id, ae.entry_date, ae.direction, ae.category, ae.description,
+                  ae.amount_net, ae.amount_vat, ae.amount_gross, ae.currency,
+                  i.invoice_number, ei.external_invoice_number, o.order_number
+           FROM accounting_entries ae
+           LEFT JOIN invoices i ON i.id = ae.source_invoice_id
+           LEFT JOIN external_invoices ei ON ei.id = ae.source_external_invoice_id
+           LEFT JOIN orders o ON o.id = ae.order_id
+           WHERE ae.patient_id = $1
+             AND ($2::date IS NULL OR ae.entry_date >= $2)
+             AND ($3::date IS NULL OR ae.entry_date <= $3)
+             AND ($4::uuid IS NULL OR ae.order_id = $4)
+             AND ($5::uuid IS NULL OR EXISTS (
+                    SELECT 1
+                    FROM patient_service_packages psp
+                    WHERE psp.patient_id = ae.patient_id
+                      AND psp.package_id = $5
+                      AND (psp.order_id IS NULL OR psp.order_id = ae.order_id)
+             ))
+           ORDER BY ae.entry_date DESC, ae.created_at DESC"#,
+    )
+    .bind(patient_id)
+    .bind(from)
+    .bind(to)
+    .bind(query.order_id)
+    .bind(query.package_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_id, "export patient financial ledger");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to export patient financial ledger",
+            );
+        }
+    };
+
+    let mut csv = String::from(
+        "entry_date,direction,category,description,order_number,invoice_number,external_invoice_number,amount_net,amount_vat,amount_gross,currency\n",
+    );
+    for row in rows {
+        let direction = row.try_get::<String, _>("direction").unwrap_or_default();
+        if direction == "expense" && !margin_allowed {
+            continue;
+        }
+        let fields = [
+            row.try_get::<NaiveDate, _>("entry_date")
+                .map(|value| value.to_string())
+                .unwrap_or_default(),
+            direction,
+            row.try_get::<String, _>("category").unwrap_or_default(),
+            row.try_get::<String, _>("description").unwrap_or_default(),
+            row.try_get::<Option<String>, _>("order_number")
+                .unwrap_or_default()
+                .unwrap_or_default(),
+            row.try_get::<Option<String>, _>("invoice_number")
+                .unwrap_or_default()
+                .unwrap_or_default(),
+            row.try_get::<Option<String>, _>("external_invoice_number")
+                .unwrap_or_default()
+                .unwrap_or_default(),
+            decimal_to_string(
+                row.try_get::<Decimal, _>("amount_net")
+                    .unwrap_or(Decimal::ZERO),
+            ),
+            decimal_to_string(
+                row.try_get::<Decimal, _>("amount_vat")
+                    .unwrap_or(Decimal::ZERO),
+            ),
+            decimal_to_string(
+                row.try_get::<Decimal, _>("amount_gross")
+                    .unwrap_or(Decimal::ZERO),
+            ),
+            row.try_get::<String, _>("currency")
+                .unwrap_or_else(|_| "EUR".to_string()),
+        ];
+        csv.push_str(
+            &fields
+                .iter()
+                .map(|field| csv_escape(field))
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        csv.push('\n');
+    }
+
+    (
+        [
+            (header::CONTENT_TYPE, "text/csv; charset=utf-8"),
+            (
+                header::CONTENT_DISPOSITION,
+                "attachment; filename=\"patient-financial-ledger.csv\"",
+            ),
+        ],
+        csv,
+    )
+        .into_response()
 }

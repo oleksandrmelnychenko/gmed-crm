@@ -4144,6 +4144,26 @@ async fn get_patient_timeline(
 
             UNION ALL
 
+            SELECT 'invoice_visibility'::text AS entity_type,
+                   i.id AS entity_id,
+                   concat('Invoice visibility: ', i.invoice_number) AS title,
+                   'invoice_visibility'::text AS category,
+                   CASE
+                       WHEN COALESCE((al.context->>'portal_visible')::boolean, i.portal_visible) = false THEN 'hidden'
+                       WHEN COALESCE((al.context->>'hide_amounts_from_patient')::boolean, i.hide_amounts_from_patient) = true THEN 'amounts_hidden'
+                       ELSE 'visible'
+                   END AS status,
+                   al.created_at AS happened_at,
+                   concat_ws(' В· ', u.name, al.context->>'visibility_note') AS source_label
+            FROM audit_log al
+            JOIN invoices i ON i.id = al.entity_id
+            LEFT JOIN users u ON u.id = al.user_id
+            WHERE al.entity_type = 'invoice'
+              AND al.action = 'invoice_visibility_changed'
+              AND i.patient_id = $1
+
+            UNION ALL
+
             SELECT 'recommendation'::text AS entity_type,
                    pr.id AS entity_id,
                    pr.title AS title,
@@ -4201,6 +4221,33 @@ async fn get_patient_timeline(
 
             UNION ALL
 
+            SELECT 'service_package_change'::text AS entity_type,
+                   COALESCE(psp.id, $1) AS entity_id,
+                   concat('Package change: ', COALESCE(sp.name, al.action)) AS title,
+                   'service_package'::text AS category,
+                   COALESCE(psp.status, al.context->>'status', 'changed') AS status,
+                   al.created_at AS happened_at,
+                   u.name AS source_label
+            FROM audit_log al
+            LEFT JOIN patient_service_packages psp ON psp.id = al.entity_id
+            LEFT JOIN service_packages sp ON sp.id = psp.package_id
+            LEFT JOIN users u ON u.id = al.user_id
+            WHERE (
+                    al.entity_type = 'patient_service_package'
+                    AND psp.patient_id = $1
+                  )
+               OR (
+                    al.entity_type = 'patient'
+                    AND al.entity_id = $1
+                    AND al.action LIKE 'patient_service_package_%'
+                  )
+               OR (
+                    al.context->>'patient_id' = $1::text
+                    AND al.action LIKE 'patient_service_package_%'
+                  )
+
+            UNION ALL
+
             SELECT 'service_group'::text AS entity_type,
                    osg.id AS entity_id,
                    osg.group_title AS title,
@@ -4211,6 +4258,68 @@ async fn get_patient_timeline(
             FROM order_service_groups osg
             JOIN orders o ON o.id = osg.order_id
             WHERE o.patient_id = $1
+
+            UNION ALL
+
+            SELECT 'interpreter_preference'::text AS entity_type,
+                   COALESCE(interpreter.id, al.entity_id) AS entity_id,
+                   concat(
+                       'Interpreter preference: ',
+                       COALESCE(interpreter.name, 'Interpreter'),
+                       ' -> ',
+                       COALESCE(al.context->>'preference', 'neutral')
+                   ) AS title,
+                   'interpreter_preference'::text AS category,
+                   COALESCE(al.context->>'preference', 'changed') AS status,
+                   al.created_at AS happened_at,
+                   actor.name AS source_label
+            FROM audit_log al
+            LEFT JOIN users actor ON actor.id = al.user_id
+            LEFT JOIN users interpreter
+                   ON interpreter.id = CASE
+                       WHEN COALESCE(al.context->>'interpreter_id', '') ~* '^[0-9a-f-]{36}$'
+                       THEN (al.context->>'interpreter_id')::uuid
+                       ELSE NULL::uuid
+                   END
+            WHERE al.entity_type = 'patient'
+              AND al.entity_id = $1
+              AND al.action = 'interpreter_preference_changed'
+
+            UNION ALL
+
+            SELECT 'drug_verification'::text AS entity_type,
+                   COALESCE(
+                       CASE
+                           WHEN COALESCE(al.context->>'match_id', '') ~* '^[0-9a-f-]{36}$'
+                           THEN (al.context->>'match_id')::uuid
+                           ELSE NULL::uuid
+                       END,
+                       al.entity_id
+                   ) AS entity_id,
+                   concat(
+                       'Drug match ',
+                       COALESCE(al.context->>'verification_status', 'verified'),
+                       ': ',
+                       COALESCE(m.handelsname, 'medication')
+                   ) AS title,
+                   'drug_verification'::text AS category,
+                   COALESCE(al.context->>'verification_status', 'verified') AS status,
+                   al.created_at AS happened_at,
+                   concat_ws(' В· ', actor.name, dp.brand_name) AS source_label
+            FROM audit_log al
+            JOIN cases c ON c.id = al.entity_id
+            LEFT JOIN users actor ON actor.id = al.user_id
+            LEFT JOIN medication_drug_matches mdm
+                   ON mdm.id = CASE
+                       WHEN COALESCE(al.context->>'match_id', '') ~* '^[0-9a-f-]{36}$'
+                       THEN (al.context->>'match_id')::uuid
+                       ELSE NULL::uuid
+                   END
+            LEFT JOIN medikamente m ON m.id = mdm.medication_id
+            LEFT JOIN drug_products dp ON dp.id = mdm.drug_product_id
+            WHERE al.entity_type = 'case'
+              AND al.action = 'drug_match_verified'
+              AND c.patient_id = $1
 
             UNION ALL
 

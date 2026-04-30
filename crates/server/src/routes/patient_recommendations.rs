@@ -47,6 +47,7 @@ struct CreateRecommendationRequest {
     source_doctor_id: Option<Uuid>,
     source_appointment_id: Option<Uuid>,
     source_document_id: Option<Uuid>,
+    source_order_id: Option<Uuid>,
     due_at: Option<String>,
     priority: Option<String>,
     portal_visible: Option<bool>,
@@ -60,6 +61,7 @@ struct UpdateRecommendationRequest {
     source_doctor_id: Option<Uuid>,
     source_appointment_id: Option<Uuid>,
     source_document_id: Option<Uuid>,
+    source_order_id: Option<Uuid>,
     due_at: Option<String>,
     priority: Option<String>,
     status: Option<String>,
@@ -152,6 +154,7 @@ async fn create_patient_recommendation(
         body.source_doctor_id,
         body.source_appointment_id,
         body.source_document_id,
+        body.source_order_id,
     )
     .await
     {
@@ -161,12 +164,12 @@ async fn create_patient_recommendation(
     let recommendation_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO patient_recommendations (
                 patient_id, title, description, recommendation_type,
-                source_doctor_id, source_appointment_id, source_document_id,
+                source_doctor_id, source_appointment_id, source_document_id, source_order_id,
                 due_at, priority, status, portal_visible, created_by, updated_by
            ) VALUES (
                 $1, $2, $3, $4,
-                $5, $6, $7,
-                $8, $9, 'active', $10, $11, $11
+                $5, $6, $7, $8,
+                $9, $10, 'active', $11, $12, $12
            )
            RETURNING id"#,
     )
@@ -177,6 +180,7 @@ async fn create_patient_recommendation(
     .bind(body.source_doctor_id)
     .bind(body.source_appointment_id)
     .bind(body.source_document_id)
+    .bind(body.source_order_id)
     .bind(due_at)
     .bind(&priority)
     .bind(portal_visible)
@@ -266,6 +270,7 @@ async fn update_patient_recommendation(
         body.source_doctor_id,
         body.source_appointment_id,
         body.source_document_id,
+        body.source_order_id,
     )
     .await
     {
@@ -321,11 +326,12 @@ async fn update_patient_recommendation(
                source_doctor_id = COALESCE($6, source_doctor_id),
                source_appointment_id = COALESCE($7, source_appointment_id),
                source_document_id = COALESCE($8, source_document_id),
-               due_at = COALESCE($9, due_at),
-               priority = COALESCE($10, priority),
-               status = COALESCE($11, status),
-               portal_visible = COALESCE($12, portal_visible),
-               updated_by = $13
+               source_order_id = COALESCE($9, source_order_id),
+               due_at = COALESCE($10, due_at),
+               priority = COALESCE($11, priority),
+               status = COALESCE($12, status),
+               portal_visible = COALESCE($13, portal_visible),
+               updated_by = $14
            WHERE id = $1 AND patient_id = $2"#,
     )
     .bind(recommendation_id)
@@ -336,6 +342,7 @@ async fn update_patient_recommendation(
     .bind(body.source_doctor_id)
     .bind(body.source_appointment_id)
     .bind(body.source_document_id)
+    .bind(body.source_order_id)
     .bind(due_at)
     .bind(priority.as_deref())
     .bind(status.as_deref())
@@ -575,6 +582,9 @@ async fn create_my_recommendation_appointment_request(
     let source_doctor_id = row
         .try_get::<Option<Uuid>, _>("source_doctor_id")
         .unwrap_or_default();
+    let source_order_id = row
+        .try_get::<Option<Uuid>, _>("source_order_id")
+        .unwrap_or_default();
     let note = normalize_optional_text(body.note.as_deref());
     let request_reason = format!("Recommendation: {title}");
     let request_notes = note
@@ -584,17 +594,18 @@ async fn create_my_recommendation_appointment_request(
 
     let request_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO patient_appointment_requests (
-                patient_id, requested_by, appointment_type, care_path_kind,
+                patient_id, requested_by, order_id, appointment_type, care_path_kind,
                 requested_provider_id, requested_doctor_id, specialty, reason, notes
            ) VALUES (
-                $1, $2, 'medical', 'followup',
-                (SELECT provider_id FROM provider_doctors WHERE id = $3),
-                $3, $4, $5, $6
+                $1, $2, $3, 'medical', 'followup',
+                (SELECT provider_id FROM provider_doctors WHERE id = $4),
+                $4, $5, $6, $7
            )
            RETURNING id"#,
     )
     .bind(patient_id)
     .bind(auth.user_id)
+    .bind(source_order_id)
     .bind(source_doctor_id)
     .bind(recommendation_type.replace('_', " "))
     .bind(&request_reason)
@@ -754,7 +765,25 @@ async fn validate_sources(
     source_doctor_id: Option<Uuid>,
     source_appointment_id: Option<Uuid>,
     source_document_id: Option<Uuid>,
+    source_order_id: Option<Uuid>,
 ) -> Result<(), axum::response::Response> {
+    if let Some(order_id) = source_order_id {
+        let belongs = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM orders WHERE id = $1 AND patient_id = $2)",
+        )
+        .bind(order_id)
+        .bind(patient_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(false);
+        if !belongs {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Source order does not belong to patient",
+            ));
+        }
+    }
+
     if let Some(appointment_id) = source_appointment_id {
         let belongs = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(SELECT 1 FROM appointments WHERE id = $1 AND patient_id = $2)",
@@ -809,6 +838,7 @@ fn recommendation_select_sql(where_clause: &str) -> String {
     format!(
         r#"SELECT pr.id, pr.patient_id, pr.title, pr.description, pr.recommendation_type,
                   pr.source_doctor_id, pr.source_appointment_id, pr.source_document_id,
+                  pr.source_order_id,
                   pr.due_at, pr.priority, pr.status, pr.portal_visible,
                   pr.patient_decision, pr.decision_note, pr.decided_at,
                   pr.appointment_request_id, pr.created_by, pr.updated_by,
@@ -818,6 +848,7 @@ fn recommendation_select_sql(where_clause: &str) -> String {
                   updater.name AS updated_by_name,
                   appointment.title AS source_appointment_title,
                   document.auto_name AS source_document_name,
+                  source_order.order_number AS source_order_number,
                   request.status AS appointment_request_status
            FROM patient_recommendations pr
            LEFT JOIN provider_doctors doctor ON doctor.id = pr.source_doctor_id
@@ -825,6 +856,7 @@ fn recommendation_select_sql(where_clause: &str) -> String {
            LEFT JOIN users updater ON updater.id = pr.updated_by
            LEFT JOIN appointments appointment ON appointment.id = pr.source_appointment_id
            LEFT JOIN documents document ON document.id = pr.source_document_id
+           LEFT JOIN orders source_order ON source_order.id = pr.source_order_id
            LEFT JOIN patient_appointment_requests request ON request.id = pr.appointment_request_id
            {where_clause}
            ORDER BY CASE pr.status WHEN 'active' THEN 0 ELSE 1 END,
@@ -885,6 +917,8 @@ fn recommendation_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "source_appointment_title": row.try_get::<Option<String>, _>("source_appointment_title").unwrap_or_default(),
         "source_document_id": row.try_get::<Option<Uuid>, _>("source_document_id").unwrap_or_default(),
         "source_document_name": row.try_get::<Option<String>, _>("source_document_name").unwrap_or_default(),
+        "source_order_id": row.try_get::<Option<Uuid>, _>("source_order_id").unwrap_or_default(),
+        "source_order_number": row.try_get::<Option<String>, _>("source_order_number").unwrap_or_default(),
         "due_at": row.try_get::<Option<DateTime<Utc>>, _>("due_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "priority": row.try_get::<String, _>("priority").unwrap_or_default(),
         "status": row.try_get::<String, _>("status").unwrap_or_default(),

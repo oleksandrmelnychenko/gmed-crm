@@ -85,8 +85,13 @@ export type TranslationRequest = {
   request_source: string;
   requested_by: string;
   requested_by_name: string | null;
+  assigned_to: string | null;
+  assigned_to_name: string | null;
+  assigned_at: string | null;
   translated_by: string | null;
   translated_by_name: string | null;
+  translated_document_id: string | null;
+  translated_document_name: string | null;
   requested_at: string;
   completed_at: string | null;
   translated_at: string | null;

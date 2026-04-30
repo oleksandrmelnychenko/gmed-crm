@@ -100,6 +100,7 @@ export type ContractItem = {
 
 export type InvoiceItem = {
   id: string;
+  patient_id?: string;
   invoice_number: string;
   invoice_type: string;
   status: string;
@@ -110,10 +111,26 @@ export type InvoiceItem = {
   balance_due?: string | null;
   order_number?: string | null;
   quote_number?: string | null;
+  portal_visible?: boolean;
+  hide_amounts_from_patient?: boolean;
+  line_items_visible_to_patient?: boolean;
+  pdf_visible_to_patient?: boolean;
+  portal_visibility?: {
+    visible_to_patient: boolean;
+    amounts_visible_to_patient: boolean;
+    line_items_visible_to_patient: boolean;
+    pdf_visible_to_patient: boolean;
+    redaction_reason: string | null;
+  };
+  payer?: {
+    contact_name?: string | null;
+    contact_relationship?: string | null;
+  };
 };
 
 export type PatientFinancialBreakdownByOrder = {
   order_id: string | null;
+  package_id: string | null;
   invoice_id: string;
   invoice_number: string;
   status: string;
@@ -145,6 +162,13 @@ export type PatientFinancialSummary = {
   margin_net: string | null;
   margin_percent: string | null;
   margin_visible: boolean;
+  filters?: {
+    from?: string | null;
+    to?: string | null;
+    order_id?: string | null;
+    package_id?: string | null;
+    include_pass_through?: boolean;
+  };
   breakdown_by_order: PatientFinancialBreakdownByOrder[];
   breakdown_by_service_type: PatientFinancialBreakdownByService[];
   issues: string[];
@@ -174,14 +198,28 @@ export type PatientFinancialLedger = {
 export type PatientServicePackageItem = {
   patient_service_package_id: string;
   package_id: string;
+  order_id?: string | null;
+  order_number?: string | null;
   package_name: string;
   status: string;
+  starts_on?: string | null;
+  ends_on?: string | null;
+  assigned_at?: string;
+  notes?: string | null;
+  payer_contact_name?: string | null;
+  payer_contact_relationship?: string | null;
   package_item_id?: string | null;
   description?: string | null;
   included_quantity: string;
+  unit_label?: string | null;
   used_quantity: string;
   remaining_quantity: string;
   overage_quantity: string;
+  pending_overage_quantity?: string;
+  approved_overage_quantity?: string;
+  declined_overage_quantity?: string;
+  pending_consumption_count?: number;
+  latest_consumed_at?: string | null;
   requires_patient_approval: boolean;
 };
 

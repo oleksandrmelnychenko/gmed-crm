@@ -61,7 +61,9 @@ import {
   fetchInvoicePdfBlob,
   fetchInvoiceWorkspace,
   fetchInvoices,
+  updateInvoicePayer,
   updateInvoiceStatus,
+  updateInvoiceVisibility,
 } from "./data/invoice-api";
 import {
   DEFAULT_FILTERS,
@@ -76,6 +78,8 @@ import {
   formatDate,
   formatDateTime,
   invoiceToStatusForm,
+  invoiceToPayerForm,
+  invoiceToVisibilityForm,
   invoicesPermissions,
   nextDunningLevel,
 } from "./model/invoice-model";
@@ -91,9 +95,11 @@ import type {
   InvoiceStatus,
   InvoiceType,
   OrderOption,
+  PayerForm,
   PatientOption,
   QuoteOption,
   StatusForm,
+  VisibilityForm,
 } from "./model/types";
 const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
@@ -331,6 +337,25 @@ function StaffInvoicesPage() {
   const [statusForm, setStatusForm] = useState<StatusForm>({ status: "draft", dueDate: "", paidAmount: "", notes: "" });
   const [statusBusy, setStatusBusy] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [visibilityForm, setVisibilityForm] = useState<VisibilityForm>({
+    portalVisible: true,
+    hideAmountsFromPatient: false,
+    lineItemsVisibleToPatient: true,
+    pdfVisibleToPatient: true,
+    visibilityNote: "",
+  });
+  const [visibilityBusy, setVisibilityBusy] = useState(false);
+  const [visibilityError, setVisibilityError] = useState<string | null>(null);
+  const [payerForm, setPayerForm] = useState<PayerForm>({
+    payerPatientRelationId: "",
+    contactName: "",
+    contactEmail: "",
+    contactPhone: "",
+    contactRelationship: "",
+    notes: "",
+  });
+  const [payerBusy, setPayerBusy] = useState(false);
+  const [payerError, setPayerError] = useState<string | null>(null);
   const [dunningBusy, setDunningBusy] = useState(false);
   const [dunningError, setDunningError] = useState<string | null>(null);
   const [dunningForm, setDunningForm] = useState<DunningForm>({ note: "" });
@@ -844,8 +869,12 @@ function StaffInvoicesPage() {
           setDetail(data);
           setDunningEvents(dunning);
           setStatusForm(invoiceToStatusForm(data));
+          setVisibilityForm(invoiceToVisibilityForm(data));
+          setPayerForm(invoiceToPayerForm(data));
           setDunningForm({ note: "" });
           setDunningError(null);
+          setVisibilityError(null);
+          setPayerError(null);
           setDetailError(null);
         }
       } catch (error) {
@@ -936,6 +965,47 @@ function StaffInvoicesPage() {
       setStatusError(error instanceof Error ? error.message : t.common_error);
     } finally {
       setStatusBusy(false);
+    }
+  }
+
+  async function handleSaveVisibility() {
+    if (!selectedInvoiceId) return;
+    setVisibilityBusy(true);
+    try {
+      await updateInvoiceVisibility(selectedInvoiceId, {
+        portal_visible: visibilityForm.portalVisible,
+        hide_amounts_from_patient: visibilityForm.hideAmountsFromPatient,
+        line_items_visible_to_patient: visibilityForm.lineItemsVisibleToPatient,
+        pdf_visible_to_patient: visibilityForm.pdfVisibleToPatient,
+        visibility_note: visibilityForm.visibilityNote.trim() || null,
+      });
+      setVisibilityError(null);
+      setReloadToken((current) => current + 1);
+    } catch (error) {
+      setVisibilityError(error instanceof Error ? error.message : t.common_error);
+    } finally {
+      setVisibilityBusy(false);
+    }
+  }
+
+  async function handleSavePayer() {
+    if (!selectedInvoiceId) return;
+    setPayerBusy(true);
+    try {
+      await updateInvoicePayer(selectedInvoiceId, {
+        payer_patient_relation_id: payerForm.payerPatientRelationId || null,
+        payer_contact_name: payerForm.contactName.trim() || null,
+        payer_contact_email: payerForm.contactEmail.trim() || null,
+        payer_contact_phone: payerForm.contactPhone.trim() || null,
+        payer_contact_relationship: payerForm.contactRelationship.trim() || null,
+        payer_notes: payerForm.notes.trim() || null,
+      });
+      setPayerError(null);
+      setReloadToken((current) => current + 1);
+    } catch (error) {
+      setPayerError(error instanceof Error ? error.message : t.common_error);
+    } finally {
+      setPayerBusy(false);
     }
   }
 
@@ -1485,6 +1555,8 @@ function StaffInvoicesPage() {
           setDetail(null);
           setDunningEvents([]);
           setDunningError(null);
+          setVisibilityError(null);
+          setPayerError(null);
           setDetailError(null);
           syncQuery({ invoice: null });
         }
@@ -1555,6 +1627,273 @@ function StaffInvoicesPage() {
                     <Button type="button" variant="outline" className="rounded-lg" onClick={() => staffGo(`/orders?order=${detail.order_id}&patient=${detail.patient_id}`)}>{text.linkedOrder}</Button>
                     <Button type="button" variant="outline" className="rounded-lg" onClick={() => staffGo(`/contracts?quote=${detail.quote_id ?? ""}&order=${detail.order_id}&patient=${detail.patient_id}&tab=quotes`)}>{text.quotes}</Button>
                     <Button type="button" variant="outline" className="rounded-lg" onClick={() => staffGo(`/documents?order=${detail.order_id}&patient=${detail.patient_id}`)}>{text.documents}</Button>
+                  </div>
+                </SectionCard>
+
+                <SectionCard
+                  title={lang === "de" ? "Patientensicht und Zahler" : "Patient visibility and payer"}
+                  description={
+                    lang === "de"
+                      ? "Steuert Portal-Sichtbarkeit, Betragsredaktion, PDF-Freigabe und externen Zahlerkontakt."
+                      : "Controls portal visibility, amount redaction, PDF release and external payer contact."
+                  }
+                >
+                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                    <div className="space-y-4">
+                      {visibilityError ? <ShellBanner tone="error">{visibilityError}</ShellBanner> : null}
+                      <div className={cn("rounded-xl p-4", tokens.surface.mutedCard)}>
+                        <div className={tokens.text.eyebrow}>Patient preview</div>
+                        <div className="mt-3 grid gap-2 text-sm text-muted-foreground">
+                          <p>
+                            Portal:{" "}
+                            {detail.portal_visibility?.visible_to_patient
+                              ? "visible"
+                              : "hidden from patient"}
+                          </p>
+                          <p>
+                            Amounts:{" "}
+                            {detail.portal_visibility?.amounts_visible_to_patient
+                              ? formatMoney(detail.total_gross)
+                              : "hidden from patient"}
+                          </p>
+                          <p>
+                            Lines:{" "}
+                            {detail.portal_visibility?.line_items_visible_to_patient
+                              ? `${detail.line_items?.length ?? 0} visible`
+                              : "hidden from patient"}
+                          </p>
+                          <p>
+                            PDF:{" "}
+                            {detail.portal_visibility?.pdf_visible_to_patient
+                              ? "available"
+                              : "blocked for patient"}
+                          </p>
+                          {detail.portal_visibility?.redaction_reason ? (
+                            <StatusBadge tone="warning">
+                              {detail.portal_visibility.redaction_reason.replaceAll("_", " ")}
+                            </StatusBadge>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <input
+                            type="checkbox"
+                            checked={visibilityForm.portalVisible}
+                            onChange={(event) =>
+                              setVisibilityForm((current) => ({
+                                ...current,
+                                portalVisible: event.target.checked,
+                              }))
+                            }
+                            disabled={!access.canManage || visibilityBusy}
+                          />
+                          Portal visible
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <input
+                            type="checkbox"
+                            checked={visibilityForm.hideAmountsFromPatient}
+                            onChange={(event) =>
+                              setVisibilityForm((current) => ({
+                                ...current,
+                                hideAmountsFromPatient: event.target.checked,
+                                lineItemsVisibleToPatient: event.target.checked
+                                  ? false
+                                  : current.lineItemsVisibleToPatient,
+                                pdfVisibleToPatient: event.target.checked
+                                  ? false
+                                  : current.pdfVisibleToPatient,
+                              }))
+                            }
+                            disabled={!access.canManage || visibilityBusy}
+                          />
+                          Hide amounts
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <input
+                            type="checkbox"
+                            checked={visibilityForm.lineItemsVisibleToPatient}
+                            onChange={(event) =>
+                              setVisibilityForm((current) => ({
+                                ...current,
+                                lineItemsVisibleToPatient: event.target.checked,
+                              }))
+                            }
+                            disabled={
+                              !access.canManage ||
+                              visibilityBusy ||
+                              visibilityForm.hideAmountsFromPatient ||
+                              !visibilityForm.portalVisible
+                            }
+                          />
+                          Patient sees lines
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <input
+                            type="checkbox"
+                            checked={visibilityForm.pdfVisibleToPatient}
+                            onChange={(event) =>
+                              setVisibilityForm((current) => ({
+                                ...current,
+                                pdfVisibleToPatient: event.target.checked,
+                              }))
+                            }
+                            disabled={
+                              !access.canManage ||
+                              visibilityBusy ||
+                              visibilityForm.hideAmountsFromPatient ||
+                              !visibilityForm.portalVisible
+                            }
+                          />
+                          Patient PDF available
+                        </label>
+                        <Field label="Visibility note" className="sm:col-span-2">
+                          <textarea
+                            className={textareaClassName}
+                            value={visibilityForm.visibilityNote}
+                            onChange={(event) =>
+                              setVisibilityForm((current) => ({
+                                ...current,
+                                visibilityNote: event.target.value,
+                              }))
+                            }
+                            disabled={!access.canManage || visibilityBusy}
+                          />
+                        </Field>
+                      </div>
+                      <SheetActionsFooter>
+                        <Button
+                          type="button"
+                          className="h-9 rounded-lg"
+                          onClick={() => void handleSaveVisibility()}
+                          disabled={visibilityBusy || !access.canManage}
+                        >
+                          {visibilityBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+                          Save visibility
+                        </Button>
+                      </SheetActionsFooter>
+                    </div>
+
+                    <div className="space-y-4">
+                      {payerError ? <ShellBanner tone="error">{payerError}</ShellBanner> : null}
+                      <div className={cn("rounded-xl p-4", tokens.surface.mutedCard)}>
+                        <div className={tokens.text.eyebrow}>Current payer</div>
+                        <div className="mt-2 text-sm text-muted-foreground">
+                          {detail.payer?.contact_name ||
+                          detail.payer?.relation_patient_name ? (
+                            <>
+                              <p className="font-medium text-foreground">
+                                {detail.payer?.contact_name ??
+                                  detail.payer?.relation_patient_name}
+                              </p>
+                              <p>
+                                {detail.payer?.contact_relationship ??
+                                  detail.payer?.relation_type ??
+                                  t.common_not_set}
+                              </p>
+                              {detail.payer?.contact_email ? <p>{detail.payer.contact_email}</p> : null}
+                              {detail.payer?.contact_phone ? <p>{detail.payer.contact_phone}</p> : null}
+                            </>
+                          ) : (
+                            <p>{t.common_not_set}</p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <Field label="Payer relation ID">
+                          <Input
+                            className={shellInputClassName}
+                            value={payerForm.payerPatientRelationId}
+                            onChange={(event) =>
+                              setPayerForm((current) => ({
+                                ...current,
+                                payerPatientRelationId: event.target.value,
+                              }))
+                            }
+                            disabled={!access.canManage || payerBusy}
+                            placeholder="optional UUID"
+                          />
+                        </Field>
+                        <Field label="Contact name">
+                          <Input
+                            className={shellInputClassName}
+                            value={payerForm.contactName}
+                            onChange={(event) =>
+                              setPayerForm((current) => ({
+                                ...current,
+                                contactName: event.target.value,
+                              }))
+                            }
+                            disabled={!access.canManage || payerBusy}
+                          />
+                        </Field>
+                        <Field label="Email">
+                          <Input
+                            className={shellInputClassName}
+                            value={payerForm.contactEmail}
+                            onChange={(event) =>
+                              setPayerForm((current) => ({
+                                ...current,
+                                contactEmail: event.target.value,
+                              }))
+                            }
+                            disabled={!access.canManage || payerBusy}
+                          />
+                        </Field>
+                        <Field label="Phone">
+                          <Input
+                            className={shellInputClassName}
+                            value={payerForm.contactPhone}
+                            onChange={(event) =>
+                              setPayerForm((current) => ({
+                                ...current,
+                                contactPhone: event.target.value,
+                              }))
+                            }
+                            disabled={!access.canManage || payerBusy}
+                          />
+                        </Field>
+                        <Field label="Relationship">
+                          <Input
+                            className={shellInputClassName}
+                            value={payerForm.contactRelationship}
+                            onChange={(event) =>
+                              setPayerForm((current) => ({
+                                ...current,
+                                contactRelationship: event.target.value,
+                              }))
+                            }
+                            disabled={!access.canManage || payerBusy}
+                          />
+                        </Field>
+                        <Field label="Payer notes" className="sm:col-span-2">
+                          <textarea
+                            className={textareaClassName}
+                            value={payerForm.notes}
+                            onChange={(event) =>
+                              setPayerForm((current) => ({
+                                ...current,
+                                notes: event.target.value,
+                              }))
+                            }
+                            disabled={!access.canManage || payerBusy}
+                          />
+                        </Field>
+                      </div>
+                      <SheetActionsFooter>
+                        <Button
+                          type="button"
+                          className="h-9 rounded-lg"
+                          onClick={() => void handleSavePayer()}
+                          disabled={payerBusy || !access.canManage}
+                        >
+                          {payerBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+                          Save payer
+                        </Button>
+                      </SheetActionsFooter>
+                    </div>
                   </div>
                 </SectionCard>
 
@@ -1635,9 +1974,16 @@ function StaffInvoicesPage() {
                             <div>
                               <h3 className={tokens.text.sectionTitle}>{line.description}</h3>
                               <p className={cn("mt-1", tokens.text.muted)}>{`${text.quantity} ${line.quantity} | ${text.unit} ${formatMoney(line.unit_price)}`}</p>
+                              <p className={cn("mt-1", tokens.text.muted)}>
+                                {line.vat_source_explanation ??
+                                  `VAT source: ${line.vat_source ?? "legacy"}`}
+                              </p>
                             </div>
                             <div className="flex flex-wrap gap-2">
                               <StatusBadge tone="neutral">{`${t.invoices_vat} ${line.vat_rate}%`}</StatusBadge>
+                              <StatusBadge tone="neutral">
+                                {(line.tax_profile_name ?? line.tax_profile_key ?? line.vat_source ?? "VAT source").toString()}
+                              </StatusBadge>
                               {line.is_cost_passthrough ? (
                                 <StatusBadge tone="warning">{t.orders_cost_pass_through_badge}</StatusBadge>
                               ) : null}

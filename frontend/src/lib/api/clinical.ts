@@ -52,6 +52,17 @@ export type ServiceGroupParticipant = {
   generated_leistung_id?: string | null;
 };
 
+export type ServiceGroupParticipantInput = {
+  provider_id: string;
+  doctor_id: string;
+  role_label?: string | null;
+  quantity_override?: number | null;
+  unit_price_override?: number | null;
+  description_override?: string | null;
+  external_invoice_id?: string | null;
+  notes?: string | null;
+};
+
 export type OrderServiceGroup = {
   id: string;
   order_id: string;
@@ -71,6 +82,43 @@ export type OrderServiceGroup = {
   generated_line_count?: number;
 };
 
+export type CreateOrderServiceGroupInput = {
+  appointment_id?: string | null;
+  group_title: string;
+  service_key?: string | null;
+  agency_service_id?: string | null;
+  description?: string | null;
+  service_date?: string | null;
+  quantity?: number | null;
+  unit_price?: number | null;
+  currency?: string | null;
+  vat_rate?: number | null;
+  participants?: ServiceGroupParticipantInput[];
+};
+
+export type OrderServiceGroupLinePreviewItem = {
+  participant_id: string;
+  provider_id: string;
+  provider_name: string;
+  doctor_id: string;
+  doctor_name: string;
+  description: string;
+  quantity: string;
+  unit_price: string;
+  currency: string;
+  vat_rate: string;
+  existing_leistung_id: string | null;
+  action: "generate" | "update" | "skip_duplicate" | string;
+};
+
+export type OrderServiceGroupLinePreview = {
+  generate_count: number;
+  update_count: number;
+  skip_duplicate_count: number;
+  override_duplicates: boolean;
+  lines: OrderServiceGroupLinePreviewItem[];
+};
+
 export type DrugProduct = {
   id: string;
   brand_name: string;
@@ -86,6 +134,7 @@ export type DrugProduct = {
 
 export type GermanEquivalent = {
   equivalent_id: string;
+  relationship_id?: string | null;
   brand_name: string;
   country_code: string;
   atc_code: string | null;
@@ -104,6 +153,37 @@ export type MedicationEquivalentPayload = {
   medication_name: string;
   medication_substance: string | null;
   candidates: GermanEquivalent[];
+};
+
+export type MedicationDrugMatchResponse = {
+  id: string;
+  verification_status: string;
+  confidence: string;
+};
+
+export type DrugImportPreviewRow = {
+  brand_name?: string | null;
+  country_code?: string | null;
+  atc_code?: string | null;
+  form?: string | null;
+  strength?: string | null;
+  manufacturer?: string | null;
+  substances?: string[];
+  clinical_note?: string | null;
+  verification_status?: string | null;
+};
+
+export type DrugImportPreview = {
+  mode: "dry_run" | string;
+  received_count: number;
+  valid_preview_count: number;
+  issue_preview_count: number;
+  preview: Array<DrugImportPreviewRow & {
+    row_number: number;
+    normalized_brand_name: string;
+    issues: string[];
+  }>;
+  message: string;
 };
 
 export function fetchInterpreterSuggestions(
@@ -145,6 +225,32 @@ export function fetchOrderServiceGroup(
   return get<OrderServiceGroup>(`/order-service-groups/${serviceGroupId}`);
 }
 
+export function createOrderServiceGroup(
+  orderId: string,
+  body: CreateOrderServiceGroupInput,
+): Promise<{ id: string }> {
+  return post(`/orders/${orderId}/service-groups`, body);
+}
+
+export function replaceOrderServiceGroupParticipants(
+  serviceGroupId: string,
+  participants: ServiceGroupParticipantInput[],
+): Promise<unknown> {
+  return post(`/order-service-groups/${serviceGroupId}/participants`, {
+    participants,
+  });
+}
+
+export function fetchOrderServiceGroupLinePreview(
+  serviceGroupId: string,
+  overrideDuplicates = false,
+): Promise<OrderServiceGroupLinePreview> {
+  const query = overrideDuplicates ? "?override_duplicates=true" : "";
+  return get<OrderServiceGroupLinePreview>(
+    `/order-service-groups/${serviceGroupId}/line-preview${query}`,
+  );
+}
+
 export function generateServiceGroupLines(
   serviceGroupId: string,
   overrideDuplicates = false,
@@ -171,6 +277,28 @@ export function searchDrugProducts(params: {
   return get<DrugProduct[]>(`/drug-products/search?${query}`);
 }
 
+export function verifyDrugProduct(
+  productId: string,
+  verificationStatus: "curated" | "candidate" | "verified" | "rejected",
+  note?: string | null,
+): Promise<unknown> {
+  return post(`/drug-products/${productId}/verify`, {
+    verification_status: verificationStatus,
+    note,
+  });
+}
+
+export function verifyDrugEquivalent(
+  relationshipId: string,
+  verificationStatus: "candidate" | "verified" | "rejected",
+  note?: string | null,
+): Promise<unknown> {
+  return post(`/drug-equivalents/${relationshipId}/verify`, {
+    verification_status: verificationStatus,
+    note,
+  });
+}
+
 export function fetchMedicationEquivalents(
   caseId: string,
   medicationId: string,
@@ -180,4 +308,39 @@ export function fetchMedicationEquivalents(
   return get<MedicationEquivalentPayload>(
     `/cases/${caseId}/medikamente/${medicationId}/equivalents${query}`,
   );
+}
+
+export function createMedicationDrugMatch(
+  caseId: string,
+  medicationId: string,
+  body: {
+    drug_product_id: string;
+    confidence?: number | null;
+    note?: string | null;
+  },
+): Promise<MedicationDrugMatchResponse> {
+  return post<MedicationDrugMatchResponse>(
+    `/cases/${caseId}/medikamente/${medicationId}/drug-matches`,
+    body,
+  );
+}
+
+export function verifyMedicationDrugMatch(
+  caseId: string,
+  medicationId: string,
+  matchId: string,
+  verificationStatus: "candidate" | "verified" | "rejected",
+  note?: string | null,
+): Promise<unknown> {
+  return post(
+    `/cases/${caseId}/medikamente/${medicationId}/drug-matches/${matchId}/verify`,
+    {
+      verification_status: verificationStatus,
+      note,
+    },
+  );
+}
+
+export function previewDrugImport(rows: DrugImportPreviewRow[]): Promise<DrugImportPreview> {
+  return post<DrugImportPreview>("/drug-products/import-preview", { rows });
 }

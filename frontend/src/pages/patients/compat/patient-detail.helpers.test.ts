@@ -94,6 +94,48 @@ describe("filterPatientTimelineItems", () => {
       })
     ).toHaveLength(0);
   });
+
+  it("filters new clinical timeline entities for interpreter and drug verification", () => {
+    const clinicalItems = [
+      {
+        entity_type: "interpreter_preference",
+        entity_id: "int-1",
+        title: "Interpreter preference: Iryna -> preferred",
+        category: "interpreter_preference",
+        status: "preferred",
+        happened_at: "2026-04-05T10:00:00Z",
+        source_label: "Patient manager",
+      },
+      {
+        entity_type: "drug_verification",
+        entity_id: "match-1",
+        title: "Drug match verified: Sortis",
+        category: "drug_verification",
+        status: "verified",
+        happened_at: "2026-04-06T10:00:00Z",
+        source_label: "Sortis",
+      },
+    ];
+
+    expect(
+      filterPatientTimelineItems(clinicalItems, {
+        entityFilter: "drug_verification",
+        categoryFilter: "all",
+        sourceFilter: "",
+        search: "",
+        rangeFilter: "all",
+      }),
+    ).toHaveLength(1);
+    expect(
+      filterPatientTimelineItems(clinicalItems, {
+        entityFilter: "all",
+        categoryFilter: "interpreter_preference",
+        sourceFilter: "",
+        search: "preferred",
+        rangeFilter: "all",
+      }),
+    ).toHaveLength(1);
+  });
 });
 
 describe("buildPatientTimelineSummary", () => {
@@ -324,6 +366,30 @@ describe("resolvePatientTimelineRoute", () => {
         access,
       ),
     ).toBe("/patients/patient-1?tab=invoices");
+    expect(
+      resolvePatientTimelineRoute(
+        { entity_type: "service_package_change", entity_id: "package-1" },
+        access,
+      ),
+    ).toBe("/patients/patient-1?tab=invoices");
+    expect(
+      resolvePatientTimelineRoute(
+        { entity_type: "invoice_visibility", entity_id: "invoice-1" },
+        access,
+      ),
+    ).toBe("/invoices?invoice=invoice-1");
+    expect(
+      resolvePatientTimelineRoute(
+        { entity_type: "interpreter_preference", entity_id: "interpreter-1" },
+        access,
+      ),
+    ).toBe("/patients/patient-1?tab=appointments");
+    expect(
+      resolvePatientTimelineRoute(
+        { entity_type: "drug_verification", entity_id: "match-1" },
+        access,
+      ),
+    ).toBe("/patients/patient-1?tab=timeline&entity_type=drug_verification");
     expect(
       resolvePatientTimelineRoute(
         { entity_type: "translation_request", entity_id: "request-1" },

@@ -12,8 +12,13 @@ type MedicationEquivalentsPanelProps = {
   includeCandidates?: boolean;
   loading?: boolean;
   error?: string;
+  verifyingEquivalentId?: string | null;
   onFind?: () => void;
   onToggleCandidates?: (includeCandidates: boolean) => void;
+  onVerifyEquivalent?: (
+    relationshipId: string,
+    verificationStatus: "verified" | "rejected" | "candidate",
+  ) => void;
 };
 
 export function MedicationEquivalentsPanel({
@@ -23,8 +28,10 @@ export function MedicationEquivalentsPanel({
   includeCandidates = false,
   loading = false,
   error,
+  verifyingEquivalentId = null,
   onFind,
   onToggleCandidates,
+  onVerifyEquivalent,
 }: MedicationEquivalentsPanelProps) {
   return (
     <Panel
@@ -114,6 +121,38 @@ export function MedicationEquivalentsPanel({
               {candidate.verification_status !== "verified" ? (
                 <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800">
                   Unverified candidate: staff-only, not patient-facing.
+                </p>
+              ) : null}
+              {onVerifyEquivalent && candidate.relationship_id ? (
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 rounded-full px-2.5 text-[11px]"
+                    disabled={verifyingEquivalentId === candidate.relationship_id}
+                    onClick={() =>
+                      onVerifyEquivalent(candidate.relationship_id!, "verified")
+                    }
+                  >
+                    Verify
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 rounded-full px-2.5 text-[11px]"
+                    disabled={verifyingEquivalentId === candidate.relationship_id}
+                    onClick={() =>
+                      onVerifyEquivalent(candidate.relationship_id!, "rejected")
+                    }
+                  >
+                    Reject
+                  </Button>
+                </div>
+              ) : candidate.verification_status !== "verified" ? (
+                <p className="mt-2 text-[11px] text-muted-foreground">
+                  No curated equivalent link exists yet. Add a product match first.
                 </p>
               ) : null}
             </article>

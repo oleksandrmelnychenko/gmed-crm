@@ -697,10 +697,13 @@ struct CreateDocumentTranslationRequest {
 #[derive(Deserialize)]
 struct UpdateDocumentTranslationRequest {
     status: String,
+    assigned_to: Option<Uuid>,
     note: Option<String>,
     source_language: Option<String>,
     source_text: Option<String>,
     translated_text: Option<String>,
+    create_translated_document: Option<bool>,
+    translated_document_auto_name: Option<String>,
 }
 
 struct ShareableDocumentContext {
@@ -6085,6 +6088,41 @@ fn parse_patient_upload_preset(
             default_title: "Patient medical document",
             is_medical: true,
         }),
+        "correspondence" | "clinic_correspondence" => Ok(PatientUploadPreset {
+            kind: "correspondence",
+            art: "patient_correspondence_upload",
+            category: "clinic_correspondence",
+            default_title: "Patient correspondence upload",
+            is_medical: false,
+        }),
+        "analysis" | "analyses" | "lab_analysis" => Ok(PatientUploadPreset {
+            kind: "analyses",
+            art: "patient_analysis_upload",
+            category: "lab_analysis",
+            default_title: "Patient analysis upload",
+            is_medical: true,
+        }),
+        "conclusion" | "conclusions" | "medical_report" => Ok(PatientUploadPreset {
+            kind: "conclusions",
+            art: "patient_conclusion_upload",
+            category: "medical_report",
+            default_title: "Patient conclusion upload",
+            is_medical: true,
+        }),
+        "invoice" | "invoices" => Ok(PatientUploadPreset {
+            kind: "invoices",
+            art: "patient_invoice_upload",
+            category: "invoice",
+            default_title: "Patient invoice upload",
+            is_medical: false,
+        }),
+        "translation" | "translations" => Ok(PatientUploadPreset {
+            kind: "translations",
+            art: "patient_translation_upload",
+            category: "translation",
+            default_title: "Patient translation upload",
+            is_medical: false,
+        }),
         "insurance_document" => Ok(PatientUploadPreset {
             kind: "insurance_document",
             art: "insurance_document",
@@ -6101,7 +6139,7 @@ fn parse_patient_upload_preset(
         }),
         _ => Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "Upload kind must be general, medical_record, insurance_document or payment_proof",
+            "Upload kind must be general, correspondence, analyses, conclusions, invoices, translations, medical_record, insurance_document or payment_proof",
         )),
     }
 }
@@ -6339,8 +6377,13 @@ fn document_translation_request_json(row: &sqlx::postgres::PgRow) -> serde_json:
         "request_source": row.try_get::<String, _>("request_source").unwrap_or_else(|_| "staff".to_string()),
         "requested_by": row.try_get::<Uuid, _>("requested_by").unwrap_or_else(|_| Uuid::nil()),
         "requested_by_name": row.try_get::<Option<String>, _>("requested_by_name").unwrap_or_default(),
+        "assigned_to": row.try_get::<Option<Uuid>, _>("assigned_to").unwrap_or_default(),
+        "assigned_to_name": row.try_get::<Option<String>, _>("assigned_to_name").unwrap_or_default(),
+        "assigned_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("assigned_at").unwrap_or_default(),
         "translated_by": row.try_get::<Option<Uuid>, _>("translated_by").unwrap_or_default(),
         "translated_by_name": row.try_get::<Option<String>, _>("translated_by_name").unwrap_or_default(),
+        "translated_document_id": row.try_get::<Option<Uuid>, _>("translated_document_id").unwrap_or_default(),
+        "translated_document_name": row.try_get::<Option<String>, _>("translated_document_name").unwrap_or_default(),
         "translated_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("translated_at").unwrap_or_default(),
         "requested_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("requested_at").unwrap_or_else(|_| chrono::Utc::now()),
         "completed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("completed_at").unwrap_or_default(),
@@ -9080,7 +9123,12 @@ async fn list_document_translation_request_queue(
         Ok(value) => value,
         Err(resp) => return resp,
     };
-    let source = match query.source.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+    let source = match query
+        .source
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
         Some("staff") => Some("staff"),
         Some("patient_portal") => Some("patient_portal"),
         Some(_) => {
@@ -9102,10 +9150,13 @@ async fn list_document_translation_request_queue(
         r#"SELECT dtr.id, dtr.document_id, dtr.patient_id, dtr.requested_language,
                   dtr.status, dtr.note, dtr.source_language, dtr.source_text,
                   dtr.translated_text, dtr.requested_by, dtr.translated_by,
+                  dtr.assigned_to, dtr.assigned_at, dtr.translated_document_id,
                   dtr.request_source, dtr.requested_at, dtr.completed_at,
                   dtr.translated_at, dtr.updated_at,
                   requester.name AS requested_by_name,
+                  assignee.name AS assigned_to_name,
                   translator.name AS translated_by_name,
+                  translated_document.auto_name AS translated_document_name,
                   d.auto_name AS document_name,
                   d.art AS document_art,
                   d.category AS document_category,
@@ -9115,7 +9166,9 @@ async fn list_document_translation_request_queue(
            JOIN documents d ON d.id = dtr.document_id
            LEFT JOIN patients p ON p.id = dtr.patient_id
            LEFT JOIN users requester ON requester.id = dtr.requested_by
+           LEFT JOIN users assignee ON assignee.id = dtr.assigned_to
            LEFT JOIN users translator ON translator.id = dtr.translated_by
+           LEFT JOIN documents translated_document ON translated_document.id = dtr.translated_document_id
            WHERE dtr.status IN ({status_sql})
              AND ($1::text IS NULL OR dtr.request_source = $1)
              AND ($2::uuid IS NULL OR dtr.patient_id = $2)
@@ -9192,12 +9245,17 @@ async fn list_document_translation_requests(
         r#"SELECT dtr.id, dtr.document_id, dtr.patient_id, dtr.requested_language,
                   dtr.status, dtr.note, dtr.source_language, dtr.source_text,
                   dtr.translated_text, dtr.requested_by, dtr.translated_by,
-                  dtr.requested_at, dtr.completed_at, dtr.translated_at, dtr.updated_at,
+                  dtr.assigned_to, dtr.assigned_at, dtr.translated_document_id,
+                  dtr.request_source, dtr.requested_at, dtr.completed_at, dtr.translated_at, dtr.updated_at,
                   requester.name AS requested_by_name,
-                  translator.name AS translated_by_name
+                  assignee.name AS assigned_to_name,
+                  translator.name AS translated_by_name,
+                  translated_document.auto_name AS translated_document_name
            FROM document_translation_requests dtr
            LEFT JOIN users requester ON requester.id = dtr.requested_by
+           LEFT JOIN users assignee ON assignee.id = dtr.assigned_to
            LEFT JOIN users translator ON translator.id = dtr.translated_by
+           LEFT JOIN documents translated_document ON translated_document.id = dtr.translated_document_id
            WHERE dtr.document_id = $1
            ORDER BY dtr.requested_at DESC, dtr.created_at DESC"#,
     )
@@ -9343,12 +9401,17 @@ async fn create_document_translation_request(
         r#"SELECT dtr.id, dtr.document_id, dtr.patient_id, dtr.requested_language,
                   dtr.status, dtr.note, dtr.source_language, dtr.source_text,
                   dtr.translated_text, dtr.requested_by, dtr.translated_by,
-                  dtr.requested_at, dtr.completed_at, dtr.translated_at, dtr.updated_at,
+                  dtr.assigned_to, dtr.assigned_at, dtr.translated_document_id,
+                  dtr.request_source, dtr.requested_at, dtr.completed_at, dtr.translated_at, dtr.updated_at,
                   requester.name AS requested_by_name,
-                  translator.name AS translated_by_name
+                  assignee.name AS assigned_to_name,
+                  translator.name AS translated_by_name,
+                  translated_document.auto_name AS translated_document_name
            FROM document_translation_requests dtr
            LEFT JOIN users requester ON requester.id = dtr.requested_by
+           LEFT JOIN users assignee ON assignee.id = dtr.assigned_to
            LEFT JOIN users translator ON translator.id = dtr.translated_by
+           LEFT JOIN documents translated_document ON translated_document.id = dtr.translated_document_id
            WHERE dtr.id = $1"#,
     )
     .bind(request_id)
@@ -9391,7 +9454,9 @@ async fn update_document_translation_request(
     };
 
     let request_row = match sqlx::query(
-        r#"SELECT dtr.id, dtr.document_id, dtr.source_text, dtr.translated_text
+        r#"SELECT dtr.id, dtr.document_id, dtr.patient_id, dtr.requested_language,
+                  dtr.source_text, dtr.translated_text, dtr.assigned_to,
+                  dtr.translated_document_id, dtr.request_source
            FROM document_translation_requests dtr
            WHERE dtr.id = $1"#,
     )
@@ -9475,6 +9540,57 @@ async fn update_document_translation_request(
             "Completed translation requests require translated text",
         );
     }
+
+    let assigned_to = match body.assigned_to {
+        Some(user_id) if user_id != Uuid::nil() => {
+            if let Err(resp) = validate_translation_assignee(&state, user_id).await {
+                return resp;
+            }
+            Some(user_id)
+        }
+        _ if next_status == "in_progress" => Some(auth.user_id),
+        _ => None,
+    };
+
+    let requested_language = request_row
+        .try_get::<String, _>("requested_language")
+        .unwrap_or_else(|_| "en".to_string());
+    let request_source = request_row
+        .try_get::<String, _>("request_source")
+        .unwrap_or_else(|_| "staff".to_string());
+    let current_translated_document_id = request_row
+        .try_get::<Option<Uuid>, _>("translated_document_id")
+        .unwrap_or_default();
+    let translated_document_id =
+        if body.create_translated_document.unwrap_or(false) && next_status == "completed" {
+            match current_translated_document_id {
+                Some(id) => Some(id),
+                None => {
+                    let translated_body = translated_text
+                        .map(ToOwned::to_owned)
+                        .or_else(|| current_translated_text.clone())
+                        .unwrap_or_default();
+                    match create_translated_document_from_request(
+                        &state,
+                        auth.user_id,
+                        request_id,
+                        &document_row,
+                        requested_language.as_str(),
+                        translated_body.as_str(),
+                        body.translated_document_auto_name.as_deref(),
+                        request_source.as_str(),
+                    )
+                    .await
+                    {
+                        Ok(id) => Some(id),
+                        Err(resp) => return resp,
+                    }
+                }
+            }
+        } else {
+            None
+        };
+
     if let Err(e) = sqlx::query(
         r#"UPDATE document_translation_requests
            SET status = $2,
@@ -9482,6 +9598,12 @@ async fn update_document_translation_request(
                source_language = COALESCE($4, source_language),
                source_text = COALESCE($5, source_text),
                translated_text = COALESCE($6, translated_text),
+               translated_document_id = COALESCE($8, translated_document_id),
+               assigned_to = COALESCE($9, assigned_to),
+               assigned_at = CASE
+                   WHEN $9 IS NOT NULL AND assigned_to IS DISTINCT FROM $9 THEN now()
+                   ELSE assigned_at
+               END,
                translated_by = CASE
                    WHEN $4 IS NOT NULL OR $5 IS NOT NULL OR $6 IS NOT NULL OR $2 = 'completed'
                        THEN $7
@@ -9502,6 +9624,8 @@ async fn update_document_translation_request(
     .bind(source_text)
     .bind(translated_text)
     .bind(auth.user_id)
+    .bind(translated_document_id)
+    .bind(assigned_to)
     .execute(&state.db)
     .await
     {
@@ -9520,6 +9644,8 @@ async fn update_document_translation_request(
         json!({
             "request_id": request_id,
             "status": next_status,
+            "assigned_to": assigned_to,
+            "translated_document_id": translated_document_id,
         }),
     ));
 
@@ -9531,6 +9657,8 @@ async fn update_document_translation_request(
         json!({
             "request_id": request_id,
             "status": next_status,
+            "assigned_to": assigned_to,
+            "translated_document_id": translated_document_id,
         }),
     )
     .await;
@@ -9539,12 +9667,17 @@ async fn update_document_translation_request(
         r#"SELECT dtr.id, dtr.document_id, dtr.patient_id, dtr.requested_language,
                   dtr.status, dtr.note, dtr.source_language, dtr.source_text,
                   dtr.translated_text, dtr.requested_by, dtr.translated_by,
-                  dtr.requested_at, dtr.completed_at, dtr.translated_at, dtr.updated_at,
+                  dtr.assigned_to, dtr.assigned_at, dtr.translated_document_id,
+                  dtr.request_source, dtr.requested_at, dtr.completed_at, dtr.translated_at, dtr.updated_at,
                   requester.name AS requested_by_name,
-                  translator.name AS translated_by_name
+                  assignee.name AS assigned_to_name,
+                  translator.name AS translated_by_name,
+                  translated_document.auto_name AS translated_document_name
            FROM document_translation_requests dtr
            LEFT JOIN users requester ON requester.id = dtr.requested_by
+           LEFT JOIN users assignee ON assignee.id = dtr.assigned_to
            LEFT JOIN users translator ON translator.id = dtr.translated_by
+           LEFT JOIN documents translated_document ON translated_document.id = dtr.translated_document_id
            WHERE dtr.id = $1"#,
     )
     .bind(request_id)
@@ -9562,6 +9695,163 @@ async fn update_document_translation_request(
     };
 
     Json(document_translation_request_json(&response_row)).into_response()
+}
+
+async fn validate_translation_assignee(
+    state: &AppState,
+    user_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    let allowed = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+              SELECT 1
+              FROM users
+              WHERE id = $1
+                AND is_active = true
+                AND role IN ('ceo', 'patient_manager', 'teamlead_interpreter', 'interpreter', 'concierge')
+           )"#,
+    )
+    .bind(user_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, user_id = %user_id, "validate translation assignee");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate translation assignee",
+        )
+    })?;
+
+    if allowed {
+        Ok(())
+    } else {
+        Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Translation assignee must be an active document staff member",
+        ))
+    }
+}
+
+async fn create_translated_document_from_request(
+    state: &AppState,
+    actor_user_id: Uuid,
+    request_id: Uuid,
+    source_document_row: &sqlx::postgres::PgRow,
+    requested_language: &str,
+    translated_text: &str,
+    auto_name_override: Option<&str>,
+    request_source: &str,
+) -> Result<Uuid, axum::response::Response> {
+    let translated_text = translated_text.trim();
+    if translated_text.is_empty() {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Translated document creation requires translated text",
+        ));
+    }
+
+    let source_document_id = source_document_row
+        .try_get::<Uuid, _>("id")
+        .unwrap_or_else(|_| Uuid::nil());
+    let patient_id = source_document_row
+        .try_get::<Option<Uuid>, _>("patient_id")
+        .unwrap_or_default();
+    let order_id = source_document_row
+        .try_get::<Option<Uuid>, _>("order_id")
+        .unwrap_or_default();
+    let appointment_id = source_document_row
+        .try_get::<Option<Uuid>, _>("appointment_id")
+        .unwrap_or_default();
+    let source_auto_name = source_document_row
+        .try_get::<String, _>("auto_name")
+        .unwrap_or_else(|_| "Document".to_string());
+    let is_medical = source_document_row
+        .try_get::<bool, _>("is_medical")
+        .unwrap_or(false);
+    let auto_name = auto_name_override
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| {
+            format!(
+                "Translation {} - {}",
+                requested_language.to_uppercase(),
+                source_auto_name
+            )
+        });
+    let original_filename = format!(
+        "translation-{}-{}.txt",
+        request_id.simple(),
+        requested_language.trim().to_lowercase()
+    );
+    let data = translated_text.as_bytes().to_vec();
+    let notes = format!("Generated from translation request {request_id}");
+    let persist_input = NewStoredDocument {
+        patient_id,
+        order_id,
+        appointment_id,
+        auto_name: auto_name.as_str(),
+        original_filename: original_filename.as_str(),
+        art: "translated_document",
+        category: Some("translation"),
+        status: "active",
+        visibility: "internal",
+        is_medical,
+        mime_type: "text/plain",
+        klinik: None,
+        ursprung: Some("translation_request"),
+        notes: Some(notes.as_str()),
+        version_root_document_id: None,
+        replaces_document_id: None,
+        version_number: 1,
+        uploaded_by: actor_user_id,
+    };
+
+    let (document_id, _file_size, stored_filename, storage_key) =
+        persist_document_file(state, &data, &persist_input).await?;
+    best_effort_extract_document_text_and_store(
+        state,
+        document_id,
+        Some(stored_filename.as_str()),
+        Some("text/plain"),
+        storage_key.as_str(),
+        actor_user_id,
+    )
+    .await;
+
+    state.audit_sender.try_send(audit::domain_event(
+        "create_translated_document_from_request",
+        Some(actor_user_id),
+        "document",
+        Some(document_id),
+        json!({
+            "request_id": request_id,
+            "source_document_id": source_document_id,
+            "requested_language": requested_language,
+            "request_source": request_source,
+        }),
+    ));
+
+    crate::realtime::publish_document_event(
+        state,
+        Some(actor_user_id),
+        "document.translation_document_created",
+        document_id,
+        json!({
+            "request_id": request_id,
+            "source_document_id": source_document_id,
+            "patient_id": patient_id,
+            "category": "translation",
+        }),
+    )
+    .await;
+
+    if request_source == "patient_portal" {
+        let _ =
+            release_document_to_patient_portal_internal(state, actor_user_id, document_id, false)
+                .await;
+    }
+
+    Ok(document_id)
 }
 
 async fn download_document(

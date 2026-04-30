@@ -1,6 +1,6 @@
 use axum::{
     Json, Router,
-    extract::{Extension, Path, State},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -8,12 +8,15 @@ use axum::{
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use sqlx::Row;
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
-use crate::services::order_service_groups::generate_order_service_group_lines;
+use crate::services::order_service_groups::{
+    generate_order_service_group_lines, preview_order_service_group_lines,
+};
 use crate::state::AppState;
 use gmed_domain::role::Role;
 
@@ -34,6 +37,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/order-service-groups/{service_group_id}/generate-lines",
             post(generate_service_group_lines),
+        )
+        .route(
+            "/order-service-groups/{service_group_id}/line-preview",
+            get(preview_service_group_lines),
         )
         .route(
             "/appointments/{appointment_id}/doctor-participants",
@@ -91,6 +98,11 @@ struct GenerateLinesRequest {
     override_duplicates: Option<bool>,
 }
 
+#[derive(Deserialize)]
+struct PreviewLinesQuery {
+    override_duplicates: Option<bool>,
+}
+
 async fn list_order_service_groups(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -134,8 +146,12 @@ async fn list_order_service_groups(
     .fetch_all(&state.db)
     .await
     {
-        Ok(rows) => Json(rows.into_iter().map(service_group_list_json).collect::<Vec<_>>())
-            .into_response(),
+        Ok(rows) => Json(
+            rows.into_iter()
+                .map(service_group_list_json)
+                .collect::<Vec<_>>(),
+        )
+        .into_response(),
         Err(error) => {
             tracing::error!(error = %error, order_id = %order_id, "list order service groups");
             err(
@@ -201,7 +217,8 @@ async fn create_order_service_group(
         .unwrap_or("EUR")
         .to_uppercase();
 
-    if let Err(resp) = validate_appointment_order_link(&state, order_id, body.appointment_id).await {
+    if let Err(resp) = validate_appointment_order_link(&state, order_id, body.appointment_id).await
+    {
         return resp;
     }
 
@@ -312,9 +329,14 @@ async fn replace_order_service_group_participants(
         }
     };
 
-    if let Err(resp) =
-        replace_participants_in_tx(&state, &mut tx, order_id, service_group_id, body.participants)
-            .await
+    if let Err(resp) = replace_participants_in_tx(
+        &state,
+        &mut tx,
+        order_id,
+        service_group_id,
+        body.participants,
+    )
+    .await
     {
         return resp;
     }
@@ -374,6 +396,42 @@ async fn generate_service_group_lines(
             err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to generate service group lines",
+            )
+        }
+    }
+}
+
+async fn preview_service_group_lines(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(service_group_id): Path<Uuid>,
+    Query(query): Query<PreviewLinesQuery>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
+        return resp;
+    }
+    let order_id = match load_service_group_order_id(&state, service_group_id).await {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Service group not found"),
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = ensure_order_access(&state, &auth, order_id).await {
+        return resp;
+    }
+
+    match preview_order_service_group_lines(
+        &state.db,
+        service_group_id,
+        query.override_duplicates.unwrap_or(false),
+    )
+    .await
+    {
+        Ok(summary) => Json(summary).into_response(),
+        Err(error) => {
+            tracing::error!(error = %error, service_group_id = %service_group_id, "preview service group lines");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to preview service group lines",
             )
         }
     }
@@ -466,12 +524,11 @@ async fn replace_appointment_doctor_participants(
         }
     };
 
-    if let Err(error) = sqlx::query(
-        "DELETE FROM appointment_doctor_participants WHERE appointment_id = $1",
-    )
-    .bind(appointment_id)
-    .execute(&mut *tx)
-    .await
+    if let Err(error) =
+        sqlx::query("DELETE FROM appointment_doctor_participants WHERE appointment_id = $1")
+            .bind(appointment_id)
+            .execute(&mut *tx)
+            .await
     {
         tracing::error!(error = %error, appointment_id = %appointment_id, "delete appointment participants");
         return err(
@@ -540,55 +597,112 @@ async fn replace_participants_in_tx(
         ));
     }
 
-    sqlx::query(
-        r#"UPDATE order_service_group_participants
-           SET is_active = false
-           WHERE service_group_id = $1"#,
-    )
-    .bind(service_group_id)
-    .execute(&mut **tx)
-    .await
-    .map_err(|error| {
-        tracing::error!(error = %error, service_group_id = %service_group_id, "deactivate service group participants");
-        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to save participants")
-    })?;
+    let requested_doctor_ids = unique_participant_doctor_ids(&participants)?;
 
     for participant in participants {
         validate_provider_doctor_in_tx(tx, participant.provider_id, participant.doctor_id).await?;
         validate_external_invoice_in_tx(tx, order_id, participant.external_invoice_id).await?;
-        sqlx::query(
-            r#"INSERT INTO order_service_group_participants (
-                    service_group_id, provider_id, doctor_id, role_label,
-                    quantity_override, unit_price_override, description_override,
-                    external_invoice_id, notes
-               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-               ON CONFLICT (service_group_id, doctor_id) WHERE is_active = true
-               DO UPDATE SET role_label = EXCLUDED.role_label,
-                             quantity_override = EXCLUDED.quantity_override,
-                             unit_price_override = EXCLUDED.unit_price_override,
-                             description_override = EXCLUDED.description_override,
-                             external_invoice_id = EXCLUDED.external_invoice_id,
-                             notes = EXCLUDED.notes,
-                             is_active = true"#,
+        let role_label = normalize_optional_text(participant.role_label);
+        let quantity_override = optional_decimal(participant.quantity_override);
+        let unit_price_override = optional_decimal(participant.unit_price_override);
+        let description_override = normalize_optional_text(participant.description_override);
+        let notes = normalize_optional_text(participant.notes);
+
+        let update_result = sqlx::query(
+            r#"WITH chosen AS (
+                   SELECT id
+                   FROM order_service_group_participants
+                   WHERE service_group_id = $1
+                     AND doctor_id = $3
+                   ORDER BY is_active DESC, created_at DESC
+                   LIMIT 1
+               )
+               UPDATE order_service_group_participants
+               SET provider_id = $2,
+                   role_label = $4,
+                   quantity_override = $5,
+                   unit_price_override = $6,
+                   description_override = $7,
+                   external_invoice_id = $8,
+                   notes = $9,
+                   is_active = true
+               WHERE id = (SELECT id FROM chosen)"#,
         )
         .bind(service_group_id)
         .bind(participant.provider_id)
         .bind(participant.doctor_id)
-        .bind(normalize_optional_text(participant.role_label))
-        .bind(optional_decimal(participant.quantity_override))
-        .bind(optional_decimal(participant.unit_price_override))
-        .bind(normalize_optional_text(participant.description_override))
+        .bind(role_label.clone())
+        .bind(quantity_override)
+        .bind(unit_price_override)
+        .bind(description_override.clone())
         .bind(participant.external_invoice_id)
-        .bind(normalize_optional_text(participant.notes))
+        .bind(notes.clone())
         .execute(&mut **tx)
         .await
         .map_err(|error| {
-            tracing::error!(error = %error, service_group_id = %service_group_id, "insert service group participant");
+            tracing::error!(error = %error, service_group_id = %service_group_id, "update service group participant");
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to save participants")
         })?;
+
+        if update_result.rows_affected() == 0 {
+            sqlx::query(
+                r#"INSERT INTO order_service_group_participants (
+                        service_group_id, provider_id, doctor_id, role_label,
+                        quantity_override, unit_price_override, description_override,
+                        external_invoice_id, notes, is_active
+                   ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)"#,
+            )
+            .bind(service_group_id)
+            .bind(participant.provider_id)
+            .bind(participant.doctor_id)
+            .bind(role_label)
+            .bind(quantity_override)
+            .bind(unit_price_override)
+            .bind(description_override)
+            .bind(participant.external_invoice_id)
+            .bind(notes)
+            .execute(&mut **tx)
+            .await
+            .map_err(|error| {
+                tracing::error!(error = %error, service_group_id = %service_group_id, "insert service group participant");
+                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to save participants")
+            })?;
+        }
     }
 
+    sqlx::query(
+        r#"UPDATE order_service_group_participants
+           SET is_active = false
+           WHERE service_group_id = $1
+             AND NOT (doctor_id = ANY($2))"#,
+    )
+    .bind(service_group_id)
+    .bind(&requested_doctor_ids)
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, service_group_id = %service_group_id, "deactivate removed service group participants");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to save participants")
+    })?;
+
     Ok(())
+}
+
+fn unique_participant_doctor_ids(
+    participants: &[ServiceGroupParticipantInput],
+) -> Result<Vec<Uuid>, axum::response::Response> {
+    let mut seen = HashSet::with_capacity(participants.len());
+    let mut ids = Vec::with_capacity(participants.len());
+    for participant in participants {
+        if !seen.insert(participant.doctor_id) {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Doctor can only appear once in a service group",
+            ));
+        }
+        ids.push(participant.doctor_id);
+    }
+    Ok(ids)
 }
 
 async fn validate_provider_doctor_in_tx(
@@ -702,7 +816,10 @@ async fn load_service_group_payload(
     .await
     .map_err(|error| {
         tracing::error!(error = %error, service_group_id = %service_group_id, "load service group");
-        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load service group")
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load service group",
+        )
     })?;
 
     let Some(row) = row else {
@@ -812,7 +929,10 @@ async fn ensure_order_access(
         .await
         .map_err(|error| {
             tracing::error!(error = %error, order_id = %order_id, "load order access");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate order access")
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate order access",
+            )
         })?;
     let Some(row) = row else {
         return Err(err(StatusCode::NOT_FOUND, "Order not found"));
@@ -827,7 +947,10 @@ async fn ensure_order_access(
         .await
         .map_err(|error| {
             tracing::error!(error = %error, patient_id = %patient_id, "validate order assignment");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate order access")
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate order access",
+            )
         })?;
     if assigned {
         Ok(())
@@ -955,6 +1078,43 @@ fn decimal_json(row: &sqlx::postgres::PgRow, column: &str) -> String {
         .round_dp(2)
         .normalize()
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn participant(doctor_id: Uuid) -> ServiceGroupParticipantInput {
+        ServiceGroupParticipantInput {
+            provider_id: Uuid::new_v4(),
+            doctor_id,
+            role_label: None,
+            quantity_override: None,
+            unit_price_override: None,
+            description_override: None,
+            external_invoice_id: None,
+            notes: None,
+        }
+    }
+
+    #[test]
+    fn unique_participant_doctor_ids_rejects_duplicate_doctors() {
+        let doctor_id = Uuid::new_v4();
+        let result =
+            unique_participant_doctor_ids(&[participant(doctor_id), participant(doctor_id)]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn unique_participant_doctor_ids_preserves_distinct_doctors() {
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        let result = unique_participant_doctor_ids(&[participant(first), participant(second)])
+            .expect("distinct doctors should be accepted");
+
+        assert_eq!(result, vec![first, second]);
+    }
 }
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {

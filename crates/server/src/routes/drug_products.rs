@@ -22,6 +22,11 @@ use gmed_domain::role::Role;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/drug-products/search", get(search_products))
+        .route("/drug-products/import-preview", post(preview_drug_import))
+        .route(
+            "/drug-products/{product_id}/verify",
+            post(verify_drug_product),
+        )
         .route(
             "/drug-products/{product_id}/german-equivalents",
             get(get_german_equivalents),
@@ -69,6 +74,24 @@ struct CreateMedicationDrugMatch {
     note: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct DrugImportPreviewRequest {
+    rows: Vec<DrugImportPreviewRow>,
+}
+
+#[derive(Deserialize)]
+struct DrugImportPreviewRow {
+    brand_name: Option<String>,
+    country_code: Option<String>,
+    atc_code: Option<String>,
+    form: Option<String>,
+    strength: Option<String>,
+    manufacturer: Option<String>,
+    substances: Option<Vec<String>>,
+    clinical_note: Option<String>,
+    verification_status: Option<String>,
+}
+
 async fn search_products(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -104,8 +127,12 @@ async fn get_german_equivalents(
         return resp;
     }
 
-    match load_german_equivalents(&state.db, product_id, query.include_candidates.unwrap_or(false))
-        .await
+    match load_german_equivalents(
+        &state.db,
+        product_id,
+        query.include_candidates.unwrap_or(false),
+    )
+    .await
     {
         Ok(rows) => Json(rows).into_response(),
         Err(error) => {
@@ -164,8 +191,8 @@ async fn create_medication_drug_match(
         return resp;
     }
 
-    let confidence = Decimal::try_from(body.confidence.unwrap_or(0.70))
-        .unwrap_or_else(|_| Decimal::new(70, 2));
+    let confidence =
+        Decimal::try_from(body.confidence.unwrap_or(0.70)).unwrap_or_else(|_| Decimal::new(70, 2));
     if confidence < Decimal::ZERO || confidence > Decimal::ONE {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -218,6 +245,163 @@ async fn create_medication_drug_match(
             err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to create medication match",
+            )
+        }
+    }
+}
+
+async fn preview_drug_import(
+    Extension(auth): Extension<AuthUser>,
+    Json(body): Json<DrugImportPreviewRequest>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
+        return resp;
+    }
+    if body.rows.len() > 500 {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Import preview is limited to 500 rows",
+        );
+    }
+
+    let received_count = body.rows.len();
+    let mut valid_count = 0usize;
+    let mut issue_count = 0usize;
+    let preview = body
+        .rows
+        .into_iter()
+        .take(25)
+        .enumerate()
+        .map(|(index, row)| {
+            let brand_name = normalize_optional_text(row.brand_name).unwrap_or_default();
+            let country_code = normalize_country_code(row.country_code.as_deref());
+            let verification_status = row
+                .verification_status
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("candidate")
+                .to_lowercase();
+            let substances = row
+                .substances
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|value| normalize_optional_text(Some(value)))
+                .collect::<Vec<_>>();
+            let mut issues = Vec::new();
+
+            if brand_name.is_empty() {
+                issues.push("brand_name is required".to_string());
+            }
+            if country_code.is_none() {
+                issues.push("country_code is required".to_string());
+            }
+            if !matches!(
+                verification_status.as_str(),
+                "curated" | "candidate" | "verified" | "rejected"
+            ) {
+                issues.push("verification_status is invalid".to_string());
+            }
+            if substances.is_empty() {
+                issues.push("at least one substance is recommended".to_string());
+            }
+
+            if issues.is_empty() {
+                valid_count += 1;
+            } else {
+                issue_count += 1;
+            }
+
+            serde_json::json!({
+                "row_number": index + 1,
+                "brand_name": brand_name,
+                "normalized_brand_name": normalize_search_value(&brand_name),
+                "country_code": country_code.unwrap_or_default(),
+                "atc_code": normalize_optional_text(row.atc_code),
+                "form": normalize_optional_text(row.form),
+                "strength": normalize_optional_text(row.strength),
+                "manufacturer": normalize_optional_text(row.manufacturer),
+                "substances": substances,
+                "clinical_note": normalize_optional_text(row.clinical_note),
+                "verification_status": verification_status,
+                "issues": issues,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    Json(serde_json::json!({
+        "mode": "dry_run",
+        "received_count": received_count,
+        "valid_preview_count": valid_count,
+        "issue_preview_count": issue_count,
+        "preview": preview,
+        "message": "Import preview only; no drug products were written.",
+    }))
+    .into_response()
+}
+
+async fn verify_drug_product(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(product_id): Path<Uuid>,
+    Json(body): Json<VerifyRequest>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
+        return resp;
+    }
+    let status = body
+        .verification_status
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("verified")
+        .to_lowercase();
+    if !matches!(
+        status.as_str(),
+        "curated" | "candidate" | "verified" | "rejected"
+    ) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid verification status",
+        );
+    }
+
+    match sqlx::query(
+        r#"UPDATE drug_products
+           SET verification_status = $2,
+               clinical_note = COALESCE($3, clinical_note),
+               updated_by = $4,
+               updated_at = now()
+           WHERE id = $1
+           RETURNING brand_name, country_code, verification_status"#,
+    )
+    .bind(product_id)
+    .bind(&status)
+    .bind(normalize_optional_text(body.note))
+    .bind(auth.user_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => {
+            state.audit_sender.try_send(audit::domain_event(
+                "drug_product_verified".to_string(),
+                Some(auth.user_id),
+                "drug_product",
+                Some(product_id),
+                serde_json::json!({
+                    "brand_name": row.try_get::<String, _>("brand_name").unwrap_or_default(),
+                    "country_code": row.try_get::<String, _>("country_code").unwrap_or_default(),
+                    "verification_status": row.try_get::<String, _>("verification_status").unwrap_or(status),
+                }),
+            ));
+            Json(serde_json::json!({"ok": true})).into_response()
+        }
+        Ok(None) => err(StatusCode::NOT_FOUND, "Drug product not found"),
+        Err(error) => {
+            tracing::error!(error = %error, product_id = %product_id, "verify drug product");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to verify drug product",
             )
         }
     }
@@ -361,7 +545,7 @@ async fn verify_medication_drug_match(
 }
 
 fn require_staff_drug_access(auth: &AuthUser) -> Result<(), axum::response::Response> {
-    auth.require_any_role(&[Role::PatientManager, Role::TeamleadInterpreter])
+    auth.require_any_role(&[Role::PatientManager, Role::TeamleadInterpreter, Role::Ceo])
 }
 
 async fn ensure_case_access(
@@ -379,7 +563,10 @@ async fn ensure_case_access(
         .await
         .map_err(|error| {
             tracing::error!(error = %error, case_id = %case_id, "load case access");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate case access")
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate case access",
+            )
         })?;
     let Some(row) = row else {
         return Err(err(StatusCode::NOT_FOUND, "Case not found"));
@@ -403,7 +590,10 @@ async fn ensure_case_access(
         .await
         .map_err(|error| {
             tracing::error!(error = %error, patient_id = %patient_id, "validate case assignment");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate case access")
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate case access",
+            )
         })?;
     if assigned {
         Ok(())
@@ -416,6 +606,35 @@ fn normalize_optional_text(value: Option<String>) -> Option<String> {
     value
         .map(|raw| raw.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+fn normalize_country_code(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_uppercase())
+        .filter(|value| value.len() == 2 && value.chars().all(|ch| ch.is_ascii_alphabetic()))
+}
+
+fn normalize_search_value(value: &str) -> String {
+    value.trim().to_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_country_code_accepts_two_letter_codes() {
+        assert_eq!(normalize_country_code(Some(" de ")), Some("DE".to_string()));
+        assert_eq!(normalize_country_code(Some("DEU")), None);
+        assert_eq!(normalize_country_code(Some("")), None);
+    }
+
+    #[test]
+    fn normalize_search_value_trims_and_lowercases() {
+        assert_eq!(normalize_search_value("  Sortis "), "sortis");
+    }
 }
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {

@@ -82,6 +82,14 @@ export function updateInvoiceStatus(invoiceId: string, payload: JsonPayload) {
   return postJson<InvoiceItem>(`/invoices/${invoiceId}/status`, payload);
 }
 
+export function updateInvoiceVisibility(invoiceId: string, payload: JsonPayload) {
+  return postJson<InvoiceItem>(`/invoices/${invoiceId}/visibility`, payload);
+}
+
+export function updateInvoicePayer(invoiceId: string, payload: JsonPayload) {
+  return postJson<InvoiceItem>(`/invoices/${invoiceId}/payer`, payload);
+}
+
 export function createDunningEvent(invoiceId: string, payload: JsonPayload) {
   return postJson<DunningEvent>(`/invoices/${invoiceId}/dunning`, payload);
 }

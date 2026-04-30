@@ -12,6 +12,12 @@ export type InvoiceLineItem = {
   quantity: string;
   unit_price: string;
   vat_rate: string;
+  vat_source?: string | null;
+  vat_source_explanation?: string | null;
+  tax_profile_id?: string | null;
+  tax_profile_key?: string | null;
+  tax_profile_name?: string | null;
+  tax_profile_vat_rate?: string | null;
   is_cost_passthrough: boolean;
   line_net: string;
   line_vat: string;
@@ -26,6 +32,27 @@ export type SupportingDocument = {
   original_filename?: string | null;
   art?: string | null;
   category?: string | null;
+};
+
+export type InvoicePortalVisibility = {
+  visible_to_patient: boolean;
+  amounts_visible_to_patient: boolean;
+  line_items_visible_to_patient: boolean;
+  pdf_visible_to_patient: boolean;
+  redaction_reason: string | null;
+};
+
+export type InvoicePayer = {
+  patient_relation_id?: string | null;
+  contact_name?: string | null;
+  contact_email?: string | null;
+  contact_phone?: string | null;
+  contact_relationship?: string | null;
+  relation_type?: string | null;
+  relation_patient_name?: string | null;
+  relation_patient_pid?: string | null;
+  notes?: string | null;
+  updated_at?: string | null;
 };
 
 export type InvoiceItem = {
@@ -50,6 +77,13 @@ export type InvoiceItem = {
   balance_due: unknown;
   paid_at: string | null;
   notes: string | null;
+  portal_visible?: boolean;
+  hide_amounts_from_patient?: boolean;
+  line_items_visible_to_patient?: boolean;
+  pdf_visible_to_patient?: boolean;
+  portal_visibility?: InvoicePortalVisibility;
+  visibility_note?: string | null;
+  payer?: InvoicePayer;
   created_at: string;
   updated_at: string;
   line_items?: InvoiceLineItem[];
@@ -166,6 +200,23 @@ export type StatusForm = {
 
 export type DunningForm = {
   note: string;
+};
+
+export type VisibilityForm = {
+  portalVisible: boolean;
+  hideAmountsFromPatient: boolean;
+  lineItemsVisibleToPatient: boolean;
+  pdfVisibleToPatient: boolean;
+  visibilityNote: string;
+};
+
+export type PayerForm = {
+  payerPatientRelationId: string;
+  contactName: string;
+  contactEmail: string;
+  contactPhone: string;
+  contactRelationship: string;
+  notes: string;
 };
 
 export type InvoicesPermissions = {

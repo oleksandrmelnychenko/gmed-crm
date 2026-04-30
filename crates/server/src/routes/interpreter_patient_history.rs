@@ -384,7 +384,10 @@ async fn ensure_patient_scope(
         .await
         .map_err(|error| {
             tracing::error!(error = %error, patient_id = %patient_id, "validate patient scope");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate access")
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate access",
+            )
         })?;
     if assigned {
         Ok(())

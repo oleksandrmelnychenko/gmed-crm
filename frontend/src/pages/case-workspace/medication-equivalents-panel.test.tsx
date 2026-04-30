@@ -49,4 +49,33 @@ describe("MedicationEquivalentsPanel", () => {
     expect(html).toContain("Unverified candidate");
     expect(html).toContain("not patient-facing");
   });
+
+  it("shows verification controls only for curated equivalent relationships", () => {
+    const html = renderToStaticMarkup(
+      <MedicationEquivalentsPanel
+        medicationName="Atoris"
+        candidates={[
+          {
+            equivalent_id: "drug-1",
+            relationship_id: "relationship-1",
+            brand_name: "Sortis",
+            country_code: "DE",
+            atc_code: "C10AA05",
+            form: "tablet",
+            strength: "20 mg",
+            manufacturer: "Pfizer",
+            confidence: "0.92",
+            verification_status: "candidate",
+            substances: ["Atorvastatin"],
+            note: "Same active substance",
+            staff_warning: "Staff information only, not a prescription.",
+          },
+        ]}
+        onVerifyEquivalent={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("Verify");
+    expect(html).toContain("Reject");
+  });
 });

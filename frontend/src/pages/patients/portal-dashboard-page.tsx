@@ -84,6 +84,33 @@ const PATIENT_DASHBOARD_REALTIME_EVENTS = [
   "order.external_invoice_overdue",
 ] as const;
 
+function nextActionPriorityRank(priority?: string | null) {
+  switch (priority) {
+    case "urgent":
+      return 0;
+    case "high":
+      return 1;
+    case "normal":
+      return 2;
+    case "low":
+      return 3;
+    default:
+      return 4;
+  }
+}
+
+function compareNextActions(a: PortalNextActionItem, b: PortalNextActionItem) {
+  const priorityDiff = nextActionPriorityRank(a.priority) - nextActionPriorityRank(b.priority);
+  if (priorityDiff !== 0) return priorityDiff;
+  const aDue = a.due_at ? Date.parse(a.due_at) : Number.POSITIVE_INFINITY;
+  const bDue = b.due_at ? Date.parse(b.due_at) : Number.POSITIVE_INFINITY;
+  return aDue - bDue;
+}
+
+function formatNextActionKind(kind: string) {
+  return kind.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 export function PatientDashboardPage() {
   const { user } = useAuth();
   const { lang } = useLang();
@@ -200,7 +227,21 @@ export function PatientDashboardPage() {
   const recentDocuments = useMemo(() => documents.slice(0, 4), [documents]);
   const recentAppointments = useMemo(() => appointments.slice(0, 4), [appointments]);
   const recentInvoices = useMemo(() => invoices.slice(0, 4), [invoices]);
-  const topNextActions = useMemo(() => nextActions.slice(0, 6), [nextActions]);
+  const topNextActions = useMemo(
+    () => [...nextActions].sort(compareNextActions).slice(0, 6),
+    [nextActions],
+  );
+  const urgentNextActionCount = useMemo(
+    () => nextActions.filter((item) => ["urgent", "high"].includes(item.priority)).length,
+    [nextActions],
+  );
+  const nextActionKindSummary = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of nextActions) {
+      counts.set(item.kind, (counts.get(item.kind) ?? 0) + 1);
+    }
+    return Array.from(counts.entries()).slice(0, 3);
+  }, [nextActions]);
   const recentRecommendations = useMemo(() => recommendations.slice(0, 4), [recommendations]);
   const recentRequests = useMemo(() => requests.slice(0, 4), [requests]);
 
@@ -389,10 +430,31 @@ export function PatientDashboardPage() {
               <p className="mt-1 text-sm text-slate-500">
                 {l("Ein konsolidierter Block aus Terminen, Empfehlungen, Dokumenten und sichtbaren Rechnungen.", "Единый блок из визитов, рекомендаций, документов и видимых счетов.", "A consolidated block from appointments, recommendations, documents and visible invoices.")}
               </p>
+              {nextActionKindSummary.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {nextActionKindSummary.map(([kind, count]) => (
+                    <Badge
+                      key={kind}
+                      variant="outline"
+                      className="rounded-full border-slate-200 bg-white text-slate-600"
+                    >
+                      {formatNextActionKind(kind)}: {count}
+                    </Badge>
+                  ))}
+                </div>
+              ) : null}
             </div>
-            <a href="/recommendations" className="text-sm font-medium text-sky-700 hover:text-sky-800">
-              {l("Empfehlungen", "Рекомендации", "Recommendations")}
-            </a>
+            <div className="shrink-0 text-right">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+                {l("Priorität", "Приоритет", "Priority")}
+              </p>
+              <p className="mt-1 text-sm font-semibold text-slate-950">
+                {urgentNextActionCount} / {nextActions.length}
+              </p>
+              <a href="/recommendations" className="mt-2 inline-flex text-sm font-medium text-sky-700 hover:text-sky-800">
+                {l("Empfehlungen", "Рекомендации", "Recommendations")}
+              </a>
+            </div>
           </div>
           <div className="mt-5 space-y-3">
             {topNextActions.length === 0 ? (
@@ -401,23 +463,28 @@ export function PatientDashboardPage() {
               topNextActions.map((item) => (
                 <div
                   key={item.id}
-                  className="rounded-[1.35rem] border border-slate-200 bg-slate-50/80 px-4 py-4"
+                  className="rounded-[1.35rem] border border-slate-200 bg-[linear-gradient(135deg,rgba(248,250,252,0.95),rgba(240,249,255,0.9))] px-4 py-4"
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-slate-950">{item.title}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge
+                          variant="outline"
+                          className={cn("rounded-full", nextActionTone(item.kind, item.priority))}
+                        >
+                          {formatNextActionKind(item.kind)}
+                        </Badge>
+                        <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-600">
+                          {formatNextActionKind(item.priority || "normal")}
+                        </Badge>
+                      </div>
+                      <p className="mt-2 text-sm font-semibold text-slate-950">{item.title}</p>
                       <p className="mt-1 text-xs text-slate-500">
-                        {[item.description, item.due_at ? formatPortalDateTime(item.due_at) : null]
+                        {[item.description, item.due_at ? `${l("Fällig", "Срок", "Due")} ${formatPortalDateTime(item.due_at)}` : null]
                           .filter(Boolean)
-                          .join(" · ")}
+                          .join(" / ")}
                       </p>
                     </div>
-                    <Badge
-                      variant="outline"
-                      className={cn("rounded-full", nextActionTone(item.kind, item.priority))}
-                    >
-                      {item.kind.replaceAll("_", " ")}
-                    </Badge>
                   </div>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                     {item.amount ? (
@@ -427,7 +494,7 @@ export function PatientDashboardPage() {
                     ) : (
                       <span />
                     )}
-                    <a href={item.action_url} className="text-xs font-medium text-sky-700 hover:text-sky-800">
+                    <a href={item.action_url} className="rounded-full bg-slate-950 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800">
                       {item.action_label}
                     </a>
                   </div>

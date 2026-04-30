@@ -3,8 +3,9 @@ import type { PortalDocumentItem } from "./portal-shared";
 export type PortalDocumentCategoryKey =
   | "all"
   | "correspondence"
-  | "lab_analysis"
-  | "medical_reports"
+  | "analyses"
+  | "conclusions"
+  | "invoices"
   | "translations";
 
 export const PORTAL_DOCUMENT_CATEGORY_TABS: Array<{
@@ -18,31 +19,39 @@ export const PORTAL_DOCUMENT_CATEGORY_TABS: Array<{
   {
     key: "correspondence",
     label: {
-      de: "Klinikkorrespondenz",
-      ru: "Переписка с клиникой",
-      en: "Clinic correspondence",
+      de: "Korrespondenz",
+      ru: "Переписка",
+      en: "Correspondence",
     },
   },
   {
-    key: "lab_analysis",
+    key: "analyses",
     label: {
-      de: "Labor / Analyse",
-      ru: "Лаборатория / анализы",
-      en: "Lab / analysis",
+      de: "Analysen",
+      ru: "Анализы",
+      en: "Analyses",
     },
   },
   {
-    key: "medical_reports",
+    key: "conclusions",
     label: {
-      de: "Medizinische Berichte",
-      ru: "Медицинские отчеты",
-      en: "Medical reports",
+      de: "Befunde / Schluesse",
+      ru: "Заключения",
+      en: "Conclusions",
+    },
+  },
+  {
+    key: "invoices",
+    label: {
+      de: "Rechnungen",
+      ru: "Счета",
+      en: "Invoices",
     },
   },
   {
     key: "translations",
     label: {
-      de: "Übersetzungen",
+      de: "Uebersetzungen",
       ru: "Переводы",
       en: "Translations",
     },
@@ -57,9 +66,20 @@ export function portalDocumentCategoryKey(
   if (
     raw.includes("translation") ||
     raw.includes("translated") ||
-    raw.includes("übersetzung")
+    raw.includes("uebersetzung") ||
+    raw.includes("ubersetzung")
   ) {
     return "translations";
+  }
+
+  if (
+    raw.includes("invoice") ||
+    raw.includes("rechnung") ||
+    raw.includes("billing") ||
+    raw.includes("payment") ||
+    raw.includes("finance")
+  ) {
+    return "invoices";
   }
 
   if (
@@ -70,7 +90,7 @@ export function portalDocumentCategoryKey(
     raw.includes("pathology") ||
     raw.includes("diagnostic")
   ) {
-    return "lab_analysis";
+    return "analyses";
   }
 
   if (
@@ -86,11 +106,13 @@ export function portalDocumentCategoryKey(
   if (
     item.is_medical ||
     raw.includes("medical_report") ||
+    raw.includes("conclusion") ||
+    raw.includes("summary") ||
     raw.includes("report") ||
     raw.includes("befund") ||
     raw.includes("treatment_plan")
   ) {
-    return "medical_reports";
+    return "conclusions";
   }
 
   return "correspondence";

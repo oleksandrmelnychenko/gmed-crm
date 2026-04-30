@@ -1674,6 +1674,164 @@ fn extract_external_document_ids(line_items: &Value) -> Vec<Uuid> {
     ids
 }
 
+fn vat_source_explanation(
+    vat_source: &str,
+    tax_profile_name: Option<&str>,
+    tax_profile_key: Option<&str>,
+    vat_rate: Option<&str>,
+) -> String {
+    let profile_label = tax_profile_name
+        .or(tax_profile_key)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("no tax profile");
+    let rate_label = vat_rate
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| format!("{value}%"))
+        .unwrap_or_else(|| "the stored VAT rate".to_string());
+
+    match vat_source {
+        "tax_profile" => {
+            format!("VAT comes from tax profile {profile_label} at {rate_label}.")
+        }
+        "catalog" => {
+            format!("VAT was copied from the agency service catalog at {rate_label}.")
+        }
+        "manual" => {
+            format!("VAT was entered manually for this service line at {rate_label}.")
+        }
+        "legacy" => {
+            format!("VAT is a legacy snapshot on this service line at {rate_label}.")
+        }
+        _ => format!("VAT source is not classified; invoice uses {rate_label}."),
+    }
+}
+
+async fn enrich_invoice_line_items(
+    state: &AppState,
+    line_items: &Value,
+) -> Result<Value, axum::response::Response> {
+    let Some(items) = line_items.as_array() else {
+        return Ok(line_items.clone());
+    };
+    let source_ids = extract_source_line_ids(line_items);
+    if source_ids.is_empty() {
+        let enriched = items
+            .iter()
+            .map(|item| {
+                let mut item = item.clone();
+                if let Some(map) = item.as_object_mut() {
+                    let vat_rate = map
+                        .get("vat_rate")
+                        .and_then(Value::as_str)
+                        .map(ToOwned::to_owned);
+                    map.entry("vat_source".to_string())
+                        .or_insert_with(|| serde_json::json!("legacy"));
+                    map.entry("vat_source_explanation".to_string())
+                        .or_insert_with(|| {
+                            serde_json::json!(vat_source_explanation(
+                                "legacy",
+                                None,
+                                None,
+                                vat_rate.as_deref(),
+                            ))
+                        });
+                }
+                item
+            })
+            .collect::<Vec<_>>();
+        return Ok(Value::Array(enriched));
+    }
+
+    let rows = sqlx::query(
+        r#"SELECT ol.id, ol.vat_source, ol.tax_profile_id,
+                  tp.profile_key, tp.name AS tax_profile_name, tp.vat_rate AS tax_profile_vat_rate
+           FROM order_leistungen ol
+           LEFT JOIN tax_profiles tp ON tp.id = ol.tax_profile_id
+           WHERE ol.id = ANY($1)"#,
+    )
+    .bind(&source_ids)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "enrich invoice line VAT sources");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load invoice VAT sources",
+        )
+    })?;
+
+    let mut meta_by_line = BTreeMap::<Uuid, Value>::new();
+    for row in rows {
+        let source_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
+        let vat_source = row
+            .try_get::<String, _>("vat_source")
+            .unwrap_or_else(|_| "legacy".to_string());
+        let tax_profile_name = row
+            .try_get::<Option<String>, _>("tax_profile_name")
+            .unwrap_or_default();
+        let tax_profile_key = row
+            .try_get::<Option<String>, _>("profile_key")
+            .unwrap_or_default();
+        let rate = row
+            .try_get::<Option<Decimal>, _>("tax_profile_vat_rate")
+            .unwrap_or_default()
+            .map(decimal_to_string);
+        meta_by_line.insert(source_id, serde_json::json!({
+            "vat_source": vat_source,
+            "tax_profile_id": row.try_get::<Option<Uuid>, _>("tax_profile_id").unwrap_or_default(),
+            "tax_profile_key": tax_profile_key,
+            "tax_profile_name": tax_profile_name,
+            "tax_profile_vat_rate": rate,
+            "vat_source_explanation": vat_source_explanation(
+                &vat_source,
+                tax_profile_name.as_deref(),
+                tax_profile_key.as_deref(),
+                rate.as_deref(),
+            ),
+        }));
+    }
+
+    let enriched = items
+        .iter()
+        .map(|item| {
+            let mut item = item.clone();
+            let source_id = item
+                .get("source_order_leistung_id")
+                .and_then(Value::as_str)
+                .and_then(|value| Uuid::parse_str(value).ok());
+            if let Some(map) = item.as_object_mut() {
+                let meta = source_id
+                    .and_then(|id| meta_by_line.get(&id))
+                    .and_then(Value::as_object);
+                if let Some(meta) = meta {
+                    for (key, value) in meta {
+                        map.insert(key.clone(), value.clone());
+                    }
+                } else {
+                    let vat_rate = map
+                        .get("vat_rate")
+                        .and_then(Value::as_str)
+                        .map(ToOwned::to_owned);
+                    map.entry("vat_source".to_string())
+                        .or_insert_with(|| serde_json::json!("legacy"));
+                    map.entry("vat_source_explanation".to_string())
+                        .or_insert_with(|| {
+                            serde_json::json!(vat_source_explanation(
+                                "legacy",
+                                None,
+                                None,
+                                vat_rate.as_deref(),
+                            ))
+                        });
+                }
+            }
+            item
+        })
+        .collect::<Vec<_>>();
+
+    Ok(Value::Array(enriched))
+}
+
 async fn can_access_patient(
     state: &AppState,
     auth: &AuthUser,
@@ -1946,6 +2104,37 @@ async fn mark_quote_services_invoiced(
     Ok(())
 }
 
+async fn link_approved_package_consumptions_to_invoice(
+    state: &AppState,
+    ctx: &QuoteInvoiceContext,
+    invoice_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    sqlx::query(
+        r#"UPDATE service_package_consumptions spc
+           SET invoice_id = $1
+           FROM patient_service_packages psp
+           WHERE spc.patient_service_package_id = psp.id
+             AND psp.patient_id = $2
+             AND spc.order_id = $3
+             AND spc.invoice_id IS NULL
+             AND spc.approval_status IN ('not_required', 'approved')"#,
+    )
+    .bind(invoice_id)
+    .bind(ctx.patient_id)
+    .bind(ctx.order_id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, invoice_id = %invoice_id, order_id = %ctx.order_id, "link package consumptions to invoice");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to link package consumption to invoice",
+        )
+    })?;
+
+    Ok(())
+}
+
 async fn load_invoice_detail(
     state: &AppState,
     invoice_id: Uuid,
@@ -1994,11 +2183,12 @@ async fn load_invoice_detail(
     let paid_amount = row
         .try_get::<Decimal, _>("paid_amount")
         .unwrap_or(Decimal::ZERO);
-    let line_items = row
+    let raw_line_items = row
         .try_get::<Value, _>("line_items")
         .unwrap_or_else(|_| serde_json::json!([]));
-    let direct_document_ids = extract_external_document_ids(&line_items);
-    let source_line_ids = extract_source_line_ids(&line_items);
+    let direct_document_ids = extract_external_document_ids(&raw_line_items);
+    let source_line_ids = extract_source_line_ids(&raw_line_items);
+    let line_items = enrich_invoice_line_items(state, &raw_line_items).await?;
 
     let supporting_documents = if direct_document_ids.is_empty() && source_line_ids.is_empty() {
         Vec::new()
@@ -3329,6 +3519,11 @@ async fn create_invoice_from_quote(
             let invoice_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
 
             if let Err(resp) = mark_quote_services_invoiced(&state, &ctx, &invoice_type).await {
+                return resp;
+            }
+            if let Err(resp) =
+                link_approved_package_consumptions_to_invoice(&state, &ctx, invoice_id).await
+            {
                 return resp;
             }
 

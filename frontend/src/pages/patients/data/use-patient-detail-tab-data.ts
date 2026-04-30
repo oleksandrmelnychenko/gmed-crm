@@ -52,6 +52,14 @@ type TabState = {
   workflowChecklist: WorkflowChecklistResponse | null;
 };
 
+type InvoiceListResponse = {
+  items: InvoiceItem[];
+  page: number;
+  per_page: number;
+  total: number;
+  total_pages: number;
+};
+
 const EMPTY_TAB_STATE: TabState = {
   appointments: [],
   cases: [],
@@ -192,7 +200,10 @@ export function usePatientDetailTabData({
           case "invoices": {
             const [result, financialSummary, financialLedger, servicePackages] =
               await Promise.all([
-                apiFetch<InvoiceItem[]>(`/patients/${id}/invoices`, { signal }),
+                apiFetch<InvoiceListResponse>(
+                  `/invoices?patient_id=${encodeURIComponent(id ?? "")}&per_page=50`,
+                  { signal },
+                ),
                 apiFetch<PatientFinancialSummary>(
                   `/patients/${id}/financial-summary`,
                   { signal },
@@ -212,7 +223,7 @@ export function usePatientDetailTabData({
                 ...current,
                 financialLedger,
                 financialSummary,
-                invoices: result,
+                invoices: result.items ?? [],
                 servicePackages,
               }));
               setSettledKey(requestKey);

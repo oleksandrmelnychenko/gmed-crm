@@ -528,6 +528,264 @@ async fn patient_invoice_amount_redaction_hides_api_amounts_and_blocks_pdf() {
 }
 
 #[tokio::test]
+async fn package_consumption_tracks_overage_approval_and_invoice_linkage() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("package-consumption");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    seed_patient_assignment(&pool, patient_id, billing_id, admin_id).await;
+
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    seed_order_leistung(
+        &pool,
+        order_id,
+        "Package eligible service",
+        100.0,
+        "approved",
+    )
+    .await;
+
+    let (status, package) = json_request(
+        &app,
+        "POST",
+        "/api/v1/service-packages",
+        &billing_bearer,
+        Some(json!({
+            "package_key": format!("pkg_{tag}"),
+            "name": "Package consumption test",
+            "base_price_net": 100,
+            "items": [{
+                "description": "Included interpreter hour",
+                "included_quantity": 1,
+                "unit_label": "hour",
+                "requires_patient_approval": false
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let package_id = package["id"].as_str().unwrap();
+    let package_item_id = package["items"][0]["id"].as_str().unwrap();
+
+    let (status, assigned) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/service-packages"),
+        &billing_bearer,
+        Some(json!({
+            "package_id": package_id,
+            "order_id": order_id
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let patient_service_package_id = assigned["id"].as_str().unwrap();
+
+    let (status, consumption) = json_request(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/patients/{patient_id}/service-packages/{patient_service_package_id}/consume"
+        ),
+        &billing_bearer,
+        Some(json!({
+            "package_item_id": package_item_id,
+            "order_id": order_id,
+            "quantity": 2,
+            "notes": "second hour is overage"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(consumption["overage_quantity"], "1");
+    assert_eq!(consumption["approval_status"], "pending");
+
+    let (status, packages) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/service-packages"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let package_line = packages
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["package_item_id"].as_str() == Some(package_item_id))
+        .unwrap();
+    assert_eq!(package_line["used_quantity"], "2");
+    assert_eq!(package_line["pending_overage_quantity"], "1");
+
+    let (status, decision) = json_request(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/patients/{patient_id}/service-packages/{patient_service_package_id}/overage-approval"
+        ),
+        &billing_bearer,
+        Some(json!({
+            "package_item_id": package_item_id,
+            "approval_status": "approved"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(decision["updated_count"], 1);
+
+    let quote = create_quote(&app, &billing_bearer, order_id).await;
+    let invoice = create_invoice(
+        &app,
+        &billing_bearer,
+        quote["id"].as_str().unwrap(),
+        "final",
+        "2026-05-15",
+    )
+    .await;
+    let invoice_id = Uuid::parse_str(invoice["id"].as_str().unwrap()).unwrap();
+    let linked_invoice_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT invoice_id FROM service_package_consumptions WHERE patient_service_package_id = $1",
+    )
+    .bind(Uuid::parse_str(patient_service_package_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(linked_invoice_id, Some(invoice_id));
+}
+
+#[tokio::test]
+async fn invoice_detail_explains_mixed_vat_sources() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("vat-mixed");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    seed_patient_assignment(&pool, patient_id, billing_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+
+    let termin_profile_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM tax_profiles WHERE profile_key = 'termin_fee_0'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let standard_profile_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM tax_profiles WHERE profile_key = 'standard_vat'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO order_leistungen (
+                order_id, description, quantity, unit_price, vat_rate, status,
+                tax_profile_id, vat_source
+           ) VALUES
+                ($1, 'Termin organization', 1, 100, 0, 'approved', $2, 'tax_profile'),
+                ($1, 'Interpreter support', 1, 100, 19, 'approved', $3, 'tax_profile')"#,
+    )
+    .bind(order_id)
+    .bind(termin_profile_id)
+    .bind(standard_profile_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let quote = create_quote(&app, &billing_bearer, order_id).await;
+    let invoice = create_invoice(
+        &app,
+        &billing_bearer,
+        quote["id"].as_str().unwrap(),
+        "final",
+        "2026-05-15",
+    )
+    .await;
+    assert_eq!(invoice["total_vat"], "19");
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{}", invoice["id"].as_str().unwrap()),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let lines = detail["line_items"].as_array().unwrap();
+    assert_eq!(lines.len(), 2);
+    assert!(lines.iter().any(|line| {
+        line["vat_rate"] == "0"
+            && line["vat_source"] == "tax_profile"
+            && line["vat_source_explanation"]
+                .as_str()
+                .unwrap()
+                .contains("Termin fee 0% VAT")
+    }));
+    assert!(lines.iter().any(|line| {
+        line["vat_rate"] == "19"
+            && line["vat_source"] == "tax_profile"
+            && line["vat_source_explanation"]
+                .as_str()
+                .unwrap()
+                .contains("Standard VAT")
+    }));
+}
+
+#[tokio::test]
+async fn patient_financial_summary_hides_margin_from_patient_manager() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("margin-hidden");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let invoice_id = seed_sent_invoice_direct(&pool, order_id, patient_id, billing_id, &tag).await;
+
+    sqlx::query(
+        r#"INSERT INTO accounting_entries (
+                entry_kind, direction, category, source_invoice_id, order_id, patient_id,
+                entry_date, description, amount_net, amount_vat, amount_gross, currency,
+                metadata, created_by
+           ) VALUES (
+                'external_invoice_payment', 'expense', 'provider_expense', $1, $2, $3,
+                CURRENT_DATE, 'Provider expense', 40, 7.6, 47.6, 'EUR',
+                '{}'::jsonb, $4
+           )"#,
+    )
+    .bind(invoice_id)
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(billing_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let (status, summary) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/financial-summary"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(summary["margin_visible"], false);
+    assert!(summary["expenses_gross"].is_null());
+    assert!(summary["margin_net"].is_null());
+}
+
+#[tokio::test]
 async fn invoice_list_returns_page_metadata_and_slices_results() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;

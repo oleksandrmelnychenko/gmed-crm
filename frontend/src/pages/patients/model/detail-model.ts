@@ -213,10 +213,21 @@ export function resolvePatientTimelineRoute(
       return access.canViewContracts ? `/contracts?contract=${item.entity_id}` : null;
     case "invoice":
       return access.canViewInvoices ? `/invoices?invoice=${item.entity_id}` : null;
+    case "invoice_visibility":
+      return access.canViewInvoices ? `/invoices?invoice=${item.entity_id}` : null;
     case "service_package":
     case "service_package_consumption":
+    case "service_package_change":
       return access.patientId && access.canViewInvoices
         ? `/patients/${access.patientId}?tab=invoices`
+        : null;
+    case "interpreter_preference":
+      return access.patientId
+        ? `/patients/${access.patientId}?tab=appointments`
+        : null;
+    case "drug_verification":
+      return access.patientId
+        ? `/patients/${access.patientId}?tab=timeline&entity_type=drug_verification`
         : null;
     case "recommendation":
       return access.patientId

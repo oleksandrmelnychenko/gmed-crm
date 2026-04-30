@@ -368,6 +368,12 @@ const STAFF_DOCUMENT_REALTIME_EVENTS = [
   "document.translation_updated",
 ] as const;
 
+type TranslationUpdateOptions = {
+  assignedTo?: string | null;
+  createTranslatedDocument?: boolean;
+  translatedDocumentAutoName?: string | null;
+};
+
 export function DocumentsPage() {
   const { user } = useAuth();
 
@@ -1276,6 +1282,7 @@ function StaffDocumentsPage() {
         note: translationForm.note.trim() || null,
       });
       await reloadTranslationRequests(detail.id);
+      clearApiCache("/documents/translation-requests");
       clearApiCache("/documents/translation-requests?status=pending,in_progress");
       setVersion((current) => current + 1);
       setTranslationForm({ requestedLanguage: "en", note: "" });
@@ -1316,6 +1323,7 @@ function StaffDocumentsPage() {
     status: string,
     patch?: Partial<TranslationWorkspaceDraft>,
     successMessage?: string,
+    options?: TranslationUpdateOptions,
   ) {
     if (!detail) return;
     setTranslationBusy(true);
@@ -1336,8 +1344,12 @@ function StaffDocumentsPage() {
         source_language: draft.sourceLanguage || null,
         source_text: draft.sourceText.trim() || null,
         translated_text: draft.translatedText.trim() || null,
+        assigned_to: options?.assignedTo || undefined,
+        create_translated_document: options?.createTranslatedDocument || undefined,
+        translated_document_auto_name: options?.translatedDocumentAutoName || undefined,
       });
       await reloadTranslationRequests(detail.id);
+      clearApiCache("/documents/translation-requests");
       clearApiCache("/documents/translation-requests?status=pending,in_progress");
       setVersion((current) => current + 1);
       setNotice(
@@ -1355,6 +1367,43 @@ function StaffDocumentsPage() {
       );
     } finally {
       setTranslationBusy(false);
+    }
+  }
+
+  async function handleUpdateQueuedTranslationRequest(
+    request: TranslationRequest,
+    status: string,
+    options?: TranslationUpdateOptions,
+  ) {
+    setTranslationQueueBusy(true);
+    setTranslationQueueError("");
+    try {
+      await updateTranslationRequest(request.id, {
+        status,
+        assigned_to: options?.assignedTo || undefined,
+        create_translated_document: options?.createTranslatedDocument || undefined,
+        translated_document_auto_name: options?.translatedDocumentAutoName || undefined,
+      });
+      clearApiCache("/documents/translation-requests");
+      clearApiCache("/documents/translation-requests?status=pending,in_progress");
+      if (detail?.id === request.document_id) {
+        await reloadTranslationRequests(detail.id);
+      }
+      setVersion((current) => current + 1);
+      setNotice(
+        t.documents_translation_marked.replace(
+          "{status}",
+          formatTranslationStatusLabel(status, t),
+        ),
+      );
+    } catch (nextError) {
+      setTranslationQueueError(
+        nextError instanceof Error
+          ? nextError.message
+          : t.documents_failed_update_translation,
+      );
+    } finally {
+      setTranslationQueueBusy(false);
     }
   }
 
@@ -1858,6 +1907,13 @@ function StaffDocumentsPage() {
                       ? l(" · Patient portal", " · Портал пациента", " · Patient portal")
                       : l(" · Staff", " · Сотрудник", " · Staff")}
                   </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {l("Zugewiesen", "Назначено", "Assigned")}:{" "}
+                    {request.assigned_to_name ?? l("Nicht zugewiesen", "Не назначено", "Unassigned")}
+                    {request.translated_document_name
+                      ? ` / ${request.translated_document_name}`
+                      : ""}
+                  </p>
                   {request.note ? (
                     <div className="mt-3 rounded-xl border border-border/60 bg-muted/25 px-3 py-2 text-sm text-muted-foreground">
                       {request.note}
@@ -1873,6 +1929,39 @@ function StaffDocumentsPage() {
                     >
                       {t.documents_open_document}
                     </Button>
+                    {request.translated_document_id ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 rounded-lg"
+                        onClick={() => openDocument(request.translated_document_id!)}
+                      >
+                        {l("Uebersetzung öffnen", "Открыть перевод", "Open translation")}
+                      </Button>
+                    ) : null}
+                    {canUpdateTranslation &&
+                    user?.id &&
+                    request.status !== "completed" &&
+                    request.status !== "cancelled" &&
+                    request.assigned_to !== user.id ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 rounded-lg"
+                        disabled={translationQueueBusy}
+                        onClick={() =>
+                          void handleUpdateQueuedTranslationRequest(
+                            request,
+                            request.status === "pending" ? "in_progress" : request.status,
+                            { assignedTo: user.id },
+                          )
+                        }
+                      >
+                        {l("Mir zuweisen", "Назначить мне", "Assign to me")}
+                      </Button>
+                    ) : null}
                   </div>
                 </ListItem>
               ))}
@@ -3273,6 +3362,13 @@ function StaffDocumentsPage() {
                                         )
                                       : ""}
                                   </p>
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    {l("Zugewiesen", "Назначено", "Assigned")}:{" "}
+                                    {request.assigned_to_name ?? l("Nicht zugewiesen", "Не назначено", "Unassigned")}
+                                    {request.translated_document_name
+                                      ? ` / ${request.translated_document_name}`
+                                      : ""}
+                                  </p>
                                 </div>
                                 {canUpdateTranslation &&
                                 request.status !== "completed" &&
@@ -3288,6 +3384,9 @@ function StaffDocumentsPage() {
                                           void handleUpdateTranslationRequest(
                                             request.id,
                                             "in_progress",
+                                            undefined,
+                                            undefined,
+                                            { assignedTo: request.assigned_to ?? user?.id ?? null },
                                           )
                                         }
                                       >
@@ -3312,6 +3411,23 @@ function StaffDocumentsPage() {
                                       type="button"
                                       variant="outline"
                                       className="rounded-xl"
+                                      disabled={translationBusy || !draft.translatedText.trim()}
+                                      onClick={() =>
+                                        void handleUpdateTranslationRequest(
+                                          request.id,
+                                          "completed",
+                                          undefined,
+                                          l("Uebersetzung abgeschlossen und Dokument erstellt.", "Перевод завершен, документ создан.", "Translation completed and document created."),
+                                          { createTranslatedDocument: true },
+                                        )
+                                      }
+                                    >
+                                      {l("Abschließen + Dokument", "Завершить + документ", "Complete + document")}
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      className="rounded-xl"
                                       disabled={translationBusy}
                                       onClick={() =>
                                         void handleUpdateTranslationRequest(
@@ -3325,6 +3441,19 @@ function StaffDocumentsPage() {
                                   </div>
                                 ) : null}
                               </div>
+                              {request.translated_document_id ? (
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="rounded-xl"
+                                    disabled={translationBusy}
+                                    onClick={() => openDocument(request.translated_document_id!)}
+                                  >
+                                    {l("Uebersetzung öffnen", "Открыть перевод", "Open translation")}
+                                  </Button>
+                                </div>
+                              ) : null}
                               {canEditWorkspace ? (
                                 <div className="mt-4 space-y-4">
                                   <div className="grid gap-4 md:grid-cols-2">
@@ -3342,6 +3471,31 @@ function StaffDocumentsPage() {
                                         <option value="de">{formatLanguageLabel("de")}</option>
                                         <option value="en">{formatLanguageLabel("en")}</option>
                                         <option value="uk">{formatLanguageLabel("uk")}</option>
+                                      </NativeComboboxSelect>
+                                    </Field>
+                                    <Field label={l("Assignee", "Исполнитель", "Assignee")}>
+                                      <NativeComboboxSelect
+                                        value={request.assigned_to ?? ""}
+                                        onChange={(event) => {
+                                          const assignedTo = event.target.value;
+                                          if (!assignedTo) return;
+                                          void handleUpdateTranslationRequest(
+                                            request.id,
+                                            request.status === "pending" ? "in_progress" : request.status,
+                                            undefined,
+                                            l("Zuweisung aktualisiert.", "Назначение обновлено.", "Assignee updated."),
+                                            { assignedTo },
+                                          );
+                                        }}
+                                        className={selectClassName}
+                                        disabled={translationBusy}
+                                      >
+                                        <option value="">{l("Nicht zugewiesen", "Не назначено", "Unassigned")}</option>
+                                        {staff.map((member) => (
+                                          <option key={member.id} value={member.id}>
+                                            {member.name} / {formatRoleLabel(member.role)}
+                                          </option>
+                                        ))}
                                       </NativeComboboxSelect>
                                     </Field>
                                     <div className="flex flex-wrap items-end gap-2">

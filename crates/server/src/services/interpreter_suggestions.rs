@@ -212,7 +212,9 @@ fn suggestion_score(
     }
     if previous_appointment_count > 0 {
         score += previous_appointment_count.saturating_mul(10);
-        reasons.push(format!("worked before ({previous_appointment_count} appointments)"));
+        reasons.push(format!(
+            "worked before ({previous_appointment_count} appointments)"
+        ));
     }
     if completed_appointment_count > 0 {
         score += completed_appointment_count.saturating_mul(4);
@@ -220,7 +222,11 @@ fn suggestion_score(
     if approved_report_count > 0 {
         score += approved_report_count.saturating_mul(3);
     }
-    let hour_bonus = total_report_hours.trunc().to_string().parse::<i64>().unwrap_or(0);
+    let hour_bonus = total_report_hours
+        .trunc()
+        .to_string()
+        .parse::<i64>()
+        .unwrap_or(0);
     score += hour_bonus.min(20);
 
     if let Some(avg) = average_feedback_score {
@@ -247,4 +253,50 @@ fn suggestion_score(
     }
 
     (score, reasons)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preferred_history_and_language_raise_interpreter_score() {
+        let (preferred_score, preferred_reasons) = suggestion_score(
+            "preferred",
+            "language match",
+            4,
+            3,
+            2,
+            Decimal::new(65, 1),
+            Some(4.8),
+        );
+        let (neutral_score, neutral_reasons) =
+            suggestion_score("neutral", "language listed", 0, 0, 0, Decimal::ZERO, None);
+
+        assert!(preferred_score > neutral_score);
+        assert!(
+            preferred_reasons
+                .iter()
+                .any(|reason| reason == "preferred for this patient")
+        );
+        assert!(
+            preferred_reasons
+                .iter()
+                .any(|reason| reason == "language match")
+        );
+        assert!(
+            neutral_reasons
+                .iter()
+                .any(|reason| reason == "available interpreter")
+        );
+    }
+
+    #[test]
+    fn language_unknown_is_reason_but_not_blocker() {
+        let (score, reasons) =
+            suggestion_score("neutral", "language unknown", 1, 1, 0, Decimal::ZERO, None);
+
+        assert!(score > 0);
+        assert!(reasons.iter().any(|reason| reason == "language unknown"));
+    }
 }

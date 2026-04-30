@@ -7,7 +7,9 @@ import type {
   InvoiceStatus,
   InvoiceType,
   InvoicesPermissions,
+  PayerForm,
   StatusForm,
+  VisibilityForm,
 } from "./types";
 
 export const INVOICE_TYPES: InvoiceType[] = ["advance", "interim", "final"];
@@ -96,6 +98,27 @@ export function invoiceToStatusForm(invoice: InvoiceItem): StatusForm {
         ? ""
         : String(invoice.paid_amount),
     notes: invoice.notes ?? "",
+  };
+}
+
+export function invoiceToVisibilityForm(invoice: InvoiceItem): VisibilityForm {
+  return {
+    portalVisible: invoice.portal_visible ?? true,
+    hideAmountsFromPatient: invoice.hide_amounts_from_patient ?? false,
+    lineItemsVisibleToPatient: invoice.line_items_visible_to_patient ?? true,
+    pdfVisibleToPatient: invoice.pdf_visible_to_patient ?? true,
+    visibilityNote: invoice.visibility_note ?? "",
+  };
+}
+
+export function invoiceToPayerForm(invoice: InvoiceItem): PayerForm {
+  return {
+    payerPatientRelationId: invoice.payer?.patient_relation_id ?? "",
+    contactName: invoice.payer?.contact_name ?? "",
+    contactEmail: invoice.payer?.contact_email ?? "",
+    contactPhone: invoice.payer?.contact_phone ?? "",
+    contactRelationship: invoice.payer?.contact_relationship ?? "",
+    notes: invoice.payer?.notes ?? "",
   };
 }
 

@@ -20,7 +20,11 @@ import {
 } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
 import {
+  fetchPatientInterpreterHistory,
   fetchInterpreterSuggestions,
+  setInterpreterPreference,
+  type InterpreterHistoryItem,
+  type InterpreterPreference,
   type InterpreterSuggestion,
 } from "@/lib/api/clinical";
 import { useLang } from "@/lib/i18n";
@@ -487,6 +491,11 @@ function AppointmentInterpreterSection({
   const [suggestions, setSuggestions] = useState<InterpreterSuggestion[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
+  const [history, setHistory] = useState<InterpreterHistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [preferenceSavingId, setPreferenceSavingId] = useState<string | null>(null);
+  const [interpreterContextNonce, setInterpreterContextNonce] = useState(0);
 
   useEffect(() => {
     setAssignInterpreterId(detail.interpreter_id ?? "");
@@ -530,7 +539,65 @@ function AppointmentInterpreterSection({
     return () => {
       cancelled = true;
     };
-  }, [canAssign, detail.id, detail.is_blocked]);
+  }, [canAssign, detail.id, detail.is_blocked, interpreterContextNonce]);
+
+  useEffect(() => {
+    if (!canAssign || detail.is_blocked || !detail.patient_id) {
+      setHistory([]);
+      setHistoryLoading(false);
+      setHistoryError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setHistoryLoading(true);
+    setHistoryError(null);
+
+    fetchPatientInterpreterHistory(detail.patient_id)
+      .then((items) => {
+        if (cancelled) return;
+        setHistory(items);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setHistory([]);
+        setHistoryError(
+          error instanceof Error
+            ? error.message
+            : "Failed to load interpreter history.",
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canAssign, detail.is_blocked, detail.patient_id, interpreterContextNonce]);
+
+  async function handleSetInterpreterPreference(
+    interpreterId: string,
+    preference: InterpreterPreference,
+  ) {
+    if (!detail.patient_id) return;
+    setPreferenceSavingId(interpreterId);
+    try {
+      await setInterpreterPreference(detail.patient_id, {
+        interpreter_id: interpreterId,
+        preference,
+      });
+      setInterpreterContextNonce((current) => current + 1);
+    } catch (error) {
+      onError(
+        error instanceof Error
+          ? error.message
+          : "Failed to save interpreter preference.",
+      );
+    } finally {
+      setPreferenceSavingId(null);
+    }
+  }
 
   async function handleAssignInterpreter(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -637,7 +704,14 @@ function AppointmentInterpreterSection({
               selectedInterpreterId={assignInterpreterId}
               loading={suggestionsLoading}
               error={suggestionsError ?? undefined}
+              history={history}
+              historyLoading={historyLoading}
+              historyError={historyError ?? undefined}
+              preferenceSavingId={preferenceSavingId}
               onSelect={setAssignInterpreterId}
+              onSetPreference={(interpreterId, preference) =>
+                void handleSetInterpreterPreference(interpreterId, preference)
+              }
             />
           </div>
         </section>

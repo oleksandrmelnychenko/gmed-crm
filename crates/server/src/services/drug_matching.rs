@@ -20,6 +20,7 @@ pub struct DrugProductSearchResult {
 #[derive(Debug, Serialize)]
 pub struct GermanEquivalentResult {
     pub equivalent_id: Uuid,
+    pub relationship_id: Option<Uuid>,
     pub brand_name: String,
     pub country_code: String,
     pub atc_code: Option<String>,
@@ -112,6 +113,7 @@ pub async fn load_german_equivalents(
            ),
            explicit_equivalents AS (
                 SELECT e.equivalent_product_id AS product_id,
+                       e.id AS relationship_id,
                        e.confidence,
                        e.verification_status,
                        e.note,
@@ -122,6 +124,7 @@ pub async fn load_german_equivalents(
            ),
            substance_equivalents AS (
                 SELECT p.id AS product_id,
+                       NULL::uuid AS relationship_id,
                        0.70::numeric AS confidence,
                        CASE
                             WHEN p.verification_status = 'verified' THEN 'verified'
@@ -147,6 +150,7 @@ pub async fn load_german_equivalents(
            )
            SELECT DISTINCT ON (p.id)
                   p.id,
+                  candidates.relationship_id,
                   p.brand_name,
                   p.country_code,
                   p.atc_code,
@@ -166,6 +170,7 @@ pub async fn load_german_equivalents(
              AND p.is_active = true
              AND ($2::bool = true OR candidates.verification_status = 'verified')
            GROUP BY p.id, candidates.confidence, candidates.verification_status, candidates.note, candidates.rank
+                  , candidates.relationship_id
            ORDER BY p.id, candidates.rank, candidates.confidence DESC"#,
     )
     .bind(product_id)
@@ -197,7 +202,9 @@ pub async fn load_medication_german_equivalents(
         return Ok(None);
     };
     let medication_name = row.try_get::<String, _>("handelsname").unwrap_or_default();
-    let medication_substance = row.try_get::<Option<String>, _>("wirkstoff").unwrap_or_default();
+    let medication_substance = row
+        .try_get::<Option<String>, _>("wirkstoff")
+        .unwrap_or_default();
 
     let mut candidates = Vec::new();
     let matched_products = sqlx::query_scalar::<_, Uuid>(
@@ -258,9 +265,12 @@ fn product_from_row(row: sqlx::postgres::PgRow) -> DrugProductSearchResult {
 }
 
 fn equivalent_from_row(row: sqlx::postgres::PgRow) -> GermanEquivalentResult {
-    let confidence = row.try_get::<Decimal, _>("confidence").unwrap_or(Decimal::ZERO);
+    let confidence = row
+        .try_get::<Decimal, _>("confidence")
+        .unwrap_or(Decimal::ZERO);
     GermanEquivalentResult {
         equivalent_id: row.try_get("id").unwrap_or_default(),
+        relationship_id: row.try_get("relationship_id").unwrap_or_default(),
         brand_name: row.try_get("brand_name").unwrap_or_default(),
         country_code: row.try_get("country_code").unwrap_or_default(),
         atc_code: row.try_get("atc_code").unwrap_or_default(),
@@ -293,11 +303,25 @@ fn normalize_search_term(value: &str) -> String {
 }
 
 #[cfg(test)]
+fn drug_record_visible(verification_status: &str, include_candidates: bool) -> bool {
+    include_candidates || matches!(verification_status, "curated" | "verified")
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn normalize_search_term_trims_and_lowercases() {
         assert_eq!(normalize_search_term("  Atorvastatin "), "atorvastatin");
+    }
+
+    #[test]
+    fn drug_record_visible_hides_unverified_candidates_by_default() {
+        assert!(drug_record_visible("verified", false));
+        assert!(drug_record_visible("curated", false));
+        assert!(!drug_record_visible("candidate", false));
+        assert!(!drug_record_visible("rejected", false));
+        assert!(drug_record_visible("candidate", true));
     }
 }

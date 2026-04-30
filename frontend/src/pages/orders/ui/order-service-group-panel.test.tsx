@@ -45,4 +45,55 @@ describe("OrderServiceGroupPanel", () => {
     expect(html).toContain("Dr. Two");
     expect(html).toContain("Dr. Three");
   });
+
+  it("shows duplicate-safe preview counts before generation", () => {
+    const html = renderToStaticMarkup(
+      <OrderServiceGroupPanel
+        group={{
+          group_title: "Cardiology board",
+          status: "generated",
+          quantity: "1",
+          unit_price: "120",
+          currency: "EUR",
+          vat_rate: "19",
+          generated_line_count: 1,
+          participants: [
+            {
+              id: "participant-1",
+              provider_id: "provider-1",
+              provider_name: "Clinic Mitte",
+              doctor_id: "doctor-1",
+              doctor_name: "Dr. One",
+            },
+          ],
+        }}
+        preview={{
+          generate_count: 0,
+          update_count: 0,
+          skip_duplicate_count: 1,
+          override_duplicates: false,
+          lines: [
+            {
+              participant_id: "participant-1",
+              provider_id: "provider-1",
+              provider_name: "Clinic Mitte",
+              doctor_id: "doctor-1",
+              doctor_name: "Dr. One",
+              description: "Cardiology board - Dr. One (Clinic Mitte)",
+              quantity: "1",
+              unit_price: "120",
+              currency: "EUR",
+              vat_rate: "19",
+              existing_leistung_id: "leistung-1",
+              action: "skip_duplicate",
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(html).toContain("Will skip duplicates");
+    expect(html).toContain("Existing line: leistung-1");
+    expect(html).toContain("duplicate-safe");
+  });
 });

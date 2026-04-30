@@ -18,17 +18,25 @@ describe("portalDocumentCategoryKey", () => {
         category: "lab_analysis",
         is_medical: true,
       }),
-    ).toBe("lab_analysis");
+    ).toBe("analyses");
   });
 
-  it("classifies medical reports and translations explicitly", () => {
+  it("classifies conclusions, invoices and translations explicitly", () => {
     expect(
       portalDocumentCategoryKey({
         art: "discharge_report",
         category: "medical_report",
         is_medical: true,
       }),
-    ).toBe("medical_reports");
+    ).toBe("conclusions");
+
+    expect(
+      portalDocumentCategoryKey({
+        art: "invoice_pdf",
+        category: "invoice",
+        is_medical: false,
+      }),
+    ).toBe("invoices");
 
     expect(
       portalDocumentCategoryKey({
