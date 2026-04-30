@@ -100,11 +100,9 @@ export function PatientInvoicesPage() {
         startTransition(() => {
           setInvoices(rows);
           setError("");
-          if (rows.length === 0) {
-            setSelectedInvoiceId("");
-          } else if (!rows.some((item) => item.id === selectedInvoiceId)) {
-            setSelectedInvoiceId(rows[0]?.id ?? "");
-          }
+          setSelectedInvoiceId((current) =>
+            current && rows.some((item) => item.id === current) ? current : "",
+          );
         });
       } catch (err) {
         if (cancelled) return;
@@ -121,7 +119,7 @@ export function PatientInvoicesPage() {
     return () => {
       cancelled = true;
     };
-  }, [loading, selectedInvoiceId, version, l]);
+  }, [loading, version, l]);
 
   useEffect(() => {
     if (!selectedInvoiceId) {
