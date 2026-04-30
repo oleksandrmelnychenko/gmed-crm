@@ -847,7 +847,7 @@ function PatientFeedbackWorkspace() {
       </div>
 
       <Sheet open={Boolean(activeFeedback)} onOpenChange={(open) => !open && setActiveFeedbackId("")}>
-        <SheetContent side="right" className="w-full p-0 sm:max-w-3xl">
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
           <AdminSheetScaffold
             title={l("Карточка feedback", "Карточка feedback", "Feedback detail")}
             description={l(
@@ -1560,7 +1560,7 @@ function StaffFeedbackWorkspace() {
       </div>
 
       <Sheet open={captureOpen} onOpenChange={setCaptureOpen}>
-        <SheetContent side="right" className="w-full p-0 sm:max-w-3xl">
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
           <form className="flex h-full flex-col" onSubmit={(event) => void handleCapture(event)}>
             <AdminSheetScaffold
               title={l("Feedback erfassen", "Зафиксировать отзыв", "Capture feedback")}
@@ -1634,7 +1634,7 @@ function StaffFeedbackWorkspace() {
       </Sheet>
 
       <Sheet open={Boolean(activeReview)} onOpenChange={(open) => !open && setActiveReview(null)}>
-        <SheetContent side="right" className="w-full p-0 sm:max-w-3xl">
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
           {activeReview ? (
             <form className="flex h-full flex-col" onSubmit={(event) => void handleReview(event)}>
               <AdminSheetScaffold

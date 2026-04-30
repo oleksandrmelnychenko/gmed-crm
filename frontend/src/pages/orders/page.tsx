@@ -256,7 +256,7 @@ function SectionCard({
 
 function DetailField({ label, value }: DetailFieldProps) {
   return (
-    <div className={cn("rounded-xl p-3", tokens.surface.mutedCard)}>
+    <div className={cn("rounded-xl p-3", tokens.surface.card)}>
       <div className={tokens.text.eyebrow}>{label}</div>
       <div className="mt-2 text-sm text-foreground">{value}</div>
     </div>
@@ -283,7 +283,7 @@ function EmptyState({ title, description, action }: EmptyStateProps) {
 function titleWithDot(title: ReactNode) {
   return (
     <span className="inline-flex items-center gap-2">
-      <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+      <span aria-hidden className="size-2 rounded-full bg-amber-500" />
       <span>{title}</span>
     </span>
   );
@@ -4361,10 +4361,10 @@ export function OrdersPage() {
 
                 {shouldRenderOrderSection("services") ? (
                   <>
-                    <div className="flex flex-wrap gap-6 rounded-xl border border-border bg-card px-4 py-3">
+                    <div className="flex flex-wrap gap-6 rounded-xl border border-border px-4 py-3">
                       <AdminInlineMetric
                         icon={ClipboardList}
-                        label={tx.providers_services}
+                        label={eyebrowWithDot(tx.providers_services)}
                         value={String(leistungMetrics.total)}
                         description={l(
                           "Aktuelle Leistungspositionen in diesem Auftrag.",
@@ -4374,7 +4374,7 @@ export function OrdersPage() {
                       />
                       <AdminInlineMetric
                         icon={CheckCircle2}
-                        label={l("Zur Freigabe", "\u0416\u0434\u0443\u0442 \u0443\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u044f")}
+                        label={eyebrowWithDot(l("Zur Freigabe", "\u0416\u0434\u0443\u0442 \u0443\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u044f"))}
                         value={String(leistungMetrics.delivered)}
                         description={l(
                           "Leistungspositionen, die auf PM-Freigabe warten.",
@@ -4384,7 +4384,7 @@ export function OrdersPage() {
                       />
                       <AdminInlineMetric
                         icon={Wallet}
-                        label={l("Freigegeben", "\u0423\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u043e")}
+                        label={eyebrowWithDot(l("Freigegeben", "\u0423\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u043e"))}
                         value={String(leistungMetrics.approved)}
                         description={l(
                           "Bereits freigegebene Leistungspositionen in diesem Auftrag.",
@@ -4394,7 +4394,7 @@ export function OrdersPage() {
                       />
                       <AdminInlineMetric
                         icon={Building2}
-                        label={tx.contracts_total}
+                        label={eyebrowWithDot(tx.contracts_total)}
                         value={formatMoney(leistungMetrics.gross)}
                         description={l(
                           "Menge x Preis uber alle sichtbaren Leistungspositionen.",

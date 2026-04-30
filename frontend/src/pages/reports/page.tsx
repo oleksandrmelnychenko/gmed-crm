@@ -2225,7 +2225,7 @@ export function ReportsPage() {
           </section>
 
           <Sheet open={Boolean(detail)} onOpenChange={(open) => !open && setDetail(null)}>
-            <SheetContent side="right" className="w-full p-0 sm:max-w-2xl">
+            <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
               {detail ? (
                 <AdminSheetScaffold
                   title={titleWithDot(

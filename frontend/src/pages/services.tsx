@@ -1,4 +1,4 @@
-import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+﻿import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   Suspense,
   lazy,
@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
 import { ColumnVisibilityMenu } from "@/components/data-table/column-visibility-menu";
 import { DataTable } from "@/components/data-table/data-table";
 import { DensityToggle } from "@/components/data-table/density-toggle";
@@ -207,7 +208,7 @@ function buildServiceColumns(l: ServicesText): ColumnDef<StaffConciergeService>[
   return [
     {
       id: "title",
-      label: l("Service", "Сервис", "Service"),
+      label: l("Service", "РЎРµСЂРІРёСЃ", "Service"),
       accessor: (row) => row.title,
       filterType: "text",
       pinned: "left",
@@ -219,7 +220,7 @@ function buildServiceColumns(l: ServicesText): ColumnDef<StaffConciergeService>[
     },
     {
       id: "status",
-      label: l("Status", "Статус", "Status"),
+      label: l("Status", "РЎС‚Р°С‚СѓСЃ", "Status"),
       accessor: (row) => row.status,
       filterType: "enum",
       filterOptions: ["planned", "booked", "confirmed", "in_service", "completed", "cancelled"].map(
@@ -235,7 +236,7 @@ function buildServiceColumns(l: ServicesText): ColumnDef<StaffConciergeService>[
     },
     {
       id: "billing_status",
-      label: l("Abrechnung", "Биллинг", "Billing"),
+      label: l("Abrechnung", "Р‘РёР»Р»РёРЅРі", "Billing"),
       accessor: (row) => row.billing_status,
       filterType: "enum",
       filterOptions: ["draft", "ready", "billed", "settled"].map((value) => ({
@@ -252,7 +253,7 @@ function buildServiceColumns(l: ServicesText): ColumnDef<StaffConciergeService>[
     },
     {
       id: "patient",
-      label: l("Patient", "Пациент", "Patient"),
+      label: l("Patient", "РџР°С†РёРµРЅС‚", "Patient"),
       accessor: (row) => row.patient_name,
       filterType: "text",
       width: 200,
@@ -270,7 +271,7 @@ function buildServiceColumns(l: ServicesText): ColumnDef<StaffConciergeService>[
     },
     {
       id: "service_kind",
-      label: l("Art", "Тип", "Kind"),
+      label: l("Art", "РўРёРї", "Kind"),
       accessor: (row) => row.service_kind,
       filterType: "enum",
       filterOptions: ["hotel", "transfer", "vip_terminal", "flight", "chauffeur", "translation_support"].map(
@@ -286,7 +287,7 @@ function buildServiceColumns(l: ServicesText): ColumnDef<StaffConciergeService>[
     },
     {
       id: "request_source",
-      label: l("Quelle", "Источник", "Source"),
+      label: l("Quelle", "РСЃС‚РѕС‡РЅРёРє", "Source"),
       accessor: (row) => row.request_source,
       filterType: "enum",
       filterOptions: ["patient_portal", "appointment_bootstrap", "care_team"].map((value) => ({
@@ -303,33 +304,33 @@ function buildServiceColumns(l: ServicesText): ColumnDef<StaffConciergeService>[
     },
     {
       id: "vendor",
-      label: l("Anbieter", "Поставщик", "Vendor"),
+      label: l("Anbieter", "РџРѕСЃС‚Р°РІС‰РёРє", "Vendor"),
       accessor: (row) => row.vendor_name,
       filterType: "text",
       width: 180,
       sortable: true,
       render: (row) => (
         <span className="truncate text-xs text-muted-foreground">
-          {row.vendor_name ?? "—"}
+          {row.vendor_name ?? "вЂ”"}
         </span>
       ),
     },
     {
       id: "booking",
-      label: l("Buchung", "Бронь", "Booking"),
+      label: l("Buchung", "Р‘СЂРѕРЅСЊ", "Booking"),
       accessor: (row) => row.booking_reference,
       filterType: "text",
       width: 140,
       sortable: true,
       render: (row) => (
         <span className="truncate font-mono text-[11px] text-muted-foreground tabular-nums">
-          {row.booking_reference ?? "—"}
+          {row.booking_reference ?? "вЂ”"}
         </span>
       ),
     },
     {
       id: "schedule",
-      label: l("Zeitplan", "Расписание", "Schedule"),
+      label: l("Zeitplan", "Р Р°СЃРїРёСЃР°РЅРёРµ", "Schedule"),
       accessor: (row) => row.starts_at,
       filterType: "date",
       width: 230,
@@ -337,17 +338,17 @@ function buildServiceColumns(l: ServicesText): ColumnDef<StaffConciergeService>[
       render: (row) => {
         const start = row.starts_at ? formatPortalDateTime(row.starts_at) : null;
         const end = row.ends_at ? formatPortalDateTime(row.ends_at) : null;
-        const schedule = [start, end].filter(Boolean).join(" – ");
+        const schedule = [start, end].filter(Boolean).join(" вЂ“ ");
         return (
           <span className="truncate text-xs tabular-nums text-muted-foreground">
-            {schedule || "—"}
+            {schedule || "вЂ”"}
           </span>
         );
       },
     },
     {
       id: "cost",
-      label: l("Kosten", "Стоимость", "Cost"),
+      label: l("Kosten", "РЎС‚РѕРёРјРѕСЃС‚СЊ", "Cost"),
       accessor: (row) => Number(row.actual_cost ?? row.cost_estimate ?? 0),
       filterType: "number",
       width: 110,
@@ -356,21 +357,21 @@ function buildServiceColumns(l: ServicesText): ColumnDef<StaffConciergeService>[
         const cost = row.actual_cost ?? row.cost_estimate;
         return (
           <span className="truncate text-xs tabular-nums text-foreground">
-            {cost ? formatPortalCurrency(cost) : "—"}
+            {cost ? formatPortalCurrency(cost) : "вЂ”"}
           </span>
         );
       },
     },
     {
       id: "concierge",
-      label: l("Concierge", "Консьерж", "Concierge"),
+      label: l("Concierge", "РљРѕРЅСЃСЊРµСЂР¶", "Concierge"),
       accessor: (row) => row.assigned_concierge_name,
       filterType: "text",
       width: 170,
       sortable: true,
       render: (row) => (
         <span className="truncate text-xs text-muted-foreground">
-          {row.assigned_concierge_name ?? "—"}
+          {row.assigned_concierge_name ?? "вЂ”"}
         </span>
       ),
     },
@@ -505,7 +506,7 @@ function StaffServicesPage() {
             ? err.message
             : l(
                 "Stammdaten konnten nicht geladen werden.",
-                "Не удалось загрузить справочники.",
+                "РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РіСЂСѓР·РёС‚СЊ СЃРїСЂР°РІРѕС‡РЅРёРєРё.",
                 "Failed to load lookup data.",
               ),
         );
@@ -547,7 +548,7 @@ function StaffServicesPage() {
             ? err.message
             : l(
                 "Concierge-Services konnten nicht geladen werden.",
-                "Не удалось загрузить concierge-сервисы.",
+                "РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РіСЂСѓР·РёС‚СЊ concierge-СЃРµСЂРІРёСЃС‹.",
                 "Failed to load concierge services.",
               ),
         );
@@ -571,11 +572,11 @@ function StaffServicesPage() {
 
     const title = createForm.title.trim();
     if (!createForm.patientId) {
-      setCreateError(l("Patient ist erforderlich.", "Пациент обязателен.", "Patient is required."));
+      setCreateError(l("Patient ist erforderlich.", "РџР°С†РёРµРЅС‚ РѕР±СЏР·Р°С‚РµР»РµРЅ.", "Patient is required."));
       return;
     }
     if (!title) {
-      setCreateError(l("Titel ist erforderlich.", "Название обязательно.", "Title is required."));
+      setCreateError(l("Titel ist erforderlich.", "РќР°Р·РІР°РЅРёРµ РѕР±СЏР·Р°С‚РµР»СЊРЅРѕ.", "Title is required."));
       return;
     }
 
@@ -584,8 +585,8 @@ function StaffServicesPage() {
     if (Number.isNaN(costEstimate) || Number.isNaN(actualCost)) {
       setCreateError(
         l(
-          "Kostenfelder müssen gültige Zahlen sein.",
-          "Поля стоимости должны быть корректными числами.",
+          "Kostenfelder mГјssen gГјltige Zahlen sein.",
+          "РџРѕР»СЏ СЃС‚РѕРёРјРѕСЃС‚Рё РґРѕР»Р¶РЅС‹ Р±С‹С‚СЊ РєРѕСЂСЂРµРєС‚РЅС‹РјРё С‡РёСЃР»Р°РјРё.",
           "Cost fields must be valid numbers.",
         ),
       );
@@ -596,8 +597,8 @@ function StaffServicesPage() {
     if (currency.length !== 3) {
       setCreateError(
         l(
-          "Währung muss aus 3 Buchstaben bestehen.",
-          "Валюта должна состоять из 3 букв.",
+          "WГ¤hrung muss aus 3 Buchstaben bestehen.",
+          "Р’Р°Р»СЋС‚Р° РґРѕР»Р¶РЅР° СЃРѕСЃС‚РѕСЏС‚СЊ РёР· 3 Р±СѓРєРІ.",
           "Currency must be 3 letters.",
         ),
       );
@@ -637,7 +638,7 @@ function StaffServicesPage() {
           ? err.message
           : l(
               "Concierge-Service konnte nicht erstellt werden.",
-              "Не удалось создать concierge-сервис.",
+              "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ concierge-СЃРµСЂРІРёСЃ.",
               "Failed to create concierge service.",
             ),
       );
@@ -661,22 +662,22 @@ function StaffServicesPage() {
 
   const operatorLabels = useMemo(
     () => ({
-      contains: l("enthält", "содержит", "contains"),
-      does_not_contain: l("enthält nicht", "не содержит", "does not contain"),
-      is_empty: l("ist leer", "пусто", "is empty"),
-      is_not_empty: l("ist nicht leer", "не пусто", "is not empty"),
-      is: l("ist", "равно", "is"),
-      is_not: l("ist nicht", "не равно", "is not"),
-      is_any_of: l("ist eines von", "одно из", "is any of"),
-      is_none_of: l("ist keines von", "ни одно из", "is none of"),
-      has_any: l("hat eines von", "имеет любое", "has any"),
-      has_all: l("hat alle", "имеет все", "has all"),
-      has_none: l("hat keines", "не имеет", "has none"),
-      before: l("vor", "до", "before"),
-      after: l("nach", "после", "after"),
-      between: l("zwischen", "между", "between"),
-      last_n_days: l("letzte N Tage", "за N дней", "last N days"),
-      equals: l("gleich", "равно", "equals"),
+      contains: l("enthГ¤lt", "СЃРѕРґРµСЂР¶РёС‚", "contains"),
+      does_not_contain: l("enthГ¤lt nicht", "РЅРµ СЃРѕРґРµСЂР¶РёС‚", "does not contain"),
+      is_empty: l("ist leer", "РїСѓСЃС‚Рѕ", "is empty"),
+      is_not_empty: l("ist nicht leer", "РЅРµ РїСѓСЃС‚Рѕ", "is not empty"),
+      is: l("ist", "СЂР°РІРЅРѕ", "is"),
+      is_not: l("ist nicht", "РЅРµ СЂР°РІРЅРѕ", "is not"),
+      is_any_of: l("ist eines von", "РѕРґРЅРѕ РёР·", "is any of"),
+      is_none_of: l("ist keines von", "РЅРё РѕРґРЅРѕ РёР·", "is none of"),
+      has_any: l("hat eines von", "РёРјРµРµС‚ Р»СЋР±РѕРµ", "has any"),
+      has_all: l("hat alle", "РёРјРµРµС‚ РІСЃРµ", "has all"),
+      has_none: l("hat keines", "РЅРµ РёРјРµРµС‚", "has none"),
+      before: l("vor", "РґРѕ", "before"),
+      after: l("nach", "РїРѕСЃР»Рµ", "after"),
+      between: l("zwischen", "РјРµР¶РґСѓ", "between"),
+      last_n_days: l("letzte N Tage", "Р·Р° N РґРЅРµР№", "last N days"),
+      equals: l("gleich", "СЂР°РІРЅРѕ", "equals"),
     }),
     [l],
   );
@@ -686,7 +687,7 @@ function StaffServicesPage() {
       <div className="flex min-h-[60vh] items-center justify-center">
         <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm text-slate-500 shadow-sm">
           <LoaderCircle className="size-4 animate-spin" />
-          {l("Concierge-Services werden geladen...", "Загрузка concierge-сервисов...", "Loading concierge services...")}
+          {l("Concierge-Services werden geladen...", "Р—Р°РіСЂСѓР·РєР° concierge-СЃРµСЂРІРёСЃРѕРІ...", "Loading concierge services...")}
         </div>
       </div>
     );
@@ -695,7 +696,7 @@ function StaffServicesPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title={l("Concierge-Services", "Concierge-сервисы", "Concierge services")}
+        title={l("Concierge-Services", "Concierge-СЃРµСЂРІРёСЃС‹", "Concierge services")}
         actions={
           canCreateService ? (
             <Button
@@ -705,7 +706,7 @@ function StaffServicesPage() {
               disabled={lookupsLoading && patients.length === 0}
             >
               <Plus className="size-3.5" />
-              {l("Service hinzufügen", "Добавить сервис", "Add service")}
+              {l("Service hinzufГјgen", "Р”РѕР±Р°РІРёС‚СЊ СЃРµСЂРІРёСЃ", "Add service")}
             </Button>
           ) : null
         }
@@ -723,9 +724,9 @@ function StaffServicesPage() {
       ) : null}
 
       <div className="grid gap-3 md:grid-cols-3">
-        <StatCard label={l("Aktiv", "Активные", "Active")} value={activeCount} />
-        <StatCard label={l("Billing-ready", "Готовы к биллингу", "Billing-ready")} value={readyForBillingCount} />
-        <StatCard label={l("Portal-Anfragen", "Запросы портала", "Portal requests")} value={portalRequestCount} />
+        <StatCard label={l("Aktiv", "РђРєС‚РёРІРЅС‹Рµ", "Active")} value={activeCount} />
+        <StatCard label={l("Billing-ready", "Р“РѕС‚РѕРІС‹ Рє Р±РёР»Р»РёРЅРіСѓ", "Billing-ready")} value={readyForBillingCount} />
+        <StatCard label={l("Portal-Anfragen", "Р—Р°РїСЂРѕСЃС‹ РїРѕСЂС‚Р°Р»Р°", "Portal requests")} value={portalRequestCount} />
       </div>
 
       <div className="relative z-30 flex flex-col gap-2">
@@ -735,7 +736,7 @@ function StaffServicesPage() {
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder={l("Patient, Anbieter, Buchung...", "Пациент, провайдер, бронь...", "Patient, provider, booking...")}
+              placeholder={l("Patient, Anbieter, Buchung...", "РџР°С†РёРµРЅС‚, РїСЂРѕРІР°Р№РґРµСЂ, Р±СЂРѕРЅСЊ...", "Patient, provider, booking...")}
               className="h-8 w-full rounded-lg bg-background pl-8 text-[13px]"
             />
           </div>
@@ -747,7 +748,7 @@ function StaffServicesPage() {
               onChange={(event) => setMineOnly(event.target.checked)}
               className={checkboxClass}
             />
-            {l("Meine", "Мои", "Mine")}
+            {l("Meine", "РњРѕРё", "Mine")}
           </label>
 
           <div className="ml-auto flex items-center gap-1.5">
@@ -760,8 +761,8 @@ function StaffServicesPage() {
               type="button"
               variant="outline"
               size="icon-sm"
-              title={l("Aktualisieren", "Обновить", "Refresh")}
-              aria-label={l("Aktualisieren", "Обновить", "Refresh")}
+              title={l("Aktualisieren", "РћР±РЅРѕРІРёС‚СЊ", "Refresh")}
+              aria-label={l("Aktualisieren", "РћР±РЅРѕРІРёС‚СЊ", "Refresh")}
               onClick={() => setVersion((value) => value + 1)}
             >
               <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
@@ -776,14 +777,14 @@ function StaffServicesPage() {
             filters={filterPredicates}
             onChange={setFilterPredicates}
             translations={{
-              addFilter: l("Filter", "Фильтр", "Filter"),
-              clearAll: l("Leeren", "Очистить", "Clear"),
-              searchPlaceholder: l("Felder suchen", "Поиск полей", "Search fields"),
-              noFields: l("Keine verfügbaren Felder", "Нет доступных полей", "No available fields"),
-              remove: l("Filter entfernen", "Удалить фильтр", "Remove filter"),
-              valuePlaceholder: l("Wert", "Значение", "Value"),
-              yes: l("Ja", "Да", "Yes"),
-              no: l("Nein", "Нет", "No"),
+              addFilter: l("Filter", "Р¤РёР»СЊС‚СЂ", "Filter"),
+              clearAll: l("Leeren", "РћС‡РёСЃС‚РёС‚СЊ", "Clear"),
+              searchPlaceholder: l("Felder suchen", "РџРѕРёСЃРє РїРѕР»РµР№", "Search fields"),
+              noFields: l("Keine verfГјgbaren Felder", "РќРµС‚ РґРѕСЃС‚СѓРїРЅС‹С… РїРѕР»РµР№", "No available fields"),
+              remove: l("Filter entfernen", "РЈРґР°Р»РёС‚СЊ С„РёР»СЊС‚СЂ", "Remove filter"),
+              valuePlaceholder: l("Wert", "Р—РЅР°С‡РµРЅРёРµ", "Value"),
+              yes: l("Ja", "Р”Р°", "Yes"),
+              no: l("Nein", "РќРµС‚", "No"),
               operatorLabels,
             }}
           />
@@ -793,14 +794,14 @@ function StaffServicesPage() {
             value={sortStack}
             onChange={setSortStack}
             translations={{
-              addSort: l("Sortierung hinzufügen", "Добавить сортировку", "Add sort"),
-              clearAll: l("Leeren", "Очистить", "Clear"),
-              ascending: l("Aufsteigend", "По возрастанию", "Asc"),
-              descending: l("Absteigend", "По убыванию", "Desc"),
-              emptyHint: l("Sortierung", "Сортировка", "Sort"),
-              moveUp: l("Nach oben", "Выше", "Move up"),
-              moveDown: l("Nach unten", "Ниже", "Move down"),
-              remove: l("Sortierung entfernen", "Удалить сортировку", "Remove sort"),
+              addSort: l("Sortierung hinzufГјgen", "Р”РѕР±Р°РІРёС‚СЊ СЃРѕСЂС‚РёСЂРѕРІРєСѓ", "Add sort"),
+              clearAll: l("Leeren", "РћС‡РёСЃС‚РёС‚СЊ", "Clear"),
+              ascending: l("Aufsteigend", "РџРѕ РІРѕР·СЂР°СЃС‚Р°РЅРёСЋ", "Asc"),
+              descending: l("Absteigend", "РџРѕ СѓР±С‹РІР°РЅРёСЋ", "Desc"),
+              emptyHint: l("Sortierung", "РЎРѕСЂС‚РёСЂРѕРІРєР°", "Sort"),
+              moveUp: l("Nach oben", "Р’С‹С€Рµ", "Move up"),
+              moveDown: l("Nach unten", "РќРёР¶Рµ", "Move down"),
+              remove: l("Sortierung entfernen", "РЈРґР°Р»РёС‚СЊ СЃРѕСЂС‚РёСЂРѕРІРєСѓ", "Remove sort"),
             }}
           />
 
@@ -814,25 +815,25 @@ function StaffServicesPage() {
               onFrozenColumnsChange={setFrozenColumns}
               defaultFrozen={DEFAULT_FROZEN_COLUMNS}
               maxFrozenColumns={MAX_FROZEN_COLUMNS}
-              buttonLabel={l("Spalten", "Колонки", "Columns")}
-              searchPlaceholder={l("Spalten suchen", "Поиск колонок", "Search columns")}
-              resetLabel={l("Zurücksetzen", "Сбросить", "Reset")}
-              showAllLabel={l("Alle anzeigen", "Показать все", "Show all")}
-              hideAllLabel={l("Alle ausblenden", "Скрыть все", "Hide all")}
-              noMatchLabel={l("Keine Treffer", "Нет совпадений", "No match")}
-              requiredNoteLabel={l("erforderlich", "обязательная", "required")}
-              freezeLabel={l("Fixieren", "Закрепить", "Freeze")}
-              unfreezeLabel={l("Lösen", "Открепить", "Unfreeze")}
-              frozenNoteLabel={l("fixiert", "закреплена", "frozen")}
+              buttonLabel={l("Spalten", "РљРѕР»РѕРЅРєРё", "Columns")}
+              searchPlaceholder={l("Spalten suchen", "РџРѕРёСЃРє РєРѕР»РѕРЅРѕРє", "Search columns")}
+              resetLabel={l("ZurГјcksetzen", "РЎР±СЂРѕСЃРёС‚СЊ", "Reset")}
+              showAllLabel={l("Alle anzeigen", "РџРѕРєР°Р·Р°С‚СЊ РІСЃРµ", "Show all")}
+              hideAllLabel={l("Alle ausblenden", "РЎРєСЂС‹С‚СЊ РІСЃРµ", "Hide all")}
+              noMatchLabel={l("Keine Treffer", "РќРµС‚ СЃРѕРІРїР°РґРµРЅРёР№", "No match")}
+              requiredNoteLabel={l("erforderlich", "РѕР±СЏР·Р°С‚РµР»СЊРЅР°СЏ", "required")}
+              freezeLabel={l("Fixieren", "Р—Р°РєСЂРµРїРёС‚СЊ", "Freeze")}
+              unfreezeLabel={l("LГ¶sen", "РћС‚РєСЂРµРїРёС‚СЊ", "Unfreeze")}
+              frozenNoteLabel={l("fixiert", "Р·Р°РєСЂРµРїР»РµРЅР°", "frozen")}
             />
             <DensityToggle
               value={density}
               onChange={setDensity}
-              ariaLabel={l("Zeilendichte", "Плотность строк", "Row density")}
+              ariaLabel={l("Zeilendichte", "РџР»РѕС‚РЅРѕСЃС‚СЊ СЃС‚СЂРѕРє", "Row density")}
               labels={{
-                comfortable: l("Komfortabel", "Свободно", "Comfortable"),
-                compact: l("Kompakt", "Компактно", "Compact"),
-                condensed: l("Dicht", "Плотно", "Condensed"),
+                comfortable: l("Komfortabel", "РЎРІРѕР±РѕРґРЅРѕ", "Comfortable"),
+                compact: l("Kompakt", "РљРѕРјРїР°РєС‚РЅРѕ", "Compact"),
+                condensed: l("Dicht", "РџР»РѕС‚РЅРѕ", "Condensed"),
               }}
             />
           </div>
@@ -843,7 +844,7 @@ function StaffServicesPage() {
         <EmptyCell>
           {l(
             "Keine Concierge-Services im aktuellen Filter.",
-            "Нет concierge-сервисов в текущем фильтре.",
+            "РќРµС‚ concierge-СЃРµСЂРІРёСЃРѕРІ РІ С‚РµРєСѓС‰РµРј С„РёР»СЊС‚СЂРµ.",
             "No concierge services in the current filter.",
           )}
         </EmptyCell>
@@ -867,24 +868,31 @@ function StaffServicesPage() {
       )}
 
       <Sheet open={createOpen} onOpenChange={(open) => (open ? setCreateOpen(true) : closeCreateSheet())}>
-        <SheetContent side="right" className="w-full overflow-y-auto border-l border-border p-0 sm:max-w-[760px]">
-          <form onSubmit={handleCreateService} className="flex min-h-full flex-col">
-            <div className="border-b border-border px-5 py-4">
-              <h2 className="text-base font-semibold text-foreground">
-                {l("Concierge-Service hinzufügen", "Добавить concierge-сервис", "Add concierge service")}
-              </h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {selectedPatient
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[760px]">
+          <form onSubmit={handleCreateService} className="flex h-full min-h-0 flex-col">
+            <AdminSheetScaffold
+              title={l("Concierge-Service hinzufugen", "\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c concierge-\u0441\u0435\u0440\u0432\u0438\u0441", "Add concierge service")}
+              description={
+                selectedPatient
                   ? patientOptionLabel(selectedPatient)
                   : l(
                       "Patient, Serviceart und Zeitfenster festlegen.",
-                      "Выберите пациента, тип сервиса и временное окно.",
+                      "\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u043f\u0430\u0446\u0438\u0435\u043d\u0442\u0430, \u0442\u0438\u043f \u0441\u0435\u0440\u0432\u0438\u0441\u0430 \u0438 \u0432\u0440\u0435\u043c\u0435\u043d\u043d\u043e\u0435 \u043e\u043a\u043d\u043e.",
                       "Set patient, service kind, and schedule window.",
-                    )}
-              </p>
-            </div>
-
-            <div className="flex-1 space-y-4 px-5 py-4">
+                    )
+              }
+              bodyClassName="space-y-4 px-5 py-4"
+              footer={
+                <SheetFormFooter
+                  cancelLabel={l("Abbrechen", "\u041e\u0442\u043c\u0435\u043d\u0430", "Cancel")}
+                  submitLabel={l("Speichern", "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c", "Save")}
+                  submittingLabel={l("Speichern", "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c", "Save")}
+                  submitting={createBusy}
+                  submitDisabled={createBusy || lookupsLoading}
+                  onCancel={closeCreateSheet}
+                />
+              }
+            >
               {createError ? (
                 <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
                   {createError}
@@ -895,7 +903,7 @@ function StaffServicesPage() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {l("Patient", "Пациент", "Patient")}
+                      {l("Patient", "РџР°С†РёРµРЅС‚", "Patient")}
                     </span>
                     <NativeComboboxSelect
                       required
@@ -905,7 +913,7 @@ function StaffServicesPage() {
                       }
                       className={formSelectClassName}
                     >
-                      <option value="">{l("Auswählen", "Выбрать", "Select")}</option>
+                      <option value="">{l("AuswГ¤hlen", "Р’С‹Р±СЂР°С‚СЊ", "Select")}</option>
                       {patients.map((patient) => (
                         <option key={patient.id} value={patient.id}>
                           {patientOptionLabel(patient)}
@@ -916,7 +924,7 @@ function StaffServicesPage() {
 
                   <label className="space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {l("Serviceart", "Тип сервиса", "Service kind")}
+                      {l("Serviceart", "РўРёРї СЃРµСЂРІРёСЃР°", "Service kind")}
                     </span>
                     <NativeComboboxSelect
                       value={createForm.serviceKind}
@@ -936,7 +944,7 @@ function StaffServicesPage() {
 
                 <label className="block space-y-1.5 text-sm">
                   <span className="text-xs font-medium text-muted-foreground">
-                    {l("Titel", "Название", "Title")}
+                    {l("Titel", "РќР°Р·РІР°РЅРёРµ", "Title")}
                   </span>
                   <Input
                     required
@@ -951,7 +959,7 @@ function StaffServicesPage() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {l("Provider", "Провайдер", "Provider")}
+                      {l("Provider", "РџСЂРѕРІР°Р№РґРµСЂ", "Provider")}
                     </span>
                     <NativeComboboxSelect
                       value={createForm.providerId}
@@ -960,7 +968,7 @@ function StaffServicesPage() {
                       }
                       className={formSelectClassName}
                     >
-                      <option value="">{l("Optional", "Опционально", "Optional")}</option>
+                      <option value="">{l("Optional", "РћРїС†РёРѕРЅР°Р»СЊРЅРѕ", "Optional")}</option>
                       {providers.map((provider) => (
                         <option key={provider.id} value={provider.id}>
                           {provider.name}
@@ -971,7 +979,7 @@ function StaffServicesPage() {
 
                   <label className="space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {l("Concierge", "Консьерж", "Concierge")}
+                      {l("Concierge", "РљРѕРЅСЃСЊРµСЂР¶", "Concierge")}
                     </span>
                     <NativeComboboxSelect
                       value={createForm.assignedConciergeId}
@@ -983,7 +991,7 @@ function StaffServicesPage() {
                       }
                       className={formSelectClassName}
                     >
-                      <option value="">{l("Nicht zugewiesen", "Не назначен", "Unassigned")}</option>
+                      <option value="">{l("Nicht zugewiesen", "РќРµ РЅР°Р·РЅР°С‡РµРЅ", "Unassigned")}</option>
                       {conciergeStaff.map((member) => (
                         <option key={member.id} value={member.id}>
                           {member.name}
@@ -996,7 +1004,7 @@ function StaffServicesPage() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {l("Start", "Начало", "Start")}
+                      {l("Start", "РќР°С‡Р°Р»Рѕ", "Start")}
                     </span>
                     <Input
                       type="datetime-local"
@@ -1009,7 +1017,7 @@ function StaffServicesPage() {
                   </label>
                   <label className="space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {l("Ende", "Конец", "End")}
+                      {l("Ende", "РљРѕРЅРµС†", "End")}
                     </span>
                     <Input
                       type="datetime-local"
@@ -1025,7 +1033,7 @@ function StaffServicesPage() {
                 <div className="grid gap-3 sm:grid-cols-3">
                   <label className="space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {l("Kostenschätzung", "Оценка стоимости", "Cost estimate")}
+                      {l("KostenschГ¤tzung", "РћС†РµРЅРєР° СЃС‚РѕРёРјРѕСЃС‚Рё", "Cost estimate")}
                     </span>
                     <Input
                       inputMode="decimal"
@@ -1041,7 +1049,7 @@ function StaffServicesPage() {
                   </label>
                   <label className="space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {l("Ist-Kosten", "Фактическая стоимость", "Actual cost")}
+                      {l("Ist-Kosten", "Р¤Р°РєС‚РёС‡РµСЃРєР°СЏ СЃС‚РѕРёРјРѕСЃС‚СЊ", "Actual cost")}
                     </span>
                     <Input
                       inputMode="decimal"
@@ -1054,7 +1062,7 @@ function StaffServicesPage() {
                   </label>
                   <label className="space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {l("Währung", "Валюта", "Currency")}
+                      {l("WГ¤hrung", "Р’Р°Р»СЋС‚Р°", "Currency")}
                     </span>
                     <Input
                       value={createForm.currency}
@@ -1070,7 +1078,7 @@ function StaffServicesPage() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {l("Buchungsreferenz", "Номер брони", "Booking reference")}
+                      {l("Buchungsreferenz", "РќРѕРјРµСЂ Р±СЂРѕРЅРё", "Booking reference")}
                     </span>
                     <Input
                       value={createForm.bookingReference}
@@ -1085,7 +1093,7 @@ function StaffServicesPage() {
                   </label>
                   <label className="space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {l("Vendor", "Поставщик", "Vendor")}
+                      {l("Vendor", "РџРѕСЃС‚Р°РІС‰РёРє", "Vendor")}
                     </span>
                     <Input
                       value={createForm.vendorName}
@@ -1099,7 +1107,7 @@ function StaffServicesPage() {
 
                 <label className="block space-y-1.5 text-sm">
                   <span className="text-xs font-medium text-muted-foreground">
-                    {l("Vendor-Kontakt", "Контакт поставщика", "Vendor contact")}
+                    {l("Vendor-Kontakt", "РљРѕРЅС‚Р°РєС‚ РїРѕСЃС‚Р°РІС‰РёРєР°", "Vendor contact")}
                   </span>
                   <Input
                     value={createForm.vendorContact}
@@ -1112,7 +1120,7 @@ function StaffServicesPage() {
 
                 <label className="block space-y-1.5 text-sm">
                   <span className="text-xs font-medium text-muted-foreground">
-                    {l("Service-Notizen", "Заметки по сервису", "Service notes")}
+                    {l("Service-Notizen", "Р—Р°РјРµС‚РєРё РїРѕ СЃРµСЂРІРёСЃСѓ", "Service notes")}
                   </span>
                   <textarea
                     value={createForm.serviceNotes}
@@ -1126,7 +1134,7 @@ function StaffServicesPage() {
 
                 <label className="block space-y-1.5 text-sm">
                   <span className="text-xs font-medium text-muted-foreground">
-                    {l("Billing-Notizen", "Заметки по биллингу", "Billing notes")}
+                    {l("Billing-Notizen", "Р—Р°РјРµС‚РєРё РїРѕ Р±РёР»Р»РёРЅРіСѓ", "Billing notes")}
                   </span>
                   <textarea
                     value={createForm.billingNotes}
@@ -1138,17 +1146,7 @@ function StaffServicesPage() {
                   />
                 </label>
               </section>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3">
-              <Button type="button" variant="outline" onClick={closeCreateSheet} disabled={createBusy}>
-                {l("Abbrechen", "Отмена", "Cancel")}
-              </Button>
-              <Button type="submit" disabled={createBusy || lookupsLoading}>
-                {createBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                {l("Speichern", "Сохранить", "Save")}
-              </Button>
-            </div>
+            </AdminSheetScaffold>
           </form>
         </SheetContent>
       </Sheet>
@@ -1169,3 +1167,4 @@ export function ServicesPage() {
 
   return <StaffServicesPage />;
 }
+
