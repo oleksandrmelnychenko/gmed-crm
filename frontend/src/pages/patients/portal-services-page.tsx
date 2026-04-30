@@ -1,7 +1,6 @@
 import { startTransition, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Building2, LoaderCircle, RefreshCw, Send } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
@@ -15,10 +14,14 @@ import {
   ListItem,
   PageHeader,
   Section,
+  selectClass,
   StatCard,
+  StatusBadge,
   SuccessBanner,
   TabLoader,
   textareaClass,
+  tokens,
+  type StatusTone,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
@@ -31,7 +34,6 @@ import {
 import {
   conciergeServiceKindLabel,
   conciergeServiceSourceLabel,
-  conciergeServiceStatusTone,
   formatPortalCurrency,
   formatPortalDateTime,
   portalStatusLabel,
@@ -68,6 +70,15 @@ function toIsoDateTime(value: string) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return undefined;
   return parsed.toISOString();
+}
+
+function serviceStatusBadgeTone(status: string): StatusTone {
+  if (status === "completed") return "success";
+  if (status === "booked" || status === "confirmed" || status === "in_service") {
+    return "info";
+  }
+  if (status === "cancelled") return "error";
+  return "warning";
 }
 
 const PORTAL_SERVICE_REALTIME_EVENTS = [
@@ -200,7 +211,7 @@ export function PatientServicesPage() {
         actions={
           <Button
             variant="outline"
-            className="h-9 rounded-lg"
+            className={tokens.control.primaryButton}
             onClick={() => setVersion((value) => value + 1)}
           >
             {refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
@@ -237,15 +248,15 @@ export function PatientServicesPage() {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <div className="flex flex-wrap gap-2">
-                        <Badge variant="outline" className={cn("rounded-full", conciergeServiceStatusTone(item.status))}>
+                        <StatusBadge status={item.status} tone={serviceStatusBadgeTone(item.status)}>
                           {portalStatusLabel(item.status)}
-                        </Badge>
-                        <Badge variant="outline" className="rounded-full border-border bg-muted/30 text-muted-foreground">
+                        </StatusBadge>
+                        <CountBadge>
                           {conciergeServiceKindLabel(item.service_kind)}
-                        </Badge>
-                        <Badge variant="outline" className="rounded-full border-border bg-muted/30 text-muted-foreground">
+                        </CountBadge>
+                        <CountBadge>
                           {conciergeServiceSourceLabel(item.request_source)}
-                        </Badge>
+                        </CountBadge>
                       </div>
                       <h2 className="mt-3 text-base font-semibold text-foreground">{item.title}</h2>
                       <p className="mt-2 text-sm text-muted-foreground">
@@ -268,7 +279,7 @@ export function PatientServicesPage() {
                   </div>
 
                   {item.service_notes ? (
-                    <div className="rounded-lg border border-border/50 bg-muted/25 px-4 py-3 text-sm text-muted-foreground">
+                    <div className={cn("rounded-lg px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
                       {item.service_notes}
                     </div>
                   ) : null}
@@ -278,7 +289,7 @@ export function PatientServicesPage() {
                       <Button
                         type="button"
                         variant="outline"
-                        className="h-8 rounded-lg"
+                        className={tokens.control.accessoryButton}
                         disabled={cancelBusyId === item.id}
                         onClick={() => void handleCancel(item.id)}
                       >
@@ -303,20 +314,22 @@ export function PatientServicesPage() {
             <Field label={t.services_form_service_type}>
               <NativeComboboxSelect
                 value={form.serviceKind}
-
-
-                onChange={(event) => setForm((current) => ({
+                onChange={(event) =>
+                  setForm((current) => ({
                     ...current,
                     serviceKind: event.target.value ?? "hotel",
-                  }))} className={cn("w-full", inputClass)}>
-                  <option value="hotel">{t.services_type_hotel}</option>
-                  <option value="transfer">{t.services_type_transfer}</option>
-                  <option value="vip_terminal">{t.services_type_vip_terminal}</option>
-                  <option value="flight">{t.services_type_flight}</option>
-                  <option value="chauffeur">{t.services_type_chauffeur}</option>
-                  <option value="translation_support">{t.services_type_translation_support}</option>
-                  <option value="other">{t.services_type_other}</option>
-                </NativeComboboxSelect>
+                  }))
+                }
+                className={selectClass}
+              >
+                <option value="hotel">{t.services_type_hotel}</option>
+                <option value="transfer">{t.services_type_transfer}</option>
+                <option value="vip_terminal">{t.services_type_vip_terminal}</option>
+                <option value="flight">{t.services_type_flight}</option>
+                <option value="chauffeur">{t.services_type_chauffeur}</option>
+                <option value="translation_support">{t.services_type_translation_support}</option>
+                <option value="other">{t.services_type_other}</option>
+              </NativeComboboxSelect>
             </Field>
 
             <Field label={t.services_form_title} htmlFor="portal-service-title">
@@ -401,7 +414,7 @@ export function PatientServicesPage() {
 
             {requestError ? <Banner tone="error">{requestError}</Banner> : null}
 
-            <Button type="submit" className="h-9 w-full rounded-lg" disabled={requestBusy}>
+            <Button type="submit" className={cn("w-full", tokens.control.primaryButton)} disabled={requestBusy}>
               {requestBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
               {t.services_submit}
             </Button>

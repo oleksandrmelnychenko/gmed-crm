@@ -2,12 +2,27 @@ import { startTransition, useCallback, useEffect, useMemo, useState, type FormEv
 import { Download, LoaderCircle, RefreshCw, Upload } from "lucide-react";
 
 import { AdminSheetScaffold } from "@/components/admin-page-patterns";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import { Banner, inputClass, textareaClass, tokens } from "@/components/ui-shell";
+import {
+  Banner,
+  CountBadge,
+  EmptyCell,
+  Field,
+  InfoRow,
+  inputClass,
+  ListItem,
+  PageHeader,
+  Section,
+  StatCard,
+  StatusBadge,
+  SuccessBanner,
+  TabLoader,
+  textareaClass,
+  tokens,
+  type StatusTone,
+} from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
@@ -20,9 +35,7 @@ import {
   formatPortalCurrency,
   formatPortalDate,
   formatPortalDateTime,
-  invoiceStatusTone,
   invoiceTypeLabel,
-  invoiceTypeTone,
   downloadPortalInvoicePdf,
   openPortalInvoicePdf,
   portalStatusLabel,
@@ -30,16 +43,19 @@ import {
 import type { PortalInvoiceItem, PortalInvoiceLineItem } from "@/pages/patients/model/portal-shared";
 import { cn } from "@/lib/utils";
 
-function shellCard(extra?: string) {
-  return cn("rounded-[1.75rem] border border-slate-200 bg-white shadow-sm", extra);
-}
-
 function invoiceAmountsVisible(invoice: PortalInvoiceItem) {
   return invoice.portal_visibility?.amounts_visible_to_patient ?? true;
 }
 
 function invoicePdfVisible(invoice: PortalInvoiceItem) {
   return invoice.portal_visibility?.pdf_visible_to_patient ?? true;
+}
+
+function invoiceTypeBadgeTone(invoiceType: string): StatusTone {
+  if (invoiceType === "advance") return "brand";
+  if (invoiceType === "interim") return "info";
+  if (invoiceType === "final") return "success";
+  return "neutral";
 }
 
 const PORTAL_INVOICE_REALTIME_EVENTS = [
@@ -217,121 +233,113 @@ export function PatientInvoicesPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm text-slate-500 shadow-sm">
-          <LoaderCircle className="size-4 animate-spin" />
-          {l("Rechnungen werden geladen...", "Загрузка счетов...", "Loading invoices...")}
-        </div>
+      <div className="min-h-[320px]">
+        <TabLoader />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <section className={shellCard("bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.16),_transparent_34%),linear-gradient(135deg,#082f49_0%,#0f172a_52%,#14532d_100%)] px-6 py-6 text-white")}>
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div className="max-w-3xl">
-            <p className="text-sm uppercase tracking-[0.18em] text-white/60">{l("Patientenportal", "Портал пациента", "Patient portal")}</p>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight">{l("Meine Rechnungen", "Мои счета", "My invoices")}</h1>
-            <p className="mt-3 text-sm leading-7 text-white/75">
-              {l(
+    <div className="space-y-4">
+      <PageHeader
+        title={l("Meine Rechnungen", "Мои счета", "My invoices")}
+        description={l(
                 "Prüfen Sie freigegebene Rechnungsstände, verfolgen Sie den Zahlungsstatus und laden Sie einen Zahlungsnachweis hoch, wenn Sie bereits überwiesen haben.",
                 "Просматривайте опубликованные счета, отслеживайте статус оплаты и загружайте подтверждение, если средства уже переведены.",
                 "Review released invoice snapshots, track payment state and upload payment proof when you already transferred funds.",
               )}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-3">
+        actions={
+          <>
+            <CountBadge>{l("Patientenportal", "Портал пациента", "Patient portal")}</CountBadge>
             <a href="/documents">
-              <Button variant="outline" className="border-white/15 bg-white/8 text-white hover:bg-white/12 hover:text-white">
+              <Button variant="outline" className={tokens.control.primaryButton}>
                 <Upload className="size-4" />
                 {l("Dokumente öffnen", "Открыть документы", "Open documents")}
               </Button>
             </a>
             <Button
               variant="outline"
-              className="border-white/15 bg-white/8 text-white hover:bg-white/12 hover:text-white"
+              className={tokens.control.primaryButton}
               onClick={() => setVersion((value) => value + 1)}
             >
               {refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
               {l("Aktualisieren", "Обновить", "Refresh")}
             </Button>
-          </div>
-        </div>
-      </section>
-
-      {notice ? (
-        <section className={shellCard("border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700")}>
-          {notice}
-        </section>
-      ) : null}
-      {error ? (
-        <section className={shellCard("border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700")}>
-          {error}
-        </section>
-      ) : null}
+          </>
+        }
+      />
+      {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
+      {error ? <Banner tone="error">{error}</Banner> : null}
 
       <section className="grid gap-4 md:grid-cols-3">
-        <MetricCard label={l("Sichtbare Rechnungen", "Видимые счета", "Visible invoices")} value={String(invoices.length)} />
-        <MetricCard label={l("Offener Saldo", "Остаток к оплате", "Outstanding balance")} value={hiddenAmountCount > 0 ? l("Teilweise verborgen", "Частично скрыто", "Partly hidden") : formatPortalCurrency(totalBalance)} />
-        <MetricCard label={l("Fehlender Zahlungsnachweis", "Отсутствует подтверждение оплаты", "Missing payment proof")} value={String(proofPendingCount)} description={l(`${overdueCount} überfällig`, `${overdueCount} просрочено`, `${overdueCount} overdue`)} />
+        <StatCard label={l("Sichtbare Rechnungen", "Видимые счета", "Visible invoices")} value={String(invoices.length)} />
+        <StatCard label={l("Offener Saldo", "Остаток к оплате", "Outstanding balance")} value={hiddenAmountCount > 0 ? l("Teilweise verborgen", "Частично скрыто", "Partly hidden") : formatPortalCurrency(totalBalance)} />
+        <StatCard label={l("Fehlender Zahlungsnachweis", "Отсутствует подтверждение оплаты", "Missing payment proof")} value={String(proofPendingCount)} description={l(`${overdueCount} überfällig`, `${overdueCount} просрочено`, `${overdueCount} overdue`)} />
       </section>
 
-      {invoices.length === 0 ? (
-        <section className={shellCard("border-dashed px-6 py-12 text-center")}>
-          <p className="text-base font-semibold text-slate-950">{l("Noch keine Rechnungen freigegeben", "Счета пока не опубликованы", "No invoices released yet")}</p>
-          <p className="mt-2 text-sm text-slate-500">
-            {l("Rechnungsstände erscheinen hier, sobald sie für das Portal freigegeben sind.", "Снимки счетов появятся здесь, как только будут доступны в портале.", "Billing snapshots will appear here once they are available for portal access.")}
-          </p>
-        </section>
-      ) : (
-        <section className="grid gap-4 xl:grid-cols-2">
-          {invoices.map((invoice) => {
-            const amountsVisible = invoiceAmountsVisible(invoice);
-            const balanceDue = Number(invoice.balance_due ?? 0);
+      <Section title={l("Meine Rechnungen", "Мои счета", "My invoices")} accessory={<CountBadge>{invoices.length}</CountBadge>}>
+        {invoices.length === 0 ? (
+          <EmptyCell>
+            <p className="text-base font-semibold text-foreground">{l("Noch keine Rechnungen freigegeben", "Счета пока не опубликованы", "No invoices released yet")}</p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {l("Rechnungsstände erscheinen hier, sobald sie für das Portal freigegeben sind.", "Снимки счетов появятся здесь, как только будут доступны в портале.", "Billing snapshots will appear here once they are available for portal access.")}
+            </p>
+          </EmptyCell>
+        ) : (
+          <div className="grid gap-3 xl:grid-cols-2">
+            {invoices.map((invoice) => {
+              const amountsVisible = invoiceAmountsVisible(invoice);
+              const balanceDue = Number(invoice.balance_due ?? 0);
 
-            return (
-              <button
-                key={invoice.id}
-                type="button"
-                onClick={() => setSelectedInvoiceId(invoice.id)}
-                className={cn(
-                  "rounded-[1.75rem] border bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md",
-                  selectedInvoiceId === invoice.id ? "border-sky-300 ring-4 ring-sky-100" : "border-slate-200",
-                )}
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <div className="font-mono text-xs font-semibold tracking-[0.16em] text-slate-500">
-                      {invoice.invoice_number}
+              return (
+                <ListItem
+                  key={invoice.id}
+                  onClick={() => setSelectedInvoiceId(invoice.id)}
+                  className={cn(
+                    "space-y-4",
+                    selectedInvoiceId === invoice.id && "border-primary/60 bg-primary/5 ring-2 ring-primary/15",
+                  )}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className={tokens.text.eyebrow}>{invoice.invoice_number}</div>
+                      <h2 className="mt-2 text-base font-semibold text-foreground">{invoice.order_number}</h2>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {l("Ausgestellt", "Выставлен", "Issued")} {formatPortalDateTime(invoice.issued_at)}
+                      </p>
                     </div>
-                    <h2 className="mt-2 text-lg font-semibold text-slate-950">{invoice.order_number}</h2>
-                    <p className="mt-1 text-sm text-slate-500">
-                      {l("Ausgestellt", "Выставлен", "Issued")} {formatPortalDateTime(invoice.issued_at)}
-                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <StatusBadge status={invoice.status}>
+                        {portalStatusLabel(invoice.status)}
+                      </StatusBadge>
+                      <StatusBadge tone={invoiceTypeBadgeTone(invoice.invoice_type)}>
+                        {invoiceTypeLabel(invoice.invoice_type)}
+                      </StatusBadge>
+                    </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Badge variant="outline" className={cn("rounded-full", invoiceStatusTone(invoice.status))}>
-                      {portalStatusLabel(invoice.status)}
-                    </Badge>
-                    <Badge variant="outline" className={cn("rounded-full", invoiceTypeTone(invoice.invoice_type))}>
-                      {invoiceTypeLabel(invoice.invoice_type)}
-                    </Badge>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <InfoRow
+                      className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
+                      label={l("Gesamt", "Итого", "Total")}
+                      value={amountsVisible ? formatPortalCurrency(invoice.total_gross) : l("Verborgen", "Скрыто", "Hidden")}
+                    />
+                    <InfoRow
+                      className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
+                      label={l("Offen", "Открыто", "Open")}
+                      value={amountsVisible ? formatPortalCurrency(balanceDue) : l("Verborgen", "Скрыто", "Hidden")}
+                    />
+                    <InfoRow
+                      className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
+                      label={l("Zahlungsnachweis", "Подтверждение оплаты", "Payment proof")}
+                      value={invoice.last_payment_proof_at ? `${l("Hochgeladen", "Загружено", "Uploaded")} ${formatPortalDate(invoice.last_payment_proof_at)}` : l("Nicht hochgeladen", "Не загружено", "Not uploaded")}
+                    />
                   </div>
-                </div>
-                <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                  <MetricChip label={l("Gesamt", "Итого", "Total")} value={amountsVisible ? formatPortalCurrency(invoice.total_gross) : l("Verborgen", "Скрыто", "Hidden")} />
-                  <MetricChip label={l("Offen", "Открыто", "Open")} value={amountsVisible ? formatPortalCurrency(balanceDue) : l("Verborgen", "Скрыто", "Hidden")} />
-                  <MetricChip
-                    label={l("Zahlungsnachweis", "Подтверждение оплаты", "Payment proof")}
-                    value={invoice.last_payment_proof_at ? `${l("Hochgeladen", "Загружено", "Uploaded")} ${formatPortalDate(invoice.last_payment_proof_at)}` : l("Nicht hochgeladen", "Не загружено", "Not uploaded")}
-                  />
-                </div>
-              </button>
-            );
-          })}
-        </section>
-      )}
+                </ListItem>
+              );
+            })}
+          </div>
+        )}
+      </Section>
 
       <Sheet open={Boolean(selectedInvoiceId)} onOpenChange={(open) => { if (!open) setSelectedInvoiceId(""); }}>
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
@@ -370,7 +378,7 @@ export function PatientInvoicesPage() {
                       <Button
                         type="button"
                         variant="outline"
-                        className={cn("rounded-2xl", !invoicePdfVisible(detail) && "hidden")}
+                        className={cn(tokens.control.primaryButton, !invoicePdfVisible(detail) && "hidden")}
                         onClick={() =>
                           void openPortalInvoicePdf(detail.id).catch((err) => {
                             setDetailError(err instanceof Error ? err.message : l("Rechnungs-PDF konnte nicht geöffnet werden.", "Не удалось открыть PDF счета.", "Failed to open invoice PDF."));
@@ -382,7 +390,7 @@ export function PatientInvoicesPage() {
                       <Button
                         type="button"
                         variant="outline"
-                        className={cn("rounded-2xl", !invoicePdfVisible(detail) && "hidden")}
+                        className={cn(tokens.control.primaryButton, !invoicePdfVisible(detail) && "hidden")}
                         onClick={() =>
                           void downloadPortalInvoicePdf(detail.id, `${detail.invoice_number}.pdf`).catch((err) => {
                             setDetailError(err instanceof Error ? err.message : l("Rechnungs-PDF konnte nicht heruntergeladen werden.", "Не удалось скачать PDF счета.", "Failed to download invoice PDF."));
@@ -392,21 +400,21 @@ export function PatientInvoicesPage() {
                         <Download className="size-4" />
                         {l("PDF herunterladen", "Скачать PDF", "Download PDF")}
                       </Button>
-                      <Badge variant="outline" className={cn("rounded-full", invoiceStatusTone(detail.status))}>
+                      <StatusBadge status={detail.status}>
                         {portalStatusLabel(detail.status)}
-                      </Badge>
-                      <Badge variant="outline" className={cn("rounded-full", invoiceTypeTone(detail.invoice_type))}>
+                      </StatusBadge>
+                      <StatusBadge tone={invoiceTypeBadgeTone(detail.invoice_type)}>
                         {invoiceTypeLabel(detail.invoice_type)}
-                      </Badge>
+                      </StatusBadge>
                     </div>
                   </div>
                   <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                    <Detail label={l("Ausgestellt am", "Выставлен", "Issued at")} value={formatPortalDateTime(detail.issued_at)} />
-                    <Detail label={l("Fällig am", "Срок оплаты", "Due date")} value={formatPortalDate(detail.due_date)} />
-                    <Detail label={l("Auftrag", "Заказ", "Order")} value={detail.order_number} />
-                    <Detail label={l("Angebot", "Предложение", "Quote")} value={detail.quote_number || l("Nicht festgelegt", "Не указано", "Not set")} />
-                    <Detail label={l("Brutto gesamt", "Итого брутто", "Total gross")} value={invoiceAmountsVisible(detail) ? formatPortalCurrency(detail.total_gross) : l("Verborgen", "Скрыто", "Hidden")} />
-                    <Detail label={l("Offener Saldo", "Остаток к оплате", "Open balance")} value={invoiceAmountsVisible(detail) ? formatPortalCurrency(detail.balance_due) : l("Verborgen", "Скрыто", "Hidden")} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={l("Ausgestellt am", "Выставлен", "Issued at")} value={formatPortalDateTime(detail.issued_at)} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={l("Fällig am", "Срок оплаты", "Due date")} value={formatPortalDate(detail.due_date)} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={l("Auftrag", "Заказ", "Order")} value={detail.order_number} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={l("Angebot", "Предложение", "Quote")} value={detail.quote_number || l("Nicht festgelegt", "Не указано", "Not set")} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={l("Brutto gesamt", "Итого брутто", "Total gross")} value={invoiceAmountsVisible(detail) ? formatPortalCurrency(detail.total_gross) : l("Verborgen", "Скрыто", "Hidden")} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={l("Offener Saldo", "Остаток к оплате", "Open balance")} value={invoiceAmountsVisible(detail) ? formatPortalCurrency(detail.balance_due) : l("Verborgen", "Скрыто", "Hidden")} />
                   </div>
                   {detail.notes ? (
                     <div className={cn("mt-4 rounded-xl px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
@@ -428,7 +436,7 @@ export function PatientInvoicesPage() {
                     </div>
                     <Button
                       type="button"
-                      className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                      className={tokens.control.primaryButton}
                       disabled={uploadBusy || ["paid", "cancelled"].includes(detail.status)}
                       onClick={() => {
                         setUploadError("");
@@ -440,8 +448,8 @@ export function PatientInvoicesPage() {
                     </Button>
                   </div>
                   <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                    <Detail label={l("Hochgeladene Nachweise", "Загруженные подтверждения", "Uploaded proofs")} value={String(detail.payment_proof_count ?? 0)} />
-                    <Detail
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={l("Hochgeladene Nachweise", "Загруженные подтверждения", "Uploaded proofs")} value={String(detail.payment_proof_count ?? 0)} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
                       label={l("Letzter Upload", "Последняя загрузка", "Latest upload")}
                       value={detail.last_payment_proof_at ? formatPortalDateTime(detail.last_payment_proof_at) : l("Nicht hochgeladen", "Не загружено", "Not uploaded")}
                     />
@@ -491,8 +499,7 @@ export function PatientInvoicesPage() {
             </DialogDescription>
           </DialogHeader>
           <form className="space-y-4" onSubmit={(event) => void handlePaymentProofUpload(event)}>
-            <div className="space-y-2">
-              <Label htmlFor="invoice-payment-proof">{l("Datei", "Файл", "File")}</Label>
+            <Field label={l("Datei", "Файл", "File")} htmlFor="invoice-payment-proof">
               <input
                 id="invoice-payment-proof"
                 type="file"
@@ -502,9 +509,8 @@ export function PatientInvoicesPage() {
                 )}
                 onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
               />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="invoice-payment-proof-note">{l("Notiz", "Заметка", "Note")}</Label>
+            </Field>
+            <Field label={l("Notiz", "Заметка", "Note")} htmlFor="invoice-payment-proof-note">
               <textarea
                 id="invoice-payment-proof-note"
                 className={cn(textareaClass, "min-h-[110px]")}
@@ -512,17 +518,13 @@ export function PatientInvoicesPage() {
                 value={uploadNote}
                 onChange={(event) => setUploadNote(event.target.value)}
               />
-            </div>
-            {uploadError ? (
-              <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                {uploadError}
-              </div>
-            ) : null}
+            </Field>
+            {uploadError ? <Banner tone="error">{uploadError}</Banner> : null}
             <DialogFooter>
-              <Button type="button" variant="outline" className="rounded-2xl" onClick={() => setUploadOpen(false)}>
+              <Button type="button" variant="outline" className={tokens.control.primaryButton} onClick={() => setUploadOpen(false)}>
                 {l("Abbrechen", "Отмена", "Cancel")}
               </Button>
-              <Button type="submit" className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800" disabled={uploadBusy}>
+              <Button type="submit" className={tokens.control.primaryButton} disabled={uploadBusy}>
                 {uploadBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Upload className="size-4" />}
                 {l("Nachweis senden", "Отправить подтверждение", "Send proof")}
               </Button>
@@ -530,34 +532,6 @@ export function PatientInvoicesPage() {
           </form>
         </DialogContent>
       </Dialog>
-    </div>
-  );
-}
-
-function MetricCard({ label, value, description }: { label: string; value: string; description?: string }) {
-  return (
-    <section className="rounded-[1.5rem] border border-slate-200 bg-white px-5 py-4 shadow-sm">
-      <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">{label}</p>
-      <p className="mt-3 text-3xl font-semibold tracking-tight text-slate-950">{value}</p>
-      {description ? <p className="mt-2 text-xs text-slate-500">{description}</p> : null}
-    </section>
-  );
-}
-
-function MetricChip({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-      <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">{label}</p>
-      <p className="mt-2 text-sm font-medium text-slate-950">{value}</p>
-    </div>
-  );
-}
-
-function Detail({ label, value }: { label: string; value: string }) {
-  return (
-    <div className={cn("rounded-xl px-4 py-3", tokens.surface.mutedCard)}>
-      <p className={tokens.text.eyebrow}>{label}</p>
-      <p className="mt-2 text-sm text-foreground">{value}</p>
     </div>
   );
 }
@@ -574,9 +548,7 @@ function InvoiceLineCard({ line }: { line: PortalInvoiceLineItem }) {
             {l("Menge", "Кол-во", "Qty")} {line.quantity} · {l("Einheit", "Цена за единицу", "Unit")} {formatPortalCurrency(line.unit_price)} · VAT {line.vat_rate}%
           </p>
         </div>
-        <Badge variant="outline" className="rounded-full border-border bg-card text-foreground">
-          {formatPortalCurrency(line.line_gross)}
-        </Badge>
+        <CountBadge>{formatPortalCurrency(line.line_gross)}</CountBadge>
       </div>
       {line.notes ? <p className={cn("mt-3", tokens.text.muted)}>{line.notes}</p> : null}
     </article>

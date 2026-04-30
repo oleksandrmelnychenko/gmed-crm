@@ -1,20 +1,25 @@
 import { startTransition, useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { CalendarPlus, CheckCircle2, LoaderCircle, MessageCircle, RefreshCw, XCircle } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  Banner,
   CountBadge,
   EmptyCell,
   Field,
+  InfoRow,
   ListItem,
   PageHeader,
   Section,
+  StatusBadge,
   TabLoader,
+  TabShell,
+  SuccessBanner,
   checkboxClass,
   inputClass,
   selectClass,
   textareaClass,
+  tokens,
 } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -140,11 +145,8 @@ export function PatientRecommendationsPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm text-slate-500 shadow-sm">
-          <LoaderCircle className="size-4 animate-spin" />
-          {l("Empfehlungen werden geladen...", "Загрузка рекомендаций...", "Loading recommendations...")}
-        </div>
+      <div className="min-h-[320px]">
+        <TabLoader />
       </div>
     );
   }
@@ -154,52 +156,34 @@ export function PatientRecommendationsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700">
-              {l("Patientenportal", "Портал пациента", "Patient portal")}
-            </p>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950">
-              {l("Meine Empfehlungen", "Мои рекомендации", "My recommendations")}
-            </h1>
-            <p className="mt-3 max-w-3xl text-sm text-slate-500">
-              {l("Hier sehen Sie freigegebene Empfehlungen Ihres Betreuungsteams und können die nächste Entscheidung dokumentieren.", "Здесь отображаются опубликованные рекомендации команды сопровождения, по которым можно выбрать следующее действие.", "Review released care-team recommendations and record the next decision.")}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-600">
-              {l("Aktiv", "Активно", "Active")}: <span className="font-semibold text-slate-950">{activeCount}</span>
-            </div>
-            <Button variant="outline" className="rounded-2xl" onClick={() => setVersion((value) => value + 1)}>
+    <TabShell className="mt-0 min-h-0">
+      <PageHeader
+        title={l("Meine Empfehlungen", "Мои рекомендации", "My recommendations")}
+        description={l("Hier sehen Sie freigegebene Empfehlungen Ihres Betreuungsteams und können die nächste Entscheidung dokumentieren.", "Здесь отображаются опубликованные рекомендации команды сопровождения, по которым можно выбрать следующее действие.", "Review released care-team recommendations and record the next decision.")}
+        actions={
+          <>
+            <CountBadge>{l("Patientenportal", "Портал пациента", "Patient portal")}</CountBadge>
+            <CountBadge>{l("Aktiv", "Активно", "Active")}: {activeCount}</CountBadge>
+            <Button variant="outline" className={tokens.control.primaryButton} onClick={() => setVersion((value) => value + 1)}>
               <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
               {l("Aktualisieren", "Обновить", "Refresh")}
             </Button>
-          </div>
-        </div>
-      </section>
+          </>
+        }
+      />
 
-      {notice ? (
-        <section className="rounded-[1.5rem] border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700 shadow-sm">
-          {notice}
-        </section>
-      ) : null}
-      {error ? (
-        <section className="rounded-[1.5rem] border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700 shadow-sm">
-          {error}
-        </section>
-      ) : null}
+      {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
+      {error ? <Banner tone="error" withIcon>{error}</Banner> : null}
 
       {recommendations.length === 0 ? (
-        <section className="rounded-[1.75rem] border border-dashed border-slate-200 bg-white px-6 py-12 text-center shadow-sm">
-          <p className="text-base font-semibold text-slate-950">
+        <EmptyCell>
+          <p className="text-base font-semibold text-foreground">
             {l("Noch keine Empfehlungen", "Пока нет рекомендаций", "No recommendations yet")}
           </p>
-          <p className="mt-2 text-sm text-slate-500">
+          <p className="mt-2 text-sm text-muted-foreground">
             {l("Sobald Ihr Team eine Empfehlung freigibt, erscheint sie hier.", "Когда команда опубликует рекомендацию, она появится здесь.", "Released recommendations from your care team will appear here.")}
           </p>
-        </section>
+        </EmptyCell>
       ) : (
         <section className="grid gap-4 xl:grid-cols-2">
           {recommendations.map((item) => {
@@ -208,50 +192,44 @@ export function PatientRecommendationsPage() {
             const isClosed = ["completed", "declined", "cancelled", "superseded"].includes(item.status);
 
             return (
-              <article
-                key={recommendationId}
-                className="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm"
-              >
+              <ListItem key={recommendationId} className="space-y-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <div className="flex flex-wrap gap-2">
-                      <Badge variant="outline" className={cn("rounded-full", recommendationStatusTone(item.status))}>
+                      <StatusBadge status={item.status} className={recommendationStatusTone(item.status)}>
                         {portalStatusLabel(item.status)}
-                      </Badge>
-                      <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-600">
+                      </StatusBadge>
+                      <CountBadge>
                         {item.recommendation_type.replaceAll("_", " ")}
-                      </Badge>
+                      </CountBadge>
                     </div>
-                    <h2 className="mt-3 text-xl font-semibold text-slate-950">{item.title}</h2>
-                    <p className="mt-2 text-sm text-slate-500">
+                    <h2 className="mt-3 text-xl font-semibold text-foreground">{item.title}</h2>
+                    <p className="mt-2 text-sm text-muted-foreground">
                       {[item.source_doctor_name, item.source_appointment_title, item.source_document_name, item.source_order_number]
                         .filter(Boolean)
                         .join(" / ") || l("Betreuungsteam", "Команда сопровождения", "Care team")}
                     </p>
                   </div>
                   {item.due_at ? (
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                      {l("Fällig", "Срок", "Due")} {formatPortalDateTime(item.due_at)}
-                    </div>
+                    <CountBadge>{l("Fällig", "Срок", "Due")} {formatPortalDateTime(item.due_at)}</CountBadge>
                   ) : null}
                 </div>
 
                 {item.description ? (
-                  <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                  <div className={cn("rounded-lg px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
                     {item.description}
                   </div>
                 ) : null}
 
                 {item.patient_decision ? (
-                  <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">
-                    {l("Ihre Entscheidung", "Ваше решение", "Your decision")}:{" "}
-                    <span className="font-semibold">{item.patient_decision.replaceAll("_", " ")}</span>
-                    {item.appointment_request_status ? ` · ${portalStatusLabel(item.appointment_request_status)}` : ""}
-                  </div>
+                  <InfoRow
+                    label={l("Ihre Entscheidung", "Ваше решение", "Your decision")}
+                    value={`${item.patient_decision.replaceAll("_", " ")}${item.appointment_request_status ? ` / ${portalStatusLabel(item.appointment_request_status)}` : ""}`}
+                  />
                 ) : null}
 
                 {!isClosed ? (
-                  <div className="mt-5 flex flex-wrap gap-3">
+                  <div className="flex flex-wrap gap-3">
                     <ActionButton
                       busy={busyId === `${recommendationId}:schedule`}
                       disabled={disabled || Boolean(item.appointment_request_id)}
@@ -282,12 +260,12 @@ export function PatientRecommendationsPage() {
                     />
                   </div>
                 ) : null}
-              </article>
+              </ListItem>
             );
           })}
         </section>
       )}
-    </div>
+    </TabShell>
   );
 }
 
@@ -603,13 +581,13 @@ function StaffRecommendationsWorkspace() {
 
   if (!canEdit) {
     return (
-      <div className="space-y-4">
+      <TabShell className="mt-0 min-h-0">
         <PageHeader
           title="Recommendations"
           description="This staff view is limited to CEO and patient manager roles."
         />
         <EmptyCell>Open a patient workspace to review recommendations with your current role.</EmptyCell>
-      </div>
+      </TabShell>
     );
   }
 
@@ -622,7 +600,7 @@ function StaffRecommendationsWorkspace() {
   }
 
   return (
-    <div className="space-y-4">
+    <TabShell className="mt-0 min-h-0">
       <PageHeader
         title="Recommendations"
         description="Create patient recommendations, link their source context, and control portal release."
@@ -640,16 +618,8 @@ function StaffRecommendationsWorkspace() {
         }
       />
 
-      {error ? (
-        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {error}
-        </div>
-      ) : null}
-      {notice ? (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-          {notice}
-        </div>
-      ) : null}
+      {error ? <Banner tone="error" withIcon>{error}</Banner> : null}
+      {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
 
       <Section
         title="Patient context"
@@ -865,20 +835,14 @@ function StaffRecommendationsWorkspace() {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap gap-2">
-                        <Badge variant="outline" className={cn("rounded-full", recommendationStatusTone(item.status))}>
+                        <StatusBadge status={item.status} className={recommendationStatusTone(item.status)}>
                           {portalStatusLabel(item.status)}
-                        </Badge>
-                        <Badge variant="outline" className="rounded-full border-border/60 bg-card text-foreground">
-                          {formatOptionLabel(item.priority || "normal")}
-                        </Badge>
+                        </StatusBadge>
+                        <CountBadge>{formatOptionLabel(item.priority || "normal")}</CountBadge>
                         {item.portal_visible ? (
-                          <Badge variant="outline" className="rounded-full border-emerald-200 bg-emerald-50 text-emerald-700">
-                            Portal
-                          </Badge>
+                          <StatusBadge tone="success">Portal</StatusBadge>
                         ) : (
-                          <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-600">
-                            Staff only
-                          </Badge>
+                          <StatusBadge tone="neutral">Staff only</StatusBadge>
                         )}
                       </div>
                       <p className="mt-2 text-sm font-semibold text-foreground">{item.title}</p>
@@ -937,7 +901,7 @@ function StaffRecommendationsWorkspace() {
           </div>
         )}
       </Section>
-    </div>
+    </TabShell>
   );
 }
 
@@ -1009,7 +973,7 @@ function ActionButton({
     <Button
       type="button"
       variant="outline"
-      className="rounded-2xl"
+      className={tokens.control.primaryButton}
       disabled={disabled}
       onClick={onClick}
     >

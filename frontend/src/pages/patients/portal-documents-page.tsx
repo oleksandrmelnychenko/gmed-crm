@@ -1,8 +1,7 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { startTransition, useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Download, LoaderCircle, RefreshCw, ShieldCheck, Upload } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,6 +11,25 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Banner,
+  CountBadge,
+  EmptyCell,
+  Field,
+  InfoRow,
+  ListItem,
+  PageHeader,
+  Section,
+  StatCard,
+  StatusBadge,
+  SuccessBanner,
+  TabLoader,
+  TabShell,
+  inputClass,
+  selectClass,
+  textareaClass,
+  tokens,
+} from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
@@ -265,110 +283,92 @@ export function PatientDocumentsPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm text-slate-500 shadow-sm">
-          <LoaderCircle className="size-4 animate-spin" />
-          {l("Dokumente werden geladen...", "Загрузка документов...", "Loading documents...")}
-        </div>
+      <div className="min-h-[320px]">
+        <TabLoader />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700">
-              {l("Patientenportal", "Портал пациента", "Patient portal")}
-            </p>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950">
-              {l("Meine Dokumente", "Мои документы", "My documents")}
-            </h1>
-            <p className="mt-3 max-w-3xl text-sm text-slate-500">
-              {l("Hier sind nur Dateien sichtbar, die ausdrücklich für Ihr Portal freigegeben wurden.", "Здесь видны только файлы, явно опубликованные для вашего портала.", "Only files explicitly released to your portal are visible here.")}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-600">
-              {l("Ausstehende Bestätigungen", "Ожидающие подтверждения", "Pending confirmations")}: <span className="font-semibold text-slate-950">{pending}</span>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-600">
-              {l("Meine Uploads", "Мои загрузки", "My uploads")}: <span className="font-semibold text-slate-950">{uploads.length}</span>
-            </div>
-            <Button variant="outline" className="rounded-2xl" onClick={() => setVersion((value) => value + 1)}>
+    <TabShell className="mt-0 space-y-6">
+      <PageHeader
+        title={l("Meine Dokumente", "Мои документы", "My documents")}
+        description={l("Hier sind nur Dateien sichtbar, die ausdrücklich für Ihr Portal freigegeben wurden.", "Здесь видны только файлы, явно опубликованные для вашего портала.", "Only files explicitly released to your portal are visible here.")}
+        actions={
+          <>
+            <CountBadge>
+              {l("Ausstehende Bestätigungen", "Ожидающие подтверждения", "Pending confirmations")}: {pending}
+            </CountBadge>
+            <CountBadge>
+              {l("Meine Uploads", "Мои загрузки", "My uploads")}: {uploads.length}
+            </CountBadge>
+            <Button variant="outline" className="h-9 rounded-lg" onClick={() => setVersion((value) => value + 1)}>
               <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
               {l("Aktualisieren", "Обновить", "Refresh")}
             </Button>
-          </div>
-        </div>
+          </>
+        }
+      />
+
+      {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
+      {error ? <Banner tone="error">{error}</Banner> : null}
+
+      <section className="grid gap-4 md:grid-cols-3">
+        <StatCard label={l("Für mich freigegeben", "Опубликовано для меня", "Released to me")} value={String(documents.length)} />
+        <StatCard label={l("Ausstehende Bestätigungen", "Ожидающие подтверждения", "Pending confirmations")} value={String(pending)} />
+        <StatCard label={l("Meine Uploads", "Мои загрузки", "My uploads")} value={String(uploads.length)} />
       </section>
 
-      {notice ? (
-        <section className="rounded-[1.5rem] border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700 shadow-sm">
-          {notice}
-        </section>
-      ) : null}
-      {error ? (
-        <section className="rounded-[1.5rem] border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700 shadow-sm">
-          {error}
-        </section>
-      ) : null}
-
       {documentAlerts && documentAlerts.configured_rule_count > 0 ? (
-        <section
-          className={cn(
-            "rounded-[1.75rem] border px-5 py-4 shadow-sm",
-            documentAlerts.document_pack_complete
-              ? "border-emerald-200 bg-emerald-50"
-              : "border-amber-200 bg-amber-50",
-          )}
+        <Section
+          title={l("Erforderliche Dokumente", "Обязательные документы", "Required documents")}
+          accessory={
+            <CountBadge>
+              {l("Erfüllt", "Выполнено", "Fulfilled")}: {documentAlerts.required_documents.filter((item) => item.fulfilled).length}/
+              {documentAlerts.configured_rule_count}
+            </CountBadge>
+          }
         >
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                {l("Erforderliche Dokumente", "Обязательные документы", "Required documents")}
+          {documentAlerts.document_pack_complete ? (
+            <SuccessBanner>
+              <p className="font-semibold">
+                {l("Ihr Mindest-Dokumentenpaket ist vollständig.", "Минимальный комплект документов уже собран.", "Your minimum document pack is complete")}
               </p>
-              <h2 className="mt-2 text-lg font-semibold text-slate-950">
-                {documentAlerts.document_pack_complete
-                  ? l("Ihr Mindest-Dokumentenpaket ist vollständig.", "Минимальный комплект документов уже собран.", "Your minimum document pack is complete")
-                  : l(
+              <p className="mt-1 text-sm">
+                {l("Sie haben bereits alle erforderlichen Basisdokumente hochgeladen oder erhalten.", "Вы уже загрузили или получили все обязательные базовые документы.", "You already uploaded or received all required base documents.")}
+              </p>
+            </SuccessBanner>
+          ) : (
+            <Banner tone="warning" withIcon>
+              <div className="space-y-3">
+                <div>
+                  <p className="font-semibold">
+                    {l(
                       `Es fehlen noch ${documentAlerts.missing_count} Pflichtdokument${documentAlerts.missing_count === 1 ? "" : "e"}.`,
                       `Еще не хватает ${documentAlerts.missing_count} обязательн${documentAlerts.missing_count === 1 ? "ого документа" : "ых документов"}.`,
                       `${documentAlerts.missing_count} required document${documentAlerts.missing_count === 1 ? "" : "s"} still missing`,
                     )}
-              </h2>
-              <p className="mt-2 text-sm text-slate-600">
-                {documentAlerts.document_pack_complete
-                  ? l("Sie haben bereits alle erforderlichen Basisdokumente hochgeladen oder erhalten.", "Вы уже загрузили или получили все обязательные базовые документы.", "You already uploaded or received all required base documents.")
-                  : l("Nutzen Sie das Upload-Formular unten, um die fehlenden Unterlagen an Ihr Betreuungsteam zu senden.", "Используйте форму загрузки ниже, чтобы отправить недостающие документы вашей команде сопровождения.", "Use the upload form below to send the missing items to your care team.")}
-              </p>
-              {documentAlerts.missing_count > 0 ? (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {documentAlerts.missing_documents.map((item) => (
-                    <Badge
-                      key={item.key}
-                      variant="outline"
-                      className="rounded-full border-amber-300 bg-white text-amber-800"
-                    >
-                      {localizeRequiredDocumentLabel(item.key, item.label, l)}
-                    </Badge>
-                  ))}
+                  </p>
+                  <p className="mt-1 text-sm">
+                    {l("Nutzen Sie das Upload-Formular unten, um die fehlenden Unterlagen an Ihr Betreuungsteam zu senden.", "Используйте форму загрузки ниже, чтобы отправить недостающие документы вашей команде сопровождения.", "Use the upload form below to send the missing items to your care team.")}
+                  </p>
                 </div>
-              ) : null}
-            </div>
-            <div className="rounded-2xl border border-white/60 bg-white/70 px-4 py-2 text-sm text-slate-700">
-              {l("Erfüllt", "Выполнено", "Fulfilled")}:{" "}
-              <span className="font-semibold text-slate-950">
-                {documentAlerts.required_documents.filter((item) => item.fulfilled).length}/
-                {documentAlerts.configured_rule_count}
-              </span>
-            </div>
-          </div>
-        </section>
+                {documentAlerts.missing_count > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {documentAlerts.missing_documents.map((item) => (
+                      <StatusBadge key={item.key} tone="warning">
+                        {localizeRequiredDocumentLabel(item.key, item.label, l)}
+                      </StatusBadge>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            </Banner>
+          )}
+        </Section>
       ) : null}
 
-      <section className="rounded-[1.75rem] border border-slate-200 bg-white p-4 shadow-sm">
+      <div className={cn("rounded-xl p-3", tokens.surface.softCard)}>
         <div className="flex flex-wrap gap-2">
           {PORTAL_DOCUMENT_CATEGORY_TABS.map((tab) => {
             const count = categoryCounts.get(tab.key) ?? 0;
@@ -379,157 +379,169 @@ export function PatientDocumentsPage() {
                 type="button"
                 onClick={() => setActiveCategory(tab.key)}
                 className={cn(
-                  "rounded-2xl border px-4 py-2 text-sm transition",
+                  "inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm transition",
                   activeCategory === tab.key
-                    ? "border-sky-300 bg-sky-50 text-sky-800"
-                    : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100",
+                    ? "border-ring bg-muted text-foreground"
+                    : "border-border/60 bg-card text-muted-foreground hover:bg-muted/35",
                 )}
               >
-                {label} <span className="font-semibold">{count}</span>
+                <span>{label}</span>
+                <CountBadge>{count}</CountBadge>
               </button>
             );
           })}
         </div>
-      </section>
+      </div>
 
       <section className="grid gap-6 xl:grid-cols-[1.2fr_0.9fr]">
         <section className="space-y-4">
-          <div className="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-950">{l("Für mich freigegeben", "Опубликовано для меня", "Released to me")}</h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  {l("Hier sind nur Dateien sichtbar, die von Ihrem Betreuungsteam ausdrücklich freigegeben wurden.", "Здесь видны только файлы, которые команда сопровождения явно опубликовала для вас.", "Only files explicitly released by your care team are visible here.")}
+          <Section
+            title={l("Für mich freigegeben", "Опубликовано для меня", "Released to me")}
+            accessory={<CountBadge>{visibleDocuments.length}</CountBadge>}
+          >
+            <p className="text-sm text-muted-foreground">
+              {l("Hier sind nur Dateien sichtbar, die von Ihrem Betreuungsteam ausdrücklich freigegeben wurden.", "Здесь видны только файлы, которые команда сопровождения явно опубликовала для вас.", "Only files explicitly released by your care team are visible here.")}
+            </p>
+
+            {visibleDocuments.length === 0 ? (
+              <EmptyCell>
+                <p className="text-base font-semibold text-foreground">
+                  {l("Keine Dokumente in dieser Kategorie", "Нет документов в этой категории", "No documents in this category")}
                 </p>
-              </div>
-            </div>
-          </div>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {l("Ihr Betreuungsteam veröffentlicht Dateien hier, sobald sie für den Portalzugang freigegeben sind.", "Команда сопровождения опубликует здесь файлы, как только они будут допущены к доступу через портал.", "Your care team will publish files here once they are cleared for portal access.")}
+                </p>
+              </EmptyCell>
+            ) : (
+              <div className="space-y-3">
+                {visibleDocuments.map((item) => {
+                  const busy = busyId === item.id;
+                  const documentTranslationRequests = translationRequests.filter(
+                    (request) => request.document_id === item.id,
+                  );
 
-          {visibleDocuments.length === 0 ? (
-            <section className="rounded-[1.75rem] border border-dashed border-slate-200 bg-white px-6 py-12 text-center shadow-sm">
-              <p className="text-base font-semibold text-slate-950">{l("Keine Dokumente in dieser Kategorie", "Нет документов в этой категории", "No documents in this category")}</p>
-              <p className="mt-2 text-sm text-slate-500">
-                {l("Ihr Betreuungsteam veröffentlicht Dateien hier, sobald sie für den Portalzugang freigegeben sind.", "Команда сопровождения опубликует здесь файлы, как только они будут допущены к доступу через портал.", "Your care team will publish files here once they are cleared for portal access.")}
-              </p>
-            </section>
-          ) : (
-            visibleDocuments.map((item) => {
-              const busy = busyId === item.id;
-              const documentTranslationRequests = translationRequests.filter(
-                (request) => request.document_id === item.id,
-              );
-
-              return (
-                <article
-                  key={item.id}
-                  className="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="outline" className={cn("rounded-full", documentTone(item))}>
-                          {item.confirmed ? l("Bestätigt", "Подтверждено", "Confirmed") : item.requires_confirmation ? l("Bestätigung erforderlich", "Требуется подтверждение", "Needs confirmation") : l("Freigegeben", "Опубликовано", "Released")}
-                        </Badge>
-                        <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-600">
-                          {portalStatusLabel(item.status)}
-                        </Badge>
-                      </div>
-                      <h2 className="mt-3 text-xl font-semibold text-slate-950">{item.auto_name}</h2>
-                      <p className="mt-2 text-sm text-slate-500">
-                        {[item.art, item.category, formatPortalFileSize(item.file_size)].filter(Boolean).join(" · ")}
-                      </p>
-                    </div>
-                    {item.requires_confirmation && !item.confirmed ? (
-                      <ShieldCheck className="size-5 text-amber-500" />
-                    ) : null}
-                  </div>
-
-                  <dl className="mt-5 grid gap-3 sm:grid-cols-2">
-                    <Detail label={l("Freigegeben von", "Опубликовано", "Released by")} value={item.shared_by_name || l("Betreuungsteam", "Команда сопровождения", "Care team")} />
-                    <Detail label={l("Freigegeben am", "Опубликовано", "Released at")} value={formatPortalDateTime(item.shared_at)} />
-                    <Detail label={l("Dateiname", "Имя файла", "Filename")} value={item.original_filename || item.auto_name} />
-                    <Detail label={l("Quelle", "Источник", "Source")} value={item.ursprung || item.klinik || l("Portalfreigabe", "Публикация в портале", "Portal release")} />
-                  </dl>
-
-                  {item.notes ? (
-                    <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                      {item.notes}
-                    </div>
-                  ) : null}
-
-                  <div className="mt-5 flex flex-wrap gap-3">
-                    <Button
-                      className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-                      disabled={busy}
-                      onClick={() => void handleDownload(item)}
-                    >
-                      {busy ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
-                      {l("Herunterladen", "Скачать", "Download")}
-                    </Button>
-                    {item.requires_confirmation && !item.confirmed ? (
-                      <Button
-                        variant="outline"
-                        className="rounded-2xl"
-                        disabled={busy}
-                        onClick={() => void handleConfirm(item.id)}
-                      >
-                        {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                        {l("Empfang bestätigen", "Подтвердить получение", "Confirm receipt")}
-                      </Button>
-                    ) : null}
-                    <Button
-                      variant="outline"
-                      className="rounded-2xl"
-                      disabled={busy}
-                      onClick={() => openTranslationDialog(item)}
-                    >
-                      {l("Übersetzung anfragen", "Запросить перевод", "Request translation")}
-                    </Button>
-                  </div>
-
-                  {documentTranslationRequests.length > 0 ? (
-                    <div className="mt-4 space-y-2">
-                      {documentTranslationRequests.map((request) => (
-                        <div
-                          key={request.id}
-                          className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"
-                        >
-                          <span>
-                            {l("Übersetzung", "Перевод", "Translation")} {request.requested_language.toUpperCase()} · {formatPortalDateTime(request.requested_at)}
-                          </span>
-                          <Badge
-                            variant="outline"
-                            className={cn("rounded-full", translationRequestTone(request.status))}
-                          >
-                            {portalStatusLabel(request.status)}
-                          </Badge>
+                  return (
+                    <ListItem key={item.id} className="space-y-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <StatusBadge className={documentTone(item)}>
+                              {item.confirmed ? l("Bestätigt", "Подтверждено", "Confirmed") : item.requires_confirmation ? l("Bestätigung erforderlich", "Требуется подтверждение", "Needs confirmation") : l("Freigegeben", "Опубликовано", "Released")}
+                            </StatusBadge>
+                            <StatusBadge status={item.status}>{portalStatusLabel(item.status)}</StatusBadge>
+                          </div>
+                          <h2 className="mt-3 text-base font-semibold text-foreground">{item.auto_name}</h2>
+                          <p className="mt-2 text-sm text-muted-foreground">
+                            {[item.art, item.category, formatPortalFileSize(item.file_size)].filter(Boolean).join(" / ")}
+                          </p>
                         </div>
-                      ))}
-                    </div>
-                  ) : null}
-                </article>
-              );
-            })
-          )}
+                        {item.requires_confirmation && !item.confirmed ? (
+                          <ShieldCheck className="size-5 text-amber-500" />
+                        ) : null}
+                      </div>
+
+                      <dl className="grid gap-3 sm:grid-cols-2">
+                        <InfoRow
+                          className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
+                          label={l("Freigegeben von", "Опубликовано", "Released by")}
+                          value={item.shared_by_name || l("Betreuungsteam", "Команда сопровождения", "Care team")}
+                        />
+                        <InfoRow
+                          className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
+                          label={l("Freigegeben am", "Опубликовано", "Released at")}
+                          value={formatPortalDateTime(item.shared_at)}
+                        />
+                        <InfoRow
+                          className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
+                          label={l("Dateiname", "Имя файла", "Filename")}
+                          value={item.original_filename || item.auto_name}
+                        />
+                        <InfoRow
+                          className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
+                          label={l("Quelle", "Источник", "Source")}
+                          value={item.ursprung || item.klinik || l("Portalfreigabe", "Публикация в портале", "Portal release")}
+                        />
+                      </dl>
+
+                      {item.notes ? (
+                        <div className={cn("rounded-lg px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
+                          {item.notes}
+                        </div>
+                      ) : null}
+
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          className="h-9 rounded-lg"
+                          disabled={busy}
+                          onClick={() => void handleDownload(item)}
+                        >
+                          {busy ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
+                          {l("Herunterladen", "Скачать", "Download")}
+                        </Button>
+                        {item.requires_confirmation && !item.confirmed ? (
+                          <Button
+                            variant="outline"
+                            className="h-9 rounded-lg"
+                            disabled={busy}
+                            onClick={() => void handleConfirm(item.id)}
+                          >
+                            {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                            {l("Empfang bestätigen", "Подтвердить получение", "Confirm receipt")}
+                          </Button>
+                        ) : null}
+                        <Button
+                          variant="outline"
+                          className="h-9 rounded-lg"
+                          disabled={busy}
+                          onClick={() => openTranslationDialog(item)}
+                        >
+                          {l("Übersetzung anfragen", "Запросить перевод", "Request translation")}
+                        </Button>
+                      </div>
+
+                      {documentTranslationRequests.length > 0 ? (
+                        <div className="space-y-2">
+                          {documentTranslationRequests.map((request) => (
+                            <div
+                              key={request.id}
+                              className={cn(
+                                "flex flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-2 text-xs text-muted-foreground",
+                                tokens.surface.mutedCard,
+                              )}
+                            >
+                              <span>
+                                {l("Übersetzung", "Перевод", "Translation")} {request.requested_language.toUpperCase()} / {formatPortalDateTime(request.requested_at)}
+                              </span>
+                              <StatusBadge status={request.status} className={translationRequestTone(request.status)}>
+                                {portalStatusLabel(request.status)}
+                              </StatusBadge>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </ListItem>
+                  );
+                })}
+              </div>
+            )}
+          </Section>
         </section>
 
         <section className="space-y-4">
-          <section className="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-950">{l("Dokumente hochladen", "Загрузить документы", "Upload documents")}</h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  {l("Senden Sie Dateien an das Betreuungsteam. Zahlungsnachweise bleiben intern und können im Rechnungsbereich hochgeladen werden.", "Отправляйте файлы команде сопровождения. Подтверждения оплаты остаются внутренними и загружаются из раздела счетов.", "Send files to the care team. Payment proofs stay internal and can be uploaded from the invoice workspace.")}
-                </p>
-              </div>
-              <Upload className="mt-1 size-5 text-sky-700" />
-            </div>
-            <form className="mt-5 space-y-4" onSubmit={(event) => void handleUpload(event)}>
-              <Field label={l("Kategorie", "Категория", "Category")}>
+          <Section
+            title={l("Dokumente hochladen", "Загрузить документы", "Upload documents")}
+            accessory={<Upload className="size-4 text-muted-foreground" />}
+          >
+            <p className="text-sm text-muted-foreground">
+              {l("Senden Sie Dateien an das Betreuungsteam. Zahlungsnachweise bleiben intern und können im Rechnungsbereich hochgeladen werden.", "Отправляйте файлы команде сопровождения. Подтверждения оплаты остаются внутренними и загружаются из раздела счетов.", "Send files to the care team. Payment proofs stay internal and can be uploaded from the invoice workspace.")}
+            </p>
+            <form className="space-y-4" onSubmit={(event) => void handleUpload(event)}>
+              <Field label={l("Kategorie", "Категория", "Category")} htmlFor="portal-document-upload-kind">
                 <NativeComboboxSelect
+                  id="portal-document-upload-kind"
                   value={uploadKind}
                   onChange={(event) => setUploadKind(event.target.value)}
-                  className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
+                  className={selectClass}
                 >
                   <option value="general">{l("Allgemein", "Общий", "General")}</option>
                   <option value="correspondence">{l("Korrespondenz", "Переписка", "Correspondence")}</option>
@@ -540,78 +552,80 @@ export function PatientDocumentsPage() {
                   <option value="insurance_document">{l("Versicherungsdokument", "Страховой документ", "Insurance document")}</option>
                 </NativeComboboxSelect>
               </Field>
-              <Field label={l("Titel", "Название", "Title")}>
+              <Field label={l("Titel", "Название", "Title")} htmlFor="portal-document-upload-title">
                 <input
+                  id="portal-document-upload-title"
                   value={uploadName}
                   onChange={(event) => setUploadName(event.target.value)}
                   placeholder={l("Optionaler Titel", "Необязательное название", "Optional title")}
-                  className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
+                  className={cn(inputClass, "w-full border border-input px-3 text-sm")}
                 />
               </Field>
-              <Field label={l("Datei", "Файл", "File")}>
+              <Field label={l("Datei", "Файл", "File")} htmlFor="portal-document-upload-file">
                 <input
+                  id="portal-document-upload-file"
                   type="file"
                   onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
-                  className="block w-full rounded-2xl border border-slate-200 bg-card px-3 py-2 text-sm text-foreground"
+                  className={cn(
+                    inputClass,
+                    "block h-auto w-full border border-input px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-foreground",
+                  )}
                 />
               </Field>
-              <Field label={l("Notiz", "Заметка", "Note")}>
+              <Field label={l("Notiz", "Заметка", "Note")} htmlFor="portal-document-upload-note">
                 <textarea
+                  id="portal-document-upload-note"
                   value={uploadNotes}
                   onChange={(event) => setUploadNotes(event.target.value)}
                   placeholder={l("Optionaler Kontext für das Betreuungsteam", "Необязательный контекст для команды сопровождения", "Optional context for the care team")}
-                  className="min-h-[110px] w-full rounded-2xl border border-slate-200 bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
+                  className={cn(textareaClass, "min-h-[110px]")}
                 />
               </Field>
-              {uploadError ? (
-                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                  {uploadError}
-                </div>
-              ) : null}
+              {uploadError ? <Banner tone="error">{uploadError}</Banner> : null}
               <Button
                 type="submit"
-                className="w-full rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                className="h-9 w-full rounded-lg"
                 disabled={uploadBusy}
               >
                 {uploadBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Upload className="size-4" />}
                 {l("Upload senden", "Отправить загрузку", "Send upload")}
               </Button>
             </form>
-          </section>
+          </Section>
 
-          <section className="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-950">{l("Meine Uploads", "Мои загрузки", "My uploads")}</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {l("Dateien, die Sie bereits aus dem Portal gesendet haben.", "Файлы, которые вы уже отправили из портала.", "Files you already sent from the portal.")}
-              </p>
-            </div>
-            <div className="mt-5 space-y-3">
-              {uploads.length === 0 ? (
-                <div className="rounded-[1.35rem] border border-dashed border-slate-200 bg-slate-50/70 px-4 py-6 text-sm text-slate-500">
-                  {l("Noch keine Portal-Uploads.", "Пока нет загрузок из портала.", "No portal uploads yet.")}
-                </div>
-              ) : (
-                uploads.map((item) => {
+          <Section
+            title={l("Meine Uploads", "Мои загрузки", "My uploads")}
+            accessory={<CountBadge>{uploads.length}</CountBadge>}
+          >
+            <p className="text-sm text-muted-foreground">
+              {l("Dateien, die Sie bereits aus dem Portal gesendet haben.", "Файлы, которые вы уже отправили из портала.", "Files you already sent from the portal.")}
+            </p>
+            {uploads.length === 0 ? (
+              <EmptyCell>
+                {l("Noch keine Portal-Uploads.", "Пока нет загрузок из портала.", "No portal uploads yet.")}
+              </EmptyCell>
+            ) : (
+              <div className="space-y-3">
+                {uploads.map((item) => {
                   const busy = busyId === item.id;
 
                   return (
-                    <article key={item.id} className="rounded-[1.35rem] border border-slate-200 bg-slate-50/80 px-4 py-4">
+                    <ListItem key={item.id} className="space-y-3">
                       <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
+                        <div className="min-w-0">
                           <div className="flex flex-wrap gap-2">
-                            <Badge variant="outline" className={cn("rounded-full", uploadedDocumentTone(item))}>
+                            <StatusBadge className={uploadedDocumentTone(item)}>
                               {item.art.replaceAll("_", " ")}
-                            </Badge>
+                            </StatusBadge>
                           </div>
-                          <p className="mt-3 text-sm font-semibold text-slate-950">{item.auto_name}</p>
-                          <p className="mt-1 text-xs text-slate-500">
-                            {[item.category, item.order_number, item.appointment_title, formatPortalFileSize(item.file_size)].filter(Boolean).join(" · ")}
+                          <p className="mt-3 text-sm font-semibold text-foreground">{item.auto_name}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {[item.category, item.order_number, item.appointment_title, formatPortalFileSize(item.file_size)].filter(Boolean).join(" / ")}
                           </p>
                         </div>
                         <Button
                           variant="outline"
-                          className="rounded-2xl"
+                          className="h-9 rounded-lg"
                           disabled={busy}
                           onClick={() => void handleUploadDownload(item)}
                         >
@@ -619,20 +633,20 @@ export function PatientDocumentsPage() {
                           {l("Herunterladen", "Скачать", "Download")}
                         </Button>
                       </div>
-                      <p className="mt-3 text-xs text-slate-500">
+                      <p className="text-xs text-muted-foreground">
                         {l("Hochgeladen", "Загружено", "Uploaded")} {formatPortalDateTime(item.created_at)}
                       </p>
                       {item.notes ? (
-                        <div className="mt-3 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                        <div className={cn("rounded-lg px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
                           {item.notes}
                         </div>
                       ) : null}
-                    </article>
+                    </ListItem>
                   );
-                })
-              )}
-            </div>
-          </section>
+                })}
+              </div>
+            )}
+          </Section>
         </section>
       </section>
 
@@ -656,11 +670,12 @@ export function PatientDocumentsPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <Field label={l("Zielsprache", "Язык перевода", "Target language")}>
+            <Field label={l("Zielsprache", "Язык перевода", "Target language")} htmlFor="portal-translation-language">
               <NativeComboboxSelect
+                id="portal-translation-language"
                 value={translationLanguage}
                 onChange={(event) => setTranslationLanguage(event.target.value)}
-                className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
+                className={selectClass}
               >
                 <option value="de">{l("Deutsch", "Немецкий", "German")}</option>
                 <option value="en">{l("Englisch", "Английский", "English")}</option>
@@ -668,25 +683,22 @@ export function PatientDocumentsPage() {
                 <option value="ru">{l("Russisch", "Русский", "Russian")}</option>
               </NativeComboboxSelect>
             </Field>
-            <Field label={l("Notiz", "Заметка", "Note")}>
+            <Field label={l("Notiz", "Заметка", "Note")} htmlFor="portal-translation-note">
               <textarea
+                id="portal-translation-note"
                 value={translationNote}
                 onChange={(event) => setTranslationNote(event.target.value)}
                 placeholder={l("Optionaler Kontext für das Betreuungsteam", "Необязательный контекст для команды сопровождения", "Optional context for the care team")}
-                className="min-h-[110px] w-full rounded-2xl border border-slate-200 bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
+                className={cn(textareaClass, "min-h-[110px]")}
               />
             </Field>
-            {translationError ? (
-              <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                {translationError}
-              </div>
-            ) : null}
+            {translationError ? <Banner tone="error">{translationError}</Banner> : null}
           </div>
           <DialogFooter>
             <Button
               type="button"
               variant="outline"
-              className="rounded-2xl"
+              className="h-9 rounded-lg"
               disabled={translationBusy}
               onClick={() => setTranslationDocument(null)}
             >
@@ -694,7 +706,7 @@ export function PatientDocumentsPage() {
             </Button>
             <Button
               type="button"
-              className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+              className="h-9 rounded-lg"
               disabled={translationBusy}
               onClick={() => void handleRequestTranslation()}
             >
@@ -704,26 +716,6 @@ export function PatientDocumentsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
-  );
-}
-
-function Detail({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-      <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">{label}</p>
-      <p className="mt-2 text-sm text-slate-900">{value}</p>
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-        {label}
-      </span>
-      {children}
-    </label>
+    </TabShell>
   );
 }

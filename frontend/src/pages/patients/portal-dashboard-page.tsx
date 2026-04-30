@@ -1,8 +1,22 @@
 import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
-import { Download, LoaderCircle, ShieldCheck } from "lucide-react";
+import { Download, LoaderCircle, RefreshCw, ShieldCheck } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Banner,
+  CountBadge,
+  EmptyCell,
+  InfoRow,
+  ListItem,
+  PageHeader,
+  Section,
+  StatCard,
+  StatusBadge,
+  SuccessBanner,
+  TabLoader,
+  TabShell,
+  tokens,
+} from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
@@ -14,6 +28,8 @@ import {
 } from "@/pages/patients/data/portal-api";
 import {
   appointmentStatusTone,
+  conciergeServiceKindLabel,
+  conciergeServiceStatusTone,
   feedbackStatusTone,
   formatPortalCurrency,
   formatPortalDate,
@@ -37,13 +53,6 @@ import type {
   PortalRecommendationItem,
 } from "@/pages/patients/model/portal-shared";
 import { cn } from "@/lib/utils";
-
-function shellCard(extra?: string) {
-  return cn(
-    "rounded-[1.75rem] border border-slate-200 bg-white shadow-sm",
-    extra,
-  );
-}
 
 const PATIENT_DASHBOARD_REALTIME_EVENTS = [
   "appointment.created",
@@ -226,6 +235,7 @@ export function PatientDashboardPage() {
   const recentFeedback = useMemo(() => feedback.slice(0, 4), [feedback]);
   const recentDocuments = useMemo(() => documents.slice(0, 4), [documents]);
   const recentAppointments = useMemo(() => appointments.slice(0, 4), [appointments]);
+  const recentServices = useMemo(() => services.slice(0, 4), [services]);
   const recentInvoices = useMemo(() => invoices.slice(0, 4), [invoices]);
   const topNextActions = useMemo(
     () => [...nextActions].sort(compareNextActions).slice(0, 6),
@@ -258,548 +268,500 @@ export function PatientDashboardPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm text-slate-500 shadow-sm">
-          <LoaderCircle className="size-4 animate-spin" />
-          {l("Patientenportal wird geladen...", "Загрузка портала пациента...", "Loading portal workspace...")}
-        </div>
+      <div className="min-h-[320px]">
+        <TabLoader />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <section className={shellCard("bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.14),_transparent_32%),linear-gradient(135deg,#0f172a_0%,#172554_52%,#0f766e_100%)] px-6 py-6 text-white")}>
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div className="max-w-3xl">
-            <p className="text-sm uppercase tracking-[0.18em] text-white/60">
-              {l("Patientenportal", "Портал пациента", "Patient portal")}
-            </p>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight">
-              {greeting}, {user?.name ?? patientLabel}
-            </h1>
-            <p className="mt-3 text-sm leading-7 text-white/75">
-              {l(
-                "Hier werden nur ausdrucklich freigegebene Dokumente und Datenschutz-Workflows angezeigt.",
-                "Здесь отображаются только явно опубликованные документы и процессы по защите данных.",
-                "Only explicitly released documents and privacy workflows are shown here.",
-              )}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-3">
+    <TabShell className="mt-0 min-h-0">
+      <PageHeader
+        title={`${greeting}, ${user?.name ?? patientLabel}`}
+        description={l(
+          "Hier werden nur ausdrucklich freigegebene Dokumente und Datenschutz-Workflows angezeigt.",
+          "Здесь отображаются только явно опубликованные документы и процессы по защите данных.",
+          "Only explicitly released documents and privacy workflows are shown here.",
+        )}
+        actions={
+          <>
+            <CountBadge>{l("Patientenportal", "Портал пациента", "Patient portal")}</CountBadge>
             <a href="/documents">
-              <Button variant="outline" className="border-white/15 bg-white/8 text-white hover:bg-white/12 hover:text-white">
+              <Button variant="outline" className={tokens.control.primaryButton}>
                 <Download className="size-4" />
                 {l("Meine Dokumente", "Мои документы", "My documents")}
               </Button>
             </a>
             <a href="/appointments">
-              <Button variant="outline" className="border-white/15 bg-white/8 text-white hover:bg-white/12 hover:text-white">
+              <Button variant="outline" className={tokens.control.primaryButton}>
                 <Download className="size-4" />
                 {l("Meine Termine", "Мои записи", "My appointments")}
               </Button>
             </a>
             <a href="/privacy">
-              <Button variant="outline" className="border-white/15 bg-white/8 text-white hover:bg-white/12 hover:text-white">
+              <Button variant="outline" className={tokens.control.primaryButton}>
                 <ShieldCheck className="size-4" />
                 {l("Datenschutzanfragen", "Запросы по приватности", "Privacy requests")}
               </Button>
             </a>
-            <Button
-              variant="outline"
-              className="border-white/15 bg-white/8 text-white hover:bg-white/12 hover:text-white"
-              onClick={() => void handleExportData()}
-              disabled={exportBusy}
-            >
-              {exportBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
-              {l("Meine Daten exportieren", "Экспортировать мои данные", "Export my data")}
-            </Button>
             <a href="/feedback">
-              <Button variant="outline" className="border-white/15 bg-white/8 text-white hover:bg-white/12 hover:text-white">
+              <Button variant="outline" className={tokens.control.primaryButton}>
                 <ShieldCheck className="size-4" />
                 {l("Mein Feedback", "Мои отзывы", "My feedback")}
               </Button>
             </a>
             <a href="/services">
-              <Button variant="outline" className="border-white/15 bg-white/8 text-white hover:bg-white/12 hover:text-white">
+              <Button variant="outline" className={tokens.control.primaryButton}>
                 <Download className="size-4" />
                 {l("Meine Services", "Мои сервисы", "My services")}
               </Button>
             </a>
             <a href="/invoices">
-              <Button variant="outline" className="border-white/15 bg-white/8 text-white hover:bg-white/12 hover:text-white">
+              <Button variant="outline" className={tokens.control.primaryButton}>
                 <Download className="size-4" />
                 {l("Meine Rechnungen", "Мои счета", "My invoices")}
               </Button>
             </a>
             <Button
               variant="outline"
-              className="border-white/15 bg-white/8 text-white hover:bg-white/12 hover:text-white"
+              className={tokens.control.primaryButton}
+              onClick={() => void handleExportData()}
+              disabled={exportBusy}
+            >
+              {exportBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
+              {l("Meine Daten exportieren", "Экспортировать мои данные", "Export my data")}
+            </Button>
+            <Button
+              variant="outline"
+              className={tokens.control.primaryButton}
               onClick={() => setVersion((value) => value + 1)}
             >
-              {refreshing ? <LoaderCircle className="size-4 animate-spin" /> : null}
+              {refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
               {l("Aktualisieren", "Обновить", "Refresh")}
             </Button>
-          </div>
-        </div>
-      </section>
+          </>
+        }
+      />
 
-      {error ? (
-        <section className={shellCard("border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700")}>
-          {error}
-        </section>
-      ) : null}
+      {error ? <Banner tone="error" withIcon>{error}</Banner> : null}
 
       {documentAlerts && documentAlerts.configured_rule_count > 0 ? (
-        <section
-          className={shellCard(
-            cn(
-              "px-5 py-4",
-              documentAlerts.document_pack_complete
-                ? "border-emerald-200 bg-emerald-50"
-                : "border-amber-200 bg-amber-50",
-            ),
-          )}
-        >
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                {l("Erforderliche Dokumente", "Обязательные документы", "Required documents")}
-              </p>
-              <h2 className="mt-2 text-lg font-semibold text-slate-950">
-                {documentAlerts.document_pack_complete
-                  ? l("Ihr Mindest-Dokumentenpaket ist vollständig.", "Минимальный комплект документов уже собран.", "Your minimum document pack is complete")
-                  : l(
-                      `Es fehlen noch ${documentAlerts.missing_count} Pflichtdokument${documentAlerts.missing_count === 1 ? "" : "e"}.`,
-                      `Еще не хватает ${documentAlerts.missing_count} обязательн${documentAlerts.missing_count === 1 ? "ого документа" : "ых документов"}.`,
-                      `${documentAlerts.missing_count} required document${documentAlerts.missing_count === 1 ? "" : "s"} still missing`,
-                    )}
-              </h2>
-              <p className="mt-2 text-sm text-slate-600">
-                {documentAlerts.document_pack_complete
-                  ? l(
-                      "Ihr Betreuungsteam hat bereits den erforderlichen Mindest-Dokumentensatz.",
-                      "У команды сопровождения уже есть минимально необходимый комплект документов.",
-                      "Your care team already has the minimum required document set.",
-                    )
-                  : l(
-                      "Laden Sie die fehlenden Unterlagen im Portal hoch, damit Ihr Team ohne manuelles Nachfassen weiterarbeiten kann.",
-                      "Загрузите недостающие документы в портал, чтобы команда могла продолжить работу без ручного напоминания.",
-                      "Upload the missing items in the portal so your care team can continue without manual follow-up.",
-                    )}
-              </p>
-              {documentAlerts.missing_count > 0 ? (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {documentAlerts.missing_documents.map((item) => (
-                    <Badge
-                      key={item.key}
-                      variant="outline"
-                      className="rounded-full border-amber-300 bg-white text-amber-800"
-                    >
-                      {localizeRequiredDocumentLabel(item.key, item.label, l)}
-                    </Badge>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-            <div className="flex shrink-0 items-center gap-3">
-              <div className="rounded-2xl border border-white/60 bg-white/70 px-4 py-2 text-sm text-slate-700">
-                {l("Erfüllt", "Выполнено", "Fulfilled")}:{" "}
-                <span className="font-semibold text-slate-950">
+        documentAlerts.document_pack_complete ? (
+          <SuccessBanner>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <p className={tokens.text.eyebrow}>
+                  {l("Erforderliche Dokumente", "Обязательные документы", "Required documents")}
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {l("Ihr Mindest-Dokumentenpaket ist vollständig.", "Минимальный комплект документов уже собран.", "Your minimum document pack is complete")}
+                </p>
+                <p className={cn("mt-1", tokens.text.muted)}>
+                  {l(
+                    "Ihr Betreuungsteam hat bereits den erforderlichen Mindest-Dokumentensatz.",
+                    "У команды сопровождения уже есть минимально необходимый комплект документов.",
+                    "Your care team already has the minimum required document set.",
+                  )}
+                </p>
+              </div>
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <CountBadge>
+                  {l("Erfüllt", "Выполнено", "Fulfilled")}:{" "}
                   {documentAlerts.required_documents.filter((item) => item.fulfilled).length}/
                   {documentAlerts.configured_rule_count}
-                </span>
+                </CountBadge>
+                <a href="/documents">
+                  <Button variant="outline" className={tokens.control.accessoryButton}>
+                    {l("Dokumente öffnen", "Открыть документы", "Open documents")}
+                  </Button>
+                </a>
               </div>
-              <a href="/documents">
-                <Button variant="outline" className="rounded-2xl bg-white/80">
-                  {l("Dokumente öffnen", "Открыть документы", "Open documents")}
-                </Button>
-              </a>
             </div>
-          </div>
-        </section>
+          </SuccessBanner>
+        ) : (
+          <Banner tone="warning" withIcon>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <p className={tokens.text.eyebrow}>
+                  {l("Erforderliche Dokumente", "Обязательные документы", "Required documents")}
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {l(
+                    `Es fehlen noch ${documentAlerts.missing_count} Pflichtdokument${documentAlerts.missing_count === 1 ? "" : "e"}.`,
+                    `Еще не хватает ${documentAlerts.missing_count} обязательн${documentAlerts.missing_count === 1 ? "ого документа" : "ых документов"}.`,
+                    `${documentAlerts.missing_count} required document${documentAlerts.missing_count === 1 ? "" : "s"} still missing`,
+                  )}
+                </p>
+                <p className={cn("mt-1", tokens.text.muted)}>
+                  {l(
+                    "Laden Sie die fehlenden Unterlagen im Portal hoch, damit Ihr Team ohne manuelles Nachfassen weiterarbeiten kann.",
+                    "Загрузите недостающие документы в портал, чтобы команда могла продолжить работу без ручного напоминания.",
+                    "Upload the missing items in the portal so your care team can continue without manual follow-up.",
+                  )}
+                </p>
+                {documentAlerts.missing_count > 0 ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {documentAlerts.missing_documents.map((item) => (
+                      <StatusBadge key={item.key} tone="warning">
+                        {localizeRequiredDocumentLabel(item.key, item.label, l)}
+                      </StatusBadge>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <CountBadge>
+                  {l("Erfüllt", "Выполнено", "Fulfilled")}:{" "}
+                  {documentAlerts.required_documents.filter((item) => item.fulfilled).length}/
+                  {documentAlerts.configured_rule_count}
+                </CountBadge>
+                <a href="/documents">
+                  <Button variant="outline" className={tokens.control.accessoryButton}>
+                    {l("Dokumente öffnen", "Открыть документы", "Open documents")}
+                  </Button>
+                </a>
+              </div>
+            </div>
+          </Banner>
+        )
       ) : null}
 
       <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-        <section className={shellCard("p-5")}>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-950">
-                {l("Nächste Schritte", "Следующие действия", "Next actions")}
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {l("Ein konsolidierter Block aus Terminen, Empfehlungen, Dokumenten und sichtbaren Rechnungen.", "Единый блок из визитов, рекомендаций, документов и видимых счетов.", "A consolidated block from appointments, recommendations, documents and visible invoices.")}
-              </p>
-              {nextActionKindSummary.length > 0 ? (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {nextActionKindSummary.map(([kind, count]) => (
-                    <Badge
-                      key={kind}
-                      variant="outline"
-                      className="rounded-full border-slate-200 bg-white text-slate-600"
-                    >
-                      {formatNextActionKind(kind)}: {count}
-                    </Badge>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-            <div className="shrink-0 text-right">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
-                {l("Priorität", "Приоритет", "Priority")}
-              </p>
-              <p className="mt-1 text-sm font-semibold text-slate-950">
-                {urgentNextActionCount} / {nextActions.length}
-              </p>
-              <a href="/recommendations" className="mt-2 inline-flex text-sm font-medium text-sky-700 hover:text-sky-800">
+        <Section
+          title={l("Nächste Schritte", "Следующие действия", "Next actions")}
+          accessory={
+            <div className="flex flex-wrap items-center gap-2">
+              <CountBadge>
+                {l("Priorität", "Приоритет", "Priority")}: {urgentNextActionCount} / {nextActions.length}
+              </CountBadge>
+              <a href="/recommendations" className="text-sm font-medium text-primary hover:underline">
                 {l("Empfehlungen", "Рекомендации", "Recommendations")}
               </a>
             </div>
-          </div>
-          <div className="mt-5 space-y-3">
+          }
+        >
+          <p className="text-sm text-muted-foreground">
+            {l("Ein konsolidierter Block aus Terminen, Empfehlungen, Dokumenten und sichtbaren Rechnungen.", "Единый блок из визитов, рекомендаций, документов и видимых счетов.", "A consolidated block from appointments, recommendations, documents and visible invoices.")}
+          </p>
+          {nextActionKindSummary.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {nextActionKindSummary.map(([kind, count]) => (
+                <CountBadge key={kind}>{formatNextActionKind(kind)}: {count}</CountBadge>
+              ))}
+            </div>
+          ) : null}
+          <div className="space-y-3">
             {topNextActions.length === 0 ? (
-              <EmptyState message={l("Aktuell sind keine offenen Portal-Aktionen vorhanden.", "Сейчас нет открытых действий в портале.", "No open portal actions right now.")} />
+              <EmptyCell>{l("Aktuell sind keine offenen Portal-Aktionen vorhanden.", "Сейчас нет открытых действий в портале.", "No open portal actions right now.")}</EmptyCell>
             ) : (
               topNextActions.map((item) => (
-                <div
-                  key={item.id}
-                  className="rounded-[1.35rem] border border-slate-200 bg-[linear-gradient(135deg,rgba(248,250,252,0.95),rgba(240,249,255,0.9))] px-4 py-4"
-                >
+                <ListItem key={item.id} className="space-y-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <StatusBadge className={nextActionTone(item.kind, item.priority)}>
+                          {formatNextActionKind(item.kind)}
+                        </StatusBadge>
+                        <CountBadge>{formatNextActionKind(item.priority || "normal")}</CountBadge>
+                      </div>
+                      <p className="mt-2 text-sm font-semibold text-foreground">{item.title}</p>
+                      {item.description ? <p className={cn("mt-1", tokens.text.muted)}>{item.description}</p> : null}
+                    </div>
+                  </div>
+                  {(item.due_at || item.amount) ? (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {item.due_at ? (
+                        <InfoRow label={l("Fällig", "Срок", "Due")} value={formatPortalDateTime(item.due_at)} />
+                      ) : null}
+                      {item.amount ? (
+                        <InfoRow label={l("Betrag", "Сумма", "Amount")} value={formatPortalCurrency(item.amount)} />
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <div className="flex justify-end">
+                    <a href={item.action_url} className="inline-flex h-8 items-center rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90">
+                      {item.action_label}
+                    </a>
+                  </div>
+                </ListItem>
+              ))
+            )}
+          </div>
+        </Section>
+
+        <Section
+          title={l("Empfehlungen", "Рекомендации", "Recommendations")}
+          accessory={
+            <a href="/recommendations" className="text-sm font-medium text-primary hover:underline">
+              {l("Alle öffnen", "Открыть все", "Open all")}
+            </a>
+          }
+        >
+          <p className="text-sm text-muted-foreground">
+            {l("Vom Betreuungsteam freigegebene medizinische Empfehlungen.", "Медицинские рекомендации, опубликованные командой сопровождения.", "Care-team recommendations released to your portal.")}
+          </p>
+          <div className="space-y-3">
+            {recentRecommendations.length === 0 ? (
+              <EmptyCell>{l("Noch keine Empfehlungen freigegeben.", "Пока нет опубликованных рекомендаций.", "No recommendations released yet.")}</EmptyCell>
+            ) : (
+              recentRecommendations.map((item) => (
+                <ListItem key={item.recommendation_id || item.id}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge
-                          variant="outline"
-                          className={cn("rounded-full", nextActionTone(item.kind, item.priority))}
-                        >
-                          {formatNextActionKind(item.kind)}
-                        </Badge>
-                        <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-600">
-                          {formatNextActionKind(item.priority || "normal")}
-                        </Badge>
-                      </div>
-                      <p className="mt-2 text-sm font-semibold text-slate-950">{item.title}</p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {[item.description, item.due_at ? `${l("Fällig", "Срок", "Due")} ${formatPortalDateTime(item.due_at)}` : null]
+                      <p className="text-sm font-semibold text-foreground">{item.title}</p>
+                      <p className={cn("mt-1", tokens.text.muted)}>
+                        {[item.source_doctor_name, item.recommendation_type.replaceAll("_", " ")]
                           .filter(Boolean)
                           .join(" / ")}
                       </p>
                     </div>
-                  </div>
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                    {item.amount ? (
-                      <p className="text-xs font-semibold text-slate-700">
-                        {formatPortalCurrency(item.amount)}
-                      </p>
-                    ) : (
-                      <span />
-                    )}
-                    <a href={item.action_url} className="rounded-full bg-slate-950 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800">
-                      {item.action_label}
-                    </a>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </section>
-
-        <section className={shellCard("p-5")}>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-950">
-                {l("Empfehlungen", "Рекомендации", "Recommendations")}
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {l("Vom Betreuungsteam freigegebene medizinische Empfehlungen.", "Медицинские рекомендации, опубликованные командой сопровождения.", "Care-team recommendations released to your portal.")}
-              </p>
-            </div>
-            <a href="/recommendations" className="text-sm font-medium text-sky-700 hover:text-sky-800">
-              {l("Alle öffnen", "Открыть все", "Open all")}
-            </a>
-          </div>
-          <div className="mt-5 space-y-3">
-            {recentRecommendations.length === 0 ? (
-              <EmptyState message={l("Noch keine Empfehlungen freigegeben.", "Пока нет опубликованных рекомендаций.", "No recommendations released yet.")} />
-            ) : (
-              recentRecommendations.map((item) => (
-                <div
-                  key={item.recommendation_id || item.id}
-                  className="rounded-[1.35rem] border border-slate-200 bg-slate-50/80 px-4 py-4"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-950">{item.title}</p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {[item.source_doctor_name, item.recommendation_type.replaceAll("_", " ")]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </p>
-                    </div>
-                    <Badge
-                      variant="outline"
-                      className={cn("rounded-full", recommendationStatusTone(item.status))}
-                    >
+                    <StatusBadge status={item.status} className={recommendationStatusTone(item.status)}>
                       {portalStatusLabel(item.status)}
-                    </Badge>
+                    </StatusBadge>
                   </div>
-                  <p className="mt-3 text-xs text-slate-500">
+                  <p className={cn("mt-3", tokens.text.muted)}>
                     {item.due_at
                       ? `${l("Fällig", "Срок", "Due")} ${formatPortalDateTime(item.due_at)}`
                       : l("Ohne Frist", "Без срока", "No due date")}
                   </p>
-                </div>
+                </ListItem>
               ))
             )}
           </div>
-        </section>
+        </Section>
       </section>
 
       <section className="grid gap-4 md:grid-cols-5">
-        <MetricCard label={l("Kommende Termine", "Предстоящие визиты", "Upcoming visits")} value={upcomingAppointments} description={l(`${releasedDocuments} freigegebene Dokumente`, `${releasedDocuments} опубликованных документа`, `${releasedDocuments} released documents`)} />
-        <MetricCard label={l("Offene Serviceanfragen", "Открытые сервисные запросы", "Open service requests")} value={openServiceRequests} description={l(`${services.length} Concierge-Einträge gesamt`, `${services.length} записей concierge всего`, `${services.length} total concierge entries`)} />
-        <MetricCard label={l("Offener Saldo", "Остаток к оплате", "Outstanding balance")} value={outstandingBalance === 0 ? formatPortalCurrency(0) : formatPortalCurrency(outstandingBalance)} />
-        <MetricCard label={l("Offene Datenschutzanfragen", "Открытые запросы по приватности", "Open privacy requests")} value={openRequests} description={l(`${pendingConfirmations} ausstehende Bestätigungen`, `${pendingConfirmations} ожидающих подтверждений`, `${pendingConfirmations} pending confirmations`)} />
-        <MetricCard label={l("Gesendetes Feedback", "Отправленные отзывы", "Feedback sent")} value={feedback.length} description={l(`${promoterCount} Promotor-Bewertungen`, `${promoterCount} оценок промоутеров`, `${promoterCount} promoter ratings`)} />
+        <StatCard label={l("Kommende Termine", "Предстоящие визиты", "Upcoming visits")} value={upcomingAppointments} description={l(`${releasedDocuments} freigegebene Dokumente`, `${releasedDocuments} опубликованных документа`, `${releasedDocuments} released documents`)} />
+        <StatCard label={l("Offene Serviceanfragen", "Открытые сервисные запросы", "Open service requests")} value={openServiceRequests} description={l(`${services.length} Concierge-Einträge gesamt`, `${services.length} записей concierge всего`, `${services.length} total concierge entries`)} />
+        <StatCard label={l("Offener Saldo", "Остаток к оплате", "Outstanding balance")} value={outstandingBalance === 0 ? formatPortalCurrency(0) : formatPortalCurrency(outstandingBalance)} />
+        <StatCard label={l("Offene Datenschutzanfragen", "Открытые запросы по приватности", "Open privacy requests")} value={openRequests} description={l(`${pendingConfirmations} ausstehende Bestätigungen`, `${pendingConfirmations} ожидающих подтверждений`, `${pendingConfirmations} pending confirmations`)} />
+        <StatCard label={l("Gesendetes Feedback", "Отправленные отзывы", "Feedback sent")} value={feedback.length} description={l(`${promoterCount} Promotor-Bewertungen`, `${promoterCount} оценок промоутеров`, `${promoterCount} promoter ratings`)} />
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[1fr_1fr_1fr_1fr_1fr]">
-        <section className={shellCard("p-5")}>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-950">{l("Kommende Termine", "Предстоящие визиты", "Upcoming visits")}</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {l("Geplante patientenseitige Termine.", "Запланированные визиты для пациента.", "Scheduled patient-facing appointments.")}
-              </p>
-            </div>
-            <a href="/appointments" className="text-sm font-medium text-sky-700 hover:text-sky-800">
+      <section className="grid gap-6 xl:grid-cols-3 2xl:grid-cols-6">
+        <Section
+          title={l("Kommende Termine", "Предстоящие визиты", "Upcoming visits")}
+          accessory={
+            <a href="/appointments" className="text-sm font-medium text-primary hover:underline">
               {l("Alle öffnen", "Открыть все", "Open all")}
             </a>
-          </div>
-          <div className="mt-5 space-y-3">
+          }
+        >
+          <p className="text-sm text-muted-foreground">
+            {l("Geplante patientenseitige Termine.", "Запланированные визиты для пациента.", "Scheduled patient-facing appointments.")}
+          </p>
+          <div className="space-y-3">
             {recentAppointments.length === 0 ? (
-              <EmptyState message={l("Noch keine geplanten Termine.", "Пока нет запланированных визитов.", "No scheduled visits yet.")} />
+              <EmptyCell>{l("Noch keine geplanten Termine.", "Пока нет запланированных визитов.", "No scheduled visits yet.")}</EmptyCell>
             ) : (
               recentAppointments.map((item) => (
-                <div
-                  key={item.id}
-                  className="rounded-[1.35rem] border border-slate-200 bg-slate-50/80 px-4 py-4"
-                >
+                <ListItem key={item.id}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-slate-950">{item.title}</p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {[item.provider_name, item.doctor_name].filter(Boolean).join(" · ")}
+                      <p className="text-sm font-semibold text-foreground">{item.title}</p>
+                      <p className={cn("mt-1", tokens.text.muted)}>
+                        {[item.provider_name, item.doctor_name].filter(Boolean).join(" / ")}
                       </p>
                     </div>
-                    <Badge
-                      variant="outline"
-                      className={cn("rounded-full", appointmentStatusTone(item.status))}
-                    >
+                    <StatusBadge status={item.status} className={appointmentStatusTone(item.status)}>
                       {portalStatusLabel(item.status)}
-                    </Badge>
+                    </StatusBadge>
                   </div>
-                  <p className="mt-3 text-xs text-slate-500">
-                    {formatPortalDate(item.date)}
-                  </p>
-                </div>
+                  <p className={cn("mt-3", tokens.text.muted)}>{formatPortalDate(item.date)}</p>
+                </ListItem>
               ))
             )}
           </div>
-        </section>
+        </Section>
 
-        <section className={shellCard("p-5")}>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-950">{l("Aktuelle Dokumente", "Недавние документы", "Recent documents")}</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {l("Von Ihrem Betreuungsteam für den Portalzugang freigegebene Dateien.", "Файлы, опубликованные командой сопровождения для доступа через портал.", "Files released by your care team for portal access.")}
-              </p>
-            </div>
-            <a href="/documents" className="text-sm font-medium text-sky-700 hover:text-sky-800">
+        <Section
+          title={l("Aktuelle Dokumente", "Недавние документы", "Recent documents")}
+          accessory={
+            <a href="/documents" className="text-sm font-medium text-primary hover:underline">
               {l("Alle öffnen", "Открыть все", "Open all")}
             </a>
-          </div>
-          <div className="mt-5 space-y-3">
+          }
+        >
+          <p className="text-sm text-muted-foreground">
+            {l("Von Ihrem Betreuungsteam für den Portalzugang freigegebene Dateien.", "Файлы, опубликованные командой сопровождения для доступа через портал.", "Files released by your care team for portal access.")}
+          </p>
+          <div className="space-y-3">
             {recentDocuments.length === 0 ? (
-              <EmptyState message={l("Es wurden noch keine Dokumente für Ihr Portal freigegeben.", "Для вашего портала пока не опубликовано ни одного документа.", "No documents have been released to your portal yet.")} />
+              <EmptyCell>{l("Es wurden noch keine Dokumente für Ihr Portal freigegeben.", "Для вашего портала пока не опубликовано ни одного документа.", "No documents have been released to your portal yet.")}</EmptyCell>
             ) : (
               recentDocuments.map((item) => (
-                <div
-                  key={item.id}
-                  className="rounded-[1.35rem] border border-slate-200 bg-slate-50/80 px-4 py-4"
-                >
+                <ListItem key={item.id}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-slate-950">{item.auto_name}</p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {[item.art, item.category, item.shared_by_name].filter(Boolean).join(" · ")}
+                      <p className="text-sm font-semibold text-foreground">{item.auto_name}</p>
+                      <p className={cn("mt-1", tokens.text.muted)}>
+                        {[item.art, item.category, item.shared_by_name].filter(Boolean).join(" / ")}
                       </p>
                     </div>
-                    <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
+                    <StatusBadge tone={item.confirmed ? "success" : item.requires_confirmation ? "warning" : "info"}>
                       {item.confirmed ? l("Bestätigt", "Подтверждено", "Confirmed") : item.requires_confirmation ? l("Bestätigung erforderlich", "Требуется подтверждение", "Needs confirmation") : l("Freigegeben", "Опубликовано", "Released")}
-                    </Badge>
+                    </StatusBadge>
                   </div>
-                  <p className="mt-3 text-xs text-slate-500">
+                  <p className={cn("mt-3", tokens.text.muted)}>
                     {l("Freigegeben", "Опубликовано", "Released")} {formatPortalDateTime(item.shared_at)}
                   </p>
-                </div>
+                </ListItem>
               ))
             )}
           </div>
-        </section>
+        </Section>
 
-        <section className={shellCard("p-5")}>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-950">{l("Aktuelle Rechnungen", "Недавние счета", "Recent invoices")}</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {l("Abrechnungs-Snapshots und aktueller Zahlungsstand.", "Снимки счетов и текущий статус оплаты.", "Billing snapshots and current payment state.")}
-              </p>
-            </div>
-            <a href="/invoices" className="text-sm font-medium text-sky-700 hover:text-sky-800">
+        <Section
+          title={l("Aktuelle Rechnungen", "Недавние счета", "Recent invoices")}
+          accessory={
+            <a href="/invoices" className="text-sm font-medium text-primary hover:underline">
               {l("Alle öffnen", "Открыть все", "Open all")}
             </a>
-          </div>
-          <div className="mt-5 space-y-3">
+          }
+        >
+          <p className="text-sm text-muted-foreground">
+            {l("Abrechnungs-Snapshots und aktueller Zahlungsstand.", "Снимки счетов и текущий статус оплаты.", "Billing snapshots and current payment state.")}
+          </p>
+          <div className="space-y-3">
             {recentInvoices.length === 0 ? (
-              <EmptyState message={l("Es wurden noch keine Rechnungen im Portal freigegeben.", "В портале пока нет опубликованных счетов.", "No invoices released to the portal yet.")} />
+              <EmptyCell>{l("Es wurden noch keine Rechnungen im Portal freigegeben.", "В портале пока нет опубликованных счетов.", "No invoices released to the portal yet.")}</EmptyCell>
             ) : (
               recentInvoices.map((item) => (
-                <div
-                  key={item.id}
-                  className="rounded-[1.35rem] border border-slate-200 bg-slate-50/80 px-4 py-4"
-                >
+                <ListItem key={item.id}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-slate-950">{item.invoice_number}</p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {item.order_number} · {l("Fällig", "Срок оплаты", "Due")} {formatPortalDate(item.due_date)}
+                      <p className="text-sm font-semibold text-foreground">{item.invoice_number}</p>
+                      <p className={cn("mt-1", tokens.text.muted)}>
+                        {item.order_number} / {l("Fällig", "Срок оплаты", "Due")} {formatPortalDate(item.due_date)}
                       </p>
                     </div>
-                    <Badge
-                      variant="outline"
-                      className={cn("rounded-full", invoiceStatusTone(item.status))}
-                    >
+                    <StatusBadge status={item.status} className={invoiceStatusTone(item.status)}>
                       {portalStatusLabel(item.status)}
-                    </Badge>
+                    </StatusBadge>
                   </div>
-                  <p className="mt-3 text-xs text-slate-500">
+                  <p className={cn("mt-3", tokens.text.muted)}>
                     {l("Offen", "Открыто", "Open")} {formatPortalCurrency(item.balance_due)}
                   </p>
-                </div>
+                </ListItem>
               ))
             )}
           </div>
-        </section>
+        </Section>
 
-        <section className={shellCard("p-5")}>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-950">{l("Verlauf der Datenschutzanfragen", "История запросов по приватности", "Privacy request history")}</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {l("Bereits eingereichte DSGVO-bezogene Anfragen.", "Уже отправленные запросы по защите данных.", "DSGVO-related requests you already submitted.")}
-              </p>
-            </div>
-            <a href="/privacy" className="text-sm font-medium text-sky-700 hover:text-sky-800">
+        <Section
+          title={l("Meine Services", "Мои сервисы", "My services")}
+          accessory={
+            <a href="/services" className="text-sm font-medium text-primary hover:underline">
               {l("Alle öffnen", "Открыть все", "Open all")}
             </a>
-          </div>
-          <div className="mt-5 space-y-3">
-            {recentRequests.length === 0 ? (
-              <EmptyState message={l("Noch keine Datenschutzanfragen eingereicht.", "Запросы по приватности еще не отправлялись.", "No privacy requests submitted yet.")} />
+          }
+        >
+          <p className="text-sm text-muted-foreground">
+            {l("Concierge- und Zusatzleistungen aus Ihrem Portal.", "Консьерж- и дополнительные услуги из вашего портала.", "Concierge and add-on services from your portal.")}
+          </p>
+          <div className="space-y-3">
+            {recentServices.length === 0 ? (
+              <EmptyCell>{l("Noch keine Services angelegt.", "Пока нет сервисов.", "No services yet.")}</EmptyCell>
             ) : (
-              recentRequests.map((item) => (
-                <div
-                  key={item.id}
-                  className="rounded-[1.35rem] border border-slate-200 bg-slate-50/80 px-4 py-4"
-                >
+              recentServices.map((item) => (
+                <ListItem key={item.id}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-slate-950">
+                      <p className="text-sm font-semibold text-foreground">{item.title}</p>
+                      <p className={cn("mt-1", tokens.text.muted)}>
+                        {[item.provider_name, item.assigned_concierge_name, item.appointment_title].filter(Boolean).join(" / ")}
+                      </p>
+                    </div>
+                    <StatusBadge status={item.status} className={conciergeServiceStatusTone(item.status)}>
+                      {portalStatusLabel(item.status)}
+                    </StatusBadge>
+                  </div>
+                  <p className={cn("mt-3", tokens.text.muted)}>
+                    {conciergeServiceKindLabel(item.service_kind)}
+                    {item.starts_at ? ` / ${formatPortalDateTime(item.starts_at)}` : ""}
+                  </p>
+                </ListItem>
+              ))
+            )}
+          </div>
+        </Section>
+
+        <Section
+          title={l("Verlauf der Datenschutzanfragen", "История запросов по приватности", "Privacy request history")}
+          accessory={
+            <a href="/privacy" className="text-sm font-medium text-primary hover:underline">
+              {l("Alle öffnen", "Открыть все", "Open all")}
+            </a>
+          }
+        >
+          <p className="text-sm text-muted-foreground">
+            {l("Bereits eingereichte DSGVO-bezogene Anfragen.", "Уже отправленные запросы по защите данных.", "DSGVO-related requests you already submitted.")}
+          </p>
+          <div className="space-y-3">
+            {recentRequests.length === 0 ? (
+              <EmptyCell>{l("Noch keine Datenschutzanfragen eingereicht.", "Запросы по приватности еще не отправлялись.", "No privacy requests submitted yet.")}</EmptyCell>
+            ) : (
+              recentRequests.map((item) => (
+                <ListItem key={item.id}>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">
                         {privacyRequestLabel(item.request_type)}
                       </p>
-                      <p className="mt-1 text-xs text-slate-500">
+                      <p className={cn("mt-1", tokens.text.muted)}>
                         {l("Angefragt", "Запрошено", "Requested")} {formatPortalDateTime(item.requested_at)}
                       </p>
                     </div>
-                    <Badge
-                      variant="outline"
-                      className={cn("rounded-full", privacyStatusTone(item.status))}
-                    >
+                    <StatusBadge status={item.status} className={privacyStatusTone(item.status)}>
                       {portalStatusLabel(item.status)}
-                    </Badge>
+                    </StatusBadge>
                   </div>
-                  <p className="mt-3 text-xs text-slate-500">
+                  <p className={cn("mt-3", tokens.text.muted)}>
                     {l("Fällig", "Срок", "Due")} {formatPortalDate(item.due_at)}
                   </p>
-                </div>
+                </ListItem>
               ))
             )}
           </div>
-        </section>
+        </Section>
 
-        <section className={shellCard("p-5")}>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-950">{l("Aktuelles Feedback", "Недавние отзывы", "Recent feedback")}</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {l("Eingereichte Qualitätsumfragen und deren Review-Status.", "Отправленные опросы качества и их статус проверки.", "Submitted quality surveys and review follow-up.")}
-              </p>
-            </div>
-            <a href="/feedback" className="text-sm font-medium text-sky-700 hover:text-sky-800">
+        <Section
+          title={l("Aktuelles Feedback", "Недавние отзывы", "Recent feedback")}
+          accessory={
+            <a href="/feedback" className="text-sm font-medium text-primary hover:underline">
               {l("Alle öffnen", "Открыть все", "Open all")}
             </a>
-          </div>
-          <div className="mt-5 space-y-3">
+          }
+        >
+          <p className="text-sm text-muted-foreground">
+            {l("Eingereichte Qualitätsumfragen und deren Review-Status.", "Отправленные опросы качества и их статус проверки.", "Submitted quality surveys and review follow-up.")}
+          </p>
+          <div className="space-y-3">
             {recentFeedback.length === 0 ? (
-              <EmptyState message={l("Noch kein Feedback eingereicht.", "Отзывы еще не отправлялись.", "No feedback submitted yet.")} />
+              <EmptyCell>{l("Noch kein Feedback eingereicht.", "Отзывы еще не отправлялись.", "No feedback submitted yet.")}</EmptyCell>
             ) : (
               recentFeedback.map((item) => (
-                <div
-                  key={item.id}
-                  className="rounded-[1.35rem] border border-slate-200 bg-slate-50/80 px-4 py-4"
-                >
+                <ListItem key={item.id}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-slate-950">
+                      <p className="text-sm font-semibold text-foreground">
                         {item.appointment_title || item.provider_name || l("Allgemeines Feedback", "Общий отзыв", "General feedback")}
                       </p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        NPS {item.nps_score} · {formatPortalDateTime(item.submitted_at)}
+                      <p className={cn("mt-1", tokens.text.muted)}>
+                        NPS {item.nps_score} / {formatPortalDateTime(item.submitted_at)}
                       </p>
                     </div>
-                    <Badge
-                      variant="outline"
-                      className={cn("rounded-full", feedbackStatusTone(item.status))}
-                    >
+                    <StatusBadge status={item.status} className={feedbackStatusTone(item.status)}>
                       {portalStatusLabel(item.status)}
-                    </Badge>
+                    </StatusBadge>
                   </div>
-                </div>
+                </ListItem>
               ))
             )}
           </div>
-        </section>
+        </Section>
       </section>
-    </div>
-  );
-}
-
-function MetricCard({ label, value, description }: { label: string; value: number | string; description?: string }) {
-  return (
-    <section className="rounded-[1.5rem] border border-slate-200 bg-white px-5 py-4 shadow-sm">
-      <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">{label}</p>
-      <p className="mt-3 text-3xl font-semibold tracking-tight text-slate-950">{value}</p>
-      {description ? <p className="mt-2 text-xs text-slate-500">{description}</p> : null}
-    </section>
-  );
-}
-
-function EmptyState({ message }: { message: string }) {
-  return (
-    <div className="rounded-[1.35rem] border border-dashed border-slate-200 bg-slate-50/70 px-4 py-6 text-sm text-slate-500">
-      {message}
-    </div>
+    </TabShell>
   );
 }
