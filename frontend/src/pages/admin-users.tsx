@@ -17,9 +17,10 @@ import {
   AdminTableCard,
   AdminToolbar,
 } from "@/components/admin-page-patterns";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import type { ColumnDef } from "@/components/data-table/types";
 import {
   Banner,
-  EmptyCell,
   PageHeader,
   TabLoader,
 } from "@/components/ui-shell";
@@ -175,6 +176,110 @@ export function AdminUsersPage() {
         roleLabel(u.role).toLowerCase().includes(q),
     );
   }, [users, search, roleLabel]);
+
+  const columns = useMemo<ColumnDef<User>[]>(
+    () => [
+      {
+        id: "name",
+        label: t.users_name,
+        accessor: (user) => user.name,
+        searchable: true,
+        required: true,
+        pinned: "left",
+        width: 260,
+        render: (user) => (
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-muted-foreground">
+              {initials(user.name)}
+            </div>
+            <span className="truncate text-sm font-medium text-foreground">
+              {user.name}
+            </span>
+          </div>
+        ),
+      },
+      {
+        id: "email",
+        label: t.users_email,
+        accessor: (user) => user.email,
+        searchable: true,
+        required: true,
+        pinned: "left",
+        width: 280,
+        render: (user) => (
+          <span className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
+            <Mail className="size-3.5 shrink-0 text-muted-foreground/70" />
+            <span className="truncate">{user.email}</span>
+          </span>
+        ),
+      },
+      {
+        id: "role",
+        label: t.users_role,
+        accessor: (user) => roleLabel(user.role),
+        filterType: "enum",
+        filterOptions: ROLE_KEYS.map((role) => ({
+          value: roleLabel(role),
+          label: roleLabel(role),
+        })),
+        searchable: true,
+        sortable: true,
+        width: 190,
+        render: (user) => (
+          <Badge
+            className={cn(
+              "font-medium",
+              ROLE_COLORS[user.role] ?? ROLE_COLORS.it_admin,
+            )}
+          >
+            {roleLabel(user.role)}
+          </Badge>
+        ),
+      },
+      {
+        id: "status",
+        label: t.users_status,
+        accessor: (user) => user.is_active,
+        filterType: "boolean",
+        sortable: true,
+        width: 150,
+        render: (user) => (
+          <Badge
+            variant="outline"
+            className={cn(
+              "rounded-full",
+              user.is_active
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-border/60 bg-muted/25 text-muted-foreground",
+            )}
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "size-1.5 rounded-full",
+                user.is_active ? "bg-emerald-500" : "bg-muted-foreground/45",
+              )}
+            />
+            {user.is_active ? t.users_active : t.users_inactive}
+          </Badge>
+        ),
+      },
+      {
+        id: "created_at",
+        label: t.users_created,
+        accessor: (user) => user.created_at,
+        filterType: "date",
+        sortable: true,
+        width: 170,
+        render: (user) => (
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {formatDate(user.created_at)}
+          </span>
+        ),
+      },
+    ],
+    [roleLabel, t],
+  );
 
   const onSubmitCreate = async (ev: FormEvent) => {
     ev.preventDefault();
@@ -489,73 +594,54 @@ export function AdminUsersPage() {
           count={filtered.length}
           className="overflow-hidden"
         >
-          {filtered.length === 0 ? (
-            <div className="p-4">
-              <EmptyCell>{search ? t.users_empty_no_results : t.users_empty_no_users}</EmptyCell>
-            </div>
-          ) : (
-            <>
-              <div className="grid grid-cols-[2.5fr_2.5fr_1.5fr_1fr_1.2fr_1.5fr] gap-3 border-b border-border/60 bg-card px-5 py-2.5 font-mono">
-                {[t.users_name, t.users_email, t.users_role, t.users_status, t.users_created, t.users_actions].map((h) => (
-                  <span key={h} className="truncate text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/80">{h}</span>
-                ))}
-              </div>
-
-              {filtered.map((user, idx) => (
-                <div
-                  key={user.id}
-                  className={cn(
-                    "grid grid-cols-[2.5fr_2.5fr_1.5fr_1fr_1.2fr_1.5fr] items-center gap-3 px-5 py-3 transition-colors hover:bg-muted/45 focus-within:bg-muted/45",
-                    idx < filtered.length - 1 && "border-b border-border/45",
-                  )}
+          <DataTableSurface
+            rows={filtered}
+            columns={columns}
+            defaultDensity="comfortable"
+            defaultFrozenColumns={["name", "email"]}
+            defaultSort={[{ field: "created_at", dir: "desc" }]}
+            dictionary={tr}
+            emptyState={
+              <span className="text-sm text-muted-foreground">
+                {search ? t.users_empty_no_results : t.users_empty_no_users}
+              </span>
+            }
+            rowId={(user) => user.id}
+            activeRowId={editUser?.id ?? null}
+            onRowClick={openEdit}
+            rowActions={(user) => (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  className="rounded-lg"
+                  onClick={() => openEdit(user)}
                 >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-muted-foreground">
-                      {initials(user.name)}
-                    </div>
-                    <span className="truncate text-sm font-medium text-foreground">{user.name}</span>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <Mail className="size-3.5 shrink-0 text-muted-foreground/70" />
-                    <span className="truncate text-sm text-muted-foreground">{user.email}</span>
-                  </div>
-
-                  <div>
-                    <Badge className={cn("font-medium", ROLE_COLORS[user.role] ?? ROLE_COLORS.it_admin)}>
-                      {roleLabel(user.role)}
-                    </Badge>
-                  </div>
-
-                  <div>
-                    <span className={cn(
-                      "inline-flex items-center gap-1.5 text-xs font-medium",
-                      user.is_active ? "text-emerald-600" : "text-slate-400",
-                    )}>
-                      <span className={cn("size-1.5 rounded-full", user.is_active ? "bg-emerald-500" : "bg-slate-300")} />
-                      {user.is_active ? t.users_active : t.users_inactive}
-                    </span>
-                  </div>
-
-                  <span className="text-xs tabular-nums text-muted-foreground">{formatDate(user.created_at)}</span>
-
-                  <div className="flex items-center gap-1.5">
-                    <Button variant="outline" size="xs" className="rounded-lg" onClick={() => openEdit(user)}>
-                      {t.patients_edit}
-                    </Button>
-                    <Button
-                      variant={user.is_active ? "destructive" : "outline"}
-                      size="xs"
-                      className="rounded-lg"
-                      onClick={() => toggleActive(user.id, user.is_active)}
-                    >
-                      {user.is_active ? t.users_deactivate : t.users_activate}
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </>
-          )}
+                  {t.patients_edit}
+                </Button>
+                <Button
+                  type="button"
+                  variant={user.is_active ? "destructive" : "outline"}
+                  size="xs"
+                  className="rounded-lg"
+                  onClick={() => void toggleActive(user.id, user.is_active)}
+                >
+                  {user.is_active ? t.users_deactivate : t.users_activate}
+                </Button>
+              </>
+            )}
+            rowActionsWidth={190}
+            tableClassName="min-h-[420px]"
+            footer={({ filteredCount, totalCount }) => (
+              <span className="tabular-nums">
+                {filteredCount === totalCount
+                  ? `${totalCount}`
+                  : `${filteredCount} / ${totalCount}`}{" "}
+                {t.users_title.toLowerCase()}
+              </span>
+            )}
+          />
         </AdminTableCard>
       ) : null}
     </div>
