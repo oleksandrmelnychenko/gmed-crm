@@ -2258,10 +2258,11 @@ function StaffDocumentsPage() {
               </Field>
             </div>
             {availableTemplateBlocks.length > 0 ? (
-              <div className="space-y-3 rounded-xl border border-border/60 bg-muted/25 p-4">
+              <div className="space-y-3 rounded-xl border border-border/60 p-4">
                 <div>
-                  <p className="text-sm font-semibold text-foreground">
-                    {t.documents_text_blocks}
+                  <p className="inline-flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <span aria-hidden className="size-2 rounded-full bg-amber-500" />
+                    <span>{t.documents_text_blocks}</span>
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {t.documents_text_blocks_hint}
