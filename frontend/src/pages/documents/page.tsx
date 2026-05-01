@@ -17,7 +17,8 @@ import {
 import { flushSync } from "react-dom";
 import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import {
-  ArrowLeft,
+  Building2,
+  ChevronRight,
   Download,
   FileText,
   FolderPlus,
@@ -26,13 +27,13 @@ import {
   Search,
   Share2,
   Trash2,
+  Undo2,
+  UserRound,
 } from "lucide-react";
 
-import { StaffLink } from "@/components/staff-link";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { DocumentsGrid } from "@/components/documents-grid";
-import { DocumentRightViewDetails } from "@/components/document-right-view-details";
 import { localizeDocumentCode } from "@/lib/required-document-labels";
 import {
   AdminSheetScaffold,
@@ -464,7 +465,7 @@ function StaffDocumentsPage({
   const { staffGo } = useStaffNavigate();
   const l = (de: string, ru: string, en: string) =>
     lang === "de" ? de : lang === "ru" ? ru : en;
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const text =
     lang === "de"
       ? {
@@ -629,6 +630,7 @@ function StaffDocumentsPage({
     note: "",
   });
   const [translationRequestOpen, setTranslationRequestOpen] = useState(false);
+  const [metadataEditOpen, setMetadataEditOpen] = useState(false);
   const [editForm, setEditForm] = useState<EditFormState | null>(null);
   const [detailOrders, setDetailOrders] = useState<OrderOption[]>([]);
   const [detailAppointments, setDetailAppointments] = useState<
@@ -1051,6 +1053,7 @@ function StaffDocumentsPage({
     setTemplateOpen(false);
     setUploadOpen(false);
     setTranslationRequestOpen(false);
+    setMetadataEditOpen(false);
     setShareCreateOpen(false);
     setDeleteOpen(false);
     setSelectedId("");
@@ -1082,31 +1085,6 @@ function StaffDocumentsPage({
       }
       return current.filter((value) => value !== id);
     });
-  }
-
-  function closeDetail() {
-    if (embedDetailOnly) {
-      const next = new URLSearchParams(searchParams);
-      const from = next.get("from");
-      next.delete("document");
-      next.delete("embed");
-      next.delete("from");
-      const search = next.toString();
-      const backPath =
-        from === "translation-requests"
-          ? "/documents/translation-requests"
-          : from === "intake"
-            ? "/documents/intake"
-            : "/documents";
-      staffGo(
-        `${backPath}${search ? `?${search}` : ""}`,
-      );
-      return;
-    }
-    const next = new URLSearchParams(searchParams);
-    next.delete("document");
-    setSearchParams(next, { replace: true });
-    setSelectedId("");
   }
 
   function handleUploadFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -1593,6 +1571,7 @@ function StaffDocumentsPage({
           ? t.documents_metadata_updated_notice
           : t.documents_review_released_notice,
       );
+      if (canManage) setMetadataEditOpen(false);
       refresh();
     } catch (nextError) {
       setSaveError(
@@ -2901,7 +2880,7 @@ function StaffDocumentsPage({
                       <option value="">{t.documents_select_user}</option>
                       {staff.map((item) => (
                         <option key={item.id} value={item.id}>
-                          {item.name} В· {formatRoleLabel(item.role)}
+                          {item.name} · {formatRoleLabel(item.role)}
                         </option>
                       ))}
                     </NativeComboboxSelect>
@@ -2921,7 +2900,7 @@ function StaffDocumentsPage({
                       <option value="">{t.documents_select_provider}</option>
                       {providers.map((item) => (
                         <option key={item.id} value={item.id}>
-                          {item.name} В· {item.address_city || t.documents_no_city}
+                          {item.name} · {item.address_city || t.documents_no_city}
                         </option>
                       ))}
                     </NativeComboboxSelect>
@@ -2974,6 +2953,260 @@ function StaffDocumentsPage({
           </form>
         </SheetContent>
       </Sheet>
+
+      {canManage && editForm ? (
+        <Sheet open={metadataEditOpen} onOpenChange={setMetadataEditOpen}>
+          <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
+            <form
+              onSubmit={handleSave}
+              className="flex flex-1 min-h-0 flex-col"
+            >
+              <AdminSheetScaffold
+                title={l(
+                  "Metadaten bearbeiten",
+                  "\u0420\u0435\u0434\u0430\u043a\u0442\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u043c\u0435\u0442\u0430\u0434\u0430\u043d\u043d\u044b\u0435",
+                  "\u0420\u0435\u0434\u0430\u0433\u0443\u0432\u0430\u0442\u0438 \u043c\u0435\u0442\u0430\u0434\u0430\u043d\u0456",
+                )}
+                footer={(
+                  <SheetFormFooter
+                    cancelLabel={t.common_cancel}
+                    submitLabel={t.documents_save_metadata}
+                    submittingLabel={t.patients_saving}
+                    submitting={saveBusy}
+                    submitDisabled={!editForm.autoName.trim() || !editForm.art.trim()}
+                    onCancel={() => setMetadataEditOpen(false)}
+                  />
+                )}
+              >
+                {saveError ? <Banner tone="error">{saveError}</Banner> : null}
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field label={t.orders_patient}>
+                    <NativeComboboxSelect
+                      value={editForm.patientId}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? {
+                                ...current,
+                                patientId: event.target.value,
+                                orderId: "",
+                                appointmentId: "",
+                              }
+                            : current,
+                        )
+                      }
+                      className={selectClassName}
+                    >
+                      <option value="">{t.documents_no_patient}</option>
+                      {patients.map((patient) => (
+                        <option key={patient.id} value={patient.id}>
+                          {patientOptionLabel(patient)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+                  <Field label={t.orders_title}>
+                    <NativeComboboxSelect
+                      value={editForm.orderId}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? { ...current, orderId: event.target.value }
+                            : current,
+                        )
+                      }
+                      className={selectClassName}
+                      disabled={!editForm.patientId}
+                    >
+                      <option value="">{t.documents_no_order}</option>
+                      {detailOrders.map((order) => (
+                        <option key={order.id} value={order.id}>
+                          {order.order_number} · {order.patient_pid}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+                  <Field label={t.appointments_title}>
+                    <NativeComboboxSelect
+                      value={editForm.appointmentId}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? {
+                                ...current,
+                                appointmentId: event.target.value,
+                              }
+                            : current,
+                        )
+                      }
+                      className={selectClassName}
+                      disabled={!editForm.patientId}
+                    >
+                      <option value="">{t.documents_no_appointment}</option>
+                      {detailAppointments.map((appointment) => (
+                        <option
+                          key={appointment.id}
+                          value={appointment.id}
+                        >
+                          {appointment.title} · {formatDate(appointment.date)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+                  <Field label={t.documents_filename} required>
+                    <Input
+                      value={editForm.autoName}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? { ...current, autoName: event.target.value }
+                            : current,
+                        )
+                      }
+                      className={shellInputClassName}
+                    />
+                  </Field>
+                  <Field label={t.documents_category} required>
+                    <Input
+                      value={editForm.art}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? { ...current, art: event.target.value }
+                            : current,
+                        )
+                      }
+                      list="documents-art-options"
+                      className={shellInputClassName}
+                    />
+                  </Field>
+                  <Field label={t.documents_category}>
+                    <NativeComboboxSelect
+                      value={editForm.category}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? { ...current, category: event.target.value }
+                            : current,
+                        )
+                      }
+                      className={selectClassName}
+                    >
+                      <option value="">{t.documents_no_category}</option>
+                      {categories.map((category) => (
+                        <option key={category.key} value={category.key}>
+                          {category.label}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+                  <Field label={t.users_status}>
+                    <NativeComboboxSelect
+                      value={editForm.status}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? {
+                                ...current,
+                                status: event.target.value as DocumentStatus,
+                              }
+                            : current,
+                        )
+                      }
+                      className={selectClassName}
+                    >
+                      {STATUS_OPTIONS.map((status) => (
+                        <option key={status} value={status}>
+                          {formatDocumentStatusLabel(status, t)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+                  <Field label={t.users_status}>
+                    <NativeComboboxSelect
+                      value={editForm.visibility}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? {
+                                ...current,
+                                visibility: event.target.value as DocumentVisibility,
+                              }
+                            : current,
+                        )
+                      }
+                      className={selectClassName}
+                    >
+                      {VISIBILITY_OPTIONS.map((value) => (
+                        <option key={value} value={value}>
+                          {formatVisibilityLabel(value, t)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+                  <Field label={t.common_provider}>
+                    <Input
+                      value={editForm.klinik}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? { ...current, klinik: event.target.value }
+                            : current,
+                        )
+                      }
+                      className={shellInputClassName}
+                    />
+                  </Field>
+                  <Field label={t.documents_source}>
+                    <Input
+                      value={editForm.ursprung}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? { ...current, ursprung: event.target.value }
+                            : current,
+                        )
+                      }
+                      className={shellInputClassName}
+                    />
+                  </Field>
+                </div>
+                <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={editForm.isMedical}
+                    onChange={(event) =>
+                      setEditForm((current) =>
+                        current
+                          ? {
+                              ...current,
+                              isMedical: event.target.checked,
+                            }
+                          : current,
+                      )
+                    }
+                    className={checkboxClass}
+                  />
+                  {t.documents_mark_medical_data}
+                </label>
+                <Field label={t.patients_notes}>
+                  <textarea
+                    value={editForm.notes}
+                    onChange={(event) =>
+                      setEditForm((current) =>
+                        current
+                          ? { ...current, notes: event.target.value }
+                          : current,
+                      )
+                    }
+                    className={textareaClassName}
+                  />
+                </Field>
+              </AdminSheetScaffold>
+            </form>
+          </SheetContent>
+        </Sheet>
+      ) : null}
 
       <Dialog
         open={deleteOpen}
@@ -3041,42 +3274,8 @@ function StaffDocumentsPage({
       </Dialog>
 
       {(() => {
-        const detailHeader = embedDetailOnly ? (
-          <PageHeader
-            title={detail?.auto_name || t.documents_title}
-            description={t.documents_detail_description}
-            actions={
-              <StaffLink
-                to={(() => {
-                  const next = new URLSearchParams(searchParams);
-                  const from = next.get("from");
-                  next.delete("document");
-                  next.delete("embed");
-                  next.delete("from");
-                  const search = next.toString();
-                  const backPath =
-                    from === "translation-requests"
-                      ? "/documents/translation-requests"
-                      : from === "intake"
-                        ? "/documents/intake"
-                        : "/documents";
-                  return `${backPath}${search ? `?${search}` : ""}`;
-                })()}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-              >
-                <ArrowLeft className="size-4" />
-                {searchParams.get("from") === "translation-requests"
-                  ? t.documents_translation_requests
-                  : searchParams.get("from") === "intake"
-                    ? t.documents_intake_queue
-                    : t.documents_title}
-              </StaffLink>
-            }
-          />
-        ) : null;
-
         const detailContent = (
-            <DocumentRightViewDetails
+            <DocumentDetailState
               busy={detailBusy}
               error={detailError}
               errorContent={
@@ -3088,13 +3287,19 @@ function StaffDocumentsPage({
             >
               {detail ? (
               <div className={cn("space-y-4", !embedDetailOnly && "pt-5")}>
-                <section className="rounded-xl border border-border/60 bg-transparent p-5">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
+                <section className="space-y-4 rounded-xl border border-border/50 bg-card/40 p-3.5">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                    <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[var(--brand)] text-white">
+                      <FileText className="size-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
+                        <h2 className="truncate text-xl font-semibold tracking-tight text-foreground">
+                          {localizeDocumentCode(detail.auto_name, l)}
+                        </h2>
                         <span
                           className={cn(
-                            "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]",
+                            "rounded-full border px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.12em]",
                             statusBadge(detail.status),
                           )}
                         >
@@ -3102,7 +3307,7 @@ function StaffDocumentsPage({
                         </span>
                         <span
                           className={cn(
-                            "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]",
+                            "rounded-full border px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.12em]",
                             visibilityBadge(detail.visibility),
                           )}
                         >
@@ -3118,10 +3323,7 @@ function StaffDocumentsPage({
                           {formatSensitivityLabel(detail.data_sensitivity)}
                         </Badge>
                       </div>
-                      <p className="mt-3 text-xl font-semibold text-foreground">
-                        {localizeDocumentCode(detail.auto_name, l)}
-                      </p>
-                      <p className="mt-1 text-sm text-muted-foreground">
+                      <p className="mt-0.5 truncate text-sm text-muted-foreground">
                         {[
                           detail.original_filename,
                           detail.mime_type,
@@ -3130,22 +3332,22 @@ function StaffDocumentsPage({
                           .filter(Boolean)
                           .join(" · ")}
                       </p>
-                      <p className="mt-2 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                      <p className="mt-1 text-[11px] font-mono text-muted-foreground/80">
                         {text.versionOf(detail.version_number, detail.version_count)}
                         {detail.is_latest_version
                           ? ` · ${text.current}`
                           : ` · ${text.historical}`}
                       </p>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex shrink-0 flex-wrap gap-2 sm:max-w-[44%] sm:justify-end">
                       {canManage && currentDetailTemplate ? (
                         <Button
                           type="button"
                           variant="outline"
-                          className="rounded-lg"
+                          className="h-9 gap-1.5 rounded-lg px-3.5"
                           onClick={() => openReplacementTemplate(detail)}
                         >
-                          <FileText className="size-4" />
+                          <FileText className="size-3.5" />
                           {text.newVersion}
                         </Button>
                       ) : null}
@@ -3155,17 +3357,17 @@ function StaffDocumentsPage({
                         <Button
                           type="button"
                           variant="outline"
-                          className="rounded-lg"
+                          className="h-9 gap-1.5 rounded-lg px-3.5"
                           onClick={() => void handleOpenPreview()}
                         >
-                          <FileText className="size-4" />
+                          <FileText className="size-3.5" />
                           {t.documents_preview}
                         </Button>
                       ) : null}
                       <Button
                         type="button"
                         variant="outline"
-                        className="rounded-lg"
+                        className="h-9 gap-1.5 rounded-lg px-3.5"
                         disabled={!detail.has_stored_file}
                         onClick={() =>
                           void downloadDocumentFile(
@@ -3174,47 +3376,41 @@ function StaffDocumentsPage({
                           )
                         }
                       >
-                        <Download className="size-4" />
+                        <Download className="size-3.5" />
                         {t.documents_download}
                       </Button>
                       {canManage && detail.has_stored_file ? (
                         <Button
                           type="button"
                           variant="destructive"
-                          className="rounded-lg"
+                          className="h-9 gap-1.5 rounded-lg px-3.5"
                           onClick={() => {
                             setDeleteError("");
                             setDeleteReason("");
                             setDeleteOpen(true);
                           }}
                         >
-                          <Trash2 className="size-4" />
+                          <Trash2 className="size-3.5" />
                           {t.documents_delete_file}
                         </Button>
                       ) : null}
-                      {detail.patient_id ? (
-                        <StaffLink
-                          to={`/patients?patient=${detail.patient_id}`}
-                          className="inline-flex h-10 items-center rounded-lg border border-input bg-background px-4 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                      {canManage && editForm ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-9 gap-1.5 rounded-lg px-3.5"
+                          onClick={() => {
+                            setSaveError("");
+                            setMetadataEditOpen(true);
+                          }}
                         >
-                          {t.orders_patient}
-                        </StaffLink>
-                      ) : null}
-                      {detail.order_id ? (
-                        <StaffLink
-                          to={`/orders?order=${detail.order_id}`}
-                          className="inline-flex h-10 items-center rounded-lg border border-input bg-background px-4 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-                        >
-                          {t.orders_title}
-                        </StaffLink>
-                      ) : null}
-                      {detail.appointment_id ? (
-                        <StaffLink
-                          to={`/appointments?appointment=${detail.appointment_id}`}
-                          className="inline-flex h-10 items-center rounded-lg border border-input bg-background px-4 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-                        >
-                          {t.appointments_title}
-                        </StaffLink>
+                          <FileText className="size-3.5" />
+                          {l(
+                            "Metadaten bearbeiten",
+                            "\u0420\u0435\u0434\u0430\u043a\u0442\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u043c\u0435\u0442\u0430\u0434\u0430\u043d\u043d\u044b\u0435",
+                            "\u0420\u0435\u0434\u0430\u0433\u0443\u0432\u0430\u0442\u0438 \u043c\u0435\u0442\u0430\u0434\u0430\u043d\u0456",
+                          )}
+                        </Button>
                       ) : null}
                     </div>
                   </div>
@@ -3245,40 +3441,75 @@ function StaffDocumentsPage({
                   </Banner>
                 ) : null}
 
-                <SectionCard title={t.common_provider}>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <DetailField
-                      label={t.orders_patient}
-                      value={
-                        detail.patient_name
-                          ? `${detail.patient_pid ?? text.pidFallback} · ${detail.patient_name}`
-                          : t.common_not_set
-                      }
-                    />
-                    <DetailField
-                      label={t.orders_title}
-                      value={detail.order_number || t.common_not_set}
-                    />
-                    <DetailField
-                      label={t.appointments_title}
-                      value={detail.appointment_title || t.common_not_set}
-                    />
-                    <DetailField
-                      label={t.documents_category}
-                      value={detail.art || t.common_not_set}
-                    />
-                    <DetailField
-                      label={t.documents_category}
-                      value={detail.category || t.common_not_set}
-                    />
-                    <DetailField
-                      label={t.common_provider}
-                      value={detail.klinik || t.common_not_set}
-                    />
-                    <DetailField
-                      label={t.documents_source}
-                      value={detail.ursprung || t.common_not_set}
-                    />
+                <SectionCard
+                  title={l(
+                    "Kontext und Metadaten",
+                    "\u041a\u043e\u043d\u0442\u0435\u043a\u0441\u0442 \u0438 \u043c\u0435\u0442\u0430\u0434\u0430\u043d\u043d\u044b\u0435",
+                    "\u041a\u043e\u043d\u0442\u0435\u043a\u0441\u0442 \u0456 \u043c\u0435\u0442\u0430\u0434\u0430\u043d\u0456",
+                  )}
+                >
+                  <div className="grid gap-3 xl:grid-cols-2">
+                    <DocumentMetaPanel
+                      title={l("Verkn\u00fcpfungen", "\u0421\u0432\u044f\u0437\u0438", "Links")}
+                    >
+                      <DocumentMetaLine
+                        label={t.orders_patient}
+                        value={
+                          detail.patient_name ? (
+                            <span className="inline-flex min-w-0 flex-wrap items-center gap-1.5">
+                              <span className="rounded-md border border-border/50 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+                                {detail.patient_pid ?? text.pidFallback}
+                              </span>
+                              <span className="min-w-0 break-words">
+                                {detail.patient_name}
+                              </span>
+                            </span>
+                          ) : (
+                            t.common_not_set
+                          )
+                        }
+                      />
+                      <DocumentMetaLine
+                        label={t.orders_title}
+                        value={detail.order_number || t.common_not_set}
+                      />
+                      <DocumentMetaLine
+                        label={t.appointments_title}
+                        value={detail.appointment_title || t.common_not_set}
+                      />
+                    </DocumentMetaPanel>
+
+                    <DocumentMetaPanel
+                      title={l(
+                        "Klassifikation",
+                        "\u041a\u043b\u0430\u0441\u0441\u0438\u0444\u0438\u043a\u0430\u0446\u0438\u044f",
+                        "Classification",
+                      )}
+                    >
+                      <DocumentMetaLine
+                        label={l(
+                          "Dokumenttyp",
+                          "\u0422\u0438\u043f \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u0430",
+                          "Document type",
+                        )}
+                        value={detail.art || t.common_not_set}
+                      />
+                      <DocumentMetaLine
+                        label={t.documents_category}
+                        value={detail.category || t.common_not_set}
+                      />
+                      <DocumentMetaLine
+                        label={t.common_provider}
+                        value={detail.klinik || t.common_not_set}
+                      />
+                      <DocumentMetaLine
+                        label={t.documents_source}
+                        value={detail.ursprung || t.common_not_set}
+                      />
+                    </DocumentMetaPanel>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                     <DetailField
                       label={t.documents_uploaded_by}
                       value={detail.uploaded_by_name || t.documents_unknown_uploader}
@@ -3297,58 +3528,96 @@ function StaffDocumentsPage({
                     />
                   </div>
                   {detail.notes ? (
-                    <div className="mt-4 rounded-lg border border-border/60 bg-card px-4 py-3 text-sm text-foreground">
-                      {detail.notes}
-                    </div>
+                    <DocumentMetaPanel title={t.patients_notes}>
+                      <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">
+                        {detail.notes}
+                      </p>
+                    </DocumentMetaPanel>
                   ) : null}
                 </SectionCard>
 
                 {detailVersions.length > 0 ? (
                   <SectionCard title={t.documents_version_history}>
-                    <div className="space-y-3">
-                      {detailVersions.map((version) => (
+                    <div className="overflow-hidden rounded-xl border border-border/50">
+                      {detailVersions.map((version, index) => {
+                        const selected = version.id === detail.id;
+                        const filename =
+                          version.original_filename ||
+                          localizeDocumentCode(version.art, l) ||
+                          t.common_not_set;
+
+                        return (
                         <button
                           key={version.id}
                           type="button"
                           onClick={() => openDocument(version.id)}
                           className={cn(
-                            "w-full rounded-lg border px-4 py-3 text-left transition",
-                            version.id === detail.id
-                              ? "border-sky-300 bg-sky-50"
-                              : "border-border/60 bg-card hover:border-input",
+                            "group relative grid w-full gap-3 border-t border-border/50 bg-transparent px-3.5 py-3.5 text-left transition first:border-t-0 hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:grid-cols-[64px_minmax(0,1fr)_32px]",
+                            selected &&
+                              "before:absolute before:bottom-3 before:left-0 before:top-3 before:w-0.5 before:rounded-full before:bg-[var(--brand)]",
                           )}
                         >
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div>
-                              <div className="flex flex-wrap items-center gap-2">
+                          <div className="flex items-center justify-center">
+                            <span
+                              className={cn(
+                                "inline-flex h-8 w-12 items-center justify-center rounded-lg border text-xs font-semibold leading-none tabular-nums",
+                                selected
+                                  ? "border-[var(--brand)] text-[var(--brand)]"
+                                  : "border-border/60 text-foreground",
+                              )}
+                            >
+                              v{version.version_number}
+                            </span>
+                          </div>
+
+                          <div className="min-w-0">
+                            <div className="flex min-w-0 flex-wrap items-center gap-2">
+                              <span className="min-w-0 truncate text-sm font-semibold text-foreground">
+                                {localizeDocumentCode(version.auto_name, l)}
+                              </span>
+                              {selected ? (
                                 <Badge
                                   variant="outline"
-                                  className="rounded-full border-border/60 bg-card text-foreground"
+                                  className="rounded-full border-[var(--brand)]/35 bg-transparent text-[10px] text-[var(--brand)]"
                                 >
-                                  v{version.version_number}
+                                  {l(
+                                    "Ge\u00f6ffnet",
+                                    "\u041e\u0442\u043a\u0440\u044b\u0442\u0430",
+                                    "Open",
+                                  )}
                                 </Badge>
-                                {!version.is_latest_version ? (
-                                  <Badge
-                                    variant="outline"
-                                    className="rounded-full border-border/60 bg-muted text-foreground"
-                                  >
-                                    {t.documents_archived}
-                                  </Badge>
-                                ) : null}
-                              </div>
-                              <p className="mt-2 text-sm font-semibold text-foreground">
-                                {version.auto_name}
-                              </p>
-                              <p className="mt-1 text-xs text-muted-foreground">
-                                {formatDateTime(version.created_at)}
-                              </p>
+                              ) : null}
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "rounded-full bg-transparent text-[10px]",
+                                  version.is_latest_version
+                                    ? "border-emerald-200 text-emerald-700"
+                                    : "border-border/60 text-muted-foreground",
+                                )}
+                              >
+                                {version.is_latest_version
+                                  ? text.current
+                                  : t.documents_archived}
+                              </Badge>
                             </div>
-                            <div className="text-xs text-muted-foreground">
-                              {version.original_filename || version.art}
+                            <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                              <span className="tabular-nums">
+                                {formatDateTime(version.created_at)}
+                              </span>
+                              <span className="min-w-0 truncate">{filename}</span>
                             </div>
                           </div>
+
+                          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground sm:justify-center">
+                            <span className="tabular-nums sm:hidden">
+                              {index + 1} / {detailVersions.length}
+                            </span>
+                            <ChevronRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+                          </div>
                         </button>
-                      ))}
+                        );
+                      })}
                     </div>
                   </SectionCard>
                 ) : null}
@@ -3865,378 +4134,133 @@ function StaffDocumentsPage({
                   </SectionCard>
                 ) : null}
 
-                {canManage && editForm ? (
-                  <SectionCard title={t.common_provider}>
-                    {saveError ? (
-                      <Banner tone="error">{saveError}</Banner>
-                    ) : null}
-                    <form onSubmit={handleSave} className="space-y-4">
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <Field label={t.orders_patient}>
-                          <NativeComboboxSelect
-                            value={editForm.patientId}
-                            onChange={(event) =>
-                              setEditForm((current) =>
-                                current
-                                  ? {
-                                      ...current,
-                                      patientId: event.target.value,
-                                      orderId: "",
-                                      appointmentId: "",
-                                    }
-                                  : current,
-                              )
-                            }
-                            className={selectClassName}
-                          >
-                            <option value="">{t.documents_no_patient}</option>
-                            {patients.map((patient) => (
-                              <option key={patient.id} value={patient.id}>
-                                {patientOptionLabel(patient)}
-                              </option>
-                            ))}
-                          </NativeComboboxSelect>
-                        </Field>
-                        <Field label={t.orders_title}>
-                          <NativeComboboxSelect
-                            value={editForm.orderId}
-                            onChange={(event) =>
-                              setEditForm((current) =>
-                                current
-                                  ? { ...current, orderId: event.target.value }
-                                  : current,
-                              )
-                            }
-                            className={selectClassName}
-                            disabled={!editForm.patientId}
-                          >
-                            <option value="">{t.documents_no_order}</option>
-                            {detailOrders.map((order) => (
-                              <option key={order.id} value={order.id}>
-                                {order.order_number} · {order.patient_pid}
-                              </option>
-                            ))}
-                          </NativeComboboxSelect>
-                        </Field>
-                        <Field label={t.appointments_title}>
-                          <NativeComboboxSelect
-                            value={editForm.appointmentId}
-                            onChange={(event) =>
-                              setEditForm((current) =>
-                                current
-                                  ? {
-                                      ...current,
-                                      appointmentId: event.target.value,
-                                    }
-                                  : current,
-                              )
-                            }
-                            className={selectClassName}
-                            disabled={!editForm.patientId}
-                          >
-                            <option value="">{t.documents_no_appointment}</option>
-                            {detailAppointments.map((appointment) => (
-                              <option
-                                key={appointment.id}
-                                value={appointment.id}
-                              >
-                                {appointment.title} ·{" "}
-                                {formatDate(appointment.date)}
-                              </option>
-                            ))}
-                          </NativeComboboxSelect>
-                        </Field>
-                        <Field label={t.documents_filename} required>
-                          <Input
-                            value={editForm.autoName}
-                            onChange={(event) =>
-                              setEditForm((current) =>
-                                current
-                                  ? { ...current, autoName: event.target.value }
-                                  : current,
-                              )
-                            }
-                            className={shellInputClassName}
-                          />
-                        </Field>
-                        <Field label={t.documents_category} required>
-                          <Input
-                            value={editForm.art}
-                            onChange={(event) =>
-                              setEditForm((current) =>
-                                current
-                                  ? { ...current, art: event.target.value }
-                                  : current,
-                              )
-                            }
-                            list="documents-art-options"
-                            className={shellInputClassName}
-                          />
-                        </Field>
-                        <Field label={t.documents_category}>
-                          <NativeComboboxSelect
-                            value={editForm.category}
-                            onChange={(event) =>
-                              setEditForm((current) =>
-                                current
-                                  ? { ...current, category: event.target.value }
-                                  : current,
-                              )
-                            }
-                            className={selectClassName}
-                          >
-                            <option value="">{t.documents_no_category}</option>
-                            {categories.map((category) => (
-                              <option key={category.key} value={category.key}>
-                                {category.label}
-                              </option>
-                            ))}
-                          </NativeComboboxSelect>
-                        </Field>
-                        <Field label={t.users_status}>
-                          <NativeComboboxSelect
-                            value={editForm.status}
-                            onChange={(event) =>
-                              setEditForm((current) =>
-                                current
-                                  ? {
-                                      ...current,
-                                      status: event.target
-                                        .value as DocumentStatus,
-                                    }
-                                  : current,
-                              )
-                            }
-                            className={selectClassName}
-                          >
-                            {STATUS_OPTIONS.map((status) => (
-                              <option key={status} value={status}>
-                                {formatDocumentStatusLabel(status, t)}
-                              </option>
-                            ))}
-                          </NativeComboboxSelect>
-                        </Field>
-                        <Field label={t.users_status}>
-                          <NativeComboboxSelect
-                            value={editForm.visibility}
-                            onChange={(event) =>
-                              setEditForm((current) =>
-                                current
-                                  ? {
-                                      ...current,
-                                      visibility: event.target
-                                        .value as DocumentVisibility,
-                                    }
-                                  : current,
-                              )
-                            }
-                            className={selectClassName}
-                          >
-                            {VISIBILITY_OPTIONS.map((value) => (
-                              <option key={value} value={value}>
-                                {formatVisibilityLabel(value, t)}
-                              </option>
-                            ))}
-                          </NativeComboboxSelect>
-                        </Field>
-                        <Field label={t.common_provider}>
-                          <Input
-                            value={editForm.klinik}
-                            onChange={(event) =>
-                              setEditForm((current) =>
-                                current
-                                  ? { ...current, klinik: event.target.value }
-                                  : current,
-                              )
-                            }
-                            className={shellInputClassName}
-                          />
-                        </Field>
-                        <Field label={t.documents_source}>
-                          <Input
-                            value={editForm.ursprung}
-                            onChange={(event) =>
-                              setEditForm((current) =>
-                                current
-                                  ? { ...current, ursprung: event.target.value }
-                                  : current,
-                              )
-                            }
-                            className={shellInputClassName}
-                          />
-                        </Field>
-                      </div>
-                      <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
-                        <input
-                          type="checkbox"
-                          checked={editForm.isMedical}
-                          onChange={(event) =>
-                            setEditForm((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    isMedical: event.target.checked,
-                                  }
-                                : current,
-                            )
-                          }
-                          className={checkboxClass}
-                        />
-                        {t.documents_mark_medical_data}
-                      </label>
-                      <Field label={t.patients_notes}>
-                        <textarea
-                          value={editForm.notes}
-                          onChange={(event) =>
-                            setEditForm((current) =>
-                              current
-                                ? { ...current, notes: event.target.value }
-                                : current,
-                            )
-                          }
-                          className={textareaClassName}
-                        />
-                      </Field>
-                      <div className="flex justify-end">
+                <SectionCard
+                  title={t.documents_patient_portal}
+                  accessory={
+                    canManage ? (
+                      <div className="flex flex-wrap justify-end gap-2">
                         <Button
-                          type="submit"
-                          className="rounded-lg"
-                          disabled={saveBusy}
+                          type="button"
+                          size="sm"
+                          className="h-8 rounded-lg"
+                          disabled={portalBusy || !detail.patient_id}
+                          onClick={() => void handleReleaseToPortal()}
                         >
-                          {saveBusy ? (
-                            <LoaderCircle className="size-4 animate-spin" />
-                          ) : (
-                            <FileText className="size-4" />
-                          )}
-                          {saveBusy ? t.patients_saving : t.documents_save_metadata}
+                          {portalBusy ? (
+                            <LoaderCircle className="size-3.5 animate-spin" />
+                          ) : null}
+                          {activePortalShares.length > 0
+                            ? t.documents_refresh_portal_release
+                            : t.documents_release_to_portal}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-8 rounded-lg"
+                          disabled={portalBusy || activePortalShares.length === 0}
+                          onClick={() => void handleRevokePortalRelease()}
+                        >
+                          {portalBusy ? (
+                            <LoaderCircle className="size-3.5 animate-spin" />
+                          ) : null}
+                          {t.documents_revoke_portal_release}
                         </Button>
                       </div>
-                    </form>
-                  </SectionCard>
-                ) : null}
-
-                <SectionCard title={t.documents_patient_portal}>
-                  <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
-                    <div className="rounded-xl border border-border/60 bg-muted/25 p-4">
-                      <div className="flex flex-wrap items-center gap-2">
+                    ) : null
+                  }
+                >
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <DocumentSummaryTile
+                      label={t.users_status}
+                      tone={
+                        detail.visibility === "patient_visible"
+                          ? "success"
+                          : "neutral"
+                      }
+                      value={
                         <Badge
                           variant="outline"
                           className={cn(
-                            "rounded-full",
+                            "rounded-full bg-transparent",
                             detail.visibility === "patient_visible"
-                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                              : "border-border/60 bg-muted text-muted-foreground",
+                              ? "border-emerald-200 text-emerald-700"
+                              : "border-border/60 text-muted-foreground",
                           )}
                         >
                           {detail.visibility === "patient_visible"
                             ? t.documents_portal_eligible
                             : t.documents_not_portal_eligible}
                         </Badge>
-                        <Badge
-                          variant="outline"
-                          className="rounded-full border-sky-200 bg-sky-50 text-sky-700"
-                        >
-                          {activePortalShares.length}{" "}
-                          {t.documents_active_portal_releases}
-                        </Badge>
-                      </div>
-                      <p className="mt-3 text-sm text-muted-foreground">
-                        {t.documents_portal_access_hint}
-                      </p>
+                      }
+                    />
+                    <DocumentSummaryTile
+                      label={t.documents_active_portal_releases}
+                      value={activePortalShares.length}
+                      tone={activePortalShares.length > 0 ? "info" : "neutral"}
+                    />
+                    <DocumentSummaryTile
+                      label={t.documents_confirmed_recipients}
+                      value={confirmedPortalShares}
+                      tone={confirmedPortalShares > 0 ? "success" : "neutral"}
+                    />
+                  </div>
+
+                  {!detail.patient_id || !canManage ? (
+                    <div className="rounded-xl border border-border/50 bg-transparent px-4 py-3 text-sm text-muted-foreground">
                       {!detail.patient_id ? (
-                        <p className="mt-3 text-sm text-amber-700">
+                        <p className="font-medium text-amber-700">
                           {t.documents_link_patient_before_portal}
                         </p>
                       ) : null}
-                      {activePortalShares.length > 0 ? (
-                        <div className="mt-4 space-y-2">
-                          {activePortalShares.map((share) => (
-                            <div
-                              key={share.id}
-                              className="rounded-lg border border-border/60 bg-card px-4 py-3 text-sm text-foreground"
-                            >
-                              <div className="flex flex-wrap items-center justify-between gap-2">
-                                <span>
-                                  {share.target_user_name ||
-                                    t.documents_patient_portal_user}
-                                </span>
-                                <Badge
-                                  variant="outline"
-                                  className={cn(
-                                    "rounded-full",
-                                    share.confirmed
-                                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                      : share.requires_confirmation
-                                        ? "border-amber-200 bg-amber-50 text-amber-700"
-                                        : "border-sky-200 bg-sky-50 text-sky-700",
-                                  )}
-                                >
-                                  {share.confirmed
-                                    ? t.documents_confirmed
-                                    : share.requires_confirmation
-                                      ? t.documents_waiting_confirmation
-                                      : t.documents_released}
-                                </Badge>
-                              </div>
-                              <p className="mt-2 text-xs text-muted-foreground">
-                                {t.documents_portal_released_at.replace(
-                                  "{datetime}",
-                                  formatDateTime(share.shared_at),
-                                )}
-                                {share.confirmed
-                                  ? ` · ${t.documents_portal_confirmed_by_patient}`
-                                  : ""}
-                              </p>
-                            </div>
-                          ))}
-                        </div>
+                      {!canManage ? (
+                        <p className="font-medium text-muted-foreground">
+                          {t.documents_only_ceo_pm_portal}
+                        </p>
                       ) : null}
                     </div>
-                    <div className="rounded-xl border border-border/60 bg-card p-4">
-                      <p className="text-sm font-semibold text-foreground">
-                        {t.documents_portal_controls}
-                      </p>
-                      <p className="mt-2 text-sm text-muted-foreground">
-                        {t.documents_portal_trail_hint}
-                      </p>
-                      <div className="mt-4 grid gap-3">
-                        <div className="rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-muted-foreground">
-                          {t.documents_confirmed_recipients}:{" "}
-                          <span className="font-semibold text-foreground">
-                            {confirmedPortalShares}
-                          </span>
-                        </div>
-                        {canManage ? (
-                          <>
-                            <Button
-                              type="button"
-                              className="rounded-lg"
-                              disabled={portalBusy || !detail.patient_id}
-                              onClick={() => void handleReleaseToPortal()}
-                            >
-                              {portalBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                              {activePortalShares.length > 0
-                                ? t.documents_refresh_portal_release
-                                : t.documents_release_to_portal}
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              className="rounded-lg"
-                              disabled={portalBusy || activePortalShares.length === 0}
-                              onClick={() => void handleRevokePortalRelease()}
-                            >
-                              {portalBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                              {t.documents_revoke_portal_release}
-                            </Button>
-                          </>
-                        ) : (
-                          <div className="rounded-lg border border-dashed border-border/60 bg-muted/25 px-4 py-4 text-sm text-muted-foreground">
-                            {t.documents_only_ceo_pm_portal}
-                          </div>
+                  ) : null}
+
+                  <div className="overflow-hidden rounded-xl border border-border/50">
+                    {activePortalShares.length === 0 ? (
+                      <div className="px-4 py-5 text-sm text-muted-foreground">
+                        {l(
+                          "Noch keine aktiven Portal-Freigaben.",
+                          "\u0410\u043a\u0442\u0438\u0432\u043d\u044b\u0445 \u0440\u0435\u043b\u0438\u0437\u043e\u0432 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442.",
+                          "No active portal releases yet.",
                         )}
                       </div>
-                    </div>
+                    ) : (
+                      activePortalShares.map((share) => (
+                        <div
+                          key={share.id}
+                          className="grid gap-3 border-t border-border/50 px-4 py-3.5 first:border-t-0 md:grid-cols-[minmax(0,1fr)_180px]"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-foreground">
+                              {share.target_user_name ||
+                                t.documents_patient_portal_user}
+                            </p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {t.documents_portal_released_at.replace(
+                                "{datetime}",
+                                formatDateTime(share.shared_at),
+                              )}
+                              {share.confirmed
+                                ? ` \u00b7 ${t.documents_portal_confirmed_by_patient}`
+                                : ""}
+                            </p>
+                          </div>
+                          <div className="flex items-center md:justify-end">
+                            <DocumentShareStateBadge
+                              share={share}
+                              t={t}
+                              text={text}
+                            />
+                          </div>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </SectionCard>
 
@@ -4261,158 +4285,154 @@ function StaffDocumentsPage({
                       ) : null
                     }
                   >
-                  {shareError ? (
-                    <Banner tone="error">{shareError}</Banner>
-                  ) : null}
-                  <div className="space-y-3">
+                    {shareError ? (
+                      <Banner tone="error">{shareError}</Banner>
+                    ) : null}
                     {shares.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-border/60 bg-muted/25 px-4 py-6 text-sm text-muted-foreground">
+                      <div className="rounded-xl border border-dashed border-border/60 bg-transparent px-4 py-6 text-sm text-muted-foreground">
                         {t.documents_no_shares_yet}
                       </div>
                     ) : (
-                      shares.map((share) => {
-                        const target = share.provider_name
-                          ? `${t.documents_provider_target} · ${share.provider_name}`
-                          : share.target_user_name
-                            ? `${share.target_user_name} · ${formatRoleLabel(share.target_user_role)}`
-                            : t.documents_unknown_target;
-                        const canCurrentUserConfirm =
-                          !share.confirmed &&
-                          !share.revoked_at &&
-                          share.shared_with_user_id === user?.id;
-                        return (
-                          <div
-                            key={share.id}
-                            className="rounded-lg border border-border/60 bg-card px-4 py-4"
-                          >
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                              <div>
-                                <p className="text-sm font-semibold text-foreground">
-                                  {target}
-                                </p>
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                  {t.documents_shared_by.replace(
-                                    "{name}",
-                                    share.shared_by_name || t.common_unknown,
-                                  )}{" "}
-                                  · {formatDateTime(share.shared_at)}
-                                </p>
-                                {share.channel ? (
-                                  <p className="mt-1 text-xs text-muted-foreground">
-                                    {formatShareChannelLabel(share.channel)}
-                                  </p>
-                                ) : null}
-                                {share.message ? (
-                                  <div className="mt-3 rounded-lg border border-border/60 bg-muted/25 px-3 py-2 text-sm text-foreground">
-                                    {share.message}
+                      <>
+                        <div className="grid gap-3 md:grid-cols-3">
+                          <DocumentSummaryTile
+                            label={l("Gesamt", "\u0412\u0441\u0435\u0433\u043e", "Total")}
+                            value={shares.length}
+                            tone="info"
+                          />
+                          <DocumentSummaryTile
+                            label={l("Aktiv", "\u0410\u043a\u0442\u0438\u0432\u043d\u044b\u0435", "Active")}
+                            value={shares.filter((share) => !share.revoked_at).length}
+                            tone="success"
+                          />
+                          <DocumentSummaryTile
+                            label={t.documents_waiting_confirmation}
+                            value={
+                              shares.filter(
+                                (share) =>
+                                  !share.revoked_at &&
+                                  !share.confirmed &&
+                                  share.requires_confirmation,
+                              ).length
+                            }
+                            tone="warning"
+                          />
+                        </div>
+
+                        <div className="overflow-hidden rounded-xl border border-border/50">
+                          {shares.map((share) => {
+                            const isProviderShare = Boolean(share.provider_name);
+                            const targetName =
+                              share.provider_name ||
+                              share.target_user_name ||
+                              t.documents_unknown_target;
+                            const targetKind = isProviderShare
+                              ? t.documents_provider_target
+                              : share.target_user_role
+                                ? formatRoleLabel(share.target_user_role)
+                                : t.common_not_set;
+                            const canCurrentUserConfirm =
+                              !share.confirmed &&
+                              !share.revoked_at &&
+                              share.shared_with_user_id === user?.id;
+                            return (
+                              <div
+                                key={share.id}
+                                className="grid gap-3 border-t border-border/50 px-4 py-4 first:border-t-0 lg:grid-cols-[minmax(0,1fr)_auto]"
+                              >
+                                <div className="flex min-w-0 gap-3">
+                                  <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/60 text-muted-foreground">
+                                    {isProviderShare ? (
+                                      <Building2 className="size-4" />
+                                    ) : (
+                                      <UserRound className="size-4" />
+                                    )}
                                   </div>
-                                ) : null}
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                      <p className="min-w-0 truncate text-sm font-semibold text-foreground">
+                                        {targetName}
+                                      </p>
+                                      <Badge
+                                        variant="outline"
+                                        className="rounded-full border-border/60 bg-transparent text-[10px] text-muted-foreground"
+                                      >
+                                        {targetKind}
+                                      </Badge>
+                                    </div>
+                                    <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                                      <span>
+                                        {t.documents_shared_by.replace(
+                                          "{name}",
+                                          share.shared_by_name || t.common_unknown,
+                                        )}
+                                      </span>
+                                      <span className="tabular-nums">
+                                        {formatDateTime(share.shared_at)}
+                                      </span>
+                                      {share.channel ? (
+                                        <span>
+                                          {formatShareChannelLabel(share.channel)}
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                    {share.message ? (
+                                      <p className="mt-3 max-w-2xl border-l-2 border-border/70 py-1 pl-3 text-sm leading-5 text-foreground">
+                                        {share.message}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                </div>
+
+                                <div className="flex shrink-0 flex-wrap items-start gap-2 lg:justify-end">
+                                  <DocumentShareStateBadge
+                                    share={share}
+                                    t={t}
+                                    text={text}
+                                  />
+                                  {canCurrentUserConfirm ? (
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      className="h-8 rounded-lg"
+                                      onClick={() =>
+                                        void handleConfirmShare(share.id)
+                                      }
+                                    >
+                                      {t.common_confirm}
+                                    </Button>
+                                  ) : null}
+                                  {canManage && !share.revoked_at ? (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 gap-1.5 rounded-md border-rose-200 px-2.5 text-[11.5px] text-rose-700 hover:bg-rose-50 hover:text-rose-800"
+                                    onClick={() =>
+                                      void handleRevokeShare(share.id)
+                                    }
+                                  >
+                                    <Undo2 className="size-3.5" />
+                                    {t.documents_revoke}
+                                  </Button>
+                                  ) : null}
+                                </div>
                               </div>
-                              <div className="flex flex-wrap gap-2">
-                                {share.revoked_at ? (
-                                  <Badge
-                                    variant="outline"
-                                    className="rounded-full border-border/60 bg-muted text-muted-foreground"
-                                  >
-                                    {text.revokedBadge}
-                                  </Badge>
-                                ) : share.confirmed ? (
-                                  <Badge
-                                    variant="outline"
-                                    className="rounded-full border-emerald-200 bg-emerald-50 text-emerald-700"
-                                  >
-                                    {t.documents_confirmed}
-                                  </Badge>
-                                ) : share.requires_confirmation ? (
-                                  <Badge
-                                    variant="outline"
-                                    className="rounded-full border-amber-200 bg-amber-50 text-amber-700"
-                                  >
-                                    {t.documents_waiting_confirmation}
-                                  </Badge>
-                                ) : (
-                                  <Badge
-                                    variant="outline"
-                                    className="rounded-full border-sky-200 bg-sky-50 text-sky-700"
-                                  >
-                                    {t.documents_released}
-                                  </Badge>
-                                )}
-                              </div>
-                            </div>
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              {canCurrentUserConfirm ? (
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  className="rounded-lg"
-                                  onClick={() =>
-                                    void handleConfirmShare(share.id)
-                                  }
-                                >
-                                  {t.common_confirm}
-                                </Button>
-                              ) : null}
-                              {canManage && !share.revoked_at ? (
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  className="rounded-xl"
-                                  onClick={() =>
-                                    void handleRevokeShare(share.id)
-                                  }
-                                >
-                                  {t.documents_revoke}
-                                </Button>
-                              ) : null}
-                            </div>
-                          </div>
-                        );
-                      })
+                            );
+                          })}
+                        </div>
+                      </>
                     )}
-                  </div>
                   </SectionCard>
                 ) : null}
               </div>
               ) : null}
-            </DocumentRightViewDetails>
+            </DocumentDetailState>
         );
-        const detailPanel = embedDetailOnly ? (
-          <>
-            {detailHeader}
-            {detailContent}
-          </>
-        ) : (
-          <AdminSheetScaffold
-            title={detail?.auto_name || t.documents_title}
-            description={t.documents_detail_description}
-          >
-            {detailContent}
-          </AdminSheetScaffold>
-        );
-
-        const showDetailSheet = !embedDetailOnly && Boolean(selectedId);
-
         return (
           <>
             {embedDetailOnly ? (
-              <div className="space-y-4">{detailPanel}</div>
-            ) : null}
-            {showDetailSheet ? (
-              <Sheet
-                open
-                onOpenChange={(open) => {
-                  if (!open) closeDetail();
-                }}
-              >
-                <SheetContent
-                  side="right"
-                  className="w-full border-l border-border p-0 sm:max-w-[820px]"
-                >
-                  {detailPanel}
-                </SheetContent>
-              </Sheet>
+              <div className="space-y-4">{detailContent}</div>
             ) : null}
           </>
         );
@@ -4869,6 +4889,35 @@ function DocumentTranslationRequestsTable({
   );
 }
 
+function DocumentDetailState({
+  busy,
+  error,
+  loadingLabel,
+  errorContent,
+  children,
+}: {
+  busy: boolean;
+  error: string;
+  loadingLabel: string;
+  errorContent?: ReactNode;
+  children: ReactNode;
+}) {
+  if (busy) {
+    return (
+      <div className="flex min-h-[280px] items-center justify-center text-sm text-muted-foreground">
+        <LoaderCircle className="mr-2 size-4 animate-spin" />
+        {loadingLabel}
+      </div>
+    );
+  }
+
+  if (error) {
+    return <>{errorContent ?? null}</>;
+  }
+
+  return <>{children}</>;
+}
+
 function Banner({
   tone,
   children,
@@ -4899,18 +4948,25 @@ function SectionCard({
   accessory,
   children,
 }: {
-  title: string;
+  title: ReactNode;
   accessory?: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <DocumentSection
-      title={title}
-      accessory={accessory}
-      className={documentSectionClassName}
-    >
-      {children}
-    </DocumentSection>
+    <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <h3 className="truncate text-sm font-semibold text-foreground">
+            {title}
+          </h3>
+        </div>
+        {accessory ? (
+          <div className="min-w-0 max-w-full">{accessory}</div>
+        ) : null}
+      </div>
+      <div className="space-y-3">{children}</div>
+    </section>
   );
 }
 
@@ -4944,8 +5000,130 @@ function DetailField({ label, value }: { label: string; value: ReactNode }) {
     <InfoRow
       label={label}
       value={value}
-      className="rounded-lg border border-border/50 bg-card px-3 py-2.5"
+      className="rounded-xl border border-border/50 bg-transparent px-3 py-2.5"
     />
+  );
+}
+
+function DocumentMetaPanel({
+  title,
+  children,
+}: {
+  title: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="rounded-xl border border-border/50 bg-transparent px-4 py-3">
+      <div className="mb-3 border-b border-border/50 pb-2">
+        <p className="min-w-0 truncate text-sm font-semibold text-foreground">
+          {title}
+        </p>
+      </div>
+      <div className="space-y-2">{children}</div>
+    </div>
+  );
+}
+
+function DocumentMetaLine({
+  label,
+  value,
+}: {
+  label: ReactNode;
+  value: ReactNode;
+}) {
+  return (
+    <div className="grid gap-1 border-t border-border/40 pt-2 first:border-t-0 first:pt-0 sm:grid-cols-[136px_minmax(0,1fr)]">
+      <span className="text-[11.5px] font-medium leading-tight text-muted-foreground">
+        {label}
+      </span>
+      <span className="min-w-0 break-words text-sm leading-5 text-foreground">
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function DocumentSummaryTile({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: ReactNode;
+  value: ReactNode;
+  tone?: "neutral" | "success" | "warning" | "info";
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-xl border bg-transparent px-4 py-3",
+        tone === "success"
+          ? "border-emerald-200"
+          : tone === "warning"
+            ? "border-amber-200"
+            : tone === "info"
+              ? "border-sky-200"
+              : "border-border/50",
+      )}
+    >
+      <p className="text-[11.5px] font-medium leading-tight text-muted-foreground">
+        {label}
+      </p>
+      <div className="mt-1.5 min-w-0 break-words text-sm font-semibold text-foreground">
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function DocumentShareStateBadge({
+  share,
+  t,
+  text,
+}: {
+  share: DocumentShare;
+  t: DocumentsPageTranslations;
+  text: DocumentsPageText & { revokedBadge: string };
+}) {
+  if (share.revoked_at) {
+    return (
+      <Badge
+        variant="outline"
+        className="rounded-full border-border/60 bg-transparent text-muted-foreground"
+      >
+        {text.revokedBadge}
+      </Badge>
+    );
+  }
+
+  if (share.confirmed) {
+    return (
+      <Badge
+        variant="outline"
+        className="rounded-full border-emerald-200 bg-transparent text-emerald-700"
+      >
+        {t.documents_confirmed}
+      </Badge>
+    );
+  }
+
+  if (share.requires_confirmation) {
+    return (
+      <Badge
+        variant="outline"
+        className="rounded-full border-amber-200 bg-transparent text-amber-700"
+      >
+        {t.documents_waiting_confirmation}
+      </Badge>
+    );
+  }
+
+  return (
+    <Badge
+      variant="outline"
+      className="rounded-full border-sky-200 bg-transparent text-sky-700"
+    >
+      {t.documents_released}
+    </Badge>
   );
 }
 
