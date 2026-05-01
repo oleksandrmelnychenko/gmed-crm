@@ -56,6 +56,7 @@ export type DataTableProps<T> = {
   rowActions?: (row: T) => ReactNode;
   rowActionsLabel?: ReactNode;
   rowActionsWidth?: number;
+  rowHeightOverrides?: Partial<Record<DensityLevel, number>>;
   loading?: boolean;
   emptyState?: ReactNode;
   loadingState?: ReactNode;
@@ -124,6 +125,7 @@ export function DataTable<T>({
   rowActions,
   rowActionsLabel = "Actions",
   rowActionsWidth = 144,
+  rowHeightOverrides,
   loading = false,
   emptyState,
   loadingState,
@@ -139,7 +141,7 @@ export function DataTable<T>({
     x: number;
     y: number;
   } | null>(null);
-  const rowHeight = DENSITY_ROW_HEIGHT[density];
+  const rowHeight = rowHeightOverrides?.[density] ?? DENSITY_ROW_HEIGHT[density];
 
   const [widthOverrides, setWidthOverrides] = useState<Record<string, number>>(
     () => loadStoredWidths(storageKey),

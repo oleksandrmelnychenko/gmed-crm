@@ -73,6 +73,31 @@ describe("resolveWorkspaceRailKind", () => {
     ).toBeNull();
   });
 
+  it.each([
+    "/documents",
+    "/documents/intake",
+    "/documents/translation-requests",
+    "/documents/doc-1",
+  ])("returns the documents rail for staffed document routes: %s", (pathname) => {
+    expect(
+      resolveWorkspaceRailKind({
+        pathname,
+        search: "",
+        userRole: "ceo",
+      }),
+    ).toBe("documents");
+  });
+
+  it("does not return the documents rail for patient users", () => {
+    expect(
+      resolveWorkspaceRailKind({
+        pathname: "/documents",
+        search: "",
+        userRole: "patient",
+      }),
+    ).toBeNull();
+  });
+
   it("returns null when no workspace rail matches", () => {
     expect(
       resolveWorkspaceRailKind({

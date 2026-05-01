@@ -221,6 +221,9 @@ export default function App() {
                     <Route path="invoices" element={<InvoicesPage />} />
                     <Route path="finance-catalog" element={<FinanceCatalogPage />} />
                     <Route path="documents" element={<DocumentsPage />} />
+                    <Route path="documents/intake" element={<DocumentsPage />} />
+                    <Route path="documents/translation-requests" element={<DocumentsPage />} />
+                    <Route path="documents/:documentId" element={<DocumentsPage />} />
                     <Route path="services" element={<ServicesPage />} />
                     <Route path="feedback" element={<FeedbackPage />} />
                     <Route path="privacy" element={<PrivacyPage />} />

@@ -170,6 +170,16 @@
 }
 
 @layer components {
+  [data-base-ui-portal]:has([data-slot="sheet-content"][data-closed]) {
+    pointer-events: none;
+  }
+
+  [data-base-ui-portal]:has([data-slot="sheet-content"][data-closed]) [data-base-ui-inert],
+  [data-base-ui-portal]:has([data-slot="sheet-content"][data-closed]) [data-slot="sheet-overlay"],
+  [data-base-ui-portal]:has([data-slot="sheet-content"][data-closed]) [data-slot="sheet-content"] {
+    pointer-events: none !important;
+  }
+
   .data-table-header-row,
   .data-table-header-cell {
     background-color: var(--card);

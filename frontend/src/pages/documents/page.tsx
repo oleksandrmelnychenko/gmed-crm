@@ -14,8 +14,10 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
-import { useSearchParams } from "react-router-dom";
+import { flushSync } from "react-dom";
+import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import {
+  ArrowLeft,
   Download,
   FileText,
   FolderPlus,
@@ -27,6 +29,8 @@ import {
 } from "lucide-react";
 
 import { StaffLink } from "@/components/staff-link";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import type { ColumnDef } from "@/components/data-table/types";
 import { DocumentsGrid } from "@/components/documents-grid";
 import { DocumentRightViewDetails } from "@/components/document-right-view-details";
 import { localizeDocumentCode } from "@/lib/required-document-labels";
@@ -35,11 +39,9 @@ import {
   SheetFormFooter,
 } from "@/components/admin-page-patterns";
 import {
-  CountBadge,
   EmptyCell,
-  ListItem,
+  InfoRow,
   PageHeader,
-  Section,
   TabLoader,
   checkboxClass,
   inputClass as shellInputClassName,
@@ -66,6 +68,7 @@ import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { getLang, t as translateCatalog, useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
+import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { PatientDocumentsPage } from "@/pages/patients/portal-documents-page";
 import { cn } from "@/lib/utils";
 import {
@@ -147,6 +150,13 @@ import type {
 
 const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
+const DEFAULT_GENERATE_TEMPLATE_ID = "patient_sticker_compact";
+const documentSectionClassName = "border-border/50 bg-transparent";
+const documentQueueRowHeightOverrides = {
+  comfortable: 56,
+  compact: 48,
+  condensed: 40,
+};
 
 function runtimeTranslations() {
   return translateCatalog(getLang());
@@ -263,6 +273,44 @@ function formatDateTime(value?: string | null) {
   }
 }
 
+function formatGenerateDocumentError(error: unknown, l: (de: string, ru: string, en: string) => string) {
+  const message = error instanceof Error ? error.message : "";
+
+  if (message.includes("Treatment plan template requires at least one appointment")) {
+    return l(
+      "Der Behandlungsplan braucht mindestens einen Termin im ausgewählten Scope.",
+      "Для плана лечения нужен минимум один приём в выбранном scope.",
+      "Для плану лікування потрібен мінімум один прийом у вибраному scope.",
+    );
+  }
+
+  if (message.includes("Medication summary template requires at least one case")) {
+    return l(
+      "Die Medikamentenübersicht braucht mindestens einen Fall im ausgewählten Scope.",
+      "Для сводки медикаментов нужен минимум один кейс в выбранном scope.",
+      "Для медикаментозної зводки потрібен мінімум один кейс у вибраному scope.",
+    );
+  }
+
+  if (message.includes("Medication summary template requires recorded medication")) {
+    return l(
+      "Die Medikamentenübersicht braucht dokumentierte Medikamente im ausgewählten Scope.",
+      "Для сводки медикаментов нужны записанные медикаменты в выбранном scope.",
+      "Для медикаментозної зводки потрібні записані медикаменти у вибраному scope.",
+    );
+  }
+
+  if (message.includes("Framework contract template requires an existing framework contract")) {
+    return l(
+      "Der Rahmenvertrag braucht einen bestehenden Vertrag im ausgewählten Scope.",
+      "Для рамочного договора нужен существующий договор в выбранном scope.",
+      "Для рамкового договору потрібен наявний договір у вибраному scope.",
+    );
+  }
+
+  return message;
+}
+
 function formatDate(value?: string | null) {
   const tr = runtimeTranslations();
   if (!value) return tr.common_not_set;
@@ -376,17 +424,44 @@ type TranslationUpdateOptions = {
 
 export function DocumentsPage() {
   const { user } = useAuth();
+  const { documentId } = useParams<{ documentId?: string }>();
+  const location = useLocation();
+  const isIntakePath = location.pathname === "/documents/intake";
+  const isTranslationRequestsPath =
+    location.pathname === "/documents/translation-requests";
 
   if (user?.role === "patient") {
     return <PatientDocumentsPage />;
   }
 
-  return <StaffDocumentsPage />;
+  return (
+    <StaffDocumentsPage
+      routeDocumentId={
+        isIntakePath || isTranslationRequestsPath ? undefined : documentId
+      }
+      routeMode={
+        isIntakePath
+          ? "intake"
+          : isTranslationRequestsPath
+            ? "translation-requests"
+            : "documents"
+      }
+    />
+  );
 }
 
-function StaffDocumentsPage() {
+type StaffDocumentsPageProps = {
+  routeDocumentId?: string;
+  routeMode?: "documents" | "intake" | "translation-requests";
+};
+
+function StaffDocumentsPage({
+  routeDocumentId,
+  routeMode = "documents",
+}: StaffDocumentsPageProps) {
   const { user } = useAuth();
   const { t, lang } = useLang();
+  const { staffGo } = useStaffNavigate();
   const l = (de: string, ru: string, en: string) =>
     lang === "de" ? de : lang === "ru" ? ru : en;
   const [searchParams, setSearchParams] = useSearchParams();
@@ -474,7 +549,12 @@ function StaffDocumentsPage() {
     ursprung: searchParams.get("ursprung") ?? "",
   }));
   const deferredSearch = useDeferredValue(filters.search);
-  const embedDetailOnly = searchParams.get("embed") === "detail";
+  const legacyQueryDocumentId = searchParams.get("document") ?? "";
+  const isIntakeRoute = routeMode === "intake";
+  const isTranslationRequestsRoute = routeMode === "translation-requests";
+  const isRouteDetail = Boolean(routeDocumentId);
+  const legacyEmbedDetailOnly = searchParams.get("embed") === "detail";
+  const embedDetailOnly = isRouteDetail || legacyEmbedDetailOnly;
 
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [intakeQueue, setIntakeQueue] = useState<DocumentItem[]>([]);
@@ -518,8 +598,8 @@ function StaffDocumentsPage() {
   const [generateBusy, setGenerateBusy] = useState(false);
   const [generateError, setGenerateError] = useState("");
 
-  const [selectedId, setSelectedId] = useState(
-    searchParams.get("document") ?? "",
+  const [selectedId, setSelectedId] = useState(() =>
+    routeDocumentId ?? (legacyEmbedDetailOnly ? legacyQueryDocumentId : ""),
   );
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const [detail, setDetail] = useState<DocumentItem | null>(null);
@@ -548,6 +628,7 @@ function StaffDocumentsPage() {
     requestedLanguage: "en",
     note: "",
   });
+  const [translationRequestOpen, setTranslationRequestOpen] = useState(false);
   const [editForm, setEditForm] = useState<EditFormState | null>(null);
   const [detailOrders, setDetailOrders] = useState<OrderOption[]>([]);
   const [detailAppointments, setDetailAppointments] = useState<
@@ -571,6 +652,7 @@ function StaffDocumentsPage() {
   });
   const [shareBusy, setShareBusy] = useState(false);
   const [shareError, setShareError] = useState("");
+  const [shareCreateOpen, setShareCreateOpen] = useState(false);
   const [portalBusy, setPortalBusy] = useState(false);
 
   useDebouncedRealtimeSubscription(STAFF_DOCUMENT_REALTIME_EVENTS, (_event, events) => {
@@ -621,8 +703,28 @@ function StaffDocumentsPage() {
   );
 
   useEffect(() => {
-    setSelectedId(searchParams.get("document") ?? "");
-  }, [searchParams]);
+    setSelectedId(
+      routeDocumentId ?? (legacyEmbedDetailOnly ? legacyQueryDocumentId : ""),
+    );
+  }, [legacyEmbedDetailOnly, legacyQueryDocumentId, routeDocumentId]);
+
+  useEffect(() => {
+    if (routeDocumentId || legacyEmbedDetailOnly || !legacyQueryDocumentId) {
+      return;
+    }
+
+    const next = new URLSearchParams(searchParams);
+    next.delete("document");
+    next.delete("embed");
+    const search = next.toString();
+    staffGo(`/documents/${legacyQueryDocumentId}${search ? `?${search}` : ""}`);
+  }, [
+    legacyEmbedDetailOnly,
+    legacyQueryDocumentId,
+    routeDocumentId,
+    searchParams,
+    staffGo,
+  ]);
 
   const documentsPath = useMemo(
     () => buildDocumentsPath({ ...filters, search: deferredSearch }),
@@ -850,7 +952,9 @@ function StaffDocumentsPage() {
   useEffect(() => {
     if (templates.length === 0) return;
     setGenerateForm((current) => {
-      const fallbackTemplate = templates[0];
+      const fallbackTemplate =
+        templates.find((template) => template.id === DEFAULT_GENERATE_TEMPLATE_ID) ??
+        templates[0];
       const nextTemplate =
         templates.find((template) => template.id === current.templateId) ??
         fallbackTemplate;
@@ -943,11 +1047,32 @@ function StaffDocumentsPage() {
     startTransition(() => setVersion((current) => current + 1));
   }
 
+  function closeDocumentOverlayLayers() {
+    setTemplateOpen(false);
+    setUploadOpen(false);
+    setTranslationRequestOpen(false);
+    setShareCreateOpen(false);
+    setDeleteOpen(false);
+    setSelectedId("");
+  }
+
   function openDocument(id: string) {
+    flushSync(closeDocumentOverlayLayers);
     const next = new URLSearchParams(searchParams);
-    next.set("document", id);
-    setSearchParams(next, { replace: true });
-    setSelectedId(id);
+    next.delete("document");
+    next.delete("embed");
+    if (
+      isTranslationRequestsRoute ||
+      searchParams.get("from") === "translation-requests"
+    ) {
+      next.set("from", "translation-requests");
+    } else if (isIntakeRoute || searchParams.get("from") === "intake") {
+      next.set("from", "intake");
+    } else {
+      next.delete("from");
+    }
+    const search = next.toString();
+    staffGo(`/documents/${id}${search ? `?${search}` : ""}`);
   }
 
   function toggleDocumentSelection(id: string, checked: boolean) {
@@ -960,6 +1085,24 @@ function StaffDocumentsPage() {
   }
 
   function closeDetail() {
+    if (embedDetailOnly) {
+      const next = new URLSearchParams(searchParams);
+      const from = next.get("from");
+      next.delete("document");
+      next.delete("embed");
+      next.delete("from");
+      const search = next.toString();
+      const backPath =
+        from === "translation-requests"
+          ? "/documents/translation-requests"
+          : from === "intake"
+            ? "/documents/intake"
+            : "/documents";
+      staffGo(
+        `${backPath}${search ? `?${search}` : ""}`,
+      );
+      return;
+    }
     const next = new URLSearchParams(searchParams);
     next.delete("document");
     setSearchParams(next, { replace: true });
@@ -1162,7 +1305,6 @@ function StaffDocumentsPage() {
       return;
     }
 
-    const previewWindow = window.open("", "_blank", "noopener,noreferrer");
     setGenerateBusy(true);
     setGenerateError("");
     try {
@@ -1184,45 +1326,18 @@ function StaffDocumentsPage() {
         notes: generateForm.notes.trim() || null,
         text_block_keys: generateForm.textBlockKeys,
       });
-      let previewOpened = false;
-      if (response.mime_type.startsWith("text/html")) {
-        if (previewWindow && response.preview_html) {
-          previewWindow.document.open();
-          previewWindow.document.write(response.preview_html);
-          previewWindow.document.close();
-          previewOpened = true;
-        }
-      } else if (response.id) {
-        try {
-          await openDocumentPreview(response.id, t.documents_popup_blocked, previewWindow);
-          previewOpened = true;
-        } catch {
-          previewOpened = false;
-        }
-      }
-      if (!previewOpened && previewWindow) {
-        previewWindow.close();
-      }
       setTemplateOpen(false);
       setNotice(
-        previewOpened
-          ? t.documents_generated_version_preview.replace(
-              "{version}",
-              String(response.version_number ?? 1),
-            )
-          : t.documents_generated_version.replace(
-              "{version}",
-              String(response.version_number ?? 1),
-            ),
+        t.documents_generated_version.replace(
+          "{version}",
+          String(response.version_number ?? 1),
+        ),
       );
       refresh();
       if (response.id) openDocument(response.id);
     } catch (nextError) {
-      if (previewWindow) previewWindow.close();
       setGenerateError(
-        nextError instanceof Error
-          ? nextError.message
-          : t.documents_failed_generate,
+        formatGenerateDocumentError(nextError, l) || t.documents_failed_generate,
       );
     } finally {
       setGenerateBusy(false);
@@ -1286,6 +1401,7 @@ function StaffDocumentsPage() {
       clearApiCache("/documents/translation-requests?status=pending,in_progress");
       setVersion((current) => current + 1);
       setTranslationForm({ requestedLanguage: "en", note: "" });
+      setTranslationRequestOpen(false);
       setNotice(t.documents_translation_created);
     } catch (nextError) {
       setTranslationError(
@@ -1541,6 +1657,7 @@ function StaffDocumentsPage() {
         message: "",
         requiresConfirmation: true,
       });
+      setShareCreateOpen(false);
       setNotice(
         targetDocumentIds.length > 1
           ? t.documents_shared_count.replace(
@@ -1687,7 +1804,13 @@ function StaffDocumentsPage() {
       {!embedDetailOnly ? (
         <>
       <PageHeader
-        title={t.documents_workspace_heading}
+        title={
+          isTranslationRequestsRoute
+            ? t.documents_translation_requests
+            : isIntakeRoute
+              ? t.documents_intake_queue
+              : t.documents_title
+        }
         actions={
           <>
             <Button
@@ -1729,14 +1852,24 @@ function StaffDocumentsPage() {
           </>
         }
       />
-
       {error ? <Banner tone="error">{error}</Banner> : null}
       {notice ? <Banner tone="success">{notice}</Banner> : null}
 
-      {canManageIntake &&
-      (intakeBusy || intakeError || intakeQueue.length > 0) ? (
-        <Section
-          className="border-amber-200 bg-amber-50/40"
+      {isIntakeRoute && !canManageIntake ? (
+        <Banner tone="warning">
+          {l(
+            "Diese Rolle kann die Intake-Dokumentenwarteschlange nicht verwalten.",
+            "Эта роль не может управлять очередью intake документов.",
+            "Ця роль не може керувати чергою intake документів.",
+          )}
+        </Banner>
+      ) : null}
+
+      {isIntakeRoute &&
+      canManageIntake &&
+      (isIntakeRoute || intakeBusy || intakeError || intakeQueue.length > 0) ? (
+        <DocumentSection
+          className={documentSectionClassName}
           title={
             <span>
               {t.documents_intake_queue}
@@ -1747,232 +1880,45 @@ function StaffDocumentsPage() {
               </span>
             </span>
           }
-          accessory={
-            <Badge
-              variant="outline"
-              className="rounded-full border-amber-200 bg-amber-50 text-amber-700"
-            >
-              {intakeQueue.length} {t.documents_pending}
-            </Badge>
-          }
         >
           {intakeError ? <Banner tone="error">{intakeError}</Banner> : null}
-          {intakeBusy ? (
-            <TabLoader />
-          ) : intakeQueue.length === 0 ? (
-            <EmptyCell>{t.documents_no_intake_pending}</EmptyCell>
-          ) : (
-            <div className="grid gap-2 xl:grid-cols-2">
-              {intakeQueue.map((item) => (
-                <ListItem key={item.id}>
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-foreground">
-                        {localizeDocumentCode(item.auto_name, l)}
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {[item.original_filename, item.patient_pid, item.patient_name]
-                          .filter(Boolean)
-                          .join(" · ") || t.documents_unlinked_document}
-                      </p>
-                    </div>
-                    <Badge
-                      variant="outline"
-                      className="rounded-full border-amber-200 bg-amber-50 text-amber-700"
-                    >
-                      {t.documents_needs_review}
-                    </Badge>
-                  </div>
-                  {item.classification_suggestion ? (
-                    <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50/70 px-3 py-3 text-sm text-sky-900">
-                      <p className="font-medium">
-                        {text.suggested(
-                          localizeDocumentCode(item.classification_suggestion.art, l),
-                          localizeDocumentCode(item.classification_suggestion.category, l),
-                        )}
-                      </p>
-                      <p className="mt-1 text-xs uppercase tracking-[0.14em] text-sky-700">
-                        {t.documents_confidence}:{" "}
-                        {formatConfidenceLabel(
-                          item.classification_suggestion.confidence,
-                          t as unknown as Record<string, string>,
-                        )}
-                      </p>
-                      <p className="mt-2 text-sm text-sky-800/90">
-                        {item.classification_suggestion.rationale}
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="mt-3 rounded-xl border border-dashed border-border/60 bg-muted/25 px-3 py-3 text-sm text-muted-foreground">
-                      {t.documents_no_auto_classification}
-                    </div>
-                  )}
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {item.classification_suggestion ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 rounded-lg gap-1.5"
-                        disabled={intakeActionId === item.id}
-                        onClick={() =>
-                          void handleApplyClassificationSuggestion(item)
-                        }
-                      >
-                        {intakeActionId === item.id ? (
-                          <LoaderCircle className="size-3.5 animate-spin" />
-                        ) : null}
-                        {item.ursprung === "interpreter_upload" &&
-                        item.status === "draft"
-                          ? t.documents_apply_and_release
-                          : t.documents_apply_suggestion}
-                      </Button>
-                    ) : null}
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-8 rounded-lg"
-                      onClick={() => openDocument(item.id)}
-                    >
-                      {t.documents_open_document}
-                    </Button>
-                  </div>
-                </ListItem>
-              ))}
-            </div>
-          )}
-        </Section>
+          <DocumentIntakeQueueTable
+            actionId={intakeActionId}
+            emptyText={t.documents_no_intake_pending}
+            l={l}
+            loading={intakeBusy}
+            onApplySuggestion={handleApplyClassificationSuggestion}
+            onOpenDocument={openDocument}
+            rows={intakeQueue}
+            selectedId={selectedId}
+            t={t}
+            text={text}
+          />
+        </DocumentSection>
       ) : null}
 
-      {(canRequestTranslation || canUpdateTranslation) &&
-      (translationQueueBusy || translationQueueError || translationQueue.length > 0) ? (
-        <Section
-          className="border-sky-200 bg-sky-50/40"
-          title={
-            <span>
-              {t.documents_translation_requests}
-              <span className="ml-2 font-normal text-muted-foreground">
-                · {l("Portal- und Staff-Anfragen", "Запросы портала и сотрудников", "Portal and staff requests")}
-              </span>
-            </span>
-          }
-          accessory={
-            <Badge
-              variant="outline"
-              className="rounded-full border-sky-200 bg-sky-50 text-sky-700"
-            >
-              {translationQueue.length} {t.documents_pending}
-            </Badge>
-          }
-        >
+      {isTranslationRequestsRoute &&
+      (canRequestTranslation || canUpdateTranslation) &&
+      (isTranslationRequestsRoute || translationQueueBusy || translationQueueError || translationQueue.length > 0) ? (
+        <DocumentSection className={documentSectionClassName}>
           {translationQueueError ? <Banner tone="error">{translationQueueError}</Banner> : null}
-          {translationQueueBusy ? (
-            <TabLoader />
-          ) : translationQueue.length === 0 ? (
-            <EmptyCell>{t.documents_no_translation_requests}</EmptyCell>
-          ) : (
-            <div className="grid gap-2 xl:grid-cols-2">
-              {translationQueue.map((request) => (
-                <ListItem key={request.id}>
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-foreground">
-                        {request.document_name || request.document_id}
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {[request.patient_pid, request.patient_name, request.document_category]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Badge
-                        variant="outline"
-                        className={cn("rounded-full", translationStatusBadge(request.status))}
-                      >
-                        {formatTranslationStatusLabel(request.status, t)}
-                      </Badge>
-                      <Badge
-                        variant="outline"
-                        className="rounded-full border-border/60 bg-card text-foreground"
-                      >
-                        {formatLanguageLabel(request.requested_language)}
-                      </Badge>
-                    </div>
-                  </div>
-                  <p className="mt-3 text-xs text-muted-foreground">
-                    {formatDateTime(request.requested_at)}
-                    {request.request_source === "patient_portal"
-                      ? l(" · Patient portal", " · Портал пациента", " · Patient portal")
-                      : l(" · Staff", " · Сотрудник", " · Staff")}
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {l("Zugewiesen", "Назначено", "Assigned")}:{" "}
-                    {request.assigned_to_name ?? l("Nicht zugewiesen", "Не назначено", "Unassigned")}
-                    {request.translated_document_name
-                      ? ` / ${request.translated_document_name}`
-                      : ""}
-                  </p>
-                  {request.note ? (
-                    <div className="mt-3 rounded-xl border border-border/60 bg-muted/25 px-3 py-2 text-sm text-muted-foreground">
-                      {request.note}
-                    </div>
-                  ) : null}
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-8 rounded-lg"
-                      onClick={() => openDocument(request.document_id)}
-                    >
-                      {t.documents_open_document}
-                    </Button>
-                    {request.translated_document_id ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 rounded-lg"
-                        onClick={() => openDocument(request.translated_document_id!)}
-                      >
-                        {l("Uebersetzung öffnen", "Открыть перевод", "Open translation")}
-                      </Button>
-                    ) : null}
-                    {canUpdateTranslation &&
-                    user?.id &&
-                    request.status !== "completed" &&
-                    request.status !== "cancelled" &&
-                    request.assigned_to !== user.id ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 rounded-lg"
-                        disabled={translationQueueBusy}
-                        onClick={() =>
-                          void handleUpdateQueuedTranslationRequest(
-                            request,
-                            request.status === "pending" ? "in_progress" : request.status,
-                            { assignedTo: user.id },
-                          )
-                        }
-                      >
-                        {l("Mir zuweisen", "Назначить мне", "Assign to me")}
-                      </Button>
-                    ) : null}
-                  </div>
-                </ListItem>
-              ))}
-            </div>
-          )}
-        </Section>
+          <DocumentTranslationRequestsTable
+            canUpdateTranslation={canUpdateTranslation}
+            currentUserId={user?.id ?? null}
+            emptyText={t.documents_no_translation_requests}
+            l={l}
+            loading={translationQueueBusy}
+            onOpenDocument={openDocument}
+            onUpdateRequest={handleUpdateQueuedTranslationRequest}
+            rows={translationQueue}
+            t={t}
+          />
+        </DocumentSection>
       ) : null}
 
-      <Section
-        title={t.documents_title}
-        accessory={<CountBadge>{documents.length}</CountBadge>}
+      {!isIntakeRoute && !isTranslationRequestsRoute ? (
+      <DocumentSection
+        className={documentSectionClassName}
       >
         <div className="relative z-30 space-y-1.5">
           <div className="grid gap-1.5 md:grid-cols-2 xl:grid-cols-6">
@@ -2238,7 +2184,10 @@ function StaffDocumentsPage() {
             formatDateTime={formatDateTime}
           />
         )}
-      </Section>
+      </DocumentSection>
+      ) : null}
+        </>
+      ) : null}
 
       <Sheet open={templateOpen} onOpenChange={setTemplateOpen}>
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[880px]">
@@ -2813,8 +2762,218 @@ function StaffDocumentsPage() {
           </form>
         </SheetContent>
       </Sheet>
-        </>
-      ) : null}
+
+      <Sheet
+        open={translationRequestOpen}
+        onOpenChange={(open) => {
+          setTranslationRequestOpen(open);
+          if (!open) setTranslationError("");
+        }}
+      >
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[560px]">
+          <form
+            onSubmit={handleCreateTranslationRequest}
+            className="flex flex-1 min-h-0 flex-col"
+          >
+            <AdminSheetScaffold
+              title={t.documents_request_translation}
+              description={t.documents_translation_requests}
+              footer={(
+                <SheetFormFooter
+                  cancelLabel={t.common_cancel}
+                  submitLabel={t.documents_request_translation}
+                  submittingLabel={t.documents_request_translation}
+                  submitting={translationBusy}
+                  onCancel={() => setTranslationRequestOpen(false)}
+                />
+              )}
+            >
+              {translationError ? <Banner tone="error">{translationError}</Banner> : null}
+              <Field label={t.patients_languages} required>
+                <NativeComboboxSelect
+                  value={translationForm.requestedLanguage}
+                  onChange={(event) =>
+                    setTranslationForm((current) => ({
+                      ...current,
+                      requestedLanguage: event.target.value,
+                    }))
+                  }
+                  className={selectClassName}
+                >
+                  <option value="de">{formatLanguageLabel("de")}</option>
+                  <option value="en">{formatLanguageLabel("en")}</option>
+                  <option value="uk">{formatLanguageLabel("uk")}</option>
+                </NativeComboboxSelect>
+              </Field>
+              <Field label={t.patients_notes}>
+                <textarea
+                  value={translationForm.note}
+                  onChange={(event) =>
+                    setTranslationForm((current) => ({
+                      ...current,
+                      note: event.target.value,
+                    }))
+                  }
+                  className={textareaClassName}
+                  placeholder={t.documents_translation_note_placeholder}
+                />
+              </Field>
+            </AdminSheetScaffold>
+          </form>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet
+        open={shareCreateOpen}
+        onOpenChange={(open) => {
+          setShareCreateOpen(open);
+          if (!open) setShareError("");
+        }}
+      >
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[640px]">
+          <form onSubmit={handleCreateShare} className="flex flex-1 min-h-0 flex-col">
+            <AdminSheetScaffold
+              title={t.documents_create_share}
+              description={t.documents_share}
+              footer={(
+                <SheetFormFooter
+                  cancelLabel={t.common_cancel}
+                  submitLabel={t.documents_create_share}
+                  submittingLabel={t.documents_sharing}
+                  submitting={shareBusy}
+                  onCancel={() => setShareCreateOpen(false)}
+                />
+              )}
+            >
+              {shareError ? <Banner tone="error">{shareError}</Banner> : null}
+              {selectedDocumentIds.length > 1 ? (
+                <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                  {t.documents_sharing_selected.replace(
+                    "{count}",
+                    String(selectedDocumentIds.length),
+                  )}
+                </div>
+              ) : null}
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant={shareForm.targetType === "user" ? "default" : "outline"}
+                  className="rounded-xl"
+                  onClick={() =>
+                    setShareForm((current) => ({
+                      ...current,
+                      targetType: "user",
+                      providerId: "",
+                      message: "",
+                    }))
+                  }
+                >
+                  {t.documents_internal_user}
+                </Button>
+                <Button
+                  type="button"
+                  variant={shareForm.targetType === "provider" ? "default" : "outline"}
+                  className="rounded-xl"
+                  onClick={() =>
+                    setShareForm((current) => ({
+                      ...current,
+                      targetType: "provider",
+                      userId: "",
+                    }))
+                  }
+                >
+                  {t.documents_provider_target}
+                </Button>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                {shareForm.targetType === "user" ? (
+                  <Field label={t.patients_assign_owner} required>
+                    <NativeComboboxSelect
+                      value={shareForm.userId}
+                      onChange={(event) =>
+                        setShareForm((current) => ({
+                          ...current,
+                          userId: event.target.value,
+                        }))
+                      }
+                      className={selectClassName}
+                    >
+                      <option value="">{t.documents_select_user}</option>
+                      {staff.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name} В· {formatRoleLabel(item.role)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+                ) : (
+                  <Field label={t.common_provider} required>
+                    <NativeComboboxSelect
+                      value={shareForm.providerId}
+                      onChange={(event) =>
+                        setShareForm((current) => ({
+                          ...current,
+                          providerId: event.target.value,
+                        }))
+                      }
+                      className={selectClassName}
+                    >
+                      <option value="">{t.documents_select_provider}</option>
+                      {providers.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name} В· {item.address_city || t.documents_no_city}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+                )}
+                <Field label={t.documents_source}>
+                  <Input
+                    value={shareForm.channel}
+                    onChange={(event) =>
+                      setShareForm((current) => ({
+                        ...current,
+                        channel: event.target.value,
+                      }))
+                    }
+                    className={shellInputClassName}
+                  />
+                </Field>
+              </div>
+              <Field
+                label={t.documents_share_message}
+                required={shareForm.targetType === "provider"}
+              >
+                <textarea
+                  value={shareForm.message}
+                  onChange={(event) =>
+                    setShareForm((current) => ({
+                      ...current,
+                      message: event.target.value,
+                    }))
+                  }
+                  placeholder={t.documents_share_message_placeholder}
+                  className={textareaClassName}
+                />
+              </Field>
+              <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-card px-4 py-3 text-sm text-foreground">
+                <input
+                  type="checkbox"
+                  checked={shareForm.requiresConfirmation}
+                  onChange={(event) =>
+                    setShareForm((current) => ({
+                      ...current,
+                      requiresConfirmation: event.target.checked,
+                    }))
+                  }
+                  className={checkboxClass}
+                />
+                {t.documents_require_confirmation}
+              </label>
+            </AdminSheetScaffold>
+          </form>
+        </SheetContent>
+      </Sheet>
 
       <Dialog
         open={deleteOpen}
@@ -2881,15 +3040,42 @@ function StaffDocumentsPage() {
         </DialogContent>
       </Dialog>
 
-      <Sheet
-        open={Boolean(selectedId)}
-        onOpenChange={(open) => (!open ? closeDetail() : undefined)}
-      >
-        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[820px]">
-          <AdminSheetScaffold
+      {(() => {
+        const detailHeader = embedDetailOnly ? (
+          <PageHeader
             title={detail?.auto_name || t.documents_title}
             description={t.documents_detail_description}
-          >
+            actions={
+              <StaffLink
+                to={(() => {
+                  const next = new URLSearchParams(searchParams);
+                  const from = next.get("from");
+                  next.delete("document");
+                  next.delete("embed");
+                  next.delete("from");
+                  const search = next.toString();
+                  const backPath =
+                    from === "translation-requests"
+                      ? "/documents/translation-requests"
+                      : from === "intake"
+                        ? "/documents/intake"
+                        : "/documents";
+                  return `${backPath}${search ? `?${search}` : ""}`;
+                })()}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+              >
+                <ArrowLeft className="size-4" />
+                {searchParams.get("from") === "translation-requests"
+                  ? t.documents_translation_requests
+                  : searchParams.get("from") === "intake"
+                    ? t.documents_intake_queue
+                    : t.documents_title}
+              </StaffLink>
+            }
+          />
+        ) : null;
+
+        const detailContent = (
             <DocumentRightViewDetails
               busy={detailBusy}
               error={detailError}
@@ -2901,8 +3087,8 @@ function StaffDocumentsPage() {
               loadingLabel={t.documents_loading_document}
             >
               {detail ? (
-              <div className="space-y-6 pt-5">
-                <section className="rounded-xl border border-border/60 bg-muted/25 p-5">
+              <div className={cn("space-y-4", !embedDetailOnly && "pt-5")}>
+                <section className="rounded-xl border border-border/60 bg-transparent p-5">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
@@ -2954,6 +3140,7 @@ function StaffDocumentsPage() {
                     <div className="flex flex-wrap gap-2">
                       {canManage && currentDetailTemplate ? (
                         <Button
+                          type="button"
                           variant="outline"
                           className="rounded-lg"
                           onClick={() => openReplacementTemplate(detail)}
@@ -2966,6 +3153,7 @@ function StaffDocumentsPage() {
                       (detail.mime_type?.startsWith("text/html") ||
                         detail.mime_type?.startsWith("application/pdf")) ? (
                         <Button
+                          type="button"
                           variant="outline"
                           className="rounded-lg"
                           onClick={() => void handleOpenPreview()}
@@ -2975,6 +3163,7 @@ function StaffDocumentsPage() {
                         </Button>
                       ) : null}
                       <Button
+                        type="button"
                         variant="outline"
                         className="rounded-lg"
                         disabled={!detail.has_stored_file}
@@ -2990,6 +3179,7 @@ function StaffDocumentsPage() {
                       </Button>
                       {canManage && detail.has_stored_file ? (
                         <Button
+                          type="button"
                           variant="destructive"
                           className="rounded-lg"
                           onClick={() => {
@@ -3246,61 +3436,28 @@ function StaffDocumentsPage() {
                 </SectionCard>
 
                 {detail.patient_id ? (
-                  <SectionCard title={t.documents_translation_requests}>
+                  <SectionCard
+                    title={t.documents_translation_requests}
+                    accessory={
+                      canRequestTranslation ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 rounded-lg"
+                          onClick={() => {
+                            setTranslationError("");
+                            setTranslationRequestOpen(true);
+                          }}
+                        >
+                          <FileText className="size-3.5" />
+                          {t.documents_request_translation}
+                        </Button>
+                      ) : null
+                    }
+                  >
                     {translationError ? (
                       <Banner tone="error">{translationError}</Banner>
-                    ) : null}
-                    {canRequestTranslation ? (
-                      <form
-                        onSubmit={handleCreateTranslationRequest}
-                        className="space-y-4"
-                      >
-                        <div className="grid gap-4 md:grid-cols-2">
-                          <Field label={t.patients_languages} required>
-                            <NativeComboboxSelect
-                              value={translationForm.requestedLanguage}
-                              onChange={(event) =>
-                                setTranslationForm((current) => ({
-                                  ...current,
-                                  requestedLanguage: event.target.value,
-                                }))
-                              }
-                              className={selectClassName}
-                            >
-                              <option value="de">{formatLanguageLabel("de")}</option>
-                              <option value="en">{formatLanguageLabel("en")}</option>
-                              <option value="uk">{formatLanguageLabel("uk")}</option>
-                            </NativeComboboxSelect>
-                          </Field>
-                          <div className="flex items-end">
-                            <Button
-                              type="submit"
-                              className="rounded-lg"
-                              disabled={translationBusy}
-                            >
-                              {translationBusy ? (
-                                <LoaderCircle className="size-4 animate-spin" />
-                              ) : (
-                                <FileText className="size-4" />
-                              )}
-                              {t.documents_request_translation}
-                            </Button>
-                          </div>
-                        </div>
-                        <Field label={t.patients_notes}>
-                          <textarea
-                            value={translationForm.note}
-                            onChange={(event) =>
-                              setTranslationForm((current) => ({
-                                ...current,
-                                note: event.target.value,
-                              }))
-                            }
-                            className={textareaClassName}
-                            placeholder={t.documents_translation_note_placeholder}
-                          />
-                        </Field>
-                      </form>
                     ) : null}
                     {translationRequests.length === 0 ? (
                       <div className="rounded-lg border border-dashed border-border/60 bg-muted/25 px-4 py-6 text-sm text-muted-foreground">
@@ -4084,7 +4241,26 @@ function StaffDocumentsPage() {
                 </SectionCard>
 
                 {canViewShares ? (
-                  <SectionCard title={t.documents_share}>
+                  <SectionCard
+                    title={t.documents_share}
+                    accessory={
+                      canManage ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 rounded-lg"
+                          onClick={() => {
+                            setShareError("");
+                            setShareCreateOpen(true);
+                          }}
+                        >
+                          <Share2 className="size-3.5" />
+                          {t.documents_create_share}
+                        </Button>
+                      ) : null
+                    }
+                  >
                   {shareError ? (
                     <Banner tone="error">{shareError}</Banner>
                   ) : null}
@@ -4196,169 +4372,500 @@ function StaffDocumentsPage() {
                       })
                     )}
                   </div>
-                  {canManage ? (
-                    <form
-                      onSubmit={handleCreateShare}
-                      className="mt-5 space-y-4 rounded-xl border border-border/60 bg-muted/25 p-4"
-                    >
-                      {selectedDocumentIds.length > 1 ? (
-                        <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-                          {t.documents_sharing_selected.replace(
-                            "{count}",
-                            String(selectedDocumentIds.length),
-                          )}
-                        </div>
-                      ) : null}
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          type="button"
-                          variant={
-                            shareForm.targetType === "user"
-                              ? "default"
-                              : "outline"
-                          }
-                          className="rounded-xl"
-                          onClick={() =>
-                            setShareForm((current) => ({
-                              ...current,
-                              targetType: "user",
-                              providerId: "",
-                              message: "",
-                            }))
-                          }
-                        >
-                          {t.documents_internal_user}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant={
-                            shareForm.targetType === "provider"
-                              ? "default"
-                              : "outline"
-                          }
-                          className="rounded-xl"
-                          onClick={() =>
-                            setShareForm((current) => ({
-                              ...current,
-                              targetType: "provider",
-                              userId: "",
-                            }))
-                          }
-                        >
-                          {t.documents_provider_target}
-                        </Button>
-                      </div>
-                      <div className="grid gap-4 md:grid-cols-2">
-                        {shareForm.targetType === "user" ? (
-                          <Field label={t.patients_assign_owner} required>
-                            <NativeComboboxSelect
-                              value={shareForm.userId}
-                              onChange={(event) =>
-                                setShareForm((current) => ({
-                                  ...current,
-                                  userId: event.target.value,
-                                }))
-                              }
-                              className={selectClassName}
-                            >
-                              <option value="">{t.documents_select_user}</option>
-                              {staff.map((item) => (
-                                <option key={item.id} value={item.id}>
-                                  {item.name} · {formatRoleLabel(item.role)}
-                                </option>
-                              ))}
-                            </NativeComboboxSelect>
-                          </Field>
-                        ) : (
-                          <Field label={t.common_provider} required>
-                            <NativeComboboxSelect
-                              value={shareForm.providerId}
-                              onChange={(event) =>
-                                setShareForm((current) => ({
-                                  ...current,
-                                  providerId: event.target.value,
-                                }))
-                              }
-                              className={selectClassName}
-                            >
-                              <option value="">{t.documents_select_provider}</option>
-                              {providers.map((item) => (
-                                <option key={item.id} value={item.id}>
-                                  {item.name} ·{" "}
-                                  {item.address_city || t.documents_no_city}
-                                </option>
-                              ))}
-                            </NativeComboboxSelect>
-                          </Field>
-                        )}
-                        <Field label={t.documents_source}>
-                          <Input
-                            value={shareForm.channel}
-                            onChange={(event) =>
-                              setShareForm((current) => ({
-                                ...current,
-                                channel: event.target.value,
-                              }))
-                            }
-                            className={shellInputClassName}
-                          />
-                        </Field>
-                      </div>
-                      <Field
-                        label={t.documents_share_message}
-                        required={shareForm.targetType === "provider"}
-                      >
-                        <textarea
-                          value={shareForm.message}
-                          onChange={(event) =>
-                            setShareForm((current) => ({
-                              ...current,
-                              message: event.target.value,
-                            }))
-                          }
-                          placeholder={t.documents_share_message_placeholder}
-                          className={textareaClassName}
-                        />
-                      </Field>
-                      <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-card px-4 py-3 text-sm text-foreground">
-                        <input
-                          type="checkbox"
-                          checked={shareForm.requiresConfirmation}
-                          onChange={(event) =>
-                            setShareForm((current) => ({
-                              ...current,
-                              requiresConfirmation: event.target.checked,
-                            }))
-                          }
-                          className={checkboxClass}
-                        />
-                        {t.documents_require_confirmation}
-                      </label>
-                      <div className="flex justify-end">
-                        <Button
-                          type="submit"
-                          className="rounded-lg"
-                          disabled={shareBusy}
-                        >
-                          {shareBusy ? (
-                            <LoaderCircle className="size-4 animate-spin" />
-                          ) : (
-                            <Share2 className="size-4" />
-                          )}
-                          {shareBusy ? t.documents_sharing : t.documents_create_share}
-                        </Button>
-                      </div>
-                    </form>
-                  ) : null}
                   </SectionCard>
                 ) : null}
               </div>
               ) : null}
             </DocumentRightViewDetails>
+        );
+        const detailPanel = embedDetailOnly ? (
+          <>
+            {detailHeader}
+            {detailContent}
+          </>
+        ) : (
+          <AdminSheetScaffold
+            title={detail?.auto_name || t.documents_title}
+            description={t.documents_detail_description}
+          >
+            {detailContent}
           </AdminSheetScaffold>
-        </SheetContent>
-      </Sheet>
+        );
+
+        const showDetailSheet = !embedDetailOnly && Boolean(selectedId);
+
+        return (
+          <>
+            {embedDetailOnly ? (
+              <div className="space-y-4">{detailPanel}</div>
+            ) : null}
+            {showDetailSheet ? (
+              <Sheet
+                open
+                onOpenChange={(open) => {
+                  if (!open) closeDetail();
+                }}
+              >
+                <SheetContent
+                  side="right"
+                  className="w-full border-l border-border p-0 sm:max-w-[820px]"
+                >
+                  {detailPanel}
+                </SheetContent>
+              </Sheet>
+            ) : null}
+          </>
+        );
+      })()}
     </div>
+  );
+}
+
+type DocumentsPageTranslations = ReturnType<typeof runtimeTranslations>;
+type DocumentsLocalizer = (de: string, ru: string, en: string) => string;
+type DocumentsPageText = {
+  pidFallback: string;
+  suggested: (art: string, category: string) => string;
+  suggestedClassification: string;
+};
+
+function DocumentIntakeQueueTable({
+  actionId,
+  emptyText,
+  l,
+  loading,
+  onApplySuggestion,
+  onOpenDocument,
+  rows,
+  selectedId,
+  t,
+  text,
+}: {
+  actionId: string;
+  emptyText: string;
+  l: DocumentsLocalizer;
+  loading: boolean;
+  onApplySuggestion: (item: DocumentItem) => Promise<void>;
+  onOpenDocument: (id: string) => void;
+  rows: DocumentItem[];
+  selectedId: string;
+  t: DocumentsPageTranslations;
+  text: DocumentsPageText;
+}) {
+  const columns = useMemo<ColumnDef<DocumentItem>[]>(
+    () => [
+      {
+        id: "document",
+        label: t.documents_filename,
+        accessor: (item) =>
+          `${localizeDocumentCode(item.auto_name, l)} ${item.original_filename ?? ""}`.trim(),
+        searchable: true,
+        sortable: true,
+        required: true,
+        pinned: "left",
+        width: 160,
+        render: (item) => (
+          <div className="min-w-0">
+            <div className="truncate font-medium text-foreground">
+              {localizeDocumentCode(item.auto_name, l)}
+            </div>
+            <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+              {item.original_filename ?? t.documents_unlinked_document}
+            </div>
+          </div>
+        ),
+      },
+      {
+        id: "patient",
+        label: t.orders_patient,
+        accessor: (item) => `${item.patient_pid ?? ""} ${item.patient_name ?? ""}`.trim(),
+        searchable: true,
+        sortable: true,
+        width: 220,
+        render: (item) =>
+          item.patient_name || item.patient_pid ? (
+            <div className="min-w-0">
+              <span className="font-mono text-[11px] text-muted-foreground">
+                {item.patient_pid ?? text.pidFallback}
+              </span>
+              <div className="truncate text-xs text-foreground">
+                {item.patient_name ?? t.common_not_set}
+              </div>
+            </div>
+          ) : (
+            <span className="text-xs text-muted-foreground">
+              {t.documents_unlinked_document}
+            </span>
+          ),
+      },
+      {
+        id: "suggestion",
+        label: text.suggestedClassification,
+        accessor: (item) =>
+          item.classification_suggestion
+            ? `${item.classification_suggestion.art} ${item.classification_suggestion.category} ${item.classification_suggestion.confidence}`
+            : "",
+        searchable: true,
+        sortable: true,
+        width: 330,
+        render: (item) => {
+          const suggestion = item.classification_suggestion;
+          if (!suggestion) {
+            return (
+              <span className="block truncate text-xs text-muted-foreground">
+                {t.documents_no_auto_classification}
+              </span>
+            );
+          }
+
+          return (
+            <div className="min-w-0">
+              <div className="truncate text-xs font-medium text-foreground">
+                {text.suggested(
+                  localizeDocumentCode(suggestion.art, l),
+                  localizeDocumentCode(suggestion.category, l),
+                )}
+              </div>
+              <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                {t.documents_confidence}:{" "}
+                {formatConfidenceLabel(
+                  suggestion.confidence,
+                  t as unknown as Record<string, string>,
+                )}
+                {suggestion.rationale ? ` / ${suggestion.rationale}` : ""}
+              </div>
+            </div>
+          );
+        },
+      },
+      {
+        id: "status",
+        label: t.users_status,
+        accessor: (item) => `${item.status} ${item.ursprung ?? ""}`.trim(),
+        sortable: true,
+        width: 150,
+        render: (item) => (
+          <div className="flex min-w-0 flex-col items-start gap-1">
+            <Badge
+              variant="outline"
+              className="rounded-full border-amber-200 bg-amber-50 text-[10px] text-amber-700"
+            >
+              {t.documents_needs_review}
+            </Badge>
+            <span className="truncate text-[11px] text-muted-foreground">
+              {[formatDocumentStatusLabel(item.status, t), item.ursprung?.replaceAll("_", " ")]
+                .filter(Boolean)
+                .join(" / ")}
+            </span>
+          </div>
+        ),
+      },
+      {
+        id: "updated_at",
+        label: t.documents_updated,
+        accessor: (item) => item.updated_at,
+        filterType: "date",
+        sortable: true,
+        width: 180,
+        render: (item) => (
+          <span className="text-xs text-muted-foreground">
+            {formatDateTime(item.updated_at)}
+          </span>
+        ),
+      },
+      {
+        id: "actions",
+        label: t.users_actions,
+        accessor: () => "",
+        sortable: false,
+        filterType: undefined,
+        width: 220,
+        render: (item) =>
+          item.classification_suggestion ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 max-w-full overflow-hidden rounded-md px-2 text-[11px]"
+              disabled={actionId === item.id}
+              onClick={(event) => {
+                event.stopPropagation();
+                void onApplySuggestion(item);
+              }}
+            >
+              {actionId === item.id ? (
+                <LoaderCircle className="size-3 shrink-0 animate-spin" />
+              ) : null}
+              <span className="truncate">
+                {item.ursprung === "interpreter_upload" && item.status === "draft"
+                  ? t.documents_apply_and_release
+                  : t.documents_apply_suggestion}
+              </span>
+            </Button>
+          ) : null,
+      },
+    ],
+    [actionId, l, onApplySuggestion, t, text],
+  );
+
+  return (
+    <DataTableSurface
+      rows={rows}
+      columns={columns}
+      rowId={(item) => item.id}
+      activeRowId={selectedId || null}
+      defaultDensity="comfortable"
+      dictionary={t as unknown as Record<string, string>}
+      loading={loading}
+      loadingState={<TabLoader />}
+      emptyState={<span>{emptyText}</span>}
+      tableClassName="min-h-[360px]"
+      rowHeightOverrides={documentQueueRowHeightOverrides}
+      onRowClick={(item) => onOpenDocument(item.id)}
+      rowAccent={() => "bg-amber-500"}
+      footer={({ filteredCount, totalCount }) => (
+        <span className="tabular-nums">
+          {filteredCount === totalCount
+            ? `${totalCount}`
+            : `${filteredCount} / ${totalCount}`}{" "}
+          {t.documents_pending}
+        </span>
+      )}
+    />
+  );
+}
+
+function DocumentTranslationRequestsTable({
+  canUpdateTranslation,
+  currentUserId,
+  emptyText,
+  l,
+  loading,
+  onOpenDocument,
+  onUpdateRequest,
+  rows,
+  t,
+}: {
+  canUpdateTranslation: boolean;
+  currentUserId: string | null;
+  emptyText: string;
+  l: DocumentsLocalizer;
+  loading: boolean;
+  onOpenDocument: (id: string) => void;
+  onUpdateRequest: (
+    request: TranslationRequest,
+    status: string,
+    options?: TranslationUpdateOptions,
+  ) => Promise<void>;
+  rows: TranslationRequest[];
+  t: DocumentsPageTranslations;
+}) {
+  const columns = useMemo<ColumnDef<TranslationRequest>[]>(
+    () => [
+      {
+        id: "document",
+        label: t.documents_filename,
+        accessor: (request) =>
+          `${request.document_name ?? request.document_id} ${request.document_category ?? ""}`.trim(),
+        searchable: true,
+        sortable: true,
+        required: true,
+        pinned: "left",
+        width: 160,
+        render: (request) => (
+          <div className="min-w-0">
+            <div className="truncate font-medium text-foreground">
+              {request.document_name || request.document_id}
+            </div>
+            <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+              {request.document_category
+                ? localizeDocumentCode(request.document_category, l)
+                : t.documents_unclassified}
+            </div>
+          </div>
+        ),
+      },
+      {
+        id: "patient",
+        label: t.orders_patient,
+        accessor: (request) =>
+          `${request.patient_pid ?? ""} ${request.patient_name ?? ""}`.trim(),
+        searchable: true,
+        sortable: true,
+        width: 220,
+        render: (request) =>
+          request.patient_name || request.patient_pid ? (
+            <div className="min-w-0">
+              <span className="font-mono text-[11px] text-muted-foreground">
+                {request.patient_pid ?? "PID"}
+              </span>
+              <div className="truncate text-xs text-foreground">
+                {request.patient_name ?? t.common_not_set}
+              </div>
+            </div>
+          ) : (
+            <span className="text-xs text-muted-foreground">{t.common_not_set}</span>
+          ),
+      },
+      {
+        id: "status",
+        label: t.users_status,
+        accessor: (request) => request.status,
+        sortable: true,
+        width: 160,
+        render: (request) => (
+          <Badge
+            variant="outline"
+            className={cn("rounded-full text-[10px]", translationStatusBadge(request.status))}
+          >
+            {formatTranslationStatusLabel(request.status, t)}
+          </Badge>
+        ),
+      },
+      {
+        id: "language",
+        label: l("Sprache", "Язык", "Language"),
+        accessor: (request) => request.requested_language,
+        searchable: true,
+        sortable: true,
+        width: 140,
+        render: (request) => (
+          <Badge
+            variant="outline"
+            className="rounded-full border-border/60 bg-card text-[10px] text-foreground"
+          >
+            {formatLanguageLabel(request.requested_language)}
+          </Badge>
+        ),
+      },
+      {
+        id: "requested_at",
+        label: l("Angefragt", "Запрошено", "Requested"),
+        accessor: (request) => request.requested_at,
+        filterType: "date",
+        sortable: true,
+        width: 158,
+        render: (request) => (
+          <div className="min-w-0">
+            <div className="truncate text-xs text-foreground">
+              {formatDateTime(request.requested_at)}
+            </div>
+            <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+              {request.request_source.replaceAll("_", " ")}
+            </div>
+          </div>
+        ),
+      },
+      {
+        id: "assigned",
+        label: l("Zugewiesen", "Назначено", "Assigned"),
+        accessor: (request) =>
+          `${request.assigned_to_name ?? ""} ${request.translated_document_name ?? ""}`.trim(),
+        searchable: true,
+        sortable: true,
+        width: 120,
+        render: (request) => (
+          <div className="min-w-0">
+            <div className="truncate text-xs text-foreground">
+              {request.assigned_to_name ?? t.common_not_set}
+            </div>
+            {request.translated_document_name ? (
+              <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                {request.translated_document_name}
+              </div>
+            ) : null}
+          </div>
+        ),
+      },
+      {
+        id: "note",
+        label: t.documents_review_notes,
+        accessor: (request) => request.note ?? "",
+        searchable: true,
+        width: 196,
+        render: (request) => (
+          <span className="block truncate text-xs text-muted-foreground">
+            {request.note || t.common_not_set}
+          </span>
+        ),
+      },
+      {
+        id: "actions",
+        label: t.users_actions,
+        accessor: () => "",
+        sortable: false,
+        filterType: undefined,
+        width: 180,
+        render: (request) => {
+          const canAssign =
+            canUpdateTranslation &&
+            Boolean(currentUserId) &&
+            request.status !== "completed" &&
+            request.status !== "cancelled" &&
+            request.assigned_to !== currentUserId;
+
+          return canAssign && currentUserId ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 max-w-full overflow-hidden rounded-md px-2 text-[11px]"
+              disabled={loading}
+              onClick={(event) => {
+                event.stopPropagation();
+                void onUpdateRequest(
+                  request,
+                  request.status === "pending" ? "in_progress" : request.status,
+                  { assignedTo: currentUserId },
+                );
+              }}
+            >
+              <span className="truncate">
+                {l("Mir zuweisen", "Назначить мне", "Assign to me")}
+              </span>
+            </Button>
+          ) : null;
+        },
+      },
+    ],
+    [
+      canUpdateTranslation,
+      currentUserId,
+      l,
+      loading,
+      onUpdateRequest,
+      t,
+    ],
+  );
+
+  return (
+    <DataTableSurface
+      rows={rows}
+      columns={columns}
+      rowId={(request) => request.id}
+      defaultDensity="comfortable"
+      dictionary={t as unknown as Record<string, string>}
+      loading={loading}
+      loadingState={<TabLoader />}
+      emptyState={<span>{emptyText}</span>}
+      tableClassName="min-h-[360px]"
+      rowHeightOverrides={documentQueueRowHeightOverrides}
+      onRowClick={(request) => onOpenDocument(request.document_id)}
+      rowAccent={(request) => {
+        if (request.status === "completed") return "bg-emerald-500";
+        if (request.status === "cancelled") return "bg-rose-500";
+        if (request.status === "in_progress") return "bg-sky-500";
+        return "bg-amber-500";
+      }}
+      footer={({ filteredCount, totalCount }) => (
+        <span className="tabular-nums">
+          {filteredCount === totalCount
+            ? `${totalCount}`
+            : `${filteredCount} / ${totalCount}`}{" "}
+          {t.documents_pending}
+        </span>
+      )}
+    />
   );
 }
 
@@ -4389,27 +4896,56 @@ function Banner({
 
 function SectionCard({
   title,
+  accessory,
   children,
 }: {
   title: string;
+  accessory?: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-border/60 bg-card p-5 shadow-sm">
-      <h2 className="mb-4 text-base font-semibold text-foreground">{title}</h2>
+    <DocumentSection
+      title={title}
+      accessory={accessory}
+      className={documentSectionClassName}
+    >
       {children}
+    </DocumentSection>
+  );
+}
+
+function DocumentSection({
+  accessory,
+  children,
+  className,
+}: {
+  title?: ReactNode;
+  accessory?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section
+      className={cn(
+        "space-y-3 rounded-xl border border-border/50 bg-transparent p-3.5",
+        className,
+      )}
+    >
+      {accessory ? (
+        <div className="flex min-w-0 max-w-full justify-end">{accessory}</div>
+      ) : null}
+      <div className="space-y-3">{children}</div>
     </section>
   );
 }
 
 function DetailField({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="rounded-lg border border-border/60 bg-card px-4 py-3">
-      <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-        {label}
-      </p>
-      <div className="mt-2 text-sm text-foreground">{value}</div>
-    </div>
+    <InfoRow
+      label={label}
+      value={value}
+      className="rounded-lg border border-border/50 bg-card px-3 py-2.5"
+    />
   );
 }
 
