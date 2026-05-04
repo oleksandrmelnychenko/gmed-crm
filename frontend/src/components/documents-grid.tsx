@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
-import type { ColumnDef } from "@/components/data-table/types";
+import type { ColumnDef, DensityLevel } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
@@ -59,6 +59,7 @@ type DocumentsGridProps = {
   formatSensitivityLabel: (value: string) => string;
   formatFileSize: (value: number | null) => string;
   formatDateTime: (value?: string | null) => string;
+  rowHeightOverrides?: Partial<Record<DensityLevel, number>>;
 };
 
 export function DocumentsGrid({
@@ -78,6 +79,7 @@ export function DocumentsGrid({
   formatSensitivityLabel,
   formatFileSize,
   formatDateTime,
+  rowHeightOverrides,
 }: DocumentsGridProps) {
   const {
     filename: filenameLabel,
@@ -297,6 +299,7 @@ export function DocumentsGrid({
       onSelectedIdsChange={onSelectionChange}
       onRowClick={(item) => onOpenDocument(item.id)}
       tableClassName="min-h-[360px]"
+      rowHeightOverrides={rowHeightOverrides}
       footer={({ filteredCount, totalCount }) => (
         <span className="tabular-nums">
           {filteredCount === totalCount

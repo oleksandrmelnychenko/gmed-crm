@@ -18,7 +18,7 @@ import { flushSync } from "react-dom";
 import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import {
   Building2,
-  ChevronRight,
+  ChevronDown,
   Download,
   FileText,
   FolderPlus,
@@ -43,11 +43,13 @@ import {
   EmptyCell,
   InfoRow,
   PageHeader,
+  StatusBadge,
   TabLoader,
   checkboxClass,
   inputClass as shellInputClassName,
   selectClass as shellSelectClassName,
   textareaClass as shellTextareaClass,
+  type StatusTone,
 } from "@/components/ui-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -157,6 +159,11 @@ const documentQueueRowHeightOverrides = {
   comfortable: 56,
   compact: 48,
   condensed: 40,
+};
+const documentListRowHeightOverrides = {
+  comfortable: 64,
+  compact: 56,
+  condensed: 48,
 };
 
 function runtimeTranslations() {
@@ -350,6 +357,12 @@ function formatDocumentStatusLabel(
   }
 }
 
+function documentStatusTone(status: string): StatusTone {
+  if (status === "active") return "success";
+  if (status === "archived") return "neutral";
+  return "warning";
+}
+
 function formatVisibilityLabel(
   visibility: string,
   tr: ReturnType<typeof runtimeTranslations>,
@@ -366,6 +379,20 @@ function formatVisibilityLabel(
     default:
       return visibility.replaceAll("_", " ");
   }
+}
+
+function documentVisibilityTone(visibility: string): StatusTone {
+  if (visibility === "patient_visible") return "success";
+  if (visibility === "released_external") return "brand";
+  if (visibility === "released_internal") return "info";
+  return "neutral";
+}
+
+function documentSensitivityTone(value: string): StatusTone {
+  const normalized = value.toLowerCase();
+  if (normalized === "medical") return "error";
+  if (normalized === "financial") return "warning";
+  return "info";
 }
 
 function formatTranslationStatusLabel(
@@ -2161,6 +2188,7 @@ function StaffDocumentsPage({
             formatSensitivityLabel={formatSensitivityLabel}
             formatFileSize={formatFileSize}
             formatDateTime={formatDateTime}
+            rowHeightOverrides={documentListRowHeightOverrides}
           />
         )}
       </DocumentSection>
@@ -3297,31 +3325,15 @@ function StaffDocumentsPage({
                         <h2 className="truncate text-xl font-semibold tracking-tight text-foreground">
                           {localizeDocumentCode(detail.auto_name, l)}
                         </h2>
-                        <span
-                          className={cn(
-                            "rounded-full border px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.12em]",
-                            statusBadge(detail.status),
-                          )}
-                        >
+                        <StatusBadge tone={documentStatusTone(detail.status)}>
                           {formatDocumentStatusLabel(detail.status, t)}
-                        </span>
-                        <span
-                          className={cn(
-                            "rounded-full border px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.12em]",
-                            visibilityBadge(detail.visibility),
-                          )}
-                        >
+                        </StatusBadge>
+                        <StatusBadge tone={documentVisibilityTone(detail.visibility)}>
                           {formatVisibilityLabel(detail.visibility, t)}
-                        </span>
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            "rounded-full",
-                            sensitivityBadge(detail.data_sensitivity),
-                          )}
-                        >
+                        </StatusBadge>
+                        <StatusBadge tone={documentSensitivityTone(detail.data_sensitivity)}>
                           {formatSensitivityLabel(detail.data_sensitivity)}
-                        </Badge>
+                        </StatusBadge>
                       </div>
                       <p className="mt-0.5 truncate text-sm text-muted-foreground">
                         {[
@@ -3552,7 +3564,7 @@ function StaffDocumentsPage({
                           type="button"
                           onClick={() => openDocument(version.id)}
                           className={cn(
-                            "group relative grid w-full gap-3 border-t border-border/50 bg-transparent px-3.5 py-3.5 text-left transition first:border-t-0 hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:grid-cols-[64px_minmax(0,1fr)_32px]",
+                            "group relative grid w-full gap-3 border-t border-border/50 bg-transparent px-3.5 py-3.5 text-left transition first:border-t-0 hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:grid-cols-[64px_minmax(0,1fr)_minmax(132px,auto)]",
                             selected &&
                               "before:absolute before:bottom-3 before:left-0 before:top-3 before:w-0.5 before:rounded-full before:bg-[var(--brand)]",
                           )}
@@ -3575,6 +3587,20 @@ function StaffDocumentsPage({
                               <span className="min-w-0 truncate text-sm font-semibold text-foreground">
                                 {localizeDocumentCode(version.auto_name, l)}
                               </span>
+                            </div>
+                            <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                              <span className="tabular-nums">
+                                {formatDateTime(version.created_at)}
+                              </span>
+                              <span className="min-w-0 truncate">{filename}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground sm:justify-end">
+                            <span className="tabular-nums sm:hidden">
+                              {index + 1} / {detailVersions.length}
+                            </span>
+                            <span className="flex min-w-0 flex-wrap justify-end gap-1.5">
                               {selected ? (
                                 <Badge
                                   variant="outline"
@@ -3600,20 +3626,7 @@ function StaffDocumentsPage({
                                   ? text.current
                                   : t.documents_archived}
                               </Badge>
-                            </div>
-                            <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                              <span className="tabular-nums">
-                                {formatDateTime(version.created_at)}
-                              </span>
-                              <span className="min-w-0 truncate">{filename}</span>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground sm:justify-center">
-                            <span className="tabular-nums sm:hidden">
-                              {index + 1} / {detailVersions.length}
                             </span>
-                            <ChevronRight className="size-4 transition-transform group-hover:translate-x-0.5" />
                           </div>
                         </button>
                         );
@@ -3745,33 +3758,13 @@ function StaffDocumentsPage({
                             canUpdateTranslation && request.status !== "cancelled";
 
                           return (
-                            <div
+                            <details
                               key={request.id}
-                              className="rounded-lg border border-border/60 bg-card px-4 py-4"
+                              className="group overflow-hidden rounded-lg border border-border/60 bg-card"
                             >
-                              <div className="flex flex-wrap items-start justify-between gap-3">
-                                <div>
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <Badge
-                                      variant="outline"
-                                      className={cn(
-                                        "rounded-full",
-                                        translationStatusBadge(request.status),
-                                      )}
-                                    >
-                                      {formatTranslationStatusLabel(
-                                        request.status,
-                                        t,
-                                      )}
-                                    </Badge>
-                                    <Badge
-                                      variant="outline"
-                                      className="rounded-full border-border/60 bg-card text-foreground"
-                                    >
-                                      {formatLanguageLabel(request.requested_language)}
-                                    </Badge>
-                                  </div>
-                                  <p className="mt-2 text-sm font-semibold text-foreground">
+                              <summary className="flex cursor-pointer list-none items-start justify-between gap-4 px-4 py-4 transition hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                                <div className="min-w-0">
+                                  <p className="text-sm font-semibold text-foreground">
                                     {request.requested_by_name ||
                                       t.documents_unknown_requester}
                                   </p>
@@ -3796,6 +3789,33 @@ function StaffDocumentsPage({
                                       : ""}
                                   </p>
                                 </div>
+                                <div className="flex shrink-0 items-start gap-2">
+                                  <div className="flex flex-wrap justify-end gap-1.5">
+                                    <Badge
+                                      variant="outline"
+                                      className={cn(
+                                        "rounded-full",
+                                        translationStatusBadge(request.status),
+                                      )}
+                                    >
+                                      {formatTranslationStatusLabel(
+                                        request.status,
+                                        t,
+                                      )}
+                                    </Badge>
+                                    <Badge
+                                      variant="outline"
+                                      className="rounded-full border-border/60 bg-card text-foreground"
+                                    >
+                                      {formatLanguageLabel(request.requested_language)}
+                                    </Badge>
+                                  </div>
+                                  <span className="mt-0.5 inline-flex size-7 items-center justify-center rounded-full border border-border/60 bg-background text-muted-foreground transition-colors group-hover:text-foreground">
+                                    <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
+                                  </span>
+                                </div>
+                              </summary>
+                              <div className="border-t border-border/50 px-4 py-4">
                                 {canUpdateTranslation &&
                                 request.status !== "completed" &&
                                 request.status !== "cancelled" ? (
@@ -3866,7 +3886,6 @@ function StaffDocumentsPage({
                                     </Button>
                                   </div>
                                 ) : null}
-                              </div>
                               {request.translated_document_id ? (
                                 <div className="mt-3 flex flex-wrap gap-2">
                                   <Button
@@ -4021,7 +4040,8 @@ function StaffDocumentsPage({
                                   ) : null}
                                 </div>
                               )}
-                            </div>
+                              </div>
+                            </details>
                           );
                         })}
                       </div>
@@ -4383,7 +4403,6 @@ function StaffDocumentsPage({
                                     ) : null}
                                   </div>
                                 </div>
-
                                 <div className="flex shrink-0 flex-wrap items-start gap-2 lg:justify-end">
                                   <DocumentShareStateBadge
                                     share={share}
