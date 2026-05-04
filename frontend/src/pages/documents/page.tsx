@@ -17,7 +17,6 @@ import {
 import { flushSync } from "react-dom";
 import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import {
-  Building2,
   ChevronDown,
   Download,
   FileText,
@@ -439,19 +438,6 @@ function translationRequestAccent(status: string) {
       return "bg-rose-500";
     default:
       return "bg-amber-500";
-  }
-}
-
-function translationRequestIconTone(status: string) {
-  switch (status) {
-    case "completed":
-      return "border-emerald-200 bg-emerald-100 text-emerald-700";
-    case "in_progress":
-      return "border-sky-200 bg-sky-100 text-sky-700";
-    case "cancelled":
-      return "border-rose-200 bg-rose-100 text-rose-700";
-    default:
-      return "border-amber-200 bg-amber-100 text-amber-700";
   }
 }
 
@@ -3841,11 +3827,11 @@ function StaffDocumentsPage({
                                 <div className="flex min-w-0 gap-3">
                                   <span
                                     className={cn(
-                                      "mt-0.5 inline-flex size-10 shrink-0 items-center justify-center rounded-lg border",
-                                      translationRequestIconTone(request.status),
+                                      "mt-0.5 inline-flex size-9 shrink-0 items-center justify-center rounded-full border shadow-sm transition-colors",
+                                      translationRequestChevronTone(request.status),
                                     )}
                                   >
-                                    <FileText className="size-4" />
+                                    <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
                                   </span>
                                   <div className="min-w-0">
                                   <p className="truncate text-sm font-semibold text-foreground">
@@ -3897,14 +3883,6 @@ function StaffDocumentsPage({
                                       {formatLanguageLabel(request.requested_language)}
                                     </Badge>
                                   </div>
-                                  <span
-                                    className={cn(
-                                      "mt-0.5 inline-flex size-8 items-center justify-center rounded-full border shadow-sm transition-colors",
-                                      translationRequestChevronTone(request.status),
-                                    )}
-                                  >
-                                    <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
-                                  </span>
                                 </div>
                               </summary>
                               <div className="border-t border-border/50 bg-white px-4 py-4">
@@ -4256,78 +4234,91 @@ function StaffDocumentsPage({
                   neutralSurface
                   title={t.documents_patient_portal}
                   tone="brand"
-                  accessory={
-                    canManage ? (
-                      <div className="flex flex-wrap justify-end gap-2">
-                        <Button
-                          type="button"
-                          size="sm"
-                          className="h-8 rounded-lg"
-                          disabled={portalBusy || !detail.patient_id}
-                          onClick={() => void handleReleaseToPortal()}
-                        >
-                          {portalBusy ? (
-                            <LoaderCircle className="size-3.5 animate-spin" />
-                          ) : null}
-                          {activePortalShares.length > 0
-                            ? t.documents_refresh_portal_release
-                            : t.documents_release_to_portal}
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="h-8 rounded-lg"
-                          disabled={portalBusy || activePortalShares.length === 0}
-                          onClick={() => void handleRevokePortalRelease()}
-                        >
-                          {portalBusy ? (
-                            <LoaderCircle className="size-3.5 animate-spin" />
-                          ) : null}
-                          {t.documents_revoke_portal_release}
-                        </Button>
-                      </div>
-                    ) : null
-                  }
                 >
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <DocumentSummaryTile
-                      label={t.users_status}
-                      tone={
-                        detail.visibility === "patient_visible"
-                          ? "success"
-                          : "neutral"
-                      }
-                      value={
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            "rounded-full bg-transparent",
-                            detail.visibility === "patient_visible"
-                              ? "border-emerald-200 text-emerald-700"
-                              : "border-border/60 text-muted-foreground",
-                          )}
-                        >
-                          {detail.visibility === "patient_visible"
-                            ? t.documents_portal_eligible
-                            : t.documents_not_portal_eligible}
-                        </Badge>
-                      }
-                    />
-                    <DocumentSummaryTile
-                      label={t.documents_active_portal_releases}
-                      value={activePortalShares.length}
-                      tone={activePortalShares.length > 0 ? "info" : "neutral"}
-                    />
-                    <DocumentSummaryTile
-                      label={t.documents_confirmed_recipients}
-                      value={confirmedPortalShares}
-                      tone={confirmedPortalShares > 0 ? "success" : "neutral"}
-                    />
+                  <div className="rounded-xl bg-[#f9fdff] px-4 py-4">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="flex min-w-0">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "rounded-full bg-white",
+                                detail.visibility === "patient_visible"
+                                  ? "border-0 text-emerald-700 shadow-sm"
+                                  : "border-0 text-muted-foreground shadow-sm",
+                              )}
+                            >
+                              {detail.visibility === "patient_visible"
+                                ? t.documents_portal_eligible
+                                : t.documents_not_portal_eligible}
+                            </Badge>
+                            <span className="text-xs font-medium text-muted-foreground">
+                              {activePortalShares.length > 0
+                                ? l(
+                                    "Portal-Freigabe aktiv",
+                                    "Релиз в портал активен",
+                                    "Portal release active",
+                                  )
+                                : l(
+                                    "Noch nicht veroeffentlicht",
+                                    "Еще не опубликовано",
+                                    "Not released yet",
+                                  )}
+                            </span>
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <span className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs text-muted-foreground shadow-sm">
+                              <span className="font-semibold tabular-nums text-foreground">
+                                {activePortalShares.length}
+                              </span>
+                              {t.documents_active_portal_releases}
+                            </span>
+                            <span className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs text-muted-foreground shadow-sm">
+                              <span className="font-semibold tabular-nums text-foreground">
+                                {confirmedPortalShares}
+                              </span>
+                              {t.documents_confirmed_recipients}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      {canManage ? (
+                        <div className="flex shrink-0 flex-wrap gap-2 lg:justify-end">
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="h-8 rounded-lg"
+                            disabled={portalBusy || !detail.patient_id}
+                            onClick={() => void handleReleaseToPortal()}
+                          >
+                            {portalBusy ? (
+                              <LoaderCircle className="size-3.5 animate-spin" />
+                            ) : null}
+                            {activePortalShares.length > 0
+                              ? t.documents_refresh_portal_release
+                              : t.documents_release_to_portal}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 rounded-lg border-transparent bg-white shadow-sm hover:border-transparent"
+                            disabled={portalBusy || activePortalShares.length === 0}
+                            onClick={() => void handleRevokePortalRelease()}
+                          >
+                            {portalBusy ? (
+                              <LoaderCircle className="size-3.5 animate-spin" />
+                            ) : null}
+                            {t.documents_revoke_portal_release}
+                          </Button>
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
 
                   {!detail.patient_id || !canManage ? (
-                    <div className="rounded-lg border border-amber-200/80 bg-amber-50/45 px-4 py-3 text-sm text-amber-900/80">
+                    <div className="rounded-lg bg-amber-50/70 px-4 py-3 text-sm text-amber-900/80">
                       {!detail.patient_id ? (
                         <p className="font-medium text-amber-700">
                           {t.documents_link_patient_before_portal}
@@ -4341,37 +4332,65 @@ function StaffDocumentsPage({
                     </div>
                   ) : null}
 
-                  <div className="overflow-hidden rounded-lg border border-emerald-200/70 bg-background/80">
+                  <div className="space-y-1">
                     {activePortalShares.length === 0 ? (
-                      <div className="px-4 py-5 text-sm text-muted-foreground">
-                        {l(
-                          "Noch keine aktiven Portal-Freigaben.",
-                          "\u0410\u043a\u0442\u0438\u0432\u043d\u044b\u0445 \u0440\u0435\u043b\u0438\u0437\u043e\u0432 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442.",
-                          "No active portal releases yet.",
-                        )}
+                      <div className="flex items-center gap-3 rounded-lg px-3 py-4 text-sm text-muted-foreground">
+                        <span className="size-2.5 shrink-0 rounded-full bg-muted-foreground/35" />
+                        <span>
+                          {l(
+                            "Noch keine aktiven Portal-Freigaben.",
+                            "\u0410\u043a\u0442\u0438\u0432\u043d\u044b\u0445 \u0440\u0435\u043b\u0438\u0437\u043e\u0432 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442.",
+                            "No active portal releases yet.",
+                          )}
+                        </span>
                       </div>
                     ) : (
-                      activePortalShares.map((share) => (
+                      activePortalShares.map((share, index) => (
                         <div
                           key={share.id}
-                          className="grid gap-3 border-t border-emerald-100/80 px-4 py-3.5 first:border-t-0 hover:bg-emerald-50/45 md:grid-cols-[minmax(0,1fr)_180px]"
+                          className="group grid gap-3 rounded-lg px-3 py-2.5 transition hover:bg-emerald-50/45 sm:grid-cols-[minmax(0,1fr)_auto]"
                         >
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-foreground">
-                              {share.target_user_name ||
-                                t.documents_patient_portal_user}
-                            </p>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {t.documents_portal_released_at.replace(
-                                "{datetime}",
-                                formatDateTime(share.shared_at),
-                              )}
-                              {share.confirmed
-                                ? ` \u00b7 ${t.documents_portal_confirmed_by_patient}`
-                                : ""}
-                            </p>
+                          <div className="flex min-w-0 gap-3">
+                            <div className="relative flex w-5 shrink-0 justify-center">
+                              {index < activePortalShares.length - 1 ? (
+                                <span
+                                  aria-hidden="true"
+                                  className="absolute bottom-[-14px] top-5 w-px bg-emerald-100 transition group-hover:bg-emerald-200"
+                                />
+                              ) : null}
+                              <span
+                                className={cn(
+                                  "relative mt-1 size-2.5 rounded-full ring-4 ring-white",
+                                  share.confirmed
+                                    ? "bg-emerald-500"
+                                    : "bg-sky-500",
+                                )}
+                              />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+                                <p className="min-w-0 truncate text-sm font-semibold text-foreground">
+                                  {share.target_user_name ||
+                                    t.documents_patient_portal_user}
+                                </p>
+                                <span className="text-[11px] tabular-nums text-muted-foreground">
+                                  {formatDateTime(share.shared_at)}
+                                </span>
+                              </div>
+                              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                                {t.documents_portal_released_at.replace(
+                                  "{datetime}",
+                                  formatDateTime(share.shared_at),
+                                )}
+                              </p>
+                              {share.confirmed ? (
+                                <span className="mt-1.5 inline-flex text-xs font-medium text-emerald-700">
+                                  {t.documents_portal_confirmed_by_patient}
+                                </span>
+                              ) : null}
+                            </div>
                           </div>
-                          <div className="flex items-center md:justify-end">
+                          <div className="flex items-start pl-8 sm:justify-end sm:pl-0">
                             <DocumentShareStateBadge
                               share={share}
                               t={t}
@@ -4392,159 +4411,176 @@ function StaffDocumentsPage({
                     title={t.documents_share}
                     tone="brand"
                     accessory={
-                      canManage ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-8 rounded-lg"
-                          onClick={() => {
-                            setShareError("");
-                            setShareCreateOpen(true);
-                          }}
-                        >
-                          <Share2 className="size-3.5" />
-                          {t.documents_create_share}
-                        </Button>
-                      ) : null
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
+                          <span className="font-semibold tabular-nums text-foreground">
+                            {shares.length}
+                          </span>
+                          {l("Gesamt", "\u0412\u0441\u0435\u0433\u043e", "Total")}
+                        </span>
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
+                          <span className="font-semibold tabular-nums text-emerald-700">
+                            {shares.filter((share) => !share.revoked_at).length}
+                          </span>
+                          {l("Aktiv", "\u0410\u043a\u0442\u0438\u0432\u043d\u044b\u0435", "Active")}
+                        </span>
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
+                          <span className="font-semibold tabular-nums text-amber-700">
+                            {shares.filter(
+                              (share) =>
+                                !share.revoked_at &&
+                                !share.confirmed &&
+                                share.requires_confirmation,
+                            ).length}
+                          </span>
+                          {t.documents_waiting_confirmation}
+                        </span>
+                        {canManage ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="h-8 rounded-lg"
+                            onClick={() => {
+                              setShareError("");
+                              setShareCreateOpen(true);
+                            }}
+                          >
+                            <Share2 className="size-3.5" />
+                            {t.documents_create_share}
+                          </Button>
+                        ) : null}
+                      </div>
                     }
                   >
                     {shareError ? (
                       <Banner tone="error">{shareError}</Banner>
                     ) : null}
+
                     {shares.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-sky-200/80 bg-sky-50/35 px-4 py-6 text-sm text-sky-900/80">
-                        {t.documents_no_shares_yet}
+                      <div className="flex items-center gap-3 rounded-lg px-3 py-4 text-sm text-muted-foreground">
+                        <span className="size-2.5 shrink-0 rounded-full bg-muted-foreground/35" />
+                        <span>{t.documents_no_shares_yet}</span>
                       </div>
                     ) : (
-                      <>
-                        <div className="grid gap-3 md:grid-cols-3">
-                          <DocumentSummaryTile
-                            label={l("Gesamt", "\u0412\u0441\u0435\u0433\u043e", "Total")}
-                            value={shares.length}
-                            tone="info"
-                          />
-                          <DocumentSummaryTile
-                            label={l("Aktiv", "\u0410\u043a\u0442\u0438\u0432\u043d\u044b\u0435", "Active")}
-                            value={shares.filter((share) => !share.revoked_at).length}
-                            tone="success"
-                          />
-                          <DocumentSummaryTile
-                            label={t.documents_waiting_confirmation}
-                            value={
-                              shares.filter(
-                                (share) =>
-                                  !share.revoked_at &&
-                                  !share.confirmed &&
-                                  share.requires_confirmation,
-                              ).length
-                            }
-                            tone="warning"
-                          />
+                      <div className="overflow-hidden rounded-lg">
+                        <div className="hidden grid-cols-[minmax(170px,0.7fr)_minmax(150px,150px)_minmax(360px,1.4fr)] gap-4 bg-[#f9fdff] px-3 py-2 text-[11px] font-medium text-muted-foreground lg:grid">
+                          <span>{l("Empfaenger", "Получатель", "Recipient")}</span>
+                          <span className="border-l border-border/50 px-3">
+                            {t.users_status}
+                          </span>
+                          <span className="border-l border-border/50 px-3">
+                            {l("Freigabe", "Доступ", "Access")}
+                          </span>
                         </div>
-
-                        <div className="overflow-hidden rounded-lg border border-sky-200/70 bg-background/80">
-                          {shares.map((share) => {
-                            const isProviderShare = Boolean(share.provider_name);
-                            const targetName =
-                              share.provider_name ||
-                              share.target_user_name ||
-                              t.documents_unknown_target;
-                            const targetKind = isProviderShare
-                              ? t.documents_provider_target
-                              : share.target_user_role
-                                ? formatRoleLabel(share.target_user_role)
-                                : t.common_not_set;
-                            const canCurrentUserConfirm =
-                              !share.confirmed &&
-                              !share.revoked_at &&
-                              share.shared_with_user_id === user?.id;
-                            return (
-                              <div
-                                key={share.id}
-                                className="grid gap-3 border-t border-sky-100/80 px-4 py-4 first:border-t-0 hover:bg-sky-50/45 lg:grid-cols-[minmax(0,1fr)_auto]"
-                              >
-                                <div className="flex min-w-0 gap-3">
-                                  <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg border border-sky-200 bg-sky-50 text-sky-700">
-                                    {isProviderShare ? (
-                                      <Building2 className="size-4" />
-                                    ) : (
-                                      <UserRound className="size-4" />
-                                    )}
+                        {shares.map((share) => {
+                          const isProviderShare = Boolean(share.provider_name);
+                          const targetName =
+                            share.provider_name ||
+                            share.target_user_name ||
+                            t.documents_unknown_target;
+                          const targetKind = isProviderShare
+                            ? t.documents_provider_target
+                            : share.target_user_role
+                              ? formatRoleLabel(share.target_user_role)
+                              : t.common_not_set;
+                          const canCurrentUserConfirm =
+                            !share.confirmed &&
+                            !share.revoked_at &&
+                            share.shared_with_user_id === user?.id;
+                          return (
+                            <div
+                              key={share.id}
+                              className={cn(
+                                "group grid gap-3 border-t border-border/50 px-3 py-3 transition first:border-t-0 hover:bg-[#f9fdff] lg:grid-cols-[minmax(170px,0.7fr)_minmax(150px,150px)_minmax(360px,1.4fr)] lg:items-center lg:gap-4",
+                                share.revoked_at && "opacity-70",
+                              )}
+                            >
+                              <div className="flex min-w-0 items-center">
+                                <div className="min-w-0">
+                                  <p className="min-w-0 truncate text-[15px] font-semibold leading-5 text-foreground">
+                                    {targetName}
+                                  </p>
+                                  <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
+                                    <Badge
+                                      variant="outline"
+                                      className={cn(
+                                        "rounded-full border-0 px-2 py-0.5 text-[10px] font-medium",
+                                        isProviderShare
+                                          ? "bg-sky-50 text-sky-700"
+                                          : "bg-[var(--brand)]/10 text-[var(--brand)]",
+                                      )}
+                                    >
+                                      {targetKind}
+                                    </Badge>
                                   </div>
-                                  <div className="min-w-0 flex-1">
-                                    <div className="flex min-w-0 flex-wrap items-center gap-2">
-                                      <p className="min-w-0 truncate text-sm font-semibold text-foreground">
-                                        {targetName}
-                                      </p>
-                                      <Badge
-                                        variant="outline"
-                                        className="rounded-full border-border/60 bg-transparent text-[10px] text-muted-foreground"
-                                      >
-                                        {targetKind}
-                                      </Badge>
-                                    </div>
-                                    <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                                      <span>
+                                </div>
+                              </div>
+                              <div className="flex min-w-0 items-center lg:border-l lg:border-border/50 lg:px-3">
+                                <DocumentShareStateBadge
+                                  share={share}
+                                  t={t}
+                                  text={text}
+                                />
+                              </div>
+                              <div className="min-w-0 lg:border-l lg:border-border/50 lg:px-3">
+                                <div className="flex min-w-0 flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+                                  <div className="min-w-0">
+                                    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                                      <span className="min-w-0 truncate text-xs font-medium text-foreground/80">
                                         {t.documents_shared_by.replace(
                                           "{name}",
                                           share.shared_by_name || t.common_unknown,
                                         )}
                                       </span>
-                                      <span className="tabular-nums">
+                                      <span className="size-1 rounded-full bg-border" />
+                                      <span className="text-xs tabular-nums text-muted-foreground">
                                         {formatDateTime(share.shared_at)}
                                       </span>
                                       {share.channel ? (
-                                        <span>
+                                        <Badge
+                                          variant="outline"
+                                          className="rounded-full border-0 bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-700"
+                                        >
                                           {formatShareChannelLabel(share.channel)}
-                                        </span>
+                                        </Badge>
                                       ) : null}
                                     </div>
                                     {share.message ? (
-                                      <p className="mt-3 max-w-2xl border-l-2 border-border/70 py-1 pl-3 text-sm leading-5 text-foreground">
+                                      <p className="mt-1.5 line-clamp-2 text-[13px] leading-5 text-muted-foreground">
                                         {share.message}
                                       </p>
                                     ) : null}
                                   </div>
-                                </div>
-                                <div className="flex shrink-0 flex-wrap items-start gap-2 lg:justify-end">
-                                  <DocumentShareStateBadge
-                                    share={share}
-                                    t={t}
-                                    text={text}
-                                  />
-                                  {canCurrentUserConfirm ? (
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      className="h-8 rounded-lg"
-                                      onClick={() =>
-                                        void handleConfirmShare(share.id)
-                                      }
-                                    >
-                                      {t.common_confirm}
-                                    </Button>
-                                  ) : null}
-                                  {canManage && !share.revoked_at ? (
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-7 gap-1.5 rounded-md border-rose-200 px-2.5 text-[11.5px] text-rose-700 hover:bg-rose-50 hover:text-rose-800"
-                                    onClick={() =>
-                                      void handleRevokeShare(share.id)
-                                    }
-                                  >
-                                    <Undo2 className="size-3.5" />
-                                    {t.documents_revoke}
-                                  </Button>
-                                  ) : null}
+                                  <div className="flex shrink-0 flex-wrap items-center gap-2 lg:ml-auto lg:justify-end">
+                                    {canCurrentUserConfirm ? (
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        className="h-8 rounded-lg"
+                                        onClick={() => void handleConfirmShare(share.id)}
+                                      >
+                                        {t.common_confirm}
+                                      </Button>
+                                    ) : null}
+                                    {canManage && !share.revoked_at ? (
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 gap-1.5 rounded-md border-transparent px-2.5 text-[11.5px] text-rose-700 hover:bg-rose-50 hover:text-rose-800"
+                                        onClick={() => void handleRevokeShare(share.id)}
+                                      >
+                                        <Undo2 className="size-3.5" />
+                                        {t.documents_revoke}
+                                      </Button>
+                                    ) : null}
+                                  </div>
                                 </div>
                               </div>
-                            );
-                          })}
-                        </div>
-                      </>
+                            </div>
+                          );
+                        })}
+                      </div>
                     )}
                   </SectionCard>
                 ) : null}
@@ -5132,19 +5168,6 @@ function documentSectionToneIcon(tone: DocumentSectionTone) {
   }
 }
 
-function documentSummaryTileTone(tone: "neutral" | "success" | "warning" | "info") {
-  switch (tone) {
-    case "success":
-      return "border-emerald-200/80 bg-emerald-50/55";
-    case "warning":
-      return "border-amber-200/80 bg-amber-50/60";
-    case "info":
-      return "border-sky-200/80 bg-sky-50/55";
-    default:
-      return "border-border/60 bg-background/75";
-  }
-}
-
 function SectionCard({
   title,
   accessory,
@@ -5273,32 +5296,6 @@ function DocumentMetaLine({
   );
 }
 
-function DocumentSummaryTile({
-  label,
-  value,
-  tone = "neutral",
-}: {
-  label: ReactNode;
-  value: ReactNode;
-  tone?: "neutral" | "success" | "warning" | "info";
-}) {
-  return (
-    <div
-      className={cn(
-        "rounded-lg border px-4 py-3 shadow-sm",
-        documentSummaryTileTone(tone),
-      )}
-    >
-      <p className="text-[11.5px] font-medium leading-tight text-muted-foreground">
-        {label}
-      </p>
-      <div className="mt-1.5 min-w-0 break-words text-sm font-semibold text-foreground">
-        {value}
-      </div>
-    </div>
-  );
-}
-
 function DocumentShareStateBadge({
   share,
   t,
@@ -5312,7 +5309,7 @@ function DocumentShareStateBadge({
     return (
       <Badge
         variant="outline"
-        className="rounded-full border-border/60 bg-transparent text-muted-foreground"
+        className="rounded-full border-0 bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
       >
         {text.revokedBadge}
       </Badge>
@@ -5323,7 +5320,7 @@ function DocumentShareStateBadge({
     return (
       <Badge
         variant="outline"
-        className="rounded-full border-emerald-200 bg-transparent text-emerald-700"
+        className="rounded-full border-0 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700"
       >
         {t.documents_confirmed}
       </Badge>
@@ -5334,7 +5331,7 @@ function DocumentShareStateBadge({
     return (
       <Badge
         variant="outline"
-        className="rounded-full border-amber-200 bg-transparent text-amber-700"
+        className="rounded-full border-0 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700"
       >
         {t.documents_waiting_confirmation}
       </Badge>
@@ -5344,7 +5341,7 @@ function DocumentShareStateBadge({
   return (
     <Badge
       variant="outline"
-      className="rounded-full border-sky-200 bg-transparent text-sky-700"
+      className="rounded-full border-0 bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-700"
     >
       {t.documents_released}
     </Badge>
