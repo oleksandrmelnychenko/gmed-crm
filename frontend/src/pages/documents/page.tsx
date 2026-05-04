@@ -4032,66 +4032,86 @@ function StaffDocumentsPage({
                                       : null}
                                   </div>
                                 ) : null}
-                                <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
                                   <div className="min-w-0">
-                                    <div className="flex min-w-0 flex-wrap items-center gap-2">
-                                      <p className="truncate text-[15px] font-semibold leading-5 text-foreground">
+                                    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                                      <p className="max-w-full truncate text-[15px] font-semibold leading-5 text-foreground">
                                         {request.requested_by_name ||
                                           t.documents_unknown_requester}
                                       </p>
-                                      <Badge
-                                        variant="outline"
-                                        className={cn(
-                                          "rounded-full",
-                                          translationStatusBadge(request.status),
-                                        )}
-                                      >
-                                        {formatTranslationStatusLabel(
-                                          request.status,
-                                          t,
-                                        )}
-                                      </Badge>
+                                      <span className="size-1 rounded-full bg-muted-foreground/35" />
+                                      <span className="text-xs tabular-nums text-muted-foreground">
+                                        {formatDateTime(request.requested_at)}
+                                      </span>
+                                      {request.completed_at ? (
+                                        <>
+                                          <span className="size-1 rounded-full bg-muted-foreground/35" />
+                                          <span className="text-xs tabular-nums text-muted-foreground">
+                                            {formatTranslationStatusLabel("completed", t)}{" "}
+                                            {formatDateTime(request.completed_at)}
+                                          </span>
+                                        </>
+                                      ) : null}
                                     </div>
-                                    <p className="mt-1 text-xs tabular-nums text-muted-foreground">
-                                      {formatDateTime(request.requested_at)}
-                                      {request.completed_at
-                                        ? ` / ${formatDateTime(request.completed_at)}`
-                                        : ""}
-                                    </p>
+                                    <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                                      <span>
+                                        {l("Zugewiesen", "Назначено", "Assigned")}:{" "}
+                                        <span className="font-medium text-foreground">
+                                          {request.assigned_to_name ?? l("Nicht zugewiesen", "Не назначено", "Unassigned")}
+                                        </span>
+                                      </span>
+                                      {request.translated_by_name ? (
+                                        <>
+                                          <span className="size-1 rounded-full bg-muted-foreground/35" />
+                                          <span>
+                                            Workspace:{" "}
+                                            <span className="font-medium text-foreground">
+                                              {request.translated_by_name}
+                                            </span>
+                                          </span>
+                                        </>
+                                      ) : null}
+                                    </div>
                                   </div>
-                                  <div className="flex min-w-0 flex-wrap justify-start gap-1.5 sm:justify-end">
+                                  <div className="flex min-w-0 flex-wrap justify-start gap-1.5 lg:max-w-[420px] lg:justify-end lg:pr-1">
+                                    <Badge
+                                      variant="outline"
+                                      className={cn(
+                                        "rounded-full",
+                                        translationStatusBadge(request.status),
+                                      )}
+                                    >
+                                      {formatTranslationStatusLabel(
+                                        request.status,
+                                        t,
+                                      )}
+                                    </Badge>
                                     <Badge
                                       variant="outline"
                                       className="rounded-full border-0 bg-[#f9fdff] px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
                                     >
                                       {formatLanguageLabel(request.requested_language)}
                                     </Badge>
-                                    {request.translated_by_name ? (
-                                      <Badge
-                                        variant="outline"
-                                        className="rounded-full border-0 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700"
-                                      >
-                                        {text.translatedByWorkspace(request.translated_by_name)}
-                                      </Badge>
-                                    ) : null}
                                     {request.translated_document_name ? (
                                       <Badge
                                         variant="outline"
-                                        className="rounded-full border-0 bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-700"
+                                        className="max-w-[220px] truncate rounded-full border-0 bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-700"
                                       >
                                         {request.translated_document_name}
                                       </Badge>
                                     ) : null}
                                   </div>
                                 </div>
-                                <p className="text-xs text-muted-foreground">
-                                  {l("Zugewiesen", "Назначено", "Assigned")}:{" "}
-                                  <span className="font-medium text-foreground">
-                                    {request.assigned_to_name ?? l("Nicht zugewiesen", "Не назначено", "Unassigned")}
-                                  </span>
-                                </p>
                               </summary>
-                              <div className="overflow-hidden rounded-lg bg-white">
+                              <div
+                                aria-hidden="true"
+                                className="ml-20 flex h-3 items-center px-3"
+                              >
+                                <span className="h-px w-12 bg-gradient-to-r from-transparent via-border/70 to-border/70" />
+                                <span className="size-1.5 rounded-full bg-border" />
+                                <span className="h-px flex-1 bg-gradient-to-r from-border/70 to-transparent" />
+                              </div>
+                              <div className="mb-2 ml-20 overflow-hidden rounded-lg bg-[#fbfdff] p-2 shadow-sm">
                                 {request.translated_document_id ? (
                                   <div className="flex items-center gap-3 px-3 py-2">
                                     <div className="min-w-0">
