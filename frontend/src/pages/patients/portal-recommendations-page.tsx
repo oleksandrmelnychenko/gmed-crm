@@ -2,6 +2,7 @@ import { startTransition, useCallback, useEffect, useMemo, useState, type FormEv
 import { CalendarPlus, CheckCircle2, LoaderCircle, MessageCircle, RefreshCw, XCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   Banner,
   CountBadge,
@@ -17,7 +18,6 @@ import {
   SuccessBanner,
   checkboxClass,
   inputClass,
-  selectClass,
   textareaClass,
   tokens,
 } from "@/components/ui-shell";
@@ -31,8 +31,12 @@ import {
   requestRecommendationAppointment,
 } from "@/pages/patients/data/portal-api";
 import {
+  documentCategoryLabel,
   formatPortalDateTime,
+  recommendationDecisionLabel,
+  recommendationPriorityLabel,
   portalStatusLabel,
+  recommendationTypeLabel,
   recommendationStatusTone,
 } from "@/pages/patients/model/portal-shared";
 import type { PortalRecommendationItem } from "@/pages/patients/model/portal-shared";
@@ -200,7 +204,7 @@ export function PatientRecommendationsPage() {
                         {portalStatusLabel(item.status)}
                       </StatusBadge>
                       <CountBadge>
-                        {item.recommendation_type.replaceAll("_", " ")}
+                        {recommendationTypeLabel(item.recommendation_type)}
                       </CountBadge>
                     </div>
                     <h2 className="mt-3 text-xl font-semibold text-foreground">{item.title}</h2>
@@ -224,7 +228,7 @@ export function PatientRecommendationsPage() {
                 {item.patient_decision ? (
                   <InfoRow
                     label={l("Ihre Entscheidung", "Ваше решение", "Your decision")}
-                    value={`${item.patient_decision.replaceAll("_", " ")}${item.appointment_request_status ? ` / ${portalStatusLabel(item.appointment_request_status)}` : ""}`}
+                    value={`${recommendationDecisionLabel(item.patient_decision)}${item.appointment_request_status ? ` / ${portalStatusLabel(item.appointment_request_status)}` : ""}`}
                   />
                 ) : null}
 
@@ -631,13 +635,12 @@ function StaffRecommendationsWorkspace() {
         }
       >
         <Field label="Patient">
-          <select
+          <NativeComboboxSelect
             value={selectedPatientId}
             onChange={(event) => {
               setSelectedPatientId(event.target.value);
               resetForm();
             }}
-            className={selectClass}
           >
             <option value="">Select a patient</option>
             {patients.map((patient) => (
@@ -645,7 +648,7 @@ function StaffRecommendationsWorkspace() {
                 {formatPatientOption(patient)}
               </option>
             ))}
-          </select>
+          </NativeComboboxSelect>
         </Field>
         {selectedPatient ? (
           <p className="text-xs text-muted-foreground">
@@ -678,55 +681,51 @@ function StaffRecommendationsWorkspace() {
                 />
               </Field>
               <Field label="Type">
-                <select
+                <NativeComboboxSelect
                   value={form.recommendation_type}
                   onChange={(event) =>
                     setForm((current) => ({ ...current, recommendation_type: event.target.value }))
                   }
-                  className={selectClass}
                 >
                   {RECOMMENDATION_TYPE_OPTIONS.map((value) => (
                     <option key={value} value={value}>
-                      {formatOptionLabel(value)}
+                      {recommendationTypeLabel(value)}
                     </option>
                   ))}
-                </select>
+                </NativeComboboxSelect>
               </Field>
               <Field label="Priority">
-                <select
+                <NativeComboboxSelect
                   value={form.priority}
                   onChange={(event) => setForm((current) => ({ ...current, priority: event.target.value }))}
-                  className={selectClass}
                 >
                   {RECOMMENDATION_PRIORITY_OPTIONS.map((value) => (
                     <option key={value} value={value}>
-                      {formatOptionLabel(value)}
+                      {recommendationPriorityLabel(value)}
                     </option>
                   ))}
-                </select>
+                </NativeComboboxSelect>
               </Field>
               {form.id ? (
                 <Field label="Status">
-                  <select
+                  <NativeComboboxSelect
                     value={form.status}
                     onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))}
-                    className={selectClass}
                   >
                     {RECOMMENDATION_STATUS_OPTIONS.map((value) => (
                       <option key={value} value={value}>
-                        {formatOptionLabel(value)}
+                        {portalStatusLabel(value)}
                       </option>
                     ))}
-                  </select>
+                  </NativeComboboxSelect>
                 </Field>
               ) : null}
               <Field label="Source doctor">
-                <select
+                <NativeComboboxSelect
                   value={form.source_doctor_id}
                   onChange={(event) =>
                     setForm((current) => ({ ...current, source_doctor_id: event.target.value }))
                   }
-                  className={selectClass}
                 >
                   <option value="">No doctor link</option>
                   {doctors.map((doctor) => (
@@ -734,31 +733,29 @@ function StaffRecommendationsWorkspace() {
                       {formatDoctorOption(doctor)}
                     </option>
                   ))}
-                </select>
+                </NativeComboboxSelect>
               </Field>
               <Field label="Source order">
-                <select
+                <NativeComboboxSelect
                   value={form.source_order_id}
                   onChange={(event) =>
                     setForm((current) => ({ ...current, source_order_id: event.target.value }))
                   }
-                  className={selectClass}
                 >
                   <option value="">No order link</option>
                   {orders.map((order) => (
                     <option key={order.id} value={order.id}>
-                      {order.order_number} {order.phase ? `/ ${formatOptionLabel(order.phase)}` : ""}
+                      {order.order_number} {order.phase ? `/ ${portalStatusLabel(order.phase)}` : ""}
                     </option>
                   ))}
-                </select>
+                </NativeComboboxSelect>
               </Field>
               <Field label="Source appointment">
-                <select
+                <NativeComboboxSelect
                   value={form.source_appointment_id}
                   onChange={(event) =>
                     setForm((current) => ({ ...current, source_appointment_id: event.target.value }))
                   }
-                  className={selectClass}
                 >
                   <option value="">No appointment link</option>
                   {appointments.map((appointment) => (
@@ -766,15 +763,14 @@ function StaffRecommendationsWorkspace() {
                       {formatAppointmentOption(appointment)}
                     </option>
                   ))}
-                </select>
+                </NativeComboboxSelect>
               </Field>
               <Field label="Source document">
-                <select
+                <NativeComboboxSelect
                   value={form.source_document_id}
                   onChange={(event) =>
                     setForm((current) => ({ ...current, source_document_id: event.target.value }))
                   }
-                  className={selectClass}
                 >
                   <option value="">No document link</option>
                   {documents.map((document) => (
@@ -782,7 +778,7 @@ function StaffRecommendationsWorkspace() {
                       {formatDocumentOption(document)}
                     </option>
                   ))}
-                </select>
+                </NativeComboboxSelect>
               </Field>
             </div>
             <Field label="Description">
@@ -838,7 +834,7 @@ function StaffRecommendationsWorkspace() {
                         <StatusBadge status={item.status} className={recommendationStatusTone(item.status)}>
                           {portalStatusLabel(item.status)}
                         </StatusBadge>
-                        <CountBadge>{formatOptionLabel(item.priority || "normal")}</CountBadge>
+                        <CountBadge>{recommendationPriorityLabel(item.priority || "normal")}</CountBadge>
                         {item.portal_visible ? (
                           <StatusBadge tone="success">Portal</StatusBadge>
                         ) : (
@@ -858,9 +854,9 @@ function StaffRecommendationsWorkspace() {
                       </p>
                       {item.patient_decision ? (
                         <p className="mt-2 text-xs text-sky-700">
-                          Patient decision: {formatOptionLabel(item.patient_decision)}
+                          Patient decision: {recommendationDecisionLabel(item.patient_decision)}
                           {item.appointment_request_status
-                            ? ` / ${formatOptionLabel(item.appointment_request_status)}`
+                            ? ` / ${portalStatusLabel(item.appointment_request_status)}`
                             : ""}
                         </p>
                       ) : null}
@@ -929,13 +925,13 @@ function formatAppointmentOption(appointment: StaffAppointmentOption) {
 }
 
 function formatDocumentOption(document: StaffDocumentOption) {
-  return [document.auto_name || document.filename || document.id, document.category, formatStaffDate(document.created_at)]
+  return [
+    document.auto_name || document.filename || document.id,
+    document.category ? documentCategoryLabel(document.category) : "",
+    formatStaffDate(document.created_at),
+  ]
     .filter(Boolean)
     .join(" / ");
-}
-
-function formatOptionLabel(value: string) {
-  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function formatDateInput(value?: string | null) {

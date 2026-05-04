@@ -34,7 +34,7 @@ import {
   SheetContent,
 } from "@/components/ui/sheet";
 import { clearApiCache } from "@/lib/api";
-import { useLang } from "@/lib/i18n";
+import { formatUnknownValue, useLang, type Lang, type Translations } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { formatAdminDateTime } from "@/pages/admin-pages.helpers";
@@ -57,6 +57,8 @@ interface ActivityRow {
   context: Record<string, unknown> | null;
   created_at: string;
 }
+
+type UnknownTranslations = Pick<Translations, "common_not_set" | "common_unknown" | "common_unknown_value">;
 
 const ADMIN_ACTIVITY_REALTIME_EVENTS = [
   "access_policy.updated",
@@ -189,8 +191,234 @@ function actionTone(action: string) {
   }
 }
 
-function actionLabel(action: string): string {
-  return action.replaceAll("_", " ");
+const EXACT_ACTION_LABELS = {
+  de: {
+    login: "Anmeldung",
+    create_lead: "Lead erstellt",
+    create_patient: "Patient erstellt",
+    convert_lead: "Lead konvertiert",
+    qualify_lead: "Lead qualifiziert",
+    update_setting: "Einstellung aktualisiert",
+    revoke_all_sessions: "Alle Sitzungen widerrufen",
+    admin_force_logout_user: "Benutzer abgemeldet",
+    revoke_all_users_sessions: "Alle Benutzersitzungen widerrufen",
+    token_theft_detected: "Token-Diebstahl erkannt",
+  },
+  ru: {
+    login: "Вход",
+    create_lead: "Лид создан",
+    create_patient: "Пациент создан",
+    convert_lead: "Лид конвертирован",
+    qualify_lead: "Лид квалифицирован",
+    update_setting: "Настройка обновлена",
+    revoke_all_sessions: "Все сессии отозваны",
+    admin_force_logout_user: "Пользователь выведен из системы",
+    revoke_all_users_sessions: "Все сессии пользователей отозваны",
+    token_theft_detected: "Обнаружена кража токена",
+  },
+} as const;
+
+const ACTIVITY_ENTITY_LABELS = {
+  de: {
+    access_policy: "Zugriffsregel",
+    announcement: "Ankuendigung",
+    appointment: "Termin",
+    appointment_checklist: "Termin-Checkliste",
+    appointment_request: "Terminanfrage",
+    case: "Fall",
+    concierge_service: "Concierge-Service",
+    consent: "Einwilligung",
+    custom_field: "Benutzerdefiniertes Feld",
+    document: "Dokument",
+    feedback: "Feedback",
+    framework_contract: "Rahmenvertrag",
+    invoice: "Rechnung",
+    lead: "Lead",
+    notification_channel: "Benachrichtigungskanal",
+    order: "Auftrag",
+    patient: "Patient",
+    pending_login: "Ausstehende Anmeldung",
+    privacy_request: "Datenschutzantrag",
+    provider: "Anbieter",
+    quote: "Angebot",
+    reminder: "Erinnerung",
+    security: "Sicherheit",
+    session: "Sitzung",
+    system_setting: "Systemeinstellung",
+    task: "Aufgabe",
+    user: "Benutzer",
+    workflow_checklist_item: "Workflow-Checkliste",
+  },
+  ru: {
+    access_policy: "Правило доступа",
+    announcement: "Объявление",
+    appointment: "Приём",
+    appointment_checklist: "Чек-лист приёма",
+    appointment_request: "Запрос на приём",
+    case: "Кейс",
+    concierge_service: "Консьерж-сервис",
+    consent: "Согласие",
+    custom_field: "Пользовательское поле",
+    document: "Документ",
+    feedback: "Отзыв",
+    framework_contract: "Рамочный договор",
+    invoice: "Счёт",
+    lead: "Лид",
+    notification_channel: "Канал уведомлений",
+    order: "Заказ",
+    patient: "Пациент",
+    pending_login: "Ожидающий вход",
+    privacy_request: "Запрос приватности",
+    provider: "Провайдер",
+    quote: "Предложение",
+    reminder: "Напоминание",
+    security: "Безопасность",
+    session: "Сессия",
+    system_setting: "Системная настройка",
+    task: "Задача",
+    user: "Пользователь",
+    workflow_checklist_item: "Чек-лист workflow",
+  },
+} as const;
+
+const ACTIVITY_EVENT_LABELS = {
+  de: {
+    activated: "aktiviert",
+    added: "hinzugefuegt",
+    approved: "genehmigt",
+    assigned: "zugewiesen",
+    assignment_revoked: "Zuweisung widerrufen",
+    billing_ready: "abrechnungsbereit",
+    cancelled: "abgesagt",
+    completed: "abgeschlossen",
+    confirmed: "bestaetigt",
+    converted: "konvertiert",
+    created: "erstellt",
+    deactivated: "deaktiviert",
+    debt_management_updated: "Debt-Management aktualisiert",
+    deleted: "geloescht",
+    doctor_created: "Arzt erstellt",
+    doctor_deleted: "Arzt geloescht",
+    doctor_updated: "Arzt aktualisiert",
+    dunning_created: "Mahnung erstellt",
+    executed: "ausgefuehrt",
+    execution_flow_updated: "Ausfuehrung aktualisiert",
+    external_invoice_created: "externe Rechnung erstellt",
+    external_invoice_overdue: "externe Rechnung ueberfaellig",
+    external_invoice_updated: "externe Rechnung aktualisiert",
+    failed_resolved: "Fehlschlag geklaert",
+    followup_flow_updated: "Nachsorge aktualisiert",
+    force_password_reset: "Passwort-Reset erzwungen",
+    generated: "erzeugt",
+    granted: "erteilt",
+    ip_whitelist_added: "IP-Freigabe hinzugefuegt",
+    ip_whitelist_deleted: "IP-Freigabe geloescht",
+    leistung_added: "Leistung hinzugefuegt",
+    leistung_approved: "Leistung genehmigt",
+    maintenance_toggled: "Wartung umgeschaltet",
+    medication_expiry_confirmed: "Medikamentenablauf bestaetigt",
+    medication_expiry_flagged: "Medikamentenablauf markiert",
+    mfa_toggled: "MFA umgeschaltet",
+    overdue_marked: "ueberfaellig markiert",
+    password_reset: "Passwort zurueckgesetzt",
+    payment_proof_uploaded: "Zahlungsnachweis hochgeladen",
+    phase_changed: "Phase geaendert",
+    planning_preparation_updated: "Planung aktualisiert",
+    portal_released: "im Portal freigegeben",
+    portal_revoked: "Portalfreigabe widerrufen",
+    process_gates_updated: "Prozess-Gates aktualisiert",
+    rejected: "abgelehnt",
+    reset: "zurueckgesetzt",
+    reviewed: "geprueft",
+    revoked: "widerrufen",
+    revoked_all: "alle widerrufen",
+    service_created: "Service erstellt",
+    service_deleted: "Service geloescht",
+    service_updated: "Service aktualisiert",
+    status_changed: "Status geaendert",
+    submitted: "eingereicht",
+    translation_requested: "Uebersetzung angefragt",
+    translation_updated: "Uebersetzung aktualisiert",
+    unlocked: "entsperrt",
+    updated: "aktualisiert",
+    uploaded: "hochgeladen",
+  },
+  ru: {
+    activated: "активирован",
+    added: "добавлено",
+    approved: "одобрен",
+    assigned: "назначен",
+    assignment_revoked: "назначение отозвано",
+    billing_ready: "готово к биллингу",
+    cancelled: "отменён",
+    completed: "завершён",
+    confirmed: "подтверждён",
+    converted: "конвертирован",
+    created: "создан",
+    deactivated: "деактивирован",
+    debt_management_updated: "debt-management обновлён",
+    deleted: "удалён",
+    doctor_created: "врач создан",
+    doctor_deleted: "врач удалён",
+    doctor_updated: "врач обновлён",
+    dunning_created: "напоминание об оплате создано",
+    executed: "исполнен",
+    execution_flow_updated: "исполнение обновлено",
+    external_invoice_created: "внешний счёт создан",
+    external_invoice_overdue: "внешний счёт просрочен",
+    external_invoice_updated: "внешний счёт обновлён",
+    failed_resolved: "ошибка закрыта",
+    followup_flow_updated: "follow-up обновлён",
+    force_password_reset: "сброс пароля принудительно",
+    generated: "сгенерирован",
+    granted: "выдан",
+    ip_whitelist_added: "IP добавлен в whitelist",
+    ip_whitelist_deleted: "IP удалён из whitelist",
+    leistung_added: "услуга добавлена",
+    leistung_approved: "услуга одобрена",
+    maintenance_toggled: "режим обслуживания переключён",
+    medication_expiry_confirmed: "срок препарата подтверждён",
+    medication_expiry_flagged: "срок препарата отмечен",
+    mfa_toggled: "MFA переключена",
+    overdue_marked: "помечен просроченным",
+    password_reset: "пароль сброшен",
+    payment_proof_uploaded: "подтверждение оплаты загружено",
+    phase_changed: "фаза изменена",
+    planning_preparation_updated: "планирование обновлено",
+    portal_released: "опубликован в портале",
+    portal_revoked: "публикация в портале отозвана",
+    process_gates_updated: "process gates обновлены",
+    rejected: "отклонён",
+    reset: "сброшен",
+    reviewed: "проверен",
+    revoked: "отозван",
+    revoked_all: "все отозваны",
+    service_created: "сервис создан",
+    service_deleted: "сервис удалён",
+    service_updated: "сервис обновлён",
+    status_changed: "статус изменён",
+    submitted: "отправлен",
+    translation_requested: "перевод запрошен",
+    translation_updated: "перевод обновлён",
+    unlocked: "разблокирован",
+    updated: "обновлён",
+    uploaded: "загружен",
+  },
+} as const;
+
+function actionLabel(action: string, translations: UnknownTranslations, lang: Lang): string {
+  const exactLabels = EXACT_ACTION_LABELS[lang] as Record<string, string>;
+  const exact = exactLabels[action];
+  if (exact) return exact;
+
+  const [entityKey, eventKey] = action.split(".");
+  const entityLabel = (ACTIVITY_ENTITY_LABELS[lang] as Record<string, string>)[entityKey ?? ""];
+  const eventLabel = (ACTIVITY_EVENT_LABELS[lang] as Record<string, string>)[eventKey ?? ""];
+  if (entityLabel && eventLabel) {
+    return `${entityLabel}: ${eventLabel}`;
+  }
+
+  return formatUnknownValue(action, translations);
 }
 
 function contextSummary(context: Record<string, unknown> | null): string {
@@ -210,7 +438,7 @@ function contextSummary(context: Record<string, unknown> | null): string {
     .join(", ");
 }
 
-function entityDisplay(entityType: string | null, entityId: unknown): string {
+function entityTechnicalValue(entityType: string | null, entityId: unknown): string {
   const entity = entityType ?? "";
   let idStr = "";
   if (typeof entityId === "string") {
@@ -220,6 +448,28 @@ function entityDisplay(entityType: string | null, entityId: unknown): string {
   }
   if (!idStr) return entity || "\u2014";
   return entity ? `${entity} ${idStr}\u2026` : idStr;
+}
+
+function entityTypeLabel(entityType: string | null, translations: UnknownTranslations, lang: Lang): string {
+  if (!entityType) return translations.common_not_set;
+  return (ACTIVITY_ENTITY_LABELS[lang] as Record<string, string>)[entityType] ?? formatUnknownValue(entityType, translations);
+}
+
+function entityDisplay(
+  entityType: string | null,
+  entityId: unknown,
+  translations: UnknownTranslations,
+  lang: Lang,
+): string {
+  let idStr = "";
+  if (typeof entityId === "string") {
+    idStr = entityId.slice(0, 8);
+  } else if (entityId != null) {
+    idStr = String(entityId).slice(0, 8);
+  }
+
+  const entity = entityTypeLabel(entityType, translations, lang);
+  return idStr ? `${entity} ${idStr}\u2026` : entity;
 }
 
 function activityInitials(name: string): string {
@@ -361,18 +611,18 @@ export function AdminActivityPage() {
       width: 180,
       render: (activity) => (
         <StatusBadge tone={actionTone(activity.action)}>
-          {actionLabel(activity.action)}
+          {actionLabel(activity.action, t, lang)}
         </StatusBadge>
       ),
     },
     {
       id: "entity",
       label: t.activity_entity,
-      accessor: (activity) => entityDisplay(activity.entity_type, activity.entity_id),
+      accessor: (activity) => entityTechnicalValue(activity.entity_type, activity.entity_id),
       width: 180,
       render: (activity) => (
         <span className="font-mono text-xs text-muted-foreground">
-          {entityDisplay(activity.entity_type, activity.entity_id)}
+          {entityDisplay(activity.entity_type, activity.entity_id, t, lang)}
         </span>
       ),
     },
@@ -390,7 +640,10 @@ export function AdminActivityPage() {
         );
       },
     },
-  ], [lang, t.activity_action, t.activity_details, t.activity_entity, t.activity_time, t.activity_user]);
+  ], [
+    lang,
+    t,
+  ]);
 
   const anyFilterActive = search.trim() !== "" || filterAction !== "";
 
@@ -440,7 +693,7 @@ export function AdminActivityPage() {
               <option value="__all__">{t.providers_all}</option>
               {actionOptions.map((value) => (
                 <option key={value} value={value}>
-                  {actionLabel(value)}
+                  {actionLabel(value, t, lang)}
                 </option>
               ))}
             </NativeComboboxSelect>
@@ -489,7 +742,7 @@ export function AdminActivityPage() {
             tone="slate"
             label={t.settings_title}
             value={metrics.settingsUpdates}
-            description={`${metrics.loginCount} ${actionLabel("login")}`}
+            description={`${metrics.loginCount} ${actionLabel("login", t, lang)}`}
           />
         </div>
 
@@ -529,7 +782,7 @@ export function AdminActivityPage() {
       <Sheet open={detailOpen} onOpenChange={setDetailOpen}>
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
           <AdminSheetScaffold
-            title={selectedActivity ? actionLabel(selectedActivity.action) : t.activity_details}
+            title={selectedActivity ? actionLabel(selectedActivity.action, t, lang) : t.activity_details}
             description={
               selectedActivity
                 ? `${selectedActivity.user_name} - ${formatAdminDateTime(selectedActivity.created_at, lang)}`
@@ -558,7 +811,7 @@ export function AdminActivityPage() {
 
                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                     <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
-                      <p className="text-[11.5px] text-muted-foreground">Actor</p>
+                      <p className="text-[11.5px] text-muted-foreground">{t.activity_user}</p>
                       <p className="mt-1 text-sm font-medium text-foreground">
                         {selectedActivity.user_name || "-"}
                       </p>
@@ -567,21 +820,21 @@ export function AdminActivityPage() {
                       </p>
                     </div>
                     <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
-                      <p className="text-[11.5px] text-muted-foreground">Action</p>
+                      <p className="text-[11.5px] text-muted-foreground">{t.activity_action}</p>
                       <div className="mt-1">
                         <StatusBadge tone={actionTone(selectedActivity.action)}>
-                          {actionLabel(selectedActivity.action)}
+                          {actionLabel(selectedActivity.action, t, lang)}
                         </StatusBadge>
                       </div>
                     </div>
                     <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
-                      <p className="text-[11.5px] text-muted-foreground">Entity</p>
+                      <p className="text-[11.5px] text-muted-foreground">{t.activity_entity}</p>
                       <p className="mt-1 text-sm font-medium text-foreground">
-                        {entityDisplay(selectedActivity.entity_type, selectedActivity.entity_id) || "-"}
+                        {entityDisplay(selectedActivity.entity_type, selectedActivity.entity_id, t, lang) || "-"}
                       </p>
                     </div>
                     <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
-                      <p className="text-[11.5px] text-muted-foreground">Timestamp</p>
+                      <p className="text-[11.5px] text-muted-foreground">{t.activity_time}</p>
                       <p className="mt-1 text-sm font-medium text-foreground">
                         {formatAdminDateTime(selectedActivity.created_at, lang) || "-"}
                       </p>
@@ -592,7 +845,7 @@ export function AdminActivityPage() {
                 <section className={`space-y-3 rounded-xl p-3.5 ${tokens.surface.softCard}`}>
                   <h3 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
                     <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
-                    <span>Payload</span>
+                    <span>{t.activity_payload}</span>
                   </h3>
                   <pre className="overflow-x-auto rounded-lg border border-border/50 bg-card/60 p-3 text-xs leading-6 text-muted-foreground">
                     {prettyContext(selectedActivity.context)}

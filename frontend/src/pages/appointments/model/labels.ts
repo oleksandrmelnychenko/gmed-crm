@@ -1,4 +1,5 @@
 import {
+  formatUnknownValue,
   getLang,
   t as translateCatalog,
   type Translations,
@@ -26,6 +27,10 @@ function runtimeTranslations() {
   return translateCatalog(getLang());
 }
 
+function unknownAppointmentValue(value: unknown) {
+  return formatUnknownValue(value, runtimeTranslations());
+}
+
 export function appointmentText(de: string, ru: string, _en: string) {
   void _en;
   return getLang() === "ru" ? ru : de;
@@ -37,10 +42,7 @@ export function roleLabel(role?: string | null) {
   const translated = tr[`role_${role}` as keyof typeof tr];
   return typeof translated === "string"
     ? translated
-    : role
-        .split("_")
-        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-        .join(" ");
+    : unknownAppointmentValue(role);
 }
 
 export function appointmentTypeLabel(
@@ -111,7 +113,7 @@ export function communicationStatusLabel(
     case "cancelled":
       return appointmentText("Abgebrochen", "Отменено", "Cancelled");
   }
-  return String(status).replace("_", " ");
+  return unknownAppointmentValue(status);
 }
 
 export function communicationChannelLabel(
@@ -131,7 +133,7 @@ export function communicationChannelLabel(
     case "other":
       return appointmentText("Anderer Kanal", "Другой канал", "Other");
   }
-  return String(channel).charAt(0).toUpperCase() + String(channel).slice(1);
+  return unknownAppointmentValue(channel);
 }
 
 export function communicationTargetLabel(
@@ -189,10 +191,7 @@ export function reportApprovalLabel(status: string) {
         "Needs interpreter revision",
       );
     default:
-      return status
-        .split("_")
-        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-        .join(" ");
+      return unknownAppointmentValue(status);
   }
 }
 
@@ -246,7 +245,7 @@ export function recurrenceFrequencyLabel(
     case "monthly":
       return appointmentText("Monatlich", "Ежемесячно", "Monthly");
     default:
-      return value;
+      return unknownAppointmentValue(value);
   }
 }
 
@@ -263,7 +262,7 @@ export function findingsArtifactLabel(value: FindingsFollowUpArtifact) {
         "Arztbrief and written findings",
       );
     default:
-      return value;
+      return unknownAppointmentValue(value);
   }
 }
 
@@ -282,7 +281,7 @@ export function incomingDataSourceLabel(value: IncomingDataSource) {
     case "other":
       return appointmentText("Andere Quelle", "Другой источник", "Other source");
     default:
-      return value;
+      return unknownAppointmentValue(value);
   }
 }
 
@@ -307,7 +306,7 @@ export function incomingDataCategoryLabel(value: IncomingDataCategory) {
     case "other":
       return appointmentText("Sonstiges", "Другое", "Other");
     default:
-      return value;
+      return unknownAppointmentValue(value);
   }
 }
 
@@ -322,10 +321,7 @@ export function taskStatusLabel(status: string) {
     case "cancelled":
       return appointmentText("Abgebrochen", "Отменена", "Cancelled");
     default:
-      return status
-        .split("_")
-        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-        .join(" ");
+      return unknownAppointmentValue(status);
   }
 }
 
@@ -340,7 +336,7 @@ export function taskPriorityLabel(priority: string) {
     case "urgent":
       return appointmentText("Dringend", "Срочно", "Urgent");
     default:
-      return priority.charAt(0).toUpperCase() + priority.slice(1);
+      return unknownAppointmentValue(priority);
   }
 }
 
@@ -359,15 +355,12 @@ export function billingHandoffKindLabel(kind: BillingHandoffKind) {
     case "other":
       return appointmentText("Sonstiges", "Другое", "Other");
     default:
-      return kind;
+      return unknownAppointmentValue(kind);
   }
 }
 
 export function serviceKindLabel(kind: string) {
-  return kind
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+  return unknownAppointmentValue(kind);
 }
 
 export function billingStatusLabel(status: string) {
@@ -389,6 +382,6 @@ export function billingStatusLabel(status: string) {
     case "cancelled":
       return appointmentText("Abgebrochen", "Отменено", "Cancelled");
     default:
-      return status.charAt(0).toUpperCase() + status.slice(1);
+      return unknownAppointmentValue(status);
   }
 }

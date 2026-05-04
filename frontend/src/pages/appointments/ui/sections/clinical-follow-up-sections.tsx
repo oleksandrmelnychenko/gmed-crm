@@ -80,6 +80,19 @@ const clinicalInputClassName = appointmentFilterControlClassName;
 const clinicalSelectClassName = appointmentSelectControlClassName;
 const clinicalTextareaClassName = appointmentTextareaControlClassName;
 
+function checklistPhaseLabel(phase: string) {
+  switch (phase) {
+    case "preparation":
+      return appointmentText("Vorbereitung", "Подготовка", "Preparation");
+    case "execution":
+      return appointmentText("Durchführung", "Выполнение", "Execution");
+    case "followup":
+      return appointmentText("Nachbereitung", "После визита", "Follow-up");
+    default:
+      return appointmentText("Unbekannte Phase", "Неизвестная фаза", "Unknown phase");
+  }
+}
+
 function withEllipsis(value: string) {
   return value.endsWith("...") || value.endsWith("…") ? value : `${value}…`;
 }
@@ -379,7 +392,7 @@ function AppointmentIncomingDataSection({
                       )}
                     </p>
                     <p className="text-[11.5px] uppercase tracking-[0.12em] text-muted-foreground">
-                      {item.phase}
+                      {checklistPhaseLabel(item.phase)}
                     </p>
                   </div>
                   {item.is_completed ? (
@@ -1050,7 +1063,7 @@ function AppointmentFindingsSection({
                         {item.item_text.replace(`${FINDINGS_CHECKLIST_PREFIX} `, "")}
                       </p>
                       <p className="text-[11.5px] uppercase tracking-[0.12em] text-muted-foreground">
-                        {item.phase}
+                        {checklistPhaseLabel(item.phase)}
                       </p>
                     </div>
                     {item.is_completed ? (

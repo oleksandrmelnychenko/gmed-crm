@@ -363,16 +363,38 @@ export function ContractsPage() {
     [lang],
   );
   const contractStatusLabel = useCallback(
-    (status: string) => enumLabel(status, text.roleLabels),
-    [text.roleLabels],
+    (status: string) => enumLabel(status, text.roleLabels, t),
+    [t, text.roleLabels],
   );
   const quoteStatusLabel = useCallback(
-    (status: string) => enumLabel(status, text.roleLabels),
-    [text.roleLabels],
+    (status: string) => enumLabel(status, text.roleLabels, t),
+    [t, text.roleLabels],
   );
   const roleLabel = useCallback(
-    (roleValue: string) => tr[`role_${roleValue}`] ?? roleValue.replaceAll("_", " "),
-    [tr],
+    (roleValue: string) => {
+      const translatedRole = tr[`role_${roleValue}`];
+      return enumLabel(
+        roleValue,
+        translatedRole ? { [roleValue]: translatedRole } : {},
+        t,
+      );
+    },
+    [t, tr],
+  );
+  const quoteVersionChangeReasonLabel = useCallback(
+    (reason: string | null | undefined) => {
+      if (!reason) return text.snapshotFallback;
+      return enumLabel(
+        reason,
+        {
+          initial_snapshot: text.snapshotFallback,
+          status_update:
+            lang === "de" ? "Statusaktualisierung" : "Обновление статуса",
+        },
+        t,
+      );
+    },
+    [lang, t, text.snapshotFallback],
   );
 
   const initialTab =
@@ -985,7 +1007,7 @@ export function ContractsPage() {
         width: 280,
         render: (row) => (
           <span className="block max-w-[280px] truncate text-sm text-foreground">
-            {(row.change_reason || text.snapshotFallback).replaceAll("_", " ")}
+            {quoteVersionChangeReasonLabel(row.change_reason)}
           </span>
         ),
       },
@@ -1024,9 +1046,9 @@ export function ContractsPage() {
       t.users_status,
       text.gross,
       text.lineItemsCount,
-      text.snapshotFallback,
       text.updatedAt,
       text.version,
+      quoteVersionChangeReasonLabel,
       quoteStatusLabel,
       roleLabel,
     ],

@@ -4,7 +4,7 @@ import { ExternalLink, Folder, LoaderCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
-import { useLang } from "@/lib/i18n";
+import { formatUnknownValue, useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
@@ -70,32 +70,238 @@ type CaseLookupItem = {
   case_id: string;
 };
 
-function formatDate(value?: string | null) {
-  if (!value) return "-";
+function formatDate(
+  value: string | null | undefined,
+  fallback: string,
+  translations: { common_unknown: string; common_unknown_value: string },
+) {
+  if (!value) return fallback;
   try {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return formatUnknownValue(value, translations);
     return new Intl.DateTimeFormat("en-GB", {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
-    }).format(new Date(value));
+    }).format(date);
   } catch {
-    return value;
+    return formatUnknownValue(value, translations);
   }
 }
 
-function formatDateTime(value?: string | null) {
-  if (!value) return "-";
+function formatDateTime(
+  value: string | null | undefined,
+  fallback: string,
+  translations: { common_unknown: string; common_unknown_value: string },
+) {
+  if (!value) return fallback;
   try {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return formatUnknownValue(value, translations);
     return new Intl.DateTimeFormat("en-GB", {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
-    }).format(new Date(value));
+    }).format(date);
   } catch {
-    return value;
+    return formatUnknownValue(value, translations);
   }
+}
+
+function caseStatusLabel(
+  status: string,
+  translations: { common_unknown: string; common_unknown_value: string },
+) {
+  const labels = translations as unknown as Record<string, string>;
+  return labels[`cases_${status}`] ?? formatUnknownValue(status, translations);
+}
+
+function caseHistorySectionLabel(
+  section: string | null | undefined,
+  l: (de: string, ru: string, en: string) => string,
+  translations: { common_unknown: string; common_unknown_value: string },
+) {
+  switch (section) {
+    case "overview":
+      return l("Ubersicht", "Обзор", "Overview");
+    case "vorerkrankungen":
+      return l("Vorerkrankungen", "Сопутствующие заболевания", "Preconditions");
+    case "allergien":
+      return l("Allergien", "Аллергии", "Allergies");
+    case "operationen":
+      return l("Operationen", "Операции", "Operations");
+    case "medikamente":
+      return l("Medikation", "Медикаменты", "Medication");
+    case "pain_records":
+      return l("Schmerzdokumentation", "Записи о боли", "Pain records");
+    case "symptome":
+      return l("Symptome", "Симптомы", "Symptoms");
+    case "cardiology":
+      return l("Kardiologie", "Кардиология", "Cardiology");
+    case "gastroenterology":
+      return l("Gastroenterologie", "Гастроэнтерология", "Gastroenterology");
+    case "orthopedics":
+      return l("Orthopadie", "Ортопедия", "Orthopedics");
+    case "neurology":
+      return l("Neurologie", "Неврология", "Neurology");
+    case "pulmonology":
+      return l("Pneumologie", "Пульмонология", "Pulmonology");
+    case "urology":
+      return l("Urologie", "Урология", "Urology");
+    case "vegetative":
+    case "vegetative_anamnese":
+      return l("Vegetative Anamnese", "Вегетативный анамнез", "Vegetative");
+    case "impfstatus":
+      return l("Impfstatus", "Вакцинация", "Vaccination");
+    default:
+      return formatUnknownValue(section, translations);
+  }
+}
+
+function caseFieldLabel(
+  key: string,
+  l: (de: string, ru: string, en: string) => string,
+  translations: { common_unknown: string; common_unknown_value: string },
+) {
+  switch (key) {
+    case "is_relevant":
+      return l("Relevant", "Релевантно", "Relevant");
+    case "chest_pain":
+      return l("Brustschmerz", "Боль в груди", "Chest pain");
+    case "dyspnea":
+      return l("Dyspnoe", "Одышка", "Dyspnea");
+    case "palpitations":
+      return l("Palpitationen", "Сердцебиение", "Palpitations");
+    case "syncope":
+      return l("Synkope", "Обморок", "Syncope");
+    case "edema":
+      return l("Odeme", "Отеки", "Edema");
+    case "known_diagnosis":
+      return l("Bekannte Diagnose", "Известный диагноз", "Known diagnosis");
+    case "prior_cardiac_workup":
+      return l("Bisherige Kardiologie", "Предыдущее кардиообследование", "Prior cardiac workup");
+    case "cardiovascular_risk_factors":
+      return l("Kardiovaskulare Risiken", "Сердечно-сосудистые риски", "Cardiovascular risks");
+    case "anticoagulation":
+      return l("Antikoagulation", "Антикоагуляция", "Anticoagulation");
+    case "family_history":
+      return l("Familienanamnese", "Семейный анамнез", "Family history");
+    case "red_flags":
+      return l("Warnzeichen", "Красные флаги", "Red flags");
+    case "notes":
+      return l("Notizen", "Заметки", "Notes");
+    case "abdominal_pain":
+      return l("Bauchschmerz", "Боль в животе", "Abdominal pain");
+    case "reflux":
+      return l("Reflux", "Рефлюкс", "Reflux");
+    case "nausea":
+      return l("Ubelkeit", "Тошнота", "Nausea");
+    case "diarrhea":
+      return l("Diarrho", "Диарея", "Diarrhea");
+    case "constipation":
+      return l("Obstipation", "Запор", "Constipation");
+    case "gi_bleeding":
+      return l("GI-Blutung", "ЖКТ-кровотечение", "GI bleeding");
+    case "prior_endoscopy":
+      return l("Bisherige Endoskopie", "Предыдущая эндоскопия", "Prior endoscopy");
+    case "bowel_habits":
+      return l("Stuhlgewohnheiten", "Особенности стула", "Bowel habits");
+    case "liver_history":
+      return l("Leberanamnese", "Печеночный анамнез", "Liver history");
+    case "food_intolerance":
+      return l("Nahrungsmittelintoleranz", "Пищевая непереносимость", "Food intolerance");
+    case "joint_pain":
+      return l("Gelenkschmerz", "Боль в суставах", "Joint pain");
+    case "back_pain":
+      return l("Ruckenschmerz", "Боль в спине", "Back pain");
+    case "mobility_limitation":
+      return l("Mobilitatseinschrankung", "Ограничение подвижности", "Mobility limitation");
+    case "trauma_history":
+      return l("Traumaanamnese", "Травматологический анамнез", "Trauma history");
+    case "prior_imaging":
+      return l("Bisherige Bildgebung", "Предыдущая визуализация", "Prior imaging");
+    case "assistive_devices":
+      return l("Hilfsmittel", "Вспомогательные средства", "Assistive devices");
+    case "physiotherapy_history":
+      return l("Physiotherapie-Anamnese", "Физиотерапия в анамнезе", "Physiotherapy history");
+    case "pain_triggers":
+      return l("Schmerzausloser", "Триггеры боли", "Pain triggers");
+    case "headache":
+      return l("Kopfschmerz", "Головная боль", "Headache");
+    case "dizziness":
+      return l("Schwindel", "Головокружение", "Dizziness");
+    case "sensory_changes":
+      return l("Sensibilitatsanderungen", "Изменения чувствительности", "Sensory changes");
+    case "weakness":
+      return l("Schwache", "Слабость", "Weakness");
+    case "seizure_history":
+      return l("Krampfanamnese", "Судорожный анамнез", "Seizure history");
+    case "gait_balance_issues":
+      return l("Gang / Gleichgewicht", "Походка / равновесие", "Gait / balance");
+    case "prior_neuro_imaging":
+      return l("Bisherige Neuro-Bildgebung", "Предыдущая нейровизуализация", "Prior neuro imaging");
+    case "prior_neurology_workup":
+      return l("Bisherige Neurologie", "Предыдущее неврологическое обследование", "Prior neurology workup");
+    case "cognitive_changes":
+      return l("Kognitive Veranderungen", "Когнитивные изменения", "Cognitive changes");
+    case "chronic_cough":
+      return l("Chronischer Husten", "Хронический кашель", "Chronic cough");
+    case "wheezing":
+      return l("Giemen", "Свистящее дыхание", "Wheezing");
+    case "chest_tightness":
+      return l("Engegefuhl Brust", "Стеснение в груди", "Chest tightness");
+    case "hemoptysis":
+      return l("Hamoptyse", "Кровохарканье", "Hemoptysis");
+    case "smoking_history":
+      return l("Raucheranamnese", "Курительный анамнез", "Smoking history");
+    case "prior_chest_imaging":
+      return l("Bisherige Thorax-Bildgebung", "Предыдущая визуализация грудной клетки", "Prior chest imaging");
+    case "inhaler_therapy":
+      return l("Inhalationstherapie", "Ингаляционная терапия", "Inhaler therapy");
+    case "sleep_apnea_history":
+      return l("Schlafapnoe-Anamnese", "Анамнез апноэ сна", "Sleep apnea history");
+    case "dysuria":
+      return l("Dysurie", "Дизурия", "Dysuria");
+    case "hematuria":
+      return l("Hamaturie", "Гематурия", "Hematuria");
+    case "flank_pain":
+      return l("Flankenschmerz", "Боль в боку", "Flank pain");
+    case "urinary_frequency":
+      return l("Haufiges Wasserlassen", "Частое мочеиспускание", "Urinary frequency");
+    case "urinary_retention":
+      return l("Harnverhalt", "Задержка мочи", "Urinary retention");
+    case "incontinence":
+      return l("Inkontinenz", "Недержание", "Incontinence");
+    case "prior_urology_workup":
+      return l("Bisherige Urologie", "Предыдущее урологическое обследование", "Prior urology workup");
+    case "catheter_history":
+      return l("Katheteranamnese", "Катетеризация в анамнезе", "Catheter history");
+    case "stone_history":
+      return l("Steinanamnese", "Анамнез камней", "Stone history");
+    case "appetit_durst":
+      return l("Appetit / Durst", "Аппетит / жажда", "Appetite / thirst");
+    case "koerpergroesse":
+      return l("Korpergroesse", "Рост", "Height");
+    case "gewicht":
+      return l("Gewicht", "Вес", "Weight");
+    case "gewichtsveraenderung":
+      return l("Gewichtsveranderung", "Изменение веса", "Weight change");
+    case "grund":
+      return l("Grund", "Причина", "Reason");
+    default:
+      return formatUnknownValue(key, translations);
+  }
+}
+
+function caseRoleLabel(
+  role: string | null | undefined,
+  translations: { common_unknown: string; common_unknown_value: string },
+) {
+  if (!role) return null;
+  const labels = translations as unknown as Record<string, string>;
+  return labels[`role_${role}`] ?? formatUnknownValue(role, translations);
 }
 
 export function PatientCasePreviewSheet({
@@ -111,8 +317,9 @@ export function PatientCasePreviewSheet({
   onOpenChange: (v: boolean) => void;
   showFullViewAction?: boolean;
 }) {
-  const { t } = useLang();
-  const tr = t as unknown as Record<string, string>;
+  const { t, lang } = useLang();
+  const l = (de: string, ru: string, en: string) =>
+    lang === "de" ? de : lang === "ru" ? ru : en;
   const { staffGo } = useStaffNavigate();
   const [detailState, setDetailState] = useState<{
     caseId: string | null;
@@ -215,9 +422,7 @@ export function PatientCasePreviewSheet({
     };
   }, [open, caseId, patientId, t.common_failed_load]);
 
-  const statusLabel = activeDetail
-    ? tr[`cases_${activeDetail.status}`] ?? activeDetail.status.replaceAll("_", " ")
-    : "";
+  const statusLabel = activeDetail ? caseStatusLabel(activeDetail.status, t) : "";
   const statusClassName = activeDetail
     ? caseStatusBadgeClass(activeDetail.status)
     : "border-slate-200 bg-slate-100 text-slate-700";
@@ -284,21 +489,26 @@ export function PatientCasePreviewSheet({
                 </div>
 
                 <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  <MetaCard label="Reference code" value={activeDetail.case_id} mono />
+                  <MetaCard label="Reference code" value={activeDetail.case_id} emptyLabel={t.common_not_set} mono />
                   <MetaCard
                     label="System case UUID"
                     value={activeDetail.case_uuid ?? activeDetail.id}
+                    emptyLabel={t.common_not_set}
                     mono
                   />
                   <MetaCard
                     label="Retention until"
-                    value={formatDate(activeDetail.retention_until)}
+                    value={formatDate(activeDetail.retention_until, t.common_not_set, t)}
+                    emptyLabel={t.common_not_set}
                   />
                   <MetaCard
                     label="Last clinical update"
                     value={formatDateTime(
                       activeDetail.last_clinical_update_at ?? activeDetail.updated_at,
+                      t.common_not_set,
+                      t,
                     )}
+                    emptyLabel={t.common_not_set}
                   />
                 </div>
 
@@ -326,10 +536,10 @@ export function PatientCasePreviewSheet({
                 <h3 className="text-base font-semibold text-slate-950">
                   {t.cases_core_anamnesis}
                 </h3>
-                <Field label={t.cases_reason} value={activeDetail.hauptanfragegrund} />
-                <Field label={t.cases_narrative} value={activeDetail.aktuelle_anamnese} />
-                <Field label={t.cases_referrer} value={activeDetail.zuweiser} />
-                <Field label={t.patients_notes} value={activeDetail.notes} />
+                <Field label={t.cases_reason} value={activeDetail.hauptanfragegrund} emptyLabel={t.common_not_set} />
+                <Field label={t.cases_narrative} value={activeDetail.aktuelle_anamnese} emptyLabel={t.common_not_set} />
+                <Field label={t.cases_referrer} value={activeDetail.zuweiser} emptyLabel={t.common_not_set} />
+                <Field label={t.patients_notes} value={activeDetail.notes} emptyLabel={t.common_not_set} />
               </section>
 
               <section className="rounded-2xl border border-slate-200 bg-white p-5 grid gap-4 lg:grid-cols-2">
@@ -365,7 +575,7 @@ export function PatientCasePreviewSheet({
                   items={
                     activeDetail.operationen?.map((item) =>
                       [
-                        item.datum ? formatDate(item.datum) : "",
+                        item.datum ? formatDate(item.datum, t.common_not_set, t) : "",
                         item.grund ?? "",
                         item.arzt ?? "",
                       ]
@@ -401,37 +611,49 @@ export function PatientCasePreviewSheet({
                   title="Cardiology"
                   recommended={activeDetail.cardiology_recommended}
                   data={activeDetail.cardiology}
+                  l={l}
                   notSetLabel={t.common_not_set}
+                  translations={t}
                 />
                 <KeyValueGrid
                   title="Gastroenterology"
                   recommended={activeDetail.gastroenterology_recommended}
                   data={activeDetail.gastroenterology}
+                  l={l}
                   notSetLabel={t.common_not_set}
+                  translations={t}
                 />
                 <KeyValueGrid
                   title="Orthopedics"
                   recommended={activeDetail.orthopedics_recommended}
                   data={activeDetail.orthopedics}
+                  l={l}
                   notSetLabel={t.common_not_set}
+                  translations={t}
                 />
                 <KeyValueGrid
                   title="Neurology"
                   recommended={activeDetail.neurology_recommended}
                   data={activeDetail.neurology}
+                  l={l}
                   notSetLabel={t.common_not_set}
+                  translations={t}
                 />
                 <KeyValueGrid
                   title="Pulmonology"
                   recommended={activeDetail.pulmonology_recommended}
                   data={activeDetail.pulmonology}
+                  l={l}
                   notSetLabel={t.common_not_set}
+                  translations={t}
                 />
                 <KeyValueGrid
                   title="Urology"
                   recommended={activeDetail.urology_recommended}
                   data={activeDetail.urology}
+                  l={l}
                   notSetLabel={t.common_not_set}
+                  translations={t}
                 />
               </section>
 
@@ -442,9 +664,11 @@ export function PatientCasePreviewSheet({
                 <KeyValueGrid
                   title={t.cases_vegetative}
                   data={activeDetail.vegetative_anamnese}
+                  l={l}
                   notSetLabel={t.common_not_set}
+                  translations={t}
                 />
-                <Field label={t.cases_vaccination} value={activeDetail.impfstatus} />
+                <Field label={t.cases_vaccination} value={activeDetail.impfstatus} emptyLabel={t.common_not_set} />
               </section>
 
               <section className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
@@ -458,25 +682,25 @@ export function PatientCasePreviewSheet({
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                            {entry.section || t.common_not_set}
+                            {caseHistorySectionLabel(entry.section, l, t)}
                           </span>
                           <span className="text-xs text-slate-500">
-                            {formatDateTime(entry.created_at)}
+                            {formatDateTime(entry.created_at, t.common_not_set, t)}
                           </span>
                         </div>
                         <p className="mt-1 text-sm text-slate-700">
-                          {[entry.changed_by_name, entry.changed_by_role]
+                          {[entry.changed_by_name, caseRoleLabel(entry.changed_by_role, t)]
                             .filter(Boolean)
                             .join(" • ") || t.common_not_set}
                         </p>
                         <div className="mt-2 grid gap-2 lg:grid-cols-2">
                           <CodeBlock
                             label="Old value"
-                            value={safeStringify(entry.old_value)}
+                            value={safeStringify(entry.old_value, l, t)}
                           />
                           <CodeBlock
                             label="New value"
-                            value={safeStringify(entry.new_value)}
+                            value={safeStringify(entry.new_value, l, t)}
                           />
                         </div>
                       </div>
@@ -509,10 +733,12 @@ function caseStatusBadgeClass(status: string) {
 function MetaCard({
   label,
   value,
+  emptyLabel,
   mono = false,
 }: {
   label: string;
   value: string;
+  emptyLabel: string;
   mono?: boolean;
 }) {
   return (
@@ -526,7 +752,7 @@ function MetaCard({
           mono ? "font-mono break-all text-xs" : null,
         )}
       >
-        {value || "-"}
+        {value || emptyLabel}
       </div>
     </div>
   );
@@ -544,9 +770,11 @@ function MetricCard({ label, value }: { label: string; value: string }) {
 function Field({
   label,
   value,
+  emptyLabel,
 }: {
   label: string;
   value: string | null | undefined;
+  emptyLabel: string;
 }) {
   return (
     <div className="rounded-lg border border-border/60 bg-card px-3 py-2.5">
@@ -554,7 +782,7 @@ function Field({
         {label}
       </p>
       <p className="mt-1 whitespace-pre-wrap text-[13px] text-foreground">
-        {value?.trim() || "-"}
+        {value?.trim() || emptyLabel}
       </p>
     </div>
   );
@@ -600,12 +828,20 @@ function KeyValueGrid({
   title,
   recommended,
   data,
+  l,
   notSetLabel,
+  translations,
 }: {
   title: string;
   recommended?: boolean;
   data?: Record<string, unknown> | null;
+  l: (de: string, ru: string, en: string) => string;
   notSetLabel: string;
+  translations: {
+    common_not_set: string;
+    common_unknown: string;
+    common_unknown_value: string;
+  };
 }) {
   const entries = Object.entries(data ?? {});
 
@@ -615,7 +851,9 @@ function KeyValueGrid({
         <p className="text-sm font-semibold text-slate-900">{title}</p>
         {recommended != null ? (
           <Badge variant="outline" className="rounded-full text-[10px]">
-            {recommended ? "recommended" : "not required"}
+            {recommended
+              ? l("empfohlen", "рекомендовано", "recommended")
+              : l("nicht erforderlich", "не требуется", "not required")}
           </Badge>
         ) : null}
       </div>
@@ -625,17 +863,19 @@ function KeyValueGrid({
         <div className="grid gap-2 lg:grid-cols-2">
           {entries.map(([key, value]) => (
             <div key={key} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-              <p className="text-[11px] uppercase tracking-[0.1em] text-slate-500">{key}</p>
+              <p className="text-[11px] uppercase tracking-[0.1em] text-slate-500">
+                {caseFieldLabel(key, l, translations)}
+              </p>
               <p className="mt-1 break-words text-sm text-slate-900">
                 {typeof value === "string"
                   ? value || notSetLabel
                   : typeof value === "boolean"
                     ? value
-                      ? "Yes"
-                      : "No"
+                      ? l("Ja", "Да", "Yes")
+                      : l("Nein", "Нет", "No")
                     : value == null
                       ? notSetLabel
-                      : safeStringify(value)}
+                      : safeStringify(value, l, translations)}
               </p>
             </div>
           ))}
@@ -656,13 +896,18 @@ function CodeBlock({ label, value }: { label: string; value: string }) {
   );
 }
 
-function safeStringify(value: unknown) {
-  if (value == null) return "-";
-  if (typeof value === "string") return value || "-";
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
+function safeStringify(
+  value: unknown,
+  l: (de: string, ru: string, en: string) => string,
+  translations: { common_not_set: string; common_unknown: string; common_unknown_value: string },
+) {
+  if (value == null) return translations.common_not_set;
+  if (typeof value === "string") return value || translations.common_not_set;
+  if (typeof value === "boolean") return value ? l("Ja", "Да", "Yes") : l("Nein", "Нет", "No");
+  if (typeof value === "number") return value.toLocaleString();
   try {
     return JSON.stringify(value, null, 2);
   } catch {
-    return String(value);
+    return formatUnknownValue(value, translations);
   }
 }

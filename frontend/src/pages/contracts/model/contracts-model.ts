@@ -16,6 +16,12 @@ import type {
   QuoteStatus,
   QuoteStatusFormState,
 } from "./types";
+import { formatEnumLabel, type Translations } from "@/lib/i18n";
+
+type EnumLabelTranslations = Pick<
+  Translations,
+  "common_not_set" | "common_unknown" | "common_unknown_value"
+>;
 
 export const CONTRACT_STATUSES: ContractStatus[] = [
   "draft",
@@ -215,8 +221,12 @@ export function formatDate(
   }
 }
 
-export function enumLabel(value: string, labels: Record<string, string>) {
-  return labels[value] ?? value.replaceAll("_", " ");
+export function enumLabel(
+  value: string | null | undefined,
+  labels: Partial<Record<string, string>>,
+  translations: EnumLabelTranslations,
+) {
+  return formatEnumLabel(value, labels, translations);
 }
 
 export function formatCurrency(value: unknown) {

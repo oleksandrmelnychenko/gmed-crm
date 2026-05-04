@@ -3,6 +3,7 @@ import { useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import type { ColumnDef } from "./types";
@@ -41,18 +42,29 @@ export function ColumnVisibilityMenu<T>({
   defaultFrozen = [],
   maxFrozenColumns = 4,
   groupLabels = {},
-  buttonLabel = "Columns",
-  searchPlaceholder = "Search columns",
-  resetLabel = "Reset",
-  showAllLabel = "Show all",
-  hideAllLabel = "Hide all",
-  noMatchLabel = "No match",
-  requiredNoteLabel = "required",
-  freezeLabel = "Freeze",
-  unfreezeLabel = "Unfreeze",
-  frozenNoteLabel = "frozen",
+  buttonLabel,
+  searchPlaceholder,
+  resetLabel,
+  showAllLabel,
+  hideAllLabel,
+  noMatchLabel,
+  requiredNoteLabel,
+  freezeLabel,
+  unfreezeLabel,
+  frozenNoteLabel,
   className,
 }: ColumnVisibilityMenuProps<T>) {
+  const { t } = useLang();
+  const resolvedButtonLabel = buttonLabel ?? t.table_columns;
+  const resolvedSearchPlaceholder = searchPlaceholder ?? t.table_columns_search;
+  const resolvedResetLabel = resetLabel ?? t.common_reset;
+  const resolvedShowAllLabel = showAllLabel ?? t.table_columns_show_all;
+  const resolvedHideAllLabel = hideAllLabel ?? t.table_columns_hide_all;
+  const resolvedNoMatchLabel = noMatchLabel ?? t.common_no_results;
+  const resolvedRequiredNoteLabel = requiredNoteLabel ?? t.table_columns_required;
+  const resolvedFreezeLabel = freezeLabel ?? t.table_columns_freeze;
+  const resolvedUnfreezeLabel = unfreezeLabel ?? t.table_columns_unfreeze;
+  const resolvedFrozenNoteLabel = frozenNoteLabel ?? t.table_columns_frozen;
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -134,7 +146,7 @@ export function ColumnVisibilityMenu<T>({
       >
         <Columns3 className="size-3.5" />
         <span>
-          {buttonLabel} <span className="tabular-nums text-muted-foreground">({totalVisible} / {totalCols})</span>
+          {resolvedButtonLabel} <span className="tabular-nums text-muted-foreground">({totalVisible} / {totalCols})</span>
         </span>
         {onFrozenColumnsChange ? (
           <span className="inline-flex items-center gap-0.5 text-muted-foreground">
@@ -154,19 +166,19 @@ export function ColumnVisibilityMenu<T>({
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder={searchPlaceholder}
+              placeholder={resolvedSearchPlaceholder}
               className="h-7 border-0 px-0 text-xs shadow-none focus-visible:ring-0"
             />
           </div>
           <div className="max-h-80 overflow-y-auto p-1">
             {grouped.length === 0 ? (
-              <div className="px-3 py-4 text-center text-xs text-muted-foreground">{noMatchLabel}</div>
+              <div className="px-3 py-4 text-center text-xs text-muted-foreground">{resolvedNoMatchLabel}</div>
             ) : (
               grouped.map(([groupKey, cols]) => (
                 <div key={groupKey || "default"} className="mb-2 last:mb-0">
                   {groupKey ? (
                     <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                      {groupLabels[groupKey] ?? groupKey}
+                      {groupLabels[groupKey] ?? t.common_unknown_value}
                     </div>
                   ) : null}
                   {cols.map((col) => {
@@ -178,8 +190,8 @@ export function ColumnVisibilityMenu<T>({
                       (isHidden && !isFrozen) ||
                       (!isFrozen && frozenColumns.length >= maxFrozenColumns);
                     const freezeTitle = isFrozen
-                      ? `${unfreezeLabel} ${col.label}`
-                      : `${freezeLabel} ${col.label}`;
+                      ? `${resolvedUnfreezeLabel} ${col.label}`
+                      : `${resolvedFreezeLabel} ${col.label}`;
                     return (
                       <div
                         key={col.id}
@@ -209,10 +221,10 @@ export function ColumnVisibilityMenu<T>({
                           </span>
                           <span className="min-w-0 flex-1 truncate">{col.label}</span>
                           {col.required ? (
-                            <span className="text-[10px] uppercase text-muted-foreground">{requiredNoteLabel}</span>
+                            <span className="text-[10px] uppercase text-muted-foreground">{resolvedRequiredNoteLabel}</span>
                           ) : null}
                           {isFrozen ? (
-                            <span className="text-[10px] uppercase text-muted-foreground">{frozenNoteLabel}</span>
+                            <span className="text-[10px] uppercase text-muted-foreground">{resolvedFrozenNoteLabel}</span>
                           ) : null}
                         </button>
                         {onFrozenColumnsChange ? (
@@ -240,16 +252,16 @@ export function ColumnVisibilityMenu<T>({
             )}
           </div>
           <div className="flex items-center justify-between gap-1 border-t border-border p-1.5">
-            <Button type="button" variant="ghost" size="xs" onClick={resetToDefault} title={resetLabel}>
+            <Button type="button" variant="ghost" size="xs" onClick={resetToDefault} title={resolvedResetLabel}>
               <RotateCcw className="size-3" />
-              <span>{resetLabel}</span>
+              <span>{resolvedResetLabel}</span>
             </Button>
             <div className="flex gap-1">
               <Button type="button" variant="ghost" size="xs" onClick={showAll}>
-                {showAllLabel}
+                {resolvedShowAllLabel}
               </Button>
               <Button type="button" variant="ghost" size="xs" onClick={hideAll}>
-                {hideAllLabel}
+                {resolvedHideAllLabel}
               </Button>
             </div>
           </div>

@@ -103,7 +103,6 @@ import {
   DEFAULT_PROVIDER_FROZEN_COLUMNS,
   DEFAULT_PROVIDER_HIDDEN_COLUMNS,
   MAX_PROVIDER_FROZEN_COLUMNS,
-  PROVIDER_COLUMN_GROUPS,
 } from "./ui/providers-columns";
 import { useProvidersListTableModel } from "./ui/hooks/use-providers-list-table-model";
 import {
@@ -212,6 +211,13 @@ function ProvidersPage() {
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
+  const providerColumnGroupLabels = {
+    identity: l("Identität", "Идентичность", "Identity"),
+    registry: l("Register", "Реестр", "Registry"),
+    contact: l("Kontakt", "Контакты", "Contact"),
+    activity: l("Aktivität", "Активность", "Activity"),
+    audit: l("Audit", "Аудит", "Audit"),
+  };
   const { staffGo } = useStaffNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = useMemo(() => providerPermissions(user?.role), [user?.role]);
@@ -916,7 +922,7 @@ function ProvidersPage() {
               onFrozenColumnsChange={setFrozenColumns}
               defaultFrozen={DEFAULT_PROVIDER_FROZEN_COLUMNS}
               maxFrozenColumns={MAX_PROVIDER_FROZEN_COLUMNS}
-              groupLabels={PROVIDER_COLUMN_GROUPS}
+              groupLabels={providerColumnGroupLabels}
               buttonLabel={tr.table_columns ?? "Columns"}
               searchPlaceholder={tr.table_columns_search ?? "Search columns"}
               resetLabel={tr.common_reset ?? "Reset"}

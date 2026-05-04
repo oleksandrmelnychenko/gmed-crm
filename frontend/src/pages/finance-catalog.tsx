@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { LoaderCircle, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -19,7 +19,7 @@ import {
 } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { useLang } from "@/lib/i18n";
+import { formatEnumLabel, formatUnknownValue, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 type TaxProfile = {
@@ -233,9 +233,44 @@ function decimalInputIsValid(value: string) {
 
 export function FinanceCatalogPage() {
   const { user } = useAuth();
-  const { lang } = useLang();
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const { lang, t } = useLang();
+  const l = useCallback(
+    (de: string, ru: string, en: string) =>
+      lang === "de" ? de : lang === "ru" ? ru : en,
+    [lang],
+  );
+  const vatCategoryLabels = useMemo(
+    () => ({
+      standard: l("Standard", "Стандартная", "Standard"),
+      zero_rated: l("Nullsatz", "Нулевая ставка", "Zero-rated"),
+      exempt: l("Befreit", "Освобождено", "Exempt"),
+      reverse_charge: l("Reverse Charge", "Reverse charge", "Reverse charge"),
+      custom: l("Individuell", "Индивидуальная", "Custom"),
+    }),
+    [l],
+  );
+  const vatSourceLabels = useMemo(
+    () => ({
+      catalog: l("Leistungskatalog", "Каталог услуг", "Service catalog"),
+      tax_profile: l("Steuerprofil", "Налоговый профиль", "Tax profile"),
+      manual: l("Manuell", "Вручную", "Manual"),
+      legacy: l("Altdaten", "Исторические данные", "Legacy"),
+    }),
+    [l],
+  );
+  const vatCategoryLabel = (value: string | null | undefined) =>
+    formatEnumLabel(value, vatCategoryLabels, t);
+  const vatSourceLabel = (value: string | null | undefined) =>
+    formatEnumLabel(value, vatSourceLabels, t);
+  const taxProfileLabel = (
+    name: string | null | undefined,
+    key: string | null | undefined,
+  ) => {
+    const trimmedName = name?.trim();
+    if (trimmedName) return trimmedName;
+    if (key?.trim()) return formatUnknownValue(key, t);
+    return t.common_not_set;
+  };
   const canManageTaxProfiles = user?.role === "ceo" || user?.role === "billing";
 
   const [taxProfiles, setTaxProfiles] = useState<TaxProfile[]>([]);
@@ -618,7 +653,7 @@ export function FinanceCatalogPage() {
                 >
                   {VAT_CATEGORIES.map((category) => (
                     <option key={category} value={category}>
-                      {category}
+                      {vatCategoryLabel(category)}
                     </option>
                   ))}
                 </NativeComboboxSelect>
@@ -776,7 +811,7 @@ export function FinanceCatalogPage() {
                 >
                   {VAT_CATEGORIES.map((category) => (
                     <option key={category} value={category}>
-                      {category}
+                      {vatCategoryLabel(category)}
                     </option>
                   ))}
                 </NativeComboboxSelect>
@@ -904,7 +939,7 @@ export function FinanceCatalogPage() {
                           : "border-slate-200 bg-slate-50 text-slate-600",
                       )}
                     >
-                      {profile.is_active ? "active" : "inactive"}
+                      {profile.is_active ? t.common_active : t.common_inactive}
                     </Badge>
                     {canManageTaxProfiles ? (
                       <Button
@@ -928,7 +963,7 @@ export function FinanceCatalogPage() {
                   {profile.vat_rate}%
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {profile.vat_category}
+                  {vatCategoryLabel(profile.vat_category)}
                   {profile.description ? ` / ${profile.description}` : ""}
                 </p>
               </article>
@@ -1022,7 +1057,9 @@ export function FinanceCatalogPage() {
                   className={selectClass}
                   disabled={packageBusy}
                 >
-                  <option value="__none__">No VAT profile</option>
+                  <option value="__none__">
+                    {l("Kein Steuerprofil", "Нет налогового профиля", "No VAT profile")}
+                  </option>
                   {taxProfiles.map((profile) => (
                     <option key={profile.id} value={profile.id}>
                       {profile.name} ({profile.vat_rate}%)
@@ -1203,7 +1240,13 @@ export function FinanceCatalogPage() {
                         className={selectClass}
                         disabled={packageBusy}
                       >
-                        <option value="__none__">Use package/default VAT</option>
+                        <option value="__none__">
+                          {l(
+                            "Paket-/Standard-MwSt. verwenden",
+                            "Использовать НДС пакета/по умолчанию",
+                            "Use package/default VAT",
+                          )}
+                        </option>
                         {taxProfiles.map((profile) => (
                           <option key={profile.id} value={profile.id}>
                             {profile.name} ({profile.vat_rate}%)
@@ -1291,7 +1334,7 @@ export function FinanceCatalogPage() {
                         : "border-slate-200 bg-slate-50 text-slate-600",
                     )}
                   >
-                    {item.is_active ? "active" : "inactive"}
+                    {item.is_active ? t.common_active : t.common_inactive}
                   </Badge>
                   {canManageTaxProfiles ? (
                     <Button
@@ -1314,7 +1357,7 @@ export function FinanceCatalogPage() {
                   {formatMoney(item.base_price_vat, item.currency)}
                 </p>
                 <p className="mt-2 text-xs text-muted-foreground">
-                  tax profile: {item.tax_profile_name ?? item.tax_profile_key ?? "not set"}
+                  tax profile: {taxProfileLabel(item.tax_profile_name, item.tax_profile_key)}
                 </p>
                 {item.items?.length ? (
                   <div className="mt-3 space-y-1.5">
@@ -1379,9 +1422,9 @@ export function FinanceCatalogPage() {
                   </p>
                 </div>
                 <span className="text-foreground">{row.vat_rate}%</span>
-                <span className="text-muted-foreground">{row.vat_source}</span>
+                <span className="text-muted-foreground">{vatSourceLabel(row.vat_source)}</span>
                 <span className="truncate text-muted-foreground">
-                  {row.tax_profile_name ?? row.tax_profile_key ?? "not set"}
+                  {taxProfileLabel(row.tax_profile_name, row.tax_profile_key)}
                 </span>
               </div>
             ))}

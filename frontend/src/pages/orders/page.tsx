@@ -54,7 +54,7 @@ import {
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { useLang } from "@/lib/i18n";
+import { formatEnumLabel, useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
@@ -360,6 +360,16 @@ export function OrdersPage() {
     }),
     [l],
   );
+  const frameworkContractStatusLabels = useMemo(
+    () => ({
+      draft: l("Entwurf", "Черновик"),
+      sent: l("Versendet", "Отправлено"),
+      signed: l("Unterzeichnet", "Подписано"),
+      expired: l("Abgelaufen", "Истекло"),
+      terminated: l("Beendet", "Прекращено"),
+    }),
+    [l],
+  );
   const debtStatusLabels = useMemo(
     () => ({
       review_required: l("Review erforderlich", "Требуется ревью"),
@@ -390,10 +400,14 @@ export function OrdersPage() {
   const roleLabels = useMemo(
     () => ({
       ceo: "CEO",
+      ceo_assistant: l("CEO-Assistenz", "Ассистент CEO"),
       admin: l("Admin", "Администратор"),
       assistant: l("CEO-Assistenz", "Ассистент CEO"),
       patient_manager: l("Patientenmanagement", "Пациент-менеджер"),
       billing: l("Billing", "Billing"),
+      sales: l("Vertrieb", "Отдел продаж"),
+      it_admin: l("IT-Admin", "IT-администратор"),
+      patient: l("Patient", "Пациент"),
       concierge: l("Concierge", "Консьерж"),
       interpreter: l("Dolmetscher", "Переводчик"),
       teamlead_interpreter: l("Dolmetscher-Teamlead", "Тимлид переводчиков"),
@@ -401,8 +415,10 @@ export function OrdersPage() {
     }),
     [l],
   );
-  const labelFor = (value: string | null | undefined, labels: Record<string, string>) =>
-    (value ? labels[value] : null) ?? value ?? l("Nicht festgelegt", "Не указано");
+  const labelFor = (
+    value: string | null | undefined,
+    labels: Partial<Record<string, string>>,
+  ) => formatEnumLabel(value, labels, t);
   const formatMoney = (value: unknown, currency = "EUR") =>
     formatCurrency(value, currency, locale);
   const formatDateLabel = (value: string | null | undefined) =>
@@ -413,6 +429,8 @@ export function OrdersPage() {
     formatDateOnly(value, locale, l("Nicht festgelegt", "Не указано"));
   const phaseLabel = (value: string) => labelFor(value, phaseLabels);
   const orderStatusLabel = (value: string) => labelFor(value, orderStatusLabels);
+  const frameworkContractStatusLabel = (value: string) =>
+    labelFor(value, frameworkContractStatusLabels);
   const debtStatusLabel = (value: string) => labelFor(value, debtStatusLabels);
   const billingReleaseLabel = (value: string) =>
     labelFor(value, billingReleaseLabels);
@@ -934,10 +952,10 @@ export function OrdersPage() {
     }
     return Array.from(grouped.entries()).map(([key, groupItems]) => ({
       key,
-      label: workflowChecklistLabel(key, workflowGroupLabels),
+      label: workflowChecklistLabel(key, workflowGroupLabels, t),
       items: groupItems,
     }));
-  }, [workflowChecklist, workflowGroupLabels]);
+  }, [t, workflowChecklist, workflowGroupLabels]);
   const nextLifecycleTransition = useMemo(
     () => orderDetail?.lifecycle?.allowed_transitions?.[0] ?? null,
     [orderDetail?.lifecycle],
@@ -5430,7 +5448,7 @@ export function OrdersPage() {
                               primary_contact: l("Hauptkontakt", "Основной контакт"),
                               country: l("Land", "Страна"),
                               language: l("Bevorzugte Sprache", "Предпочитаемый язык"),
-                            }),
+                            }, t),
                           )
                           .join(", ")}
                       </div>
@@ -5526,7 +5544,9 @@ export function OrdersPage() {
                               createRecheck.latest_framework_contract
                                 .contract_number
                             }{" "}
-                            ({createRecheck.latest_framework_contract.status})
+                            ({frameworkContractStatusLabel(
+                              createRecheck.latest_framework_contract.status,
+                            )})
                           </div>
                         ) : (
                           <div>

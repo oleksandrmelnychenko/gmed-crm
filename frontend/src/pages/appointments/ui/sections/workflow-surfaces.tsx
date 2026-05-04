@@ -105,6 +105,19 @@ import { ContextCard } from "@/pages/appointments/ui/shared/context-card";
 const selectClassName = appointmentSelectControlClassName;
 const textareaClassName = appointmentTextareaControlClassName;
 
+function checklistPhaseLabel(phase: string) {
+  switch (phase) {
+    case "preparation":
+      return appointmentText("Vorbereitung", "Подготовка", "Preparation");
+    case "execution":
+      return appointmentText("Durchführung", "Выполнение", "Execution");
+    case "followup":
+      return appointmentText("Nachbereitung", "После визита", "Follow-up");
+    default:
+      return appointmentText("Unbekannte Phase", "Неизвестная фаза", "Unknown phase");
+  }
+}
+
 function withEllipsis(value: string | null | undefined) {
   const normalized = String(value ?? "").trim();
   if (!normalized) return "";
@@ -847,7 +860,7 @@ function AppointmentChecklistSection({
                   {item.item_text}
                 </p>
                 <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">
-                  {item.phase}
+                  {checklistPhaseLabel(item.phase)}
                 </p>
               </div>
               {item.is_completed ? (
@@ -892,7 +905,7 @@ function AppointmentChecklistSection({
           >
             {CHECKLIST_PHASES.map((phase) => (
               <option key={phase} value={phase}>
-                {phase}
+                {checklistPhaseLabel(phase)}
               </option>
             ))}
           </NativeComboboxSelect>

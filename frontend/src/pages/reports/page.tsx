@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   BarChart3,
@@ -27,7 +27,7 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { clearApiCache } from "@/lib/api";
 import { Banner as ShellBanner, PageHeader, StatusBadge, tokens } from "@/components/ui-shell";
 import { useAuth } from "@/lib/auth";
-import { useLang } from "@/lib/i18n";
+import { formatUnknownValue, useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { fetchReportsExport, fetchReportsWorkspace } from "./data/reports-api";
@@ -411,7 +411,7 @@ function metricCard(label: string, value: string | number, icon: LucideIcon) {
 
 export function ReportsPage() {
   const { user } = useAuth();
-  const { lang } = useLang();
+  const { lang, t } = useLang();
   const locale = lang === "de" ? "de-DE" : "ru-RU";
   const text = useMemo(
     () => (lang === "de"
@@ -507,6 +507,13 @@ export function ReportsPage() {
           weighted: "Gewichtet",
           readModel: "Statusgewichtung",
           readModelLegend: "Entwurf 25 % / Gesendet 60 % / Angenommen 100 %",
+          quoteStatuses: {
+            draft: "Entwurf",
+            sent: "Gesendet",
+            accepted: "Angenommen",
+            rejected: "Abgelehnt",
+            expired: "Abgelaufen",
+          },
           statusSummary: (quotes: number, expiring: number) =>
             `${quotes} Angebote · ${expiring} laufen in 14 Tagen aus`,
           weightedValue: (value: string) => `${value} gewichtet`,
@@ -732,6 +739,13 @@ export function ReportsPage() {
           weighted: "Взвешено",
           readModel: "Вес по статусу",
           readModelLegend: "Черновик 25 % / Отправлено 60 % / Принято 100 %",
+          quoteStatuses: {
+            draft: "Черновик",
+            sent: "Отправлено",
+            accepted: "Принято",
+            rejected: "Отклонено",
+            expired: "Истекло",
+          },
           statusSummary: (quotes: number, expiring: number) =>
             `${quotes} предложений · ${expiring} истекают в ближайшие 14 дней`,
           weightedValue: (value: string) => `${value} взвешено`,
@@ -869,7 +883,13 @@ export function ReportsPage() {
   );
   const sectionLabel = (section: string) =>
     text.sectionLabels[section as keyof typeof text.sectionLabels] ??
-    section.replaceAll("_", " ");
+    formatUnknownValue(section, t);
+  const quoteStatusLabel = useCallback(
+    (status: string) =>
+      text.forecast.quoteStatuses[status as keyof typeof text.forecast.quoteStatuses] ??
+      formatUnknownValue(status, t),
+    [t, text],
+  );
   const [data, setData] = useState<ReportsWorkspacePayload | null>(null);
   const [forecasting, setForecasting] = useState<ForecastingPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1045,7 +1065,7 @@ export function ReportsPage() {
         pinned: "left",
         render: (row) => (
           <span className="text-sm font-medium text-foreground">
-            {serviceTypeLabel(row.service_type, text.serviceTypes)}
+            {serviceTypeLabel(row.service_type, text.serviceTypes, formatUnknownValue(row.service_type, t))}
           </span>
         ),
       },
@@ -1082,7 +1102,7 @@ export function ReportsPage() {
         ),
       },
     ],
-    [locale, text],
+    [locale, t, text],
   );
   const medicalProviderColumns = useMemo<ColumnDef<MedicalProviderReportRow>[]>(
     () => [
@@ -1506,6 +1526,11 @@ export function ReportsPage() {
         width: 240,
         pinned: "left",
         sortable: true,
+        render: (row) => (
+          <span className="text-sm font-medium text-foreground">
+            {quoteStatusLabel(row.status)}
+          </span>
+        ),
       },
       {
         id: "quotes",
@@ -1544,7 +1569,7 @@ export function ReportsPage() {
         ),
       },
     ],
-    [locale, text],
+    [locale, quoteStatusLabel, text],
   );
   const forecastClinicCapacityColumns = useMemo<ColumnDef<ForecastClinicCapacityRow>[]>(
     () => [

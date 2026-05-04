@@ -32,7 +32,7 @@ import {
   SheetContent,
 } from "@/components/ui/sheet";
 import { useSheetDirtyGuard } from "@/hooks/use-sheet-dirty-guard";
-import { useLang } from "@/lib/i18n";
+import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
 import {
   Banner,
   EmptyCell,
@@ -198,8 +198,10 @@ function accessTone(level: string, locked: boolean) {
   }
 }
 
-function roleLabel(role: string, dictionary: Record<string, string>) {
-  return dictionary[`role_${role}`] ?? role.replaceAll("_", " ");
+type UnknownTranslations = Pick<Translations, "common_unknown" | "common_unknown_value">;
+
+function roleLabel(role: string, dictionary: Record<string, string>, translations: UnknownTranslations) {
+  return dictionary[`role_${role}`] ?? formatUnknownValue(role, translations);
 }
 
 export function AdminAccessPage() {
@@ -208,7 +210,7 @@ export function AdminAccessPage() {
   const ui = ACCESS_UI_LABELS[lang];
   const fieldLabels = ACCESS_FIELD_LABELS[lang];
   const closeUnsavedConfirmMessage =
-    tr.common_discard_unsaved_confirm ?? "Discard unsaved changes?";
+    t.common_discard_unsaved_confirm;
 
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [loading, setLoading] = useState(true);
@@ -298,9 +300,9 @@ export function AdminAccessPage() {
       case "conditional":
         return t.access_conditional;
       default:
-        return level;
+        return formatUnknownValue(level, t);
     }
-  }, [t.access_conditional, t.access_full, t.access_hidden, t.access_masked, t.access_system_locked]);
+  }, [t]);
 
   const updatePolicy = useCallback(async (role: string, field: string) => {
     const existing = policies.find(
@@ -378,7 +380,7 @@ export function AdminAccessPage() {
     },
     ...ROLE_KEYS.map<ColumnDef<AccessMatrixRow>>((role) => ({
       id: `role:${role}`,
-      label: roleLabel(role, tr),
+      label: roleLabel(role, tr, t),
       accessor: (row) => {
         const policy = policies.find(
           (item) => item.role === role && item.field_name === row.field,
@@ -437,8 +439,7 @@ export function AdminAccessPage() {
     levelLabel,
     policies,
     saveBusyToken,
-    t.access_field,
-    t.access_system_locked,
+    t,
     tr,
     ui.clickToChange,
     ui.fieldWorkspace,
@@ -694,7 +695,7 @@ export function AdminAccessPage() {
                       >
                         <div className="flex items-center justify-between gap-3">
                           <p className="text-[13px] font-semibold text-foreground">
-                            {roleLabel(role, tr)}
+                            {roleLabel(role, tr, t)}
                           </p>
                           <Button
                             type="button"
@@ -723,7 +724,7 @@ export function AdminAccessPage() {
                 </section>
 
                 <section className={cn("space-y-2 rounded-xl p-3.5", tokens.surface.softCard)}>
-                  <h3 className="text-[13px] font-semibold tracking-tight text-foreground">Audit note</h3>
+                  <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{t.access_audit_note}</h3>
                   <p className="text-xs text-muted-foreground">{selectedFieldAuditNote}</p>
                 </section>
               </>

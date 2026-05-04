@@ -13,6 +13,11 @@ import {
 
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
+import {
+  formatUnknownValue,
+  getLang,
+  t as translateCatalog,
+} from "@/lib/i18n";
 
 import {
   ChartSkeleton,
@@ -21,6 +26,23 @@ import {
 } from "./staff-dashboard-surface-primitives";
 
 const PALETTE = ["#f97316", "#fb923c", "#fdba74", "#fed7aa", "#fff4ed", "#a3a3a3"];
+
+function dashboardText(de: string, ru: string, en: string) {
+  const lang = getLang();
+  if (lang === "de") return de;
+  if (lang === "ru") return ru;
+  return en;
+}
+
+function orderPhaseLabel(phase: string) {
+  const labels: Record<string, string> = {
+    closure: dashboardText("Abschluss", "Закрытие", "Closure"),
+    execution: dashboardText("Ausführung", "Выполнение", "Execution"),
+    intake: dashboardText("Aufnahme", "Прием", "Intake"),
+    planning: dashboardText("Planung", "Планирование", "Planning"),
+  };
+  return labels[phase] ?? formatUnknownValue(phase, translateCatalog(getLang()));
+}
 
 type TopProviderRow = {
   id: string;
@@ -224,7 +246,7 @@ export function OrdersValuedBars({
         return (
           <div key={item.phase} className="flex items-center gap-3">
             <div className="w-[100px] shrink-0 capitalize text-[13px] text-foreground">
-              {item.phase}
+              {orderPhaseLabel(item.phase)}
             </div>
             <div className="flex-1">
               <div className="relative h-5 overflow-hidden rounded-md bg-muted/50">
@@ -238,7 +260,7 @@ export function OrdersValuedBars({
               </div>
             </div>
             <div className="w-[60px] shrink-0 text-right text-[11.5px] tabular-nums text-muted-foreground">
-              {item.count} ord.
+              {item.count} {dashboardText("Auftr.", "зак.", "ord.")}
             </div>
             <div className="w-[110px] shrink-0 text-right text-[12.5px] font-medium tabular-nums text-foreground">
               € {value.toLocaleString()}

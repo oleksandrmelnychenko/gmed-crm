@@ -4,7 +4,7 @@ import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useLang } from "@/lib/i18n";
+import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
 import {
   CASE_TEXT_SNIPPET_PLACEHOLDERS,
   appendSnippetToNarrative,
@@ -40,6 +40,23 @@ function doctorOptionLabel(doctor: CaseWorkspaceDoctor) {
     ? ` · ${doctor.fachbereich.trim()}`
     : "";
   return `${doctor.provider_name} | ${titlePrefix}${doctor.name}${specialty}`;
+}
+
+function snippetCategoryLabel(
+  lang: string,
+  category: string,
+  translations: Translations,
+) {
+  const labels: Record<string, string> = {
+    anamnesis: tri(lang, "Anamnese", "Анамнез", "Anamnesis"),
+    cardiology: tri(lang, "Kardiologie", "Кардиология", "Cardiology"),
+    general: tri(lang, "Allgemein", "Общее", "General"),
+    medication: tri(lang, "Medikation", "Медикация", "Medication"),
+    neurology: tri(lang, "Neurologie", "Неврология", "Neurology"),
+    oncology: tri(lang, "Onkologie", "Онкология", "Oncology"),
+    symptoms: tri(lang, "Symptome", "Симптомы", "Symptoms"),
+  };
+  return labels[category] ?? formatUnknownValue(category, translations);
 }
 
 function initialOverviewForm(
@@ -289,7 +306,7 @@ function OverviewSectionForm({
                           {snippet.label}
                         </p>
                         <p className="truncate text-xs text-muted-foreground">
-                          {snippet.category}
+                          {snippetCategoryLabel(lang, snippet.category, t)}
                         </p>
                       </div>
                     </div>

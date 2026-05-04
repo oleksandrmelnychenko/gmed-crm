@@ -730,7 +730,7 @@ export function ChatPage() {
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate">{u.name}</p>
-                    <p className="text-[10px] text-muted-foreground">{roleDisplay(u.role)}</p>
+                    <p className="text-[10px] text-muted-foreground">{roleDisplay(u.role, t)}</p>
                   </div>
                 </button>
               ))}
@@ -798,7 +798,7 @@ export function ChatPage() {
                 <div className="min-w-0">
                   <p className="text-sm font-semibold truncate">{activeName}</p>
                   <p className="text-[10px] text-muted-foreground">
-                    {roleDisplay(activeRole)}
+                    {roleDisplay(activeRole, t)}
                     {activePeerMessageKey ? " · End-to-end encrypted chat" : ""}
                   </p>
                 </div>

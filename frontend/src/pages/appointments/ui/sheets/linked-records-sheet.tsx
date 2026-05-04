@@ -1,6 +1,7 @@
 import { memo } from "react";
 
 import { Banner, EmptyCell, InfoRow, ListItem } from "@/components/ui-shell";
+import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
 import { appointmentPreviewInfoCardClassName } from "@/pages/appointments/appearance/surface-appearance";
 import {
   linkedPreviewText,
@@ -10,6 +11,7 @@ import { appointmentText } from "@/pages/appointments/model/labels";
 import type {
   LinkedPreviewKind,
   LinkedPreviewPayload,
+  LinkedPreviewRecord,
 } from "@/pages/appointments/model/types";
 import { AppointmentPreviewSheet } from "@/pages/appointments/ui/shared/workspace-primitives";
 
@@ -23,6 +25,82 @@ export type LinkedRecordsSheetProps = {
   kind: LinkedPreviewKind | null;
 };
 
+function readLinkedPreviewRawValue(
+  record: LinkedPreviewRecord,
+  keys: string[],
+): unknown {
+  for (const key of keys) {
+    const value = record[key];
+    if (value !== undefined && value !== null && value !== "") {
+      return value;
+    }
+  }
+  return null;
+}
+
+function linkedOptionalText(value: unknown) {
+  return value === undefined || value === null || value === ""
+    ? ""
+    : linkedPreviewText(value);
+}
+
+function linkedStatusLabel(value: unknown, translations: Translations) {
+  if (value === undefined || value === null || value === "") return "";
+  const status = String(value);
+  const labels: Record<string, string> = {
+    active: appointmentText("Aktiv", "Активно", "Active"),
+    approved: appointmentText("Genehmigt", "Одобрено", "Approved"),
+    archived: appointmentText("Archiviert", "Архивировано", "Archived"),
+    cancelled: appointmentText("Abgesagt", "Отменено", "Cancelled"),
+    closed: appointmentText("Geschlossen", "Закрыто", "Closed"),
+    completed: appointmentText("Abgeschlossen", "Завершено", "Completed"),
+    confirmed: appointmentText("Bestätigt", "Подтверждено", "Confirmed"),
+    draft: appointmentText("Entwurf", "Черновик", "Draft"),
+    in_progress: appointmentText("In Bearbeitung", "В работе", "In progress"),
+    open: appointmentText("Offen", "Открыто", "Open"),
+    pending: appointmentText("Ausstehend", "Ожидает", "Pending"),
+    planned: appointmentText("Geplant", "Запланировано", "Planned"),
+    ready: appointmentText("Bereit", "Готово", "Ready"),
+    rejected: appointmentText("Abgelehnt", "Отклонено", "Rejected"),
+    released: appointmentText("Freigegeben", "Опубликовано", "Released"),
+    sent: appointmentText("Versendet", "Отправлено", "Sent"),
+  };
+  return labels[status] ?? formatUnknownValue(status, translations);
+}
+
+function linkedTypeLabel(value: unknown, translations: Translations) {
+  if (value === undefined || value === null || value === "") return "";
+  const type = String(value);
+  const labels: Record<string, string> = {
+    administrative: appointmentText("Administrativ", "Административный", "Administrative"),
+    billing: appointmentText("Abrechnung", "Биллинг", "Billing"),
+    document: appointmentText("Dokument", "Документ", "Document"),
+    internal: appointmentText("Intern", "Внутренний", "Internal"),
+    medical: appointmentText("Medizinisch", "Медицинский", "Medical"),
+    non_medical: appointmentText("Nicht-medizinisch", "Немедицинский", "Non-medical"),
+    provider: appointmentText("Leistungserbringer", "Провайдер", "Provider"),
+    service: appointmentText("Leistung", "Услуга", "Service"),
+  };
+  return labels[type] ?? formatUnknownValue(type, translations);
+}
+
+function linkedCategoryLabel(value: unknown, translations: Translations) {
+  if (value === undefined || value === null || value === "") return "";
+  const category = String(value);
+  const labels: Record<string, string> = {
+    administrative: appointmentText("Administrativ", "Административный", "Administrative"),
+    clinical: appointmentText("Klinisch", "Клинический", "Clinical"),
+    contract: appointmentText("Vertrag", "Договор", "Contract"),
+    document: appointmentText("Dokument", "Документ", "Document"),
+    imaging: appointmentText("Bildgebung", "Визуализация", "Imaging"),
+    invoice: appointmentText("Rechnung", "Счет", "Invoice"),
+    lab: appointmentText("Labor", "Лаборатория", "Lab"),
+    medical: appointmentText("Medizinisch", "Медицинский", "Medical"),
+    portal: appointmentText("Portal", "Портал", "Portal"),
+  };
+  return labels[category] ?? formatUnknownValue(category, translations);
+}
+
 function LinkedRecordsSheet({
   open,
   onOpenChange,
@@ -32,6 +110,8 @@ function LinkedRecordsSheet({
   payload,
   kind,
 }: LinkedRecordsSheetProps) {
+  const { t } = useLang();
+
   function renderContent() {
     if (loading) {
       return (
@@ -107,11 +187,11 @@ function LinkedRecordsSheet({
                 },
                 {
                   label: appointmentText("Status", "Статус", "Status"),
-                  value: readLinkedPreviewValue(record, ["status"]),
+                  value: linkedStatusLabel(readLinkedPreviewRawValue(record, ["status"]), t),
                 },
                 {
                   label: appointmentText("Typ", "Тип", "Type"),
-                  value: readLinkedPreviewValue(record, ["order_type", "type"]),
+                  value: linkedTypeLabel(readLinkedPreviewRawValue(record, ["order_type", "type"]), t),
                 },
                 {
                   label: appointmentText("Patient", "Пациент", "Patient"),
@@ -135,10 +215,10 @@ function LinkedRecordsSheet({
                 },
                 {
                   label: appointmentText("Typ", "Тип", "Type"),
-                  value: readLinkedPreviewValue(record, [
-                    "provider_type",
-                    "type",
-                  ]),
+                  value: linkedTypeLabel(
+                    readLinkedPreviewRawValue(record, ["provider_type", "type"]),
+                    t,
+                  ),
                 },
                 {
                   label: appointmentText("Stadt", "Город", "City"),
@@ -196,9 +276,12 @@ function LinkedRecordsSheet({
                     "id",
                   ])
                 : readLinkedPreviewValue(item, ["title", "name", "id"]);
-          const meta = [item.status, item.category, item.created_at]
-            .filter((part) => part !== undefined && part !== null && part !== "")
-            .map((part) => linkedPreviewText(part))
+          const meta = [
+            linkedStatusLabel(item.status, t),
+            linkedCategoryLabel(item.category, t),
+            linkedOptionalText(item.created_at),
+          ]
+            .filter(Boolean)
             .join(" • ");
 
           return (

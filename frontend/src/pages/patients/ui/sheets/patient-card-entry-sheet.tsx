@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "@/components/ui/toast";
 import { selectClass, textareaClass } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
-import { useLang } from "@/lib/i18n";
+import { formatUnknownValue, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
@@ -25,6 +25,7 @@ const CATEGORY_OPTIONS = [
 function categoryLabel(
   value: string,
   l: (de: string, ru: string, en: string) => string,
+  translations: { common_unknown: string; common_unknown_value: string },
 ): string {
   switch (value) {
     case "medical_update":
@@ -42,7 +43,7 @@ function categoryLabel(
     case "other":
       return l("Sonstiges", "Другое", "Other");
     default:
-      return value.replaceAll("_", " ");
+      return formatUnknownValue(value, translations);
   }
 }
 
@@ -185,7 +186,7 @@ export function PatientCardEntrySheet({
               }))} id="patient-card-entry-category" className={cn("w-full", selectClass)}>
               {CATEGORY_OPTIONS.map((option) => (
                 <option key={option} value={option}>
-                  {categoryLabel(option, l)}
+                  {categoryLabel(option, l, t)}
                 </option>
               ))}
             </NativeComboboxSelect>

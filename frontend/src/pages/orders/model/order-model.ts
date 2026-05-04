@@ -19,6 +19,24 @@ import type {
   PatientOption,
   WorkflowChecklistFormState,
 } from "./types";
+import {
+  formatUnknownValue,
+  getLang,
+  t as translateCatalog,
+  type Translations,
+} from "@/lib/i18n";
+
+type UnknownValueTranslations = Pick<
+  Translations,
+  "common_unknown" | "common_unknown_value"
+>;
+
+function unknownValueLabel(
+  value: string,
+  translations?: UnknownValueTranslations,
+) {
+  return formatUnknownValue(value, translations ?? translateCatalog(getLang()));
+}
 
 export const ORDER_PHASES: OrderPhase[] = [
   "discovery",
@@ -250,6 +268,7 @@ export function orderFollowupToForm(
 export function workflowChecklistLabel(
   key: string,
   labels?: Partial<Record<OrderPhase | "custom", string>>,
+  translations?: UnknownValueTranslations,
 ) {
   switch (key) {
     case "order_discovery":
@@ -265,13 +284,14 @@ export function workflowChecklistLabel(
     case "order_custom":
       return labels?.custom ?? "Custom";
     default:
-      return key.replaceAll("_", " ");
+      return unknownValueLabel(key, translations);
   }
 }
 
 export function recheckMissingFieldLabel(
   field: string,
   labels?: Partial<Record<"primary_contact" | "country" | "language", string>>,
+  translations?: UnknownValueTranslations,
 ) {
   switch (field) {
     case "primary_contact":
@@ -281,7 +301,7 @@ export function recheckMissingFieldLabel(
     case "language":
       return labels?.language ?? "Preferred language";
     default:
-      return field.replaceAll("_", " ");
+      return unknownValueLabel(field, translations);
   }
 }
 

@@ -82,7 +82,6 @@ function LinkedCasesSheet({
               )}
             </EmptyCell>
           }
-          caseStatusLabel={(status) => status.replaceAll("_", " ")}
           reasonLabel={t.cases_reason}
           createdLabel={t.users_created}
           notSetLabel={t.common_not_set}

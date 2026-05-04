@@ -31,7 +31,7 @@ import {
   UsersRound,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
-import { useLang } from "@/lib/i18n";
+import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
 import { useNavState } from "@/lib/nav-state";
 import {
   listPatientPortalNavItems,
@@ -117,14 +117,14 @@ export function NavPanel() {
     >
       {user && (
         <div className={cn("shrink-0", collapsed ? "px-2 pt-3" : "px-3 pt-3")}>
-          <UserCard name={user.name} role={user.role} collapsed={collapsed} />
+          <UserCard name={user.name} role={user.role} tr={tr} translations={t} collapsed={collapsed} />
         </div>
       )}
       <div className={cn("flex-1 py-4", collapsed ? "px-2" : "px-3")}>
         {isPatientPortal ? (
-          <NavGroup items={patientPortalNav} tr={tr} collapsed={collapsed} />
+          <NavGroup items={patientPortalNav} tr={tr} translations={t} collapsed={collapsed} />
         ) : (
-          <StaffNavGroups staffNavBySection={staffNavBySection} tr={tr} collapsed={collapsed} />
+          <StaffNavGroups staffNavBySection={staffNavBySection} tr={tr} translations={t} collapsed={collapsed} />
         )}
       </div>
 
@@ -148,10 +148,12 @@ export function NavPanel() {
 function StaffNavGroups({
   staffNavBySection,
   tr,
+  translations,
   collapsed,
 }: {
   staffNavBySection: Map<StaffNavSection, NavItem[]>;
   tr: Record<string, string>;
+  translations: UnknownTranslations;
   collapsed: boolean;
 }) {
   const sections = STAFF_NAV_SECTIONS.filter((section) => (staffNavBySection.get(section)?.length ?? 0) > 0);
@@ -164,12 +166,12 @@ function StaffNavGroups({
             <div className="flex flex-col items-center gap-1 pb-1.5 pt-0.5">
               <div className="h-px w-10 bg-sidebar-border" />
               <div className="text-[10px] tracking-wide text-sidebar-foreground/50 uppercase">
-                {tr[SECTION_LABEL_KEYS[section]] ?? section}
+                {sectionLabel(section, tr, translations)}
               </div>
             </div>
           )}
           {collapsed && <SectionDivider />}
-          <NavGroup items={staffNavBySection.get(section) ?? []} tr={tr} collapsed={collapsed} />
+          <NavGroup items={staffNavBySection.get(section) ?? []} tr={tr} translations={translations} collapsed={collapsed} />
         </div>
       ))}
     </div>
@@ -189,22 +191,25 @@ function groupStaffNavItems(items: StaffNavItem[]): Map<StaffNavSection, NavItem
 function NavGroup({
   items,
   tr,
+  translations,
   collapsed,
 }: {
   items: NavItem[];
   tr: Record<string, string>;
+  translations: UnknownTranslations;
   collapsed: boolean;
 }) {
   return (
     <div className="flex flex-col gap-0.5">
       {items.map((item) => {
         const Icon = NAV_ICONS[item.id] ?? FileText;
+        const label = navItemLabel(item, tr, translations);
         return (
           <NavLink
             key={item.to}
             to={item.to}
             end={item.to === "/"}
-            title={collapsed ? (tr[item.labelKey] ?? item.labelKey) : undefined}
+            title={collapsed ? label : undefined}
             className={({ isActive }: { isActive: boolean }) =>
               cn(
                 "relative flex items-center rounded-lg text-sm transition-colors",
@@ -222,7 +227,7 @@ function NavGroup({
                   className={cn("shrink-0", collapsed ? "size-5" : "size-[18px]")}
                 />
                 {!collapsed && (
-                  <span className="whitespace-nowrap overflow-hidden">{tr[item.labelKey] ?? item.labelKey}</span>
+                  <span className="whitespace-nowrap overflow-hidden">{label}</span>
                 )}
               </>
             )}
@@ -245,18 +250,47 @@ function userInitials(name: string): string {
     .join("");
 }
 
-function roleLabel(role: string): string {
-  return role
-    .split("_")
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
+type UnknownTranslations = Pick<Translations, "common_unknown" | "common_unknown_value">;
+
+function sectionLabel(
+  section: StaffNavSection,
+  dictionary: Record<string, string>,
+  translations: UnknownTranslations,
+): string {
+  return dictionary[SECTION_LABEL_KEYS[section]] ?? formatUnknownValue(section, translations);
 }
 
-function UserCard({ name, role, collapsed }: { name: string; role: string; collapsed: boolean }) {
+function navItemLabel(
+  item: NavItem,
+  dictionary: Record<string, string>,
+  translations: UnknownTranslations,
+): string {
+  return dictionary[item.labelKey] ?? formatUnknownValue(item.labelKey, translations);
+}
+
+function roleLabel(role: string, dictionary: Record<string, string>, translations: UnknownTranslations): string {
+  return dictionary[`role_${role}`] ?? formatUnknownValue(role, translations);
+}
+
+function UserCard({
+  name,
+  role,
+  tr,
+  translations,
+  collapsed,
+}: {
+  name: string;
+  role: string;
+  tr: Record<string, string>;
+  translations: UnknownTranslations;
+  collapsed: boolean;
+}) {
+  const roleText = roleLabel(role, tr, translations);
+
   if (collapsed) {
     return (
       <div
-        title={`${name} · ${roleLabel(role)}`}
+        title={`${name} - ${roleText}`}
         className="flex items-center justify-center size-10 mx-auto rounded-full bg-[var(--brand)] text-[12px] font-semibold text-white"
       >
         {userInitials(name)}
@@ -270,7 +304,7 @@ function UserCard({ name, role, collapsed }: { name: string; role: string; colla
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate text-[13px] font-semibold text-foreground leading-tight">{name}</p>
-        <p className="truncate text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground mt-0.5">{roleLabel(role)}</p>
+        <p className="truncate text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground mt-0.5">{roleText}</p>
       </div>
     </div>
   );

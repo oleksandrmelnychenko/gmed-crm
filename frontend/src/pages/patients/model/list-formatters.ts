@@ -72,7 +72,9 @@ export function getPatientRoleLabel(
   value: string | null | undefined,
   dictionary: DictionaryLike,
 ) {
-  return value ? dictionary[`roles_${value}`] ?? value : dictionary.common_unknown;
+  return value
+    ? dictionary[`roles_${value}`] ?? dictionary.common_unknown_value ?? dictionary.common_unknown
+    : dictionary.common_unknown;
 }
 
 export function getPatientDisplayName(patient: PatientSummary | PatientDetail) {

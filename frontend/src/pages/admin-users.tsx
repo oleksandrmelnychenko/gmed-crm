@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import {
   Mail,
   Plus,
@@ -23,10 +23,11 @@ import {
   Banner,
   PageHeader,
   TabLoader,
+  tokens,
 } from "@/components/ui-shell";
 import { useSheetDirtyGuard } from "@/hooks/use-sheet-dirty-guard";
 import { clearApiCache } from "@/lib/api";
-import { useLang } from "@/lib/i18n";
+import { formatUnknownValue, useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -109,6 +110,26 @@ function formatDate(value: string) {
   }
 }
 
+function DotTitle({ children }: { children: ReactNode }) {
+  return (
+    <span className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
+      <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+      <span>{children}</span>
+    </span>
+  );
+}
+
+function DotSection({ title, children }: { title: ReactNode; children: ReactNode }) {
+  return (
+    <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
+      <h3>
+        <DotTitle>{title}</DotTitle>
+      </h3>
+      {children}
+    </section>
+  );
+}
+
 export function AdminUsersPage() {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
@@ -134,8 +155,11 @@ export function AdminUsersPage() {
   const [euPassword, setEuPassword] = useState("");
   const [euSaving, setEuSaving] = useState(false);
 
-  const roleLabel = useCallback((role: string) => tr[`role_${role}`] ?? role, [tr]);
-  const closeUnsavedConfirmMessage = tr.common_discard_unsaved_confirm ?? "Discard unsaved changes?";
+  const roleLabel = useCallback(
+    (role: string) => tr[`role_${role}`] ?? formatUnknownValue(role, t),
+    [t, tr],
+  );
+  const closeUnsavedConfirmMessage = t.common_discard_unsaved_confirm;
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -475,7 +499,7 @@ export function AdminUsersPage() {
               )}
             >
               {createError ? <Banner tone="error">{createError}</Banner> : null}
-              <section className="space-y-4 rounded-xl border border-border/60 bg-card p-3.5">
+              <DotSection title={t.users_create_title}>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_name}</Label>
@@ -520,7 +544,7 @@ export function AdminUsersPage() {
                     ) : null}
                   </div>
                 </div>
-              </section>
+              </DotSection>
             </AdminSheetScaffold>
           </form>
         </SheetContent>
@@ -547,7 +571,7 @@ export function AdminUsersPage() {
                 />
               )}
             >
-              <section className="space-y-4 rounded-xl border border-border/60 bg-card p-3.5">
+              <DotSection title={t.users_title}>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_name}</Label>
@@ -578,7 +602,7 @@ export function AdminUsersPage() {
                     </Button>
                   </div>
                 </div>
-              </section>
+              </DotSection>
             </AdminSheetScaffold>
           </form>
         </SheetContent>
@@ -589,7 +613,7 @@ export function AdminUsersPage() {
 
       {!loading && !error ? (
         <AdminTableCard
-          title={t.users_title}
+          title={<DotTitle>{t.users_title}</DotTitle>}
           description={t.users_subtitle}
           count={filtered.length}
           className="overflow-hidden"

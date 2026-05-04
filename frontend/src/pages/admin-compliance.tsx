@@ -29,7 +29,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { useAuth } from "@/lib/auth";
-import { useLang, type Translations } from "@/lib/i18n";
+import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
 import {
   Banner,
   EmptyCell,
@@ -188,7 +188,7 @@ function consentTypeLabel(consentType: string, t: Translations): string {
     case "third_party_sharing":
       return t.compliance_consent_type_third_party;
     default:
-      return consentType.replaceAll("_", " ");
+      return formatUnknownValue(consentType, t);
   }
 }
 
@@ -204,7 +204,7 @@ function privacyRequestTypeLabel(
     case "third_party_revoke":
       return t.compliance_request_type_third_party_revoke;
     default:
-      return requestType.replaceAll("_", " ");
+      return formatUnknownValue(requestType, t);
   }
 }
 
@@ -221,7 +221,22 @@ function privacyStatusLabel(status: string, t: Translations) {
     case "completed":
       return t.compliance_privacy_status_completed;
     default:
-      return status.replaceAll("_", " ");
+      return formatUnknownValue(status, t);
+  }
+}
+
+function privacySourceLabel(source: string, t: Translations): string {
+  switch (source) {
+    case "patient_portal":
+      return t.documents_patient_portal;
+    case "manual":
+      return t.orders_billing_source_manual;
+    case "system":
+      return t.invoices_workspace_system;
+    case "compliance_workspace":
+      return t.compliance_title;
+    default:
+      return formatUnknownValue(source, t);
   }
 }
 
@@ -1021,7 +1036,7 @@ export function AdminCompliancePage() {
             {privacyRequestTypeLabel(record.request_type, t)}
           </div>
           <div className="truncate text-xs text-slate-500">
-            {record.source.replaceAll("_", " ")}
+            {privacySourceLabel(record.source, t)}
           </div>
         </div>
       ),
@@ -1601,7 +1616,7 @@ export function AdminCompliancePage() {
                     </div>
 
                     <div className="space-y-2 rounded-lg border border-border/60 bg-card p-3">
-                      <p className="text-xs font-medium text-foreground">Impact summary</p>
+                      <p className="text-xs font-medium text-foreground">{t.compliance_impact_summary}</p>
                       {reviewSheetImpactSummary.map((line) => (
                         <p key={line} className="text-xs text-muted-foreground">
                           {line}

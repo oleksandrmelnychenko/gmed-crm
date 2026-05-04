@@ -24,7 +24,7 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
-import { useLang } from "@/lib/i18n";
+import { formatUnknownValue, useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import {
   createPortalAppointmentRequest,
@@ -86,8 +86,29 @@ const PORTAL_APPOINTMENT_REALTIME_EVENTS = [
   "order.external_invoice_overdue",
 ] as const;
 
+function portalOrderPhaseLabel(
+  value: string | null | undefined,
+  l: (de: string, ru: string, en: string) => string,
+  translations: { common_unknown: string; common_unknown_value: string },
+) {
+  switch (value) {
+    case "discovery":
+      return l("Discovery", "Диагностика потребности", "Discovery");
+    case "intake":
+      return l("Aufnahme", "Интейк", "Intake");
+    case "execution":
+      return l("Ausfuhrung", "Исполнение", "Execution");
+    case "closure":
+      return l("Abschluss", "Закрытие", "Closure");
+    case "followup":
+      return l("Nachbetreuung", "Наблюдение", "Follow-up");
+    default:
+      return formatUnknownValue(value, translations);
+  }
+}
+
 export function PatientAppointmentsPage() {
-  const { lang } = useLang();
+  const { t, lang } = useLang();
   const [appointments, setAppointments] = useState<PortalAppointmentItem[]>([]);
   const [requests, setRequests] = useState<PortalAppointmentRequestItem[]>([]);
   const [followupMilestones, setFollowupMilestones] = useState<PortalFollowupMilestoneItem[]>([]);
@@ -358,7 +379,7 @@ export function PatientAppointmentsPage() {
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="min-w-0">
                           <p className="text-sm font-semibold text-foreground">
-                            {item.order_number} / {item.phase.replaceAll("_", " ")}
+                            {item.order_number} / {portalOrderPhaseLabel(item.phase, l, t)}
                           </p>
                           <p className="mt-1 text-xs text-muted-foreground">
                             {l("Abschlussanker", "Точка закрытия", "Closure anchor")} {formatPortalDateTime(item.closure_anchor_at)}
@@ -376,7 +397,7 @@ export function PatientAppointmentsPage() {
                               label={milestone.label}
                               value={
                                 <span className="flex flex-col items-start gap-2">
-                                  <StatusBadge className={milestone.tone}>{milestone.value.replaceAll("_", " ")}</StatusBadge>
+                                  <StatusBadge className={milestone.tone}>{milestone.value}</StatusBadge>
                                   {milestone.hint ? <span className="text-xs text-muted-foreground">{milestone.hint}</span> : null}
                                 </span>
                               }

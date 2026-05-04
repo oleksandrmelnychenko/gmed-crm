@@ -74,6 +74,21 @@ const MED_TYP_OPTIONS: Array<{
   { value: "as_needed", labels: { de: "Bei Bedarf", ru: "По необходимости", en: "As needed" } },
 ];
 
+function verificationStatusLabel(lang: string, status?: string | null) {
+  if (status === "verified") return tri(lang, "Verifiziert", "Проверено", "Verified");
+  if (status === "rejected") return tri(lang, "Abgelehnt", "Отклонено", "Rejected");
+  if (status === "candidate") return tri(lang, "Kandidat", "Кандидат", "Candidate");
+  if (status === "pending") return tri(lang, "Ausstehend", "Ожидает", "Pending");
+  return tri(lang, "Unbekannter Status", "Неизвестный статус", "Unknown status");
+}
+
+function medicationTypeLabel(lang: string, value?: string | null) {
+  const option = MED_TYP_OPTIONS.find((item) => item.value === value);
+  return option
+    ? tri(lang, option.labels.de, option.labels.ru, option.labels.en)
+    : tri(lang, "Unbekannter Typ", "Неизвестный тип", "Unknown type");
+}
+
 function parseDrugImportRows(value: string) {
   return value
     .split(/\r?\n/)
@@ -186,12 +201,12 @@ export function MedicationsSection() {
       setEquivalentError(
         error instanceof Error
           ? error.message
-          : tri(
-              lang,
-              "Failed to load medication equivalents.",
-              "Failed to load medication equivalents.",
-              "Failed to load medication equivalents.",
-            ),
+            : tri(
+                lang,
+                "Medikationsäquivalente konnten nicht geladen werden.",
+                "Не удалось загрузить эквиваленты медикации.",
+                "Failed to load medication equivalents.",
+              ),
       );
     } finally {
       setEquivalentLoading(false);
@@ -211,7 +226,7 @@ export function MedicationsSection() {
       setEquivalentError(
         error instanceof Error
           ? error.message
-          : "Failed to verify drug equivalent.",
+          : tri(lang, "Äquivalent konnte nicht verifiziert werden.", "Не удалось проверить эквивалент.", "Failed to verify drug equivalent."),
       );
     } finally {
       setVerifyingEquivalentId(null);
@@ -220,7 +235,7 @@ export function MedicationsSection() {
 
   async function handleSearchDrugs() {
     if (!drugSearchQuery.trim()) {
-      setDrugSearchError("Enter a drug name, ATC code, or substance.");
+      setDrugSearchError(tri(lang, "Arzneiname, ATC-Code oder Wirkstoff eingeben.", "Введите название препарата, ATC-код или действующее вещество.", "Enter a drug name, ATC code, or substance."));
       return;
     }
     setDrugSearchLoading(true);
@@ -235,7 +250,7 @@ export function MedicationsSection() {
     } catch (error) {
       setDrugSearchResults([]);
       setDrugSearchError(
-        error instanceof Error ? error.message : "Failed to search drugs.",
+        error instanceof Error ? error.message : tri(lang, "Arzneisuche fehlgeschlagen.", "Не удалось выполнить поиск препаратов.", "Failed to search drugs."),
       );
     } finally {
       setDrugSearchLoading(false);
@@ -253,7 +268,7 @@ export function MedicationsSection() {
       await handleSearchDrugs();
     } catch (error) {
       setDrugSearchError(
-        error instanceof Error ? error.message : "Failed to verify drug product.",
+        error instanceof Error ? error.message : tri(lang, "Produkt konnte nicht verifiziert werden.", "Не удалось проверить препарат.", "Failed to verify drug product."),
       );
     } finally {
       setProductUpdatingId(null);
@@ -268,7 +283,7 @@ export function MedicationsSection() {
       const match = await createMedicationDrugMatch(caseId, selectedEquivalentMedication.id, {
         drug_product_id: productId,
         confidence: 0.85,
-        note: "Selected from drug reference search.",
+        note: tri(lang, "Aus der Arzneimittel-Referenzsuche ausgewählt.", "Выбрано из справочника препаратов.", "Selected from drug reference search."),
       });
       setLastMedicationMatch(match);
       await handleFindEquivalent();
@@ -276,7 +291,7 @@ export function MedicationsSection() {
       setDrugSearchError(
         error instanceof Error
           ? error.message
-          : "Failed to create medication drug match.",
+          : tri(lang, "Medikations-Match konnte nicht erstellt werden.", "Не удалось создать связь с препаратом.", "Failed to create medication drug match."),
       );
     } finally {
       setMatchUpdatingId(null);
@@ -305,7 +320,7 @@ export function MedicationsSection() {
       setDrugSearchError(
         error instanceof Error
           ? error.message
-          : "Failed to verify medication drug match.",
+          : tri(lang, "Medikations-Match konnte nicht verifiziert werden.", "Не удалось проверить связь с препаратом.", "Failed to verify medication drug match."),
       );
     } finally {
       setMatchUpdatingId(null);
@@ -315,7 +330,7 @@ export function MedicationsSection() {
   async function handlePreviewDrugImport() {
     const rows = parseDrugImportRows(drugImportText);
     if (rows.length === 0) {
-      setDrugImportError("Paste at least one CSV row to preview.");
+      setDrugImportError(tri(lang, "Mindestens eine CSV-Zeile für die Vorschau einfügen.", "Вставьте минимум одну CSV-строку для предпросмотра.", "Paste at least one CSV row to preview."));
       return;
     }
     setDrugImportLoading(true);
@@ -325,7 +340,7 @@ export function MedicationsSection() {
     } catch (error) {
       setDrugImportPreview(null);
       setDrugImportError(
-        error instanceof Error ? error.message : "Failed to preview drug import.",
+        error instanceof Error ? error.message : tri(lang, "Importvorschau konnte nicht erstellt werden.", "Не удалось создать предпросмотр импорта.", "Failed to preview drug import."),
       );
     } finally {
       setDrugImportLoading(false);
@@ -406,7 +421,7 @@ export function MedicationsSection() {
                 variant="outline"
                 className="rounded-full border-border/60 bg-muted/25 text-[11px] font-medium text-muted-foreground"
               >
-                {item.med_typ}
+                {medicationTypeLabel(lang, item.med_typ)}
               </Badge>
             ) : null}
           </div>
@@ -602,8 +617,8 @@ export function MedicationsSection() {
           <Field
             label={tri(
               lang,
-              "Medication for German equivalent lookup",
-              "Medication for German equivalent lookup",
+              "Medikation für die Suche nach deutschem Äquivalent",
+              "Медикация для поиска немецкого эквивалента",
               "Medication for German equivalent lookup",
             )}
           >
@@ -640,16 +655,21 @@ export function MedicationsSection() {
             }
           />
           <Panel
-            title="Drug reference admin"
-            description="Search curated products, verify product records, and attach a product match to the selected medication before showing final equivalents."
+            title={tri(lang, "Arzneimittel-Referenz", "Справочник препаратов", "Drug reference admin")}
+            description={tri(
+              lang,
+              "Kuratierte Produkte suchen, Datensätze prüfen und einen Produkt-Match zur ausgewählten Medikation hinzufügen.",
+              "Поиск по справочнику, проверка записей и привязка препарата к выбранной медикации.",
+              "Search curated products, verify product records, and attach a product match to the selected medication.",
+            )}
             action={
               <Badge variant="outline" className="rounded-full">
-                staff only
+                {tri(lang, "Nur Team", "Только команда", "Staff only")}
               </Badge>
             }
           >
             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_120px_auto]">
-              <Field label="Drug search">
+              <Field label={tri(lang, "Arzneisuche", "Поиск препаратов", "Drug search")}>
                 <Input
                   value={drugSearchQuery}
                   onChange={(event) => setDrugSearchQuery(event.target.value)}
@@ -657,7 +677,7 @@ export function MedicationsSection() {
                   placeholder="Atorvastatin, Sortis, C10AA05"
                 />
               </Field>
-              <Field label="Country">
+              <Field label={tri(lang, "Land", "Страна", "Country")}>
                 <Input
                   value={drugSearchCountry}
                   onChange={(event) => setDrugSearchCountry(event.target.value)}
@@ -672,7 +692,9 @@ export function MedicationsSection() {
                   disabled={drugSearchLoading}
                   onClick={() => void handleSearchDrugs()}
                 >
-                  {drugSearchLoading ? "Searching..." : "Search"}
+                  {drugSearchLoading
+                    ? tri(lang, "Suche...", "Поиск...", "Searching...")
+                    : tri(lang, "Suchen", "Найти", "Search")}
                 </button>
               </div>
             </div>
@@ -682,7 +704,7 @@ export function MedicationsSection() {
                 checked={includeDrugCandidates}
                 onChange={(event) => setIncludeDrugCandidates(event.target.checked)}
               />
-              Include candidate and rejected products for staff verification
+              {tri(lang, "Kandidaten und abgelehnte Produkte für Team-Prüfung einschließen", "Включить кандидаты и отклоненные препараты для проверки командой", "Include candidate and rejected products for staff verification")}
             </label>
             {drugSearchError ? (
               <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -693,9 +715,9 @@ export function MedicationsSection() {
               <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div>
-                    <p className="font-semibold">Medication match saved</p>
+                    <p className="font-semibold">{tri(lang, "Medikations-Match gespeichert", "Связь с препаратом сохранена", "Medication match saved")}</p>
                     <p className="mt-1 text-xs text-sky-800/80">
-                      Match {lastMedicationMatch.id} - {lastMedicationMatch.verification_status}
+                      {tri(lang, "Match", "Связь", "Match")} {lastMedicationMatch.id} - {verificationStatusLabel(lang, lastMedicationMatch.verification_status)}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -705,7 +727,7 @@ export function MedicationsSection() {
                       disabled={matchUpdatingId === lastMedicationMatch.id}
                       onClick={() => void handleVerifyMedicationMatch("verified")}
                     >
-                      Verify match
+                      {tri(lang, "Match prüfen", "Проверить связь", "Verify match")}
                     </button>
                     <button
                       type="button"
@@ -713,7 +735,7 @@ export function MedicationsSection() {
                       disabled={matchUpdatingId === lastMedicationMatch.id}
                       onClick={() => void handleVerifyMedicationMatch("rejected")}
                     >
-                      Reject match
+                      {tri(lang, "Match ablehnen", "Отклонить связь", "Reject match")}
                     </button>
                   </div>
                 </div>
@@ -721,7 +743,7 @@ export function MedicationsSection() {
             ) : null}
             {drugSearchResults.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border/60 bg-muted/25 px-4 py-6 text-center text-sm text-muted-foreground">
-                Search results will appear here.
+                {tri(lang, "Suchergebnisse erscheinen hier.", "Результаты поиска появятся здесь.", "Search results will appear here.")}
               </div>
             ) : (
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -742,11 +764,11 @@ export function MedicationsSection() {
                         </p>
                       </div>
                       <Badge variant="outline" className="rounded-full">
-                        {product.verification_status}
+                        {verificationStatusLabel(lang, product.verification_status)}
                       </Badge>
                     </div>
                     <p className="mt-2 text-xs text-muted-foreground">
-                      Substances: {product.substances.join(", ") || "unknown"}
+                      {tri(lang, "Wirkstoffe", "Действующие вещества", "Substances")}: {product.substances.join(", ") || tri(lang, "Unbekannt", "Неизвестно", "Unknown")}
                     </p>
                     {product.clinical_note ? (
                       <p className="mt-1 text-xs text-muted-foreground">
@@ -760,7 +782,7 @@ export function MedicationsSection() {
                         disabled={productUpdatingId === product.id}
                         onClick={() => void handleVerifyDrugProduct(product.id, "verified")}
                       >
-                        Verify product
+                        {tri(lang, "Produkt prüfen", "Проверить препарат", "Verify product")}
                       </button>
                       <button
                         type="button"
@@ -768,7 +790,7 @@ export function MedicationsSection() {
                         disabled={productUpdatingId === product.id}
                         onClick={() => void handleVerifyDrugProduct(product.id, "rejected")}
                       >
-                        Reject
+                        {tri(lang, "Ablehnen", "Отклонить", "Reject")}
                       </button>
                       <button
                         type="button"
@@ -776,7 +798,7 @@ export function MedicationsSection() {
                         disabled={!selectedEquivalentMedication?.id || matchUpdatingId === product.id}
                         onClick={() => void handleCreateMedicationMatch(product.id)}
                       >
-                        Use for medication
+                        {tri(lang, "Für Medikation nutzen", "Использовать для медикации", "Use for medication")}
                       </button>
                     </div>
                   </article>
@@ -785,8 +807,13 @@ export function MedicationsSection() {
             )}
           </Panel>
           <Panel
-            title="Drug import skeleton"
-            description="Dry-run CSV preview for future drug imports. Format: brand,country,substance,strength,form,manufacturer,atc."
+            title={tri(lang, "Arzneiimport-Vorschau", "Предпросмотр импорта препаратов", "Drug import skeleton")}
+            description={tri(
+              lang,
+              "CSV-Testlauf für zukünftige Arzneiimporte. Format: brand,country,substance,strength,form,manufacturer,atc.",
+              "Тестовый CSV-предпросмотр будущего импорта препаратов. Формат: brand,country,substance,strength,form,manufacturer,atc.",
+              "Dry-run CSV preview for future drug imports. Format: brand,country,substance,strength,form,manufacturer,atc.",
+            )}
           >
             <textarea
               value={drugImportText}
@@ -806,7 +833,9 @@ export function MedicationsSection() {
                 disabled={drugImportLoading}
                 onClick={() => void handlePreviewDrugImport()}
               >
-                {drugImportLoading ? "Previewing..." : "Preview import"}
+                {drugImportLoading
+                  ? tri(lang, "Vorschau...", "Предпросмотр...", "Previewing...")
+                  : tri(lang, "Import prüfen", "Проверить импорт", "Preview import")}
               </button>
             </div>
             {drugImportError ? (
@@ -820,7 +849,12 @@ export function MedicationsSection() {
                   {drugImportPreview.message}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {drugImportPreview.received_count} rows received - {drugImportPreview.valid_preview_count} valid preview rows - {drugImportPreview.issue_preview_count} with issues
+                  {tri(
+                    lang,
+                    `${drugImportPreview.received_count} Zeilen empfangen - ${drugImportPreview.valid_preview_count} gültige Vorschauzeilen - ${drugImportPreview.issue_preview_count} mit Hinweisen`,
+                    `${drugImportPreview.received_count} строк получено - ${drugImportPreview.valid_preview_count} валидных строк предпросмотра - ${drugImportPreview.issue_preview_count} с замечаниями`,
+                    `${drugImportPreview.received_count} rows received - ${drugImportPreview.valid_preview_count} valid preview rows - ${drugImportPreview.issue_preview_count} with issues`,
+                  )}
                 </p>
                 <div className="mt-3 grid gap-2">
                   {drugImportPreview.preview.map((row) => (
@@ -832,8 +866,8 @@ export function MedicationsSection() {
                         #{row.row_number} {row.brand_name} ({row.country_code})
                       </p>
                       <p className="mt-1 text-muted-foreground">
-                        {row.substances?.join(", ") || "No substances"}
-                        {row.issues.length > 0 ? ` - issues: ${row.issues.join(", ")}` : ""}
+                        {row.substances?.join(", ") || tri(lang, "Keine Wirkstoffe", "Нет действующих веществ", "No substances")}
+                        {row.issues.length > 0 ? ` - ${tri(lang, "Hinweise", "Замечания", "issues")}: ${row.issues.join(", ")}` : ""}
                       </p>
                     </div>
                   ))}

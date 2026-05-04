@@ -3,6 +3,7 @@ import { Check, X } from "lucide-react";
 import { useMemo, useState, type ChangeEvent } from "react";
 
 import { Input } from "@/components/ui/input";
+import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import {
@@ -33,7 +34,9 @@ type FilterValueInputTranslations = {
   clear?: string;
   no?: string;
   noMatch?: string;
+  notSet?: string;
   searchPlaceholder?: string;
+  unknownValue?: string;
   valuePlaceholder?: string;
   yes?: string;
 };
@@ -52,6 +55,19 @@ export function FilterValueInput<T>({
   onChange,
   translations,
 }: Props<T>) {
+  const { t } = useLang();
+  const resolvedTranslations: FilterValueInputTranslations = {
+    clear: t.common_clear,
+    no: t.common_no,
+    noMatch: t.common_no_results,
+    notSet: t.common_not_set,
+    searchPlaceholder: t.common_search_placeholder,
+    unknownValue: t.common_unknown_value,
+    valuePlaceholder: t.table_filter_value,
+    yes: t.common_yes,
+    ...translations,
+  };
+
   if (!operatorTakesValue(operator)) return null;
 
   const fieldType: FilterFieldType = column.filterType ?? "text";
@@ -111,7 +127,7 @@ export function FilterValueInput<T>({
         options={options}
         selected={selected}
         onChange={(next) => onChange(next)}
-        translations={translations}
+        translations={resolvedTranslations}
       />
     );
   }
@@ -125,7 +141,7 @@ export function FilterValueInput<T>({
         onChange={(e) => onChange(e.target.value)}
         className="h-7 rounded-md border border-input bg-background px-2 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
       >
-        <option value="">—</option>
+        <option value="">{resolvedTranslations.notSet}</option>
         {options.map((opt) => (
           <option key={opt.value} value={opt.value}>
             {opt.label}
@@ -148,7 +164,7 @@ export function FilterValueInput<T>({
             !current && "text-muted-foreground",
           )}
         >
-          {translations?.yes ?? "Yes"}
+          {resolvedTranslations.yes}
         </button>
         <button
           type="button"
@@ -159,7 +175,7 @@ export function FilterValueInput<T>({
             current && "text-muted-foreground",
           )}
         >
-          {translations?.no ?? "No"}
+          {resolvedTranslations.no}
         </button>
       </div>
     );
@@ -171,7 +187,7 @@ export function FilterValueInput<T>({
       value={typeof value === "string" ? value : ""}
       onChange={onTextChange}
       className="h-7 w-44 text-xs"
-      placeholder={translations?.valuePlaceholder ?? "value"}
+      placeholder={resolvedTranslations.valuePlaceholder}
     />
   );
 }
@@ -212,7 +228,7 @@ function MultiSelect({ options, selected, onChange, translations }: MultiSelectP
             type="button"
             onClick={() => onChange([])}
             className="inline-flex size-4 items-center justify-center rounded text-muted-foreground hover:bg-muted"
-            title={translations?.clear ?? "Clear"}
+            title={translations?.clear}
           >
             <X className="size-3" />
           </button>
@@ -221,7 +237,7 @@ function MultiSelect({ options, selected, onChange, translations }: MultiSelectP
       <div className="max-h-48 overflow-y-auto p-1">
         {filtered.length === 0 ? (
           <div className="px-2 py-1 text-xs text-muted-foreground">
-            {translations?.noMatch ?? "No match"}
+            {translations?.noMatch}
           </div>
         ) : (
           filtered.map((opt) => {

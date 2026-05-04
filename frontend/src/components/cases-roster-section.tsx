@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { formatUnknownValue, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 export type CaseRosterItem = {
@@ -71,8 +72,9 @@ export function CasesRosterSection({
   itemClassName,
   interactiveItemClassName,
 }: CasesRosterSectionProps) {
+  const { t } = useLang();
   const renderStatus = (status: string) =>
-    caseStatusLabel ? caseStatusLabel(status) : status.replaceAll("_", " ");
+    caseStatusLabel ? caseStatusLabel(status) : formatUnknownValue(status, t);
 
   return (
     <section className={className}>

@@ -31,7 +31,7 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
-import { useLang } from "@/lib/i18n";
+import { formatUnknownValue, useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { localizeRequiredDocumentLabel } from "@/lib/required-document-labels";
 import {
@@ -76,8 +76,73 @@ const PORTAL_DOCUMENT_REALTIME_EVENTS = [
   "document.translation_updated",
 ] as const;
 
+function portalDocumentValueLabel(
+  value: string | null | undefined,
+  l: (de: string, ru: string, en: string) => string,
+  translations: { common_unknown: string; common_unknown_value: string },
+) {
+  switch (value) {
+    case "general":
+      return l("Allgemein", "Общий", "General");
+    case "report":
+    case "medical_report":
+      return l("Medizinischer Bericht", "Медицинский отчет", "Medical report");
+    case "discharge_report":
+      return l("Entlassungsbericht", "Выписной отчет", "Discharge report");
+    case "clinic_letter":
+    case "clinic_correspondence":
+    case "correspondence":
+      return l("Korrespondenz", "Переписка", "Correspondence");
+    case "blood_results":
+    case "analyses":
+    case "analysis":
+      return l("Analysen", "Анализы", "Analyses");
+    case "conclusions":
+      return l("Befunde", "Заключения", "Conclusions");
+    case "invoice_pdf":
+    case "invoices":
+      return l("Rechnung", "Счет", "Invoice");
+    case "translated_letter":
+    case "translations":
+      return l("Ubersetzung", "Перевод", "Translation");
+    case "insurance":
+    case "insurance_document":
+      return l("Versicherungsdokument", "Страховой документ", "Insurance document");
+    case "identity":
+      return l("Identitat", "Идентификация", "Identity");
+    case "payment_proof":
+      return l("Zahlungsnachweis", "Подтверждение оплаты", "Payment proof");
+    default:
+      return formatUnknownValue(value, translations);
+  }
+}
+
+function portalDocumentSourceLabel(
+  source: string | null | undefined,
+  clinic: string | null | undefined,
+  l: (de: string, ru: string, en: string) => string,
+  translations: { common_unknown: string; common_unknown_value: string },
+) {
+  switch (source) {
+    case "patient_portal":
+      return l("Patientenportal", "Портал пациента", "Patient portal");
+    case "provider":
+      return l("Provider", "Провайдер", "Provider");
+    case "staff_workspace":
+      return l("Team-Workspace", "Рабочая область команды", "Team workspace");
+    case "portal_release":
+      return l("Portalfreigabe", "Публикация в портале", "Portal release");
+    case null:
+    case undefined:
+    case "":
+      return clinic || l("Portalfreigabe", "Публикация в портале", "Portal release");
+    default:
+      return formatUnknownValue(source, translations);
+  }
+}
+
 export function PatientDocumentsPage() {
-  const { lang } = useLang();
+  const { t, lang } = useLang();
   const [documents, setDocuments] = useState<PortalDocumentItem[]>([]);
   const [documentAlerts, setDocumentAlerts] = useState<PortalDocumentAlertsSummary | null>(null);
   const [uploads, setUploads] = useState<PortalUploadedDocumentItem[]>([]);
@@ -432,7 +497,11 @@ export function PatientDocumentsPage() {
                           </div>
                           <h2 className="mt-3 text-base font-semibold text-foreground">{item.auto_name}</h2>
                           <p className="mt-2 text-sm text-muted-foreground">
-                            {[item.art, item.category, formatPortalFileSize(item.file_size)].filter(Boolean).join(" / ")}
+                            {[
+                              portalDocumentValueLabel(item.art, l, t),
+                              item.category ? portalDocumentValueLabel(item.category, l, t) : null,
+                              formatPortalFileSize(item.file_size),
+                            ].filter(Boolean).join(" / ")}
                           </p>
                         </div>
                         {item.requires_confirmation && !item.confirmed ? (
@@ -459,7 +528,7 @@ export function PatientDocumentsPage() {
                         <InfoRow
                           className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
                           label={l("Quelle", "Источник", "Source")}
-                          value={item.ursprung || item.klinik || l("Portalfreigabe", "Публикация в портале", "Portal release")}
+                          value={portalDocumentSourceLabel(item.ursprung, item.klinik, l, t)}
                         />
                       </dl>
 
@@ -615,12 +684,17 @@ export function PatientDocumentsPage() {
                         <div className="min-w-0">
                           <div className="flex flex-wrap gap-2">
                             <StatusBadge className={uploadedDocumentTone(item)}>
-                              {item.art.replaceAll("_", " ")}
+                              {portalDocumentValueLabel(item.art, l, t)}
                             </StatusBadge>
                           </div>
                           <p className="mt-3 text-sm font-semibold text-foreground">{item.auto_name}</p>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            {[item.category, item.order_number, item.appointment_title, formatPortalFileSize(item.file_size)].filter(Boolean).join(" / ")}
+                            {[
+                              item.category ? portalDocumentValueLabel(item.category, l, t) : null,
+                              item.order_number,
+                              item.appointment_title,
+                              formatPortalFileSize(item.file_size),
+                            ].filter(Boolean).join(" / ")}
                           </p>
                         </div>
                         <Button

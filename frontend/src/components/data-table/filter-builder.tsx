@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import { FilterValueInput } from "./filter-value-input";
@@ -54,7 +55,7 @@ function valueSummary(
     if (range.to) {
       return `${labelForOperator("before", translations?.operatorLabels)} ${range.to}`;
     }
-    return "—";
+    return translations?.notSet ?? "—";
   }
   if (operator === "last_n_days") {
     const days = typeof value === "object" && value && "days" in value
@@ -63,17 +64,20 @@ function valueSummary(
     return `${days}d`;
   }
   if (Array.isArray(value)) {
-    if (value.length === 0) return "—";
-    const labels = value.map((v) => options.find((o) => o.value === v)?.label ?? v);
+    if (value.length === 0) return translations?.notSet ?? "—";
+    const labels = value.map(
+      (v) => options.find((o) => o.value === v)?.label ?? translations?.unknownValue ?? "",
+    );
     if (labels.length <= 2) return labels.join(", ");
     return `${labels.slice(0, 2).join(", ")} +${labels.length - 2}`;
   }
   if (typeof value === "boolean") {
     return value ? translations?.yes ?? "yes" : translations?.no ?? "no";
   }
-  if (value == null || value === "") return "—";
+  if (value == null || value === "") return translations?.notSet ?? "—";
   const opt = options.find((o) => o.value === String(value));
-  return opt?.label ?? String(value);
+  if (opt) return opt.label;
+  return options.length > 0 ? translations?.unknownValue ?? "" : String(value);
 }
 
 export type FilterBuilderTranslations = {
@@ -83,6 +87,8 @@ export type FilterBuilderTranslations = {
   noFields?: string;
   remove?: string;
   valuePlaceholder?: string;
+  notSet?: string;
+  unknownValue?: string;
   yes?: string;
   no?: string;
   operatorLabels?: FilterOperatorLabels;
@@ -105,8 +111,41 @@ export function FilterBuilder<T>({
   translations,
   className,
 }: FilterBuilderProps<T>) {
-  const addFilter = translations?.addFilter ?? "Filter";
-  const clearAll = translations?.clearAll ?? "Clear all";
+  const { t } = useLang();
+  const resolvedTranslations: FilterBuilderTranslations = {
+    addFilter: t.table_filter,
+    clearAll: t.common_clear,
+    searchPlaceholder: t.table_filter_search_fields,
+    noFields: t.table_filter_no_fields,
+    remove: t.table_filter_remove,
+    valuePlaceholder: t.table_filter_value,
+    notSet: t.common_not_set,
+    unknownValue: t.common_unknown_value,
+    yes: t.common_yes,
+    no: t.common_no,
+    ...translations,
+    operatorLabels: {
+      contains: t.filter_op_contains,
+      does_not_contain: t.filter_op_does_not_contain,
+      is_empty: t.filter_op_is_empty,
+      is_not_empty: t.filter_op_is_not_empty,
+      is: t.filter_op_is,
+      is_not: t.filter_op_is_not,
+      is_any_of: t.filter_op_is_any_of,
+      is_none_of: t.filter_op_is_none_of,
+      has_any: t.filter_op_has_any,
+      has_all: t.filter_op_has_all,
+      has_none: t.filter_op_has_none,
+      before: t.filter_op_before,
+      after: t.filter_op_after,
+      between: t.filter_op_between,
+      last_n_days: t.filter_op_last_n_days,
+      equals: t.filter_op_equals,
+      ...translations?.operatorLabels,
+    },
+  };
+  const addFilter = resolvedTranslations.addFilter ?? t.table_filter;
+  const clearAll = resolvedTranslations.clearAll ?? t.common_clear;
 
   const filterable = useMemo(
     () => columns.filter((c) => Boolean(c.filterType)),
@@ -174,7 +213,7 @@ export function FilterBuilder<T>({
             onUpdate={(patch) => handleUpdate(predicate.id, patch)}
             onRemove={() => handleRemove(predicate.id)}
             onClose={() => setEditing(null)}
-            translations={translations}
+            translations={resolvedTranslations}
           />
         );
       })}
@@ -201,7 +240,7 @@ export function FilterBuilder<T>({
               <Input
                 value={pickerQuery}
                 onChange={(e) => setPickerQuery(e.target.value)}
-                placeholder={translations?.searchPlaceholder ?? "Search fields"}
+                placeholder={resolvedTranslations.searchPlaceholder}
                 className="h-6 border-0 px-0 text-xs shadow-none focus-visible:ring-0"
                 autoFocus
               />
@@ -209,7 +248,7 @@ export function FilterBuilder<T>({
             <div className="max-h-64 overflow-y-auto p-1">
               {pickerOptions.length === 0 ? (
                 <div className="px-3 py-4 text-center text-xs text-muted-foreground">
-                  {translations?.noFields ?? "No available fields"}
+                  {resolvedTranslations.noFields}
                 </div>
               ) : (
                 pickerOptions.map((col) => (
@@ -308,8 +347,8 @@ function FilterChip<T>({
         <button
           type="button"
           onClick={onRemove}
-          aria-label={translations?.remove ?? "Remove filter"}
-          title={translations?.remove ?? "Remove filter"}
+          aria-label={translations?.remove}
+          title={translations?.remove}
           className="flex h-full items-center border-l border-border px-1.5 text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
         >
           <X className="size-3" />

@@ -3,6 +3,7 @@
 import * as React from "react"
 import { Select as SelectPrimitive } from "@base-ui/react/select"
 
+import { useLang } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon, SearchIcon } from "lucide-react"
 
@@ -134,12 +135,18 @@ function SelectContent({
   align = "center",
   alignOffset = 0,
   alignItemWithTrigger = true,
+  searchPlaceholder,
+  emptyLabel,
   ...props
 }: SelectPrimitive.Popup.Props &
   Pick<
     SelectPrimitive.Positioner.Props,
     "align" | "alignOffset" | "side" | "sideOffset" | "alignItemWithTrigger"
-  >) {
+  > & {
+    searchPlaceholder?: string
+    emptyLabel?: React.ReactNode
+  }) {
+  const { t } = useLang()
   const [query, setQuery] = React.useState("")
   const filtered = React.useMemo(() => filterSelectChildren(children, query), [children, query])
 
@@ -166,7 +173,7 @@ function SelectContent({
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => event.stopPropagation()}
               onPointerDown={(event) => event.stopPropagation()}
-              placeholder="Поиск..."
+              placeholder={searchPlaceholder ?? t.common_search_placeholder}
               className="h-7 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />
           </div>
@@ -175,7 +182,9 @@ function SelectContent({
             {filtered.count > 0 ? (
               filtered.children
             ) : (
-              <div className="px-2 py-2 text-sm text-muted-foreground">Ничего не найдено</div>
+              <div className="px-2 py-2 text-sm text-muted-foreground">
+                {emptyLabel ?? t.common_no_results}
+              </div>
             )}
           </SelectPrimitive.List>
           <SelectScrollDownButton />

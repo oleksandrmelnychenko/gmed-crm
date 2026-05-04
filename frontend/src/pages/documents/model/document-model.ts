@@ -9,6 +9,7 @@ import type {
   PatientOption,
   UploadFormState,
 } from "./types";
+import { formatUnknownValue, type Translations } from "@/lib/i18n";
 
 export const STATUS_OPTIONS: DocumentStatus[] = ["draft", "active", "archived"];
 export const VISIBILITY_OPTIONS: DocumentVisibility[] = [
@@ -95,13 +96,20 @@ export function patientOptionLabel(patient: PatientOption) {
 
 export function formatConfidenceLabel(
   value: string,
-  tr: Record<string, string>,
+  tr: Pick<
+    Translations,
+    | "common_unknown"
+    | "common_unknown_value"
+    | "documents_confidence_high"
+    | "documents_confidence_medium"
+    | "documents_confidence_low"
+  >,
 ): string {
   const normalized = value.trim().toLowerCase();
-  if (normalized === "high") return tr.documents_confidence_high ?? value;
-  if (normalized === "medium") return tr.documents_confidence_medium ?? value;
-  if (normalized === "low") return tr.documents_confidence_low ?? value;
-  return value;
+  if (normalized === "high") return tr.documents_confidence_high;
+  if (normalized === "medium") return tr.documents_confidence_medium;
+  if (normalized === "low") return tr.documents_confidence_low;
+  return formatUnknownValue(value, tr);
 }
 
 export function normalizeTemplateLanguage(value?: string | null) {

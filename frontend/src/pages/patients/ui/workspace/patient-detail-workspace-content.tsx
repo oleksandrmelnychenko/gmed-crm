@@ -12,7 +12,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
-import type { Translations } from "@/lib/i18n";
+import { formatUnknownValue, type Translations } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import {
@@ -769,7 +769,7 @@ export function PatientDetailWorkspaceContent(props: PatientDetailWorkspaceConte
               formatDate={formatDate}
               onOpenCase={onOpenCase}
               statusColors={statusColors}
-              statusLabel={(status) => tr[`cases_${status}`] ?? status}
+              statusLabel={(status) => tr[`cases_${status}`] ?? formatUnknownValue(status, t)}
               t={t}
               tabLoading={tabLoading}
             />

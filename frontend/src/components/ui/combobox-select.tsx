@@ -4,6 +4,7 @@ import * as React from "react"
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox"
 import { CheckIcon, ChevronDownIcon, SearchIcon } from "lucide-react"
 
+import { useLang } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
 type PrimitiveValue = string | number
@@ -29,6 +30,7 @@ type ComboboxSelectProps = {
   placeholder?: React.ReactNode
   searchPlaceholder?: string
   emptyLabel?: React.ReactNode
+  missingValueLabel?: React.ReactNode | ((value: string) => React.ReactNode)
   autoComplete?: string
   "aria-label"?: string
   "aria-describedby"?: string
@@ -50,6 +52,7 @@ type NativeComboboxSelectProps = Omit<
   onFocus?: React.FocusEventHandler<HTMLSelectElement>
   searchPlaceholder?: string
   emptyLabel?: React.ReactNode
+  missingValueLabel?: React.ReactNode | ((value: string) => React.ReactNode)
   value?: PrimitiveValue | readonly string[] | null
 }
 
@@ -117,6 +120,18 @@ function createSelectChangeEvent(value: string, name?: string) {
   } as React.ChangeEvent<HTMLSelectElement>
 }
 
+function resolveMissingValueLabel(
+  value: string,
+  label: React.ReactNode | ((value: string) => React.ReactNode) | undefined,
+  fallback: React.ReactNode,
+) {
+  if (typeof label === "function") {
+    return label(value)
+  }
+
+  return label ?? fallback
+}
+
 function ComboboxSelect({
   value,
   defaultValue,
@@ -129,8 +144,9 @@ function ComboboxSelect({
   className,
   triggerClassName,
   placeholder,
-  searchPlaceholder = "Поиск...",
-  emptyLabel = "Ничего не найдено",
+  searchPlaceholder,
+  emptyLabel,
+  missingValueLabel,
   autoComplete,
   style,
   title,
@@ -138,16 +154,45 @@ function ComboboxSelect({
   onFocus,
   ...ariaProps
 }: ComboboxSelectProps) {
+  const { t } = useLang()
   const normalizedValue = normalizeValue(value)
   const normalizedDefaultValue = normalizeValue(defaultValue)
   const [uncontrolledValue, setUncontrolledValue] = React.useState(
     normalizedDefaultValue ?? options[0]?.value ?? "",
   )
   const selectedValue = normalizedValue ?? uncontrolledValue
+  const resolvedSearchPlaceholder =
+    searchPlaceholder
+      ? searchPlaceholder
+      : t.common_search_placeholder
+  const resolvedEmptyLabel =
+    emptyLabel ?? t.common_no_results
+
+  const displayOptions = React.useMemo(() => {
+    if (!selectedValue || options.some((option) => option.value === selectedValue)) {
+      return options
+    }
+
+    const label = resolveMissingValueLabel(
+      selectedValue,
+      missingValueLabel,
+      t.select_missing_value,
+    )
+
+    return [
+      {
+        value: selectedValue,
+        label,
+        disabled: true,
+        searchText: textFromNode(label),
+      },
+      ...options,
+    ]
+  }, [missingValueLabel, options, selectedValue, t.select_missing_value])
 
   const optionsByValue = React.useMemo(() => {
-    return new Map(options.map((option) => [option.value, option]))
-  }, [options])
+    return new Map(displayOptions.map((option) => [option.value, option]))
+  }, [displayOptions])
 
   const handleValueChange = React.useCallback(
     (nextValue: string | null) => {
@@ -170,9 +215,9 @@ function ComboboxSelect({
       disabled={disabled}
       value={selectedValue}
       onValueChange={handleValueChange}
-      items={options.map((option) => option.value)}
+      items={displayOptions.map((option) => option.value)}
       itemToStringLabel={(itemValue) =>
-        textFromNode(optionsByValue.get(String(itemValue))?.label ?? itemValue)
+        textFromNode(optionsByValue.get(String(itemValue))?.label ?? t.select_missing_value)
       }
       filter={(itemValue, query) => {
         const option = optionsByValue.get(String(itemValue))
@@ -210,7 +255,7 @@ function ComboboxSelect({
               <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
               <ComboboxPrimitive.Input
                 autoComplete={autoComplete}
-                placeholder={searchPlaceholder}
+                placeholder={resolvedSearchPlaceholder}
                 className="h-7 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
               />
             </div>
@@ -238,7 +283,7 @@ function ComboboxSelect({
               }}
             </ComboboxPrimitive.List>
             <ComboboxPrimitive.Empty className="px-3 py-2 text-sm text-muted-foreground">
-              {emptyLabel}
+              {resolvedEmptyLabel}
             </ComboboxPrimitive.Empty>
           </ComboboxPrimitive.Popup>
         </ComboboxPrimitive.Positioner>
@@ -260,6 +305,7 @@ function NativeComboboxSelect({
   autoComplete,
   searchPlaceholder,
   emptyLabel,
+  missingValueLabel,
   title,
   style,
   onBlur,
@@ -282,6 +328,7 @@ function NativeComboboxSelect({
       className={className}
       searchPlaceholder={searchPlaceholder}
       emptyLabel={emptyLabel}
+      missingValueLabel={missingValueLabel}
       autoComplete={autoComplete}
       title={title}
       style={style}

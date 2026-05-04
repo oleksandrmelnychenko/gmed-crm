@@ -11,6 +11,58 @@ import type {
   ServiceFormState,
   ServiceItem,
 } from "./types";
+import {
+  formatEnumLabel,
+  getLang,
+  t as translateCatalog,
+  type Translations,
+} from "@/lib/i18n";
+
+type EnumLabelTranslations = Pick<
+  Translations,
+  "common_not_set" | "common_unknown" | "common_unknown_value"
+>;
+
+function enumTranslationsFromRecord(
+  tr: Record<string, string>,
+): EnumLabelTranslations {
+  const runtime = translateCatalog(getLang());
+  return {
+    common_not_set: tr.common_not_set ?? runtime.common_not_set,
+    common_unknown: tr.common_unknown ?? runtime.common_unknown,
+    common_unknown_value:
+      tr.common_unknown_value ?? runtime.common_unknown_value,
+  };
+}
+
+function localizedCodeLabels(tr = translateCatalog(getLang())) {
+  const de = getLang() === "de";
+  return {
+    appointment: de ? "Termin" : "Запись",
+    leistung: de ? "Leistung" : "Услуга",
+    concierge_service: de ? "Concierge-Service" : "Консьерж-сервис",
+    medical: tr.providers_type_medical,
+    non_medical: tr.providers_type_non_medical,
+    internal: de ? "Intern" : "Внутренний",
+    planned: de ? "Geplant" : "Запланировано",
+    booked: de ? "Gebucht" : "Забронировано",
+    confirmed: de ? "Bestätigt" : "Подтверждено",
+    in_progress: de ? "In Bearbeitung" : "В работе",
+    in_service: de ? "In Leistung" : "В процессе",
+    completed: de ? "Abgeschlossen" : "Завершено",
+    cancelled: tr.invoices_workspace_status_cancelled,
+    draft: tr.invoices_workspace_status_draft,
+    delivered: de ? "Erbracht" : "Оказано",
+    approved: de ? "Freigegeben" : "Утверждено",
+    hotel: de ? "Hotel" : "Отель",
+    transfer: de ? "Transfer" : "Трансфер",
+    vip_terminal: de ? "VIP-Terminal" : "VIP-терминал",
+    flight: de ? "Flug" : "Авиаперелет",
+    chauffeur: de ? "Chauffeur" : "Шофер",
+    translation_support: de ? "Übersetzungsunterstützung" : "Поддержка перевода",
+    other: de ? "Sonstiges" : "Другое",
+  };
+}
 
 export const DEFAULT_FILTERS: ProviderFilters = {
   search: "",
@@ -253,7 +305,14 @@ export function parseCommaList(value: string) {
 }
 
 export function providerTypeLabel(value: string, tr: Record<string, string>) {
-  return value === "non_medical" ? tr.providers_type_non_medical : tr.providers_type_medical;
+  return formatEnumLabel(
+    value,
+    {
+      medical: tr.providers_type_medical,
+      non_medical: tr.providers_type_non_medical,
+    },
+    enumTranslationsFromRecord(tr),
+  );
 }
 
 export function compactDateTime(value?: string | null, fallback = "Not set") {
@@ -420,7 +479,8 @@ export function toServicePayload(form: ServiceFormState) {
 }
 
 export function humanizeCode(value: string) {
-  return value.replaceAll("_", " ");
+  const translations = translateCatalog(getLang());
+  return formatEnumLabel(value, localizedCodeLabels(translations), translations);
 }
 
 export function moneyLabel(price: string, currency: string) {

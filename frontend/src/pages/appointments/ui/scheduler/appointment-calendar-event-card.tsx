@@ -8,6 +8,7 @@ import {
 import { createPortal } from "react-dom";
 
 import { Badge } from "@/components/ui/badge";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { appointmentText, appointmentTypeLabel, statusLabel } from "@/pages/appointments/model/labels";
 import type {
   AppointmentRecurringActionScope,
@@ -356,7 +357,7 @@ export function AppointmentCalendarEventCard({
                   <label className="block text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
                     {dictionary.appointments_scope_apply_status}
                   </label>
-                  <select
+                  <NativeComboboxSelect
                     value={monthActionScope}
                     className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2 text-xs text-foreground"
                     onChange={(event) =>
@@ -370,7 +371,7 @@ export function AppointmentCalendarEventCard({
                       {dictionary.appointments_scope_following}
                     </option>
                     <option value="series">{dictionary.appointments_scope_series}</option>
-                  </select>
+                  </NativeComboboxSelect>
                 </div>
               ) : null}
               <div className="mt-3 -mx-3 -mb-3 h-10 flex flex-nowrap items-stretch border-t border-border/70">

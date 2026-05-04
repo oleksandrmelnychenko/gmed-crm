@@ -71,9 +71,7 @@ export function AdminCustomFieldsPage() {
   const [fOptions, setFOptions] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
 
-  const closeUnsavedConfirmMessage =
-    (t as unknown as Record<string, string>).common_discard_unsaved_confirm ??
-    "Discard unsaved changes?";
+  const closeUnsavedConfirmMessage = t.common_discard_unsaved_confirm;
 
   const load = useCallback(async () => {
     setLoading(true);

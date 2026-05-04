@@ -29,10 +29,18 @@ import {
 } from "@/components/ui/tabs";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { useLang } from "@/lib/i18n";
+import { formatUnknownValue, useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
+import {
+  appointmentTypeLabel as appointmentKindLabel,
+  statusLabel as appointmentStatusLabel,
+} from "@/pages/appointments/model/labels";
+import type {
+  AppointmentKind,
+  AppointmentStatus,
+} from "@/pages/appointments/model/types";
 import { PROVIDER_DETAIL_STATUS_COLORS } from "./appearance/status-appearance";
 import {
   createProviderTemplate,
@@ -105,6 +113,7 @@ export function ProviderDetailPage() {
   const { staffGo } = useStaffNavigate();
   const { user } = useAuth();
   const { t, lang } = useLang();
+  const tr = t as unknown as Record<string, string>;
   const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
 
   const [detail, setDetail] = useState<ProviderDetail | null>(null);
@@ -871,8 +880,12 @@ export function ProviderDetailPage() {
               {appointments.map((a) => (
                 <button key={a.id} type="button" onClick={() => staffGo(`/appointments?appointment=${a.id}`)} className={card("p-5 text-left hover:-translate-y-0.5 hover:shadow-lg transition")}>
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-400">{a.apt_type}</span>
-                    <Badge variant="outline" className={cn("rounded-full text-[10px]", PROVIDER_DETAIL_STATUS_COLORS[a.status] ?? "")}>{a.status}</Badge>
+                    <span className="text-xs text-slate-400">
+                      {appointmentKindLabel(a.apt_type as AppointmentKind, tr)}
+                    </span>
+                    <Badge variant="outline" className={cn("rounded-full text-[10px]", PROVIDER_DETAIL_STATUS_COLORS[a.status] ?? "")}>
+                      {appointmentStatusLabel(a.status as AppointmentStatus) ?? formatUnknownValue(a.status, t)}
+                    </Badge>
                   </div>
                   <p className="mt-2 text-sm font-medium text-slate-900">{a.title}</p>
                   <div className="flex gap-2 mt-1 text-xs text-slate-400">

@@ -12,7 +12,7 @@ import {
 } from "@/components/ui-shell";
 import { toast } from "@/components/ui/toast";
 import { apiFetch } from "@/lib/api";
-import { useLang } from "@/lib/i18n";
+import { formatUnknownValue, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
@@ -31,6 +31,7 @@ type OrderType = (typeof ORDER_TYPE_OPTIONS)[number];
 function orderTypeLabel(
   value: string,
   l: (de: string, ru: string, en: string) => string,
+  translations: { common_unknown: string; common_unknown_value: string },
 ): string {
   switch (value) {
     case "physiotherapy":
@@ -48,7 +49,7 @@ function orderTypeLabel(
     case "other":
       return l("Sonstiges", "Drugoe", "Other");
     default:
-      return value.replaceAll("_", " ");
+      return formatUnknownValue(value, translations);
   }
 }
 
@@ -195,7 +196,7 @@ export function PatientMedicalOrderSheet({
               }))} id="patient-medical-order-type" className={cn("w-full", selectClass)}>
               {ORDER_TYPE_OPTIONS.map((option) => (
                 <option key={option} value={option}>
-                  {orderTypeLabel(option, l)}
+                  {orderTypeLabel(option, l, t)}
                 </option>
               ))}
             </NativeComboboxSelect>

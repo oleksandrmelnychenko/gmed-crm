@@ -73,7 +73,7 @@ import {
 } from "@/components/ui/sheet";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { getLang, t as translateCatalog, useLang } from "@/lib/i18n";
+import { formatUnknownValue, getLang, t as translateCatalog, useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { PatientDocumentsPage } from "@/pages/patients/portal-documents-page";
@@ -179,9 +179,9 @@ function runtimeLocale() {
 
 function formatRoleLabel(role?: string | null) {
   const tr = runtimeTranslations();
-  if (!role) return getLang() === "ru" ? "пользователь" : "Benutzer";
+  if (!role) return tr.common_unknown;
   const translated = tr[`role_${role}` as keyof typeof tr];
-  return typeof translated === "string" ? translated : role.replaceAll("_", " ");
+  return typeof translated === "string" ? translated : formatUnknownValue(role, tr);
 }
 
 function formatLanguageLabel(language?: string | null) {
@@ -197,7 +197,7 @@ function formatLanguageLabel(language?: string | null) {
     case "ru":
       return isRu ? "Русский" : "Russisch";
     default:
-      return language ? language.toUpperCase() : runtimeTranslations().common_not_set;
+      return language ? formatUnknownValue(language, runtimeTranslations()) : runtimeTranslations().common_not_set;
   }
 }
 
@@ -219,7 +219,7 @@ function formatSensitivityLabel(value?: string | null) {
     case "service":
       return isRu ? "Сервисные данные" : "Servicedaten";
     default:
-      return value?.replaceAll("_", " ") ?? runtimeTranslations().common_not_set;
+      return value ? formatUnknownValue(value, runtimeTranslations()) : runtimeTranslations().common_not_set;
   }
 }
 
@@ -243,7 +243,39 @@ function formatShareChannelLabel(channel?: string | null) {
     case "other":
       return isRu ? "Другой канал" : "Anderer Kanal";
     default:
-      return channel?.replaceAll("_", " ") ?? runtimeTranslations().common_not_set;
+      return channel ? formatUnknownValue(channel, runtimeTranslations()) : runtimeTranslations().common_not_set;
+  }
+}
+
+function formatDocumentSourceLabel(
+  source?: string | null,
+  tr: ReturnType<typeof runtimeTranslations> = runtimeTranslations(),
+) {
+  const normalized = source?.trim().toLowerCase();
+  if (!normalized) return tr.common_not_set;
+
+  switch (normalized) {
+    case "patient_portal":
+      return tr.documents_patient_portal;
+    case "interpreter_upload":
+      return `${tr.role_interpreter} - ${tr.documents_upload}`;
+    case "patient_upload":
+      return `${tr.role_patient} - ${tr.documents_upload}`;
+    case "staff_upload":
+      return `${tr.activity_user} - ${tr.documents_upload}`;
+    case "upload":
+      return tr.documents_upload;
+    case "generated":
+    case "document_generation":
+    case "template":
+      return tr.documents_generate_from_template;
+    case "translation":
+    case "translation_request":
+      return tr.documents_translation_requests;
+    case "manual":
+      return tr.orders_billing_source_manual;
+    default:
+      return formatUnknownValue(source, tr);
   }
 }
 
@@ -264,7 +296,7 @@ function formatExtractionMethodLabel(method?: string | null) {
     case "ocr_unavailable":
       return isRu ? "OCR недоступен" : "OCR nicht verfügbar";
     default:
-      return method?.replaceAll("_", " ") ?? runtimeTranslations().common_not_set;
+      return method ? formatUnknownValue(method, runtimeTranslations()) : runtimeTranslations().common_not_set;
   }
 }
 
@@ -280,7 +312,7 @@ function formatDateTime(value?: string | null) {
       minute: "2-digit",
     }).format(new Date(value));
   } catch {
-    return value;
+    return formatUnknownValue(value, tr);
   }
 }
 
@@ -332,7 +364,7 @@ function formatDate(value?: string | null) {
       year: "numeric",
     }).format(new Date(`${value}T00:00:00`));
   } catch {
-    return value;
+    return formatUnknownValue(value, tr);
   }
 }
 
@@ -356,7 +388,7 @@ function formatDocumentStatusLabel(
     case "archived":
       return tr.documents_status_archived;
     default:
-      return status.replaceAll("_", " ");
+      return formatUnknownValue(status, tr);
   }
 }
 
@@ -380,7 +412,7 @@ function formatVisibilityLabel(
     case "patient_visible":
       return tr.documents_visibility_patient_visible;
     default:
-      return visibility.replaceAll("_", " ");
+      return formatUnknownValue(visibility, tr);
   }
 }
 
@@ -412,7 +444,7 @@ function formatTranslationStatusLabel(
     case "cancelled":
       return tr.documents_translation_cancelled;
     default:
-      return status.replaceAll("_", " ");
+      return formatUnknownValue(status, tr);
   }
 }
 
@@ -443,7 +475,7 @@ function formatExtractionStatusLabel(
     case "not_started":
       return tr.documents_extraction_not_started;
     default:
-      return status.replaceAll("_", " ");
+      return formatUnknownValue(status, tr);
   }
 }
 
@@ -3565,7 +3597,7 @@ function StaffDocumentsPage({
                       />
                       <DocumentMetaLine
                         label={t.documents_source}
-                        value={detail.ursprung || t.common_not_set}
+                        value={formatDocumentSourceLabel(detail.ursprung, t)}
                       />
                     </DocumentMetaPanel>
                   </div>
@@ -4895,7 +4927,7 @@ function DocumentIntakeQueueTable({
                 {t.documents_confidence}:{" "}
                 {formatConfidenceLabel(
                   suggestion.confidence,
-                  t as unknown as Record<string, string>,
+                  t,
                 )}
                 {suggestion.rationale ? ` / ${suggestion.rationale}` : ""}
               </div>
@@ -4918,7 +4950,7 @@ function DocumentIntakeQueueTable({
               {t.documents_needs_review}
             </Badge>
             <span className="truncate text-[11px] text-muted-foreground">
-              {[formatDocumentStatusLabel(item.status, t), item.ursprung?.replaceAll("_", " ")]
+              {[formatDocumentStatusLabel(item.status, t), item.ursprung ? formatDocumentSourceLabel(item.ursprung, t) : null]
                 .filter(Boolean)
                 .join(" / ")}
             </span>
@@ -5116,7 +5148,7 @@ function DocumentTranslationRequestsTable({
               {formatDateTime(request.requested_at)}
             </div>
             <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
-              {request.request_source.replaceAll("_", " ")}
+              {formatDocumentSourceLabel(request.request_source, t)}
             </div>
           </div>
         ),

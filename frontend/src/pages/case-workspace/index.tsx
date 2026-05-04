@@ -4,7 +4,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { apiFetch } from "@/lib/api";
-import { useLang } from "@/lib/i18n";
+import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import { AllergiesSection } from "./allergies-section";
@@ -42,6 +42,17 @@ function tri(lang: string, de: string, ru: string, en: string) {
   if (lang === "de") return de;
   if (lang === "ru") return ru;
   return en;
+}
+
+function caseStatusLabel(
+  status: string,
+  labels: Pick<
+    Translations,
+    "cases_open" | "cases_in_progress" | "cases_closed" | "common_unknown" | "common_unknown_value"
+  >,
+) {
+  const dictionary = labels as unknown as Record<string, string>;
+  return dictionary[`cases_${status}`] ?? formatUnknownValue(status, labels);
 }
 
 function renderSection(section: CaseSectionKey) {
@@ -155,7 +166,7 @@ function CaseWorkspaceContent() {
                     "border-border/60 bg-muted/25 text-foreground",
                 )}
               >
-                {detail.status}
+                {caseStatusLabel(detail.status, t)}
               </Badge>
             ) : null}
           </div>

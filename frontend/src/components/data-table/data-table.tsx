@@ -13,6 +13,7 @@ import {
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
+import { useLang, type Translations } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import { DENSITY_ROW_HEIGHT } from "./density-toggle";
@@ -123,7 +124,7 @@ export function DataTable<T>({
   selectionEnabled = false,
   rowAccent,
   rowActions,
-  rowActionsLabel = "Actions",
+  rowActionsLabel,
   rowActionsWidth = 144,
   rowHeightOverrides,
   loading = false,
@@ -134,6 +135,7 @@ export function DataTable<T>({
   overscan = 10,
   storageKey,
 }: DataTableProps<T>) {
+  const { t } = useLang();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const columnMenuRef = useRef<HTMLDivElement | null>(null);
   const [columnMenu, setColumnMenu] = useState<{
@@ -142,6 +144,7 @@ export function DataTable<T>({
     y: number;
   } | null>(null);
   const rowHeight = rowHeightOverrides?.[density] ?? DENSITY_ROW_HEIGHT[density];
+  const resolvedRowActionsLabel = rowActionsLabel ?? t.table_actions;
 
   const [widthOverrides, setWidthOverrides] = useState<Record<string, number>>(
     () => loadStoredWidths(storageKey),
@@ -356,7 +359,7 @@ export function DataTable<T>({
                 checked={allSelected}
                 indeterminate={someSelected}
                 onChange={toggleSelectAll}
-                ariaLabel="Select all"
+                ariaLabel={t.table_select_all}
               />
             </div>
           ) : null}
@@ -398,7 +401,7 @@ export function DataTable<T>({
                 <span className="truncate uppercase tracking-[0.08em]">{col.label}</span>
                 {isPinned ? (
                   <span
-                    title={columnHeaderContextMenuLabels?.frozen ?? "Frozen"}
+                    title={columnHeaderContextMenuLabels?.frozen ?? t.table_columns_frozen}
                     className="inline-flex shrink-0 items-center text-primary"
                   >
                     <Pin className="size-3" />
@@ -425,7 +428,7 @@ export function DataTable<T>({
                 <span
                   role="separator"
                   aria-orientation="vertical"
-                  aria-label="Resize column"
+                  aria-label={t.table_resize_column}
                   onMouseDown={(e) => beginColumnResize(col.id, e)}
                   onClick={(e) => e.stopPropagation()}
                   onContextMenu={(e) => e.stopPropagation()}
@@ -441,7 +444,7 @@ export function DataTable<T>({
               className="sticky right-0 z-30 flex h-full items-center justify-end border-l border-b border-border/50 bg-card px-2 text-right shadow-[-1px_0_0_color-mix(in_oklch,var(--border)_70%,transparent)]"
               style={{ gridColumn: `${visibleCols.length + (selectionEnabled ? 2 : 1)}` }}
             >
-              <span className="truncate uppercase tracking-[0.08em]">{rowActionsLabel}</span>
+              <span className="truncate uppercase tracking-[0.08em]">{resolvedRowActionsLabel}</span>
             </div>
           ) : null}
         </div>
@@ -450,7 +453,7 @@ export function DataTable<T>({
           loadingState ?? <DefaultSkeleton rows={12} height={rowHeight} />
         ) : showEmpty ? (
           <div className="flex min-h-48 items-center justify-center p-8 text-sm text-muted-foreground">
-            {emptyState ?? "No results"}
+            {emptyState ?? t.common_no_results}
           </div>
         ) : (
           <div style={{ height: totalSize, position: "relative" }}>
@@ -494,7 +497,7 @@ export function DataTable<T>({
                       <SelectCheckbox
                         checked={isSelected}
                         onChange={(e) => toggleSelection(id, e)}
-                        ariaLabel="Select row"
+                        ariaLabel={t.table_select_row}
                       />
                     </div>
                   ) : null}
@@ -516,7 +519,7 @@ export function DataTable<T>({
                         style={pinStyle.style}
                       >
                         <div className="w-full truncate">
-                          {col.render ? col.render(row) : defaultRender(col.accessor(row))}
+                          {col.render ? col.render(row) : defaultRender(col.accessor(row), t)}
                         </div>
                       </div>
                     );
@@ -546,7 +549,14 @@ export function DataTable<T>({
           refEl={columnMenuRef}
           column={columnMenuColumn}
           disabled={columnMenuFreezeDisabled}
-          labels={columnHeaderContextMenuLabels}
+          labels={{
+            column: columnHeaderContextMenuLabels?.column ?? t.table_columns,
+            freeze: columnHeaderContextMenuLabels?.freeze ?? t.table_columns_freeze,
+            unfreeze: columnHeaderContextMenuLabels?.unfreeze ?? t.table_columns_unfreeze,
+            frozen: columnHeaderContextMenuLabels?.frozen ?? t.table_columns_frozen,
+            freezeLimitReached:
+              columnHeaderContextMenuLabels?.freezeLimitReached ?? t.table_columns_freeze_limit,
+          }}
           x={columnMenu.x}
           y={columnMenu.y}
           onClose={closeColumnMenu}
@@ -558,10 +568,14 @@ export function DataTable<T>({
   );
 }
 
-function defaultRender(value: unknown): ReactNode {
-  if (value == null) return <span className="text-muted-foreground">—</span>;
+function defaultRender(value: unknown, translations: Translations): ReactNode {
+  if (value == null) {
+    return <span className="text-muted-foreground">{translations.common_not_set}</span>;
+  }
   if (Array.isArray(value)) return value.join(", ");
-  if (typeof value === "boolean") return value ? "yes" : "no";
+  if (typeof value === "boolean") {
+    return value ? translations.common_yes : translations.common_no;
+  }
   return String(value);
 }
 

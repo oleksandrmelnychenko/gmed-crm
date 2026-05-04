@@ -12,7 +12,7 @@ import {
 } from "@/components/ui-shell";
 import { toast } from "@/components/ui/toast";
 import { apiFetch } from "@/lib/api";
-import { useLang } from "@/lib/i18n";
+import { formatUnknownValue, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
@@ -31,6 +31,7 @@ type ScoreType = (typeof SCORE_TYPE_OPTIONS)[number];
 function scoreTypeLabel(
   value: string,
   l: (de: string, ru: string, en: string) => string,
+  translations: { common_unknown: string; common_unknown_value: string },
 ): string {
   switch (value) {
     case "cha2ds2_vasc":
@@ -48,7 +49,7 @@ function scoreTypeLabel(
     case "other":
       return l("Sonstiges", "Drugoe", "Other");
     default:
-      return value.replaceAll("_", " ");
+      return formatUnknownValue(value, translations);
   }
 }
 
@@ -217,7 +218,7 @@ export function PatientRiskScoreSheet({
               }))} id="patient-risk-score-type" className={cn("w-full", selectClass)}>
               {SCORE_TYPE_OPTIONS.map((option) => (
                 <option key={option} value={option}>
-                  {scoreTypeLabel(option, l)}
+                  {scoreTypeLabel(option, l, t)}
                 </option>
               ))}
             </NativeComboboxSelect>

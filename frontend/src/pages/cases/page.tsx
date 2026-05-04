@@ -49,6 +49,7 @@ import { clearApiCache } from "@/lib/api";
 import { useSecurePersistedState } from "@/lib/secure-persist";
 import { useAuth } from "@/lib/auth";
 import {
+  formatUnknownValue,
   getLang,
   t as translateCatalog,
   type Translations,
@@ -507,13 +508,15 @@ function caseStatusLabel(
     cases_open: string;
     cases_in_progress: string;
     cases_closed: string;
+    common_unknown: string;
+    common_unknown_value: string;
   }
 ) {
   switch (status) {
     case "open": return tr.cases_open;
     case "in_progress": return tr.cases_in_progress;
     case "closed": return tr.cases_closed;
-    default: return status;
+    default: return formatUnknownValue(status, tr);
   }
 }
 
@@ -787,6 +790,27 @@ function historySectionLabel(section: string) {
       return caseText("Impfstatus", "Вакцинация", "Vaccination");
     default:
       return section;
+  }
+}
+
+function snippetCategoryLabel(category: string) {
+  switch (category) {
+    case "anamnesis":
+      return caseText("Anamnese", "Анамнез", "Anamnesis");
+    case "cardiology":
+      return caseText("Kardiologie", "Кардиология", "Cardiology");
+    case "general":
+      return caseText("Allgemein", "Общее", "General");
+    case "medication":
+      return caseText("Medikation", "Медикация", "Medication");
+    case "neurology":
+      return caseText("Neurologie", "Неврология", "Neurology");
+    case "oncology":
+      return caseText("Onkologie", "Онкология", "Oncology");
+    case "symptoms":
+      return caseText("Symptome", "Симптомы", "Symptoms");
+    default:
+      return formatUnknownValue(category, runtimeTranslations());
   }
 }
 
@@ -2572,7 +2596,7 @@ export function CasesPage({
                                       {snippet.label}
                                     </p>
                                     <p className="text-xs text-muted-foreground">
-                                      {snippet.category}
+                                      {snippetCategoryLabel(snippet.category)}
                                     </p>
                                   </div>
                                   {permissions.canEdit ? (
@@ -2657,7 +2681,7 @@ export function CasesPage({
                                       {snippet.label}
                                     </p>
                                     <p className="text-xs text-muted-foreground">
-                                      {snippet.category}
+                                      {snippetCategoryLabel(snippet.category)}
                                     </p>
                                   </div>
                                   <Badge

@@ -42,9 +42,9 @@ export function formatChange(value?: number | null, emptyLabel = "-") {
   return `${prefix}${value.toFixed(1)}%`;
 }
 
-export function serviceTypeLabel(value: string, labels?: Record<string, string>) {
+export function serviceTypeLabel(value: string, labels: Record<string, string> | undefined, unknownLabel: string) {
   if (labels?.[value]) return labels[value];
-  return value.replaceAll("_", " ");
+  return unknownLabel;
 }
 
 export function roleCanOpenReports(role?: string) {

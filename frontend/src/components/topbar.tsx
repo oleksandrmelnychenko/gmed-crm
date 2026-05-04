@@ -14,7 +14,7 @@ import { useAuth } from "@/lib/auth";
 import { clearApiCache } from "@/lib/api";
 import { useNavState } from "@/lib/nav-state";
 import { staffHrefIfAllowed } from "@/lib/staff-route-access";
-import { useLang } from "@/lib/i18n";
+import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
 import {
   useDebouncedRealtimeSubscription,
   useRealtimeConnectionStatus,
@@ -61,11 +61,9 @@ function compactTime(dt: string) {
   return idx >= 0 ? dt.slice(idx + 1, idx + 6) : dt.slice(0, 5);
 }
 
-function roleDisplay(role: string) {
-  return role
-    .split("_")
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
+function roleDisplay(role: string, translations: Translations) {
+  const labels = translations as unknown as Record<string, string>;
+  return labels[`role_${role}`] ?? formatUnknownValue(role, translations);
 }
 
 function realtimeStatusLabel(
@@ -561,7 +559,7 @@ function UsersPanel({
               <div>
                 <p className="text-sm font-semibold">{chatUser.user_name}</p>
                 <p className="text-[10px] text-muted-foreground">
-                  {roleDisplay(chatUser.role)}
+                  {roleDisplay(chatUser.role, t)}
                 </p>
               </div>
             </div>
@@ -648,7 +646,7 @@ function UsersPanel({
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium truncate">{u.user_name}</p>
                 <p className="text-xs text-muted-foreground">
-                  {roleDisplay(u.role)}
+                  {roleDisplay(u.role, t)}
                 </p>
               </div>
               <MessageSquare className="size-4 text-primary shrink-0" />

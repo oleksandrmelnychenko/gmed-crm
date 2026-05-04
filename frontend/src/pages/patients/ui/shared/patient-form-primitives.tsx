@@ -1,4 +1,9 @@
-import { getLang, useLang } from "@/lib/i18n";
+import {
+  formatUnknownValue,
+  getLang,
+  t as translateCatalog,
+  useLang,
+} from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
   CountBadge,
@@ -80,7 +85,11 @@ export function humanizeFunctionalLabel(
   const normalized = normalizeFunctionalLabel(value);
   const meta = FUNCTIONAL_LABEL_META[normalized];
   if (meta) return meta[lang] ?? meta.ru;
-  return value.replaceAll("_", " ");
+  const translations =
+    lang === "en"
+      ? { common_unknown: "Unknown", common_unknown_value: "Unknown value" }
+      : translateCatalog(lang === "de" ? "de" : "ru");
+  return formatUnknownValue(value, translations);
 }
 
 export function functionalLabelChipClass(value: string): string {

@@ -21,7 +21,7 @@ import {
   type StatusTone,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
-import { useLang } from "@/lib/i18n";
+import { formatUnknownValue, useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import {
   createPortalPrivacyRequest,
@@ -50,8 +50,23 @@ const PORTAL_PRIVACY_REALTIME_EVENTS = [
   "privacy_request.executed",
 ] as const;
 
+function privacyRequestSourceLabel(
+  value: string | null | undefined,
+  l: (de: string, ru: string, en: string) => string,
+  translations: { common_unknown: string; common_unknown_value: string },
+) {
+  switch (value) {
+    case "patient_portal":
+      return l("Patientenportal", "Портал пациента", "Patient portal");
+    case "staff_workspace":
+      return l("Team-Workspace", "Рабочая область команды", "Team workspace");
+    default:
+      return formatUnknownValue(value, translations);
+  }
+}
+
 export function PatientPrivacyPage() {
-  const { lang } = useLang();
+  const { t, lang } = useLang();
   const [requests, setRequests] = useState<PortalPrivacyRequest[]>([]);
   const [requestType, setRequestType] = useState<RequestType>("restriction");
   const [reason, setReason] = useState("");
@@ -237,7 +252,7 @@ export function PatientPrivacyPage() {
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={l("Fällig", "Срок", "Due")} value={formatPortalDate(item.due_at)} />
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={l("Geprüft", "Проверено", "Reviewed")} value={formatPortalDateTime(item.reviewed_at)} />
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={l("Ausgeführt", "Исполнено", "Executed")} value={formatPortalDateTime(item.executed_at)} />
-                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={l("Quelle", "Источник", "Source")} value={item.source.replaceAll("_", " ")} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={l("Quelle", "Источник", "Source")} value={privacyRequestSourceLabel(item.source, l, t)} />
                   </div>
 
                   {item.reason ? (

@@ -217,8 +217,7 @@ export function AdminSettingsPage() {
     () => SETTINGS_GROUPS.find((group) => group.id === selectedGroupId) ?? null,
     [selectedGroupId],
   );
-  const closeUnsavedConfirmMessage =
-    tr.common_discard_unsaved_confirm ?? "Discard unsaved changes?";
+  const closeUnsavedConfirmMessage = t.common_discard_unsaved_confirm;
 
   const load = useCallback(async () => {
     setLoading(true);

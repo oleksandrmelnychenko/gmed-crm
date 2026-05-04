@@ -42,7 +42,7 @@ import {
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { useLang } from "@/lib/i18n";
+import { formatUnknownValue, useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { PatientInvoicesPage } from "@/pages/patients/portal-invoices-page";
@@ -270,6 +270,7 @@ function StaffInvoicesPage() {
     ledgerEntry: lang === "de" ? "Buchung" : "Проводка",
     ledgerCategory: lang === "de" ? "Kategorie" : "Категория",
     ledgerPeriod: lang === "de" ? "Monat" : "Период",
+    vatSource: lang === "de" ? "MwSt.-Quelle" : "Источник НДС",
     sendDunning: (level: string) => t.invoices_workspace_send_dunning.replace("{level}", level),
     statuses: {
       draft: t.invoices_workspace_status_draft,
@@ -293,11 +294,41 @@ function StaffInvoicesPage() {
       income: t.invoices_workspace_direction_income,
       expense: t.invoices_workspace_direction_expense,
     },
+    redactionReasons: {
+      invoice_hidden_from_patient:
+        lang === "de" ? "Rechnung vor Patient verborgen" : "Счет скрыт от пациента",
+      amounts_hidden_from_patient:
+        lang === "de" ? "Beträge vor Patient verborgen" : "Суммы скрыты от пациента",
+      line_items_hidden_from_patient:
+        lang === "de" ? "Positionen vor Patient verborgen" : "Позиции скрыты от пациента",
+    },
+    vatSources: {
+      catalog: lang === "de" ? "Leistungskatalog" : "Каталог услуг",
+      tax_profile: lang === "de" ? "Steuerprofil" : "Налоговый профиль",
+      manual: lang === "de" ? "Manuell" : "Вручную",
+      legacy: lang === "de" ? "Altdaten" : "Исторические данные",
+    },
   };
-  const invoiceStatusLabel = (status: string) => enumLabel(status, text.statuses);
-  const invoiceTypeLabel = (invoiceType: string) => enumLabel(invoiceType, text.types);
-  const dunningLevelLabel = (level: string) => enumLabel(level, text.dunningLevels);
-  const accountingDirectionLabel = (direction: string) => enumLabel(direction, text.directions);
+  const invoiceStatusLabel = (status: string) => enumLabel(status, text.statuses, t);
+  const invoiceTypeLabel = (invoiceType: string) => enumLabel(invoiceType, text.types, t);
+  const dunningLevelLabel = (level: string) => enumLabel(level, text.dunningLevels, t);
+  const accountingDirectionLabel = (direction: string) =>
+    enumLabel(direction, text.directions, t);
+  const redactionReasonLabel = (reason: string | null | undefined) =>
+    enumLabel(reason, text.redactionReasons, t);
+  const vatSourceLabel = (source: string | null | undefined) =>
+    enumLabel(source, text.vatSources, t);
+  const taxProfileLabel = (
+    name: string | null | undefined,
+    key: string | null | undefined,
+    source: string | null | undefined,
+  ) => {
+    const trimmedName = name?.trim();
+    if (trimmedName) return trimmedName;
+    if (key?.trim()) return formatUnknownValue(key, t);
+    if (source?.trim()) return vatSourceLabel(source);
+    return text.vatSource;
+  };
   const canLoadOrderOptions =
     user?.role === "ceo" || user?.role === "patient_manager" || user?.role === "billing";
   const currentYear = String(new Date().getFullYear());
@@ -1670,7 +1701,9 @@ function StaffInvoicesPage() {
                           </p>
                           {detail.portal_visibility?.redaction_reason ? (
                             <StatusBadge tone="warning">
-                              {detail.portal_visibility.redaction_reason.replaceAll("_", " ")}
+                              {redactionReasonLabel(
+                                detail.portal_visibility.redaction_reason,
+                              )}
                             </StatusBadge>
                           ) : null}
                         </div>
@@ -1976,13 +2009,17 @@ function StaffInvoicesPage() {
                               <p className={cn("mt-1", tokens.text.muted)}>{`${text.quantity} ${line.quantity} | ${text.unit} ${formatMoney(line.unit_price)}`}</p>
                               <p className={cn("mt-1", tokens.text.muted)}>
                                 {line.vat_source_explanation ??
-                                  `VAT source: ${line.vat_source ?? "legacy"}`}
+                                  `${text.vatSource}: ${vatSourceLabel(line.vat_source ?? "legacy")}`}
                               </p>
                             </div>
                             <div className="flex flex-wrap gap-2">
                               <StatusBadge tone="neutral">{`${t.invoices_vat} ${line.vat_rate}%`}</StatusBadge>
                               <StatusBadge tone="neutral">
-                                {(line.tax_profile_name ?? line.tax_profile_key ?? line.vat_source ?? "VAT source").toString()}
+                                {taxProfileLabel(
+                                  line.tax_profile_name,
+                                  line.tax_profile_key,
+                                  line.vat_source,
+                                )}
                               </StatusBadge>
                               {line.is_cost_passthrough ? (
                                 <StatusBadge tone="warning">{t.orders_cost_pass_through_badge}</StatusBadge>

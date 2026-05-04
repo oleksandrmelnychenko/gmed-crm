@@ -95,6 +95,7 @@ export interface Translations {
   access_system_locked: string;
   access_save: string;
   access_reset: string;
+  access_audit_note: string;
 
   common_loading: string;
   common_error: string;
@@ -105,6 +106,16 @@ export interface Translations {
   common_yes: string;
   common_no: string;
   common_search: string;
+  common_search_placeholder: string;
+  common_select_placeholder: string;
+  common_no_results: string;
+  common_clear: string;
+  common_remove: string;
+  common_value: string;
+  common_actions: string;
+  common_unknown_value: string;
+  enum_unknown: string;
+  select_missing_value: string;
   common_delete: string;
   common_archive: string;
   common_sort: string;
@@ -117,6 +128,7 @@ export interface Translations {
   common_configuration: string;
   common_monitoring: string;
   common_last_updated: string;
+  common_discard_unsaved_confirm: string;
   table_filter: string;
   table_filter_search_fields: string;
   table_filter_value: string;
@@ -139,6 +151,11 @@ export interface Translations {
   table_columns_unfreeze: string;
   table_columns_frozen: string;
   table_columns_freeze_limit: string;
+  table_select_all: string;
+  table_select_row: string;
+  table_resize_column: string;
+  table_actions: string;
+  table_no_sort_applied: string;
   table_density: string;
   table_density_comfortable: string;
   table_density_compact: string;
@@ -479,6 +496,7 @@ export interface Translations {
   activity_user: string;
   activity_time: string;
   activity_details: string;
+  activity_payload: string;
   activity_filter_user: string;
   activity_filter_action: string;
   common_ip: string;
@@ -618,6 +636,7 @@ export interface Translations {
   compliance_col_type: string;
   compliance_col_total: string;
   compliance_privacy_review_queue: string;
+  compliance_impact_summary: string;
   compliance_stat_requested: string;
   compliance_stat_hold: string;
   compliance_stat_approved: string;
@@ -1351,6 +1370,31 @@ export function t(lang: Lang): Translations {
     case "ru":
       return ru;
   }
+}
+
+export type EnumLabelMap = Partial<Record<string, string>>;
+
+export function formatUnknownValue(
+  value: unknown,
+  translations: Pick<Translations, "common_unknown" | "common_unknown_value">,
+): string {
+  const raw = typeof value === "string" ? value.trim() : String(value ?? "").trim();
+  return raw ? translations.common_unknown_value : translations.common_unknown;
+}
+
+export function formatEnumLabel(
+  value: string | null | undefined,
+  labels: EnumLabelMap,
+  translations: Pick<
+    Translations,
+    "common_not_set" | "common_unknown" | "common_unknown_value"
+  >,
+): string {
+  if (!value) {
+    return translations.common_not_set;
+  }
+
+  return labels[value] ?? formatUnknownValue(value, translations);
 }
 
 function subscribe(onStoreChange: () => void) {

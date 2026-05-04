@@ -1,5 +1,9 @@
 import { buildApiUrl, getAccessToken } from "@/lib/api";
-import { getLang } from "@/lib/i18n";
+import {
+  formatUnknownValue,
+  getLang,
+  t as translateCatalog,
+} from "@/lib/i18n";
 
 export type PortalDocumentItem = {
   id: string;
@@ -427,6 +431,10 @@ function portalLocale() {
   return "en-GB";
 }
 
+function portalUnknownValue(value: unknown) {
+  return formatUnknownValue(value, translateCatalog(getLang()));
+}
+
 export function portalNotSetLabel() {
   return portalText("Nicht festgelegt", "Не указано", "Not set");
 }
@@ -458,14 +466,26 @@ export function portalStatusLabel(value?: string | null) {
   if (value === "reviewed") return portalText("Geprüft", "Проверено", "Reviewed");
   if (value === "scheduled") return portalText("Eingeplant", "Назначено", "Scheduled");
   if (value === "sent") return portalText("Versendet", "Отправлено", "Sent");
-  return value.replaceAll("_", " ");
+  return portalUnknownValue(value);
+}
+
+export function documentCategoryLabel(value?: string | null) {
+  if (!value) return portalNotSetLabel();
+  if (value === "administrative") return portalText("Administrativ", "Административный", "Administrative");
+  if (value === "clinical") return portalText("Klinisch", "Клинический", "Clinical");
+  if (value === "contract") return portalText("Vertrag", "Договор", "Contract");
+  if (value === "imaging") return portalText("Bildgebung", "Визуализация", "Imaging");
+  if (value === "invoice") return portalText("Rechnung", "Счет", "Invoice");
+  if (value === "lab") return portalText("Labor", "Лаборатория", "Lab");
+  if (value === "medical") return portalText("Medizinisch", "Медицинский", "Medical");
+  return portalUnknownValue(value);
 }
 
 export function invoiceTypeLabel(value: string) {
   if (value === "advance") return portalText("Vorkasse", "Авансовый счет", "Advance");
   if (value === "interim") return portalText("Zwischenrechnung", "Промежуточный счет", "Interim");
   if (value === "final") return portalText("Schlussrechnung", "Итоговый счет", "Final");
-  return value.replaceAll("_", " ");
+  return portalUnknownValue(value);
 }
 
 export function formatPortalDateTime(value?: string | null) {
@@ -522,7 +542,7 @@ export function privacyRequestLabel(value: string) {
   if (value === "erasure") return portalText("Daten löschen", "Удалить данные", "Erase data");
   if (value === "restriction") return portalText("Verarbeitung einschränken", "Ограничить обработку", "Restrict processing");
   if (value === "third_party_revoke") return portalText("Weitergabe an Dritte widerrufen", "Отозвать передачу третьим лицам", "Revoke third-party sharing");
-  return value.replaceAll("_", " ");
+  return portalUnknownValue(value);
 }
 
 export function privacyStatusTone(status: string) {
@@ -546,7 +566,7 @@ export function feedbackStatusTone(status: string) {
 export function feedbackSourceLabel(source: string) {
   if (source === "patient_portal") return portalText("Patientenportal", "Портал пациента", "Patient portal");
   if (source === "staff_capture") return portalText("Durch Mitarbeitende erfasst", "Зафиксировано сотрудником", "Staff capture");
-  return source.replaceAll("_", " ");
+  return portalUnknownValue(source);
 }
 
 export function formatPortalAverage(value?: number | null) {
@@ -595,6 +615,36 @@ export function recommendationStatusTone(status: string) {
   }
   if (status === "superseded") return "border-slate-300 bg-slate-100 text-slate-700";
   return "border-sky-200 bg-sky-50 text-sky-700";
+}
+
+export function recommendationTypeLabel(value?: string | null) {
+  if (!value) return portalNotSetLabel();
+  if (value === "follow_up") return portalText("Nachsorge", "Последующее наблюдение", "Follow-up");
+  if (value === "consultation") return portalText("Konsultation", "Консультация", "Consultation");
+  if (value === "lab_test") return portalText("Laboranalyse", "Лабораторный анализ", "Lab test");
+  if (value === "imaging") return portalText("Bildgebung", "Визуализация", "Imaging");
+  if (value === "document") return portalText("Dokument", "Документ", "Document");
+  if (value === "medication_review") return portalText("Medikationsprüfung", "Проверка назначений", "Medication review");
+  if (value === "other") return portalText("Sonstiges", "Другое", "Other");
+  return portalUnknownValue(value);
+}
+
+export function recommendationPriorityLabel(value?: string | null) {
+  if (!value) return portalNotSetLabel();
+  if (value === "low") return portalText("Niedrig", "Низкий", "Low");
+  if (value === "normal") return portalText("Normal", "Обычный", "Normal");
+  if (value === "high") return portalText("Hoch", "Высокий", "High");
+  if (value === "urgent") return portalText("Dringend", "Срочный", "Urgent");
+  return portalUnknownValue(value);
+}
+
+export function recommendationDecisionLabel(value?: string | null) {
+  if (!value) return portalNotSetLabel();
+  if (value === "schedule") return portalText("Termin planen", "Запланировать визит", "Schedule");
+  if (value === "already_done") return portalText("Schon erledigt", "Уже выполнено", "Already done");
+  if (value === "need_consultation") return portalText("Beratung nötig", "Нужна консультация", "Needs consultation");
+  if (value === "declined") return portalText("Abgelehnt", "Отклонено", "Declined");
+  return portalUnknownValue(value);
 }
 
 export function nextActionTone(kind: string, priority?: string | null) {
@@ -655,7 +705,7 @@ export function appointmentTypeLabel(value: string) {
   if (value === "medical") return portalText("Medizinisch", "Медицинский", "Medical");
   if (value === "non_medical") return portalText("Nicht medizinisch", "Немедицинский", "Non-medical");
   if (value === "internal") return portalText("Intern", "Внутренний", "Internal");
-  return value.replaceAll("_", " ");
+  return portalUnknownValue(value);
 }
 
 export function appointmentCarePathKindLabel(value?: string | null) {

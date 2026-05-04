@@ -19,7 +19,7 @@ import {
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { useLang } from "@/lib/i18n";
+import { formatUnknownValue, useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { localizeRequiredDocumentLabel } from "@/lib/required-document-labels";
 import {
@@ -39,7 +39,9 @@ import {
   portalStatusLabel,
   privacyRequestLabel,
   privacyStatusTone,
+  recommendationPriorityLabel,
   recommendationStatusTone,
+  recommendationTypeLabel,
 } from "@/pages/patients/model/portal-shared";
 import type {
   PortalAppointmentItem,
@@ -116,13 +118,77 @@ function compareNextActions(a: PortalNextActionItem, b: PortalNextActionItem) {
   return aDue - bDue;
 }
 
-function formatNextActionKind(kind: string) {
-  return kind.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+function formatNextActionKind(
+  kind: string,
+  l: (de: string, ru: string, en: string) => string,
+  translations: { common_unknown: string; common_unknown_value: string },
+) {
+  switch (kind) {
+    case "invoice_payment":
+      return l("Rechnung bezahlen", "Оплата счета", "Invoice payment");
+    case "package_approval":
+      return l("Paket freigeben", "Подтверждение пакета", "Package approval");
+    case "document_confirmation":
+      return l("Dokument bestatigen", "Подтверждение документа", "Document confirmation");
+    case "recommendation_decision":
+      return l("Empfehlung entscheiden", "Решение по рекомендации", "Recommendation decision");
+    case "appointment_request":
+      return l("Terminanfrage", "Запрос на визит", "Appointment request");
+    case "privacy_request":
+      return l("Datenschutzanfrage", "Запрос приватности", "Privacy request");
+    case "feedback_request":
+      return l("Feedback abgeben", "Оставить отзыв", "Feedback request");
+    case "concierge_service":
+      return l("Zusatzservice", "Дополнительная услуга", "Concierge service");
+    default:
+      return formatUnknownValue(kind, translations);
+  }
+}
+
+function portalDocumentValueLabel(
+  value: string | null | undefined,
+  l: (de: string, ru: string, en: string) => string,
+  translations: { common_unknown: string; common_unknown_value: string },
+) {
+  switch (value) {
+    case "general":
+      return l("Allgemein", "Общий", "General");
+    case "report":
+    case "medical_report":
+      return l("Medizinischer Bericht", "Медицинский отчет", "Medical report");
+    case "discharge_report":
+      return l("Entlassungsbericht", "Выписной отчет", "Discharge report");
+    case "clinic_letter":
+    case "clinic_correspondence":
+    case "correspondence":
+      return l("Korrespondenz", "Переписка", "Correspondence");
+    case "blood_results":
+    case "analyses":
+    case "analysis":
+      return l("Analysen", "Анализы", "Analyses");
+    case "conclusions":
+      return l("Befunde", "Заключения", "Conclusions");
+    case "invoice_pdf":
+    case "invoices":
+      return l("Rechnung", "Счет", "Invoice");
+    case "translated_letter":
+    case "translations":
+      return l("Ubersetzung", "Перевод", "Translation");
+    case "insurance":
+    case "insurance_document":
+      return l("Versicherungsdokument", "Страховой документ", "Insurance document");
+    case "identity":
+      return l("Identitat", "Идентификация", "Identity");
+    case "payment_proof":
+      return l("Zahlungsnachweis", "Подтверждение оплаты", "Payment proof");
+    default:
+      return formatUnknownValue(value, translations);
+  }
 }
 
 export function PatientDashboardPage() {
   const { user } = useAuth();
-  const { lang } = useLang();
+  const { t, lang } = useLang();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [documents, setDocuments] = useState<PortalDocumentItem[]>([]);
@@ -446,7 +512,7 @@ export function PatientDashboardPage() {
           {nextActionKindSummary.length > 0 ? (
             <div className="flex flex-wrap gap-2">
               {nextActionKindSummary.map(([kind, count]) => (
-                <CountBadge key={kind}>{formatNextActionKind(kind)}: {count}</CountBadge>
+                <CountBadge key={kind}>{formatNextActionKind(kind, l, t)}: {count}</CountBadge>
               ))}
             </div>
           ) : null}
@@ -460,9 +526,9 @@ export function PatientDashboardPage() {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <StatusBadge className={nextActionTone(item.kind, item.priority)}>
-                          {formatNextActionKind(item.kind)}
+                          {formatNextActionKind(item.kind, l, t)}
                         </StatusBadge>
-                        <CountBadge>{formatNextActionKind(item.priority || "normal")}</CountBadge>
+                        <CountBadge>{recommendationPriorityLabel(item.priority || "normal")}</CountBadge>
                       </div>
                       <p className="mt-2 text-sm font-semibold text-foreground">{item.title}</p>
                       {item.description ? <p className={cn("mt-1", tokens.text.muted)}>{item.description}</p> : null}
@@ -510,7 +576,7 @@ export function PatientDashboardPage() {
                     <div>
                       <p className="text-sm font-semibold text-foreground">{item.title}</p>
                       <p className={cn("mt-1", tokens.text.muted)}>
-                        {[item.source_doctor_name, item.recommendation_type.replaceAll("_", " ")]
+                        {[item.source_doctor_name, recommendationTypeLabel(item.recommendation_type)]
                           .filter(Boolean)
                           .join(" / ")}
                       </p>
@@ -596,7 +662,11 @@ export function PatientDashboardPage() {
                     <div>
                       <p className="text-sm font-semibold text-foreground">{item.auto_name}</p>
                       <p className={cn("mt-1", tokens.text.muted)}>
-                        {[item.art, item.category, item.shared_by_name].filter(Boolean).join(" / ")}
+                        {[
+                          portalDocumentValueLabel(item.art, l, t),
+                          item.category ? portalDocumentValueLabel(item.category, l, t) : null,
+                          item.shared_by_name,
+                        ].filter(Boolean).join(" / ")}
                       </p>
                     </div>
                     <StatusBadge tone={item.confirmed ? "success" : item.requires_confirmation ? "warning" : "info"}>

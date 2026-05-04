@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 
+import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import { ColumnVisibilityMenu } from "./column-visibility-menu";
@@ -70,6 +71,7 @@ export function DataTableSurface<T>({
   toolbarClassName,
   ...tableProps
 }: DataTableSurfaceProps<T>) {
+  const { t } = useLang();
   const initialFrozenColumns = useMemo(
     () =>
       defaultFrozenColumns ??
@@ -168,7 +170,7 @@ export function DataTableSurface<T>({
           </span>
         );
 
-  const labels = dictionary ?? {};
+  const labels = useMemo(() => ({ ...t, ...dictionary }), [dictionary, t]);
 
   return (
     <div className={cn("space-y-2", surfaceClassName)}>
@@ -184,15 +186,14 @@ export function DataTableSurface<T>({
           filters={filters}
           onChange={setFilters}
           translations={{
-            addFilter: labels.table_filter ?? labels.common_filter ?? "Filter",
-            clearAll: labels.table_sort_clear ?? labels.common_clear_all ?? "Clear",
-            searchPlaceholder:
-              labels.table_filter_search_fields ?? labels.common_search ?? "Search",
-            noFields: labels.table_filter_no_fields ?? "No available fields",
-            remove: labels.table_filter_remove ?? labels.common_remove ?? "Remove",
-            valuePlaceholder: labels.table_filter_value ?? labels.common_value ?? "Value",
-            yes: labels.common_yes ?? "Yes",
-            no: labels.common_no ?? "No",
+            addFilter: labels.table_filter,
+            clearAll: labels.table_sort_clear ?? labels.common_clear,
+            searchPlaceholder: labels.table_filter_search_fields ?? labels.common_search,
+            noFields: labels.table_filter_no_fields,
+            remove: labels.table_filter_remove ?? labels.common_remove,
+            valuePlaceholder: labels.table_filter_value ?? labels.common_value,
+            yes: labels.common_yes,
+            no: labels.common_no,
             operatorLabels: {
               contains: labels.filter_op_contains ?? "contains",
               does_not_contain:
@@ -219,16 +220,14 @@ export function DataTableSurface<T>({
           value={sortStack}
           onChange={setSortStack}
           translations={{
-            addSort: labels.table_sort_add ?? "Add sort",
-            clearAll: labels.table_sort_clear ?? labels.common_clear_all ?? "Clear",
-            ascending: labels.table_sort_ascending ?? labels.common_ascending ?? "Asc",
-            descending:
-              labels.table_sort_descending ?? labels.common_descending ?? "Desc",
+            addSort: labels.table_sort_add,
+            clearAll: labels.table_sort_clear ?? labels.common_clear,
+            ascending: labels.table_sort_ascending,
+            descending: labels.table_sort_descending,
             emptyHint: labels.common_sort ?? "Sort",
-            moveUp: labels.table_sort_move_up ?? labels.common_move_up ?? "Move up",
-            moveDown:
-              labels.table_sort_move_down ?? labels.common_move_down ?? "Move down",
-            remove: labels.table_sort_remove ?? labels.common_remove ?? "Remove",
+            moveUp: labels.table_sort_move_up,
+            moveDown: labels.table_sort_move_down,
+            remove: labels.table_sort_remove ?? labels.common_remove,
           }}
         />
         <div className="flex items-center gap-1">
@@ -242,32 +241,25 @@ export function DataTableSurface<T>({
             defaultFrozen={initialFrozenColumns}
             maxFrozenColumns={maxFrozenColumns}
             groupLabels={groupLabels}
-            buttonLabel={labels.table_columns ?? "Columns"}
-            searchPlaceholder={labels.table_columns_search ?? "Search columns"}
-            resetLabel={labels.common_reset ?? "Reset"}
-            showAllLabel={labels.table_columns_show_all ?? "Show all"}
-            hideAllLabel={labels.table_columns_hide_all ?? "Hide all"}
-            noMatchLabel={labels.table_filter_no_fields ?? "No match"}
-            requiredNoteLabel={labels.table_columns_required ?? "required"}
-            freezeLabel={labels.table_columns_freeze ?? "Freeze"}
-            unfreezeLabel={labels.table_columns_unfreeze ?? "Unfreeze"}
-            frozenNoteLabel={labels.table_columns_frozen ?? "frozen"}
+            buttonLabel={labels.table_columns}
+            searchPlaceholder={labels.table_columns_search}
+            resetLabel={labels.common_reset}
+            showAllLabel={labels.table_columns_show_all}
+            hideAllLabel={labels.table_columns_hide_all}
+            noMatchLabel={labels.common_no_results}
+            requiredNoteLabel={labels.table_columns_required}
+            freezeLabel={labels.table_columns_freeze}
+            unfreezeLabel={labels.table_columns_unfreeze}
+            frozenNoteLabel={labels.table_columns_frozen}
           />
           <DensityToggle
             value={density}
             onChange={setDensity}
-            ariaLabel={labels.table_density ?? "Row density"}
+            ariaLabel={labels.table_density}
             labels={{
-              comfortable:
-                labels.table_density_comfortable ??
-                labels.density_comfortable ??
-                "Comfortable",
-              compact:
-                labels.table_density_compact ?? labels.density_compact ?? "Compact",
-              condensed:
-                labels.table_density_condensed ??
-                labels.density_condensed ??
-                "Condensed",
+              comfortable: labels.table_density_comfortable,
+              compact: labels.table_density_compact,
+              condensed: labels.table_density_condensed,
             }}
           />
         </div>
@@ -286,23 +278,17 @@ export function DataTableSurface<T>({
           effectiveFrozenColumns.length >= maxFrozenColumns
         }
         columnHeaderContextMenuLabels={{
-          column: labels.table_columns ?? "Column",
-          freeze: labels.table_columns_freeze ?? "Freeze column",
-          unfreeze: labels.table_columns_unfreeze ?? "Unfreeze column",
-          frozen: labels.table_columns_frozen ?? "Frozen",
-          freezeLimitReached:
-            labels.table_columns_freeze_limit ?? "Freeze limit reached",
+          column: labels.table_columns,
+          freeze: labels.table_columns_freeze,
+          unfreeze: labels.table_columns_unfreeze,
+          frozen: labels.table_columns_frozen,
+          freezeLimitReached: labels.table_columns_freeze_limit,
         }}
         density={density}
         footer={footerNode}
         rowActionsLabel={
           rowActionsLabel ??
-          labels.table_actions ??
-          labels.common_actions ??
-          labels.common_actions_label ??
-          labels.users_actions ??
-          labels.compliance_col_actions ??
-          "Actions"
+          labels.table_actions ?? labels.common_actions ?? labels.users_actions
         }
         rowActionsWidth={rowActionsWidth}
         className={cn("rounded-none border-0 shadow-none", tableClassName)}

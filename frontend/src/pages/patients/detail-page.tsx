@@ -25,7 +25,12 @@ import {
 } from "@/lib/workflow-labels";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { getLang, useLang } from "@/lib/i18n";
+import {
+  formatEnumLabel,
+  getLang,
+  t as translateCatalog,
+  useLang,
+} from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
@@ -243,6 +248,10 @@ function patientDetailText(de: string, ru: string, en: string) {
   return en;
 }
 
+function patientDetailUnknownEnumLabel(value: string | null | undefined) {
+  return formatEnumLabel(value, {}, translateCatalog(getLang()));
+}
+
 function toOptional(value: string) {
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
@@ -321,7 +330,7 @@ function insuranceLbl(v: string | null | undefined, tr: Record<string, string>) 
 
 function roleLbl(v: string | null | undefined, tr: Record<string, string>) {
   if (!v) return tr.common_unknown;
-  return tr[`role_${v}`] ?? v.replaceAll("_", " ");
+  return tr[`role_${v}`] ?? tr.common_unknown_value ?? tr.common_unknown;
 }
 
 function relationTypeLabel(value: string) {
@@ -345,7 +354,7 @@ function relationTypeLabel(value: string) {
     case "other":
       return patientDetailText("Sonstiges", "Другое", "Other");
     default:
-      return value.replaceAll("_", " ");
+      return patientDetailUnknownEnumLabel(value);
   }
 }
 
@@ -362,7 +371,7 @@ function orderPhaseLabel(value: string) {
     case "followup":
       return patientDetailText("Nachbetreuung", "Наблюдение", "Follow-up");
     default:
-      return value.replaceAll("_", " ");
+      return patientDetailUnknownEnumLabel(value);
   }
 }
 
@@ -377,7 +386,7 @@ function appointmentTypeLabel(value: string) {
     case "procedure":
       return patientDetailText("Eingriff", "Процедура", "Procedure");
     default:
-      return value.replaceAll("_", " ");
+      return patientDetailUnknownEnumLabel(value);
   }
 }
 
@@ -390,7 +399,7 @@ function invoiceTypeLabel(value: string) {
     case "final":
       return patientDetailText("Abschlussrechnung", "Финальный счёт", "Final");
     default:
-      return value.replaceAll("_", " ");
+      return patientDetailUnknownEnumLabel(value);
   }
 }
 
@@ -498,7 +507,7 @@ function patientCardEntryCategoryLabel(category: string) {
     case "other":
       return patientDetailText("Sonstiges", "Другое", "Other");
     default:
-      return category.replaceAll("_", " ");
+      return patientDetailUnknownEnumLabel(category);
   }
 }
 
@@ -549,7 +558,7 @@ function patientMedicalOrderTypeLabel(orderType: string) {
     case "other":
       return patientDetailText("Sonstiges", "Другое", "Other");
     default:
-      return orderType.replaceAll("_", " ");
+      return patientDetailUnknownEnumLabel(orderType);
   }
 }
 
@@ -582,7 +591,7 @@ function patientRiskScoreTypeLabel(scoreType: string) {
     case "other":
       return patientDetailText("Sonstiges", "Другое", "Other");
     default:
-      return scoreType.replaceAll("_", " ");
+      return patientDetailUnknownEnumLabel(scoreType);
   }
 }
 
@@ -593,7 +602,7 @@ function workflowChecklistLabel(key: string) {
     case "patient_custom":
       return patientDetailText("Benutzerdefiniert", "Пользовательское", "Custom");
     default:
-      return key.replaceAll("_", " ");
+      return patientDetailUnknownEnumLabel(key);
   }
 }
 
@@ -640,7 +649,7 @@ function patientDetailStatusLabel(status: string) {
     case "archived":
       return patientDetailText("Archiviert", "В архиве", "Archived");
     default:
-      return status.replaceAll("_", " ");
+      return patientDetailUnknownEnumLabel(status);
   }
 }
 
@@ -655,7 +664,7 @@ function priorityLabel(priority: string) {
     case "urgent":
       return patientDetailText("Dringend", "Срочно", "Urgent");
     default:
-      return priority;
+      return patientDetailUnknownEnumLabel(priority);
   }
 }
 

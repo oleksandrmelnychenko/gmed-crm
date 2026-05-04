@@ -1,3 +1,5 @@
+import { formatUnknownValue, type Translations } from "@/lib/i18n";
+
 export function initials(name: string) {
   return name
     .split(/\s+/)
@@ -6,11 +8,9 @@ export function initials(name: string) {
     .join("");
 }
 
-export function roleDisplay(role: string) {
-  return role
-    .split("_")
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
+export function roleDisplay(role: string, translations: Translations) {
+  const labels = translations as unknown as Record<string, string>;
+  return labels[`role_${role}`] ?? formatUnknownValue(role, translations);
 }
 
 export function timeAgo(iso: string) {
