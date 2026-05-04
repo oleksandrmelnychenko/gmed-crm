@@ -17,6 +17,7 @@ import {
 import { flushSync } from "react-dom";
 import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import {
+  CalendarClock,
   ChevronDown,
   Download,
   FileText,
@@ -4234,57 +4235,34 @@ function StaffDocumentsPage({
                   neutralSurface
                   title={t.documents_patient_portal}
                   tone="brand"
-                >
-                  <div className="rounded-xl bg-[#f9fdff] px-4 py-4">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                      <div className="flex min-w-0">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                "rounded-full bg-white",
-                                detail.visibility === "patient_visible"
-                                  ? "border-0 text-emerald-700 shadow-sm"
-                                  : "border-0 text-muted-foreground shadow-sm",
-                              )}
-                            >
-                              {detail.visibility === "patient_visible"
-                                ? t.documents_portal_eligible
-                                : t.documents_not_portal_eligible}
-                            </Badge>
-                            <span className="text-xs font-medium text-muted-foreground">
-                              {activePortalShares.length > 0
-                                ? l(
-                                    "Portal-Freigabe aktiv",
-                                    "Релиз в портал активен",
-                                    "Portal release active",
-                                  )
-                                : l(
-                                    "Noch nicht veroeffentlicht",
-                                    "Еще не опубликовано",
-                                    "Not released yet",
-                                  )}
-                            </span>
-                          </div>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            <span className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs text-muted-foreground shadow-sm">
-                              <span className="font-semibold tabular-nums text-foreground">
-                                {activePortalShares.length}
-                              </span>
-                              {t.documents_active_portal_releases}
-                            </span>
-                            <span className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs text-muted-foreground shadow-sm">
-                              <span className="font-semibold tabular-nums text-foreground">
-                                {confirmedPortalShares}
-                              </span>
-                              {t.documents_confirmed_recipients}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
+                  accessory={
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <span
+                        className={cn(
+                          "inline-flex items-center rounded-full bg-white px-2.5 py-1 text-[11px] font-medium shadow-sm",
+                          detail.visibility === "patient_visible"
+                            ? "text-emerald-700"
+                            : "text-muted-foreground",
+                        )}
+                      >
+                        {detail.visibility === "patient_visible"
+                          ? t.documents_portal_eligible
+                          : t.documents_not_portal_eligible}
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
+                        <span className="font-semibold tabular-nums text-foreground">
+                          {activePortalShares.length}
+                        </span>
+                        {t.documents_active_portal_releases}
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
+                        <span className="font-semibold tabular-nums text-emerald-700">
+                          {confirmedPortalShares}
+                        </span>
+                        {t.documents_confirmed_recipients}
+                      </span>
                       {canManage ? (
-                        <div className="flex shrink-0 flex-wrap gap-2 lg:justify-end">
+                        <>
                           <Button
                             type="button"
                             size="sm"
@@ -4312,11 +4290,11 @@ function StaffDocumentsPage({
                             ) : null}
                             {t.documents_revoke_portal_release}
                           </Button>
-                        </div>
+                        </>
                       ) : null}
                     </div>
-                  </div>
-
+                  }
+                >
                   {!detail.patient_id || !canManage ? (
                     <div className="rounded-lg bg-amber-50/70 px-4 py-3 text-sm text-amber-900/80">
                       {!detail.patient_id ? (
@@ -4463,7 +4441,7 @@ function StaffDocumentsPage({
                       </div>
                     ) : (
                       <div className="overflow-hidden rounded-lg">
-                        <div className="hidden grid-cols-[minmax(170px,0.7fr)_minmax(150px,150px)_minmax(360px,1.4fr)] gap-4 bg-[#f9fdff] px-3 py-2 text-[11px] font-medium text-muted-foreground lg:grid">
+                        <div className="hidden grid-cols-[minmax(170px,0.7fr)_minmax(150px,150px)_minmax(360px,1.4fr)] gap-4 px-3 py-2 text-[11px] font-medium text-muted-foreground lg:grid">
                           <span>{l("Empfaenger", "Получатель", "Recipient")}</span>
                           <span className="border-l border-border/50 px-3">
                             {t.users_status}
@@ -4500,22 +4478,26 @@ function StaffDocumentsPage({
                                   <p className="min-w-0 truncate text-[15px] font-semibold leading-5 text-foreground">
                                     {targetName}
                                   </p>
-                                  <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
-                                    <Badge
-                                      variant="outline"
-                                      className={cn(
-                                        "rounded-full border-0 px-2 py-0.5 text-[10px] font-medium",
-                                        isProviderShare
-                                          ? "bg-sky-50 text-sky-700"
-                                          : "bg-[var(--brand)]/10 text-[var(--brand)]",
-                                      )}
-                                    >
-                                      {targetKind}
-                                    </Badge>
-                                  </div>
+                                  <p className="mt-1 flex min-w-0 items-center gap-1.5 truncate text-xs tabular-nums text-muted-foreground">
+                                    <CalendarClock className="size-3.5 shrink-0" />
+                                    <span className="truncate">
+                                      {formatDateTime(share.shared_at)}
+                                    </span>
+                                  </p>
                                 </div>
                               </div>
-                              <div className="flex min-w-0 items-center lg:border-l lg:border-border/50 lg:px-3">
+                              <div className="flex min-w-0 flex-wrap items-center gap-1.5 lg:border-l lg:border-border/50 lg:px-3">
+                                <Badge
+                                  variant="outline"
+                                  className={cn(
+                                    "rounded-full border-0 px-2 py-0.5 text-[10px] font-medium",
+                                    isProviderShare
+                                      ? "bg-sky-50 text-sky-700"
+                                      : "bg-[var(--brand)]/10 text-[var(--brand)]",
+                                  )}
+                                >
+                                  {targetKind}
+                                </Badge>
                                 <DocumentShareStateBadge
                                   share={share}
                                   t={t}
@@ -4532,17 +4514,16 @@ function StaffDocumentsPage({
                                           share.shared_by_name || t.common_unknown,
                                         )}
                                       </span>
-                                      <span className="size-1 rounded-full bg-border" />
-                                      <span className="text-xs tabular-nums text-muted-foreground">
-                                        {formatDateTime(share.shared_at)}
-                                      </span>
                                       {share.channel ? (
+                                        <>
+                                        <span className="size-1 rounded-full bg-border" />
                                         <Badge
                                           variant="outline"
                                           className="rounded-full border-0 bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-700"
                                         >
                                           {formatShareChannelLabel(share.channel)}
                                         </Badge>
+                                        </>
                                       ) : null}
                                     </div>
                                     {share.message ? (
