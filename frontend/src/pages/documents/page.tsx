@@ -14,7 +14,7 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
-import { flushSync } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import {
   CalendarClock,
@@ -25,6 +25,7 @@ import {
   History,
   Languages,
   LoaderCircle,
+  MoreHorizontal,
   RefreshCw,
   Search,
   Share2,
@@ -416,42 +417,16 @@ function formatTranslationStatusLabel(
   }
 }
 
-function translationRequestSurface(status: string) {
-  switch (status) {
-    case "completed":
-      return "border-border/60 bg-white";
-    case "in_progress":
-      return "border-border/60 bg-white";
-    case "cancelled":
-      return "border-border/60 bg-white";
-    default:
-      return "border-border/60 bg-white";
-  }
-}
-
-function translationRequestAccent(status: string) {
-  switch (status) {
-    case "completed":
-      return "bg-emerald-500";
-    case "in_progress":
-      return "bg-sky-500";
-    case "cancelled":
-      return "bg-rose-500";
-    default:
-      return "bg-amber-500";
-  }
-}
-
 function translationRequestChevronTone(status: string) {
   switch (status) {
     case "completed":
-      return "border-emerald-200 bg-emerald-100 text-emerald-700";
+      return "text-emerald-600";
     case "in_progress":
-      return "border-sky-200 bg-sky-100 text-sky-700";
+      return "text-sky-600";
     case "cancelled":
-      return "border-rose-200 bg-rose-100 text-rose-700";
+      return "text-rose-500";
     default:
-      return "border-amber-200 bg-amber-100 text-amber-700";
+      return "text-amber-600";
   }
 }
 
@@ -692,6 +667,9 @@ function StaffDocumentsPage({
   const [detailError, setDetailError] = useState("");
   const [translationBusy, setTranslationBusy] = useState(false);
   const [translationError, setTranslationError] = useState("");
+  const [translationActionMenuOpen, setTranslationActionMenuOpen] = useState<string | null>(null);
+  const [translationActionMenuPosition, setTranslationActionMenuPosition] =
+    useState<{ left: number; top: number } | null>(null);
   const [textExtractionBusy, setTextExtractionBusy] = useState(false);
   const [textExtractionError, setTextExtractionError] = useState("");
   const [translationForm, setTranslationForm] = useState({
@@ -739,6 +717,41 @@ function StaffDocumentsPage({
     }
     startTransition(() => setVersion((current) => current + 1));
   }, 250);
+
+  useEffect(() => {
+    if (!translationActionMenuOpen) return;
+
+    function handlePointer(event: MouseEvent) {
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest("[data-translation-action-menu]")) {
+        setTranslationActionMenuOpen(null);
+        setTranslationActionMenuPosition(null);
+      }
+    }
+
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setTranslationActionMenuOpen(null);
+        setTranslationActionMenuPosition(null);
+      }
+    }
+
+    function closeActionMenu() {
+      setTranslationActionMenuOpen(null);
+      setTranslationActionMenuPosition(null);
+    }
+
+    window.addEventListener("mousedown", handlePointer);
+    window.addEventListener("keydown", handleKey);
+    window.addEventListener("resize", closeActionMenu);
+    window.addEventListener("scroll", closeActionMenu, true);
+    return () => {
+      window.removeEventListener("mousedown", handlePointer);
+      window.removeEventListener("keydown", handleKey);
+      window.removeEventListener("resize", closeActionMenu);
+      window.removeEventListener("scroll", closeActionMenu, true);
+    };
+  }, [translationActionMenuOpen]);
 
   const selectedTemplate = useMemo(
     () =>
@@ -3773,32 +3786,59 @@ function StaffDocumentsPage({
                     title={t.documents_translation_requests}
                     tone="brand"
                     accessory={
-                      canRequestTranslation ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-8 rounded-lg"
-                          onClick={() => {
-                            setTranslationError("");
-                            setTranslationRequestOpen(true);
-                          }}
-                        >
-                          <FileText className="size-3.5" />
-                          {t.documents_request_translation}
-                        </Button>
-                      ) : null
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
+                          <span className="font-semibold tabular-nums text-foreground">
+                            {translationRequests.length}
+                          </span>
+                          {t.documents_translation_requests}
+                        </span>
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
+                          <span className="font-semibold tabular-nums text-amber-700">
+                            {translationRequests.filter((request) => request.status === "requested").length}
+                          </span>
+                          {formatTranslationStatusLabel("requested", t)}
+                        </span>
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
+                          <span className="font-semibold tabular-nums text-sky-700">
+                            {translationRequests.filter((request) => request.status === "in_progress").length}
+                          </span>
+                          {formatTranslationStatusLabel("in_progress", t)}
+                        </span>
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
+                          <span className="font-semibold tabular-nums text-emerald-700">
+                            {translationRequests.filter((request) => request.status === "completed").length}
+                          </span>
+                          {formatTranslationStatusLabel("completed", t)}
+                        </span>
+                        {canRequestTranslation ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 rounded-lg bg-white"
+                            onClick={() => {
+                              setTranslationError("");
+                              setTranslationRequestOpen(true);
+                            }}
+                          >
+                            <FileText className="size-3.5" />
+                            {t.documents_request_translation}
+                          </Button>
+                        ) : null}
+                      </div>
                     }
                   >
                     {translationError ? (
                       <Banner tone="error">{translationError}</Banner>
                     ) : null}
                     {translationRequests.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-amber-200/80 bg-amber-50/45 px-4 py-6 text-sm text-amber-900/80">
-                        {t.documents_no_translation_requests}
+                      <div className="flex items-center gap-3 rounded-lg px-3 py-4 text-sm text-muted-foreground">
+                        <span className="size-2.5 shrink-0 rounded-full bg-muted-foreground/35" />
+                        <span>{t.documents_no_translation_requests}</span>
                       </div>
                     ) : (
-                      <div className="space-y-3">
+                      <div className="space-y-0">
                         {translationRequests.map((request) => {
                           const draft = translationDrafts[request.id] ?? {
                             note: request.note ?? "",
@@ -3808,309 +3848,422 @@ function StaffDocumentsPage({
                           };
                           const canEditWorkspace =
                             canUpdateTranslation && request.status !== "cancelled";
+                          const canActOnTranslation =
+                            canUpdateTranslation &&
+                            request.status !== "completed" &&
+                            request.status !== "cancelled";
+                          const canShowTranslationActionMenu =
+                            canActOnTranslation || Boolean(request.translated_document_id);
+                          const actionMenuButtonClass =
+                            "h-8 w-full justify-start rounded-md px-2.5 text-xs font-medium text-foreground hover:bg-[#f9fdff] hover:text-foreground";
 
                           return (
                             <details
                               key={request.id}
                               className={cn(
-                                "group relative overflow-hidden rounded-lg border shadow-sm transition-shadow",
-                                translationRequestSurface(request.status),
+                                "group relative pl-9",
+                                request.status === "cancelled" && "opacity-75",
                               )}
                             >
-                              <span
-                                aria-hidden="true"
-                                className={cn(
-                                  "absolute inset-y-0 left-0 w-1",
-                                  translationRequestAccent(request.status),
-                                )}
-                              />
-                              <summary className="flex cursor-pointer list-none flex-col gap-3 px-4 py-4 pl-5 transition hover:bg-background/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex-row sm:items-start sm:justify-between [&::-webkit-details-marker]:hidden">
-                                <div className="flex min-w-0 gap-3">
+                              <summary className="relative grid cursor-pointer list-none gap-2 rounded-lg px-3 py-3 pr-12 transition hover:bg-[#f9fdff] group-open:bg-[#f9fdff] group-open:ring-1 group-open:ring-border/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                                <div className="absolute -left-9 bottom-0 top-0 flex w-8 items-start justify-center pt-3">
                                   <span
                                     className={cn(
-                                      "mt-0.5 inline-flex size-9 shrink-0 items-center justify-center rounded-full border shadow-sm transition-colors",
+                                      "inline-flex size-7 shrink-0 items-center justify-center transition-colors",
                                       translationRequestChevronTone(request.status),
                                     )}
                                   >
-                                    <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
+                                    <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
                                   </span>
-                                  <div className="min-w-0">
-                                  <p className="truncate text-sm font-semibold text-foreground">
-                                    {request.requested_by_name ||
-                                      t.documents_unknown_requester}
-                                  </p>
-                                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                                    {formatDateTime(request.requested_at)}
-                                    {request.completed_at
-                                      ? text.completedAt(
-                                          formatDateTime(request.completed_at),
-                                        )
-                                      : ""}
-                                    {request.translated_by_name
-                                      ? text.translatedByWorkspace(
-                                          request.translated_by_name,
-                                        )
-                                      : ""}
-                                  </p>
-                                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                                    {l("Zugewiesen", "Назначено", "Assigned")}:{" "}
-                                    <span className="font-medium text-foreground">
-                                      {request.assigned_to_name ?? l("Nicht zugewiesen", "Не назначено", "Unassigned")}
-                                    </span>
-                                    {request.translated_document_name
-                                      ? ` / ${request.translated_document_name}`
-                                      : ""}
-                                  </p>
                                 </div>
-                                </div>
-                                <div className="flex shrink-0 items-start gap-2 self-end sm:self-start">
-                                  <div className="flex flex-wrap justify-end gap-1.5">
-                                    <Badge
-                                      variant="outline"
-                                      className={cn(
-                                        "rounded-full",
-                                        translationStatusBadge(request.status),
-                                      )}
+                                {canShowTranslationActionMenu ? (
+                                  <div
+                                    data-translation-action-menu
+                                    className="absolute right-3 top-3 z-20"
+                                    onClick={(event) => {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                    }}
+                                    onKeyDown={(event) => event.stopPropagation()}
+                                  >
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon-sm"
+                                      className="size-7 rounded-full bg-white text-muted-foreground shadow-sm ring-1 ring-border/60 hover:bg-[#f9fdff] hover:text-foreground"
+                                      aria-label={l("Aktionen", "Действия", "Actions")}
+                                      aria-expanded={translationActionMenuOpen === request.id}
+                                      onClick={(event) => {
+                                        if (translationActionMenuOpen === request.id) {
+                                          setTranslationActionMenuOpen(null);
+                                          setTranslationActionMenuPosition(null);
+                                          return;
+                                        }
+
+                                        const rect = event.currentTarget.getBoundingClientRect();
+                                        const menuWidth = 240;
+                                        setTranslationActionMenuPosition({
+                                          left: Math.max(
+                                            8,
+                                            Math.min(
+                                              window.innerWidth - menuWidth - 8,
+                                              rect.right - menuWidth,
+                                            ),
+                                          ),
+                                          top: rect.bottom + 8,
+                                        });
+                                        setTranslationActionMenuOpen(request.id);
+                                      }}
                                     >
-                                      {formatTranslationStatusLabel(
-                                        request.status,
-                                        t,
-                                      )}
-                                    </Badge>
+                                      <MoreHorizontal className="size-4" />
+                                    </Button>
+                                    {translationActionMenuOpen === request.id &&
+                                    translationActionMenuPosition &&
+                                    typeof document !== "undefined"
+                                      ? createPortal(
+                                      <div
+                                        data-translation-action-menu
+                                        className="fixed z-[9999] w-60 rounded-lg border border-border/60 bg-white p-1.5 shadow-xl"
+                                        style={{
+                                          left: translationActionMenuPosition.left,
+                                          top: translationActionMenuPosition.top,
+                                        }}
+                                      >
+                                        <span className="absolute -top-1.5 right-3 size-3 rotate-45 border-l border-t border-border/60 bg-white" />
+                                        {request.translated_document_id ? (
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            className={actionMenuButtonClass}
+                                            disabled={translationBusy}
+                                            onClick={() => {
+                                              setTranslationActionMenuOpen(null);
+                                              setTranslationActionMenuPosition(null);
+                                              openDocument(request.translated_document_id!);
+                                            }}
+                                          >
+                                            {l("Uebersetzung öffnen", "Открыть перевод", "Open translation")}
+                                          </Button>
+                                        ) : null}
+                                        {canActOnTranslation && request.status !== "in_progress" ? (
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            className={actionMenuButtonClass}
+                                            disabled={translationBusy}
+                                            onClick={() => {
+                                              setTranslationActionMenuOpen(null);
+                                              setTranslationActionMenuPosition(null);
+                                              void handleUpdateTranslationRequest(
+                                                request.id,
+                                                "in_progress",
+                                                undefined,
+                                                undefined,
+                                                { assignedTo: request.assigned_to ?? user?.id ?? null },
+                                              );
+                                            }}
+                                          >
+                                            {t.documents_translation_start}
+                                          </Button>
+                                        ) : null}
+                                        {canActOnTranslation ? (
+                                          <>
+                                            <Button
+                                              type="button"
+                                              variant="ghost"
+                                              size="sm"
+                                              className={actionMenuButtonClass}
+                                              disabled={translationBusy}
+                                              onClick={() => {
+                                                setTranslationActionMenuOpen(null);
+                                                setTranslationActionMenuPosition(null);
+                                                void handleUpdateTranslationRequest(
+                                                  request.id,
+                                                  "completed",
+                                                );
+                                              }}
+                                            >
+                                              {t.documents_translation_complete}
+                                            </Button>
+                                            <Button
+                                              type="button"
+                                              variant="ghost"
+                                              size="sm"
+                                              className={actionMenuButtonClass}
+                                              disabled={translationBusy || !draft.translatedText.trim()}
+                                              onClick={() => {
+                                                setTranslationActionMenuOpen(null);
+                                                setTranslationActionMenuPosition(null);
+                                                void handleUpdateTranslationRequest(
+                                                  request.id,
+                                                  "completed",
+                                                  undefined,
+                                                  l("Uebersetzung abgeschlossen und Dokument erstellt.", "Перевод завершен, документ создан.", "Translation completed and document created."),
+                                                  { createTranslatedDocument: true },
+                                                );
+                                              }}
+                                            >
+                                              {l("Abschließen + Dokument", "Завершить + документ", "Complete + document")}
+                                            </Button>
+                                            <Button
+                                              type="button"
+                                              variant="ghost"
+                                              size="sm"
+                                              className={actionMenuButtonClass}
+                                              disabled={translationBusy}
+                                              onClick={() => {
+                                                setTranslationActionMenuOpen(null);
+                                                setTranslationActionMenuPosition(null);
+                                                void handleUpdateTranslationRequest(
+                                                  request.id,
+                                                  "cancelled",
+                                                );
+                                              }}
+                                            >
+                                              {t.documents_translation_cancel}
+                                            </Button>
+                                          </>
+                                        ) : null}
+                                      </div>,
+                                      document.body,
+                                    )
+                                      : null}
+                                  </div>
+                                ) : null}
+                                <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                  <div className="min-w-0">
+                                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                      <p className="truncate text-[15px] font-semibold leading-5 text-foreground">
+                                        {request.requested_by_name ||
+                                          t.documents_unknown_requester}
+                                      </p>
+                                      <Badge
+                                        variant="outline"
+                                        className={cn(
+                                          "rounded-full",
+                                          translationStatusBadge(request.status),
+                                        )}
+                                      >
+                                        {formatTranslationStatusLabel(
+                                          request.status,
+                                          t,
+                                        )}
+                                      </Badge>
+                                    </div>
+                                    <p className="mt-1 text-xs tabular-nums text-muted-foreground">
+                                      {formatDateTime(request.requested_at)}
+                                      {request.completed_at
+                                        ? ` / ${formatDateTime(request.completed_at)}`
+                                        : ""}
+                                    </p>
+                                  </div>
+                                  <div className="flex min-w-0 flex-wrap justify-start gap-1.5 sm:justify-end">
                                     <Badge
                                       variant="outline"
-                                      className="rounded-full border-border/60 bg-card text-foreground"
+                                      className="rounded-full border-0 bg-[#f9fdff] px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
                                     >
                                       {formatLanguageLabel(request.requested_language)}
                                     </Badge>
+                                    {request.translated_by_name ? (
+                                      <Badge
+                                        variant="outline"
+                                        className="rounded-full border-0 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700"
+                                      >
+                                        {text.translatedByWorkspace(request.translated_by_name)}
+                                      </Badge>
+                                    ) : null}
+                                    {request.translated_document_name ? (
+                                      <Badge
+                                        variant="outline"
+                                        className="rounded-full border-0 bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-700"
+                                      >
+                                        {request.translated_document_name}
+                                      </Badge>
+                                    ) : null}
                                   </div>
                                 </div>
+                                <p className="text-xs text-muted-foreground">
+                                  {l("Zugewiesen", "Назначено", "Assigned")}:{" "}
+                                  <span className="font-medium text-foreground">
+                                    {request.assigned_to_name ?? l("Nicht zugewiesen", "Не назначено", "Unassigned")}
+                                  </span>
+                                </p>
                               </summary>
-                              <div className="border-t border-border/50 bg-white px-4 py-4">
-                                {canUpdateTranslation &&
-                                request.status !== "completed" &&
-                                request.status !== "cancelled" ? (
-                                  <div className="flex flex-wrap gap-2 rounded-lg border border-border/50 bg-card/80 px-3 py-3">
-                                    {request.status !== "in_progress" ? (
-                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        className="rounded-xl"
-                                        disabled={translationBusy}
-                                        onClick={() =>
-                                          void handleUpdateTranslationRequest(
-                                            request.id,
-                                            "in_progress",
-                                            undefined,
-                                            undefined,
-                                            { assignedTo: request.assigned_to ?? user?.id ?? null },
-                                          )
-                                        }
-                                      >
-                                        {t.documents_translation_start}
-                                      </Button>
-                                    ) : null}
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      className="rounded-xl"
-                                      disabled={translationBusy}
-                                      onClick={() =>
-                                        void handleUpdateTranslationRequest(
-                                          request.id,
-                                          "completed",
-                                        )
-                                      }
-                                    >
-                                      {t.documents_translation_complete}
-                                    </Button>
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      className="rounded-xl"
-                                      disabled={translationBusy || !draft.translatedText.trim()}
-                                      onClick={() =>
-                                        void handleUpdateTranslationRequest(
-                                          request.id,
-                                          "completed",
-                                          undefined,
-                                          l("Uebersetzung abgeschlossen und Dokument erstellt.", "Перевод завершен, документ создан.", "Translation completed and document created."),
-                                          { createTranslatedDocument: true },
-                                        )
-                                      }
-                                    >
-                                      {l("Abschließen + Dokument", "Завершить + документ", "Complete + document")}
-                                    </Button>
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      className="rounded-xl"
-                                      disabled={translationBusy}
-                                      onClick={() =>
-                                        void handleUpdateTranslationRequest(
-                                          request.id,
-                                          "cancelled",
-                                        )
-                                      }
-                                    >
-                                      {t.documents_translation_cancel}
-                                    </Button>
+                              <div className="overflow-hidden rounded-lg bg-white">
+                                {request.translated_document_id ? (
+                                  <div className="flex items-center gap-3 px-3 py-2">
+                                    <div className="min-w-0">
+                                      <p className="text-[11.5px] font-medium leading-tight text-muted-foreground">
+                                        {l("Fertiges Dokument", "Готовый документ", "Ready document")}
+                                      </p>
+                                      <p className="mt-1 truncate text-sm font-medium text-foreground">
+                                        {request.translated_document_name ?? t.documents_translated_text}
+                                      </p>
+                                    </div>
                                   </div>
                                 ) : null}
-                              {request.translated_document_id ? (
-                                <div className="mt-3 flex flex-wrap gap-2">
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    className="rounded-xl"
-                                    disabled={translationBusy}
-                                    onClick={() => openDocument(request.translated_document_id!)}
-                                  >
-                                    {l("Uebersetzung öffnen", "Открыть перевод", "Open translation")}
-                                  </Button>
-                                </div>
-                              ) : null}
-                              {canEditWorkspace ? (
-                                <div className="mt-4 space-y-4">
-                                  <div className="grid gap-4 md:grid-cols-2">
-                                    <Field label={t.documents_source_language}>
-                                      <NativeComboboxSelect
-                                        value={draft.sourceLanguage}
-                                        onChange={(event) =>
-                                          updateTranslationDraft(request.id, {
-                                            sourceLanguage: event.target.value,
-                                          })
-                                        }
-                                        className={selectClassName}
-                                      >
-                                        <option value="">{t.common_not_set}</option>
-                                        <option value="de">{formatLanguageLabel("de")}</option>
-                                        <option value="en">{formatLanguageLabel("en")}</option>
-                                        <option value="uk">{formatLanguageLabel("uk")}</option>
-                                      </NativeComboboxSelect>
-                                    </Field>
-                                    <Field label={l("Assignee", "Исполнитель", "Assignee")}>
-                                      <NativeComboboxSelect
-                                        value={request.assigned_to ?? ""}
-                                        onChange={(event) => {
-                                          const assignedTo = event.target.value;
-                                          if (!assignedTo) return;
-                                          void handleUpdateTranslationRequest(
-                                            request.id,
-                                            request.status === "pending" ? "in_progress" : request.status,
-                                            undefined,
-                                            l("Zuweisung aktualisiert.", "Назначение обновлено.", "Assignee updated."),
-                                            { assignedTo },
-                                          );
-                                        }}
-                                        className={selectClassName}
-                                        disabled={translationBusy}
-                                      >
-                                        <option value="">{l("Nicht zugewiesen", "Не назначено", "Unassigned")}</option>
-                                        {staff.map((member) => (
-                                          <option key={member.id} value={member.id}>
-                                            {member.name} / {formatRoleLabel(member.role)}
-                                          </option>
-                                        ))}
-                                      </NativeComboboxSelect>
-                                    </Field>
-                                    <div className="flex flex-wrap items-end gap-2">
-                                      {textExtraction?.extracted_text ? (
+                                {canEditWorkspace ? (
+                                  <div>
+                                    <div className="grid gap-3 px-3 py-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+                                      <div className="grid gap-3 md:grid-cols-2">
+                                        <Field label={t.documents_source_language}>
+                                          <NativeComboboxSelect
+                                            value={draft.sourceLanguage}
+                                            onChange={(event) =>
+                                              updateTranslationDraft(request.id, {
+                                                sourceLanguage: event.target.value,
+                                              })
+                                            }
+                                            className={selectClassName}
+                                          >
+                                            <option value="">{t.common_not_set}</option>
+                                            <option value="de">{formatLanguageLabel("de")}</option>
+                                            <option value="en">{formatLanguageLabel("en")}</option>
+                                            <option value="uk">{formatLanguageLabel("uk")}</option>
+                                          </NativeComboboxSelect>
+                                        </Field>
+                                        <Field label={l("Assignee", "Исполнитель", "Assignee")}>
+                                          <NativeComboboxSelect
+                                            value={request.assigned_to ?? ""}
+                                            onChange={(event) => {
+                                              const assignedTo = event.target.value;
+                                              if (!assignedTo) return;
+                                              void handleUpdateTranslationRequest(
+                                                request.id,
+                                                request.status === "pending" ? "in_progress" : request.status,
+                                                undefined,
+                                                l("Zuweisung aktualisiert.", "Назначение обновлено.", "Assignee updated."),
+                                                { assignedTo },
+                                              );
+                                            }}
+                                            className={selectClassName}
+                                            disabled={translationBusy}
+                                          >
+                                            <option value="">{l("Nicht zugewiesen", "Не назначено", "Unassigned")}</option>
+                                            {staff.map((member) => (
+                                              <option key={member.id} value={member.id}>
+                                                {member.name} / {formatRoleLabel(member.role)}
+                                              </option>
+                                            ))}
+                                          </NativeComboboxSelect>
+                                        </Field>
+                                      </div>
+                                      <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                                        {textExtraction?.extracted_text ? (
+                                          <Button
+                                            type="button"
+                                            variant="outline"
+                                            className="h-8 rounded-lg bg-white"
+                                            disabled={translationBusy}
+                                            onClick={() =>
+                                              handleUseExtractedTextForTranslation(
+                                                request.id,
+                                              )
+                                            }
+                                          >
+                                            {t.documents_use_extracted_text}
+                                          </Button>
+                                        ) : null}
                                         <Button
                                           type="button"
                                           variant="outline"
-                                          className="rounded-xl"
+                                          className="h-8 rounded-lg bg-white"
                                           disabled={translationBusy}
                                           onClick={() =>
-                                            handleUseExtractedTextForTranslation(
+                                            void handleSaveTranslationWorkspace(
                                               request.id,
                                             )
                                           }
                                         >
-                                          {t.documents_use_extracted_text}
+                                          {t.documents_save_workspace}
                                         </Button>
-                                      ) : null}
-                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        className="rounded-xl"
-                                        disabled={translationBusy}
-                                        onClick={() =>
-                                          void handleSaveTranslationWorkspace(
-                                            request.id,
-                                          )
-                                        }
-                                      >
-                                        {t.documents_save_workspace}
-                                      </Button>
+                                      </div>
+                                    </div>
+                                    <div className="grid lg:grid-cols-2">
+                                      <div className="px-3 py-3 lg:pr-4">
+                                        <Field label={t.documents_source_text}>
+                                          <textarea
+                                            value={draft.sourceText}
+                                            onChange={(event) =>
+                                              updateTranslationDraft(request.id, {
+                                                sourceText: event.target.value,
+                                              })
+                                            }
+                                            className={cn(textareaClassName, "min-h-[260px]")}
+                                            placeholder={t.documents_source_text_placeholder}
+                                          />
+                                        </Field>
+                                      </div>
+                                      <div className="px-3 py-3 lg:pl-4">
+                                        <Field label={t.documents_translated_text}>
+                                          <textarea
+                                            value={draft.translatedText}
+                                            onChange={(event) =>
+                                              updateTranslationDraft(request.id, {
+                                                translatedText: event.target.value,
+                                              })
+                                            }
+                                            className={cn(textareaClassName, "min-h-[260px] bg-white")}
+                                            placeholder={t.documents_translated_text_placeholder}
+                                          />
+                                        </Field>
+                                      </div>
+                                    </div>
+                                    <div className="px-3 py-3">
+                                      <Field label={t.patients_notes}>
+                                        <textarea
+                                          value={draft.note}
+                                          onChange={(event) =>
+                                            updateTranslationDraft(request.id, {
+                                              note: event.target.value,
+                                            })
+                                          }
+                                          className={cn(textareaClassName, "min-h-[92px]")}
+                                          placeholder={t.documents_translation_note_placeholder}
+                                        />
+                                      </Field>
                                     </div>
                                   </div>
-                                  <Field label={t.patients_notes}>
-                                    <textarea
-                                      value={draft.note}
-                                      onChange={(event) =>
-                                        updateTranslationDraft(request.id, {
-                                          note: event.target.value,
-                                        })
-                                      }
-                                      className={textareaClassName}
-                                      placeholder={t.documents_translation_note_placeholder}
-                                    />
-                                  </Field>
-                                  <Field label={t.documents_source_text}>
-                                    <textarea
-                                      value={draft.sourceText}
-                                      onChange={(event) =>
-                                        updateTranslationDraft(request.id, {
-                                          sourceText: event.target.value,
-                                        })
-                                      }
-                                      className={textareaClassName}
-                                      placeholder={t.documents_source_text_placeholder}
-                                    />
-                                  </Field>
-                                  <Field label={t.documents_translated_text}>
-                                    <textarea
-                                      value={draft.translatedText}
-                                      onChange={(event) =>
-                                        updateTranslationDraft(request.id, {
-                                          translatedText: event.target.value,
-                                        })
-                                      }
-                                      className={textareaClassName}
-                                      placeholder={t.documents_translated_text_placeholder}
-                                    />
-                                  </Field>
-                                </div>
-                              ) : (
-                                <div className="mt-4 space-y-3">
-                                  {request.note ? (
-                                    <div className="rounded-lg border border-border/60 bg-muted/25 px-3 py-2 text-sm text-foreground">
-                                      {request.note}
-                                    </div>
-                                  ) : null}
-                                  {request.source_text ? (
-                                    <div className="rounded-lg border border-border/60 bg-muted/25 px-3 py-3">
-                                      <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                                        {t.documents_source_text}
-                                      </p>
-                                      <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">
-                                        {request.source_text}
-                                      </p>
-                                    </div>
-                                  ) : null}
-                                  {request.translated_text ? (
-                                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3">
-                                      <p className="text-xs font-medium uppercase tracking-[0.16em] text-emerald-700">
-                                        {t.documents_translated_text}
-                                      </p>
-                                      <p className="mt-2 whitespace-pre-wrap text-sm text-emerald-900">
-                                        {request.translated_text}
-                                      </p>
-                                    </div>
-                                  ) : null}
-                                </div>
-                              )}
+                                ) : (
+                                  <div>
+                                    {request.note ? (
+                                      <div className="px-3 py-3">
+                                        <p className="text-[11.5px] font-medium leading-tight text-muted-foreground">
+                                          {t.patients_notes}
+                                        </p>
+                                        <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">
+                                          {request.note}
+                                        </p>
+                                      </div>
+                                    ) : null}
+                                    {request.source_text || request.translated_text ? (
+                                      <div className="grid lg:grid-cols-2">
+                                        {request.source_text ? (
+                                          <div className="px-3 py-3 lg:pr-4">
+                                            <p className="text-[11.5px] font-medium leading-tight text-muted-foreground">
+                                              {t.documents_source_text}
+                                            </p>
+                                            <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">
+                                              {request.source_text}
+                                            </p>
+                                          </div>
+                                        ) : null}
+                                        {request.translated_text ? (
+                                          <div className="px-3 py-3 lg:pl-4">
+                                            <p className="text-[11.5px] font-medium leading-tight text-muted-foreground">
+                                              {t.documents_translated_text}
+                                            </p>
+                                            <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">
+                                              {request.translated_text}
+                                            </p>
+                                          </div>
+                                        ) : null}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                )}
                               </div>
                             </details>
                           );
