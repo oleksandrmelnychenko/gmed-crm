@@ -2258,7 +2258,6 @@ function StaffDocumentsPage({
           >
             <AdminSheetScaffold
               title={t.documents_generate_title}
-              description={t.documents_generate_description}
               footer={(
                 <SheetFormFooter
                   cancelLabel={t.common_cancel}
@@ -3328,7 +3327,7 @@ function StaffDocumentsPage({
               <Button
                 type="button"
                 variant="outline"
-                className="h-9 rounded-lg"
+                disabled={deleteBusy}
                 onClick={() => {
                   setDeleteOpen(false);
                   setDeleteError("");
@@ -3340,7 +3339,6 @@ function StaffDocumentsPage({
               <Button
                 type="submit"
                 variant="destructive"
-                className="h-9 rounded-lg gap-1.5"
                 disabled={deleteBusy}
               >
                 {deleteBusy ? (
@@ -3433,7 +3431,10 @@ function StaffDocumentsPage({
                       <Button
                         type="button"
                         variant="outline"
-                        className="h-9 gap-1.5 rounded-lg px-3.5"
+                        size="icon-lg"
+                        className="rounded-lg"
+                        aria-label={t.documents_download}
+                        title={t.documents_download}
                         disabled={!detail.has_stored_file}
                         onClick={() =>
                           void downloadDocumentFile(
@@ -3442,29 +3443,29 @@ function StaffDocumentsPage({
                           )
                         }
                       >
-                        <Download className="size-3.5" />
-                        {t.documents_download}
+                        <Download className="size-4" />
                       </Button>
                       {canManage && detail.has_stored_file ? (
                         <Button
                           type="button"
-                          variant="destructive"
-                          className="h-9 gap-1.5 rounded-lg px-3.5"
+                          variant="outline"
+                          size="icon-lg"
+                          className="rounded-lg text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          aria-label={t.documents_delete_file}
+                          title={t.documents_delete_file}
                           onClick={() => {
                             setDeleteError("");
                             setDeleteReason("");
                             setDeleteOpen(true);
                           }}
                         >
-                          <Trash2 className="size-3.5" />
-                          {t.documents_delete_file}
+                          <Trash2 className="size-4" />
                         </Button>
                       ) : null}
                       {canManage && editForm ? (
                         <Button
                           type="button"
-                          variant="outline"
-                          className="h-9 gap-1.5 rounded-lg px-3.5"
+                          className="h-9 gap-1.5 rounded-lg bg-[var(--brand)] px-3.5 text-white shadow-sm hover:bg-[var(--brand)]/90 focus-visible:ring-[var(--brand)]/30"
                           onClick={() => {
                             setSaveError("");
                             setMetadataEditOpen(true);
