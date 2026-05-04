@@ -22,10 +22,13 @@ import {
   Download,
   FileText,
   FolderPlus,
+  History,
+  Languages,
   LoaderCircle,
   RefreshCw,
   Search,
   Share2,
+  ShieldCheck,
   Trash2,
   Undo2,
   UserRound,
@@ -410,6 +413,58 @@ function formatTranslationStatusLabel(
       return tr.documents_translation_cancelled;
     default:
       return status.replaceAll("_", " ");
+  }
+}
+
+function translationRequestSurface(status: string) {
+  switch (status) {
+    case "completed":
+      return "border-border/60 bg-white";
+    case "in_progress":
+      return "border-border/60 bg-white";
+    case "cancelled":
+      return "border-border/60 bg-white";
+    default:
+      return "border-border/60 bg-white";
+  }
+}
+
+function translationRequestAccent(status: string) {
+  switch (status) {
+    case "completed":
+      return "bg-emerald-500";
+    case "in_progress":
+      return "bg-sky-500";
+    case "cancelled":
+      return "bg-rose-500";
+    default:
+      return "bg-amber-500";
+  }
+}
+
+function translationRequestIconTone(status: string) {
+  switch (status) {
+    case "completed":
+      return "border-emerald-200 bg-emerald-100 text-emerald-700";
+    case "in_progress":
+      return "border-sky-200 bg-sky-100 text-sky-700";
+    case "cancelled":
+      return "border-rose-200 bg-rose-100 text-rose-700";
+    default:
+      return "border-amber-200 bg-amber-100 text-amber-700";
+  }
+}
+
+function translationRequestChevronTone(status: string) {
+  switch (status) {
+    case "completed":
+      return "border-emerald-200 bg-emerald-100 text-emerald-700";
+    case "in_progress":
+      return "border-sky-200 bg-sky-100 text-sky-700";
+    case "cancelled":
+      return "border-rose-200 bg-rose-100 text-rose-700";
+    default:
+      return "border-amber-200 bg-amber-100 text-amber-700";
   }
 }
 
@@ -3315,7 +3370,7 @@ function StaffDocumentsPage({
             >
               {detail ? (
               <div className={cn("space-y-4", !embedDetailOnly && "pt-5")}>
-                <section className="space-y-4 rounded-xl border border-border/50 bg-card/40 p-3.5">
+                <section className="space-y-4 rounded-xl bg-card/40">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
                     <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[var(--brand)] text-white">
                       <FileText className="size-5" />
@@ -3453,13 +3508,7 @@ function StaffDocumentsPage({
                   </Banner>
                 ) : null}
 
-                <SectionCard
-                  title={l(
-                    "Kontext und Metadaten",
-                    "\u041a\u043e\u043d\u0442\u0435\u043a\u0441\u0442 \u0438 \u043c\u0435\u0442\u0430\u0434\u0430\u043d\u043d\u044b\u0435",
-                    "\u041a\u043e\u043d\u0442\u0435\u043a\u0441\u0442 \u0456 \u043c\u0435\u0442\u0430\u0434\u0430\u043d\u0456",
-                  )}
-                >
+                <section className="space-y-3">
                   <div className="grid gap-3 xl:grid-cols-2">
                     <DocumentMetaPanel
                       title={l("Verkn\u00fcpfungen", "\u0421\u0432\u044f\u0437\u0438", "Links")}
@@ -3546,11 +3595,17 @@ function StaffDocumentsPage({
                       </p>
                     </DocumentMetaPanel>
                   ) : null}
-                </SectionCard>
+                </section>
 
                 {detailVersions.length > 0 ? (
-                  <SectionCard title={t.documents_version_history}>
-                    <div className="overflow-hidden rounded-xl border border-border/50">
+                  <SectionCard
+                    icon={<History className="size-4" />}
+                    iconChrome="plain"
+                    neutralSurface
+                    title={t.documents_version_history}
+                    tone="violet"
+                  >
+                    <div className="space-y-1">
                       {detailVersions.map((version, index) => {
                         const selected = version.id === detail.id;
                         const filename =
@@ -3564,9 +3619,9 @@ function StaffDocumentsPage({
                           type="button"
                           onClick={() => openDocument(version.id)}
                           className={cn(
-                            "group relative grid w-full gap-3 border-t border-border/50 bg-transparent px-3.5 py-3.5 text-left transition first:border-t-0 hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:grid-cols-[64px_minmax(0,1fr)_minmax(132px,auto)]",
+                            "group relative grid w-full rounded-lg gap-3 bg-transparent px-3.5 py-1.5 text-left transition hover:bg-violet-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:grid-cols-[64px_minmax(0,1fr)_minmax(132px,auto)]",
                             selected &&
-                              "before:absolute before:bottom-3 before:left-0 before:top-3 before:w-0.5 before:rounded-full before:bg-[var(--brand)]",
+                              "before:absolute before:bottom-3 before:left-0 before:top-3 before:w-0.5 before:rounded-full before:bg-violet-500",
                           )}
                         >
                           <div className="flex items-center justify-center">
@@ -3574,8 +3629,8 @@ function StaffDocumentsPage({
                               className={cn(
                                 "inline-flex h-8 w-12 items-center justify-center rounded-lg border text-xs font-semibold leading-none tabular-nums",
                                 selected
-                                  ? "border-[var(--brand)] text-[var(--brand)]"
-                                  : "border-border/60 text-foreground",
+                                  ? "border-violet-200 bg-violet-100 text-violet-700"
+                                  : "border-border/60 bg-background text-foreground",
                               )}
                             >
                               v{version.version_number}
@@ -3604,7 +3659,7 @@ function StaffDocumentsPage({
                               {selected ? (
                                 <Badge
                                   variant="outline"
-                                  className="rounded-full border-[var(--brand)]/35 bg-transparent text-[10px] text-[var(--brand)]"
+                                  className="rounded-full border-violet-200 bg-violet-50 text-[10px] text-violet-700"
                                 >
                                   {l(
                                     "Ge\u00f6ffnet",
@@ -3635,11 +3690,17 @@ function StaffDocumentsPage({
                   </SectionCard>
                 ) : null}
 
-                <SectionCard title={t.documents_text_extraction}>
+                <SectionCard
+                  icon={<Search className="size-4" />}
+                  iconChrome="plain"
+                  neutralSurface
+                  title={t.documents_text_extraction}
+                  tone="brand"
+                >
                   {textExtractionError ? (
                     <Banner tone="error">{textExtractionError}</Banner>
                   ) : null}
-                  <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-sky-200/70 px-4 py-3">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge
@@ -3701,17 +3762,17 @@ function StaffDocumentsPage({
                   ) : null}
                   {textExtraction?.extracted_text ? (
                     <div className="mt-4 space-y-2">
-                      <Label className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                      <Label className="text-sm font-medium text-muted-foreground">
                         {t.documents_extracted_text}
                       </Label>
                       <textarea
                         readOnly
                         value={textExtraction.extracted_text}
-                        className={textareaClassName}
+                        className={cn(textareaClassName, "min-h-[260px]")}
                       />
                     </div>
                   ) : (
-                    <div className="mt-4 rounded-lg border border-dashed border-border/60 bg-muted/25 px-4 py-5 text-sm text-muted-foreground">
+                    <div className="mt-4 rounded-lg border border-dashed border-sky-200/80 bg-sky-50/35 px-4 py-5 text-sm text-sky-900/80">
                       {t.documents_no_extracted_text}
                     </div>
                   )}
@@ -3719,7 +3780,11 @@ function StaffDocumentsPage({
 
                 {detail.patient_id ? (
                   <SectionCard
+                    icon={<Languages className="size-4" />}
+                    iconChrome="plain"
+                    neutralSurface
                     title={t.documents_translation_requests}
+                    tone="brand"
                     accessory={
                       canRequestTranslation ? (
                         <Button
@@ -3742,7 +3807,7 @@ function StaffDocumentsPage({
                       <Banner tone="error">{translationError}</Banner>
                     ) : null}
                     {translationRequests.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-border/60 bg-muted/25 px-4 py-6 text-sm text-muted-foreground">
+                      <div className="rounded-lg border border-dashed border-amber-200/80 bg-amber-50/45 px-4 py-6 text-sm text-amber-900/80">
                         {t.documents_no_translation_requests}
                       </div>
                     ) : (
@@ -3760,15 +3825,34 @@ function StaffDocumentsPage({
                           return (
                             <details
                               key={request.id}
-                              className="group overflow-hidden rounded-lg border border-border/60 bg-card"
+                              className={cn(
+                                "group relative overflow-hidden rounded-lg border shadow-sm transition-shadow",
+                                translationRequestSurface(request.status),
+                              )}
                             >
-                              <summary className="flex cursor-pointer list-none items-start justify-between gap-4 px-4 py-4 transition hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-                                <div className="min-w-0">
-                                  <p className="text-sm font-semibold text-foreground">
+                              <span
+                                aria-hidden="true"
+                                className={cn(
+                                  "absolute inset-y-0 left-0 w-1",
+                                  translationRequestAccent(request.status),
+                                )}
+                              />
+                              <summary className="flex cursor-pointer list-none flex-col gap-3 px-4 py-4 pl-5 transition hover:bg-background/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex-row sm:items-start sm:justify-between [&::-webkit-details-marker]:hidden">
+                                <div className="flex min-w-0 gap-3">
+                                  <span
+                                    className={cn(
+                                      "mt-0.5 inline-flex size-10 shrink-0 items-center justify-center rounded-lg border",
+                                      translationRequestIconTone(request.status),
+                                    )}
+                                  >
+                                    <FileText className="size-4" />
+                                  </span>
+                                  <div className="min-w-0">
+                                  <p className="truncate text-sm font-semibold text-foreground">
                                     {request.requested_by_name ||
                                       t.documents_unknown_requester}
                                   </p>
-                                  <p className="mt-1 text-xs text-muted-foreground">
+                                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
                                     {formatDateTime(request.requested_at)}
                                     {request.completed_at
                                       ? text.completedAt(
@@ -3781,15 +3865,18 @@ function StaffDocumentsPage({
                                         )
                                       : ""}
                                   </p>
-                                  <p className="mt-1 text-xs text-muted-foreground">
+                                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
                                     {l("Zugewiesen", "Назначено", "Assigned")}:{" "}
-                                    {request.assigned_to_name ?? l("Nicht zugewiesen", "Не назначено", "Unassigned")}
+                                    <span className="font-medium text-foreground">
+                                      {request.assigned_to_name ?? l("Nicht zugewiesen", "Не назначено", "Unassigned")}
+                                    </span>
                                     {request.translated_document_name
                                       ? ` / ${request.translated_document_name}`
                                       : ""}
                                   </p>
                                 </div>
-                                <div className="flex shrink-0 items-start gap-2">
+                                </div>
+                                <div className="flex shrink-0 items-start gap-2 self-end sm:self-start">
                                   <div className="flex flex-wrap justify-end gap-1.5">
                                     <Badge
                                       variant="outline"
@@ -3810,16 +3897,21 @@ function StaffDocumentsPage({
                                       {formatLanguageLabel(request.requested_language)}
                                     </Badge>
                                   </div>
-                                  <span className="mt-0.5 inline-flex size-7 items-center justify-center rounded-full border border-border/60 bg-background text-muted-foreground transition-colors group-hover:text-foreground">
+                                  <span
+                                    className={cn(
+                                      "mt-0.5 inline-flex size-8 items-center justify-center rounded-full border shadow-sm transition-colors",
+                                      translationRequestChevronTone(request.status),
+                                    )}
+                                  >
                                     <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
                                   </span>
                                 </div>
                               </summary>
-                              <div className="border-t border-border/50 px-4 py-4">
+                              <div className="border-t border-border/50 bg-white px-4 py-4">
                                 {canUpdateTranslation &&
                                 request.status !== "completed" &&
                                 request.status !== "cancelled" ? (
-                                  <div className="flex flex-wrap gap-2">
+                                  <div className="flex flex-wrap gap-2 rounded-lg border border-border/50 bg-card/80 px-3 py-3">
                                     {request.status !== "in_progress" ? (
                                       <Button
                                         type="button"
@@ -4050,7 +4142,11 @@ function StaffDocumentsPage({
                 ) : null}
 
                 {canReviewSelectedDocument && editForm ? (
-                  <SectionCard title={t.documents_interpreter_review}>
+                  <SectionCard
+                    icon={<ShieldCheck className="size-4" />}
+                    title={t.documents_interpreter_review}
+                    tone="rose"
+                  >
                     {saveError ? (
                       <Banner tone="error">{saveError}</Banner>
                     ) : null}
@@ -4135,7 +4231,7 @@ function StaffDocumentsPage({
                             placeholder={t.documents_review_notes}
                           />
                       </Field>
-                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-muted-foreground">
+                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-200/70 bg-rose-50/40 px-4 py-3 text-sm text-rose-900/80">
                         <span>{t.documents_release_internal_hint}</span>
                         <Button
                           type="submit"
@@ -4155,7 +4251,11 @@ function StaffDocumentsPage({
                 ) : null}
 
                 <SectionCard
+                  icon={<UserRound className="size-4" />}
+                  iconChrome="plain"
+                  neutralSurface
                   title={t.documents_patient_portal}
+                  tone="brand"
                   accessory={
                     canManage ? (
                       <div className="flex flex-wrap justify-end gap-2">
@@ -4227,7 +4327,7 @@ function StaffDocumentsPage({
                   </div>
 
                   {!detail.patient_id || !canManage ? (
-                    <div className="rounded-xl border border-border/50 bg-transparent px-4 py-3 text-sm text-muted-foreground">
+                    <div className="rounded-lg border border-amber-200/80 bg-amber-50/45 px-4 py-3 text-sm text-amber-900/80">
                       {!detail.patient_id ? (
                         <p className="font-medium text-amber-700">
                           {t.documents_link_patient_before_portal}
@@ -4241,7 +4341,7 @@ function StaffDocumentsPage({
                     </div>
                   ) : null}
 
-                  <div className="overflow-hidden rounded-xl border border-border/50">
+                  <div className="overflow-hidden rounded-lg border border-emerald-200/70 bg-background/80">
                     {activePortalShares.length === 0 ? (
                       <div className="px-4 py-5 text-sm text-muted-foreground">
                         {l(
@@ -4254,7 +4354,7 @@ function StaffDocumentsPage({
                       activePortalShares.map((share) => (
                         <div
                           key={share.id}
-                          className="grid gap-3 border-t border-border/50 px-4 py-3.5 first:border-t-0 md:grid-cols-[minmax(0,1fr)_180px]"
+                          className="grid gap-3 border-t border-emerald-100/80 px-4 py-3.5 first:border-t-0 hover:bg-emerald-50/45 md:grid-cols-[minmax(0,1fr)_180px]"
                         >
                           <div className="min-w-0">
                             <p className="truncate text-sm font-semibold text-foreground">
@@ -4286,7 +4386,11 @@ function StaffDocumentsPage({
 
                 {canViewShares ? (
                   <SectionCard
+                    icon={<Share2 className="size-4" />}
+                    iconChrome="plain"
+                    neutralSurface
                     title={t.documents_share}
+                    tone="brand"
                     accessory={
                       canManage ? (
                         <Button
@@ -4309,7 +4413,7 @@ function StaffDocumentsPage({
                       <Banner tone="error">{shareError}</Banner>
                     ) : null}
                     {shares.length === 0 ? (
-                      <div className="rounded-xl border border-dashed border-border/60 bg-transparent px-4 py-6 text-sm text-muted-foreground">
+                      <div className="rounded-lg border border-dashed border-sky-200/80 bg-sky-50/35 px-4 py-6 text-sm text-sky-900/80">
                         {t.documents_no_shares_yet}
                       </div>
                     ) : (
@@ -4339,7 +4443,7 @@ function StaffDocumentsPage({
                           />
                         </div>
 
-                        <div className="overflow-hidden rounded-xl border border-border/50">
+                        <div className="overflow-hidden rounded-lg border border-sky-200/70 bg-background/80">
                           {shares.map((share) => {
                             const isProviderShare = Boolean(share.provider_name);
                             const targetName =
@@ -4358,10 +4462,10 @@ function StaffDocumentsPage({
                             return (
                               <div
                                 key={share.id}
-                                className="grid gap-3 border-t border-border/50 px-4 py-4 first:border-t-0 lg:grid-cols-[minmax(0,1fr)_auto]"
+                                className="grid gap-3 border-t border-sky-100/80 px-4 py-4 first:border-t-0 hover:bg-sky-50/45 lg:grid-cols-[minmax(0,1fr)_auto]"
                               >
                                 <div className="flex min-w-0 gap-3">
-                                  <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/60 text-muted-foreground">
+                                  <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg border border-sky-200 bg-sky-50 text-sky-700">
                                     {isProviderShare ? (
                                       <Building2 className="size-4" />
                                     ) : (
@@ -4962,20 +5066,126 @@ function Banner({
   );
 }
 
+type DocumentSectionTone =
+  | "brand"
+  | "neutral"
+  | "sky"
+  | "amber"
+  | "emerald"
+  | "rose"
+  | "violet";
+
+function documentSectionToneBorder(tone: DocumentSectionTone) {
+  switch (tone) {
+    case "brand":
+      return "border-[var(--brand)]/25";
+    case "sky":
+      return "border-sky-200/80";
+    case "amber":
+      return "border-amber-200/80";
+    case "emerald":
+      return "border-emerald-200/80";
+    case "rose":
+      return "border-rose-200/80";
+    case "violet":
+      return "border-violet-200/80";
+    default:
+      return "border-border/60";
+  }
+}
+
+function documentSectionToneHeader(tone: DocumentSectionTone) {
+  switch (tone) {
+    case "brand":
+      return "border-[var(--brand)]/15 bg-[#f9fdff]";
+    case "sky":
+      return "border-sky-200/70 bg-sky-50/60";
+    case "amber":
+      return "border-amber-200/70 bg-amber-50/65";
+    case "emerald":
+      return "border-emerald-200/70 bg-emerald-50/60";
+    case "rose":
+      return "border-rose-200/70 bg-rose-50/60";
+    case "violet":
+      return "border-violet-200/70 bg-violet-50/60";
+    default:
+      return "border-border/50 bg-muted/25";
+  }
+}
+
+function documentSectionToneIcon(tone: DocumentSectionTone) {
+  switch (tone) {
+    case "brand":
+      return "border-[var(--brand)]/25 bg-[var(--brand)]/10 text-[var(--brand)]";
+    case "sky":
+      return "border-sky-200 bg-sky-100 text-sky-700";
+    case "amber":
+      return "border-amber-200 bg-amber-100 text-amber-700";
+    case "emerald":
+      return "border-emerald-200 bg-emerald-100 text-emerald-700";
+    case "rose":
+      return "border-rose-200 bg-rose-100 text-rose-700";
+    case "violet":
+      return "border-violet-200 bg-violet-100 text-violet-700";
+    default:
+      return "border-border/60 bg-background text-muted-foreground";
+  }
+}
+
+function documentSummaryTileTone(tone: "neutral" | "success" | "warning" | "info") {
+  switch (tone) {
+    case "success":
+      return "border-emerald-200/80 bg-emerald-50/55";
+    case "warning":
+      return "border-amber-200/80 bg-amber-50/60";
+    case "info":
+      return "border-sky-200/80 bg-sky-50/55";
+    default:
+      return "border-border/60 bg-background/75";
+  }
+}
+
 function SectionCard({
   title,
   accessory,
   children,
+  icon,
+  iconChrome = "default",
+  neutralSurface = false,
+  tone = "neutral",
 }: {
   title: ReactNode;
   accessory?: ReactNode;
   children: ReactNode;
+  icon?: ReactNode;
+  iconChrome?: "default" | "plain";
+  neutralSurface?: boolean;
+  tone?: DocumentSectionTone;
 }) {
   return (
-    <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <section
+      className={cn(
+        "overflow-hidden rounded-xl border bg-white shadow-sm",
+        neutralSurface ? "border-border/60" : documentSectionToneBorder(tone),
+      )}
+    >
+      <div
+        className={cn(
+          "flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3",
+          documentSectionToneHeader(tone),
+        )}
+      >
         <div className="flex min-w-0 items-center gap-2">
-          <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <span
+            className={cn(
+              "inline-flex size-8 shrink-0 items-center justify-center rounded-lg",
+              iconChrome === "default" && "border shadow-sm",
+              documentSectionToneIcon(tone),
+              iconChrome === "plain" && "border-0 bg-transparent shadow-none",
+            )}
+          >
+            {icon ?? <span className="size-2 rounded-full bg-current" />}
+          </span>
           <h3 className="truncate text-sm font-semibold text-foreground">
             {title}
           </h3>
@@ -4984,7 +5194,7 @@ function SectionCard({
           <div className="min-w-0 max-w-full">{accessory}</div>
         ) : null}
       </div>
-      <div className="space-y-3">{children}</div>
+      <div className="space-y-3 p-4">{children}</div>
     </section>
   );
 }
@@ -5002,7 +5212,7 @@ function DocumentSection({
   return (
     <section
       className={cn(
-        "space-y-3 rounded-xl border border-border/50 bg-transparent p-3.5",
+        "space-y-3 rounded-xl border border-border/60 bg-card/70 p-3.5 shadow-sm",
         className,
       )}
     >
@@ -5019,7 +5229,7 @@ function DetailField({ label, value }: { label: string; value: ReactNode }) {
     <InfoRow
       label={label}
       value={value}
-      className="rounded-xl border border-border/50 bg-transparent px-3 py-2.5"
+      className="rounded-lg border border-border/60 bg-white px-3 py-2.5 shadow-sm"
     />
   );
 }
@@ -5032,8 +5242,9 @@ function DocumentMetaPanel({
   children: ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-border/50 bg-transparent px-4 py-3">
-      <div className="mb-3 border-b border-border/50 pb-2">
+    <div className="rounded-lg border border-border/60 bg-white px-4 py-3 shadow-sm">
+      <div className="mb-3 flex items-center gap-2 border-b border-border/50 pb-2">
+        <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
         <p className="min-w-0 truncate text-sm font-semibold text-foreground">
           {title}
         </p>
@@ -5074,14 +5285,8 @@ function DocumentSummaryTile({
   return (
     <div
       className={cn(
-        "rounded-xl border bg-transparent px-4 py-3",
-        tone === "success"
-          ? "border-emerald-200"
-          : tone === "warning"
-            ? "border-amber-200"
-            : tone === "info"
-              ? "border-sky-200"
-              : "border-border/50",
+        "rounded-lg border px-4 py-3 shadow-sm",
+        documentSummaryTileTone(tone),
       )}
     >
       <p className="text-[11.5px] font-medium leading-tight text-muted-foreground">
