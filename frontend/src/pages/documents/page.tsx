@@ -81,7 +81,6 @@ import { cn } from "@/lib/utils";
 import {
   sensitivityBadge,
   statusBadge,
-  textExtractionStatusBadge,
   translationStatusBadge,
   visibilityBadge,
 } from "./appearance/status-appearance";
@@ -3696,86 +3695,119 @@ function StaffDocumentsPage({
                   neutralSurface
                   title={t.documents_text_extraction}
                   tone="brand"
-                >
-                  {textExtractionError ? (
-                    <Banner tone="error">{textExtractionError}</Banner>
-                  ) : null}
-                  <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-sky-200/70 px-4 py-3">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            "rounded-full",
-                            textExtractionStatusBadge(
-                              textExtraction?.status ?? "not_started",
-                            ),
-                          )}
-                        >
-                          {formatExtractionStatusLabel(
-                            textExtraction?.status ?? "not_started",
-                            t,
-                          )}
-                        </Badge>
-                        {textExtraction?.method ? (
-                          <Badge
-                            variant="outline"
-                            className="rounded-full border-border/60 bg-card text-foreground"
-                          >
-                            {formatExtractionMethodLabel(textExtraction.method)}
-                          </Badge>
-                        ) : null}
-                      </div>
-                      <p className="mt-2 text-sm text-muted-foreground">
-                        {textExtraction?.extracted_at
-                          ? t.documents_last_processed.replace(
-                              "{datetime}",
-                              formatDateTime(textExtraction.extracted_at),
-                            )
-                          : t.documents_no_extraction_run}
-                        {textExtraction?.extracted_by_name
-                          ? ` · ${textExtraction.extracted_by_name}`
-                          : ""}
-                      </p>
-                    </div>
-                    {canRequestTranslation ? (
+                  accessory={
+                    canRequestTranslation ? (
                       <Button
                         type="button"
-                        variant="outline"
-                        className="rounded-xl"
+                        size="sm"
+                        className="h-8 rounded-lg"
                         disabled={textExtractionBusy}
                         onClick={() => void handleRunTextExtraction()}
                       >
                         {textExtractionBusy ? (
-                          <LoaderCircle className="size-4 animate-spin" />
+                          <LoaderCircle className="size-3.5 animate-spin" />
                         ) : (
-                          <RefreshCw className="size-4" />
+                          <RefreshCw className="size-3.5" />
                         )}
                         {t.documents_run_extraction}
                       </Button>
-                    ) : null}
-                  </div>
-                  {textExtraction?.message ? (
-                    <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                      {textExtraction.message}
-                    </div>
+                    ) : null
+                  }
+                >
+                  {textExtractionError ? (
+                    <Banner tone="error">{textExtractionError}</Banner>
                   ) : null}
-                  {textExtraction?.extracted_text ? (
-                    <div className="mt-4 space-y-2">
-                      <Label className="text-sm font-medium text-muted-foreground">
-                        {t.documents_extracted_text}
-                      </Label>
-                      <textarea
-                        readOnly
-                        value={textExtraction.extracted_text}
-                        className={cn(textareaClassName, "min-h-[260px]")}
-                      />
-                    </div>
-                  ) : (
-                    <div className="mt-4 rounded-lg border border-dashed border-sky-200/80 bg-sky-50/35 px-4 py-5 text-sm text-sky-900/80">
-                      {t.documents_no_extracted_text}
-                    </div>
-                  )}
+                  <div className="space-y-3">
+                    {textExtraction?.message ? (
+                      <div className="px-1 py-1 text-sm text-amber-900">
+                        {textExtraction.message}
+                      </div>
+                    ) : null}
+                    {textExtraction?.extracted_text ? (
+                      <div className="px-1 pt-1">
+                        <div className="mb-2 flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <Label className="text-sm font-medium text-foreground">
+                              {t.documents_extracted_text}
+                            </Label>
+                          </div>
+                          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                            <span
+                              className={cn(
+                                "size-1.5 rounded-full",
+                                (textExtraction?.status ?? "not_started") === "completed" && "bg-emerald-500",
+                                (textExtraction?.status ?? "not_started") === "failed" && "bg-rose-500",
+                                (textExtraction?.status ?? "not_started") === "unsupported" && "bg-amber-500",
+                                (textExtraction?.status ?? "not_started") === "not_started" && "bg-muted-foreground/35",
+                              )}
+                            />
+                            <span className="font-medium text-foreground">
+                              {formatExtractionStatusLabel(
+                                textExtraction?.status ?? "not_started",
+                                t,
+                              )}
+                            </span>
+                            {textExtraction?.method ? (
+                              <>
+                                <span className="size-1 rounded-full bg-muted-foreground/35" />
+                                <span>{formatExtractionMethodLabel(textExtraction.method)}</span>
+                              </>
+                            ) : null}
+                            <span className="size-1 rounded-full bg-muted-foreground/35" />
+                            <span>
+                              {textExtraction?.extracted_at
+                                ? t.documents_last_processed.replace(
+                                    "{datetime}",
+                                    formatDateTime(textExtraction.extracted_at),
+                                  )
+                                : t.documents_no_extraction_run}
+                            </span>
+                            {textExtraction?.extracted_by_name ? (
+                              <>
+                                <span className="size-1 rounded-full bg-muted-foreground/35" />
+                                <span>{textExtraction.extracted_by_name}</span>
+                              </>
+                            ) : null}
+                          </div>
+                        </div>
+                        <textarea
+                          readOnly
+                          value={textExtraction.extracted_text}
+                          className={cn(textareaClassName, "min-h-[320px] bg-white leading-relaxed")}
+                        />
+                      </div>
+                    ) : (
+                      <div className="space-y-2 px-1 py-1">
+                        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                          <span
+                            className={cn(
+                              "size-1.5 rounded-full",
+                              (textExtraction?.status ?? "not_started") === "completed" && "bg-emerald-500",
+                              (textExtraction?.status ?? "not_started") === "failed" && "bg-rose-500",
+                              (textExtraction?.status ?? "not_started") === "unsupported" && "bg-amber-500",
+                              (textExtraction?.status ?? "not_started") === "not_started" && "bg-muted-foreground/35",
+                            )}
+                          />
+                          <span className="font-medium text-foreground">
+                            {formatExtractionStatusLabel(
+                              textExtraction?.status ?? "not_started",
+                              t,
+                            )}
+                          </span>
+                          {textExtraction?.method ? (
+                            <>
+                              <span className="size-1 rounded-full bg-muted-foreground/35" />
+                              <span>{formatExtractionMethodLabel(textExtraction.method)}</span>
+                            </>
+                          ) : null}
+                        </div>
+                        <div className="flex items-center gap-3 py-4 text-sm text-muted-foreground">
+                          <span className="size-2 rounded-full bg-muted-foreground/35" />
+                          <span>{t.documents_no_extracted_text}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </SectionCard>
 
                 {detail.patient_id ? (
@@ -3814,9 +3846,8 @@ function StaffDocumentsPage({
                         {canRequestTranslation ? (
                           <Button
                             type="button"
-                            variant="outline"
                             size="sm"
-                            className="h-8 rounded-lg bg-white"
+                            className="h-8 rounded-lg"
                             onClick={() => {
                               setTranslationError("");
                               setTranslationRequestOpen(true);
