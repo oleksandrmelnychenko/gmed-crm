@@ -45,7 +45,6 @@ import {
 } from "@/components/admin-page-patterns";
 import {
   EmptyCell,
-  InfoRow,
   PageHeader,
   StatusBadge,
   TabLoader,
@@ -3541,92 +3540,124 @@ function StaffDocumentsPage({
                   </Banner>
                 ) : null}
 
-                <section className="space-y-3">
-                  <div className="grid gap-3 xl:grid-cols-2">
+                <section className="overflow-hidden rounded-2xl bg-white shadow-[0_10px_24px_rgba(15,23,42,0.035)] ring-1 ring-slate-950/[0.06]">
+                  <div className="grid xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_310px]">
                     <DocumentMetaPanel
+                      className="border-b border-slate-200/70 xl:border-b-0 xl:border-r"
                       title={l("Verkn\u00fcpfungen", "\u0421\u0432\u044f\u0437\u0438", "Links")}
                     >
-                      <DocumentMetaLine
+                      <DocumentMetaHighlight
                         label={t.orders_patient}
                         value={
-                          detail.patient_name ? (
-                            <span className="inline-flex min-w-0 flex-wrap items-center gap-1.5">
-                              <span className="rounded-md border border-border/50 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-                                {detail.patient_pid ?? text.pidFallback}
-                              </span>
-                              <span className="min-w-0 break-words">
-                                {detail.patient_name}
-                              </span>
-                            </span>
-                          ) : (
-                            t.common_not_set
-                          )
+                          detail.patient_name || t.common_not_set
                         }
-                      />
-                      <DocumentMetaLine
-                        label={t.orders_title}
-                        value={detail.order_number || t.common_not_set}
-                      />
-                      <DocumentMetaLine
-                        label={t.appointments_title}
-                        value={detail.appointment_title || t.common_not_set}
-                      />
+                        accessory={
+                          detail.patient_name ? (
+                            <span className="rounded-full bg-white px-2 py-1 font-mono text-[11px] font-medium text-muted-foreground ring-1 ring-slate-200/80">
+                              {detail.patient_pid ?? text.pidFallback}
+                            </span>
+                          ) : null
+                        }
+                      >
+                        <div className="mt-4 space-y-2.5">
+                          <DocumentMetaFact
+                            label={t.orders_title}
+                            value={detail.order_number || t.common_not_set}
+                          />
+                          <DocumentMetaFact
+                            label={t.appointments_title}
+                            value={detail.appointment_title || t.common_not_set}
+                          />
+                        </div>
+                      </DocumentMetaHighlight>
                     </DocumentMetaPanel>
 
                     <DocumentMetaPanel
+                      className="border-b border-slate-200/70 xl:border-b-0 xl:border-r"
                       title={l(
                         "Klassifikation",
                         "\u041a\u043b\u0430\u0441\u0441\u0438\u0444\u0438\u043a\u0430\u0446\u0438\u044f",
                         "Classification",
                       )}
                     >
-                      <DocumentMetaLine
+                      <DocumentMetaHighlight
                         label={l(
                           "Dokumenttyp",
                           "\u0422\u0438\u043f \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u0430",
                           "Document type",
                         )}
                         value={detail.art ? localizeDocumentCode(detail.art, l) : t.common_not_set}
-                      />
-                      <DocumentMetaLine
-                        label={t.documents_category}
-                        value={detail.category ? localizeDocumentCode(detail.category, l) : t.common_not_set}
-                      />
-                      <DocumentMetaLine
-                        label={t.common_provider}
-                        value={detail.klinik || t.common_not_set}
-                      />
-                      <DocumentMetaLine
-                        label={t.documents_source}
-                        value={formatDocumentSourceLabel(detail.ursprung, t)}
-                      />
+                      >
+                        <div className="mt-4 space-y-2.5">
+                          <DocumentMetaFact
+                            label={t.documents_category}
+                            value={detail.category ? localizeDocumentCode(detail.category, l) : t.common_not_set}
+                          />
+                          <DocumentMetaFact
+                            label={t.common_provider}
+                            value={detail.klinik || t.common_not_set}
+                          />
+                          <DocumentMetaFact
+                            label={t.documents_source}
+                            value={formatDocumentSourceLabel(detail.ursprung, t)}
+                          />
+                        </div>
+                      </DocumentMetaHighlight>
                     </DocumentMetaPanel>
+
+                    <aside className="px-5 py-4">
+                      <div className="mb-5 flex items-end justify-between gap-3">
+                        <div className="min-w-0">
+                          <span className="text-[11px] font-medium leading-4 text-muted-foreground">
+                            {t.documents_version_chain}
+                          </span>
+                          <p className="mt-1 flex min-w-0 items-baseline gap-1.5">
+                            <span className="text-2xl font-semibold leading-7 tracking-tight text-foreground">
+                              v{detail.version_number}
+                            </span>
+                            <span className="text-xs font-medium text-muted-foreground">
+                              {l("von", "из", "of")} {detail.version_count}
+                            </span>
+                          </p>
+                        </div>
+                        <span
+                          aria-hidden
+                          className="mb-1 h-1.5 w-11 shrink-0 rounded-full bg-[var(--brand)] opacity-30"
+                        />
+                      </div>
+                      <div className="space-y-3">
+                        <DetailField
+                          label={t.documents_uploaded_by}
+                          value={detail.uploaded_by_name || t.documents_unknown_uploader}
+                        />
+                        <DetailField
+                          label={t.users_created}
+                          value={formatDateTime(detail.created_at)}
+                        />
+                        <DetailField
+                          label={t.documents_updated}
+                          value={formatDateTime(detail.updated_at)}
+                        />
+                      </div>
+                    </aside>
                   </div>
 
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                    <DetailField
-                      label={t.documents_uploaded_by}
-                      value={detail.uploaded_by_name || t.documents_unknown_uploader}
-                    />
-                    <DetailField
-                      label={t.users_created}
-                      value={formatDateTime(detail.created_at)}
-                    />
-                    <DetailField
-                      label={t.documents_updated}
-                      value={formatDateTime(detail.updated_at)}
-                    />
-                    <DetailField
-                      label={t.documents_version_chain}
-                      value={text.versionOf(detail.version_number, detail.version_count)}
-                    />
-                  </div>
                   {detail.notes ? (
-                    <DocumentMetaPanel title={t.patients_notes}>
-                      <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">
-                        {detail.notes}
-                      </p>
-                    </DocumentMetaPanel>
+                    <div className="border-t border-slate-200/70 px-5 py-4">
+                      <div className="flex w-full flex-col gap-2">
+                        <div className="w-full rounded-xl border border-slate-200/70 bg-[#f9fdff] px-4 py-3">
+                          <div className="mb-2 flex items-center gap-2.5">
+                            <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+                            <span className="min-w-0 truncate text-[13px] font-semibold text-foreground">
+                              {t.patients_notes}
+                            </span>
+                          </div>
+                          <p className="w-full whitespace-pre-wrap text-[13.5px] font-normal leading-6 text-muted-foreground">
+                            {detail.notes}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
                   ) : null}
                 </section>
 
@@ -5468,35 +5499,73 @@ function DocumentSection({
 
 function DetailField({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <InfoRow
-      label={label}
-      value={value}
-      className="rounded-lg border border-border/60 bg-white px-3 py-2.5 shadow-sm"
-    />
+    <div className="grid min-w-0 grid-cols-[92px_minmax(0,1fr)] items-baseline gap-3">
+      <span className="min-w-0 text-[11px] font-medium leading-4 text-muted-foreground">
+        {label}
+      </span>
+      <span className="min-w-0 break-words text-[13px] font-semibold leading-5 text-foreground">
+        {value}
+      </span>
+    </div>
   );
 }
 
 function DocumentMetaPanel({
   title,
+  compact = false,
+  className,
   children,
 }: {
   title: ReactNode;
+  compact?: boolean;
+  className?: string;
   children: ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-border/60 bg-white px-4 py-3 shadow-sm">
-      <div className="mb-3 flex items-center gap-2 border-b border-border/50 pb-2">
+    <div className={cn("px-5 py-4", compact && "px-0 py-0", className)}>
+      <div className={cn("flex items-center gap-2.5", compact ? "mb-2.5" : "mb-3.5")}>
         <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
-        <p className="min-w-0 truncate text-sm font-semibold text-foreground">
+        <p className="min-w-0 truncate text-[13px] font-semibold text-foreground">
           {title}
         </p>
       </div>
-      <div className="space-y-2">{children}</div>
+      <div className="space-y-1">{children}</div>
     </div>
   );
 }
 
-function DocumentMetaLine({
+function DocumentMetaHighlight({
+  label,
+  value,
+  accessory,
+  className,
+  children,
+}: {
+  label: ReactNode;
+  value: ReactNode;
+  accessory?: ReactNode;
+  className?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div className={cn("py-1.5", className)}>
+      <div className="flex min-w-0 items-start justify-between gap-4">
+        <div className="min-w-0">
+          <span className="text-[11px] font-medium leading-4 text-muted-foreground">
+            {label}
+          </span>
+          <div className="mt-1 min-w-0 break-words text-[17px] font-semibold leading-6 tracking-tight text-foreground">
+            {value}
+          </div>
+        </div>
+        {accessory ? <div className="shrink-0 pt-1">{accessory}</div> : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function DocumentMetaFact({
   label,
   value,
 }: {
@@ -5504,11 +5573,12 @@ function DocumentMetaLine({
   value: ReactNode;
 }) {
   return (
-    <div className="grid gap-1 border-t border-border/40 pt-2 first:border-t-0 first:pt-0 sm:grid-cols-[136px_minmax(0,1fr)]">
-      <span className="text-[11.5px] font-medium leading-tight text-muted-foreground">
+    <div className="grid min-w-0 grid-cols-[92px_minmax(24px,1fr)_minmax(0,auto)] items-baseline gap-3">
+      <span className="min-w-0 text-[11px] font-medium leading-4 text-muted-foreground">
         {label}
       </span>
-      <span className="min-w-0 break-words text-sm leading-5 text-foreground">
+      <span aria-hidden className="h-px min-w-6 bg-slate-200/80" />
+      <span className="min-w-0 max-w-full break-words text-right text-[13px] font-semibold leading-5 text-foreground">
         {value}
       </span>
     </div>
