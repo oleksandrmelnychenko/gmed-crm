@@ -600,17 +600,18 @@ function ColumnHeaderContextMenu<T>({
   onClose,
   onFreezeChange,
 }: ColumnHeaderContextMenuProps<T>) {
+  const { t } = useLang();
   const isFrozen = column.pinned === "left";
   const actionLabel = isFrozen
-    ? (labels?.unfreeze ?? "Unfreeze column")
-    : (labels?.freeze ?? "Freeze column");
+    ? (labels?.unfreeze ?? t.table_columns_unfreeze)
+    : (labels?.freeze ?? t.table_columns_freeze);
 
   return (
     <div
       ref={refEl}
       data-column-header-context-menu
       role="menu"
-      aria-label={`${labels?.column ?? "Column"} ${column.label}`}
+      aria-label={`${labels?.column ?? t.table_columns} ${column.label}`}
       className="fixed z-[120] w-56 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-xl"
       style={{ left: x, top: y }}
     >
@@ -619,7 +620,7 @@ function ColumnHeaderContextMenu<T>({
         {isFrozen ? (
           <span className="inline-flex shrink-0 items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium uppercase text-primary">
             <Pin className="size-3" />
-            {labels?.frozen ?? "Frozen"}
+            {labels?.frozen ?? t.table_columns_frozen}
           </span>
         ) : null}
       </div>
@@ -646,7 +647,7 @@ function ColumnHeaderContextMenu<T>({
         </button>
         {disabled ? (
           <div className="px-2 py-1 text-[11px] leading-4 text-muted-foreground">
-            {labels?.freezeLimitReached ?? "Freeze limit reached"}
+            {labels?.freezeLimitReached ?? t.table_columns_freeze_limit}
           </div>
         ) : null}
       </div>

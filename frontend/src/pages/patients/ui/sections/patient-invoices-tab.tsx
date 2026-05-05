@@ -18,6 +18,7 @@ import {
   textareaClass,
 } from "@/components/ui-shell";
 import { apiFetch, buildApiUrl, getAccessToken } from "@/lib/api";
+import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import type {
@@ -28,6 +29,11 @@ import type {
   OrderItem,
 } from "../../model/detail-tab-types";
 import { WorkspaceSectionIntro } from "../shared/workspace-primitives";
+import {
+  patientInvoiceLedgerCategoryLabel,
+  patientInvoiceLedgerDirectionLabel,
+  patientInvoiceServiceTypeLabel,
+} from "../../model/portal-shared";
 
 type LocalizeFn = (de: string, ru: string, en: string) => string;
 type StatusLabelFn = (status: string) => string;
@@ -159,7 +165,6 @@ async function downloadPatientLedgerExport(patientId: string, query: URLSearchPa
 }
 
 export function PatientInvoicesTab({
-  l,
   commonNotSet,
   tabLoading,
   invoices,
@@ -181,6 +186,7 @@ export function PatientInvoicesTab({
   moneyValueNumber,
   invoiceTypeLabel,
 }: PatientInvoicesTabProps) {
+  const { t } = useLang();
   const patientId = financialSummary?.patient_id ?? invoices.find((item) => item.patient_id)?.patient_id ?? "";
   const [financeFilters, setFinanceFilters] = useState({
     from: "",
@@ -257,7 +263,7 @@ export function PatientInvoicesTab({
         setPatientOrders(orders);
       } catch (error) {
         if (!cancelled) {
-          setFinanceError(error instanceof Error ? error.message : "Failed to load finance filters");
+          setFinanceError(error instanceof Error ? error.message : t.patient_invoices_error_load_filters);
         }
       } finally {
         if (!cancelled) setFinanceBusy(false);
@@ -268,7 +274,7 @@ export function PatientInvoicesTab({
     return () => {
       cancelled = true;
     };
-  }, [financeQuery, patientId]);
+  }, [financeQuery, patientId, t.patient_invoices_error_load_filters]);
 
   async function refreshPackages() {
     if (!patientId) return;
@@ -300,7 +306,7 @@ export function PatientInvoicesTab({
       setAssignOpen(false);
       await refreshPackages();
     } catch (error) {
-      setAssignError(error instanceof Error ? error.message : "Failed to assign package");
+      setAssignError(error instanceof Error ? error.message : t.patient_invoices_error_assign_package);
     } finally {
       setAssignBusy(false);
     }
@@ -311,7 +317,7 @@ export function PatientInvoicesTab({
     if (!patientId || !consumeTargetId) return;
     const quantity = Number(consumeForm.quantity.replace(",", "."));
     if (!Number.isFinite(quantity) || quantity <= 0) {
-      setConsumeError("Quantity must be greater than zero.");
+      setConsumeError(t.patient_invoices_error_quantity_positive);
       return;
     }
     setConsumeBusy(true);
@@ -334,7 +340,7 @@ export function PatientInvoicesTab({
       setConsumeTargetId("");
       await refreshPackages();
     } catch (error) {
-      setConsumeError(error instanceof Error ? error.message : "Failed to record consumption");
+      setConsumeError(error instanceof Error ? error.message : t.patient_invoices_error_record_consumption);
     } finally {
       setConsumeBusy(false);
     }
@@ -388,20 +394,16 @@ export function PatientInvoicesTab({
   return (
     <TabsContent value="invoices" className="mt-4 min-h-[400px] space-y-4">
       <WorkspaceSectionIntro
-        title={l("Billing cockpit", "Billing cockpit", "Billing cockpit")}
-        description={l(
-          "Payment status, package coverage, ledger and profitability in patient context.",
-          "Payment status, package coverage, ledger and profitability in patient context.",
-          "Payment status, package coverage, ledger and profitability in patient context.",
-        )}
+        title={t.patient_invoices_billing_cockpit}
+        description={t.patient_invoices_billing_cockpit_description}
         accessory={<CountBadge>{invoices.length}</CountBadge>}
       />
 
       <FormSection
-        title={l("Financial overview", "Financial overview", "Financial overview")}
+        title={t.patient_invoices_financial_overview}
         accessory={
           <CountBadge>
-            {invoices.length} {l("invoices", "invoices", "invoices")}
+            {invoices.length} {t.patient_invoices_count_suffix}
           </CountBadge>
         }
       >
@@ -411,7 +413,7 @@ export function PatientInvoicesTab({
           </Banner>
         ) : null}
         <div className="mb-4 grid gap-3 rounded-xl border border-border/50 bg-muted/20 px-4 py-3 md:grid-cols-2 xl:grid-cols-5">
-          <Field label={l("From", "From", "From")} htmlFor="profitability-from">
+          <Field label={t.patient_invoices_from} htmlFor="profitability-from">
             <Input
               id="profitability-from"
               type="date"
@@ -426,7 +428,7 @@ export function PatientInvoicesTab({
               disabled={financeBusy}
             />
           </Field>
-          <Field label={l("To", "To", "To")} htmlFor="profitability-to">
+          <Field label={t.patient_invoices_to} htmlFor="profitability-to">
             <Input
               id="profitability-to"
               type="date"
@@ -441,7 +443,7 @@ export function PatientInvoicesTab({
               disabled={financeBusy}
             />
           </Field>
-          <Field label={l("Order", "Order", "Order")} htmlFor="profitability-order">
+          <Field label={t.patient_invoices_order} htmlFor="profitability-order">
             <NativeComboboxSelect
               id="profitability-order"
               value={financeFilters.orderId || "__all__"}
@@ -454,7 +456,7 @@ export function PatientInvoicesTab({
               className={selectClass}
               disabled={financeBusy}
             >
-              <option value="__all__">{l("All orders", "All orders", "All orders")}</option>
+              <option value="__all__">{t.patient_invoices_all_orders}</option>
               {patientOrders.map((order) => (
                 <option key={order.id} value={order.id}>
                   {order.order_number}
@@ -462,7 +464,7 @@ export function PatientInvoicesTab({
               ))}
             </NativeComboboxSelect>
           </Field>
-          <Field label={l("Package", "Package", "Package")} htmlFor="profitability-package">
+          <Field label={t.patient_invoices_package} htmlFor="profitability-package">
             <NativeComboboxSelect
               id="profitability-package"
               value={financeFilters.packageId || "__all__"}
@@ -475,7 +477,7 @@ export function PatientInvoicesTab({
               className={selectClass}
               disabled={financeBusy}
             >
-              <option value="__all__">{l("All packages", "All packages", "All packages")}</option>
+              <option value="__all__">{t.patient_invoices_all_packages}</option>
               {packageCatalog.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.name}
@@ -491,7 +493,7 @@ export function PatientInvoicesTab({
               onClick={() => setFinanceFilters({ from: "", to: "", orderId: "", packageId: "" })}
               disabled={financeBusy}
             >
-              {l("Reset", "Reset", "Reset")}
+              {t.patient_invoices_reset}
             </Button>
             <Button
               type="button"
@@ -500,76 +502,52 @@ export function PatientInvoicesTab({
                 patientId
                   ? void downloadPatientLedgerExport(patientId, financeQuery).catch((error) =>
                       setFinanceError(
-                        error instanceof Error ? error.message : "Failed to export",
+                        error instanceof Error ? error.message : t.patient_invoices_error_export,
                       ),
                     )
                   : undefined
               }
               disabled={!patientId || financeBusy}
             >
-              {l("Export", "Export", "Export")}
+              {t.patient_invoices_export}
             </Button>
           </div>
         </div>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <StatCard
-            label={l("Gross revenue", "Gross revenue", "Gross revenue")}
+            label={t.patient_invoices_gross_revenue}
             value={formatMoney(revenueGross)}
-            description={l(
-              "Invoice revenue for this patient.",
-              "Invoice revenue for this patient.",
-              "Invoice revenue for this patient.",
-            )}
+            description={t.patient_invoices_gross_revenue_description}
           />
           <StatCard
-            label={l("Open invoices", "Open invoices", "Open invoices")}
+            label={t.patient_invoices_open_invoices}
             value={invoiceOpenCount}
-            description={l(
-              "Invoices with a remaining balance.",
-              "Invoices with a remaining balance.",
-              "Invoices with a remaining balance.",
-            )}
+            description={t.patient_invoices_open_invoices_description}
           />
           <StatCard
-            label={l("Outstanding amount", "Outstanding amount", "Outstanding amount")}
+            label={t.patient_invoices_outstanding_amount}
             value={formatMoney(openBalance)}
-            description={l(
-              "Total amount still unpaid in this patient profile.",
-              "Total amount still unpaid in this patient profile.",
-              "Total amount still unpaid in this patient profile.",
-            )}
+            description={t.patient_invoices_outstanding_amount_description}
           />
           <StatCard
-            label={l("Paid", "Paid", "Paid")}
+            label={t.patient_invoices_paid}
             value={formatMoney(paidAmount)}
-            description={l(
-              "Amount already collected across all invoices.",
-              "Amount already collected across all invoices.",
-              "Amount already collected across all invoices.",
-            )}
+            description={t.patient_invoices_paid_description}
           />
           <StatCard
-            label={l("Overdue amount", "Overdue amount", "Overdue amount")}
+            label={t.patient_invoices_overdue_amount}
             value={formatMoney(overdueAmount)}
-            description={l(
-              "Balance requiring immediate billing follow-up.",
-              "Balance requiring immediate billing follow-up.",
-              "Balance requiring immediate billing follow-up.",
-            )}
+            description={t.patient_invoices_overdue_amount_description}
           />
           {effectiveFinancialSummary?.margin_visible ? (
             <>
               <StatCard
-                label={l("Gross expenses", "Gross expenses", "Gross expenses")}
+                label={t.patient_invoices_gross_expenses}
                 value={formatMoney(effectiveFinancialSummary.expenses_gross)}
-                description={l(
-                  "Visible only to CEO and Billing.",
-                  "Visible only to CEO and Billing.",
-                  "Visible only to CEO and Billing.",
-                )}
+                description={t.patient_invoices_visible_ceo_billing}
               />
               <StatCard
-                label={l("Net margin", "Net margin", "Net margin")}
+                label={t.patient_invoices_net_margin}
                 value={formatMoney(effectiveFinancialSummary.margin_net)}
                 description={`${effectiveFinancialSummary.margin_percent ?? "0"}%`}
               />
@@ -577,14 +555,10 @@ export function PatientInvoicesTab({
           ) : (
             <div className="rounded-xl border border-dashed border-border/60 bg-muted/25 px-4 py-3">
               <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                {l("Margin hidden", "Margin hidden", "Margin hidden")}
+                {t.patient_invoices_margin_hidden}
               </p>
               <p className="mt-2 text-sm text-muted-foreground">
-                {l(
-                  "Profitability is intentionally visible only to CEO and Billing.",
-                  "Profitability is intentionally visible only to CEO and Billing.",
-                  "Profitability is intentionally visible only to CEO and Billing.",
-                )}
+                {t.patient_invoices_margin_hidden_description}
               </p>
             </div>
           )}
@@ -598,11 +572,11 @@ export function PatientInvoicesTab({
                 className="rounded-xl border border-border/50 bg-card px-4 py-3"
               >
                 <p className="text-sm font-semibold text-foreground">
-                  {item.service_type}
+                  {patientInvoiceServiceTypeLabel(item.service_type)}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {formatMoney(item.revenue_gross)} gross /{" "}
-                  {formatMoney(item.revenue_net)} net
+                  {formatMoney(item.revenue_gross)} {t.patient_invoices_money_gross} /{" "}
+                  {formatMoney(item.revenue_net)} {t.patient_invoices_money_net}
                 </p>
               </div>
             ))}
@@ -611,7 +585,7 @@ export function PatientInvoicesTab({
       </FormSection>
 
       <FormSection
-        title={l("Service packages", "Service packages", "Service packages")}
+        title={t.patient_invoices_service_packages}
         accessory={
           <div className="flex items-center gap-2">
             <CountBadge>{packageGroupItems.length}</CountBadge>
@@ -624,7 +598,7 @@ export function PatientInvoicesTab({
                 onClick={() => setAssignOpen((current) => !current)}
                 disabled={!patientId}
               >
-                {l("Assign package", "Assign package", "Assign package")}
+                {t.patient_invoices_assign_package}
               </Button>
             ) : null}
           </div>
@@ -641,7 +615,7 @@ export function PatientInvoicesTab({
               </Banner>
             ) : null}
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <Field label={l("Package", "Package", "Package")}>
+              <Field label={t.patient_invoices_package}>
                 <NativeComboboxSelect
                   value={assignForm.packageId || "__empty__"}
                   onChange={(event) =>
@@ -655,7 +629,7 @@ export function PatientInvoicesTab({
                   disabled={assignBusy}
                 >
                   <option value="__empty__">
-                    {l("Choose package", "Choose package", "Choose package")}
+                    {t.patient_invoices_choose_package}
                   </option>
                   {assignablePackages.map((item) => (
                     <option key={item.id} value={item.id}>
@@ -664,7 +638,7 @@ export function PatientInvoicesTab({
                   ))}
                 </NativeComboboxSelect>
               </Field>
-              <Field label={l("Order", "Order", "Order")}>
+              <Field label={t.patient_invoices_order}>
                 <NativeComboboxSelect
                   value={assignForm.orderId || "__none__"}
                   onChange={(event) =>
@@ -676,7 +650,7 @@ export function PatientInvoicesTab({
                   className={selectClass}
                   disabled={assignBusy}
                 >
-                  <option value="__none__">{l("No order link", "No order link", "No order link")}</option>
+                  <option value="__none__">{t.patient_invoices_no_order_link}</option>
                   {patientOrders.map((order) => (
                     <option key={order.id} value={order.id}>
                       {order.order_number}
@@ -684,7 +658,7 @@ export function PatientInvoicesTab({
                   ))}
                 </NativeComboboxSelect>
               </Field>
-              <Field label={l("Starts", "Starts", "Starts")}>
+              <Field label={t.patient_invoices_starts}>
                 <Input
                   type="date"
                   value={assignForm.startsOn}
@@ -698,7 +672,7 @@ export function PatientInvoicesTab({
                   disabled={assignBusy}
                 />
               </Field>
-              <Field label={l("Ends", "Ends", "Ends")}>
+              <Field label={t.patient_invoices_ends}>
                 <Input
                   type="date"
                   value={assignForm.endsOn}
@@ -712,7 +686,7 @@ export function PatientInvoicesTab({
                   disabled={assignBusy}
                 />
               </Field>
-              <Field label={l("Payer", "Payer", "Payer")}>
+              <Field label={t.patient_invoices_payer}>
                 <Input
                   value={assignForm.payerName}
                   onChange={(event) =>
@@ -725,7 +699,7 @@ export function PatientInvoicesTab({
                   disabled={assignBusy}
                 />
               </Field>
-              <Field label={l("Relationship", "Relationship", "Relationship")}>
+              <Field label={t.patient_invoices_relationship}>
                 <Input
                   value={assignForm.payerRelationship}
                   onChange={(event) =>
@@ -738,7 +712,7 @@ export function PatientInvoicesTab({
                   disabled={assignBusy}
                 />
               </Field>
-              <Field label={l("Notes", "Notes", "Notes")} className="md:col-span-2">
+              <Field label={t.patient_invoices_notes} className="md:col-span-2">
                 <textarea
                   value={assignForm.notes}
                   onChange={(event) =>
@@ -761,14 +735,14 @@ export function PatientInvoicesTab({
                 onClick={() => setAssignOpen(false)}
                 disabled={assignBusy}
               >
-                {l("Cancel", "Cancel", "Cancel")}
+                {t.patient_invoices_cancel}
               </Button>
               <Button
                 type="submit"
                 className="h-9 rounded-lg"
                 disabled={assignBusy || !assignForm.packageId}
               >
-                {l("Assign", "Assign", "Assign")}
+                {t.patient_invoices_assign}
               </Button>
             </div>
           </form>
@@ -778,11 +752,7 @@ export function PatientInvoicesTab({
           <TabLoader />
         ) : packageGroupItems.length === 0 ? (
           <EmptyCell>
-            {l(
-              "No service package is assigned to this patient yet.",
-              "No service package is assigned to this patient yet.",
-              "No service package is assigned to this patient yet.",
-            )}
+            {t.patient_invoices_no_service_package}
           </EmptyCell>
         ) : (
           <div className="space-y-3">
@@ -797,7 +767,7 @@ export function PatientInvoicesTab({
                       {group.packageName}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      {group.items.length} {l("items", "items", "items")}
+                      {group.items.length} {t.patient_invoices_items_suffix}
                     </p>
                   </div>
                   <Badge
@@ -814,14 +784,13 @@ export function PatientInvoicesTab({
                       className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-sm"
                     >
                       <p className="font-medium text-foreground">
-                        {item.description ??
-                          l("Package summary", "Package summary", "Package summary")}
+                        {item.description ?? t.patient_invoices_package_summary}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {l("Included", "Included", "Included")}:{" "}
+                        {t.patient_invoices_included}:{" "}
                         {item.included_quantity} {item.unit_label ?? ""} /{" "}
-                        {l("Used", "Used", "Used")}: {item.used_quantity} /{" "}
-                        {l("Remaining", "Remaining", "Remaining")}:{" "}
+                        {t.patient_invoices_used}: {item.used_quantity} /{" "}
+                        {t.patient_invoices_remaining}:{" "}
                         {item.remaining_quantity}
                       </p>
                       {moneyValueNumber(item.overage_quantity) > 0 ||
@@ -832,7 +801,7 @@ export function PatientInvoicesTab({
                               variant="outline"
                               className="rounded-full border-amber-200 bg-amber-50 text-[10px] text-amber-700"
                             >
-                              {l("Overage", "Overage", "Overage")}:{" "}
+                              {t.patient_invoices_overage}:{" "}
                               {item.overage_quantity}
                             </Badge>
                           ) : null}
@@ -841,7 +810,7 @@ export function PatientInvoicesTab({
                               variant="outline"
                               className="rounded-full border-orange-200 bg-orange-50 text-[10px] text-orange-700"
                             >
-                              {l("Pending", "Pending", "Pending")}:{" "}
+                              {t.patient_invoices_pending}:{" "}
                               {item.pending_overage_quantity}
                             </Badge>
                           ) : null}
@@ -850,7 +819,7 @@ export function PatientInvoicesTab({
                               variant="outline"
                               className="rounded-full border-emerald-200 bg-emerald-50 text-[10px] text-emerald-700"
                             >
-                              {l("Approved", "Approved", "Approved")}:{" "}
+                              {t.patient_invoices_approved}:{" "}
                               {item.approved_overage_quantity}
                             </Badge>
                           ) : null}
@@ -859,7 +828,7 @@ export function PatientInvoicesTab({
                               variant="outline"
                               className="rounded-full border-sky-200 bg-sky-50 text-[10px] text-sky-700"
                             >
-                              {l("Patient approval", "Patient approval", "Patient approval")}
+                              {t.patient_invoices_patient_approval}
                             </Badge>
                           ) : null}
                         </div>
@@ -883,7 +852,7 @@ export function PatientInvoicesTab({
                               )
                             }
                           >
-                            {l("Approve overage", "Approve overage", "Approve overage")}
+                            {t.patient_invoices_approve_overage}
                           </Button>
                           <Button
                             type="button"
@@ -902,7 +871,7 @@ export function PatientInvoicesTab({
                               )
                             }
                           >
-                            {l("Decline", "Decline", "Decline")}
+                            {t.patient_invoices_decline}
                           </Button>
                         </div>
                       ) : null}
@@ -918,7 +887,7 @@ export function PatientInvoicesTab({
                     ) : null}
                     {consumeTargetId === id ? (
                       <form className="grid gap-3 md:grid-cols-2 xl:grid-cols-5" onSubmit={handleConsumePackage}>
-                        <Field label={l("Item", "Item", "Item")}>
+                        <Field label={t.patient_invoices_item}>
                           <NativeComboboxSelect
                             value={consumeForm.packageItemId || "__summary__"}
                             onChange={(event) =>
@@ -934,7 +903,7 @@ export function PatientInvoicesTab({
                             disabled={consumeBusy}
                           >
                             <option value="__summary__">
-                              {l("Package summary", "Package summary", "Package summary")}
+                              {t.patient_invoices_package_summary}
                             </option>
                             {group.items
                               .filter((item) => item.package_item_id)
@@ -945,7 +914,7 @@ export function PatientInvoicesTab({
                               ))}
                           </NativeComboboxSelect>
                         </Field>
-                        <Field label={l("Order", "Order", "Order")}>
+                        <Field label={t.patient_invoices_order}>
                           <NativeComboboxSelect
                             value={consumeForm.orderId || "__none__"}
                             onChange={(event) =>
@@ -958,7 +927,7 @@ export function PatientInvoicesTab({
                             className={selectClass}
                             disabled={consumeBusy}
                           >
-                            <option value="__none__">{l("No order", "No order", "No order")}</option>
+                            <option value="__none__">{t.patient_invoices_no_order}</option>
                             {patientOrders.map((order) => (
                               <option key={order.id} value={order.id}>
                                 {order.order_number}
@@ -966,7 +935,7 @@ export function PatientInvoicesTab({
                             ))}
                           </NativeComboboxSelect>
                         </Field>
-                        <Field label={l("Order service ID", "Order service ID", "Order service ID")}>
+                        <Field label={t.patient_invoices_order_service_id}>
                           <Input
                             value={consumeForm.orderLeistungId}
                             onChange={(event) =>
@@ -977,10 +946,10 @@ export function PatientInvoicesTab({
                             }
                             className={inputClass}
                             disabled={consumeBusy}
-                            placeholder="optional UUID"
+                            placeholder={t.patient_invoices_optional_uuid}
                           />
                         </Field>
-                        <Field label={l("Quantity", "Quantity", "Quantity")}>
+                        <Field label={t.patient_invoices_quantity}>
                           <Input
                             value={consumeForm.quantity}
                             onChange={(event) =>
@@ -999,7 +968,7 @@ export function PatientInvoicesTab({
                             className="h-9 rounded-lg"
                             disabled={consumeBusy}
                           >
-                            {l("Record", "Record", "Record")}
+                            {t.patient_invoices_record}
                           </Button>
                           <Button
                             type="button"
@@ -1011,10 +980,10 @@ export function PatientInvoicesTab({
                             }}
                             disabled={consumeBusy}
                           >
-                            {l("Cancel", "Cancel", "Cancel")}
+                            {t.patient_invoices_cancel}
                           </Button>
                         </div>
-                        <Field label={l("Consumption note", "Consumption note", "Consumption note")} className="md:col-span-2 xl:col-span-5">
+                        <Field label={t.patient_invoices_consumption_note} className="md:col-span-2 xl:col-span-5">
                           <textarea
                             value={consumeForm.notes}
                             onChange={(event) =>
@@ -1041,7 +1010,7 @@ export function PatientInvoicesTab({
                           setConsumeError("");
                         }}
                       >
-                        {l("Record order/service consumption", "Record order/service consumption", "Record order/service consumption")}
+                        {t.patient_invoices_record_consumption}
                       </Button>
                     )}
                   </div>
@@ -1053,18 +1022,14 @@ export function PatientInvoicesTab({
       </FormSection>
 
       <FormSection
-        title={l("Accounting ledger", "Accounting ledger", "Accounting ledger")}
+        title={t.patient_invoices_accounting_ledger}
         accessory={<CountBadge>{ledgerEntries.length}</CountBadge>}
       >
         {tabLoading ? (
           <TabLoader />
         ) : ledgerEntries.length === 0 ? (
           <EmptyCell>
-            {l(
-              "No ledger entries for this patient yet.",
-              "No ledger entries for this patient yet.",
-              "No ledger entries for this patient yet.",
-            )}
+            {t.patient_invoices_no_ledger_entries}
           </EmptyCell>
         ) : (
           <div className="space-y-2">
@@ -1082,19 +1047,19 @@ export function PatientInvoicesTab({
                       variant="outline"
                       className={cn(
                         "rounded-full text-[10px]",
-                        entry.direction === "revenue"
+                        entry.direction === "revenue" || entry.direction === "income"
                           ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                           : "border-rose-200 bg-rose-50 text-rose-700",
                       )}
                     >
-                      {entry.direction}
+                      {patientInvoiceLedgerDirectionLabel(entry.direction)}
                     </Badge>
                     <span className="truncate font-medium text-foreground">
                       {entry.description}
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {entry.category}
+                    {patientInvoiceLedgerCategoryLabel(entry.category)}
                     {entry.order_number ? ` / ${entry.order_number}` : ""}
                     {entry.invoice_number ? ` / ${entry.invoice_number}` : ""}
                     {entry.external_invoice_number
@@ -1112,18 +1077,14 @@ export function PatientInvoicesTab({
       </FormSection>
 
       <FormSection
-        title={l("Invoices and payment follow-up", "Invoices and payment follow-up", "Invoices and payment follow-up")}
+        title={t.patient_invoices_payment_followup}
         accessory={<CountBadge>{invoices.length}</CountBadge>}
       >
         {tabLoading ? (
           <TabLoader />
         ) : invoices.length === 0 ? (
           <EmptyCell>
-            {l(
-              "No invoices have been issued for this patient yet.",
-              "No invoices have been issued for this patient yet.",
-              "No invoices have been issued for this patient yet.",
-            )}
+            {t.patient_invoices_no_invoices}
           </EmptyCell>
         ) : (
           <div className="space-y-2">
@@ -1150,43 +1111,43 @@ export function PatientInvoicesTab({
                 </div>
                 <div className="grid gap-1 text-sm text-muted-foreground md:grid-cols-2 xl:grid-cols-4">
                   <p>
-                    {l("Type", "Type", "Type")}:{" "}
+                    {t.patient_invoices_type}:{" "}
                     {invoiceTypeLabel(invoice.invoice_type)}
                   </p>
                   <p>
-                    {l("Total", "Total", "Total")}:{" "}
+                    {t.patient_invoices_total}:{" "}
                     {formatMoney(invoice.total_gross)}
                   </p>
                   <p>
-                    {l("Paid", "Paid", "Paid")}:{" "}
+                    {t.patient_invoices_paid}:{" "}
                     {formatMoney(invoice.paid_amount)}
                   </p>
                   <p>
-                    {l("Open", "Open", "Open")}:{" "}
+                    {t.patient_invoices_open}:{" "}
                     {formatMoney(invoice.balance_due)}
                   </p>
                   <p>
-                    {l("Due", "Due", "Due")}:{" "}
+                    {t.patient_invoices_due}:{" "}
                     {formatDate(invoice.due_date, commonNotSet)}
                   </p>
                   <p>
-                    {l("Order", "Order", "Order")}:{" "}
+                    {t.patient_invoices_order}:{" "}
                     {invoice.order_number ?? commonNotSet}
                   </p>
                   <p>
-                    {l("Quote", "Quote", "Quote")}:{" "}
+                    {t.patient_invoices_quote}:{" "}
                     {invoice.quote_number ?? commonNotSet}
                   </p>
                   <p>
-                    {l("Patient view", "Patient view", "Patient view")}:{" "}
+                    {t.patient_invoices_patient_view}:{" "}
                     {invoice.portal_visibility?.visible_to_patient
                       ? invoice.portal_visibility.amounts_visible_to_patient
-                        ? l("amounts visible", "amounts visible", "amounts visible")
-                        : l("amounts hidden", "amounts hidden", "amounts hidden")
-                      : l("hidden", "hidden", "hidden")}
+                        ? t.patient_invoices_amounts_visible
+                        : t.patient_invoices_amounts_hidden
+                      : t.patient_invoices_hidden}
                   </p>
                   <p>
-                    {l("Payer", "Payer", "Payer")}:{" "}
+                    {t.patient_invoices_payer}:{" "}
                     {invoice.payer?.contact_name ??
                       invoice.payer?.contact_relationship ??
                       commonNotSet}
@@ -1195,11 +1156,7 @@ export function PatientInvoicesTab({
                 {invoice.portal_visibility &&
                 !invoice.portal_visibility.amounts_visible_to_patient ? (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                    {l(
-                      "Patient preview: amount fields and PDF are hidden from the portal.",
-                      "Patient preview: amount fields and PDF are hidden from the portal.",
-                      "Patient preview: amount fields and PDF are hidden from the portal.",
-                    )}
+                    {t.patient_invoices_patient_preview_hidden}
                   </div>
                 ) : null}
                 {moneyValueNumber(invoice.balance_due) > 0 ? (
@@ -1213,8 +1170,8 @@ export function PatientInvoicesTab({
                     )}
                   >
                     {invoice.status === "overdue"
-                      ? l("Needs urgent follow-up", "Needs urgent follow-up", "Needs urgent follow-up")
-                      : l("Balance outstanding", "Balance outstanding", "Balance outstanding")}
+                      ? t.patient_invoices_needs_urgent_followup
+                      : t.patient_invoices_balance_outstanding}
                   </Badge>
                 ) : null}
                 <div className="flex flex-wrap gap-2 pt-1">
@@ -1225,7 +1182,7 @@ export function PatientInvoicesTab({
                     className="h-8 rounded-lg"
                     onClick={() => onOpenInvoice(invoice.id)}
                   >
-                    {l("Open", "Open", "Open")}
+                    {t.patient_invoices_open}
                   </Button>
                   {canManageInvoices ? (
                     <Button
@@ -1235,7 +1192,7 @@ export function PatientInvoicesTab({
                       className="h-8 rounded-lg"
                       onClick={() => onManageInvoice(invoice)}
                     >
-                      {l("Manage billing", "Manage billing", "Manage billing")}
+                      {t.patient_invoices_manage_billing}
                     </Button>
                   ) : null}
                 </div>

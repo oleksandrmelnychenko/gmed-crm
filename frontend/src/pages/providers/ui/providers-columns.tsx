@@ -23,14 +23,6 @@ export const DEFAULT_PROVIDER_HIDDEN_COLUMNS: string[] = [
 export const DEFAULT_PROVIDER_FROZEN_COLUMNS: string[] = ["provider"];
 export const MAX_PROVIDER_FROZEN_COLUMNS = 3;
 
-export const PROVIDER_COLUMN_GROUPS: Record<string, string> = {
-  identity: "Identity",
-  registry: "Registry",
-  contact: "Contact",
-  activity: "Activity",
-  audit: "Audit",
-};
-
 function optionsFrom(values: Iterable<string>): FilterOption[] {
   return Array.from(values)
     .sort((a, b) => a.localeCompare(b))
@@ -94,7 +86,7 @@ function StatusPill({ active, tr }: { active: boolean; tr: Record<string, string
       )}
     >
       <span className={cn("size-1.5 rounded-full", active ? "bg-emerald-500" : "bg-neutral-400")} />
-      {active ? (tr.common_active ?? "Active") : (tr.common_inactive ?? "Inactive")}
+      {active ? (tr.common_active ?? commonNotSet(tr)) : (tr.common_inactive ?? commonNotSet(tr))}
     </span>
   );
 }
@@ -115,7 +107,7 @@ function ContractBadge({
       variant="outline"
       className="rounded-full border-emerald-200 bg-emerald-50 text-[10px] text-emerald-700"
     >
-      {tr.providers_contract_with ?? "Contract"}
+      {tr.providers_contract ?? tr.providers_contract_with ?? commonNotSet(tr)}
     </Badge>
   );
 }
@@ -130,12 +122,12 @@ export function buildProviderColumns(
   return [
     {
       id: "status",
-      label: tr.patients_col_status ?? "Status",
+      label: tr.patients_col_status ?? notSet,
       accessor: (provider) => (provider.is_active ? "active" : "inactive"),
       filterType: "enum",
       filterOptions: [
-        { value: "active", label: tr.common_active ?? "Active" },
-        { value: "inactive", label: tr.common_inactive ?? "Inactive" },
+        { value: "active", label: tr.common_active ?? notSet },
+        { value: "inactive", label: tr.common_inactive ?? notSet },
       ],
       sortable: true,
       width: 112,
@@ -144,7 +136,7 @@ export function buildProviderColumns(
     },
     {
       id: "provider",
-      label: tr.providers_title ?? "Provider",
+      label: tr.providers_title ?? notSet,
       accessor: (provider) => provider.name,
       filterType: "text",
       sortable: true,
@@ -168,7 +160,7 @@ export function buildProviderColumns(
               <div className="truncate text-[10px] text-muted-foreground">{provider.legal_name}</div>
             ) : provider.tax_id ? (
               <div className="truncate text-[10px] text-muted-foreground">
-                {(tr.providers_tax_id ?? "Tax ID")} {provider.tax_id}
+                {(tr.providers_tax_id ?? notSet)} {provider.tax_id}
               </div>
             ) : null}
           </div>
@@ -177,12 +169,12 @@ export function buildProviderColumns(
     },
     {
       id: "type",
-      label: tr.providers_type ?? "Type",
+      label: tr.providers_type ?? notSet,
       accessor: (provider) => provider.provider_type,
       filterType: "enum",
       filterOptions: [
-        { value: "medical", label: tr.providers_type_medical ?? "Medical" },
-        { value: "non_medical", label: tr.providers_type_non_medical ?? "Non-medical" },
+        { value: "medical", label: tr.providers_type_medical ?? notSet },
+        { value: "non_medical", label: tr.providers_type_non_medical ?? notSet },
       ],
       sortable: true,
       searchable: true,
@@ -192,7 +184,7 @@ export function buildProviderColumns(
     },
     {
       id: "city",
-      label: tr.providers_city ?? "City",
+      label: tr.providers_city ?? notSet,
       accessor: (provider) => provider.address_city,
       filterType: "enum",
       filterOptions: dyn.cities,
@@ -208,7 +200,7 @@ export function buildProviderColumns(
     },
     {
       id: "country",
-      label: tr.providers_country ?? "Country",
+      label: tr.providers_country ?? notSet,
       accessor: (provider) => provider.address_country,
       filterType: "enum",
       filterOptions: dyn.countries,
@@ -224,7 +216,7 @@ export function buildProviderColumns(
     },
     {
       id: "fachbereich",
-      label: tr.providers_fachbereich ?? "Specialty",
+      label: tr.providers_fachbereich ?? notSet,
       accessor: (provider) => provider.fachbereich,
       filterType: "enum",
       filterOptions: dyn.fachbereiche,
@@ -240,7 +232,7 @@ export function buildProviderColumns(
     },
     {
       id: "contract",
-      label: tr.providers_contract ?? "Contract",
+      label: tr.providers_contract ?? notSet,
       accessor: (provider) => provider.has_contract,
       filterType: "boolean",
       sortable: true,
@@ -250,7 +242,7 @@ export function buildProviderColumns(
     },
     {
       id: "doctors",
-      label: tr.providers_doctors ?? "Doctors",
+      label: tr.providers_doctors ?? notSet,
       accessor: (provider) => provider.doctor_count,
       filterType: "number",
       sortable: true,
@@ -262,7 +254,7 @@ export function buildProviderColumns(
     },
     {
       id: "patients",
-      label: tr.providers_linked_patients ?? "Patients",
+      label: tr.providers_linked_patients ?? notSet,
       accessor: (provider) => provider.patient_count,
       filterType: "number",
       sortable: true,
@@ -274,7 +266,7 @@ export function buildProviderColumns(
     },
     {
       id: "appointments",
-      label: tr.providers_appointments ?? "Appointments",
+      label: tr.providers_appointments ?? notSet,
       accessor: (provider) => provider.appointment_count,
       filterType: "number",
       sortable: true,
@@ -286,7 +278,7 @@ export function buildProviderColumns(
     },
     {
       id: "services",
-      label: tr.providers_services ?? "Services",
+      label: tr.providers_services ?? notSet,
       accessor: (provider) => provider.service_count,
       filterType: "number",
       sortable: true,
@@ -298,7 +290,7 @@ export function buildProviderColumns(
     },
     {
       id: "open_requests",
-      label: tr.concierge_open_requests ?? "Open requests",
+      label: tr.concierge_open_requests ?? notSet,
       accessor: (provider) => provider.open_concierge_service_count,
       filterType: "number",
       sortable: true,
@@ -312,7 +304,7 @@ export function buildProviderColumns(
     },
     {
       id: "rating",
-      label: tr.providers_rating ?? "Rating",
+      label: tr.providers_rating ?? notSet,
       accessor: (provider) => provider.avg_rating,
       filterType: "number",
       sortable: true,
@@ -329,7 +321,7 @@ export function buildProviderColumns(
     },
     {
       id: "phone",
-      label: tr.field_phone ?? "Phone",
+      label: tr.field_phone ?? notSet,
       accessor: (provider) => provider.phone,
       filterType: "text",
       sortable: true,
@@ -342,7 +334,7 @@ export function buildProviderColumns(
     },
     {
       id: "email",
-      label: tr.patients_email ?? "Email",
+      label: tr.field_email ?? tr.patients_email ?? notSet,
       accessor: (provider) => provider.email,
       filterType: "text",
       sortable: true,
@@ -355,7 +347,7 @@ export function buildProviderColumns(
     },
     {
       id: "tax_id",
-      label: tr.providers_tax_id ?? "Tax ID",
+      label: tr.providers_tax_id ?? notSet,
       accessor: (provider) => provider.tax_id,
       filterType: "text",
       sortable: true,
@@ -368,7 +360,7 @@ export function buildProviderColumns(
     },
     {
       id: "last_interaction_at",
-      label: tr.providers_last_activity ?? "Last activity",
+      label: tr.providers_last_activity ?? notSet,
       accessor: (provider) => provider.last_interaction_at,
       filterType: "date",
       sortable: true,
@@ -382,7 +374,7 @@ export function buildProviderColumns(
     },
     {
       id: "created_at",
-      label: tr.patients_col_created_at ?? "Created",
+      label: tr.patients_col_created_at ?? notSet,
       accessor: (provider) => provider.created_at,
       filterType: "date",
       sortable: true,

@@ -24,7 +24,7 @@ import {
   SheetContent,
 } from "@/components/ui/sheet";
 import { useSheetDirtyGuard } from "@/hooks/use-sheet-dirty-guard";
-import { useLang } from "@/lib/i18n";
+import { formatEnumLabelFromKeys, useLang, type TranslationKey } from "@/lib/i18n";
 import {
   formatAdminDateTime,
   normalizeAdminSettingValue,
@@ -189,6 +189,19 @@ const ADMIN_SETTINGS_REALTIME_EVENTS = [
   "user.mfa_toggled",
 ] as const;
 
+const ROLE_LABEL_KEYS = {
+  ceo: "role_ceo",
+  ceo_assistant: "role_ceo_assistant",
+  patient_manager: "role_patient_manager",
+  teamlead_interpreter: "role_teamlead_interpreter",
+  interpreter: "role_interpreter",
+  concierge: "role_concierge",
+  billing: "role_billing",
+  sales: "role_sales",
+  it_admin: "role_it_admin",
+  patient: "role_patient",
+} as const satisfies Partial<Record<string, TranslationKey>>;
+
 export function AdminSettingsPage() {
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
@@ -272,6 +285,12 @@ export function AdminSettingsPage() {
   function hasFieldChanged(key: string): boolean {
     return normalizeAdminSettingValue(settingsMap[key]?.value) !== (editValues[key] ?? "");
   }
+
+  const roleLabel = useCallback(
+    (value: string | null | undefined) =>
+      formatEnumLabelFromKeys(value, ROLE_LABEL_KEYS, t),
+    [t],
+  );
 
   const groupHasChanges =
     selectedGroup?.fields.some((field) => hasFieldChanged(field.key)) ?? false;
@@ -420,7 +439,7 @@ export function AdminSettingsPage() {
       render: (entry) => (
         <div className="min-w-0">
           <div className="text-xs font-medium text-foreground">{entry.user_name}</div>
-          <div className="text-[11px] text-muted-foreground">{entry.role}</div>
+          <div className="text-[11px] text-muted-foreground">{roleLabel(entry.role)}</div>
         </div>
       ),
     },
@@ -524,6 +543,7 @@ export function AdminSettingsPage() {
     t.mfa_approve,
     t.mfa_reject,
     t.users_actions,
+    roleLabel,
   ]);
 
   const sessionColumns = useMemo<ColumnDef<SessionRow>[]>(() => [
@@ -553,7 +573,7 @@ export function AdminSettingsPage() {
       accessor: (session) => session.role,
       sortable: true,
       width: 130,
-      render: (session) => <StatusBadge tone="neutral">{session.role}</StatusBadge>,
+      render: (session) => <StatusBadge tone="neutral">{roleLabel(session.role)}</StatusBadge>,
     },
     {
       id: "ip",
@@ -628,6 +648,7 @@ export function AdminSettingsPage() {
     t.settings_logout_user,
     t.users_actions,
     t.users_role,
+    roleLabel,
   ]);
 
   return (
@@ -868,7 +889,7 @@ export function AdminSettingsPage() {
               <>
                 <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
                   <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
-                    Overview
+                    {t.admin_system_overview}
                   </h3>
                   <div className="flex items-center gap-2">
                     <StatusBadge tone={groupHasChanges ? "warning" : "neutral"}>
@@ -888,7 +909,7 @@ export function AdminSettingsPage() {
 
                 <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
                   <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
-                    Fields
+                    {t.admin_system_fields}
                   </h3>
                   <div className="grid gap-4 md:grid-cols-2">
                     {selectedGroup.fields.map((field) => {

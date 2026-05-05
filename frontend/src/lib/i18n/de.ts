@@ -1,4 +1,11 @@
 import type { Translations } from "./index";
+import { adminSystemDe } from "./catalogs/admin-system";
+import { casesClinicalDe } from "./catalogs/cases-clinical";
+import { clinicalDe } from "./catalogs/clinical";
+import { operationsDe } from "./catalogs/operations";
+import { patientsPortalDe } from "./catalogs/patients-portal";
+import { revenueDe } from "./catalogs/revenue";
+import { sharedCoreDe } from "./catalogs/shared";
 
 export const de: Translations = {
   app_name: "GMED CONSOLE",
@@ -1442,4 +1449,11 @@ export const de: Translations = {
   chat_hours_ago: "Std. her",
   chat_yesterday: "Gestern",
   nav_chat: "Chat",
+  ...adminSystemDe,
+  ...casesClinicalDe,
+  ...clinicalDe,
+  ...operationsDe,
+  ...patientsPortalDe,
+  ...revenueDe,
+  ...sharedCoreDe,
 };

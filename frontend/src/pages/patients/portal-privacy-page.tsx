@@ -32,6 +32,7 @@ import {
   formatPortalDateTime,
   portalStatusLabel,
   privacyRequestLabel,
+  privacyRequestSourceLabel as sharedPrivacyRequestSourceLabel,
 } from "@/pages/patients/model/portal-shared";
 import type { PortalPrivacyRequest } from "@/pages/patients/model/portal-shared";
 import { cn } from "@/lib/utils";
@@ -55,6 +56,7 @@ function privacyRequestSourceLabel(
   l: (de: string, ru: string, en: string) => string,
   translations: { common_unknown: string; common_unknown_value: string },
 ) {
+  return sharedPrivacyRequestSourceLabel(value);
   switch (value) {
     case "patient_portal":
       return l("Patientenportal", "Портал пациента", "Patient portal");

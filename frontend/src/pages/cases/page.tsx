@@ -49,12 +49,20 @@ import { clearApiCache } from "@/lib/api";
 import { useSecurePersistedState } from "@/lib/secure-persist";
 import { useAuth } from "@/lib/auth";
 import {
-  formatUnknownValue,
+  formatEnumLabelFromKeys,
   getLang,
   t as translateCatalog,
   type Translations,
   useLang,
 } from "@/lib/i18n";
+import {
+  CASE_HISTORY_SECTION_LABEL_KEYS,
+  CASE_MEDICATION_TYPE_LABEL_KEYS,
+  CASE_MEDICATION_TYPE_VALUES,
+  CASE_SNIPPET_CATEGORY_LABEL_KEYS,
+  CASE_SNIPPET_CATEGORY_VALUES,
+  CASE_STATUS_LABEL_KEYS,
+} from "@/lib/i18n/catalogs/cases-clinical";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
@@ -504,20 +512,9 @@ function cardClass(className?: string) {
 
 function caseStatusLabel(
   status: string,
-  tr: {
-    cases_open: string;
-    cases_in_progress: string;
-    cases_closed: string;
-    common_unknown: string;
-    common_unknown_value: string;
-  }
+  tr: Translations,
 ) {
-  switch (status) {
-    case "open": return tr.cases_open;
-    case "in_progress": return tr.cases_in_progress;
-    case "closed": return tr.cases_closed;
-    default: return formatUnknownValue(status, tr);
-  }
+  return formatEnumLabelFromKeys(status, CASE_STATUS_LABEL_KEYS, tr);
 }
 
 function blankVorerkrankung(): VorerkrankungItem {
@@ -720,9 +717,16 @@ function caseText(de: string, ru: string, _en: string) {
   }
 }
 
+function formatCatalogMessage(
+  template: string,
+  values: Record<string, string>,
+) {
+  return template.replace(/\{(\w+)\}/g, (_, key: string) => values[key] ?? "");
+}
+
 function patientLabel(patient: PatientOption) {
   const name = [patient.first_name, patient.last_name].filter(Boolean).join(" ").trim();
-  return `${name || caseText("Patient", "Пациент", "Patient")} (${patient.patient_id})`;
+  return `${name || runtimeTranslations().cases_clinical_patient_fallback} (${patient.patient_id})`;
 }
 
 function doctorOptionLabel(doctor: DoctorOption) {
@@ -749,69 +753,44 @@ function formatDateTime(value: string | null | undefined) {
 }
 
 function historyValuePreview(value: unknown) {
-  if (value == null) return caseText("leer", "пусто", "empty");
-  if (typeof value === "string") return value || caseText("leer", "пусто", "empty");
+  const empty = runtimeTranslations().cases_clinical_history_value_empty;
+  if (value == null) return empty;
+  if (typeof value === "string") return value || empty;
   const serialized = JSON.stringify(value);
-  if (!serialized) return caseText("leer", "пусто", "empty");
+  if (!serialized) return empty;
   return serialized.length > 180 ? `${serialized.slice(0, 177)}...` : serialized;
 }
 
 function historySectionLabel(section: string) {
-  switch (section) {
-    case "overview":
-      return caseText("Übersicht", "Обзор", "Overview");
-    case "vorerkrankungen":
-      return caseText("Vorerkrankungen", "Сопутствующие заболевания", "Preconditions");
-    case "allergien":
-      return caseText("Allergien", "Аллергии", "Allergies");
-    case "operationen":
-      return caseText("Operationen", "Операции", "Operations");
-    case "medikamente":
-      return caseText("Medikation", "Медикаменты", "Medication");
-    case "pain_records":
-      return caseText("Schmerzdokumentation", "Записи о боли", "Pain records");
-    case "symptome":
-      return caseText("Symptome", "Симптомы", "Symptoms");
-    case "cardiology":
-      return caseText("Kardiologie", "Кардиология", "Cardiology");
-    case "gastroenterology":
-      return caseText("Gastroenterologie", "Гастроэнтерология", "Gastroenterology");
-    case "orthopedics":
-      return caseText("Orthopädie", "Ортопедия", "Orthopedics");
-    case "neurology":
-      return caseText("Neurologie", "Неврология", "Neurology");
-    case "pulmonology":
-      return caseText("Pneumologie", "Пульмонология", "Pulmonology");
-    case "urology":
-      return caseText("Urologie", "Урология", "Urology");
-    case "vegetative":
-      return caseText("Vegetative Anamnese", "Вегетативный анамнез", "Vegetative");
-    case "impfstatus":
-      return caseText("Impfstatus", "Вакцинация", "Vaccination");
-    default:
-      return section;
-  }
+  return formatEnumLabelFromKeys(
+    section,
+    CASE_HISTORY_SECTION_LABEL_KEYS,
+    runtimeTranslations(),
+  );
 }
 
 function snippetCategoryLabel(category: string) {
-  switch (category) {
-    case "anamnesis":
-      return caseText("Anamnese", "Анамнез", "Anamnesis");
-    case "cardiology":
-      return caseText("Kardiologie", "Кардиология", "Cardiology");
-    case "general":
-      return caseText("Allgemein", "Общее", "General");
-    case "medication":
-      return caseText("Medikation", "Медикация", "Medication");
-    case "neurology":
-      return caseText("Neurologie", "Неврология", "Neurology");
-    case "oncology":
-      return caseText("Onkologie", "Онкология", "Oncology");
-    case "symptoms":
-      return caseText("Symptome", "Симптомы", "Symptoms");
-    default:
-      return formatUnknownValue(category, runtimeTranslations());
-  }
+  return formatEnumLabelFromKeys(
+    category,
+    CASE_SNIPPET_CATEGORY_LABEL_KEYS,
+    runtimeTranslations(),
+  );
+}
+
+function medicationTypeLabel(type: string | null | undefined) {
+  return formatEnumLabelFromKeys(
+    type,
+    CASE_MEDICATION_TYPE_LABEL_KEYS,
+    runtimeTranslations(),
+  );
+}
+
+function isKnownSnippetCategory(value: string) {
+  return (CASE_SNIPPET_CATEGORY_VALUES as readonly string[]).includes(value);
+}
+
+function isKnownMedicationType(value: string) {
+  return (CASE_MEDICATION_TYPE_VALUES as readonly string[]).includes(value);
 }
 
 function numericInputToValue(value: string) {
@@ -1219,7 +1198,7 @@ export function CasesPage({
     () => [
       {
         id: "case_id",
-        label: caseText("Fall-ID", "ID кейса", "Case ID"),
+        label: t.cases_clinical_case_id,
         accessor: (row) => row.case_id,
         sortable: true,
         required: true,
@@ -1236,7 +1215,7 @@ export function CasesPage({
       },
       {
         id: "patient_pid",
-        label: caseText("Patient-ID", "ID пациента", "Patient ID"),
+        label: t.cases_clinical_patient_id,
         accessor: (row) => row.patient_pid,
         sortable: true,
         width: 180,
@@ -2311,11 +2290,7 @@ export function CasesPage({
                 </Field>
 
                 <Field
-                  label={caseText(
-                    "Bezeichnung des Zuweisers",
-                    "Наименование направившего врача",
-                    "Referrer label",
-                  )}
+                  label={t.cases_clinical_referrer_label}
                 >
                   <Input
                     value={createForm.zuweiser}
@@ -2374,7 +2349,7 @@ export function CasesPage({
             {detailBusy ? (
               <div className="flex min-h-[320px] items-center justify-center text-sm text-muted-foreground">
                 <LoaderCircle className="mr-2 size-4 animate-spin" />
-                Loading case
+                {t.cases_clinical_loading_case}
               </div>
             ) : detailError ? (
               <Banner tone="error">{detailError}</Banner>
@@ -2409,13 +2384,13 @@ export function CasesPage({
                       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                         <div className="rounded-xl border border-border bg-muted/20 px-4 py-3">
                           <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                            {caseText("Referenzcode", "Код ссылки", "Reference code")}
+                            {t.cases_clinical_reference_code}
                           </div>
                           <div className="mt-2 font-mono text-sm text-foreground">{detail.case_id}</div>
                         </div>
                         <div className="rounded-xl border border-border bg-muted/20 px-4 py-3">
                           <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                            {caseText("System-UUID des Falls", "Системный UUID кейса", "System case UUID")}
+                            {t.cases_clinical_system_case_uuid}
                           </div>
                           <div className="mt-2 break-all font-mono text-xs text-foreground">
                             {detail.case_uuid ?? detail.id}
@@ -2423,7 +2398,7 @@ export function CasesPage({
                         </div>
                         <div className="rounded-xl border border-border bg-muted/20 px-4 py-3">
                           <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                            {caseText("Aufbewahrung bis", "Хранить до", "Retention until")}
+                            {t.cases_clinical_retention_until}
                           </div>
                           <div className="mt-2 text-sm text-foreground">
                             {formatDate(detail.retention_until)}
@@ -2431,7 +2406,7 @@ export function CasesPage({
                         </div>
                         <div className="rounded-xl border border-border bg-muted/20 px-4 py-3">
                           <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                            {caseText("Letzte klinische Aktualisierung", "Последнее клиническое обновление", "Last clinical update")}
+                            {t.cases_clinical_last_clinical_update}
                           </div>
                           <div className="mt-2 text-sm text-foreground">
                             {formatDateTime(detail.last_clinical_update_at ?? detail.updated_at)}
@@ -2442,15 +2417,15 @@ export function CasesPage({
                     <div className="flex flex-wrap gap-2">
                       <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={openPatientWorkspace}>
                         <UserRound className="size-4" />
-                        {caseText("Patient", "Пациент", "Patient")}
+                        {t.cases_clinical_patient_fallback}
                       </Button>
                       <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={openOrdersWorkspace}>
                         <ClipboardList className="size-4" />
-                        {caseText("Aufträge", "Заказы", "Orders")}
+                        {t.cases_clinical_orders}
                       </Button>
                       <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={openAppointmentsWorkspace}>
                         <CalendarClock className="size-4" />
-                        {caseText("Termine", "Приёмы", "Appointments")}
+                        {t.cases_clinical_appointments}
                       </Button>
                     </div>
                   </div>
@@ -2461,13 +2436,9 @@ export function CasesPage({
                     <MetricCard label={t.cases_medication} value={detail.medikamente.length.toString()} description={t.cases_subtitle} icon={<ClipboardList className="size-4" />} />
                     <MetricCard label={t.cases_symptoms} value={detail.symptome.length.toString()} description={t.cases_subtitle} icon={<Search className="size-4" />} />
                     <MetricCard
-                      label={caseText("Klinische Revisionen", "Клинические ревизии", "Clinical revisions")}
+                      label={t.cases_clinical_revisions_metric}
                       value={String(detail.version_count ?? detail.history?.length ?? 0)}
-                      description={caseText(
-                        "Append-only-Einträge in der Fallhistorie",
-                        "Записи в истории кейса без перезаписи",
-                        "Append-only case history entries",
-                      )}
+                      description={t.cases_clinical_revisions_metric_hint}
                       icon={<RefreshCw className="size-4" />}
                     />
                   </div>
@@ -2526,7 +2497,7 @@ export function CasesPage({
                             ))}
                           </NativeComboboxSelect>
                       </Field>
-                      <Field label={caseText("Bezeichnung des Zuweisers", "Наименование направившего врача", "Referrer label")}>
+                      <Field label={t.cases_clinical_referrer_label}>
                         <Input
                           value={overviewForm.zuweiser}
                           onChange={(event) =>
@@ -2634,7 +2605,7 @@ export function CasesPage({
                     <div className="flex justify-end border-t border-border/70 pt-4">
                       <Button type="submit" className="h-9 rounded-lg px-3.5" disabled={sectionBusy === "overview" || !permissions.canEdit}>
                         {sectionBusy === "overview" ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                        {caseText("Übersicht speichern", "Сохранить обзор", "Save overview")}
+                        {t.cases_clinical_save_overview}
                       </Button>
                     </div>
                   </form>
@@ -2714,15 +2685,27 @@ export function CasesPage({
                             />
                           </Field>
                           <Field label={t.cases_snippets_category}>
-                            <Input
-                              value={snippetForm.category}
+                            <NativeComboboxSelect
+                              value={snippetForm.category || "general"}
                               onChange={(event) =>
                                 setSnippetForm((current) => ({
                                   ...current,
                                   category: event.target.value,
                                 }))}
-                              className="h-10 rounded-xl bg-white"
-                            />
+                              className={selectClassName}
+                            >
+                              {CASE_SNIPPET_CATEGORY_VALUES.map((category) => (
+                                <option key={category} value={category}>
+                                  {snippetCategoryLabel(category)}
+                                </option>
+                              ))}
+                              {snippetForm.category &&
+                              !isKnownSnippetCategory(snippetForm.category) ? (
+                                <option value={snippetForm.category}>
+                                  {snippetCategoryLabel(snippetForm.category)}
+                                </option>
+                              ) : null}
+                            </NativeComboboxSelect>
                           </Field>
                           <Field label={t.cases_snippets_body} required>
                             <textarea
@@ -2800,7 +2783,7 @@ export function CasesPage({
                       <Field label={t.cases_note}>
                         <textarea value={item.notiz ?? ""} onChange={(event) => setVorerkrankungen((current) => updateItemAtIndex(current, index, { notiz: event.target.value }))} className="mt-2 min-h-[90px] w-full rounded-xl border border-input bg-white px-3 py-2 text-sm outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30" />
                       </Field>
-                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setVorerkrankungen((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button></div>
+                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setVorerkrankungen((current) => removeItemAtIndex(current, index))}>{t.cases_clinical_remove}</Button></div>
                     </div>
                   ))}
                 </ItemEditorSection>
@@ -2812,7 +2795,7 @@ export function CasesPage({
                         <Field label={t.cases_allergies} required><Input value={item.allergie} onChange={(event) => setAllergien((current) => updateItemAtIndex(current, index, { allergie: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_subtitle}><Input value={item.reaktion ?? ""} onChange={(event) => setAllergien((current) => updateItemAtIndex(current, index, { reaktion: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
-                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setAllergien((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button></div>
+                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setAllergien((current) => removeItemAtIndex(current, index))}>{t.cases_clinical_remove}</Button></div>
                     </div>
                   ))}
                 </ItemEditorSection>
@@ -2823,7 +2806,7 @@ export function CasesPage({
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                         <Field label={t.appointments_date}><Input type="date" value={item.datum ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { datum: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_reason} required><Input value={item.grund} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { grund: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={caseText("Arzt aus Register", "Врач из реестра", "Doctor registry")}>
+                        <Field label={t.cases_clinical_doctor_registry}>
                           <NativeComboboxSelect
                             value={item.arzt_id || "__none__"}
 
@@ -2848,10 +2831,10 @@ export function CasesPage({
                               ))}
                             </NativeComboboxSelect>
                         </Field>
-                        <Field label={caseText("Freitext Arzt", "Наименование врача", "Doctor label")}><Input value={item.arzt ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { arzt: event.target.value }))} className="h-10 rounded-xl bg-white" placeholder={caseText("Altbestand / manuelle Angabe", "Устаревшее / ручной ввод", "Legacy / manual fallback")} /></Field>
+                        <Field label={t.cases_clinical_doctor_label}><Input value={item.arzt ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { arzt: event.target.value }))} className="h-10 rounded-xl bg-white" placeholder={t.cases_clinical_legacy_manual_fallback} /></Field>
                         <Field label={t.cases_note}><Input value={item.notiz ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { notiz: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
-                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setOperationen((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button></div>
+                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setOperationen((current) => removeItemAtIndex(current, index))}>{t.cases_clinical_remove}</Button></div>
                     </div>
                   ))}
                 </ItemEditorSection>
@@ -2862,8 +2845,28 @@ export function CasesPage({
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                         <Field label={t.cases_medications} required><Input value={item.handelsname} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { handelsname: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_medications}><Input value={item.wirkstoff ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { wirkstoff: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.documents_category}><Input value={item.med_typ ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { med_typ: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={caseText("Gültig bis", "Действительно до", "Valid until")}>
+                        <Field label={t.documents_category}>
+                          <NativeComboboxSelect
+                            value={item.med_typ || "permanent"}
+                            onChange={(event) =>
+                              setMedikamente((current) =>
+                                updateItemAtIndex(current, index, { med_typ: event.target.value }),
+                              )}
+                            className={selectClassName}
+                          >
+                            {CASE_MEDICATION_TYPE_VALUES.map((type) => (
+                              <option key={type} value={type}>
+                                {medicationTypeLabel(type)}
+                              </option>
+                            ))}
+                            {item.med_typ && !isKnownMedicationType(item.med_typ) ? (
+                              <option value={item.med_typ}>
+                                {medicationTypeLabel(item.med_typ)}
+                              </option>
+                            ) : null}
+                          </NativeComboboxSelect>
+                        </Field>
+                        <Field label={t.cases_clinical_valid_until}>
                           <Input
                             type="date"
                             value={item.expiry_date ?? ""}
@@ -2884,7 +2887,7 @@ export function CasesPage({
                         <Field label={t.cases_medications}><Input value={item.einheit ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { einheit: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.providers_service_valid_from}><Input value={item.seit ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { seit: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_reason}><Input value={item.grund ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { grund: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={caseText("Arzt aus Register", "Врач из реестра", "Doctor registry")}>
+                        <Field label={t.cases_clinical_doctor_registry}>
                           <NativeComboboxSelect
                             value={item.verordnender_arzt_id || "__none__"}
 
@@ -2909,35 +2912,41 @@ export function CasesPage({
                               ))}
                             </NativeComboboxSelect>
                         </Field>
-                        <Field label={caseText("Freitext Arzt", "Наименование врача", "Doctor label")}><Input value={item.verordnender_arzt ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { verordnender_arzt: event.target.value }))} className="h-10 rounded-xl bg-white" placeholder={caseText("Altbestand / manuelle Angabe", "Устаревшее / ручной ввод", "Legacy / manual fallback")} /></Field>
+                        <Field label={t.cases_clinical_doctor_label}><Input value={item.verordnender_arzt ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { verordnender_arzt: event.target.value }))} className="h-10 rounded-xl bg-white" placeholder={t.cases_clinical_legacy_manual_fallback} /></Field>
                         <Field label={t.patients_notes}><Input value={item.anmerkung ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { anmerkung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
                       {item.is_expired ? (
                         <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                           <div className="flex flex-wrap items-center gap-2">
                             <Badge variant="outline" className="rounded-full border-amber-300 bg-white text-amber-700">
-                              Expired
+                              {t.cases_clinical_medication_expired}
                             </Badge>
                             {item.pending_expiry_confirmation ? (
                               <Badge variant="outline" className="rounded-full border-rose-300 bg-white text-rose-700">
-                                Confirmation required
+                                {t.cases_clinical_medication_confirmation_required}
                               </Badge>
                             ) : (
                               <Badge variant="outline" className="rounded-full border-emerald-300 bg-white text-emerald-700">
-                                Review confirmed
+                                {t.cases_clinical_medication_review_confirmed}
                               </Badge>
                             )}
                             <span>
-                              {caseText(
-                                `Die Gültigkeit des Medikaments endete am ${formatDate(item.expiry_date)}.`,
-                                `Срок действия лекарства закончился ${formatDate(item.expiry_date)}.`,
-                                `Medication validity ended on ${formatDate(item.expiry_date)}.`,
+                              {formatCatalogMessage(
+                                t.cases_clinical_medication_validity_ended,
+                                { date: formatDate(item.expiry_date) },
                               )}
                             </span>
                           </div>
                           {item.pending_expiry_notification_sent_at ? (
                             <p className="mt-2 text-xs text-amber-700">
-                              Notification sent {formatDateTime(item.pending_expiry_notification_sent_at)}.
+                              {formatCatalogMessage(
+                                t.cases_clinical_medication_notification_sent,
+                                {
+                                  date: formatDateTime(
+                                    item.pending_expiry_notification_sent_at,
+                                  ),
+                                },
+                              )}
                             </p>
                           ) : null}
                         </div>
@@ -2956,10 +2965,10 @@ export function CasesPage({
                             }}
                             disabled={sectionBusy === "medikamente"}
                           >
-                            Confirm expiry review
+                            {t.cases_clinical_medication_confirm_expiry_review}
                           </Button>
                         ) : null}
-                        <Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setMedikamente((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button>
+                        <Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setMedikamente((current) => removeItemAtIndex(current, index))}>{t.cases_clinical_remove}</Button>
                       </div>
                     </div>
                   ))}
@@ -2982,7 +2991,7 @@ export function CasesPage({
                         <Field label={t.cases_pain}><Input value={item.ausstrahlung ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { ausstrahlung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_pain}><Input value={item.auftreten ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { auftreten: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
-                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setPainRecords((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button></div>
+                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setPainRecords((current) => removeItemAtIndex(current, index))}>{t.cases_clinical_remove}</Button></div>
                     </div>
                   ))}
                 </ItemEditorSection>
@@ -2994,7 +3003,7 @@ export function CasesPage({
                         <Field label={t.patients_notes} required><Input value={item.beschreibung} onChange={(event) => setSymptome((current) => updateItemAtIndex(current, index, { beschreibung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_title}><Input value={item.fachrichtung ?? ""} onChange={(event) => setSymptome((current) => updateItemAtIndex(current, index, { fachrichtung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
-                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setSymptome((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button></div>
+                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setSymptome((current) => removeItemAtIndex(current, index))}>{t.cases_clinical_remove}</Button></div>
                     </div>
                   ))}
                 </ItemEditorSection>

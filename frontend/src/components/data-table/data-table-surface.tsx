@@ -187,31 +187,31 @@ export function DataTableSurface<T>({
           onChange={setFilters}
           translations={{
             addFilter: labels.table_filter,
-            clearAll: labels.table_sort_clear ?? labels.common_clear,
-            searchPlaceholder: labels.table_filter_search_fields ?? labels.common_search,
+            clearAll: labels.table_sort_clear,
+            searchPlaceholder: labels.table_filter_search_fields,
             noFields: labels.table_filter_no_fields,
-            remove: labels.table_filter_remove ?? labels.common_remove,
-            valuePlaceholder: labels.table_filter_value ?? labels.common_value,
+            remove: labels.table_filter_remove,
+            valuePlaceholder: labels.table_filter_value,
+            daysSuffix: labels.table_filter_days_suffix,
             yes: labels.common_yes,
             no: labels.common_no,
             operatorLabels: {
-              contains: labels.filter_op_contains ?? "contains",
-              does_not_contain:
-                labels.filter_op_does_not_contain ?? "does not contain",
-              is_empty: labels.filter_op_is_empty ?? "is empty",
-              is_not_empty: labels.filter_op_is_not_empty ?? "is not empty",
-              is: labels.filter_op_is ?? "is",
-              is_not: labels.filter_op_is_not ?? "is not",
-              is_any_of: labels.filter_op_is_any_of ?? "is any of",
-              is_none_of: labels.filter_op_is_none_of ?? "is none of",
-              has_any: labels.filter_op_has_any ?? "has any of",
-              has_all: labels.filter_op_has_all ?? "has all of",
-              has_none: labels.filter_op_has_none ?? "has none of",
-              before: labels.filter_op_before ?? "before",
-              after: labels.filter_op_after ?? "after",
-              between: labels.filter_op_between ?? "between",
-              last_n_days: labels.filter_op_last_n_days ?? "last N days",
-              equals: labels.filter_op_equals ?? "equals",
+              contains: labels.filter_op_contains,
+              does_not_contain: labels.filter_op_does_not_contain,
+              is_empty: labels.filter_op_is_empty,
+              is_not_empty: labels.filter_op_is_not_empty,
+              is: labels.filter_op_is,
+              is_not: labels.filter_op_is_not,
+              is_any_of: labels.filter_op_is_any_of,
+              is_none_of: labels.filter_op_is_none_of,
+              has_any: labels.filter_op_has_any,
+              has_all: labels.filter_op_has_all,
+              has_none: labels.filter_op_has_none,
+              before: labels.filter_op_before,
+              after: labels.filter_op_after,
+              between: labels.filter_op_between,
+              last_n_days: labels.filter_op_last_n_days,
+              equals: labels.filter_op_equals,
             },
           }}
         />
@@ -221,13 +221,13 @@ export function DataTableSurface<T>({
           onChange={setSortStack}
           translations={{
             addSort: labels.table_sort_add,
-            clearAll: labels.table_sort_clear ?? labels.common_clear,
+            clearAll: labels.table_sort_clear,
             ascending: labels.table_sort_ascending,
             descending: labels.table_sort_descending,
-            emptyHint: labels.common_sort ?? "Sort",
+            emptyHint: labels.common_sort,
             moveUp: labels.table_sort_move_up,
             moveDown: labels.table_sort_move_down,
-            remove: labels.table_sort_remove ?? labels.common_remove,
+            remove: labels.table_sort_remove,
           }}
         />
         <div className="flex items-center gap-1">
@@ -287,8 +287,7 @@ export function DataTableSurface<T>({
         density={density}
         footer={footerNode}
         rowActionsLabel={
-          rowActionsLabel ??
-          labels.table_actions ?? labels.common_actions ?? labels.users_actions
+          rowActionsLabel ?? labels.table_actions
         }
         rowActionsWidth={rowActionsWidth}
         className={cn("rounded-none border-0 shadow-none", tableClassName)}

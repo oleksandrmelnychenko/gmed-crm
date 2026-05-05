@@ -34,8 +34,9 @@ import {
 } from "@/pages/appointments/model/runtime-formatters";
 import { blankExternalHandoffForm } from "@/pages/appointments/model/form-factories";
 import {
-  appointmentText,
+  appointmentText as appointmentTextBase,
   communicationChannelLabel,
+  communicationDirectionLabel,
   communicationStatusLabel,
   communicationTargetLabel,
   roleLabel,
@@ -108,6 +109,16 @@ function AppointmentExternalHandoffSection({
 }: AppointmentExternalHandoffSectionProps) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
+  const appointmentText = (de: string, ru: string, en: string) => {
+    switch (en) {
+      case "Open internal chat draft":
+        return t.appointments_external_handoff_open_chat;
+      case "Log communication":
+        return t.appointments_external_handoff_log;
+      default:
+        return appointmentTextBase(de, ru, en);
+    }
+  };
   const { staffGo } = useStaffNavigate();
 
   const assigneeIndex = useMemo(
@@ -153,7 +164,7 @@ function AppointmentExternalHandoffSection({
     const targetLabel = communicationTargetLabel(form.target, detail);
     const draftParts = [
       `External handoff: ${detail.patient_pid} · ${detail.title}`,
-      `Target: ${targetLabel} · ${form.direction} via ${communicationChannelLabel(form.channel)}`,
+      `${t.patients_assign_owner}: ${targetLabel} · ${communicationDirectionLabel(form.direction)} ${t.appointments_common_via} ${communicationChannelLabel(form.channel)}`,
       `Slot: ${slotLabel(detail)}`,
       form.contactName.trim() ? `Contact: ${form.contactName.trim()}` : "",
       form.notes.trim() || "",
@@ -175,8 +186,8 @@ function AppointmentExternalHandoffSection({
     const targetLabel = communicationTargetLabel(form.target, detail);
     const handoffTitle = `${EXTERNAL_HANDOFF_PREFIX} ${form.title.trim()}`;
     const descriptionParts = [
-      `Target: ${form.target} · ${targetLabel}`,
-      `Direction: ${form.direction} via ${communicationChannelLabel(form.channel)}`,
+      `${t.patients_assign_owner}: ${targetLabel}`,
+      `${tr.documents_source}: ${communicationDirectionLabel(form.direction)} ${t.appointments_common_via} ${communicationChannelLabel(form.channel)}`,
       `Appointment: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}`,
       form.contactName.trim() ? `Contact: ${form.contactName.trim()}` : "",
       form.notes.trim() || "",
@@ -273,12 +284,14 @@ function AppointmentExternalHandoffSection({
     <section className={sectionCardClass}>
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <AppointmentSectionHeading
-          title="Clinic and doctor handoff trail"
-          description="External communication log for clinics, doctors and service providers, plus linked internal follow-up."
+          title={t.appointments_external_handoff_title}
+          description={t.appointments_external_handoff_description}
         />
         <span className={appointmentMetaPillClassName}>
-          {communications.length} communication
-          {communications.length === 1 ? "" : "s"}
+          {communications.length}{" "}
+          {communications.length === 1
+            ? t.appointments_common_communication
+            : t.appointments_common_communications}
         </span>
       </div>
       <div className="mt-4 grid gap-4 xl:grid-cols-2">
@@ -300,12 +313,13 @@ function AppointmentExternalHandoffSection({
                         {item.subject}
                       </p>
                       <p className="mt-1 text-xs text-slate-500">
-                        {item.created_by_name} · {item.direction} via{" "}
+                        {item.created_by_name} · {communicationDirectionLabel(item.direction)}{" "}
+                        {t.appointments_common_via}{" "}
                         {communicationChannelLabel(item.channel)} ·{" "}
                         {communicationTargetLabel(item.target_type, detail)}
                         {item.contact_name ? ` · ${item.contact_name}` : ""}
                         {item.due_at
-                          ? ` · due ${formatDateTimeLabel(item.due_at)}`
+                          ? ` · ${t.appointments_common_due} ${formatDateTimeLabel(item.due_at)}`
                           : ""}
                       </p>
                     </div>
@@ -345,7 +359,7 @@ function AppointmentExternalHandoffSection({
                           {actionBusy === `communication:${item.id}:answered` ? (
                             <LoaderCircle className="size-4 animate-spin" />
                           ) : null}
-                          Mark answered
+                          {t.appointments_external_handoff_mark_answered}
                         </Button>
                       ) : null}
                       {item.status !== "closed" && item.status !== "cancelled" ? (
@@ -361,7 +375,7 @@ function AppointmentExternalHandoffSection({
                           {actionBusy === `communication:${item.id}:closed` ? (
                             <LoaderCircle className="size-4 animate-spin" />
                           ) : null}
-                          Close
+                          {t.appointments_external_handoff_close}
                         </Button>
                       ) : null}
                       {item.status !== "cancelled" ? (
@@ -382,7 +396,7 @@ function AppointmentExternalHandoffSection({
                           {actionBusy === `communication:${item.id}:cancelled` ? (
                             <LoaderCircle className="size-4 animate-spin" />
                           ) : null}
-                          Cancel
+                          {t.appointments_external_handoff_cancel}
                         </Button>
                       ) : null}
                     </div>
@@ -392,7 +406,7 @@ function AppointmentExternalHandoffSection({
               {canViewReminders && (reminders.length > 0 || tasks.length > 0) ? (
                 <div className="rounded-2xl border border-dashed border-slate-200 bg-white/70 p-4">
                   <AppointmentDotLabel>
-                    Internal follow-up trail
+                    {t.appointments_external_handoff_internal_trail}
                   </AppointmentDotLabel>
                   <div className="mt-3 space-y-3">
                     {reminders.map((item) => (
@@ -464,13 +478,13 @@ function AppointmentExternalHandoffSection({
                   className={selectClassName}
                 >
                   <option value="clinic" disabled={!detail.provider_id}>
-                    Clinic
+                    {communicationTargetLabel("clinic", detail)}
                   </option>
                   <option value="service_provider" disabled={!detail.provider_id}>
-                    Service provider
+                    {communicationTargetLabel("service_provider", detail)}
                   </option>
                   <option value="doctor" disabled={!detail.doctor_id}>
-                    Doctor
+                    {communicationTargetLabel("doctor", detail)}
                   </option>
                 </NativeComboboxSelect>
               </Field>
@@ -506,8 +520,8 @@ function AppointmentExternalHandoffSection({
                   }
                   className={selectClassName}
                 >
-                  <option value="outbound">{tr.common_active}</option>
-                  <option value="inbound">{tr.common_active}</option>
+                  <option value="outbound">{communicationDirectionLabel("outbound")}</option>
+                  <option value="inbound">{communicationDirectionLabel("inbound")}</option>
                 </NativeComboboxSelect>
               </Field>
               <Field label={t.users_status}>
@@ -623,8 +637,7 @@ function AppointmentExternalHandoffSection({
                   className={cn(checkboxClass, "mt-0.5")}
                 />
                 <span>
-                  Mirror this communication as an internal task when assignee
-                  and due date are set.
+                  {t.appointments_external_handoff_mirror_task}
                 </span>
               </label>
               <Field label={tr.appointments_title_col}>

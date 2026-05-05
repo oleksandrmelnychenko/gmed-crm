@@ -40,11 +40,7 @@ export function OrderWorkspaceNav() {
   }
 
   const backHref = patientContext ? `/patients/${patientContext}?tab=orders` : "/orders";
-  const backLabel = patientContext
-    ? lang === "de"
-      ? "Patient"
-      : "Пациент"
-    : t.orders_title;
+  const backLabel = patientContext ? t.patients_col_patient : t.orders_title;
 
   const groupedSections = GROUP_ORDER.map((group) => ({
     group,

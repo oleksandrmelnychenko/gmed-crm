@@ -19,7 +19,12 @@ import {
 } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { formatEnumLabel, formatUnknownValue, useLang } from "@/lib/i18n";
+import {
+  formatEnumLabelFromKeys,
+  formatUnknownValue,
+  useLang,
+  type TranslationKey,
+} from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 type TaxProfile = {
@@ -155,6 +160,14 @@ const BLANK_PACKAGE_FORM: ServicePackageForm = {
   items: [{ ...BLANK_PACKAGE_ITEM_FORM }],
 };
 
+function createBlankPackageItem(unitLabel: string): ServicePackageItemForm {
+  return { ...BLANK_PACKAGE_ITEM_FORM, unitLabel };
+}
+
+function createBlankPackageForm(unitLabel: string): ServicePackageForm {
+  return { ...BLANK_PACKAGE_FORM, items: [createBlankPackageItem(unitLabel)] };
+}
+
 const VAT_CATEGORIES = [
   "standard",
   "zero_rated",
@@ -162,6 +175,21 @@ const VAT_CATEGORIES = [
   "reverse_charge",
   "custom",
 ];
+
+const VAT_CATEGORY_LABEL_KEYS = {
+  standard: "finance_catalog_vat_category_standard",
+  zero_rated: "finance_catalog_vat_category_zero_rated",
+  exempt: "finance_catalog_vat_category_exempt",
+  reverse_charge: "finance_catalog_vat_category_reverse_charge",
+  custom: "finance_catalog_vat_category_custom",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const VAT_SOURCE_LABEL_KEYS = {
+  catalog: "finance_catalog_vat_source_catalog",
+  tax_profile: "finance_catalog_vat_source_tax_profile",
+  manual: "finance_catalog_vat_source_manual",
+  legacy: "finance_catalog_vat_source_legacy",
+} satisfies Partial<Record<string, TranslationKey>>;
 
 function numberValue(value: string | null | undefined) {
   const numeric = Number(value);
@@ -233,35 +261,11 @@ function decimalInputIsValid(value: string) {
 
 export function FinanceCatalogPage() {
   const { user } = useAuth();
-  const { lang, t } = useLang();
-  const l = useCallback(
-    (de: string, ru: string, en: string) =>
-      lang === "de" ? de : lang === "ru" ? ru : en,
-    [lang],
-  );
-  const vatCategoryLabels = useMemo(
-    () => ({
-      standard: l("Standard", "Стандартная", "Standard"),
-      zero_rated: l("Nullsatz", "Нулевая ставка", "Zero-rated"),
-      exempt: l("Befreit", "Освобождено", "Exempt"),
-      reverse_charge: l("Reverse Charge", "Reverse charge", "Reverse charge"),
-      custom: l("Individuell", "Индивидуальная", "Custom"),
-    }),
-    [l],
-  );
-  const vatSourceLabels = useMemo(
-    () => ({
-      catalog: l("Leistungskatalog", "Каталог услуг", "Service catalog"),
-      tax_profile: l("Steuerprofil", "Налоговый профиль", "Tax profile"),
-      manual: l("Manuell", "Вручную", "Manual"),
-      legacy: l("Altdaten", "Исторические данные", "Legacy"),
-    }),
-    [l],
-  );
+  const { t } = useLang();
   const vatCategoryLabel = (value: string | null | undefined) =>
-    formatEnumLabel(value, vatCategoryLabels, t);
+    formatEnumLabelFromKeys(value, VAT_CATEGORY_LABEL_KEYS, t);
   const vatSourceLabel = (value: string | null | undefined) =>
-    formatEnumLabel(value, vatSourceLabels, t);
+    formatEnumLabelFromKeys(value, VAT_SOURCE_LABEL_KEYS, t);
   const taxProfileLabel = (
     name: string | null | undefined,
     key: string | null | undefined,
@@ -271,6 +275,18 @@ export function FinanceCatalogPage() {
     if (key?.trim()) return formatUnknownValue(key, t);
     return t.common_not_set;
   };
+  const totalCountLabel = (count: number) =>
+    t.finance_catalog_total_count.replace("{count}", String(count));
+  const moreItemsLabel = (count: number) =>
+    t.finance_catalog_more_items.replace("{count}", String(count));
+  const blankPackageItem = useCallback(
+    () => createBlankPackageItem(t.finance_catalog_unit_default),
+    [t.finance_catalog_unit_default],
+  );
+  const blankPackageForm = useCallback(
+    () => createBlankPackageForm(t.finance_catalog_unit_default),
+    [t.finance_catalog_unit_default],
+  );
   const canManageTaxProfiles = user?.role === "ceo" || user?.role === "billing";
 
   const [taxProfiles, setTaxProfiles] = useState<TaxProfile[]>([]);
@@ -289,7 +305,9 @@ export function FinanceCatalogPage() {
   const [packageFormOpen, setPackageFormOpen] = useState(false);
   const [packageBusy, setPackageBusy] = useState(false);
   const [packageError, setPackageError] = useState("");
-  const [packageForm, setPackageForm] = useState<ServicePackageForm>(BLANK_PACKAGE_FORM);
+  const [packageForm, setPackageForm] = useState<ServicePackageForm>(() =>
+    createBlankPackageForm(t.finance_catalog_unit_default),
+  );
 
   const activeTaxProfiles = useMemo(
     () => taxProfiles.filter((item) => item.is_active).length,
@@ -301,7 +319,7 @@ export function FinanceCatalogPage() {
   );
   const defaultTaxProfile = taxProfiles.find((item) => item.is_default);
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
@@ -314,15 +332,15 @@ export function FinanceCatalogPage() {
       setCatalogRows(catalogResult);
       setServicePackages(packageResult);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load finance catalog");
+      setError(err instanceof Error ? err.message : t.finance_catalog_error_load);
     } finally {
       setLoading(false);
     }
-  }
+  }, [t.finance_catalog_error_load]);
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
 
   async function handleCreateTaxProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -330,11 +348,11 @@ export function FinanceCatalogPage() {
 
     const vatRate = Number(form.vatRate.replace(",", "."));
     if (!form.profileKey.trim() || !form.name.trim()) {
-      setCreateError("Profile key and name are required.");
+      setCreateError(t.finance_catalog_error_profile_required);
       return;
     }
     if (!Number.isFinite(vatRate) || vatRate < 0) {
-      setCreateError("VAT rate must be a non-negative number.");
+      setCreateError(t.finance_catalog_error_vat_rate);
       return;
     }
 
@@ -359,7 +377,9 @@ export function FinanceCatalogPage() {
       setCreateOpen(false);
       await load();
     } catch (err) {
-      setCreateError(err instanceof Error ? err.message : "Failed to create tax profile");
+      setCreateError(
+        err instanceof Error ? err.message : t.finance_catalog_error_create_tax_profile,
+      );
     } finally {
       setCreateBusy(false);
     }
@@ -372,11 +392,11 @@ export function FinanceCatalogPage() {
 
     const vatRate = Number(taxEditForm.vatRate.replace(",", "."));
     if (!taxEditForm.profileKey.trim() || !taxEditForm.name.trim()) {
-      setTaxEditError("Profile key and name are required.");
+      setTaxEditError(t.finance_catalog_error_profile_required);
       return;
     }
     if (!Number.isFinite(vatRate) || vatRate < 0) {
-      setTaxEditError("VAT rate must be a non-negative number.");
+      setTaxEditError(t.finance_catalog_error_vat_rate);
       return;
     }
 
@@ -401,14 +421,16 @@ export function FinanceCatalogPage() {
       setTaxEditForm(BLANK_TAX_PROFILE_FORM);
       await load();
     } catch (err) {
-      setTaxEditError(err instanceof Error ? err.message : "Failed to update tax profile");
+      setTaxEditError(
+        err instanceof Error ? err.message : t.finance_catalog_error_update_tax_profile,
+      );
     } finally {
       setTaxEditBusy(false);
     }
   }
 
   function openCreatePackage() {
-    setPackageForm(BLANK_PACKAGE_FORM);
+    setPackageForm(blankPackageForm());
     setPackageError("");
     setPackageFormOpen(true);
   }
@@ -433,7 +455,7 @@ export function FinanceCatalogPage() {
       ...current,
       items:
         current.items.length <= 1
-          ? [{ ...BLANK_PACKAGE_ITEM_FORM }]
+          ? [blankPackageItem()]
           : current.items.filter((_, itemIndex) => itemIndex !== index),
     }));
   }
@@ -443,15 +465,15 @@ export function FinanceCatalogPage() {
     setPackageError("");
 
     if (!packageForm.packageKey.trim() || !packageForm.name.trim()) {
-      setPackageError("Package key and name are required.");
+      setPackageError(t.finance_catalog_error_package_required);
       return;
     }
     if (packageForm.items.some((item) => !item.description.trim())) {
-      setPackageError("Every package item needs a description.");
+      setPackageError(t.finance_catalog_error_package_item_description);
       return;
     }
     if (!decimalInputIsValid(packageForm.basePriceNet)) {
-      setPackageError("Base price must be numeric.");
+      setPackageError(t.finance_catalog_error_base_price_numeric);
       return;
     }
     if (
@@ -464,7 +486,7 @@ export function FinanceCatalogPage() {
           ),
       )
     ) {
-      setPackageError("Package item quantities and overage prices must be numeric.");
+      setPackageError(t.finance_catalog_error_item_numbers);
       return;
     }
 
@@ -484,7 +506,7 @@ export function FinanceCatalogPage() {
           description: item.description.trim(),
           service_key: item.serviceKey.trim() || null,
           included_quantity: decimalPayload(item.includedQuantity, 1),
-          unit_label: item.unitLabel.trim() || "unit",
+          unit_label: item.unitLabel.trim() || t.finance_catalog_unit_default,
           overage_unit_price_net: item.overageUnitPriceNet.trim()
             ? decimalPayload(item.overageUnitPriceNet)
             : null,
@@ -501,11 +523,13 @@ export function FinanceCatalogPage() {
         },
       );
       clearApiCache("/service-packages");
-      setPackageForm(BLANK_PACKAGE_FORM);
+      setPackageForm(blankPackageForm());
       setPackageFormOpen(false);
       await load();
     } catch (err) {
-      setPackageError(err instanceof Error ? err.message : "Failed to save service package");
+      setPackageError(
+        err instanceof Error ? err.message : t.finance_catalog_error_save_package,
+      );
     } finally {
       setPackageBusy(false);
     }
@@ -514,12 +538,8 @@ export function FinanceCatalogPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title={l("Finance catalog", "Finance catalog", "Finance catalog")}
-        description={l(
-          "VAT profiles, service package catalog and agency-service VAT mapping. Uses the existing staff UI shell.",
-          "VAT profiles, service package catalog and agency-service VAT mapping. Uses the existing staff UI shell.",
-          "VAT profiles, service package catalog and agency-service VAT mapping. Uses the existing staff UI shell.",
-        )}
+        title={t.finance_catalog_title}
+        description={t.finance_catalog_description}
         actions={
           <Button
             type="button"
@@ -533,7 +553,7 @@ export function FinanceCatalogPage() {
             ) : (
               <RefreshCw className="size-4" />
             )}
-            {l("Refresh", "Refresh", "Refresh")}
+            {t.finance_catalog_refresh}
           </Button>
         }
       />
@@ -546,29 +566,29 @@ export function FinanceCatalogPage() {
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <StatCard
-          label={l("Active tax profiles", "Active tax profiles", "Active tax profiles")}
+          label={t.finance_catalog_active_tax_profiles}
           value={activeTaxProfiles}
-          description={`${taxProfiles.length} total`}
+          description={totalCountLabel(taxProfiles.length)}
         />
         <StatCard
-          label={l("Default VAT", "Default VAT", "Default VAT")}
-          value={defaultTaxProfile ? `${defaultTaxProfile.vat_rate}%` : "Not set"}
-          description={defaultTaxProfile?.name ?? "No default profile"}
+          label={t.finance_catalog_default_vat}
+          value={defaultTaxProfile ? `${defaultTaxProfile.vat_rate}%` : t.common_not_set}
+          description={defaultTaxProfile?.name ?? t.finance_catalog_no_default_profile}
         />
         <StatCard
-          label={l("Active packages", "Active packages", "Active packages")}
+          label={t.finance_catalog_active_packages}
           value={activePackages}
-          description={`${servicePackages.length} total`}
+          description={totalCountLabel(servicePackages.length)}
         />
         <StatCard
-          label={l("Catalog services", "Catalog services", "Catalog services")}
+          label={t.finance_catalog_catalog_services}
           value={catalogRows.length}
-          description={l("VAT mapping rows", "VAT mapping rows", "VAT mapping rows")}
+          description={t.finance_catalog_vat_mapping_rows}
         />
       </div>
 
       <Section
-        title={l("Tax profiles", "Tax profiles", "Tax profiles")}
+        title={t.finance_catalog_tax_profiles}
         accessory={
           <div className="flex items-center gap-2">
             <CountBadge>{taxProfiles.length}</CountBadge>
@@ -581,7 +601,7 @@ export function FinanceCatalogPage() {
                 onClick={() => setCreateOpen((current) => !current)}
               >
                 <Plus className="size-4" />
-                {l("New tax profile", "New tax profile", "New tax profile")}
+                {t.finance_catalog_new_tax_profile}
               </Button>
             ) : null}
           </div>
@@ -598,7 +618,7 @@ export function FinanceCatalogPage() {
               </div>
             ) : null}
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <Field label="Profile key" htmlFor="tax-profile-key">
+              <Field label={t.finance_catalog_profile_key} htmlFor="tax-profile-key">
                 <Input
                   id="tax-profile-key"
                   value={form.profileKey}
@@ -613,7 +633,7 @@ export function FinanceCatalogPage() {
                   disabled={createBusy}
                 />
               </Field>
-              <Field label="Name" htmlFor="tax-profile-name">
+              <Field label={t.finance_catalog_name} htmlFor="tax-profile-name">
                 <Input
                   id="tax-profile-name"
                   value={form.name}
@@ -624,7 +644,7 @@ export function FinanceCatalogPage() {
                   disabled={createBusy}
                 />
               </Field>
-              <Field label="VAT rate" htmlFor="tax-profile-vat">
+              <Field label={t.finance_catalog_vat_rate} htmlFor="tax-profile-vat">
                 <Input
                   id="tax-profile-vat"
                   value={form.vatRate}
@@ -638,7 +658,7 @@ export function FinanceCatalogPage() {
                   disabled={createBusy}
                 />
               </Field>
-              <Field label="VAT category" htmlFor="tax-profile-category">
+              <Field label={t.finance_catalog_vat_category} htmlFor="tax-profile-category">
                 <NativeComboboxSelect
                   id="tax-profile-category"
                   value={form.vatCategory}
@@ -659,7 +679,7 @@ export function FinanceCatalogPage() {
                 </NativeComboboxSelect>
               </Field>
             </div>
-            <Field label="Description" htmlFor="tax-profile-description" className="mt-3">
+            <Field label={t.finance_catalog_description_label} htmlFor="tax-profile-description" className="mt-3">
               <textarea
                 id="tax-profile-description"
                 value={form.description}
@@ -675,7 +695,7 @@ export function FinanceCatalogPage() {
               />
             </Field>
             <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <Field label="Valid from" htmlFor="tax-profile-valid-from">
+              <Field label={t.finance_catalog_valid_from} htmlFor="tax-profile-valid-from">
                 <Input
                   id="tax-profile-valid-from"
                   type="date"
@@ -687,7 +707,7 @@ export function FinanceCatalogPage() {
                   disabled={createBusy}
                 />
               </Field>
-              <Field label="Valid to" htmlFor="tax-profile-valid-to">
+              <Field label={t.finance_catalog_valid_to} htmlFor="tax-profile-valid-to">
                 <Input
                   id="tax-profile-valid-to"
                   type="date"
@@ -711,7 +731,7 @@ export function FinanceCatalogPage() {
                   }
                   disabled={createBusy}
                 />
-                Default profile
+                {t.finance_catalog_default_profile}
               </label>
               <label className="flex items-center gap-2 text-sm text-muted-foreground">
                 <input
@@ -725,7 +745,7 @@ export function FinanceCatalogPage() {
                   }
                   disabled={createBusy}
                 />
-                Active
+                {t.finance_catalog_active}
               </label>
             </div>
             <div className="mt-3 flex justify-end gap-2">
@@ -736,11 +756,11 @@ export function FinanceCatalogPage() {
                 onClick={() => setCreateOpen(false)}
                 disabled={createBusy}
               >
-                Cancel
+                {t.common_cancel}
               </Button>
               <Button type="submit" className="h-9 rounded-lg" disabled={createBusy}>
                 {createBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                Create
+                {t.finance_catalog_create}
               </Button>
             </div>
           </form>
@@ -757,7 +777,7 @@ export function FinanceCatalogPage() {
               </div>
             ) : null}
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <Field label="Profile key" htmlFor="tax-edit-profile-key">
+              <Field label={t.finance_catalog_profile_key} htmlFor="tax-edit-profile-key">
                 <Input
                   id="tax-edit-profile-key"
                   value={taxEditForm.profileKey}
@@ -771,7 +791,7 @@ export function FinanceCatalogPage() {
                   disabled={taxEditBusy}
                 />
               </Field>
-              <Field label="Name" htmlFor="tax-edit-profile-name">
+              <Field label={t.finance_catalog_name} htmlFor="tax-edit-profile-name">
                 <Input
                   id="tax-edit-profile-name"
                   value={taxEditForm.name}
@@ -782,7 +802,7 @@ export function FinanceCatalogPage() {
                   disabled={taxEditBusy}
                 />
               </Field>
-              <Field label="VAT rate" htmlFor="tax-edit-profile-vat">
+              <Field label={t.finance_catalog_vat_rate} htmlFor="tax-edit-profile-vat">
                 <Input
                   id="tax-edit-profile-vat"
                   value={taxEditForm.vatRate}
@@ -796,7 +816,7 @@ export function FinanceCatalogPage() {
                   disabled={taxEditBusy}
                 />
               </Field>
-              <Field label="VAT category" htmlFor="tax-edit-profile-category">
+              <Field label={t.finance_catalog_vat_category} htmlFor="tax-edit-profile-category">
                 <NativeComboboxSelect
                   id="tax-edit-profile-category"
                   value={taxEditForm.vatCategory}
@@ -816,7 +836,7 @@ export function FinanceCatalogPage() {
                   ))}
                 </NativeComboboxSelect>
               </Field>
-              <Field label="Valid from" htmlFor="tax-edit-valid-from">
+              <Field label={t.finance_catalog_valid_from} htmlFor="tax-edit-valid-from">
                 <Input
                   id="tax-edit-valid-from"
                   type="date"
@@ -828,7 +848,7 @@ export function FinanceCatalogPage() {
                   disabled={taxEditBusy}
                 />
               </Field>
-              <Field label="Valid to" htmlFor="tax-edit-valid-to">
+              <Field label={t.finance_catalog_valid_to} htmlFor="tax-edit-valid-to">
                 <Input
                   id="tax-edit-valid-to"
                   type="date"
@@ -852,7 +872,7 @@ export function FinanceCatalogPage() {
                   }
                   disabled={taxEditBusy}
                 />
-                Default profile
+                {t.finance_catalog_default_profile}
               </label>
               <label className="flex items-center gap-2 text-sm text-muted-foreground">
                 <input
@@ -866,10 +886,10 @@ export function FinanceCatalogPage() {
                   }
                   disabled={taxEditBusy}
                 />
-                Active
+                {t.finance_catalog_active}
               </label>
             </div>
-            <Field label="Description" htmlFor="tax-edit-profile-description" className="mt-3">
+            <Field label={t.finance_catalog_description_label} htmlFor="tax-edit-profile-description" className="mt-3">
               <textarea
                 id="tax-edit-profile-description"
                 value={taxEditForm.description}
@@ -892,11 +912,11 @@ export function FinanceCatalogPage() {
                 onClick={() => setEditingTaxProfileId("")}
                 disabled={taxEditBusy}
               >
-                Cancel
+                {t.common_cancel}
               </Button>
               <Button type="submit" className="h-9 rounded-lg" disabled={taxEditBusy}>
                 {taxEditBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                Save VAT profile
+                {t.finance_catalog_save_vat_profile}
               </Button>
             </div>
           </form>
@@ -904,10 +924,10 @@ export function FinanceCatalogPage() {
 
         {loading ? (
           <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-8 text-center text-sm text-muted-foreground">
-            Loading tax profiles...
+            {t.finance_catalog_loading_tax_profiles}
           </div>
         ) : taxProfiles.length === 0 ? (
-          <EmptyCell>No tax profiles configured yet.</EmptyCell>
+          <EmptyCell>{t.finance_catalog_empty_tax_profiles}</EmptyCell>
         ) : (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {taxProfiles.map((profile) => (
@@ -927,7 +947,7 @@ export function FinanceCatalogPage() {
                   <div className="flex flex-wrap gap-1.5">
                     {profile.is_default ? (
                       <Badge variant="outline" className="rounded-full">
-                        default
+                        {t.finance_catalog_default_badge}
                       </Badge>
                     ) : null}
                     <Badge
@@ -954,7 +974,7 @@ export function FinanceCatalogPage() {
                         }}
                       >
                         <Pencil className="size-3.5" />
-                        Edit
+                        {t.finance_catalog_edit}
                       </Button>
                     ) : null}
                   </div>
@@ -973,7 +993,7 @@ export function FinanceCatalogPage() {
       </Section>
 
       <Section
-        title={l("Service package catalog", "Service package catalog", "Service package catalog")}
+        title={t.finance_catalog_service_package_catalog}
         accessory={
           <div className="flex items-center gap-2">
             <CountBadge>{servicePackages.length}</CountBadge>
@@ -986,7 +1006,7 @@ export function FinanceCatalogPage() {
                 onClick={openCreatePackage}
               >
                 <Plus className="size-4" />
-                New package
+                {t.finance_catalog_new_package}
               </Button>
             ) : null}
           </div>
@@ -1003,7 +1023,7 @@ export function FinanceCatalogPage() {
               </div>
             ) : null}
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <Field label="Package key" htmlFor="package-key">
+              <Field label={t.finance_catalog_package_key} htmlFor="package-key">
                 <Input
                   id="package-key"
                   value={packageForm.packageKey}
@@ -1018,7 +1038,7 @@ export function FinanceCatalogPage() {
                   placeholder="premium_care"
                 />
               </Field>
-              <Field label="Name" htmlFor="package-name">
+              <Field label={t.finance_catalog_name} htmlFor="package-name">
                 <Input
                   id="package-name"
                   value={packageForm.name}
@@ -1029,7 +1049,7 @@ export function FinanceCatalogPage() {
                   disabled={packageBusy}
                 />
               </Field>
-              <Field label="Base net price" htmlFor="package-base-price">
+              <Field label={t.finance_catalog_base_net_price} htmlFor="package-base-price">
                 <Input
                   id="package-base-price"
                   value={packageForm.basePriceNet}
@@ -1043,7 +1063,7 @@ export function FinanceCatalogPage() {
                   disabled={packageBusy}
                 />
               </Field>
-              <Field label="Package VAT profile" htmlFor="package-tax-profile">
+              <Field label={t.finance_catalog_package_vat_profile} htmlFor="package-tax-profile">
                 <NativeComboboxSelect
                   id="package-tax-profile"
                   value={packageForm.taxProfileId || "__none__"}
@@ -1057,9 +1077,7 @@ export function FinanceCatalogPage() {
                   className={selectClass}
                   disabled={packageBusy}
                 >
-                  <option value="__none__">
-                    {l("Kein Steuerprofil", "Нет налогового профиля", "No VAT profile")}
-                  </option>
+                  <option value="__none__">{t.finance_catalog_no_vat_profile}</option>
                   {taxProfiles.map((profile) => (
                     <option key={profile.id} value={profile.id}>
                       {profile.name} ({profile.vat_rate}%)
@@ -1067,7 +1085,7 @@ export function FinanceCatalogPage() {
                   ))}
                 </NativeComboboxSelect>
               </Field>
-              <Field label="Currency" htmlFor="package-currency">
+              <Field label={t.finance_catalog_currency} htmlFor="package-currency">
                 <Input
                   id="package-currency"
                   value={packageForm.currency}
@@ -1081,7 +1099,7 @@ export function FinanceCatalogPage() {
                   disabled={packageBusy}
                 />
               </Field>
-              <Field label="Valid from" htmlFor="package-valid-from">
+              <Field label={t.finance_catalog_valid_from} htmlFor="package-valid-from">
                 <Input
                   id="package-valid-from"
                   type="date"
@@ -1096,7 +1114,7 @@ export function FinanceCatalogPage() {
                   disabled={packageBusy}
                 />
               </Field>
-              <Field label="Valid to" htmlFor="package-valid-to">
+              <Field label={t.finance_catalog_valid_to} htmlFor="package-valid-to">
                 <Input
                   id="package-valid-to"
                   type="date"
@@ -1123,10 +1141,10 @@ export function FinanceCatalogPage() {
                   }
                   disabled={packageBusy}
                 />
-                Active
+                {t.finance_catalog_active}
               </label>
             </div>
-            <Field label="Description" htmlFor="package-description" className="mt-3">
+            <Field label={t.finance_catalog_description_label} htmlFor="package-description" className="mt-3">
               <textarea
                 id="package-description"
                 value={packageForm.description}
@@ -1145,9 +1163,11 @@ export function FinanceCatalogPage() {
             <div className="mt-4 space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold text-foreground">Included items</p>
+                  <p className="text-sm font-semibold text-foreground">
+                    {t.finance_catalog_included_items}
+                  </p>
                   <p className="text-xs text-muted-foreground">
-                    Quantities drive consumption and overage approval.
+                    {t.finance_catalog_included_items_hint}
                   </p>
                 </div>
                 <Button
@@ -1158,13 +1178,13 @@ export function FinanceCatalogPage() {
                   onClick={() =>
                     setPackageForm((current) => ({
                       ...current,
-                      items: [...current.items, { ...BLANK_PACKAGE_ITEM_FORM }],
+                      items: [...current.items, blankPackageItem()],
                     }))
                   }
                   disabled={packageBusy}
                 >
                   <Plus className="size-4" />
-                  Add item
+                  {t.finance_catalog_add_item}
                 </Button>
               </div>
               {packageForm.items.map((item, index) => (
@@ -1173,7 +1193,7 @@ export function FinanceCatalogPage() {
                   className="rounded-xl border border-border/50 bg-muted/20 px-3 py-3"
                 >
                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                    <Field label="Description">
+                    <Field label={t.finance_catalog_description_label}>
                       <Input
                         value={item.description}
                         onChange={(event) =>
@@ -1183,7 +1203,7 @@ export function FinanceCatalogPage() {
                         disabled={packageBusy}
                       />
                     </Field>
-                    <Field label="Service key">
+                    <Field label={t.finance_catalog_service_key}>
                       <Input
                         value={item.serviceKey}
                         onChange={(event) =>
@@ -1194,7 +1214,7 @@ export function FinanceCatalogPage() {
                         placeholder="interpreter_hours"
                       />
                     </Field>
-                    <Field label="Included quantity">
+                    <Field label={t.finance_catalog_included_quantity}>
                       <Input
                         value={item.includedQuantity}
                         onChange={(event) =>
@@ -1206,7 +1226,7 @@ export function FinanceCatalogPage() {
                         disabled={packageBusy}
                       />
                     </Field>
-                    <Field label="Unit label">
+                    <Field label={t.finance_catalog_unit_label}>
                       <Input
                         value={item.unitLabel}
                         onChange={(event) =>
@@ -1216,7 +1236,7 @@ export function FinanceCatalogPage() {
                         disabled={packageBusy}
                       />
                     </Field>
-                    <Field label="Overage net price">
+                    <Field label={t.finance_catalog_overage_net_price}>
                       <Input
                         value={item.overageUnitPriceNet}
                         onChange={(event) =>
@@ -1228,7 +1248,7 @@ export function FinanceCatalogPage() {
                         disabled={packageBusy}
                       />
                     </Field>
-                    <Field label="Item VAT profile">
+                    <Field label={t.finance_catalog_item_vat_profile}>
                       <NativeComboboxSelect
                         value={item.taxProfileId || "__none__"}
                         onChange={(event) =>
@@ -1241,11 +1261,7 @@ export function FinanceCatalogPage() {
                         disabled={packageBusy}
                       >
                         <option value="__none__">
-                          {l(
-                            "Paket-/Standard-MwSt. verwenden",
-                            "Использовать НДС пакета/по умолчанию",
-                            "Use package/default VAT",
-                          )}
+                          {t.finance_catalog_use_package_default_vat}
                         </option>
                         {taxProfiles.map((profile) => (
                           <option key={profile.id} value={profile.id}>
@@ -1265,7 +1281,7 @@ export function FinanceCatalogPage() {
                         }
                         disabled={packageBusy}
                       />
-                      Approval required
+                      {t.finance_catalog_approval_required}
                     </label>
                     <div className="flex items-end justify-end">
                       <Button
@@ -1277,7 +1293,7 @@ export function FinanceCatalogPage() {
                         disabled={packageBusy}
                       >
                         <Trash2 className="size-4" />
-                        Remove
+                        {t.common_remove}
                       </Button>
                     </div>
                   </div>
@@ -1293,11 +1309,13 @@ export function FinanceCatalogPage() {
                 onClick={() => setPackageFormOpen(false)}
                 disabled={packageBusy}
               >
-                Cancel
+                {t.common_cancel}
               </Button>
               <Button type="submit" className="h-9 rounded-lg" disabled={packageBusy}>
                 {packageBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                {packageForm.id ? "Save package" : "Create package"}
+                {packageForm.id
+                  ? t.finance_catalog_save_package
+                  : t.finance_catalog_create_package}
               </Button>
             </div>
           </form>
@@ -1305,10 +1323,10 @@ export function FinanceCatalogPage() {
 
         {loading ? (
           <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-8 text-center text-sm text-muted-foreground">
-            Loading packages...
+            {t.finance_catalog_loading_packages}
           </div>
         ) : servicePackages.length === 0 ? (
-          <EmptyCell>No service packages configured yet.</EmptyCell>
+          <EmptyCell>{t.finance_catalog_empty_packages}</EmptyCell>
         ) : (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {servicePackages.map((item) => (
@@ -1345,7 +1363,7 @@ export function FinanceCatalogPage() {
                       onClick={() => openEditPackage(item)}
                     >
                       <Pencil className="size-3.5" />
-                      Edit
+                      {t.finance_catalog_edit}
                     </Button>
                   ) : null}
                 </div>
@@ -1353,11 +1371,14 @@ export function FinanceCatalogPage() {
                   {formatMoney(item.base_price_gross, item.currency)}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  net {formatMoney(item.base_price_net, item.currency)} / VAT{" "}
+                  {t.finance_catalog_net_label}{" "}
+                  {formatMoney(item.base_price_net, item.currency)} /{" "}
+                  {t.finance_catalog_vat_label}{" "}
                   {formatMoney(item.base_price_vat, item.currency)}
                 </p>
                 <p className="mt-2 text-xs text-muted-foreground">
-                  tax profile: {taxProfileLabel(item.tax_profile_name, item.tax_profile_key)}
+                  {t.finance_catalog_tax_profile_prefix}:{" "}
+                  {taxProfileLabel(item.tax_profile_name, item.tax_profile_key)}
                 </p>
                 {item.items?.length ? (
                   <div className="mt-3 space-y-1.5">
@@ -1370,18 +1391,20 @@ export function FinanceCatalogPage() {
                           {packageItem.description}
                         </span>{" "}
                         / {packageItem.included_quantity} {packageItem.unit_label}
-                        {packageItem.requires_patient_approval ? " / approval" : ""}
+                        {packageItem.requires_patient_approval
+                          ? ` / ${t.finance_catalog_approval_suffix}`
+                          : ""}
                       </div>
                     ))}
                     {item.items.length > 4 ? (
                       <p className="text-xs text-muted-foreground">
-                        +{item.items.length - 4} more items
+                        {moreItemsLabel(item.items.length - 4)}
                       </p>
                     ) : null}
                   </div>
                 ) : (
                   <p className="mt-3 text-xs text-muted-foreground">
-                    No included items configured.
+                    {t.finance_catalog_empty_included_items}
                   </p>
                 )}
               </article>
@@ -1391,22 +1414,22 @@ export function FinanceCatalogPage() {
       </Section>
 
       <Section
-        title={l("Agency service VAT mapping", "Agency service VAT mapping", "Agency service VAT mapping")}
+        title={t.finance_catalog_agency_service_vat_mapping}
         accessory={<CountBadge>{catalogRows.length}</CountBadge>}
       >
         {loading ? (
           <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-8 text-center text-sm text-muted-foreground">
-            Loading catalog mapping...
+            {t.finance_catalog_loading_mapping}
           </div>
         ) : catalogRows.length === 0 ? (
-          <EmptyCell>No catalog VAT mappings found.</EmptyCell>
+          <EmptyCell>{t.finance_catalog_empty_mapping}</EmptyCell>
         ) : (
           <div className="overflow-hidden rounded-xl border border-border/50 bg-card">
             <div className="grid grid-cols-[minmax(0,1.2fr)_120px_120px_minmax(0,1fr)] gap-3 border-b border-border/50 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-              <span>Service</span>
-              <span>VAT</span>
-              <span>Source</span>
-              <span>Tax profile</span>
+              <span>{t.finance_catalog_service}</span>
+              <span>{t.finance_catalog_vat_label}</span>
+              <span>{t.finance_catalog_source}</span>
+              <span>{t.finance_catalog_tax_profile_prefix}</span>
             </div>
             {catalogRows.map((row) => (
               <div

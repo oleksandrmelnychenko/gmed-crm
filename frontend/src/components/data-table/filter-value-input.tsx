@@ -220,7 +220,7 @@ function MultiSelect({ options, selected, onChange, translations }: MultiSelectP
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder={translations?.searchPlaceholder ?? "search"}
+          placeholder={translations?.searchPlaceholder ?? ""}
           className="h-6 border-0 px-0 text-xs shadow-none focus-visible:ring-0"
         />
         {selected.length > 0 ? (
@@ -228,6 +228,7 @@ function MultiSelect({ options, selected, onChange, translations }: MultiSelectP
             type="button"
             onClick={() => onChange([])}
             className="inline-flex size-4 items-center justify-center rounded text-muted-foreground hover:bg-muted"
+            aria-label={translations?.clear}
             title={translations?.clear}
           >
             <X className="size-3" />

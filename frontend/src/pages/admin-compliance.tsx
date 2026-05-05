@@ -29,7 +29,13 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { useAuth } from "@/lib/auth";
-import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
+import {
+  formatEnumLabelFromKeys,
+  formatUnknownValue,
+  useLang,
+  type TranslationKey,
+  type Translations,
+} from "@/lib/i18n";
 import {
   Banner,
   EmptyCell,
@@ -155,6 +161,16 @@ const PRIVACY_REQUEST_TYPE_VALUES = [
   "third_party_revoke",
 ] as const;
 
+const PRIVACY_SOURCE_LABEL_KEYS = {
+  patient_request: "compliance_privacy_source_patient_request",
+  admin_intake: "compliance_privacy_source_admin_intake",
+  legal_hold: "compliance_privacy_source_legal_hold",
+  patient_portal: "compliance_privacy_source_patient_portal",
+  manual: "compliance_privacy_source_manual",
+  system: "compliance_privacy_source_system",
+  compliance_workspace: "compliance_privacy_source_compliance_workspace",
+} as const satisfies Partial<Record<string, TranslationKey>>;
+
 const COMPLIANCE_REALTIME_EVENTS = [
   "privacy_request.created",
   "privacy_request.reviewed",
@@ -226,18 +242,7 @@ function privacyStatusLabel(status: string, t: Translations) {
 }
 
 function privacySourceLabel(source: string, t: Translations): string {
-  switch (source) {
-    case "patient_portal":
-      return t.documents_patient_portal;
-    case "manual":
-      return t.orders_billing_source_manual;
-    case "system":
-      return t.invoices_workspace_system;
-    case "compliance_workspace":
-      return t.compliance_title;
-    default:
-      return formatUnknownValue(source, t);
-  }
+  return formatEnumLabelFromKeys(source, PRIVACY_SOURCE_LABEL_KEYS, t);
 }
 
 function privacyStatusBadgeClass(status: string) {
@@ -266,17 +271,17 @@ function patientLabel(patientPid?: string | null, patientName?: string | null) {
   return normalizedPid || normalizedName || "\u2014";
 }
 
-function recordSummaryLabel(summary?: RecordSummary | null) {
+function recordSummaryLabel(summary: RecordSummary | null | undefined, t: Translations) {
   if (!summary) {
     return "\u2014";
   }
 
   return [
-    `A ${summary.appointments ?? 0}`,
-    `C ${summary.cases ?? 0}`,
-    `O ${summary.orders ?? 0}`,
-    `D ${summary.documents ?? 0}`,
-    `I ${summary.invoices ?? 0}`,
+    `${t.admin_system_record_count_appointments}: ${summary.appointments ?? 0}`,
+    `${t.admin_system_record_count_cases}: ${summary.cases ?? 0}`,
+    `${t.admin_system_record_count_orders}: ${summary.orders ?? 0}`,
+    `${t.admin_system_record_count_documents}: ${summary.documents ?? 0}`,
+    `${t.admin_system_record_count_invoices}: ${summary.invoices ?? 0}`,
   ].join(" - ");
 }
 
@@ -653,16 +658,11 @@ export function AdminCompliancePage() {
       )}`,
       `${t.compliance_col_linked_records}: ${recordSummaryLabel(
         reviewSheetRecord.record_summary,
+        t,
       )}`,
       `${t.compliance_col_notes}: ${privacyNotesLabel(reviewSheetRecord)}`,
     ];
-  }, [
-    reviewSheetRecord,
-    t.compliance_col_due,
-    t.compliance_col_linked_records,
-    t.compliance_col_notes,
-    t.compliance_col_retention_until,
-  ]);
+  }, [reviewSheetRecord, t]);
 
   const doExport = async () => {
     const targetPatientId = (activePatientId || patientInput).trim();
@@ -679,7 +679,9 @@ export function AdminCompliancePage() {
       setExportResult(`${t.compliance_downloaded} ${filename}`);
     } catch (error) {
       setExportResult(
-        `Error: ${error instanceof Error ? error.message : String(error)}`,
+        `${t.admin_system_export_error_prefix}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       );
     }
   };
@@ -849,11 +851,11 @@ export function AdminCompliancePage() {
     {
       id: "linked_records",
       label: t.compliance_col_linked_records,
-      accessor: (record) => recordSummaryLabel(record.record_summary),
+      accessor: (record) => recordSummaryLabel(record.record_summary, t),
       width: 142,
       render: (record) => (
         <span className="truncate text-xs text-slate-600">
-          {recordSummaryLabel(record.record_summary)}
+          {recordSummaryLabel(record.record_summary, t)}
         </span>
       ),
     },
@@ -1076,11 +1078,11 @@ export function AdminCompliancePage() {
     {
       id: "linked_records",
       label: t.compliance_col_linked_records,
-      accessor: (record) => recordSummaryLabel(record.record_summary),
+      accessor: (record) => recordSummaryLabel(record.record_summary, t),
       width: 142,
       render: (record) => (
         <span className="truncate text-xs text-slate-600">
-          {recordSummaryLabel(record.record_summary)}
+          {recordSummaryLabel(record.record_summary, t)}
         </span>
       ),
     },
@@ -1153,7 +1155,8 @@ export function AdminCompliancePage() {
       value: privacyCounters.overdue,
     },
   ];
-  const exportResultIsError = exportResult?.startsWith("Error:") ?? false;
+  const exportResultIsError =
+    exportResult?.startsWith(`${t.admin_system_export_error_prefix}:`) ?? false;
   const exportResultIsJson = Boolean(
     exportResult &&
       (exportResult.trim().startsWith("{") || exportResult.trim().startsWith("[")),

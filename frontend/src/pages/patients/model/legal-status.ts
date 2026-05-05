@@ -1,3 +1,10 @@
+import {
+  formatEnumLabelFromKeys,
+  getLang,
+  t as translateCatalog,
+  type TranslationKey,
+} from "@/lib/i18n";
+
 export type PatientLegalStatus = {
   dsgvoSigned: boolean;
   confidentialityReleaseSigned: boolean;
@@ -28,6 +35,27 @@ const DEFAULT_PATIENT_LEGAL_STATUS: PatientLegalStatus = {
   contractStatus: "not_started",
   notes: "",
 };
+
+const PATIENT_CONTRACT_STATUS_LABEL_KEYS = {
+  expired: "patient_contract_status_expired",
+  not_started: "patient_contract_status_not_started",
+  pending: "patient_contract_status_pending",
+  sent: "patient_contract_status_sent",
+  signed: "patient_contract_status_signed",
+  terminated: "patient_contract_status_terminated",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+function legalStatusTranslations() {
+  return translateCatalog(getLang());
+}
+
+export function patientContractStatusLabel(value?: string | null) {
+  return formatEnumLabelFromKeys(
+    value,
+    PATIENT_CONTRACT_STATUS_LABEL_KEYS,
+    legalStatusTranslations(),
+  );
+}
 
 function asRecord(value: unknown): LegalStatusRecord | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -84,22 +112,23 @@ export function serializePatientLegalStatus(status: PatientLegalStatus) {
 }
 
 export function getPatientLegalStatusChecklist(status: PatientLegalStatus) {
+  const translations = legalStatusTranslations();
   return [
-    { key: "dsgvo", label: "DSGVO", done: status.dsgvoSigned },
+    { key: "dsgvo", label: translations.patient_legal_check_dsgvo, done: status.dsgvoSigned },
     {
       key: "confidentiality",
-      label: "Schweigepflicht",
+      label: translations.patient_legal_check_confidentiality,
       done: status.confidentialityReleaseSigned,
     },
-    { key: "identity", label: "ID verified", done: status.identityVerified },
+    { key: "identity", label: translations.patient_legal_check_identity, done: status.identityVerified },
     {
       key: "document-pack",
-      label: "Document pack",
+      label: translations.patient_legal_check_document_pack,
       done: status.documentPackComplete,
     },
     {
       key: "compliance",
-      label: "Compliance complete",
+      label: translations.patient_legal_check_compliance,
       done: status.complianceCompleted,
     },
   ];
@@ -117,12 +146,15 @@ export function getPatientLegalStatusCompletion(status: PatientLegalStatus) {
 }
 
 export function getPatientLegalStatusSummary(status: PatientLegalStatus) {
+  const translations = legalStatusTranslations();
   const completion = getPatientLegalStatusCompletion(status);
   if (status.complianceCompleted) {
-    return "Compliance complete";
+    return translations.patient_legal_summary_complete;
   }
   if (completion.completed === 0) {
-    return "Compliance not started";
+    return translations.patient_legal_summary_not_started;
   }
-  return `${completion.completed}/${completion.total} compliance checks completed`;
+  return translations.patient_legal_summary_progress
+    .replace("{completed}", String(completion.completed))
+    .replace("{total}", String(completion.total));
 }

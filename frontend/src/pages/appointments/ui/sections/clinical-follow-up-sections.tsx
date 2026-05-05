@@ -583,12 +583,16 @@ function AppointmentIncomingDataSection({
               }
               className={clinicalSelectClassName}
             >
-              <option value="patient">{tr.orders_patient}</option>
-              <option value="doctor">{tr.common_doctor}</option>
-              <option value="clinic">{tr.common_provider}</option>
-              <option value="interpreter">{tr.role_interpreter}</option>
-              <option value="external_lab">{tr.common_provider}</option>
-              <option value="other">{tr.common_not_set}</option>
+              <option value="patient">{incomingDataSourceLabel("patient")}</option>
+              <option value="doctor">{incomingDataSourceLabel("doctor")}</option>
+              <option value="clinic">{incomingDataSourceLabel("clinic")}</option>
+              <option value="interpreter">
+                {incomingDataSourceLabel("interpreter")}
+              </option>
+              <option value="external_lab">
+                {incomingDataSourceLabel("external_lab")}
+              </option>
+              <option value="other">{incomingDataSourceLabel("other")}</option>
             </NativeComboboxSelect>
           </Field>
           <Field label={tr.documents_category}>
@@ -602,15 +606,25 @@ function AppointmentIncomingDataSection({
               }
               className={clinicalSelectClassName}
             >
-              <option value="medical_update">Medical update</option>
-              <option value="diagnosis">{tr.cases_preconditions}</option>
-              <option value="medication">{tr.cases_medications}</option>
-              <option value="symptom">{tr.cases_symptoms}</option>
-              <option value="lab_result">{tr.cases_title}</option>
-              <option value="imaging">{tr.documents_title}</option>
-              <option value="recommendation">Recommendation</option>
-              <option value="risk_flag">{tr.common_error}</option>
-              <option value="other">{tr.common_not_set}</option>
+              <option value="medical_update">
+                {incomingDataCategoryLabel("medical_update")}
+              </option>
+              <option value="diagnosis">{incomingDataCategoryLabel("diagnosis")}</option>
+              <option value="medication">
+                {incomingDataCategoryLabel("medication")}
+              </option>
+              <option value="symptom">{incomingDataCategoryLabel("symptom")}</option>
+              <option value="lab_result">
+                {incomingDataCategoryLabel("lab_result")}
+              </option>
+              <option value="imaging">{incomingDataCategoryLabel("imaging")}</option>
+              <option value="recommendation">
+                {incomingDataCategoryLabel("recommendation")}
+              </option>
+              <option value="risk_flag">
+                {incomingDataCategoryLabel("risk_flag")}
+              </option>
+              <option value="other">{incomingDataCategoryLabel("other")}</option>
             </NativeComboboxSelect>
           </Field>
         </div>
@@ -1260,9 +1274,11 @@ function AppointmentFindingsSection({
             }
             className={clinicalSelectClassName}
           >
-            <option value="arztbrief">Arztbrief</option>
-            <option value="written_findings">Written findings</option>
-            <option value="both">Both</option>
+            <option value="arztbrief">{findingsArtifactLabel("arztbrief")}</option>
+            <option value="written_findings">
+              {findingsArtifactLabel("written_findings")}
+            </option>
+            <option value="both">{findingsArtifactLabel("both")}</option>
           </NativeComboboxSelect>
         </Field>
 

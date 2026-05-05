@@ -51,6 +51,8 @@ import {
   downloadPortalUpload,
   formatPortalDateTime,
   formatPortalFileSize,
+  portalDocumentSourceLabel as sharedPortalDocumentSourceLabel,
+  portalDocumentValueLabel as sharedPortalDocumentValueLabel,
   portalStatusLabel,
   translationRequestTone,
   uploadedDocumentTone,
@@ -81,6 +83,7 @@ function portalDocumentValueLabel(
   l: (de: string, ru: string, en: string) => string,
   translations: { common_unknown: string; common_unknown_value: string },
 ) {
+  return sharedPortalDocumentValueLabel(value);
   switch (value) {
     case "general":
       return l("Allgemein", "Общий", "General");
@@ -123,6 +126,7 @@ function portalDocumentSourceLabel(
   l: (de: string, ru: string, en: string) => string,
   translations: { common_unknown: string; common_unknown_value: string },
 ) {
+  return sharedPortalDocumentSourceLabel(source, clinic);
   switch (source) {
     case "patient_portal":
       return l("Patientenportal", "Портал пациента", "Patient portal");

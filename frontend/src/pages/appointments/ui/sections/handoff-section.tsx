@@ -20,7 +20,12 @@ import {
 } from "@/pages/appointments/appearance/surface-appearance";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
 import { formatAppointmentSlotLabel as slotLabel } from "@/pages/appointments/model/runtime-formatters";
-import { appointmentText, roleLabel } from "@/pages/appointments/model/labels";
+import {
+  appointmentText,
+  followUpPresetLabel,
+  followUpPresetTitle,
+  roleLabel,
+} from "@/pages/appointments/model/labels";
 import { appointmentAnchorDateTime, toRfc3339 } from "@/pages/appointments/model/workflow-helpers";
 import type {
   AppointmentDetail,
@@ -94,7 +99,7 @@ function AppointmentHandoffSection({
         body: JSON.stringify({
           user_id: followUpAssigneeId,
           remind_at: toRfc3339(remindAt),
-          title: preset.title,
+          title: followUpPresetTitle(preset.id),
           description: `Auto-planned from appointment ${detail.patient_pid} · ${detail.title}.`,
         }),
       });
@@ -110,12 +115,14 @@ function AppointmentHandoffSection({
     <section className={sectionCardClass}>
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <AppointmentSectionHeading
-          title="Handoff and follow-up"
-          description="Coordinate the assigned team and schedule post-care follow-up from the appointment itself."
+          title={t.appointments_handoff_title}
+          description={t.appointments_handoff_description}
         />
         <span className={appointmentMetaPillClassName}>
-          {handoffStakeholders.length} stakeholder
-          {handoffStakeholders.length === 1 ? "" : "s"}
+          {handoffStakeholders.length}{" "}
+          {handoffStakeholders.length === 1
+            ? t.appointments_common_stakeholder
+            : t.appointments_common_stakeholders}
         </span>
       </div>
       <div className="mt-4 space-y-3">
@@ -153,7 +160,7 @@ function AppointmentHandoffSection({
                 variant="outline"
                 onClick={() => openChat(peer)}
               >
-                Open chat
+                {t.appointments_common_open_chat}
               </Button>
             </div>
           ))
@@ -185,7 +192,7 @@ function AppointmentHandoffSection({
                 onClick={() => void handlePreset(preset)}
               >
                 {followUpBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                {preset.label}
+                {followUpPresetLabel(preset.id)}
               </Button>
             ))}
           </div>

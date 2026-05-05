@@ -39,6 +39,7 @@ import {
   followupStatusTone,
   formatPortalDate,
   formatPortalDateTime,
+  portalOrderPhaseLabel as sharedPortalOrderPhaseLabel,
   portalStatusLabel,
 } from "@/pages/patients/model/portal-shared";
 import type {
@@ -91,6 +92,7 @@ function portalOrderPhaseLabel(
   l: (de: string, ru: string, en: string) => string,
   translations: { common_unknown: string; common_unknown_value: string },
 ) {
+  return sharedPortalOrderPhaseLabel(value);
   switch (value) {
     case "discovery":
       return l("Discovery", "Диагностика потребности", "Discovery");

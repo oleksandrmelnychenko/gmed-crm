@@ -36,7 +36,7 @@ import {
   Sheet,
   SheetContent,
 } from "@/components/ui/sheet";
-import { useLang } from "@/lib/i18n";
+import { formatEnumLabelFromKeys, useLang, type TranslationKey } from "@/lib/i18n";
 import {
   compactNotificationConfig,
   matchesNotificationSearch,
@@ -82,6 +82,17 @@ const ADMIN_NOTIFICATION_CHANNEL_REALTIME_EVENTS = [
   "notification_channel.updated",
   "notification_channel.deleted",
 ] as const;
+
+const NOTIFICATION_CHANNEL_TYPE_LABEL_KEYS = {
+  smtp: "notif_smtp",
+  webhook: "notif_webhook",
+} as const satisfies Partial<Record<string, TranslationKey>>;
+
+function channelTypeTone(channelType: string) {
+  if (channelType === "smtp") return "info" as const;
+  if (channelType === "webhook") return "brand" as const;
+  return "neutral" as const;
+}
 
 export function AdminNotificationsPage() {
   const { t } = useLang();
@@ -172,6 +183,12 @@ export function AdminNotificationsPage() {
     setDetailOpen(open);
     if (!open) setSelectedChannelId("");
   }
+
+  const channelTypeLabel = useCallback(
+    (value: string | null | undefined) =>
+      formatEnumLabelFromKeys(value, NOTIFICATION_CHANNEL_TYPE_LABEL_KEYS, t),
+    [t],
+  );
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -275,8 +292,8 @@ export function AdminNotificationsPage() {
       sortable: true,
       width: 140,
       render: (channel) => (
-        <StatusBadge tone={channel.channel_type === "smtp" ? "info" : "brand"}>
-          {channel.channel_type === "smtp" ? t.notif_smtp : t.notif_webhook}
+        <StatusBadge tone={channelTypeTone(channel.channel_type)}>
+          {channelTypeLabel(channel.channel_type)}
         </StatusBadge>
       ),
     },
@@ -356,12 +373,11 @@ export function AdminNotificationsPage() {
     t.common_inactive,
     t.notif_config,
     t.notif_name,
-    t.notif_smtp,
     t.notif_test,
     t.notif_type,
-    t.notif_webhook,
     t.users_actions,
     t.users_status,
+    channelTypeLabel,
   ]);
 
   return (
@@ -611,11 +627,9 @@ export function AdminNotificationsPage() {
                 <section className={cn("space-y-3 rounded-xl p-3.5", tokens.surface.softCard)}>
                   <div className="flex flex-wrap items-center gap-1.5">
                     <StatusBadge
-                      tone={selectedChannel.channel_type === "smtp" ? "info" : "brand"}
+                      tone={channelTypeTone(selectedChannel.channel_type)}
                     >
-                      {selectedChannel.channel_type === "smtp"
-                        ? t.notif_smtp
-                        : t.notif_webhook}
+                      {channelTypeLabel(selectedChannel.channel_type)}
                     </StatusBadge>
                     <StatusBadge tone={selectedChannel.is_active ? "success" : "neutral"}>
                       {selectedChannel.is_active ? t.common_active : t.common_inactive}
@@ -632,9 +646,7 @@ export function AdminNotificationsPage() {
                     <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
                       <p className="text-[11.5px] text-muted-foreground">{t.notif_type}</p>
                       <p className="mt-1 text-sm font-medium text-foreground">
-                        {selectedChannel.channel_type === "smtp"
-                          ? t.notif_smtp
-                          : t.notif_webhook}
+                        {channelTypeLabel(selectedChannel.channel_type)}
                       </p>
                     </div>
                   </div>

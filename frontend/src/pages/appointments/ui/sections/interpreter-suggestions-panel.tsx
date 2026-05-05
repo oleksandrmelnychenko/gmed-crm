@@ -1,7 +1,13 @@
 ﻿import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Banner, CountBadge, Section, tokens } from "@/components/ui-shell";
-import { appointmentText, roleLabel } from "@/pages/appointments/model/labels";
+import { useLang } from "@/lib/i18n";
+import {
+  interpreterLanguageStatusLabel,
+  interpreterPreferenceLabel,
+  interpreterSuggestionReasonLabel,
+  roleLabel,
+} from "@/pages/appointments/model/labels";
 import type {
   InterpreterHistoryItem,
   InterpreterPreference,
@@ -42,6 +48,7 @@ export function InterpreterSuggestionsPanel({
   onSelect,
   onSetPreference,
 }: InterpreterSuggestionsPanelProps) {
+  const { t } = useLang();
   const topSuggestion = suggestions[0] ?? null;
   const preferredCount = history.filter(
     (item) => item.preference === "preferred",
@@ -50,17 +57,11 @@ export function InterpreterSuggestionsPanel({
 
   return (
     <Section
-      title={appointmentText(
-        "Interpreter suggestions",
-        "Interpreter suggestions",
-        "Interpreter suggestions",
-      )}
+      title={t.appointments_interpreter_suggestions_title}
       accessory={<CountBadge>{suggestions.length}</CountBadge>}
     >
       <p className={tokens.text.muted}>
-        Ranking uses patient history, preference, feedback and language. Missing
-        languages do not block the suggestion. Avoid preferences are hidden from
-        assignment suggestions but remain visible in history.
+        {t.appointments_interpreter_suggestions_description}
       </p>
 
       {topSuggestion ? (
@@ -68,10 +69,12 @@ export function InterpreterSuggestionsPanel({
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <p className="font-semibold">
-                Recommended now: {topSuggestion.interpreter_name}
+                {t.appointments_interpreter_recommended_now}:{" "}
+                {topSuggestion.interpreter_name}
               </p>
               <p className="mt-1 text-xs text-sky-800/80">
-                Score {topSuggestion.score} - {topSuggestion.reasons.join(", ")}
+                {t.appointments_interpreter_score} {topSuggestion.score} -{" "}
+                {topSuggestion.reasons.map(interpreterSuggestionReasonLabel).join(", ")}
               </p>
             </div>
             {onSelect ? (
@@ -81,7 +84,7 @@ export function InterpreterSuggestionsPanel({
                 className="rounded-lg"
                 onClick={() => onSelect(topSuggestion.interpreter_id)}
               >
-                Use recommendation
+                {t.appointments_interpreter_use_recommendation}
               </Button>
             ) : null}
           </div>
@@ -91,11 +94,11 @@ export function InterpreterSuggestionsPanel({
       {error ? <Banner tone="error" withIcon>{error}</Banner> : null}
       {loading ? (
         <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-5 text-sm text-muted-foreground">
-          Loading suggestions
+          {t.appointments_interpreter_loading_suggestions}
         </div>
       ) : suggestions.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border/60 bg-muted/25 px-4 py-8 text-center text-sm text-muted-foreground">
-          No matching suggestions. Avoid preferences are not shown.
+          {t.appointments_interpreter_no_suggestions}
         </div>
       ) : (
         <div className="grid gap-3">
@@ -116,15 +119,18 @@ export function InterpreterSuggestionsPanel({
                         {roleLabel(suggestion.role)}
                       </Badge>
                       <Badge variant="outline" className="rounded-full">
-                        {suggestion.preference}
+                        {interpreterPreferenceLabel(suggestion.preference)}
                       </Badge>
                       <Badge variant="outline" className="rounded-full">
-                        {suggestion.language_status}
+                        {interpreterLanguageStatusLabel(suggestion.language_status)}
                       </Badge>
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {suggestion.previous_appointment_count} worked before - {" "}
-                      {suggestion.total_report_hours}h approved - score {" "}
+                      {suggestion.previous_appointment_count}{" "}
+                      {t.appointments_interpreter_worked_before} -{" "}
+                      {suggestion.total_report_hours}
+                      {t.appointments_interpreter_hours_approved} -{" "}
+                      {t.appointments_interpreter_score.toLowerCase()}{" "}
                       {suggestion.score}
                     </p>
                     <div className="mt-3 flex flex-wrap gap-1.5">
@@ -133,13 +139,14 @@ export function InterpreterSuggestionsPanel({
                           key={reason}
                           className="rounded-full border border-border/60 bg-muted/25 px-2.5 py-1 text-[11px] font-medium text-muted-foreground"
                         >
-                          {reason}
+                          {interpreterSuggestionReasonLabel(reason)}
                         </span>
                       ))}
                     </div>
                     {suggestion.languages.length > 0 ? (
                       <p className="mt-2 text-[11px] text-muted-foreground">
-                        Languages: {suggestion.languages.join(", ")}
+                        {t.appointments_interpreter_languages}:{" "}
+                        {suggestion.languages.join(", ")}
                       </p>
                     ) : null}
                   </div>
@@ -152,7 +159,9 @@ export function InterpreterSuggestionsPanel({
                         className="rounded-lg"
                         onClick={() => onSelect(suggestion.interpreter_id)}
                       >
-                        {selected ? "Selected" : "Use"}
+                        {selected
+                          ? t.appointments_interpreter_selected
+                          : t.appointments_interpreter_use}
                       </Button>
                     ) : null}
                     {onSetPreference ? (
@@ -176,10 +185,12 @@ export function InterpreterSuggestionsPanel({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h4 className="text-sm font-semibold text-foreground">
-              Interpreter history for this patient
+              {t.appointments_interpreter_history_title}
             </h4>
             <p className="mt-1 text-xs text-muted-foreground">
-              {preferredCount} preferred - {avoidCount} avoid - {history.length} total relationships
+              {preferredCount} {interpreterPreferenceLabel("preferred")} -{" "}
+              {avoidCount} {interpreterPreferenceLabel("avoid")} - {history.length}{" "}
+              {t.appointments_interpreter_total_relationships}
             </p>
           </div>
           <CountBadge>{history.length}</CountBadge>
@@ -191,11 +202,11 @@ export function InterpreterSuggestionsPanel({
         ) : null}
         {historyLoading ? (
           <div className="mt-3 rounded-xl border border-border/50 bg-muted/25 px-4 py-4 text-sm text-muted-foreground">
-            Loading interpreter history
+            {t.appointments_interpreter_loading_history}
           </div>
         ) : history.length === 0 ? (
           <div className="mt-3 rounded-xl border border-dashed border-border/60 bg-muted/25 px-4 py-5 text-center text-sm text-muted-foreground">
-            No interpreter history or preferences yet.
+            {t.appointments_interpreter_no_history}
           </div>
         ) : (
           <div className="mt-3 grid gap-2">
@@ -215,24 +226,34 @@ export function InterpreterSuggestionsPanel({
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="truncate text-sm font-medium text-foreground">
-                          {item.interpreter_name ?? item.patient_name ?? "Interpreter"}
+                          {item.interpreter_name ??
+                            item.patient_name ??
+                            t.appointments_interpreter_fallback_name}
                         </p>
                         <Badge variant="outline" className="rounded-full">
-                          {item.preference}
+                          {interpreterPreferenceLabel(item.preference)}
                         </Badge>
                         {item.average_feedback_score ? (
                           <Badge variant="outline" className="rounded-full">
-                            feedback {item.average_feedback_score.toFixed(1)}
+                            {t.appointments_interpreter_feedback}{" "}
+                            {item.average_feedback_score.toFixed(1)}
                           </Badge>
                         ) : null}
                       </div>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {item.appointment_count} appointments - {item.completed_appointment_count} completed - {item.total_report_hours}h approved
-                        {item.last_appointment_date ? ` - last ${item.last_appointment_date}` : ""}
+                        {item.appointment_count}{" "}
+                        {t.appointments_interpreter_appointments} -{" "}
+                        {item.completed_appointment_count}{" "}
+                        {t.appointments_interpreter_completed} -{" "}
+                        {item.total_report_hours}
+                        {t.appointments_interpreter_hours_approved}
+                        {item.last_appointment_date
+                          ? ` - ${t.appointments_interpreter_last} ${item.last_appointment_date}`
+                          : ""}
                       </p>
                       {item.preference_note ? (
                         <p className="mt-1 text-xs text-muted-foreground">
-                          Note: {item.preference_note}
+                          {t.appointments_interpreter_note}: {item.preference_note}
                         </p>
                       ) : null}
                     </div>
@@ -265,6 +286,7 @@ function PreferenceButtons({
   disabled?: boolean;
   onSelectPreference: (preference: InterpreterPreference) => void;
 }) {
+  const { t } = useLang();
   return (
     <div className="flex flex-wrap gap-1.5 md:justify-end">
       {PREFERENCE_OPTIONS.map((preference) => (
@@ -277,7 +299,9 @@ function PreferenceButtons({
           disabled={disabled}
           onClick={() => onSelectPreference(preference)}
         >
-          {disabled ? "Saving" : preference}
+          {disabled
+            ? t.appointments_interpreter_saving
+            : interpreterPreferenceLabel(preference)}
         </Button>
       ))}
     </div>

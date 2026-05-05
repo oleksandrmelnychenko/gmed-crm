@@ -62,7 +62,7 @@ export function StaffDashboardOverviewSection({
             {greeting}
           </h1>
           <p className="mt-1 text-[13px] text-muted-foreground">
-            {tr.dash_subtitle ?? "Overview of your team's daily performance"}
+            {tr.dash_subtitle ?? tr.common_unknown}
           </p>
         </div>
         <PeriodSwitcher value={period} onChange={onPeriodChange} tr={tr} />
@@ -70,30 +70,30 @@ export function StaffDashboardOverviewSection({
 
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <DashKpi
-          label={tr.patients_title ?? "Patients"}
+          label={tr.patients_title ?? tr.common_unknown}
           value={numberOrDash(overview?.patients)}
-          hint={`${activePatientCount} ${tr.common_active?.toLowerCase() ?? "active"}`}
+          hint={`${activePatientCount} ${tr.common_active?.toLowerCase() ?? tr.common_unknown}`}
           icon={UsersIcon}
           onClick={onOpenPatients}
         />
         <DashKpi
-          label={tr.dash_new_patients ?? "New patients"}
+          label={tr.dash_new_patients ?? tr.common_unknown}
           value={numberOrDash(newPatientsThisMonth)}
-          hint={tr.dash_this_month ?? "this month"}
+          hint={tr.dash_this_month ?? tr.common_unknown}
           icon={UserPlus}
           onClick={onOpenPatients}
         />
         <DashKpi
-          label={tr.cases_title ?? "Cases"}
+          label={tr.cases_title ?? tr.common_unknown}
           value={numberOrDash(overview?.cases)}
-          hint={tr.common_active?.toLowerCase() ?? "active"}
+          hint={tr.common_active?.toLowerCase() ?? tr.common_unknown}
           icon={Stethoscope}
           onClick={onOpenCases}
         />
         <DashKpi
-          label={tr.orders_title ?? "Orders"}
+          label={tr.orders_title ?? tr.common_unknown}
           value={numberOrDash(overview?.orders)}
-          hint={`${openTasksCount} ${(tr.dash_open_tasks ?? "open tasks").toLowerCase()}`}
+          hint={`${openTasksCount} ${(tr.dash_open_tasks ?? tr.common_unknown).toLowerCase()}`}
           icon={ClipboardList}
           onClick={onOpenOrders}
         />
@@ -103,10 +103,10 @@ export function StaffDashboardOverviewSection({
         <div className="mb-3 flex items-center justify-between">
           <div>
             <h3 className="text-[14px] font-semibold text-foreground">
-              {tr.leads_title ?? "Leads"} · {tr.dash_this_year ?? "last 12 months"}
+              {tr.leads_title ?? tr.common_unknown} - {tr.dash_this_year ?? tr.common_unknown}
             </h3>
             <p className="mt-0.5 text-[11.5px] text-muted-foreground">
-              {tr.dash_leads_monthly_hint ?? "Monthly intake over the last year"}
+              {tr.dash_leads_monthly_hint ?? tr.common_unknown}
             </p>
           </div>
           <button
@@ -114,7 +114,7 @@ export function StaffDashboardOverviewSection({
             className="inline-flex items-center gap-1 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
             onClick={onOpenLeads}
           >
-            {tr.dash_view_all ?? "View all"}
+            {tr.dash_view_all ?? tr.common_unknown}
             <ArrowRight className="size-3" />
           </button>
         </div>
@@ -122,7 +122,7 @@ export function StaffDashboardOverviewSection({
           {loading ? (
             <ChartSkeleton />
           ) : monthly.length === 0 ? (
-            <EmptyChart label={tr.dash_no_data ?? "No data"} />
+            <EmptyChart label={tr.dash_no_data ?? tr.common_unknown} />
           ) : (
             <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
               <AreaChart data={monthly} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>

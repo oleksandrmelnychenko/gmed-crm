@@ -1,16 +1,7 @@
-import { getLang } from "@/lib/i18n";
-
 import type { FeedbackFormState, PatientOption } from "./types";
 
 export const scoreOptions = ["1", "2", "3", "4", "5"];
 export const npsOptions = Array.from({ length: 11 }, (_, index) => String(index));
-
-export function feedbackText(de: string, ru: string, en: string) {
-  const lang = getLang();
-  if (lang === "de") return de;
-  if (lang === "ru") return ru;
-  return en;
-}
 
 export function blankFeedbackForm(): FeedbackFormState {
   return {
@@ -58,5 +49,5 @@ export function buildFeedbackQuery(search: string, status: string, source: strin
 }
 
 export function patientLabel(item: PatientOption) {
-  return `${item.patient_id} · ${[item.first_name, item.last_name].filter(Boolean).join(" ")}`.trim();
+  return `${item.patient_id} - ${[item.first_name, item.last_name].filter(Boolean).join(" ")}`.trim();
 }

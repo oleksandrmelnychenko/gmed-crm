@@ -24,7 +24,7 @@ import {
   Sheet,
   SheetContent,
 } from "@/components/ui/sheet";
-import { useLang } from "@/lib/i18n";
+import { formatEnumLabelFromKeys, useLang, type TranslationKey } from "@/lib/i18n";
 import {
   formatAdminDateTime,
   normalizeAdminSettingValue,
@@ -124,6 +124,47 @@ const ADMIN_SECURITY_REALTIME_EVENTS = [
   "user.force_password_reset",
   "user.mfa_toggled",
 ] as const;
+
+const ROLE_LABEL_KEYS = {
+  ceo: "role_ceo",
+  ceo_assistant: "role_ceo_assistant",
+  patient_manager: "role_patient_manager",
+  teamlead_interpreter: "role_teamlead_interpreter",
+  interpreter: "role_interpreter",
+  concierge: "role_concierge",
+  billing: "role_billing",
+  sales: "role_sales",
+  it_admin: "role_it_admin",
+  patient: "role_patient",
+} as const satisfies Partial<Record<string, TranslationKey>>;
+
+const SECURITY_ACTION_LABEL_KEYS = {
+  login: "activity_action_login",
+  create_lead: "activity_action_create_lead",
+  create_patient: "activity_action_create_patient",
+  convert_lead: "activity_action_convert_lead",
+  qualify_lead: "activity_action_qualify_lead",
+  update_setting: "activity_action_update_setting",
+  revoke_all_sessions: "activity_action_revoke_all_sessions",
+  admin_force_logout_user: "activity_action_admin_force_logout_user",
+  revoke_all_users_sessions: "activity_action_revoke_all_users_sessions",
+  token_theft_detected: "activity_action_token_theft_detected",
+} as const satisfies Partial<Record<string, TranslationKey>>;
+
+const SECURITY_ENTITY_LABEL_KEYS = {
+  access_policy: "activity_entity_access_policy",
+  appointment: "activity_entity_appointment",
+  case: "activity_entity_case",
+  document: "activity_entity_document",
+  invoice: "activity_entity_invoice",
+  order: "activity_entity_order",
+  patient: "activity_entity_patient",
+  privacy_request: "activity_entity_privacy_request",
+  security: "activity_entity_security",
+  session: "activity_entity_session",
+  system_setting: "activity_entity_system_setting",
+  user: "activity_entity_user",
+} as const satisfies Partial<Record<string, TranslationKey>>;
 
 export function AdminSecurityPage() {
   const { t, lang } = useLang();
@@ -291,6 +332,22 @@ export function AdminSecurityPage() {
     }
   }, [load, t.common_error]);
 
+  const roleLabel = useCallback(
+    (value: string | null | undefined) =>
+      formatEnumLabelFromKeys(value, ROLE_LABEL_KEYS, t),
+    [t],
+  );
+  const securityActionLabel = useCallback(
+    (value: string | null | undefined) =>
+      formatEnumLabelFromKeys(value, SECURITY_ACTION_LABEL_KEYS, t),
+    [t],
+  );
+  const securityEntityLabel = useCallback(
+    (value: string | null | undefined) =>
+      formatEnumLabelFromKeys(value, SECURITY_ENTITY_LABEL_KEYS, t),
+    [t],
+  );
+
   const suspiciousEventColumns = useMemo<ColumnDef<AuditAnalyticsEvent>[]>(() => [
     {
       id: "created_at",
@@ -316,7 +373,7 @@ export function AdminSecurityPage() {
             {event.user_name ?? t.security_anonymous}
           </div>
           <div className="text-[11px] text-muted-foreground">
-            {event.user_role ?? event.action}
+            {event.user_role ? roleLabel(event.user_role) : securityActionLabel(event.action)}
           </div>
         </div>
       ),
@@ -331,7 +388,7 @@ export function AdminSecurityPage() {
         <div className="min-w-0">
           <div className="truncate text-xs text-foreground">{event.reason}</div>
           <div className="text-[11px] text-muted-foreground">
-            {event.entity_type} - {event.action}
+            {securityEntityLabel(event.entity_type)} - {securityActionLabel(event.action)}
           </div>
         </div>
       ),
@@ -368,6 +425,9 @@ export function AdminSecurityPage() {
     t.security_anonymous,
     t.security_col_reason,
     t.security_col_route,
+    roleLabel,
+    securityActionLabel,
+    securityEntityLabel,
   ]);
 
   const readerColumns = useMemo<ColumnDef<AuditAnalyticsReader>[]>(() => [
@@ -380,7 +440,9 @@ export function AdminSecurityPage() {
       render: (reader) => (
         <div className="min-w-0">
           <div className="text-xs font-medium text-foreground">{reader.user_name}</div>
-          <div className="text-[11px] text-muted-foreground">{reader.user_role}</div>
+          <div className="text-[11px] text-muted-foreground">
+            {roleLabel(reader.user_role)}
+          </div>
         </div>
       ),
     },
@@ -400,7 +462,7 @@ export function AdminSecurityPage() {
       width: 160,
       render: (reader) => <span className="tabular-nums">{reader.distinct_entities}</span>,
     },
-  ], [t.activity_user, t.security_col_distinct_entities, t.security_col_events]);
+  ], [roleLabel, t.activity_user, t.security_col_distinct_entities, t.security_col_events]);
 
   const ipColumns = useMemo<ColumnDef<IpEntry>[]>(() => [
     {

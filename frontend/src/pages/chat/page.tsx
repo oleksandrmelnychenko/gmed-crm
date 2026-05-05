@@ -222,7 +222,7 @@ export function ChatPage() {
         await ensureServerMessageKey();
       } catch {
         if (!cancelled) {
-          setSecureStatus("Secure chat setup failed on this device.");
+          setSecureStatus(t.chat_secure_setup_failed_device);
         }
       }
     })();
@@ -230,7 +230,7 @@ export function ChatPage() {
     return () => {
       cancelled = true;
     };
-  }, [canViewChat]);
+  }, [canViewChat, t.chat_secure_setup_failed_device]);
 
   useEffect(() => {
     activePeerRef.current = activePeer;
@@ -257,12 +257,12 @@ export function ChatPage() {
         setSecureStatus(
           key
             ? null
-            : "Secure setup is still pending for this conversation. Text messages stay paused until the other side opens chat once.",
+            : t.chat_secure_setup_pending,
         );
       } catch {
         if (!cancelled) {
           setActivePeerMessageKey(null);
-          setSecureStatus("Failed to load secure chat key.");
+          setSecureStatus(t.chat_secure_key_failed);
         }
       }
     })();
@@ -270,7 +270,13 @@ export function ChatPage() {
     return () => {
       cancelled = true;
     };
-  }, [activePeer, canViewChat, loadPeerMessageKey]);
+  }, [
+    activePeer,
+    canViewChat,
+    loadPeerMessageKey,
+    t.chat_secure_key_failed,
+    t.chat_secure_setup_pending,
+  ]);
 
   useEffect(() => {
     const peer = searchParams.get("peer");
@@ -459,14 +465,14 @@ export function ChatPage() {
           : message.sender_key_fingerprint;
       const localKey = getLocalMessageKey(myFingerprint);
       if (!localKey || !peerFingerprint) {
-        setSecureStatus("This secure attachment is unavailable on this device.");
+        setSecureStatus(t.chat_secure_attachment_unavailable);
         return;
       }
 
       const peerId = message.from_user === myId ? message.to_user : message.from_user;
       const peerKey = await loadPeerMessageKey(peerId, peerFingerprint);
       if (!peerKey) {
-        setSecureStatus("Failed to load the peer key for this secure attachment.");
+        setSecureStatus(t.chat_secure_attachment_peer_key_failed);
         return;
       }
 
@@ -489,12 +495,19 @@ export function ChatPage() {
         );
         setSecureStatus(null);
       } catch {
-        setSecureStatus("Failed to decrypt the secure attachment.");
+        setSecureStatus(t.chat_secure_attachment_decrypt_failed);
       } finally {
         setAttachmentBusyId(null);
       }
     },
-    [downloadBlob, loadPeerMessageKey, myId],
+    [
+      downloadBlob,
+      loadPeerMessageKey,
+      myId,
+      t.chat_secure_attachment_decrypt_failed,
+      t.chat_secure_attachment_peer_key_failed,
+      t.chat_secure_attachment_unavailable,
+    ],
   );
 
   const handleKeyBackupFileChange = useCallback(
@@ -511,7 +524,7 @@ export function ChatPage() {
 
   const handleKeyDialogSubmit = useCallback(async () => {
     if (!keyPassphrase.trim()) {
-      setKeyDialogStatus("Passphrase is required.");
+      setKeyDialogStatus(t.chat_secure_passphrase_required);
       return;
     }
 
@@ -523,19 +536,30 @@ export function ChatPage() {
           new Blob([payload], { type: "application/json" }),
           `gmed-secure-chat-keys-${new Date().toISOString().slice(0, 10)}.json`,
         );
-        setKeyDialogStatus("Secure key backup downloaded.");
+        setKeyDialogStatus(t.chat_secure_backup_downloaded);
       } else if (keyDialogMode === "import" && importedKeyBackup) {
         const result = await importKeyRingBackup(importedKeyBackup.content, keyPassphrase);
-        setKeyDialogStatus(`Imported ${result.importedKeys} secure chat keys.`);
+        setKeyDialogStatus(
+          t.chat_secure_keys_imported.replace("{count}", String(result.importedKeys)),
+        );
       }
     } catch (error) {
       setKeyDialogStatus(
-        error instanceof Error ? error.message : "Secure key operation failed.",
+        error instanceof Error ? error.message : t.chat_secure_operation_failed,
       );
     } finally {
       setKeyDialogBusy(false);
     }
-  }, [downloadBlob, importedKeyBackup, keyDialogMode, keyPassphrase]);
+  }, [
+    downloadBlob,
+    importedKeyBackup,
+    keyDialogMode,
+    keyPassphrase,
+    t.chat_secure_backup_downloaded,
+    t.chat_secure_keys_imported,
+    t.chat_secure_operation_failed,
+    t.chat_secure_passphrase_required,
+  ]);
 
   // Send message
   const handleSend = async (e: FormEvent) => {
@@ -608,8 +632,8 @@ export function ChatPage() {
       } catch {
         setSecureStatus(
           activePeerMessageKey
-            ? "Failed to send secure attachment."
-            : "Failed to upload attachment.",
+            ? t.chat_secure_attachment_send_failed
+            : t.chat_attachment_send_failed,
         );
       } finally {
         setInput("");
@@ -622,9 +646,7 @@ export function ChatPage() {
     // Text message
     if (!input.trim()) return;
     if (!activePeerMessageKey) {
-      setSecureStatus(
-        "Secure setup is still pending for this conversation. Text messages stay paused until the other side opens chat once.",
-      );
+      setSecureStatus(t.chat_secure_setup_pending);
       return;
     }
     setSending(true);
@@ -643,7 +665,7 @@ export function ChatPage() {
       setSecureStatus(null);
     } catch {
       setInput(msg);
-      setSecureStatus("Failed to send encrypted message.");
+      setSecureStatus(t.chat_secure_message_send_failed);
     } finally {
       setSending(false);
     }
@@ -669,7 +691,7 @@ export function ChatPage() {
   if (!canViewChat) {
     return (
       <div className="rounded-2xl border bg-card p-8 text-sm text-muted-foreground shadow-sm">
-        Your current role does not have access to chat.
+        {t.chat_access_denied}
       </div>
     );
   }
@@ -799,7 +821,7 @@ export function ChatPage() {
                   <p className="text-sm font-semibold truncate">{activeName}</p>
                   <p className="text-[10px] text-muted-foreground">
                     {roleDisplay(activeRole, t)}
-                    {activePeerMessageKey ? " · End-to-end encrypted chat" : ""}
+                    {activePeerMessageKey ? ` - ${t.chat_secure_encrypted_label}` : ""}
                   </p>
                 </div>
               </div>
@@ -821,7 +843,7 @@ export function ChatPage() {
                     setKeyDialogStatus(null);
                   }}
                 >
-                  Export keys
+                  {t.chat_export_keys}
                 </Button>
                 <Button
                   type="button"
@@ -830,7 +852,7 @@ export function ChatPage() {
                   className="rounded-xl"
                   onClick={() => keyBackupInputRef.current?.click()}
                 >
-                  Import keys
+                  {t.chat_import_keys}
                 </Button>
               </div>
             </div>
@@ -848,7 +870,7 @@ export function ChatPage() {
                 const isImage =
                   !isSecureAttachment && (m.attachment_mime?.startsWith("image/") ?? false);
                 const readReceipt =
-                  mine && m.read_at ? `Seen ${timeAgo(m.read_at)}` : null;
+                  mine && m.read_at ? `${t.chat_seen} ${timeAgo(m.read_at)}` : null;
 
                 return (
                   <div key={m.id} className={cn("flex flex-col", mine ? "items-end" : "items-start")}>
@@ -870,7 +892,7 @@ export function ChatPage() {
                               {m.attachment_filename}
                             </p>
                             <p className="text-[10px] opacity-70">
-                              Secure attachment · {formatSize(m.attachment_size ?? 0)}
+                              {t.chat_secure_attachment_label} - {formatSize(m.attachment_size ?? 0)}
                             </p>
                           </div>
                           <Download className="size-3.5 shrink-0 opacity-60" />
@@ -917,7 +939,7 @@ export function ChatPage() {
                     )}
                     <span className="text-[10px] text-muted-foreground mt-0.5 px-1">
                       {timeAgo(m.created_at)}
-                      {readReceipt ? ` · ${readReceipt}` : ""}
+                      {readReceipt ? ` - ${readReceipt}` : ""}
                     </span>
                   </div>
                 );
@@ -982,12 +1004,14 @@ export function ChatPage() {
               <DialogContent className="sm:max-w-md">
                 <DialogHeader>
                   <DialogTitle>
-                    {keyDialogMode === "export" ? "Export secure chat keys" : "Import secure chat keys"}
+                    {keyDialogMode === "export"
+                      ? t.chat_export_secure_keys_title
+                      : t.chat_import_secure_keys_title}
                   </DialogTitle>
                   <DialogDescription>
                     {keyDialogMode === "export"
-                      ? "Create an encrypted backup so you can restore secure chat on another device."
-                      : "Restore an encrypted key backup to unlock older secure chats on this device."}
+                      ? t.chat_export_secure_keys_description
+                      : t.chat_import_secure_keys_description}
                   </DialogDescription>
                 </DialogHeader>
 
@@ -995,18 +1019,18 @@ export function ChatPage() {
                   {keyDialogMode === "import" && (
                     <div className="rounded-xl border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
                       {importedKeyBackup
-                        ? `Selected backup: ${importedKeyBackup.name}`
-                        : "Choose a secure chat backup file first."}
+                        ? t.chat_backup_selected.replace("{name}", importedKeyBackup.name)
+                        : t.chat_backup_choose_first}
                     </div>
                   )}
                   <div className="space-y-2">
-                    <Label htmlFor="chat-key-passphrase">Passphrase</Label>
+                    <Label htmlFor="chat-key-passphrase">{t.chat_key_passphrase}</Label>
                     <Input
                       id="chat-key-passphrase"
                       type="password"
                       value={keyPassphrase}
                       onChange={(event) => setKeyPassphrase(event.target.value)}
-                      placeholder="Enter passphrase"
+                      placeholder={t.chat_key_passphrase_placeholder}
                     />
                   </div>
                   {keyDialogStatus && (
@@ -1018,7 +1042,7 @@ export function ChatPage() {
 
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={resetKeyDialog}>
-                    Close
+                    {t.chat_close}
                   </Button>
                   <Button
                     type="button"
@@ -1030,10 +1054,10 @@ export function ChatPage() {
                     }
                   >
                     {keyDialogBusy
-                      ? "Working..."
+                      ? t.chat_working
                       : keyDialogMode === "export"
-                        ? "Export backup"
-                        : "Import backup"}
+                        ? t.chat_export_backup
+                        : t.chat_import_backup}
                   </Button>
                 </DialogFooter>
               </DialogContent>

@@ -162,11 +162,11 @@ export function PeriodSwitcher({
   tr: DashboardTranslations;
 }) {
   const labels: Record<Period, string> = {
-    "7d": tr.dash_period_7d ?? "7d",
-    "30d": tr.dash_period_30d ?? "30d",
-    "90d": tr.dash_period_90d ?? "90d",
-    "12m": tr.dash_period_12m ?? "12m",
-    all: tr.dash_period_all ?? "All",
+    "7d": tr.dash_period_7d ?? tr.common_unknown,
+    "30d": tr.dash_period_30d ?? tr.common_unknown,
+    "90d": tr.dash_period_90d ?? tr.common_unknown,
+    "12m": tr.dash_period_12m ?? tr.common_unknown,
+    all: tr.dash_period_all ?? tr.common_unknown,
   };
 
   return (

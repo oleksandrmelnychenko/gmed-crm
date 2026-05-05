@@ -1,8 +1,22 @@
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { de } from "./de";
 import { ru } from "./ru";
+import type { AdminSystemTranslations } from "./catalogs/admin-system";
+import type { CasesClinicalTranslations } from "./catalogs/cases-clinical";
+import type { ClinicalTranslations } from "./catalogs/clinical";
+import type { OperationsTranslations } from "./catalogs/operations";
+import type { PatientsPortalTranslations } from "./catalogs/patients-portal";
+import type { RevenueTranslations } from "./catalogs/revenue";
+import type { SharedCoreTranslations } from "./catalogs/shared";
 
-export interface Translations {
+export interface Translations
+  extends SharedCoreTranslations,
+    AdminSystemTranslations,
+    CasesClinicalTranslations,
+    ClinicalTranslations,
+    OperationsTranslations,
+    PatientsPortalTranslations,
+    RevenueTranslations {
   app_name: string;
   app_subtitle: string;
 
@@ -1373,6 +1387,9 @@ export function t(lang: Lang): Translations {
 }
 
 export type EnumLabelMap = Partial<Record<string, string>>;
+export type TranslationKey = {
+  [Key in keyof Translations]: Translations[Key] extends string ? Key : never;
+}[keyof Translations];
 
 export function formatUnknownValue(
   value: unknown,
@@ -1395,6 +1412,19 @@ export function formatEnumLabel(
   }
 
   return labels[value] ?? formatUnknownValue(value, translations);
+}
+
+export function formatEnumLabelFromKeys(
+  value: string | null | undefined,
+  labelKeys: Partial<Record<string, TranslationKey>>,
+  translations: Translations,
+): string {
+  if (!value) {
+    return translations.common_not_set;
+  }
+
+  const labelKey = labelKeys[value];
+  return labelKey ? translations[labelKey] : formatUnknownValue(value, translations);
 }
 
 function subscribe(onStoreChange: () => void) {

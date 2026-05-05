@@ -24,9 +24,27 @@ type WorkspaceItem = {
 
 export function AppointmentWorkspaceNav() {
   const [searchParams] = useSearchParams();
-  const { lang, t } = useLang();
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const { t } = useLang();
+  const l = (_de: string, _ru: string, en: string) => {
+    switch (en) {
+      case "Overview":
+        return t.appointments_workspace_nav_overview;
+      case "Timeline":
+        return t.appointments_workspace_nav_timeline;
+      case "Coordination":
+        return t.appointments_workspace_nav_coordination;
+      case "Clinical":
+        return t.appointments_workspace_nav_clinical;
+      case "Workflow":
+        return t.appointments_workspace_nav_workflow;
+      case "Services":
+        return t.appointments_workspace_nav_services;
+      case "Notes":
+        return t.appointments_workspace_nav_notes;
+      default:
+        return en;
+    }
+  };
 
   const appointmentId = searchParams.get("appointment");
   const currentTab = normalizeAppointmentWorkspaceTab(

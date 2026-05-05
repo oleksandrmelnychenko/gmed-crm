@@ -91,11 +91,17 @@ import {
   blankFailedLeadResolutionForm,
   blankLeadForm,
   buildLeadsPath,
+  complianceStatusLabel,
   computeLeadConversionGate,
   dashOrValue,
+  failedOutcomeLabel,
   filterLeadsByContact,
   formatDate,
   formatSize,
+  leadSourceLabel,
+  leadStageLabel,
+  leadTransitionKindLabel,
+  legalSexLabel,
   leadPermissions,
   leadToGateForm,
   nonempty,
@@ -114,13 +120,6 @@ const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
 const LEAD_DEFAULT_FROZEN_COLUMNS = ["lead"];
 const LEAD_MAX_FROZEN_COLUMNS = 2;
-const LEAD_COLUMN_GROUPS = {
-  identity: "Identity",
-  qualification: "Qualification",
-  contact: "Contact",
-  origin: "Origin",
-  lifecycle: "Lifecycle",
-};
 const FAILED_OUTCOME_OPTIONS = ["archived", "delete_anonymized"] as const;
 type LeadPaneTab = "overview" | "process" | "qualification" | "details";
 const LEAD_REALTIME_EVENTS = [
@@ -162,6 +161,17 @@ export function LeadsPage() {
   const { t, lang } = useLang();
   const l = (de: string, ru: string, en: string) =>
     lang === "de" ? de : lang === "ru" ? ru : en;
+  const locale = lang === "de" ? "de-DE" : "ru-RU";
+  const leadColumnGroupLabels = useMemo(
+    () => ({
+      identity: t.lead_column_group_identity,
+      qualification: t.lead_column_group_qualification,
+      contact: t.lead_column_group_contact,
+      origin: t.lead_column_group_origin,
+      lifecycle: t.lead_column_group_lifecycle,
+    }),
+    [t],
+  );
   const { staffGo } = useStaffNavigate();
   const failedLoadMessage = t.common_failed_load;
   const [searchParams, setSearchParams] = useSearchParams();
@@ -278,31 +288,31 @@ export function LeadsPage() {
         filterType: "enum",
         filterOptions: STATUS_OPTIONS.map((status) => ({
           value: status,
-          label: statusLabel(status),
+          label: statusLabel(status, t),
         })),
         group: "qualification",
         sortable: true,
         width: 180,
         render: (row) => (
           <StatusBadge tone={leadStatusTone(row.qualification_status)}>
-            {statusLabel(row.qualification_status)}
+            {statusLabel(row.qualification_status, t)}
           </StatusBadge>
         ),
       },
       {
         id: "compliance",
-        label: "Compliance",
+        label: t.lead_compliance_status,
         accessor: (row) => row.compliance_status ?? "",
         filterType: "enum",
         filterOptions: COMPLIANCE_OPTIONS.map((status) => ({
           value: status,
-          label: statusLabel(status),
+          label: complianceStatusLabel(status, t),
         })),
         group: "qualification",
         width: 170,
         render: (row) => (
           <StatusBadge tone={complianceTone(row.compliance_status)}>
-            {row.compliance_status ? statusLabel(row.compliance_status) : t.common_not_set}
+            {complianceStatusLabel(row.compliance_status, t)}
           </StatusBadge>
         ),
       },
@@ -331,7 +341,7 @@ export function LeadsPage() {
         filterType: "text",
         group: "origin",
         width: 180,
-        render: (row) => <span className="text-xs text-foreground">{row.source || t.common_not_set}</span>,
+        render: (row) => <span className="text-xs text-foreground">{leadSourceLabel(row.source, t)}</span>,
       },
       {
         id: "country",
@@ -344,43 +354,38 @@ export function LeadsPage() {
       },
       {
         id: "created",
-        label: "Date",
+        label: t.patients_col_created_at,
         accessor: (row) => row.created_at,
         filterType: "date",
         group: "lifecycle",
         sortable: true,
         width: 130,
-        render: (row) => <span className="text-xs text-foreground">{formatDate(row.created_at)}</span>,
+        render: (row) => <span className="text-xs text-foreground">{formatDate(row.created_at, locale, t.common_not_set)}</span>,
       },
       {
         id: "failed",
-        label: "Failed",
+        label: t.lead_failed_outcome,
         accessor: (row) => row.failed_outcome?.status ?? "",
         filterType: "enum",
         filterOptions: FAILED_OUTCOME_OPTIONS.map((status) => ({
           value: status,
-          label: statusLabel(status),
+          label: failedOutcomeLabel(status, t),
         })),
         group: "lifecycle",
         width: 170,
         render: (row) =>
           row.failed_outcome?.status && row.failed_outcome.status !== "none" ? (
             <StatusBadge tone={failedOutcomeTone(row.failed_outcome.status)}>
-              {statusLabel(row.failed_outcome.status)}
+              {failedOutcomeLabel(row.failed_outcome.status, t)}
             </StatusBadge>
           ) : (
-            <span className="text-xs text-muted-foreground">-</span>
+            <span className="text-xs text-muted-foreground">{t.common_not_set}</span>
           ),
       },
     ],
     [
-      t.common_not_set,
-      t.field_phone,
-      t.leads_source,
-      t.leads_title,
-      t.patients_email,
-      t.providers_country,
-      t.users_status,
+      locale,
+      t,
     ]
   );
 
@@ -681,10 +686,10 @@ export function LeadsPage() {
     key: LeadPaneTab;
     label: string;
   }> = [
-    { key: "overview", label: l("Огляд", "Обзор", "Overview") },
-    { key: "process", label: l("Процес", "Процесс", "Process") },
-    { key: "qualification", label: l("Кваліфікація", "Квалификация", "Qualification") },
-    { key: "details", label: l("Деталі", "Детали", "Details") },
+    { key: "overview", label: t.lead_tab_overview },
+    { key: "process", label: t.lead_tab_process },
+    { key: "qualification", label: t.lead_tab_qualification },
+    { key: "details", label: t.lead_tab_details },
   ];
 
   const detailPaneNode: ReactNode = (
@@ -719,7 +724,7 @@ export function LeadsPage() {
         {detailLoading ? (
           <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
             <LoaderCircle className="mr-2 size-4 animate-spin" />
-            Loading lead
+            {t.lead_loading_detail}
           </div>
         ) : detailError ? (
           <div className="pt-1">
@@ -732,34 +737,34 @@ export function LeadsPage() {
                 <section className={cardClass("p-5")}>
                   <div className="flex flex-wrap items-center gap-2">
                     <StatusBadge tone={leadStatusTone(detail.qualification_status)}>
-                      {statusLabel(detail.qualification_status)}
+                      {statusLabel(detail.qualification_status, t)}
                     </StatusBadge>
                     <StatusBadge tone={complianceTone(detail.compliance_status)}>
-                      {`Compliance ${detail.compliance_status ?? t.common_not_set}`}
+                      {`${t.lead_compliance_status}: ${complianceStatusLabel(detail.compliance_status, t)}`}
                     </StatusBadge>
                     {detail.failed_outcome.status !== "none" ? (
                       <StatusBadge tone={failedOutcomeTone(detail.failed_outcome.status)}>
-                        {detail.failed_outcome.status === "delete_anonymized"
-                          ? "Deleted payload"
-                          : "Failed lead archived"}
+                        {failedOutcomeLabel(detail.failed_outcome.status, t)}
                       </StatusBadge>
                     ) : null}
                     {detail.converted_patient_id ? (
-                      <StatusBadge tone="success">Converted</StatusBadge>
+                      <StatusBadge tone="success">{statusLabel("converted", t)}</StatusBadge>
                     ) : null}
                   </div>
                   <h2 className="mt-4 text-2xl font-semibold text-slate-950">
                     {detail.first_name} {detail.last_name}
                   </h2>
-                  <p className="mt-2 text-sm text-slate-600">Created {formatDate(detail.created_at)}</p>
+                  <p className="mt-2 text-sm text-slate-600">
+                    {t.users_created} {formatDate(detail.created_at, locale, t.common_not_set)}
+                  </p>
                 </section>
 
                 <section className={cardClass("p-5")}>
-                  <SectionTitle>Contact and origin</SectionTitle>
+                  <SectionTitle>{t.lead_section_contact_origin}</SectionTitle>
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
                     <DetailCard label={t.patients_email} value={detail.email || t.common_not_set} />
                     <DetailCard label={t.field_phone} value={detail.phone || t.common_not_set} />
-                    <DetailCard label={t.leads_source} value={detail.source || t.common_not_set} />
+                    <DetailCard label={t.leads_source} value={leadSourceLabel(detail.source, t)} />
                     <DetailCard label={t.providers_country} value={detail.country || t.common_not_set} />
                   </div>
                 </section>
@@ -768,21 +773,21 @@ export function LeadsPage() {
                   <section className={cardClass("p-5")}>
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="outline" className="rounded-full border-sky-200 bg-sky-50 text-sky-700">
-                        From website wizard
+                        {t.lead_from_website_wizard}
                       </Badge>
                       {detail.flow ? (
                         <Badge variant="outline" className="rounded-full">
-                          Flow: {detail.flow}
+                          {t.lead_flow}: {detail.flow}
                         </Badge>
                       ) : null}
                       {detail.locale ? (
                         <Badge variant="outline" className="rounded-full">
-                          Locale: {detail.locale}
+                          {t.lead_locale}: {detail.locale}
                         </Badge>
                       ) : null}
                       {detail.submitted_at ? (
                         <span className="text-xs text-slate-500">
-                          Submitted {formatDate(detail.submitted_at)}
+                          {t.lead_submitted_at} {formatDate(detail.submitted_at, locale, t.common_not_set)}
                         </span>
                       ) : null}
                     </div>
@@ -790,10 +795,10 @@ export function LeadsPage() {
                 ) : null}
 
                 <section className={cardClass("p-5")}>
-                  <SectionTitle>Identity</SectionTitle>
+                  <SectionTitle>{t.lead_section_identity}</SectionTitle>
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
                     <DetailCard
-                      label="Full name"
+                      label={t.lead_full_name}
                       value={dashOrValue(
                         [
                           detail.first_name,
@@ -805,21 +810,21 @@ export function LeadsPage() {
                           .join(" ")
                       )}
                     />
-                    <DetailCard label="Date of birth" value={dashOrValue(detail.date_of_birth)} />
-                    <DetailCard label="Legal sex" value={dashOrValue(detail.legal_sex)} />
-                    <DetailCard label="Primary language" value={dashOrValue(detail.primary_language)} />
-                    <DetailCard label="Needs interpreter" value={yesNo(detail.needs_interpreter)} />
+                    <DetailCard label={t.field_birth_date} value={dashOrValue(detail.date_of_birth, t)} />
+                    <DetailCard label={t.lead_legal_sex} value={legalSexLabel(detail.legal_sex, t)} />
+                    <DetailCard label={t.lead_primary_language} value={dashOrValue(detail.primary_language, t)} />
+                    <DetailCard label={t.lead_needs_interpreter} value={yesNo(detail.needs_interpreter, t)} />
                   </div>
                 </section>
 
                 <section className={cardClass("p-5")}>
-                  <SectionTitle>Address</SectionTitle>
+                  <SectionTitle>{t.lead_section_address}</SectionTitle>
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
-                    <DetailCard label="Country" value={dashOrValue(detail.country)} />
-                    <DetailCard label="City" value={dashOrValue(detail.city)} />
-                    <DetailCard label="State / region" value={dashOrValue(detail.state)} />
-                    <DetailCard label="Zip code" value={dashOrValue(detail.zip_code)} />
-                    <DetailCard label="Street" value={dashOrValue(detail.street_address)} />
+                    <DetailCard label={t.providers_country} value={dashOrValue(detail.country, t)} />
+                    <DetailCard label={t.providers_city} value={dashOrValue(detail.city, t)} />
+                    <DetailCard label={t.lead_state_region} value={dashOrValue(detail.state, t)} />
+                    <DetailCard label={t.lead_zip_code} value={dashOrValue(detail.zip_code, t)} />
+                    <DetailCard label={t.providers_street} value={dashOrValue(detail.street_address, t)} />
                   </div>
                 </section>
               </>
@@ -830,9 +835,9 @@ export function LeadsPage() {
                 <section className={cardClass("p-5")}>
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <SectionTitle>Process readiness</SectionTitle>
+                      <SectionTitle>{t.lead_section_process_readiness}</SectionTitle>
                       <p className="mt-1 text-sm text-slate-600">
-                        Qualification and conversion are now blocked by explicit gate checks.
+                        {t.lead_process_readiness_description}
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -845,7 +850,9 @@ export function LeadsPage() {
                             : "border-amber-200 bg-amber-50 text-amber-700"
                         )}
                       >
-                        Qualification {detail.readiness.qualification_ready ? "ready" : "blocked"}
+                        {detail.readiness.qualification_ready
+                          ? t.lead_qualification_ready
+                          : t.lead_qualification_blocked}
                       </Badge>
                       <Badge
                         variant="outline"
@@ -856,7 +863,9 @@ export function LeadsPage() {
                             : "border-rose-200 bg-rose-50 text-rose-700"
                         )}
                       >
-                        Conversion {detail.readiness.conversion_ready ? "ready" : "blocked"}
+                        {detail.readiness.conversion_ready
+                          ? t.lead_conversion_ready
+                          : t.lead_conversion_blocked}
                       </Badge>
                     </div>
                   </div>
@@ -871,7 +880,7 @@ export function LeadsPage() {
                           <div>
                             <p className="text-sm font-medium text-slate-900">{check.label}</p>
                             <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">
-                              Blocks {check.blocking_for}
+                              {t.lead_blocks} {leadStageLabel(check.blocking_for, t)}
                             </p>
                           </div>
                           <Badge
@@ -883,7 +892,7 @@ export function LeadsPage() {
                                 : "border-rose-200 bg-rose-50 text-rose-700"
                             )}
                           >
-                            {check.passed ? "ok" : "missing"}
+                            {check.passed ? t.lead_ok : t.lead_missing}
                           </Badge>
                         </div>
                       </div>
@@ -893,7 +902,7 @@ export function LeadsPage() {
                   {detail.readiness.blocking_reasons.length > 0 ? (
                     <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3">
                       <p className="text-sm font-semibold text-rose-700">
-                        Blocking reasons
+                        {t.lead_blocking_reasons}
                       </p>
                       <ul className="mt-2 space-y-1 text-sm text-rose-700">
                         {detail.readiness.blocking_reasons.map((reason) => (
@@ -907,24 +916,24 @@ export function LeadsPage() {
                 <section className={cardClass("p-5")}>
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <SectionTitle>Lead lifecycle</SectionTitle>
+                      <SectionTitle>{t.lead_section_lifecycle}</SectionTitle>
                       <p className="mt-1 text-sm text-slate-600">
-                        Sequential lifecycle history for qualification, failed-lead handling and conversion.
+                        {t.lead_lifecycle_description}
                       </p>
                     </div>
                     <StatusBadge tone="neutral">
-                      {`Current stage ${detail.lifecycle.current_stage}`}
+                      {`${t.lead_current_stage}: ${leadStageLabel(detail.lifecycle.current_stage, t)}`}
                     </StatusBadge>
                   </div>
 
                   <div className="mt-4 grid gap-3 md:grid-cols-2">
                     <DetailCard
-                      label="Current stage"
-                      value={detail.lifecycle.current_stage}
+                      label={t.lead_current_stage}
+                      value={leadStageLabel(detail.lifecycle.current_stage, t)}
                     />
                     <DetailCard
-                      label="Entered at"
-                      value={detail.lifecycle.stage_entered_at ? formatDate(detail.lifecycle.stage_entered_at) : "Not set"}
+                      label={t.lead_entered_at}
+                      value={formatDate(detail.lifecycle.stage_entered_at, locale, t.common_not_set)}
                     />
                   </div>
 
@@ -937,14 +946,16 @@ export function LeadsPage() {
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <div>
                             <p className="text-sm font-medium text-slate-900">
-                              {event.from_stage ? `${event.from_stage} -> ${event.to_stage}` : event.to_stage}
+                              {event.from_stage
+                                ? `${leadStageLabel(event.from_stage, t)} -> ${leadStageLabel(event.to_stage, t)}`
+                                : leadStageLabel(event.to_stage, t)}
                             </p>
                             <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">
-                              {event.transition_kind}
+                              {leadTransitionKindLabel(event.transition_kind, t)}
                             </p>
                           </div>
                           <span className="text-xs text-slate-500">
-                            {formatDate(event.created_at)}
+                            {formatDate(event.created_at, locale, t.common_not_set)}
                           </span>
                         </div>
                         {event.note ? (
@@ -963,9 +974,9 @@ export function LeadsPage() {
                   <section className={cardClass("p-5")}>
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <SectionTitle>Qualification gate data</SectionTitle>
+                        <SectionTitle>{t.lead_qualification_gate_data}</SectionTitle>
                         <p className="mt-1 text-sm text-slate-600">
-                          Fill missing compliance and identity fields directly from the lead workspace.
+                          {t.lead_qualification_gate_description}
                         </p>
                       </div>
                     </div>
@@ -1015,7 +1026,7 @@ export function LeadsPage() {
                           />
                         </LeadField>
                         <LeadField
-                          label="Primary language"
+                          label={t.lead_primary_language}
                           htmlFor="lead-gate-primary-language"
                         >
                           <Input
@@ -1032,7 +1043,7 @@ export function LeadsPage() {
                           />
                         </LeadField>
                         <LeadField
-                          label="Date of birth"
+                          label={t.field_birth_date}
                           htmlFor="lead-gate-date-of-birth"
                         >
                           <Input
@@ -1049,7 +1060,7 @@ export function LeadsPage() {
                             }
                           />
                         </LeadField>
-                        <LeadField label="Legal sex" htmlFor="lead-gate-legal-sex">
+                        <LeadField label={t.lead_legal_sex} htmlFor="lead-gate-legal-sex">
                           <NativeComboboxSelect
                             value={gateForm.legalSex || "__unset__"}
                             onChange={(event) =>
@@ -1070,13 +1081,13 @@ export function LeadsPage() {
                             <option value="__unset__">{t.common_not_set}</option>
                             {LEGAL_SEX_OPTIONS.map((option) => (
                               <option key={option} value={option}>
-                                {option}
+                                {legalSexLabel(option, t)}
                               </option>
                             ))}
                           </NativeComboboxSelect>
                         </LeadField>
                         <LeadField
-                          label="Compliance status"
+                          label={t.lead_compliance_status}
                           htmlFor="lead-gate-compliance-status"
                         >
                           <NativeComboboxSelect
@@ -1092,7 +1103,7 @@ export function LeadsPage() {
                           >
                             {COMPLIANCE_OPTIONS.map((option) => (
                               <option key={option} value={option}>
-                                {option}
+                                {complianceStatusLabel(option, t)}
                               </option>
                             ))}
                           </NativeComboboxSelect>
@@ -1130,7 +1141,7 @@ export function LeadsPage() {
                               )
                             }
                           />
-                          <span>Healthcare consent available</span>
+                          <span>{t.lead_healthcare_consent_available}</span>
                         </label>
                         <label className={cn("flex items-start gap-3 rounded-lg px-4 py-3 text-sm text-foreground", tokens.surface.mutedCard)}>
                           <input
@@ -1148,14 +1159,14 @@ export function LeadsPage() {
                               )
                             }
                           />
-                          <span>Privacy practices accepted</span>
+                          <span>{t.lead_privacy_practices_accepted}</span>
                         </label>
                       </div>
 
                       <div className="flex justify-end">
                         <Button type="submit" disabled={gateBusy}>
                           {gateBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                          Save gate data
+                          {t.lead_save_gate_data}
                         </Button>
                       </div>
                     </form>
@@ -1166,9 +1177,9 @@ export function LeadsPage() {
                   <section className={cardClass("p-5")}>
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <SectionTitle>Failed-lead resolution</SectionTitle>
+                        <SectionTitle>{t.lead_failed_resolution_title}</SectionTitle>
                         <p className="mt-1 text-sm text-slate-600">
-                          Use the controlled archive or delete-anonymize flow instead of setting archived directly.
+                          {t.lead_failed_resolution_description}
                         </p>
                       </div>
                       {detail.failed_outcome.status !== "none" ? (
@@ -1181,7 +1192,7 @@ export function LeadsPage() {
                               : "border-slate-200 bg-slate-100 text-slate-700"
                           )}
                         >
-                          {detail.failed_outcome.status}
+                          {failedOutcomeLabel(detail.failed_outcome.status, t)}
                         </Badge>
                       ) : null}
                     </div>
@@ -1189,23 +1200,21 @@ export function LeadsPage() {
                     {detail.failed_outcome.status !== "none" ? (
                       <div className="mt-4 grid gap-3 md:grid-cols-2">
                         <DetailCard
-                          label="Resolution"
-                          value={detail.failed_outcome.status}
+                          label={t.lead_resolution}
+                          value={failedOutcomeLabel(detail.failed_outcome.status, t)}
                         />
                         <DetailCard
-                          label="Processed at"
+                          label={t.lead_processed_at}
                           value={
-                            detail.failed_outcome.processed_at
-                              ? formatDate(detail.failed_outcome.processed_at)
-                              : "Not set"
+                            formatDate(detail.failed_outcome.processed_at, locale, t.common_not_set)
                           }
                         />
                         <DetailCard
-                          label="Failed from"
-                          value={detail.failed_outcome.from_status || t.common_not_set}
+                          label={t.lead_failed_from}
+                          value={leadStageLabel(detail.failed_outcome.from_status, t)}
                         />
                         <DetailCard
-                          label="Reason"
+                          label={t.lead_failure_reason}
                           value={detail.failed_outcome.reason || t.common_not_set}
                         />
                       </div>
@@ -1214,7 +1223,7 @@ export function LeadsPage() {
                     {detail.failed_outcome.status === "none" ? (
                       <form className="mt-4 space-y-4" onSubmit={handleResolveFailedLead}>
                         <div className="grid gap-4 md:grid-cols-2">
-                          <LeadField label="Resolution" htmlFor="lead-failed-resolution">
+                          <LeadField label={t.lead_resolution} htmlFor="lead-failed-resolution">
                             <NativeComboboxSelect
                               value={failedLeadForm.resolution}
                               onChange={(event) =>
@@ -1225,13 +1234,13 @@ export function LeadsPage() {
                               }
                             className={selectClassName}
                           >
-                            <option value="archive">Archive</option>
+                            <option value="archive">{t.lead_archive}</option>
                             {user?.role === "patient_manager" || user?.role === "ceo" ? (
-                              <option value="delete">Delete and anonymize</option>
+                              <option value="delete">{t.lead_delete_and_anonymize}</option>
                             ) : null}
                           </NativeComboboxSelect>
                           </LeadField>
-                          <LeadField label="Failure reason" htmlFor="lead-failed-reason">
+                          <LeadField label={t.lead_failure_reason} htmlFor="lead-failed-reason">
                             <Input
                               id="lead-failed-reason"
                               className={shellInputClassName}
@@ -1247,7 +1256,7 @@ export function LeadsPage() {
                           </LeadField>
                         </div>
 
-                        <LeadField label="Internal note" htmlFor="lead-failed-note">
+                        <LeadField label={t.lead_internal_note} htmlFor="lead-failed-note">
                           <textarea
                             id="lead-failed-note"
                             value={failedLeadForm.note}
@@ -1264,14 +1273,14 @@ export function LeadsPage() {
 
                         {failedLeadForm.resolution === "delete" ? (
                           <Banner tone="warning">
-                            Delete keeps the lead row for audit trail, but removes personal payload and attachments.
+                            {t.lead_delete_warning}
                           </Banner>
                         ) : null}
 
                         <div className="flex justify-end">
                           <Button type="submit" disabled={failedLeadBusy}>
                             {failedLeadBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                            Save failed-lead resolution
+                            {t.lead_save_failed_resolution}
                           </Button>
                         </div>
                       </form>
@@ -1290,16 +1299,16 @@ export function LeadsPage() {
                   detail.has_medical_records ||
                   detail.has_travel_documents !== null) ? (
                   <section className={cardClass("p-5")}>
-                    <SectionTitle>Eligibility & path</SectionTitle>
+                    <SectionTitle>{t.lead_section_eligibility_path}</SectionTitle>
                     <div className="mt-4 grid gap-4 md:grid-cols-2">
-                      <DetailCard label="Location" value={dashOrValue(detail.location)} />
-                      <DetailCard label="Location detailed" value={dashOrValue(detail.location_detailed)} />
-                      <DetailCard label="Wants membership" value={yesNo(detail.wants_membership)} />
-                      <DetailCard label="Selected program" value={dashOrValue(detail.selected_program)} />
-                      <DetailCard label="Can travel" value={yesNo(detail.can_travel)} />
-                      <DetailCard label="Has medical records" value={dashOrValue(detail.has_medical_records)} />
-                      <DetailCard label="Records in accepted language" value={yesNo(detail.records_in_accepted_language)} />
-                      <DetailCard label="Has travel documents" value={yesNo(detail.has_travel_documents)} />
+                      <DetailCard label={t.lead_location} value={dashOrValue(detail.location, t)} />
+                      <DetailCard label={t.lead_location_detailed} value={dashOrValue(detail.location_detailed, t)} />
+                      <DetailCard label={t.lead_wants_membership} value={yesNo(detail.wants_membership, t)} />
+                      <DetailCard label={t.lead_selected_program} value={dashOrValue(detail.selected_program, t)} />
+                      <DetailCard label={t.lead_can_travel} value={yesNo(detail.can_travel, t)} />
+                      <DetailCard label={t.lead_has_medical_records} value={dashOrValue(detail.has_medical_records, t)} />
+                      <DetailCard label={t.lead_records_in_accepted_language} value={yesNo(detail.records_in_accepted_language, t)} />
+                      <DetailCard label={t.lead_has_travel_documents} value={yesNo(detail.has_travel_documents, t)} />
                     </div>
                   </section>
                 ) : null}
@@ -1309,10 +1318,10 @@ export function LeadsPage() {
                   detail.primary_concern_text ||
                   detail.additional_concerns) ? (
                   <section className={cardClass("p-5")}>
-                    <SectionTitle>Health & concern</SectionTitle>
+                    <SectionTitle>{t.lead_section_health_concern}</SectionTitle>
                     <div className="mt-4 grid gap-4 md:grid-cols-2">
-                      <DetailCard label="Currently in treatment" value={yesNo(detail.currently_in_treatment)} />
-                      <DetailCard label="Health risk for travel" value={yesNo(detail.has_health_risk_for_travel)} />
+                      <DetailCard label={t.lead_currently_in_treatment} value={yesNo(detail.currently_in_treatment, t)} />
+                      <DetailCard label={t.lead_health_risk_for_travel} value={yesNo(detail.has_health_risk_for_travel, t)} />
                     </div>
                     {detail.primary_concern_text ? (
                       <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">
@@ -1331,14 +1340,14 @@ export function LeadsPage() {
                   detail.has_insurance !== null ||
                   detail.insurance_covers_germany) ? (
                   <section className={cardClass("p-5")}>
-                    <SectionTitle>Services & insurance</SectionTitle>
+                    <SectionTitle>{t.lead_section_services_insurance}</SectionTitle>
                     <div className="mt-4 grid gap-4 md:grid-cols-2">
                       <DetailCard
-                        label="Services"
+                        label={t.lead_services}
                         value={detail.services && detail.services.length > 0 ? detail.services.join(", ") : t.common_not_set}
                       />
-                      <DetailCard label="Has insurance" value={yesNo(detail.has_insurance)} />
-                      <DetailCard label="Insurance covers Germany" value={dashOrValue(detail.insurance_covers_germany)} />
+                      <DetailCard label={t.lead_has_insurance} value={yesNo(detail.has_insurance, t)} />
+                      <DetailCard label={t.lead_insurance_covers_germany} value={dashOrValue(detail.insurance_covers_germany, t)} />
                     </div>
                   </section>
                 ) : null}
@@ -1347,10 +1356,10 @@ export function LeadsPage() {
                   detail.visit_timing ||
                   detail.message) ? (
                   <section className={cardClass("p-5")}>
-                    <SectionTitle>Wrap up</SectionTitle>
+                    <SectionTitle>{t.lead_section_wrap_up}</SectionTitle>
                     <div className="mt-4 grid gap-4 md:grid-cols-2">
-                      <DetailCard label="Preferred location" value={dashOrValue(detail.preferred_location)} />
-                      <DetailCard label="Visit timing" value={dashOrValue(detail.visit_timing)} />
+                      <DetailCard label={t.lead_preferred_location} value={dashOrValue(detail.preferred_location, t)} />
+                      <DetailCard label={t.lead_visit_timing} value={dashOrValue(detail.visit_timing, t)} />
                     </div>
                     {detail.message ? (
                       <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">
@@ -1362,21 +1371,21 @@ export function LeadsPage() {
 
                 {detail.intake_source === "visitor_facade" ? (
                   <section className={cardClass("p-5")}>
-                    <SectionTitle>Consents</SectionTitle>
+                    <SectionTitle>{t.lead_section_consents}</SectionTitle>
                     <div className="mt-4 grid gap-4 md:grid-cols-2">
-                      <DetailCard label="Automated contact" value={yesNo(detail.consent_automated_contact)} />
-                      <DetailCard label="Healthcare" value={yesNo(detail.consent_healthcare)} />
-                      <DetailCard label="Opt out" value={yesNo(detail.consent_opt_out)} />
-                      <DetailCard label="Privacy practices" value={yesNo(detail.consent_privacy_practices)} />
-                      <DetailCard label="Email consent" value={yesNo(detail.email_consent)} />
-                      <DetailCard label="WhatsApp consent" value={yesNo(detail.whatsapp_consent)} />
+                      <DetailCard label={t.lead_consent_automated_contact} value={yesNo(detail.consent_automated_contact, t)} />
+                      <DetailCard label={t.lead_consent_healthcare} value={yesNo(detail.consent_healthcare, t)} />
+                      <DetailCard label={t.lead_consent_opt_out} value={yesNo(detail.consent_opt_out, t)} />
+                      <DetailCard label={t.lead_consent_privacy_practices} value={yesNo(detail.consent_privacy_practices, t)} />
+                      <DetailCard label={t.lead_email_consent} value={yesNo(detail.email_consent, t)} />
+                      <DetailCard label={t.lead_whatsapp_consent} value={yesNo(detail.whatsapp_consent, t)} />
                     </div>
                   </section>
                 ) : null}
 
                 <section className={cardClass("p-5")}>
                   <SectionTitle>
-                    {`Attachments (${detail.attachments?.length ?? 0})`}
+                    {`${t.lead_attachments} (${detail.attachments?.length ?? 0})`}
                   </SectionTitle>
                   {detail.attachments && detail.attachments.length > 0 ? (
                     <ul className="mt-4 space-y-2">
@@ -1388,7 +1397,7 @@ export function LeadsPage() {
                           <div>
                             <div className="font-medium text-slate-800">{file.file_name}</div>
                             <div className="text-xs text-slate-500">
-                              {dashOrValue(file.content_type)} - {formatSize(file.size_bytes)}
+                              {dashOrValue(file.content_type, t)} - {formatSize(file.size_bytes)}
                             </div>
                           </div>
                           <Button
@@ -1410,22 +1419,22 @@ export function LeadsPage() {
                                 setDetailError(
                                   downloadErr instanceof Error
                                     ? downloadErr.message
-                                    : "Failed to download attachment"
+                                    : t.lead_download_attachment_failed
                                 );
                               }
                             }}
                           >
-                            Download
+                            {t.lead_download_attachment}
                           </Button>
                         </li>
                       ))}
                     </ul>
                   ) : (
-                    <p className="mt-3 text-sm text-slate-500">No files uploaded.</p>
+                    <p className="mt-3 text-sm text-slate-500">{t.lead_no_files_uploaded}</p>
                   )}
                   {detail.notes ? (
                     <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700">
-                      <div className="mb-1 text-xs uppercase tracking-wide text-slate-400">Internal notes</div>
+                      <div className="mb-1 text-xs uppercase tracking-wide text-slate-400">{t.lead_internal_note}</div>
                       {detail.notes}
                     </div>
                   ) : null}
@@ -1435,7 +1444,7 @@ export function LeadsPage() {
           </div>
         ) : (
           <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
-            Select a lead from the queue.
+            {t.lead_select_from_queue}
           </div>
         )}
       </div>
@@ -1480,14 +1489,14 @@ export function LeadsPage() {
             icon={CheckCircle2}
             label={t.users_status}
             value={String(stats?.qualified_this_month ?? 0)}
-            description={statusLabel("qualified")}
+            description={statusLabel("qualified", t)}
             tone="emerald"
           />
           <AdminInlineMetric
             icon={UserPlus}
             label={t.leads_convert}
             value={String(stats?.converted_this_month ?? 0)}
-            description={statusLabel("converted")}
+            description={statusLabel("converted", t)}
             tone="amber"
           />
           <AdminInlineMetric
@@ -1501,7 +1510,7 @@ export function LeadsPage() {
 
         <div className="grid gap-4 lg:grid-cols-3">
           <div className="rounded-[1.75rem] border border-border/70 bg-card p-5 shadow-[0_20px_60px_rgba(15,23,42,0.05)] lg:col-span-2">
-            <h2 className="mb-4 text-sm font-semibold text-slate-900">Monthly growth</h2>
+            <h2 className="mb-4 text-sm font-semibold text-slate-900">{t.leads_monthly_growth}</h2>
             <div className="flex h-48 items-end gap-2">
               {monthly.map((item) => {
                 const pct = (item.count / maxMonthly) * 100;
@@ -1518,7 +1527,7 @@ export function LeadsPage() {
           </div>
 
           <div className="rounded-[1.75rem] border border-border/70 bg-card p-5 shadow-[0_20px_60px_rgba(15,23,42,0.05)]">
-            <h2 className="mb-2 text-sm font-semibold text-slate-900">By status</h2>
+            <h2 className="mb-2 text-sm font-semibold text-slate-900">{t.leads_by_status}</h2>
             <p className="mb-4 text-3xl font-bold text-slate-950">{totalByStatus}</p>
             <div className="space-y-3">
               {byStatus.map((item) => {
@@ -1526,7 +1535,7 @@ export function LeadsPage() {
                 return (
                   <div key={item.status} className="space-y-1">
                     <div className="flex items-center justify-between text-xs text-slate-600">
-                      <span>{item.status}</span>
+                      <span>{statusLabel(item.status, t)}</span>
                       <span className="font-medium">{item.count}</span>
                     </div>
                     <div className="h-2 w-full rounded-full bg-slate-100">
@@ -1588,7 +1597,7 @@ export function LeadsPage() {
               <option value="__all__">{t.users_status}</option>
               {STATUS_OPTIONS.map((status) => (
                 <option key={status} value={status}>
-                  {statusLabel(status)}
+                  {statusLabel(status, t)}
                 </option>
               ))}
             </NativeComboboxSelect>
@@ -1609,10 +1618,10 @@ export function LeadsPage() {
               className={cn(selectClassName, "h-8 w-[170px] bg-background text-[13px]")}
             >
               <option value="false">
-                {l("Aktive Leads", "Активные лиды", "Active leads")}
+                {t.lead_filter_active_leads}
               </option>
               <option value="true">
-                {l("Mit Archiv", "С архивом", "With archive")}
+                {t.lead_filter_with_archive}
               </option>
             </NativeComboboxSelect>
 
@@ -1648,7 +1657,7 @@ export function LeadsPage() {
             defaultDensity="compact"
             defaultFrozenColumns={LEAD_DEFAULT_FROZEN_COLUMNS}
             dictionary={t as unknown as Record<string, string>}
-            groupLabels={LEAD_COLUMN_GROUPS}
+            groupLabels={leadColumnGroupLabels}
             loading={loading}
             maxFrozenColumns={LEAD_MAX_FROZEN_COLUMNS}
             toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
@@ -1688,7 +1697,7 @@ export function LeadsPage() {
                       {actionBusy === `status:${row.id}:qualified` ? (
                         <LoaderCircle className="size-3 animate-spin" />
                       ) : null}
-                      Qualify
+                      {t.lead_qualify}
                     </Button>
                   ) : null}
                   {canConvertRole ? (
@@ -1707,7 +1716,7 @@ export function LeadsPage() {
                       {actionBusy === `convert:${row.id}` ? (
                         <LoaderCircle className="size-3 animate-spin" />
                       ) : null}
-                      Convert
+                      {t.lead_convert_action}
                     </Button>
                   ) : null}
                   {canResolveFailed ? (
@@ -1725,7 +1734,7 @@ export function LeadsPage() {
                         openLeadDetail(row.id);
                       }}
                     >
-                      Resolve
+                      {t.lead_resolve}
                     </Button>
                   ) : null}
                 </>
@@ -1733,9 +1742,9 @@ export function LeadsPage() {
             }}
             emptyState={
               <div className={cn("rounded-xl px-6 py-10 text-center", tokens.surface.dashed)}>
-                <div className="text-sm font-medium text-foreground">No leads found</div>
+                <div className="text-sm font-medium text-foreground">{t.lead_empty_title}</div>
                 <p className="mt-2 text-xs text-muted-foreground">
-                  Adjust filters or create a new lead from the right-side flow.
+                  {t.lead_empty_description}
                 </p>
               </div>
             }
@@ -1749,7 +1758,7 @@ export function LeadsPage() {
           <form onSubmit={handleCreate} className="flex h-full flex-col">
             <AdminSheetScaffold
               title={l("Neuer Lead", "Новый лид", "New lead")}
-              description="Capture intake data and keep qualification flow consistent."
+              description={t.lead_create_description}
               footer={(
                 <SheetFormFooter
                   cancelLabel={l("Abbrechen", "Отмена", "Cancel")}
@@ -1851,25 +1860,16 @@ export function LeadsPage() {
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{l("Lead in Patienten umwandeln?", "Convert lead to patient?", "Convert lead to patient?")}</DialogTitle>
+            <DialogTitle>{t.lead_convert_dialog_title}</DialogTitle>
             <DialogDescription>
               {pendingConvertLead ? (
                 <>
-                  {l("Dadurch wird eine Patientenakte fuer", "This creates a patient record for", "This will create a patient record for")}{" "}
+                  {t.lead_convert_dialog_start}{" "}
                   <span className="font-medium text-slate-900">
                     {pendingConvertLead.first_name} {pendingConvertLead.last_name}
                   </span>
-                  {l(
-                    ", Sie als Patientenmanager zuweisen und die standardmaessige Workflow-Checkliste vorbereiten. Der Lead selbst wechselt in den Status",
-                    ", assign patient manager ownership and prepare the default workflow checklist. The lead then moves to status",
-                    ", assign you as the patient manager, and bootstrap the default workflow checklist. The lead itself moves to the",
-                  )}{" "}
-                  <span className="font-mono text-xs">{l("converted", "converted", "converted")}</span>{" "}
-                  {l(
-                    "umgeschaltet. Diese Aktion kann nicht rueckgaengig gemacht werden.",
-                    "this action cannot be undone.",
-                    "state. This action cannot be undone.",
-                  )}
+                  {t.lead_convert_dialog_end}{" "}
+                  <span className="font-mono text-xs">{statusLabel("converted", t)}</span>.
                 </>
               ) : null}
             </DialogDescription>
@@ -1878,7 +1878,7 @@ export function LeadsPage() {
             <DialogClose
               render={
                 <Button type="button" variant="outline" disabled={Boolean(actionBusy)}>
-                  {l("Abbrechen", "Cancel", "Cancel")}
+                  {t.common_cancel}
                 </Button>
               }
             />
@@ -1894,7 +1894,7 @@ export function LeadsPage() {
               {pendingConvertLead && actionBusy === `convert:${pendingConvertLead.id}` ? (
                 <LoaderCircle className="mr-2 size-4 animate-spin" />
               ) : null}
-              {l("Patient anlegen", "Create patient", "Create patient")}
+              {t.lead_create_patient}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -42,7 +42,12 @@ import {
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { formatUnknownValue, useLang } from "@/lib/i18n";
+import {
+  formatEnumLabelFromKeys,
+  formatUnknownValue,
+  useLang,
+  type TranslationKey,
+} from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { PatientInvoicesPage } from "@/pages/patients/portal-invoices-page";
@@ -73,7 +78,6 @@ import {
   blankCreateForm,
   buildInvoicesPath,
   buildSearchParams,
-  enumLabel,
   formatCurrency,
   formatDate,
   formatDateTime,
@@ -105,21 +109,47 @@ const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
 const INVOICE_DEFAULT_FROZEN_COLUMNS = ["invoice_number", "patient_name"];
 const INVOICE_MAX_FROZEN_COLUMNS = 3;
-const INVOICE_COLUMN_GROUPS = {
-  identity: "Identity",
-  context: "Context",
-  status: "Status",
-  finance: "Finance",
-  audit: "Audit",
-};
 const ACCOUNTING_DEFAULT_FROZEN_COLUMNS = ["entry_date", "description"];
 const ACCOUNTING_MAX_FROZEN_COLUMNS = 3;
-const ACCOUNTING_COLUMN_GROUPS = {
-  accounting: "Accounting",
-  context: "Context",
-  finance: "Finance",
-  audit: "Audit",
-};
+
+const INVOICE_STATUS_LABEL_KEYS = {
+  draft: "revenue_invoice_status_draft",
+  sent: "revenue_invoice_status_sent",
+  partially_paid: "revenue_invoice_status_partially_paid",
+  paid: "revenue_invoice_status_paid",
+  overdue: "revenue_invoice_status_overdue",
+  cancelled: "revenue_invoice_status_cancelled",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const INVOICE_TYPE_LABEL_KEYS = {
+  advance: "revenue_invoice_type_advance",
+  interim: "revenue_invoice_type_interim",
+  final: "revenue_invoice_type_final",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const DUNNING_LEVEL_LABEL_KEYS = {
+  first: "revenue_dunning_level_first",
+  second: "revenue_dunning_level_second",
+  collections: "revenue_dunning_level_collections",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const ACCOUNTING_DIRECTION_LABEL_KEYS = {
+  income: "revenue_accounting_direction_income",
+  expense: "revenue_accounting_direction_expense",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const REDACTION_REASON_LABEL_KEYS = {
+  invoice_hidden_from_patient: "revenue_invoices_redaction_invoice_hidden",
+  amounts_hidden_from_patient: "revenue_invoices_redaction_amounts_hidden",
+  line_items_hidden_from_patient: "revenue_invoices_redaction_line_items_hidden",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const VAT_SOURCE_LABEL_KEYS = {
+  catalog: "finance_catalog_vat_source_catalog",
+  tax_profile: "finance_catalog_vat_source_tax_profile",
+  manual: "finance_catalog_vat_source_manual",
+  legacy: "finance_catalog_vat_source_legacy",
+} satisfies Partial<Record<string, TranslationKey>>;
 
 const STAFF_INVOICE_REALTIME_EVENTS = [
   "invoice.created",
@@ -215,10 +245,7 @@ function StaffInvoicesPage() {
     invoiceCount: t.invoices_workspace_invoice_count,
     previous: t.invoices_workspace_previous,
     next: t.invoices_workspace_next,
-    createInvoiceDescription:
-      lang === "de"
-        ? "Erstelle eine Rechnung aus einem Angebots-Snapshot. Positionen und Summen werden beim Erstellen fixiert."
-        : "Сформируйте счёт из снимка предложения. Позиции и суммы фиксируются в момент создания.",
+    createInvoiceDescription: t.revenue_invoices_create_description,
     selectedQuoteSnapshot: t.invoices_workspace_selected_quote_snapshot,
     chooseQuote: t.invoices_workspace_choose_quote,
     notes: t.invoices_workspace_notes,
@@ -265,59 +292,39 @@ function StaffInvoicesPage() {
     statsPaidWord: t.invoices_workspace_stats_paid_word,
     pageOf: t.invoices_workspace_page_of,
     linkedOrder: t.invoices_workspace_linked_order,
-    ledgerDate: lang === "de" ? "Datum" : "Дата",
-    ledgerDirection: lang === "de" ? "Richtung" : "Направление",
-    ledgerEntry: lang === "de" ? "Buchung" : "Проводка",
-    ledgerCategory: lang === "de" ? "Kategorie" : "Категория",
-    ledgerPeriod: lang === "de" ? "Monat" : "Период",
-    vatSource: lang === "de" ? "MwSt.-Quelle" : "Источник НДС",
+    ledgerDate: t.revenue_invoices_ledger_date,
+    ledgerDirection: t.revenue_invoices_ledger_direction,
+    ledgerEntry: t.revenue_invoices_ledger_entry,
+    ledgerCategory: t.revenue_invoices_ledger_category,
+    ledgerPeriod: t.revenue_invoices_ledger_period,
+    vatSource: t.revenue_invoices_vat_source,
     sendDunning: (level: string) => t.invoices_workspace_send_dunning.replace("{level}", level),
-    statuses: {
-      draft: t.invoices_workspace_status_draft,
-      sent: t.invoices_workspace_status_sent,
-      partially_paid: t.invoices_workspace_status_partially_paid,
-      paid: t.invoices_workspace_status_paid,
-      overdue: t.invoices_workspace_status_overdue,
-      cancelled: t.invoices_workspace_status_cancelled,
-    },
-    types: {
-      advance: t.invoices_workspace_type_advance,
-      interim: t.invoices_workspace_type_interim,
-      final: t.invoices_workspace_type_final,
-    },
-    dunningLevels: {
-      first: t.invoices_workspace_dunning_level_first,
-      second: t.invoices_workspace_dunning_level_second,
-      collections: t.invoices_workspace_dunning_level_collections,
-    },
-    directions: {
-      income: t.invoices_workspace_direction_income,
-      expense: t.invoices_workspace_direction_expense,
-    },
-    redactionReasons: {
-      invoice_hidden_from_patient:
-        lang === "de" ? "Rechnung vor Patient verborgen" : "Счет скрыт от пациента",
-      amounts_hidden_from_patient:
-        lang === "de" ? "Beträge vor Patient verborgen" : "Суммы скрыты от пациента",
-      line_items_hidden_from_patient:
-        lang === "de" ? "Positionen vor Patient verborgen" : "Позиции скрыты от пациента",
-    },
-    vatSources: {
-      catalog: lang === "de" ? "Leistungskatalog" : "Каталог услуг",
-      tax_profile: lang === "de" ? "Steuerprofil" : "Налоговый профиль",
-      manual: lang === "de" ? "Manuell" : "Вручную",
-      legacy: lang === "de" ? "Altdaten" : "Исторические данные",
-    },
   };
-  const invoiceStatusLabel = (status: string) => enumLabel(status, text.statuses, t);
-  const invoiceTypeLabel = (invoiceType: string) => enumLabel(invoiceType, text.types, t);
-  const dunningLevelLabel = (level: string) => enumLabel(level, text.dunningLevels, t);
+  const invoiceColumnGroups = {
+    identity: t.revenue_table_group_identity,
+    context: t.revenue_table_group_context,
+    status: t.revenue_table_group_status,
+    finance: t.revenue_table_group_finance,
+    audit: t.revenue_table_group_audit,
+  };
+  const accountingColumnGroups = {
+    accounting: t.revenue_table_group_accounting,
+    context: t.revenue_table_group_context,
+    finance: t.revenue_table_group_finance,
+    audit: t.revenue_table_group_audit,
+  };
+  const invoiceStatusLabel = (status: string) =>
+    formatEnumLabelFromKeys(status, INVOICE_STATUS_LABEL_KEYS, t);
+  const invoiceTypeLabel = (invoiceType: string) =>
+    formatEnumLabelFromKeys(invoiceType, INVOICE_TYPE_LABEL_KEYS, t);
+  const dunningLevelLabel = (level: string) =>
+    formatEnumLabelFromKeys(level, DUNNING_LEVEL_LABEL_KEYS, t);
   const accountingDirectionLabel = (direction: string) =>
-    enumLabel(direction, text.directions, t);
+    formatEnumLabelFromKeys(direction, ACCOUNTING_DIRECTION_LABEL_KEYS, t);
   const redactionReasonLabel = (reason: string | null | undefined) =>
-    enumLabel(reason, text.redactionReasons, t);
+    formatEnumLabelFromKeys(reason, REDACTION_REASON_LABEL_KEYS, t);
   const vatSourceLabel = (source: string | null | undefined) =>
-    enumLabel(source, text.vatSources, t);
+    formatEnumLabelFromKeys(source, VAT_SOURCE_LABEL_KEYS, t);
   const taxProfileLabel = (
     name: string | null | undefined,
     key: string | null | undefined,
@@ -1202,7 +1209,7 @@ function StaffInvoicesPage() {
                   defaultDensity="compact"
                   defaultFrozenColumns={ACCOUNTING_DEFAULT_FROZEN_COLUMNS}
                   dictionary={t as unknown as Record<string, string>}
-                  groupLabels={ACCOUNTING_COLUMN_GROUPS}
+                  groupLabels={accountingColumnGroups}
                   maxFrozenColumns={ACCOUNTING_MAX_FROZEN_COLUMNS}
                   toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
                   rowAccent={(row) => (row.direction === "income" ? "bg-emerald-500" : "bg-rose-500")}
@@ -1222,7 +1229,7 @@ function StaffInvoicesPage() {
                     defaultDensity="compact"
                     defaultFrozenColumns={["period"]}
                     dictionary={t as unknown as Record<string, string>}
-                    groupLabels={ACCOUNTING_COLUMN_GROUPS}
+                    groupLabels={accountingColumnGroups}
                     maxFrozenColumns={2}
                     toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
                     rowAccent={(row) => {
@@ -1430,7 +1437,7 @@ function StaffInvoicesPage() {
             defaultDensity="compact"
             defaultFrozenColumns={INVOICE_DEFAULT_FROZEN_COLUMNS}
             dictionary={t as unknown as Record<string, string>}
-            groupLabels={INVOICE_COLUMN_GROUPS}
+            groupLabels={invoiceColumnGroups}
             loading={listBusy}
             maxFrozenColumns={INVOICE_MAX_FROZEN_COLUMNS}
             toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
@@ -1662,42 +1669,43 @@ function StaffInvoicesPage() {
                 </SectionCard>
 
                 <SectionCard
-                  title={lang === "de" ? "Patientensicht und Zahler" : "Patient visibility and payer"}
-                  description={
-                    lang === "de"
-                      ? "Steuert Portal-Sichtbarkeit, Betragsredaktion, PDF-Freigabe und externen Zahlerkontakt."
-                      : "Controls portal visibility, amount redaction, PDF release and external payer contact."
-                  }
+                  title={t.revenue_invoices_visibility_title}
+                  description={t.revenue_invoices_visibility_description}
                 >
                   <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                     <div className="space-y-4">
                       {visibilityError ? <ShellBanner tone="error">{visibilityError}</ShellBanner> : null}
                       <div className={cn("rounded-xl p-4", tokens.surface.mutedCard)}>
-                        <div className={tokens.text.eyebrow}>Patient preview</div>
+                        <div className={tokens.text.eyebrow}>
+                          {t.revenue_invoices_patient_preview}
+                        </div>
                         <div className="mt-3 grid gap-2 text-sm text-muted-foreground">
                           <p>
-                            Portal:{" "}
+                            {t.revenue_invoices_preview_portal}:{" "}
                             {detail.portal_visibility?.visible_to_patient
-                              ? "visible"
-                              : "hidden from patient"}
+                              ? t.revenue_invoices_visible
+                              : t.revenue_invoices_hidden_from_patient}
                           </p>
                           <p>
-                            Amounts:{" "}
+                            {t.revenue_invoices_preview_amounts}:{" "}
                             {detail.portal_visibility?.amounts_visible_to_patient
                               ? formatMoney(detail.total_gross)
-                              : "hidden from patient"}
+                              : t.revenue_invoices_hidden_from_patient}
                           </p>
                           <p>
-                            Lines:{" "}
+                            {t.revenue_invoices_preview_lines}:{" "}
                             {detail.portal_visibility?.line_items_visible_to_patient
-                              ? `${detail.line_items?.length ?? 0} visible`
-                              : "hidden from patient"}
+                              ? t.revenue_invoices_line_count_visible.replace(
+                                  "{count}",
+                                  String(detail.line_items?.length ?? 0),
+                                )
+                              : t.revenue_invoices_hidden_from_patient}
                           </p>
                           <p>
-                            PDF:{" "}
+                            {t.revenue_invoices_preview_pdf}:{" "}
                             {detail.portal_visibility?.pdf_visible_to_patient
-                              ? "available"
-                              : "blocked for patient"}
+                              ? t.revenue_invoices_pdf_available
+                              : t.revenue_invoices_pdf_blocked}
                           </p>
                           {detail.portal_visibility?.redaction_reason ? (
                             <StatusBadge tone="warning">
@@ -1722,7 +1730,7 @@ function StaffInvoicesPage() {
                             }
                             disabled={!access.canManage || visibilityBusy}
                           />
-                          Portal visible
+                          {t.revenue_invoices_portal_visible}
                         </label>
                         <label className="flex items-center gap-2 text-sm text-muted-foreground">
                           <input
@@ -1742,7 +1750,7 @@ function StaffInvoicesPage() {
                             }
                             disabled={!access.canManage || visibilityBusy}
                           />
-                          Hide amounts
+                          {t.revenue_invoices_hide_amounts}
                         </label>
                         <label className="flex items-center gap-2 text-sm text-muted-foreground">
                           <input
@@ -1761,7 +1769,7 @@ function StaffInvoicesPage() {
                               !visibilityForm.portalVisible
                             }
                           />
-                          Patient sees lines
+                          {t.revenue_invoices_patient_sees_lines}
                         </label>
                         <label className="flex items-center gap-2 text-sm text-muted-foreground">
                           <input
@@ -1780,9 +1788,9 @@ function StaffInvoicesPage() {
                               !visibilityForm.portalVisible
                             }
                           />
-                          Patient PDF available
+                          {t.revenue_invoices_patient_pdf_available}
                         </label>
-                        <Field label="Visibility note" className="sm:col-span-2">
+                        <Field label={t.revenue_invoices_visibility_note} className="sm:col-span-2">
                           <textarea
                             className={textareaClassName}
                             value={visibilityForm.visibilityNote}
@@ -1804,7 +1812,7 @@ function StaffInvoicesPage() {
                           disabled={visibilityBusy || !access.canManage}
                         >
                           {visibilityBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                          Save visibility
+                          {t.revenue_invoices_save_visibility}
                         </Button>
                       </SheetActionsFooter>
                     </div>
@@ -1812,7 +1820,9 @@ function StaffInvoicesPage() {
                     <div className="space-y-4">
                       {payerError ? <ShellBanner tone="error">{payerError}</ShellBanner> : null}
                       <div className={cn("rounded-xl p-4", tokens.surface.mutedCard)}>
-                        <div className={tokens.text.eyebrow}>Current payer</div>
+                        <div className={tokens.text.eyebrow}>
+                          {t.revenue_invoices_current_payer}
+                        </div>
                         <div className="mt-2 text-sm text-muted-foreground">
                           {detail.payer?.contact_name ||
                           detail.payer?.relation_patient_name ? (
@@ -1835,7 +1845,7 @@ function StaffInvoicesPage() {
                         </div>
                       </div>
                       <div className="grid gap-3 sm:grid-cols-2">
-                        <Field label="Payer relation ID">
+                        <Field label={t.revenue_invoices_payer_relation_id}>
                           <Input
                             className={shellInputClassName}
                             value={payerForm.payerPatientRelationId}
@@ -1846,10 +1856,10 @@ function StaffInvoicesPage() {
                               }))
                             }
                             disabled={!access.canManage || payerBusy}
-                            placeholder="optional UUID"
+                            placeholder={t.revenue_invoices_optional_uuid}
                           />
                         </Field>
-                        <Field label="Contact name">
+                        <Field label={t.revenue_invoices_contact_name}>
                           <Input
                             className={shellInputClassName}
                             value={payerForm.contactName}
@@ -1862,7 +1872,7 @@ function StaffInvoicesPage() {
                             disabled={!access.canManage || payerBusy}
                           />
                         </Field>
-                        <Field label="Email">
+                        <Field label={t.revenue_invoices_email}>
                           <Input
                             className={shellInputClassName}
                             value={payerForm.contactEmail}
@@ -1875,7 +1885,7 @@ function StaffInvoicesPage() {
                             disabled={!access.canManage || payerBusy}
                           />
                         </Field>
-                        <Field label="Phone">
+                        <Field label={t.revenue_invoices_phone}>
                           <Input
                             className={shellInputClassName}
                             value={payerForm.contactPhone}
@@ -1888,7 +1898,7 @@ function StaffInvoicesPage() {
                             disabled={!access.canManage || payerBusy}
                           />
                         </Field>
-                        <Field label="Relationship">
+                        <Field label={t.revenue_invoices_relationship}>
                           <Input
                             className={shellInputClassName}
                             value={payerForm.contactRelationship}
@@ -1901,7 +1911,7 @@ function StaffInvoicesPage() {
                             disabled={!access.canManage || payerBusy}
                           />
                         </Field>
-                        <Field label="Payer notes" className="sm:col-span-2">
+                        <Field label={t.revenue_invoices_payer_notes} className="sm:col-span-2">
                           <textarea
                             className={textareaClassName}
                             value={payerForm.notes}
@@ -1923,7 +1933,7 @@ function StaffInvoicesPage() {
                           disabled={payerBusy || !access.canManage}
                         >
                           {payerBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                          Save payer
+                          {t.revenue_invoices_save_payer}
                         </Button>
                       </SheetActionsFooter>
                     </div>

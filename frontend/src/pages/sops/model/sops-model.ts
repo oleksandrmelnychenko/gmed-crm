@@ -1,3 +1,10 @@
+import {
+  formatEnumLabelFromKeys,
+  type Lang,
+  type TranslationKey,
+  type Translations,
+} from "@/lib/i18n";
+
 import type { SopFormState } from "./types";
 
 export function emptyForm(): SopFormState {
@@ -12,11 +19,19 @@ export function emptyForm(): SopFormState {
   };
 }
 
-export function categoryLabel(value: string) {
-  if (value === "sop") return "SOP";
-  if (value === "handbook") return "Handbook";
-  if (value === "training") return "Training";
-  return value;
+const SOP_CATEGORY_LABEL_KEYS = {
+  sop: "sops_category_sop",
+  handbook: "sops_category_handbook",
+  training: "sops_category_training",
+} as const satisfies Partial<Record<string, TranslationKey>>;
+
+const SOP_APPROVAL_ROLE_LABEL_KEYS = {
+  ceo: "sops_approval_role_ceo",
+  patient_manager: "sops_approval_role_patient_manager",
+} as const satisfies Partial<Record<string, TranslationKey>>;
+
+export function categoryLabel(value: string, translations: Translations) {
+  return formatEnumLabelFromKeys(value, SOP_CATEGORY_LABEL_KEYS, translations);
 }
 
 export function roleCanOpenLearning(role?: string) {
@@ -31,10 +46,10 @@ export function roleCanReview(role?: string) {
   return role === "ceo" || role === "patient_manager";
 }
 
-export function formatDate(value?: string | null) {
-  if (!value) return "Not set";
+export function formatDate(value: string | null | undefined, lang: Lang, translations: Translations) {
+  if (!value) return translations.sops_date_not_set;
   try {
-    return new Intl.DateTimeFormat("en-GB", {
+    return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
       day: "2-digit",
       month: "short",
       year: "numeric",
@@ -46,35 +61,32 @@ export function formatDate(value?: string | null) {
   }
 }
 
-export function approvalRoleLabel(value?: string | null) {
-  if (value === "ceo") return "CEO approval";
-  if (value === "patient_manager") return "Patient-manager approval";
-  return "Approval";
+export function approvalRoleLabel(value: string | null | undefined, translations: Translations) {
+  return formatEnumLabelFromKeys(value, SOP_APPROVAL_ROLE_LABEL_KEYS, translations);
 }
 
-export function reviewQueueCopy(role?: string) {
+export function reviewQueueCopy(role: string | undefined, translations: Translations) {
   if (role === "patient_manager") {
     return {
-      metric: "PM review queue",
-      title: "Patient-manager approval queue",
-      description:
-        "Interpreter-team SOPs waiting for patient-manager approval before they become visible.",
+      metric: translations.sops_review_queue_metric_pm,
+      title: translations.sops_review_queue_title_pm,
+      description: translations.sops_review_queue_description_pm,
     };
   }
 
   return {
-    metric: "CEO review queue",
-    title: "CEO approval queue",
-    description: "Team-authored SOPs waiting for CEO approval before they become visible.",
+    metric: translations.sops_review_queue_metric_ceo,
+    title: translations.sops_review_queue_title_ceo,
+    description: translations.sops_review_queue_description_ceo,
   };
 }
 
-export function formDescription(role?: string) {
+export function formDescription(role: string | undefined, translations: Translations) {
   if (role === "ceo") {
-    return "Create role-scoped SOP, handbook or training content. CEO content is published immediately.";
+    return translations.sops_form_description_ceo;
   }
   if (role === "patient_manager") {
-    return "Create role-scoped SOP, handbook or training content. Patient-manager content is routed to CEO approval.";
+    return translations.sops_form_description_patient_manager;
   }
-  return "Create interpreter-team SOP content. Teamlead interpreter content is routed to patient-manager approval and can target interpreters only.";
+  return translations.sops_form_description_teamlead;
 }

@@ -573,11 +573,7 @@ function EditAppointmentSection({
               </Field>
             </div>
             <p className="mt-3 text-xs text-sky-800">
-              Recurrence rule edits only apply when you target
-              <span className="font-semibold"> this and following</span> or the{" "}
-              <span className="font-semibold">whole series</span>. Single-
-              occurrence updates keep the current slot detached from rule
-              changes.
+              {t.appointments_edit_recurrence_rule_guidance}
             </p>
           </div>
         ) : null}

@@ -55,16 +55,16 @@ function valueSummary(
     if (range.to) {
       return `${labelForOperator("before", translations?.operatorLabels)} ${range.to}`;
     }
-    return translations?.notSet ?? "—";
+    return translations?.notSet ?? "";
   }
   if (operator === "last_n_days") {
     const days = typeof value === "object" && value && "days" in value
       ? (value as { days: number }).days
       : 0;
-    return `${days}d`;
+    return `${days}${translations?.daysSuffix ?? ""}`;
   }
   if (Array.isArray(value)) {
-    if (value.length === 0) return translations?.notSet ?? "—";
+    if (value.length === 0) return translations?.notSet ?? "";
     const labels = value.map(
       (v) => options.find((o) => o.value === v)?.label ?? translations?.unknownValue ?? "",
     );
@@ -72,9 +72,9 @@ function valueSummary(
     return `${labels.slice(0, 2).join(", ")} +${labels.length - 2}`;
   }
   if (typeof value === "boolean") {
-    return value ? translations?.yes ?? "yes" : translations?.no ?? "no";
+    return value ? translations?.yes ?? "" : translations?.no ?? "";
   }
-  if (value == null || value === "") return translations?.notSet ?? "—";
+  if (value == null || value === "") return translations?.notSet ?? "";
   const opt = options.find((o) => o.value === String(value));
   if (opt) return opt.label;
   return options.length > 0 ? translations?.unknownValue ?? "" : String(value);
@@ -87,6 +87,7 @@ export type FilterBuilderTranslations = {
   noFields?: string;
   remove?: string;
   valuePlaceholder?: string;
+  daysSuffix?: string;
   notSet?: string;
   unknownValue?: string;
   yes?: string;
@@ -119,6 +120,7 @@ export function FilterBuilder<T>({
     noFields: t.table_filter_no_fields,
     remove: t.table_filter_remove,
     valuePlaceholder: t.table_filter_value,
+    daysSuffix: t.table_filter_days_suffix,
     notSet: t.common_not_set,
     unknownValue: t.common_unknown_value,
     yes: t.common_yes,

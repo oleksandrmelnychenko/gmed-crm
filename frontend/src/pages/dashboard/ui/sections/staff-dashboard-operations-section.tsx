@@ -26,34 +26,34 @@ export function StaffDashboardOperationsSection({
   return (
     <>
       <SectionHeader
-        title={tr.dash_sec_ops ?? "Operations"}
-        hint={tr.dash_sec_ops_hint ?? "Appointments, orders and provider network"}
+        title={tr.dash_sec_ops ?? tr.common_unknown}
+        hint={tr.dash_sec_ops_hint ?? tr.common_unknown}
       />
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <ChartCard title={tr.dash_appointments_by_status ?? "Appointments by status"}>
+        <ChartCard title={tr.dash_appointments_by_status ?? tr.common_unknown}>
           <MiniDonut
             loading={sectionsLoading}
             data={apptStatusToChart(operations?.appointments_by_status, tr)}
-            emptyLabel={tr.dash_no_data ?? "No data"}
+            emptyLabel={tr.dash_no_data ?? tr.common_unknown}
           />
         </ChartCard>
 
         <ChartCard
-          title={`${tr.orders_title ?? "Orders"} · ${tr.dash_pipeline_value ?? "pipeline value"}`}
-          hint={tr.dash_pipeline_hint ?? "Count and € value per phase"}
+          title={`${tr.orders_title ?? tr.common_unknown} - ${tr.dash_pipeline_value ?? tr.common_unknown}`}
+          hint={tr.dash_pipeline_hint ?? tr.common_unknown}
         >
           <OrdersValuedBars
             loading={sectionsLoading}
             data={operations?.orders_by_phase_valued ?? []}
-            emptyLabel={tr.dash_no_data ?? "No data"}
+            emptyLabel={tr.dash_no_data ?? tr.common_unknown}
           />
         </ChartCard>
       </div>
 
       <ChartCard
-        title={tr.dash_heatmap ?? "Appointments heatmap"}
-        hint={tr.dash_heatmap_hint ?? "Day of week × hour"}
+        title={tr.dash_heatmap ?? tr.common_unknown}
+        hint={tr.dash_heatmap_hint ?? tr.common_unknown}
       >
         <AppointmentsHeatmap
           loading={sectionsLoading}
@@ -63,8 +63,8 @@ export function StaffDashboardOperationsSection({
       </ChartCard>
 
       <ChartCard
-        title={tr.dash_top_providers ?? "Top providers"}
-        hint={tr.dash_top_providers_hint ?? "By appointment volume"}
+        title={tr.dash_top_providers ?? tr.common_unknown}
+        hint={tr.dash_top_providers_hint ?? tr.common_unknown}
       >
         <TopProvidersTable
           loading={sectionsLoading}

@@ -22,6 +22,6 @@ describe("InfoRow", () => {
       <InfoRow label="Nationality" value="Germany" onEdit={() => {}} />,
     );
 
-    expect(html).toContain('aria-label="Edit Nationality"');
+    expect(html).toContain('aria-label="Изменить Nationality"');
   });
 });

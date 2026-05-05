@@ -11,34 +11,13 @@ import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
   PATIENT_CONTRACT_STATUS_OPTIONS,
+  patientContractStatusLabel,
   serializePatientLegalStatus,
   type PatientLegalStatus,
 } from "../../model/legal-status";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 const legalNotesTextareaClassName = cn(textareaClass, "min-h-[80px]");
-
-function contractStatusLabel(
-  value: string,
-  l: (de: string, ru: string, en: string) => string,
-): string {
-  switch (value) {
-    case "not_started":
-      return l("Nicht gestartet", "Не начато", "Not started");
-    case "pending":
-      return l("In Bearbeitung", "В работе", "Pending");
-    case "sent":
-      return l("Versendet", "Отправлено", "Sent");
-    case "signed":
-      return l("Signiert", "Подписано", "Signed");
-    case "expired":
-      return l("Abgelaufen", "Истекло", "Expired");
-    case "terminated":
-      return l("Beendet", "Расторгнуто", "Terminated");
-    default:
-      return value;
-  }
-}
 
 type ChecklistKey =
   | "dsgvoSigned"
@@ -60,9 +39,7 @@ export function PatientLegalStatusSheet({
   onOpenChange: (v: boolean) => void;
   onSaved: () => void;
 }) {
-  const { t, lang } = useLang();
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const { t } = useLang();
   const [form, setForm] = useState<PatientLegalStatus>(initial);
   const [busy, setBusy] = useState(false);
 
@@ -75,14 +52,14 @@ export function PatientLegalStatusSheet({
   }
 
   const checklist: Array<{ key: ChecklistKey; label: string }> = [
-    { key: "dsgvoSigned", label: l("DSGVO", "DSGVO", "DSGVO") },
+    { key: "dsgvoSigned", label: t.patient_legal_check_dsgvo },
     {
       key: "confidentialityReleaseSigned",
-      label: l("Schweigepflicht", "Конфиденциальность", "Confidentiality release"),
+      label: t.patient_legal_check_confidentiality,
     },
-    { key: "identityVerified", label: l("Identitat verifiziert", "Личность подтверждена", "ID verified") },
-    { key: "documentPackComplete", label: l("Dokumentenpaket", "Пакет документов", "Document pack") },
-    { key: "complianceCompleted", label: l("Compliance vollstandig", "Compliance завершен", "Compliance complete") },
+    { key: "identityVerified", label: t.patient_legal_check_identity },
+    { key: "documentPackComplete", label: t.patient_legal_check_document_pack },
+    { key: "complianceCompleted", label: t.patient_legal_check_compliance },
   ];
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -95,7 +72,7 @@ export function PatientLegalStatusSheet({
           legal_status: serializePatientLegalStatus(form),
         }),
       });
-      toast.success(l("Status gespeichert.", "Статус сохранен.", "Status saved."));
+      toast.success(t.patient_legal_sheet_saved);
       onOpenChange(false);
       onSaved();
     } catch (error) {
@@ -109,7 +86,7 @@ export function PatientLegalStatusSheet({
     <PatientSheetScaffold
       open={open}
       onOpenChange={onOpenChange}
-      title={l("Rechtsstatus aktualisieren", "Обновить правовой статус", "Update legal status")}
+      title={t.patient_legal_sheet_title}
       maxWidthClassName="sm:max-w-[480px]"
       onSubmit={handleSubmit}
       bodyClassName="px-4 py-4 space-y-5"
@@ -136,7 +113,7 @@ export function PatientLegalStatusSheet({
           className="text-[11.5px] font-medium text-muted-foreground leading-tight"
           htmlFor="patient-legal-contract-status"
         >
-          {l("Vertragsstatus", "Статус договора", "Contract status")}
+          {t.patient_legal_sheet_contract_status}
         </Label>
         <NativeComboboxSelect
           value={form.contractStatus}
@@ -145,7 +122,7 @@ export function PatientLegalStatusSheet({
           onChange={(event) => setForm((current) => ({ ...current, contractStatus: event.target.value ?? "not_started" }))} id="patient-legal-contract-status" className={cn("w-full", selectClass)}>
             {PATIENT_CONTRACT_STATUS_OPTIONS.map((option) => (
               <option key={option} value={option}>
-                {contractStatusLabel(option, l)}
+                {patientContractStatusLabel(option)}
               </option>
             ))}
           </NativeComboboxSelect>
@@ -153,7 +130,7 @@ export function PatientLegalStatusSheet({
 
       <div className="flex flex-col gap-2">
         <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-          {l("Compliance-Checkliste", "Compliance-чеклист", "Compliance checklist")}
+          {t.patient_legal_sheet_checklist}
         </span>
         <div className="flex flex-col divide-y divide-border rounded-lg border border-border">
           {checklist.map((item) => {
@@ -192,7 +169,7 @@ export function PatientLegalStatusSheet({
           className="text-[11.5px] font-medium text-muted-foreground leading-tight"
           htmlFor="patient-legal-notes"
         >
-          {l("Notizen", "Заметки", "Notes")}
+          {t.patient_legal_sheet_notes}
         </Label>
         <textarea
           id="patient-legal-notes"
@@ -201,11 +178,7 @@ export function PatientLegalStatusSheet({
           onChange={(event) =>
             setForm((current) => ({ ...current, notes: event.target.value }))
           }
-          placeholder={l(
-            "Kontext, Blocker oder nachste Schritte dokumentieren.",
-            "Контекст, блокеры или следующие шаги.",
-            "Context, blockers or next steps.",
-          )}
+          placeholder={t.patient_legal_sheet_notes_placeholder}
         />
       </div>
     </PatientSheetScaffold>

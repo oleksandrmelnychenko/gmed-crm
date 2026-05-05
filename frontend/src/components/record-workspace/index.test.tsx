@@ -20,6 +20,6 @@ describe("record-workspace", () => {
 
     expect(html).toContain("space-y-4");
     expect(html).toContain("Active");
-    expect(html).toContain('aria-label="Edit Country"');
+    expect(html).toContain('aria-label="Изменить Country"');
   });
 });

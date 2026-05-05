@@ -51,6 +51,8 @@ import {
 } from "@/pages/appointments/model/form-factories";
 import {
   appointmentText,
+  followUpPresetLabel,
+  followUpPresetTitle,
   reportApprovalLabel,
   responseLabel,
   roleLabel,
@@ -1262,7 +1264,7 @@ function AppointmentCompletionSection({
               body: JSON.stringify({
                 user_id: followUpAssigneeId,
                 remind_at: toRfc3339(remindAt),
-                title: preset.title,
+                title: followUpPresetTitle(preset.id),
                 description: `Auto-planned during appointment completion for ${detail.patient_pid} · ${detail.title}.`,
               }),
             });
@@ -1474,7 +1476,7 @@ function AppointmentCompletionSection({
                   }))
                 }
               >
-                {preset.label}
+                {followUpPresetLabel(preset.id)}
               </Button>
             ))}
           </div>
@@ -1666,9 +1668,12 @@ function AppointmentStatusSection({
           </p>
           {completionScopeBlockers.length > 0 ? (
             <Banner tone="warning" withIcon>
-              Completing this scope is currently blocked by{" "}
-              {completionScopeBlockers.length} occurrence
-              {completionScopeBlockers.length === 1 ? "" : "s"}:{" "}
+              {t.appointments_workflow_completion_scope_blocked}{" "}
+              {completionScopeBlockers.length}{" "}
+              {completionScopeBlockers.length === 1
+                ? t.appointments_workflow_occurrence
+                : t.appointments_workflow_occurrences}
+              :{" "}
               {completionScopeBlockers
                 .map((item) => recurringOccurrenceLabel(item, t))
                 .join("; ")}
@@ -1971,7 +1976,7 @@ function AppointmentTasksSection({
               disabled={submitBusy || !form.title.trim() || !form.assignedTo}
             >
               {submitBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-              Add task
+              {t.appointments_workflow_add_task}
             </Button>
           </div>
         </form>

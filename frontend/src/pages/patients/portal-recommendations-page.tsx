@@ -33,6 +33,7 @@ import {
 import {
   documentCategoryLabel,
   formatPortalDateTime,
+  portalOrderPhaseLabel,
   recommendationDecisionLabel,
   recommendationPriorityLabel,
   portalStatusLabel,
@@ -369,6 +370,7 @@ function emptyRecommendationForm(): RecommendationFormState {
 
 function StaffRecommendationsWorkspace() {
   const { user } = useAuth();
+  const { t } = useLang();
   const [patients, setPatients] = useState<StaffPatientOption[]>([]);
   const [doctors, setDoctors] = useState<StaffDoctorOption[]>([]);
   const [selectedPatientId, setSelectedPatientId] = useState("");
@@ -413,7 +415,7 @@ function StaffRecommendationsWorkspace() {
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to load patient recommendation lookups.");
+        setError(err instanceof Error ? err.message : t.patient_recommendations_staff_lookup_failed);
       })
       .finally(() => {
         if (!cancelled) setLookupLoading(false);
@@ -422,7 +424,7 @@ function StaffRecommendationsWorkspace() {
     return () => {
       cancelled = true;
     };
-  }, [canEdit]);
+  }, [canEdit, t.patient_recommendations_staff_lookup_failed]);
 
   useEffect(() => {
     let cancelled = false;
@@ -458,7 +460,7 @@ function StaffRecommendationsWorkspace() {
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to load patient recommendations.");
+        setError(err instanceof Error ? err.message : t.patient_recommendations_staff_load_failed);
       })
       .finally(() => {
         if (!cancelled) setPatientLoading(false);
@@ -467,7 +469,7 @@ function StaffRecommendationsWorkspace() {
     return () => {
       cancelled = true;
     };
-  }, [canEdit, selectedPatientId, version]);
+  }, [canEdit, selectedPatientId, t.patient_recommendations_staff_load_failed, version]);
 
   const selectedPatient = useMemo(
     () => patients.find((patient) => patient.id === selectedPatientId) ?? null,
@@ -496,7 +498,7 @@ function StaffRecommendationsWorkspace() {
     event.preventDefault();
     if (!selectedPatientId || !canEdit) return;
     if (!form.title.trim()) {
-      setError("Recommendation title is required.");
+      setError(t.patient_recommendations_staff_title_required);
       return;
     }
 
@@ -532,10 +534,10 @@ function StaffRecommendationsWorkspace() {
       );
       clearRecommendationCaches(selectedPatientId);
       resetForm();
-      setNotice(form.id ? "Recommendation updated." : "Recommendation created.");
+      setNotice(form.id ? t.patient_recommendations_staff_updated : t.patient_recommendations_staff_created);
       setVersion((current) => current + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save recommendation.");
+      setError(err instanceof Error ? err.message : t.patient_recommendations_staff_save_failed);
     } finally {
       setSaving(false);
     }
@@ -574,10 +576,14 @@ function StaffRecommendationsWorkspace() {
         },
       );
       clearRecommendationCaches(selectedPatientId);
-      setNotice(item.portal_visible ? "Recommendation hidden from portal." : "Recommendation released to portal.");
+      setNotice(
+        item.portal_visible
+          ? t.patient_recommendations_staff_hidden
+          : t.patient_recommendations_staff_released,
+      );
       setVersion((current) => current + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update portal visibility.");
+      setError(err instanceof Error ? err.message : t.patient_recommendations_staff_visibility_failed);
     } finally {
       setBusyId("");
     }
@@ -587,17 +593,17 @@ function StaffRecommendationsWorkspace() {
     return (
       <TabShell className="mt-0 min-h-0">
         <PageHeader
-          title="Recommendations"
-          description="This staff view is limited to CEO and patient manager roles."
+          title={t.patient_recommendations_staff_title}
+          description={t.patient_recommendations_staff_forbidden_description}
         />
-        <EmptyCell>Open a patient workspace to review recommendations with your current role.</EmptyCell>
+        <EmptyCell>{t.patient_recommendations_staff_forbidden_empty}</EmptyCell>
       </TabShell>
     );
   }
 
   if (lookupLoading) {
     return (
-      <Section title="Recommendations">
+      <Section title={t.patient_recommendations_staff_title}>
         <TabLoader />
       </Section>
     );
@@ -606,8 +612,8 @@ function StaffRecommendationsWorkspace() {
   return (
     <TabShell className="mt-0 min-h-0">
       <PageHeader
-        title="Recommendations"
-        description="Create patient recommendations, link their source context, and control portal release."
+        title={t.patient_recommendations_staff_title}
+        description={t.patient_recommendations_staff_description}
         actions={
           <Button
             type="button"
@@ -617,7 +623,7 @@ function StaffRecommendationsWorkspace() {
             onClick={() => setVersion((current) => current + 1)}
           >
             <RefreshCw className={cn("size-4", patientLoading && "animate-spin")} />
-            Refresh
+            {t.patient_recommendations_staff_refresh}
           </Button>
         }
       />
@@ -626,15 +632,15 @@ function StaffRecommendationsWorkspace() {
       {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
 
       <Section
-        title="Patient context"
+        title={t.patient_recommendations_staff_patient_context}
         accessory={
           <div className="flex flex-wrap gap-2">
-            <CountBadge>{activeCount} active</CountBadge>
-            <CountBadge>{releasedCount} released</CountBadge>
+            <CountBadge>{activeCount} {t.patient_recommendations_staff_active_suffix}</CountBadge>
+            <CountBadge>{releasedCount} {t.patient_recommendations_staff_released_suffix}</CountBadge>
           </div>
         }
       >
-        <Field label="Patient">
+        <Field label={t.patient_recommendations_staff_patient}>
           <NativeComboboxSelect
             value={selectedPatientId}
             onChange={(event) => {
@@ -642,7 +648,7 @@ function StaffRecommendationsWorkspace() {
               resetForm();
             }}
           >
-            <option value="">Select a patient</option>
+            <option value="">{t.patient_recommendations_staff_select_patient}</option>
             {patients.map((patient) => (
               <option key={patient.id} value={patient.id}>
                 {formatPatientOption(patient)}
@@ -652,7 +658,7 @@ function StaffRecommendationsWorkspace() {
         </Field>
         {selectedPatient ? (
           <p className="text-xs text-muted-foreground">
-            Editing recommendations for {formatPatientOption(selectedPatient)}.
+            {t.patient_recommendations_staff_editing_for} {formatPatientOption(selectedPatient)}.
           </p>
         ) : null}
       </Section>
@@ -660,19 +666,23 @@ function StaffRecommendationsWorkspace() {
       {selectedPatientId ? (
         <form onSubmit={handleSubmitRecommendation}>
           <Section
-            title={form.id ? "Edit recommendation" : "Create recommendation"}
-            accessory={form.id ? <CountBadge>Editing</CountBadge> : <CountBadge>Draft</CountBadge>}
+            title={form.id ? t.patient_recommendations_staff_edit : t.patient_recommendations_staff_create}
+            accessory={
+              form.id
+                ? <CountBadge>{t.patient_recommendations_staff_editing_badge}</CountBadge>
+                : <CountBadge>{t.patient_recommendations_staff_draft_badge}</CountBadge>
+            }
           >
             <div className="grid gap-3 md:grid-cols-2">
-              <Field label="Title">
+              <Field label={t.patient_recommendations_staff_field_title}>
                 <input
                   value={form.title}
                   onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))}
                   className={cn(inputClass, "w-full border border-input px-3 text-sm")}
-                  placeholder="What should the patient do next?"
+                  placeholder={t.patient_recommendations_staff_title_placeholder}
                 />
               </Field>
-              <Field label="Due date">
+              <Field label={t.patient_recommendations_staff_field_due_date}>
                 <input
                   type="date"
                   value={form.due_at}
@@ -680,7 +690,7 @@ function StaffRecommendationsWorkspace() {
                   className={cn(inputClass, "w-full border border-input px-3 text-sm")}
                 />
               </Field>
-              <Field label="Type">
+              <Field label={t.patient_recommendations_staff_field_type}>
                 <NativeComboboxSelect
                   value={form.recommendation_type}
                   onChange={(event) =>
@@ -694,7 +704,7 @@ function StaffRecommendationsWorkspace() {
                   ))}
                 </NativeComboboxSelect>
               </Field>
-              <Field label="Priority">
+              <Field label={t.patient_recommendations_staff_field_priority}>
                 <NativeComboboxSelect
                   value={form.priority}
                   onChange={(event) => setForm((current) => ({ ...current, priority: event.target.value }))}
@@ -707,7 +717,7 @@ function StaffRecommendationsWorkspace() {
                 </NativeComboboxSelect>
               </Field>
               {form.id ? (
-                <Field label="Status">
+                <Field label={t.patient_recommendations_staff_field_status}>
                   <NativeComboboxSelect
                     value={form.status}
                     onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))}
@@ -720,14 +730,14 @@ function StaffRecommendationsWorkspace() {
                   </NativeComboboxSelect>
                 </Field>
               ) : null}
-              <Field label="Source doctor">
+              <Field label={t.patient_recommendations_staff_field_source_doctor}>
                 <NativeComboboxSelect
                   value={form.source_doctor_id}
                   onChange={(event) =>
                     setForm((current) => ({ ...current, source_doctor_id: event.target.value }))
                   }
                 >
-                  <option value="">No doctor link</option>
+                  <option value="">{t.patient_recommendations_staff_no_doctor_link}</option>
                   {doctors.map((doctor) => (
                     <option key={doctor.id} value={doctor.id}>
                       {formatDoctorOption(doctor)}
@@ -735,29 +745,29 @@ function StaffRecommendationsWorkspace() {
                   ))}
                 </NativeComboboxSelect>
               </Field>
-              <Field label="Source order">
+              <Field label={t.patient_recommendations_staff_field_source_order}>
                 <NativeComboboxSelect
                   value={form.source_order_id}
                   onChange={(event) =>
                     setForm((current) => ({ ...current, source_order_id: event.target.value }))
                   }
                 >
-                  <option value="">No order link</option>
+                  <option value="">{t.patient_recommendations_staff_no_order_link}</option>
                   {orders.map((order) => (
                     <option key={order.id} value={order.id}>
-                      {order.order_number} {order.phase ? `/ ${portalStatusLabel(order.phase)}` : ""}
+                      {order.order_number} {order.phase ? `/ ${portalOrderPhaseLabel(order.phase)}` : ""}
                     </option>
                   ))}
                 </NativeComboboxSelect>
               </Field>
-              <Field label="Source appointment">
+              <Field label={t.patient_recommendations_staff_field_source_appointment}>
                 <NativeComboboxSelect
                   value={form.source_appointment_id}
                   onChange={(event) =>
                     setForm((current) => ({ ...current, source_appointment_id: event.target.value }))
                   }
                 >
-                  <option value="">No appointment link</option>
+                  <option value="">{t.patient_recommendations_staff_no_appointment_link}</option>
                   {appointments.map((appointment) => (
                     <option key={appointment.id} value={appointment.id}>
                       {formatAppointmentOption(appointment)}
@@ -765,14 +775,14 @@ function StaffRecommendationsWorkspace() {
                   ))}
                 </NativeComboboxSelect>
               </Field>
-              <Field label="Source document">
+              <Field label={t.patient_recommendations_staff_field_source_document}>
                 <NativeComboboxSelect
                   value={form.source_document_id}
                   onChange={(event) =>
                     setForm((current) => ({ ...current, source_document_id: event.target.value }))
                   }
                 >
-                  <option value="">No document link</option>
+                  <option value="">{t.patient_recommendations_staff_no_document_link}</option>
                   {documents.map((document) => (
                     <option key={document.id} value={document.id}>
                       {formatDocumentOption(document)}
@@ -781,12 +791,12 @@ function StaffRecommendationsWorkspace() {
                 </NativeComboboxSelect>
               </Field>
             </div>
-            <Field label="Description">
+            <Field label={t.patient_recommendations_staff_field_description}>
               <textarea
                 value={form.description}
                 onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
                 className={textareaClass}
-                placeholder="Add context, instructions, or patient-safe rationale."
+                placeholder={t.patient_recommendations_staff_description_placeholder}
               />
             </Field>
             <label className="flex items-center gap-3 rounded-xl border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
@@ -798,16 +808,18 @@ function StaffRecommendationsWorkspace() {
                 }
                 className={checkboxClass}
               />
-              Release to patient portal
+              {t.patient_recommendations_staff_release_to_portal}
             </label>
             <div className="flex flex-wrap gap-2">
               <Button type="submit" className="rounded-lg" disabled={saving || patientLoading}>
                 {saving ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                {form.id ? "Save recommendation" : "Create recommendation"}
+                {form.id
+                  ? t.patient_recommendations_staff_save_recommendation
+                  : t.patient_recommendations_staff_create_recommendation}
               </Button>
               {form.id ? (
                 <Button type="button" variant="outline" className="rounded-lg" onClick={resetForm}>
-                  Cancel edit
+                  {t.patient_recommendations_staff_cancel_edit}
                 </Button>
               ) : null}
             </div>
@@ -815,13 +827,13 @@ function StaffRecommendationsWorkspace() {
         </form>
       ) : null}
 
-      <Section title="Patient recommendations" accessory={<CountBadge>{recommendations.length}</CountBadge>}>
+      <Section title={t.patient_recommendations_staff_patient_recommendations} accessory={<CountBadge>{recommendations.length}</CountBadge>}>
         {!selectedPatientId ? (
-          <EmptyCell>Select a patient to view and manage recommendations.</EmptyCell>
+          <EmptyCell>{t.patient_recommendations_staff_select_patient_empty}</EmptyCell>
         ) : patientLoading ? (
           <TabLoader />
         ) : recommendations.length === 0 ? (
-          <EmptyCell>No recommendations for this patient yet.</EmptyCell>
+          <EmptyCell>{t.patient_recommendations_staff_no_recommendations}</EmptyCell>
         ) : (
           <div className="grid gap-3 xl:grid-cols-2">
             {recommendations.map((item) => {
@@ -836,9 +848,9 @@ function StaffRecommendationsWorkspace() {
                         </StatusBadge>
                         <CountBadge>{recommendationPriorityLabel(item.priority || "normal")}</CountBadge>
                         {item.portal_visible ? (
-                          <StatusBadge tone="success">Portal</StatusBadge>
+                          <StatusBadge tone="success">{t.patient_recommendations_staff_portal_badge}</StatusBadge>
                         ) : (
-                          <StatusBadge tone="neutral">Staff only</StatusBadge>
+                          <StatusBadge tone="neutral">{t.patient_recommendations_staff_staff_only_badge}</StatusBadge>
                         )}
                       </div>
                       <p className="mt-2 text-sm font-semibold text-foreground">{item.title}</p>
@@ -850,11 +862,11 @@ function StaffRecommendationsWorkspace() {
                           item.source_document_name,
                         ]
                           .filter(Boolean)
-                          .join(" / ") || "No linked source"}
+                          .join(" / ") || t.patient_recommendations_staff_no_linked_source}
                       </p>
                       {item.patient_decision ? (
                         <p className="mt-2 text-xs text-sky-700">
-                          Patient decision: {recommendationDecisionLabel(item.patient_decision)}
+                          {t.patient_recommendations_staff_patient_decision}: {recommendationDecisionLabel(item.patient_decision)}
                           {item.appointment_request_status
                             ? ` / ${portalStatusLabel(item.appointment_request_status)}`
                             : ""}
@@ -862,7 +874,7 @@ function StaffRecommendationsWorkspace() {
                       ) : null}
                       {item.due_at ? (
                         <p className="mt-1 text-xs text-muted-foreground">
-                          Due {formatPortalDateTime(item.due_at)}
+                          {t.patient_recommendations_staff_due} {formatPortalDateTime(item.due_at)}
                         </p>
                       ) : null}
                     </div>
@@ -874,7 +886,7 @@ function StaffRecommendationsWorkspace() {
                         className="h-8 rounded-lg"
                         onClick={() => handleEditRecommendation(item)}
                       >
-                        Edit
+                        {t.patient_recommendations_staff_edit_action}
                       </Button>
                       <Button
                         type="button"
@@ -887,7 +899,9 @@ function StaffRecommendationsWorkspace() {
                         {busyId === `${recommendationId}:visibility` ? (
                           <LoaderCircle className="size-3.5 animate-spin" />
                         ) : null}
-                        {item.portal_visible ? "Hide" : "Release"}
+                        {item.portal_visible
+                          ? t.patient_recommendations_staff_hide_action
+                          : t.patient_recommendations_staff_release_action}
                       </Button>
                     </div>
                   </div>

@@ -14,9 +14,10 @@ import {
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import {
-  formatUnknownValue,
+  formatEnumLabelFromKeys,
   getLang,
   t as translateCatalog,
+  type TranslationKey,
 } from "@/lib/i18n";
 
 import {
@@ -27,21 +28,21 @@ import {
 
 const PALETTE = ["#f97316", "#fb923c", "#fdba74", "#fed7aa", "#fff4ed", "#a3a3a3"];
 
-function dashboardText(de: string, ru: string, en: string) {
-  const lang = getLang();
-  if (lang === "de") return de;
-  if (lang === "ru") return ru;
-  return en;
-}
+const ORDER_PHASE_LABEL_KEYS = {
+  closure: "dash_order_phase_closure",
+  execution: "dash_order_phase_execution",
+  intake: "dash_order_phase_intake",
+  planning: "dash_order_phase_planning",
+} as const satisfies Partial<Record<string, TranslationKey>>;
+
+const SERVICE_TYPE_LABEL_KEYS = {
+  medical: "providers_type_medical",
+  non_medical: "providers_type_non_medical",
+  cost_passthrough: "orders_cost_pass_through_badge",
+} as const satisfies Partial<Record<string, TranslationKey>>;
 
 function orderPhaseLabel(phase: string) {
-  const labels: Record<string, string> = {
-    closure: dashboardText("Abschluss", "Закрытие", "Closure"),
-    execution: dashboardText("Ausführung", "Выполнение", "Execution"),
-    intake: dashboardText("Aufnahme", "Прием", "Intake"),
-    planning: dashboardText("Planung", "Планирование", "Planning"),
-  };
-  return labels[phase] ?? formatUnknownValue(phase, translateCatalog(getLang()));
+  return formatEnumLabelFromKeys(phase, ORDER_PHASE_LABEL_KEYS, translateCatalog(getLang()));
 }
 
 type TopProviderRow = {
@@ -77,7 +78,7 @@ export function HorizontalBars({
     ? data.map((item) => ({
         ...item,
         label:
-          item.label.length > truncate ? `${item.label.slice(0, truncate - 1)}…` : item.label,
+          item.label.length > truncate ? `${item.label.slice(0, truncate - 3)}...` : item.label,
       }))
     : data;
 
@@ -190,13 +191,8 @@ export function ServiceMixTable({
   tr: DashboardTranslations;
 }) {
   if (loading) return <div className="py-8"><ChartSkeleton /></div>;
-  if (rows.length === 0) return <EmptyChart label={tr.dash_no_data ?? "No data"} />;
+  if (rows.length === 0) return <EmptyChart label={tr.dash_no_data ?? tr.common_unknown} />;
 
-  const labels: Record<string, string> = {
-    medical: tr.providers_type_medical ?? "Medical",
-    non_medical: tr.providers_type_non_medical ?? "Non-medical",
-    cost_passthrough: tr.orders_cost_pass_through_badge ?? "Pass-through",
-  };
   const max = Math.max(1, ...rows.map((row) => row.item_count));
 
   return (
@@ -206,7 +202,11 @@ export function ServiceMixTable({
         return (
           <div key={row.service_type} className="flex items-center gap-3">
             <div className="w-[140px] shrink-0 text-[13px] text-foreground">
-              {labels[row.service_type] ?? row.service_type}
+              {formatEnumLabelFromKeys(
+                row.service_type,
+                SERVICE_TYPE_LABEL_KEYS,
+                translateCatalog(getLang()),
+              )}
             </div>
             <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted/60">
               <div className="h-full rounded-full bg-[var(--brand)]" style={{ width: `${percent}%` }} />
@@ -215,7 +215,7 @@ export function ServiceMixTable({
               {row.item_count}
             </div>
             <div className="w-[120px] shrink-0 text-right text-[12px] font-medium tabular-nums text-foreground">
-              € {row.gross_total}
+              EUR {row.gross_total}
             </div>
           </div>
         );
@@ -260,10 +260,10 @@ export function OrdersValuedBars({
               </div>
             </div>
             <div className="w-[60px] shrink-0 text-right text-[11.5px] tabular-nums text-muted-foreground">
-              {item.count} {dashboardText("Auftr.", "зак.", "ord.")}
+              {item.count} {translateCatalog(getLang()).dash_order_count_suffix}
             </div>
             <div className="w-[110px] shrink-0 text-right text-[12.5px] font-medium tabular-nums text-foreground">
-              € {value.toLocaleString()}
+              EUR {value.toLocaleString()}
             </div>
           </div>
         );
@@ -282,7 +282,7 @@ export function AppointmentsHeatmap({
   tr: DashboardTranslations;
 }) {
   if (loading) return <div className="h-[200px]"><ChartSkeleton /></div>;
-  if (data.length === 0) return <EmptyChart label={tr.dash_no_data ?? "No data"} />;
+  if (data.length === 0) return <EmptyChart label={tr.dash_no_data ?? tr.common_unknown} />;
 
   const lookup = new Map<string, number>();
   let max = 0;
@@ -292,13 +292,13 @@ export function AppointmentsHeatmap({
   }
 
   const days = [
-    tr.day_mon ?? "Mon",
-    tr.day_tue ?? "Tue",
-    tr.day_wed ?? "Wed",
-    tr.day_thu ?? "Thu",
-    tr.day_fri ?? "Fri",
-    tr.day_sat ?? "Sat",
-    tr.day_sun ?? "Sun",
+    tr.day_mon ?? tr.common_unknown,
+    tr.day_tue ?? tr.common_unknown,
+    tr.day_wed ?? tr.common_unknown,
+    tr.day_thu ?? tr.common_unknown,
+    tr.day_fri ?? tr.common_unknown,
+    tr.day_sat ?? tr.common_unknown,
+    tr.day_sun ?? tr.common_unknown,
   ];
   const dayOrder = [1, 2, 3, 4, 5, 6, 0];
   const hours = Array.from({ length: 13 }, (_, index) => index + 8);
@@ -331,7 +331,7 @@ export function AppointmentsHeatmap({
               return (
                 <div
                   key={hour}
-                  title={value > 0 ? `${days[rowIndex]} ${hour}:00 — ${value}` : undefined}
+                  title={value > 0 ? `${days[rowIndex]} ${hour}:00 - ${value}` : undefined}
                   className="mx-0.5 flex aspect-square min-h-[22px] min-w-[22px] flex-1 items-center justify-center rounded-sm text-[10px] text-foreground/60"
                   style={{
                     background,
@@ -379,7 +379,7 @@ export function TopProvidersTable({
     },
     {
       id: "provider",
-      label: tr.providers_title ?? "Provider",
+      label: tr.providers_title ?? tr.common_provider,
       accessor: (row) => row.name,
       required: true,
       pinned: "left",
@@ -390,7 +390,7 @@ export function TopProvidersTable({
     },
     {
       id: "patients",
-      label: tr.patients_title ?? "Patients",
+      label: tr.patients_title ?? tr.common_unknown,
       accessor: (row) => row.patient_count,
       width: 112,
       render: (row) => (
@@ -399,17 +399,23 @@ export function TopProvidersTable({
     },
     {
       id: "appointments",
-      label: tr.appointments_title ?? "Appointments",
+      label: tr.appointments_title ?? tr.common_unknown,
       accessor: (row) => row.appointment_count,
       width: 132,
       render: (row) => (
         <span className="block text-right tabular-nums">{row.appointment_count}</span>
       ),
     },
-  ], [tr.appointments_title, tr.patients_title, tr.providers_title]);
+  ], [
+    tr.appointments_title,
+    tr.common_provider,
+    tr.common_unknown,
+    tr.patients_title,
+    tr.providers_title,
+  ]);
 
   if (loading) return <div className="py-6"><ChartSkeleton /></div>;
-  if (rows.length === 0) return <EmptyChart label={tr.dash_no_data ?? "No data"} />;
+  if (rows.length === 0) return <EmptyChart label={tr.dash_no_data ?? tr.common_unknown} />;
 
   return (
     <DataTableSurface

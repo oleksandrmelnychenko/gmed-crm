@@ -31,10 +31,9 @@ import {
   CONCIERGE_SERVICE_STATUS_OPTIONS,
 } from "@/pages/appointments/model/constants";
 import {
-  appointmentText,
   billingStatusLabel,
   serviceKindLabel,
-  taskStatusLabel,
+  serviceStatusLabel,
 } from "@/pages/appointments/model/labels";
 import {
   formatAppointmentDateTimeLabel as formatDateTimeLabel,
@@ -85,6 +84,12 @@ function AppointmentConciergeSection({
 }: AppointmentConciergeSectionProps) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
+  const appointmentText = (_de: string, _ru: string, en: string) =>
+    en === "No provider"
+      ? t.appointments_concierge_no_provider
+      : en === "No concierge"
+        ? t.appointments_concierge_no_concierge
+        : en;
 
   const buildCreateForm = useCallback(
     () =>
@@ -234,11 +239,14 @@ function AppointmentConciergeSection({
     <section className={sectionCardClass}>
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <AppointmentSectionHeading
-          title="Concierge and VIP services"
-          description="Travel, transfer and VIP execution linked to this appointment."
+          title={t.appointments_concierge_title}
+          description={t.appointments_concierge_description}
         />
         <span className={appointmentMetaPillClassName}>
-          {services.length} service{services.length === 1 ? "" : "s"}
+          {services.length}{" "}
+          {services.length === 1
+            ? t.appointments_common_service
+            : t.appointments_common_services}
         </span>
       </div>
       <div className="mt-4 space-y-4">
@@ -263,7 +271,7 @@ function AppointmentConciergeSection({
                           {serviceKindLabel(service.service_kind)}
                         </span>
                         <span className={appointmentMiniPillClassName}>
-                          {taskStatusLabel(service.status)}
+                          {serviceStatusLabel(service.status)}
                         </span>
                         <span className={appointmentMiniPillClassName}>
                           {billingStatusLabel(service.billing_status)}
@@ -279,14 +287,14 @@ function AppointmentConciergeSection({
                     </div>
                     <div className="text-xs text-slate-500 xl:text-right">
                       <div>
-                        Estimate{" "}
+                        {t.appointments_concierge_estimate}{" "}
                         {formatMoneyLabel(
                           service.cost_estimate,
                           draft.currency || service.currency,
                         )}
                       </div>
                       <div>
-                        Actual{" "}
+                        {t.appointments_concierge_actual}{" "}
                         {formatMoneyLabel(
                           draft.actualCost || service.actual_cost,
                           draft.currency || service.currency,
@@ -366,7 +374,7 @@ function AppointmentConciergeSection({
                       >
                         {CONCIERGE_SERVICE_STATUS_OPTIONS.map((status) => (
                           <option key={status} value={status}>
-                            {taskStatusLabel(status)}
+                            {serviceStatusLabel(status)}
                           </option>
                         ))}
                       </NativeComboboxSelect>
@@ -503,7 +511,7 @@ function AppointmentConciergeSection({
                       {actionBusy === `service:${service.id}` ? (
                         <LoaderCircle className="size-4 animate-spin" />
                       ) : null}
-                      Save service
+                      {t.appointments_concierge_save_service}
                     </Button>
                   </div>
                 </div>
@@ -692,7 +700,7 @@ function AppointmentConciergeSection({
               disabled={submitBusy || !form.title.trim()}
             >
               {submitBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-              Add service
+              {t.appointments_concierge_add_service}
             </Button>
           </div>
         </form>

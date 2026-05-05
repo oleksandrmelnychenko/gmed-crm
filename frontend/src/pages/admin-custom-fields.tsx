@@ -17,7 +17,7 @@ import {
   TabLoader,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
-import { useLang } from "@/lib/i18n";
+import { formatEnumLabelFromKeys, useLang, type TranslationKey } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,6 +46,21 @@ interface CustomField {
 
 const ENTITY_TYPES = ["lead", "patient", "order", "provider"] as const;
 const FIELD_TYPES = ["text", "number", "date", "boolean", "select"] as const;
+
+const ENTITY_TYPE_LABEL_KEYS = {
+  lead: "cf_entity_lead",
+  patient: "cf_entity_patient",
+  order: "cf_entity_order",
+  provider: "cf_entity_provider",
+} as const satisfies Partial<Record<string, TranslationKey>>;
+
+const FIELD_TYPE_LABEL_KEYS = {
+  text: "cf_field_type_text",
+  number: "cf_field_type_number",
+  date: "cf_field_type_date",
+  boolean: "cf_field_type_boolean",
+  select: "cf_field_type_select",
+} as const satisfies Partial<Record<string, TranslationKey>>;
 
 const ADMIN_CUSTOM_FIELD_REALTIME_EVENTS = [
   "custom_field.created",
@@ -158,6 +173,16 @@ export function AdminCustomFieldsPage() {
   }, [load]);
 
   const activeFields = fields.filter((f) => f.is_active);
+  const entityTypeLabel = useCallback(
+    (value: string | null | undefined) =>
+      formatEnumLabelFromKeys(value, ENTITY_TYPE_LABEL_KEYS, t),
+    [t],
+  );
+  const fieldTypeLabel = useCallback(
+    (value: string | null | undefined) =>
+      formatEnumLabelFromKeys(value, FIELD_TYPE_LABEL_KEYS, t),
+    [t],
+  );
   const columns = useMemo<ColumnDef<CustomField>[]>(() => [
     {
       id: "entity_type",
@@ -167,7 +192,7 @@ export function AdminCustomFieldsPage() {
       width: 150,
       render: (field) => (
         <Badge className="bg-blue-500/15 text-blue-700 dark:text-blue-400">
-          {field.entity_type}
+          {entityTypeLabel(field.entity_type)}
         </Badge>
       ),
     },
@@ -195,7 +220,7 @@ export function AdminCustomFieldsPage() {
       width: 150,
       render: (field) => (
         <Badge className="bg-neutral-500/15 text-neutral-700 dark:text-neutral-400">
-          {field.field_type}
+          {fieldTypeLabel(field.field_type)}
         </Badge>
       ),
     },
@@ -205,7 +230,7 @@ export function AdminCustomFieldsPage() {
       accessor: (field) => field.is_required,
       sortable: true,
       width: 110,
-      render: (field) => (field.is_required ? "yes" : ""),
+      render: (field) => (field.is_required ? t.common_yes : ""),
     },
     {
       id: "actions",
@@ -232,7 +257,10 @@ export function AdminCustomFieldsPage() {
     t.cf_field_type,
     t.cf_required,
     t.common_delete,
+    t.common_yes,
     t.users_actions,
+    entityTypeLabel,
+    fieldTypeLabel,
     onDelete,
   ]);
 
@@ -291,7 +319,7 @@ export function AdminCustomFieldsPage() {
                       onChange={(event) => setFEntity(event.target.value ?? ENTITY_TYPES[0] ?? "patient")} className="h-9 w-full rounded-lg bg-card">
                         {ENTITY_TYPES.map((et) => (
                           <option key={et} value={et}>
-                            {et.charAt(0).toUpperCase() + et.slice(1)}
+                            {entityTypeLabel(et)}
                           </option>
                         ))}
                       </NativeComboboxSelect>
@@ -323,7 +351,7 @@ export function AdminCustomFieldsPage() {
                       onChange={(event) => setFType(event.target.value ?? FIELD_TYPES[0] ?? "text")} className="h-9 w-full rounded-lg bg-card">
                         {FIELD_TYPES.map((ft) => (
                           <option key={ft} value={ft}>
-                            {ft.charAt(0).toUpperCase() + ft.slice(1)}
+                            {fieldTypeLabel(ft)}
                           </option>
                         ))}
                       </NativeComboboxSelect>
@@ -364,7 +392,7 @@ export function AdminCustomFieldsPage() {
               <option value="">{t.providers_all}</option>
               {ENTITY_TYPES.map((et) => (
                 <option key={et} value={et}>
-                  {et.charAt(0).toUpperCase() + et.slice(1)}
+                  {entityTypeLabel(et)}
                 </option>
               ))}
             </NativeComboboxSelect>

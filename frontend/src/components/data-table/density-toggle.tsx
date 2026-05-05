@@ -1,19 +1,20 @@
 import { Rows2, Rows3, Rows4 } from "lucide-react";
 
+import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import type { DensityLevel } from "./types";
 
 export type DensityOption = {
   value: DensityLevel;
-  label: string;
+  label?: string;
   icon: typeof Rows3;
 };
 
 const DEFAULT_OPTIONS: readonly DensityOption[] = [
-  { value: "comfortable", label: "Comfortable", icon: Rows2 },
-  { value: "compact", label: "Compact", icon: Rows3 },
-  { value: "condensed", label: "Condensed", icon: Rows4 },
+  { value: "comfortable", icon: Rows2 },
+  { value: "compact", icon: Rows3 },
+  { value: "condensed", icon: Rows4 },
 ];
 
 export type DensityToggleProps = {
@@ -31,12 +32,19 @@ export function DensityToggle({
   options = DEFAULT_OPTIONS,
   labels,
   className,
-  ariaLabel = "Row density",
+  ariaLabel,
 }: DensityToggleProps) {
+  const { t } = useLang();
+  const defaultLabels: Record<DensityLevel, string> = {
+    comfortable: t.table_density_comfortable,
+    compact: t.table_density_compact,
+    condensed: t.table_density_condensed,
+  };
+
   return (
     <div
       role="radiogroup"
-      aria-label={ariaLabel}
+      aria-label={ariaLabel ?? t.table_density}
       className={cn(
         "inline-flex items-center rounded-lg border border-border bg-background p-0.5",
         className,
@@ -45,7 +53,7 @@ export function DensityToggle({
       {options.map((option) => {
         const selected = option.value === value;
         const Icon = option.icon;
-        const label = labels?.[option.value] ?? option.label;
+        const label = labels?.[option.value] ?? option.label ?? defaultLabels[option.value];
         return (
           <button
             key={option.value}

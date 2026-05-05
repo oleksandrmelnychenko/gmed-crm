@@ -54,7 +54,8 @@ import {
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { formatEnumLabel, useLang } from "@/lib/i18n";
+import { formatEnumLabel, formatEnumLabelFromKeys, type TranslationKey, useLang } from "@/lib/i18n";
+import { localizeDocumentCode } from "@/lib/required-document-labels";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
@@ -212,12 +213,13 @@ const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
 const ORDER_DEFAULT_FROZEN_COLUMNS = ["order_number", "patient"];
 const ORDER_MAX_FROZEN_COLUMNS = 3;
-const ORDER_COLUMN_GROUPS = {
-  identity: "Identity",
-  workflow: "Workflow",
-  finance: "Finance",
-  audit: "Audit",
-};
+const ORDER_TASK_STATUS_LABEL_KEYS = {
+  open: "orders_task_status_open",
+  in_progress: "orders_task_status_in_progress",
+  completed: "orders_task_status_completed",
+  done: "orders_task_status_completed",
+  cancelled: "orders_task_status_cancelled",
+} satisfies Partial<Record<string, TranslationKey>>;
 
 function StatCard({ label, value, description, icon }: StatCardProps) {
   return (
@@ -327,6 +329,20 @@ export function OrdersPage() {
   const permissions = orderPermissions(user?.role);
   const locale = lang === "de" ? "de-DE" : "ru-RU";
   const l = useCallback((de: string, ru: string) => (lang === "de" ? de : ru), [lang]);
+  const orderColumnGroupLabels = useMemo(
+    () => ({
+      identity: t.operations_column_group_identity,
+      workflow: t.operations_column_group_workflow,
+      finance: t.operations_column_group_finance,
+      audit: t.operations_column_group_audit,
+    }),
+    [t],
+  );
+  const workflowTaskStatusLabel = useCallback(
+    (status: string | null | undefined) =>
+      formatEnumLabelFromKeys(status, ORDER_TASK_STATUS_LABEL_KEYS, t),
+    [t],
+  );
   const normalizeLeistungDescription = useCallback(
     (value: string) =>
       value === "Discovery and provider shortlist"
@@ -347,7 +363,7 @@ export function OrdersPage() {
   const workflowGroupLabels = useMemo(
     () => ({
       ...phaseLabels,
-      custom: l("Individuell", "Individualno"),
+      custom: l("Individuell", "Индивидуально"),
     }),
     [l, phaseLabels],
   );
@@ -522,37 +538,37 @@ export function OrdersPage() {
       lang === "de"
         ? {
             "Billing release is not granted and package coverage is not confirmed":
-              "Billing-Release fehlt und die Paketdeckung ist nicht bestatigt.",
+              "Billing-Release fehlt und die Paketdeckung ist nicht bestätigt.",
             "Order signatures are still incomplete":
-              "Die Auftragssignaturen sind noch nicht vollstandig.",
+              "Die Auftragssignaturen sind noch nicht vollständig.",
             "Advance invoice exists but payment is still missing":
               "Es gibt eine Vorausrechnung, aber die Zahlung fehlt noch.",
             "Treatment plan must be finalized before execution":
-              "Der Behandlungsplan muss vor der Durchfuhrung finalisiert sein.",
+              "Der Behandlungsplan muss vor der Durchführung finalisiert sein.",
             "At least one confirmed medical appointment is required":
-              "Mindestens ein bestatigter medizinischer Termin ist erforderlich.",
+              "Mindestens ein bestätigter medizinischer Termin ist erforderlich.",
             "Required non-medical services still need a confirmed booking":
-              "Erforderliche nicht-medizinische Leistungen brauchen noch eine bestatigte Buchung.",
+              "Erforderliche nicht-medizinische Leistungen brauchen noch eine bestätigte Buchung.",
             "Interpreter is required but not assigned yet":
               "Ein Dolmetscher ist erforderlich, aber noch nicht zugewiesen.",
             "Assigned interpreter has not confirmed yet":
-              "Der zugewiesene Dolmetscher hat noch nicht bestatigt.",
+              "Der zugewiesene Dolmetscher hat noch nicht bestätigt.",
             "Interpreter briefing is still pending":
               "Das Dolmetscher-Briefing ist noch ausstehend.",
             "Preparation documents still need to be sent":
-              "Vorbereitungsunterlagen mussen noch versendet werden.",
+              "Vorbereitungsunterlagen müssen noch versendet werden.",
             "Patient arrival or execution start is not recorded yet":
-              "Patientenankunft oder Durchfuhrungsstart sind noch nicht erfasst.",
+              "Patientenankunft oder Durchführungsstart sind noch nicht erfasst.",
             "Medical execution must be completed and backed by delivered appointments or services":
-              "Die medizinische Durchfuhrung muss abgeschlossen und durch erbrachte Termine oder Leistungen belegt sein.",
+              "Die medizinische Durchführung muss abgeschlossen und durch erbrachte Termine oder Leistungen belegt sein.",
             "Required non-medical services still need execution confirmation":
-              "Erforderliche nicht-medizinische Leistungen brauchen noch eine Durchfuhrungsbestatigung.",
+              "Erforderliche nicht-medizinische Leistungen brauchen noch eine Durchführungsbestätigung.",
             "Interpreter-supported execution still needs completion or report confirmation":
-              "Dolmetscher-gestutzte Durchfuhrung braucht noch Abschluss oder Berichtbestatigung.",
+              "Dolmetscher-gestützte Durchführung braucht noch Abschluss oder Berichtbestätigung.",
             "Execution deviations or incidents must be resolved or marked as not required":
-              "Abweichungen oder Vorfalle mussen geklart oder als nicht erforderlich markiert werden.",
+              "Abweichungen oder Vorfälle müssen geklärt oder als nicht erforderlich markiert werden.",
             "Results, Arztbrief or final patient handoff still need to be released":
-              "Ergebnisse, Arztbrief oder finale Patientenubergabe mussen noch freigegeben werden.",
+              "Ergebnisse, Arztbrief oder finale Patientenübergabe müssen noch freigegeben werden.",
             "Doctor-directed follow-up is required but not scheduled yet":
               "Arztgesteuertes Follow-up ist erforderlich, aber noch nicht terminiert.",
             "1-week follow-up is not scheduled yet":
@@ -573,9 +589,9 @@ export function OrdersPage() {
               "Der Compliance-Status ist nicht abgeschlossen.",
             "DSGVO/compliance documents are not signed":
               "DSGVO-/Compliance-Dokumente sind nicht unterschrieben.",
-            "Identity is not verified": "Die Identitat ist nicht verifiziert.",
+            "Identity is not verified": "Die Identität ist nicht verifiziert.",
             "Valid contract documentation is missing":
-              "Gultige Vertragsdokumentation fehlt.",
+              "Gültige Vertragsdokumentation fehlt.",
             "Patient is still in debt-management hold":
               "Der Patient befindet sich noch im Debt-Hold.",
             "Existing-customer re-check is not required before the first operational order":
@@ -583,64 +599,64 @@ export function OrdersPage() {
           }[reason]
         : {
             "Billing release is not granted and package coverage is not confirmed":
-              "Billing-release ne vydan, a pokrytie paketom ne podtverzhdeno.",
+              "Billing release не выдан, и покрытие пакетом не подтверждено.",
             "Order signatures are still incomplete":
-              "Podpisi po zakazu eshche ne zaversheny.",
+              "Подписи по заказу ещё не завершены.",
             "Advance invoice exists but payment is still missing":
-              "Est avansovyy schet, no oplata eshche ne postupila.",
+              "Есть авансовый счёт, но оплата ещё не поступила.",
             "Treatment plan must be finalized before execution":
-              "Plan lecheniya dolzhen byt finalizirovan do ispolneniya.",
+              "План лечения должен быть финализирован до исполнения.",
             "At least one confirmed medical appointment is required":
-              "Nuzhen kak minimum odin podtverzhdennyy meditsinskiy priem.",
+              "Нужен минимум один подтверждённый медицинский приём.",
             "Required non-medical services still need a confirmed booking":
-              "Objazatelnye nemeditsinskie uslugi eshche trebuyut podtverzhdennogo bronirovaniya.",
+              "Обязательные немедицинские услуги ещё требуют подтверждённого бронирования.",
             "Interpreter is required but not assigned yet":
-              "Perevodchik trebuetsya, no eshche ne naznachen.",
+              "Переводчик требуется, но ещё не назначен.",
             "Assigned interpreter has not confirmed yet":
-              "Naznachennyy perevodchik eshche ne podtverdil uchastie.",
+              "Назначенный переводчик ещё не подтвердил участие.",
             "Interpreter briefing is still pending":
-              "Brifing perevodchika vse eshche ozhidaetsya.",
+              "Брифинг переводчика ещё ожидает выполнения.",
             "Preparation documents still need to be sent":
-              "Podgotovitelnye dokumenty eshche nuzhno otpravit.",
+              "Подготовительные документы ещё нужно отправить.",
             "Patient arrival or execution start is not recorded yet":
-              "Pribytie patsienta ili start ispolneniya eshche ne zafiksirovany.",
+              "Прибытие пациента или начало исполнения ещё не зафиксированы.",
             "Medical execution must be completed and backed by delivered appointments or services":
-              "Meditsinskaya chast dolzhna byt zavershena i podtverzhdena okazannymi priemami ili uslugami.",
+              "Медицинская часть должна быть завершена и подтверждена оказанными приёмами или услугами.",
             "Required non-medical services still need execution confirmation":
-              "Objazatelnye nemeditsinskie uslugi eshche trebuyut podtverzhdeniya ispolneniya.",
+              "Обязательные немедицинские услуги ещё требуют подтверждения исполнения.",
             "Interpreter-supported execution still needs completion or report confirmation":
-              "Ispolnenie s uchastiem perevodchika eshche trebuet zaversheniya ili podtverzhdeniya otcheta.",
+              "Исполнение с участием переводчика ещё требует завершения или подтверждения отчёта.",
             "Execution deviations or incidents must be resolved or marked as not required":
-              "Otkлонeniya ili intsidenty ispolneniya dolzhny byt zakryty ili pomеcheny kak ne trebuyushchie deystviy.",
+              "Отклонения или инциденты исполнения должны быть закрыты или помечены как не требующие действий.",
             "Results, Arztbrief or final patient handoff still need to be released":
-              "Rezul'taty, Arztbrief ili finalnaya peredacha patsientu eshche dolzhny byt vypushcheny.",
+              "Результаты, Arztbrief или финальная передача пациенту ещё должны быть выпущены.",
             "Doctor-directed follow-up is required but not scheduled yet":
-              "Follow-up po naznacheniyu vracha trebuetsya, no eshche ne zaplanirovan.",
+              "Follow-up по назначению врача требуется, но ещё не запланирован.",
             "1-week follow-up is not scheduled yet":
-              "1-nedelnyy follow-up eshche ne zaplanirovan.",
+              "Недельный follow-up ещё не запланирован.",
             "1-month follow-up is not scheduled yet":
-              "1-mesyachnyy follow-up eshche ne zaplanirovan.",
+              "Месячный follow-up ещё не запланирован.",
             "6-month follow-up is not scheduled yet":
-              "6-mesyachnyy follow-up eshche ne zaplanirovan.",
+              "Шестимесячный follow-up ещё не запланирован.",
             "Package-end follow-up is required but not scheduled yet":
-              "Follow-up po zaversheniyu paketa trebuetsya, no eshche ne zaplanirovan.",
+              "Follow-up по завершению пакета требуется, но ещё не запланирован.",
             "No follow-up reminder, task or appointment has been launched yet":
-              "Eshche ne zapushcheno ni odnogo napominaniya, zadachi ili priema po follow-up.",
-            "Primary contact is missing": "Ne ukazan osnovnoy kontakt.",
+              "Ещё не запущено ни одного напоминания, задачи или приёма по follow-up.",
+            "Primary contact is missing": "Не указан основной контакт.",
             "Residence or address country is missing":
-              "Ne ukazana strana prozhivaniya ili adresa.",
-            "Preferred language is missing": "Ne ukazan predpochitaemyy yazyk.",
+              "Не указана страна проживания или адреса.",
+            "Preferred language is missing": "Не указан предпочитаемый язык.",
             "Compliance status is not completed":
-              "Status compliance ne zavershen.",
+              "Статус compliance не завершён.",
             "DSGVO/compliance documents are not signed":
-              "Dokumenty DSGVO/compliance ne podpisany.",
-            "Identity is not verified": "Lichnost ne podtverzhdena.",
+              "Документы DSGVO/compliance не подписаны.",
+            "Identity is not verified": "Личность не подтверждена.",
             "Valid contract documentation is missing":
-              "Net validnogo dogovornogo paketa.",
+              "Нет действующего договорного пакета.",
             "Patient is still in debt-management hold":
-              "Patsient vse eshche nakhoditsya v debt-hold.",
+              "Пациент всё ещё находится в debt-hold.",
             "Existing-customer re-check is not required before the first operational order":
-              "Povtornaya proverka sushchestvuyushchego klienta ne trebuetsya pered pervym operatsionnym zakazom.",
+              "Повторная проверка существующего клиента не требуется перед первым операционным заказом.",
           }[reason];
     if (exact) return exact;
     const executionChecklistMatch = reason.match(
@@ -649,8 +665,8 @@ export function OrdersPage() {
     if (executionChecklistMatch) {
       const count = Number(executionChecklistMatch[1]);
       return l(
-        `${count} Punkt(e) der Durchfuhrungs-Checkliste sind noch offen.`,
-        `Otkryto eshche ${count} punkt(ov) cheklista ispolneniya.`,
+        `${count} Punkt(e) der Durchführungs-Checkliste sind noch offen.`,
+        `${count} пункт(ов) чек-листа исполнения ещё открыто.`,
       );
     }
     const missingDocsMatch = reason.match(
@@ -660,7 +676,7 @@ export function OrdersPage() {
       const count = Number(missingDocsMatch[1]);
       return l(
         `${count} erforderliche Patientendokument(e) fehlen.`,
-        `Ne khvataet ${count} obyazatelnykh dokument(ov) patsienta.`,
+        `Не хватает ${count} обязательных документ(ов) пациента.`,
       );
     }
     return reason;
@@ -1458,7 +1474,7 @@ export function OrdersPage() {
     return () => {
       cancelled = true;
     };
-  }, [reloadNonce, selectedOrderId]);
+  }, [reloadNonce, selectedOrderId, t.orders_service_groups_failed_load]);
 
   useEffect(() => {
     if (!selectedOrderId) {
@@ -1520,7 +1536,7 @@ export function OrdersPage() {
         setServiceGroupsError(
           error instanceof Error
             ? error.message
-            : "Failed to load service groups",
+            : t.orders_service_groups_failed_load,
         );
       } finally {
         if (!cancelled) setServiceGroupsLoading(false);
@@ -1531,7 +1547,7 @@ export function OrdersPage() {
     return () => {
       cancelled = true;
     };
-  }, [reloadNonce, selectedOrderId]);
+  }, [reloadNonce, selectedOrderId, t.orders_service_groups_failed_load]);
 
   async function handleCreateOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1863,7 +1879,7 @@ export function OrdersPage() {
       setServiceGroupsError(
         error instanceof Error
           ? error.message
-          : "Failed to generate service group lines",
+          : t.orders_service_group_lines_failed_generate,
       );
     } finally {
       setGeneratingServiceGroupId(null);
@@ -1884,7 +1900,7 @@ export function OrdersPage() {
       setServiceGroupWizardError(
         error instanceof Error
           ? error.message
-          : "Failed to create service group",
+          : t.orders_service_group_failed_create,
       );
       throw error;
     } finally {
@@ -2368,7 +2384,7 @@ export function OrdersPage() {
           defaultDensity="compact"
           defaultFrozenColumns={ORDER_DEFAULT_FROZEN_COLUMNS}
           dictionary={tx}
-          groupLabels={ORDER_COLUMN_GROUPS}
+          groupLabels={orderColumnGroupLabels}
           loading={loading}
           maxFrozenColumns={ORDER_MAX_FROZEN_COLUMNS}
           toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
@@ -4359,10 +4375,8 @@ export function OrdersPage() {
                                             )}
                                           >
                                             {item.is_completed
-                                              ? l("abgeschlossen", "завершено")
-                                              : item.linked_task_status === "open"
-                                                ? l("offen", "открыто")
-                                                : item.linked_task_status ?? l("offen", "открыто")}
+                                              ? workflowTaskStatusLabel("completed")
+                                              : workflowTaskStatusLabel(item.linked_task_status ?? "open")}
                                           </Badge>
                                         </div>
                                         <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
@@ -4604,7 +4618,7 @@ export function OrdersPage() {
                         ) : null}
                         {serviceGroupsLoading ? (
                           <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-5 text-sm text-muted-foreground">
-                            Loading split service groups
+                            {t.orders_service_groups_loading}
                           </div>
                         ) : null}
                         {orderServiceGroups.map((group) => (
@@ -5776,7 +5790,7 @@ export function OrdersPage() {
                       {document.auto_name ||
                         document.original_filename ||
                         document.id}
-                      {document.art ? ` · ${document.art}` : ""}
+                      {document.art ? ` · ${localizeDocumentCode(document.art, l)}` : ""}
                       {document.original_filename
                         ? ` · ${document.original_filename}`
                         : ""}

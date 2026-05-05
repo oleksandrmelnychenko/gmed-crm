@@ -66,34 +66,42 @@ function roleDisplay(role: string, translations: Translations) {
   return labels[`role_${role}`] ?? formatUnknownValue(role, translations);
 }
 
+type RealtimeStatusTranslations = Pick<
+  Translations,
+  | "topbar_realtime_connected"
+  | "topbar_realtime_connecting"
+  | "topbar_realtime_reconnecting"
+  | "topbar_realtime_disconnected"
+>;
+
 function realtimeStatusLabel(
   status: RealtimeConnectionStatus,
   attempt: number,
-  lang: string,
+  translations: RealtimeStatusTranslations,
 ) {
-  const isDe = lang === "de";
   if (status === "connected") {
-    return isDe ? "Realtime verbunden" : "Realtime подключен";
+    return translations.topbar_realtime_connected;
   }
   if (status === "connecting") {
-    return isDe ? "Realtime verbindet..." : "Realtime подключается...";
+    return translations.topbar_realtime_connecting;
   }
   if (status === "reconnecting") {
-    return isDe
-      ? `Realtime verbindet erneut (${attempt})`
-      : `Realtime переподключается (${attempt})`;
+    return translations.topbar_realtime_reconnecting.replace(
+      "{attempt}",
+      String(attempt),
+    );
   }
-  return isDe ? "Realtime getrennt" : "Realtime отключен";
+  return translations.topbar_realtime_disconnected;
 }
 
 function RealtimeConnectionIndicator({
   status,
   attempt,
-  lang,
+  translations,
 }: {
   status: RealtimeConnectionStatus;
   attempt: number;
-  lang: string;
+  translations: RealtimeStatusTranslations;
 }) {
   const tone =
     status === "connected"
@@ -101,7 +109,7 @@ function RealtimeConnectionIndicator({
       : status === "disconnected"
         ? "bg-rose-500"
         : "bg-amber-500 animate-pulse";
-  const label = realtimeStatusLabel(status, attempt, lang);
+  const label = realtimeStatusLabel(status, attempt, translations);
 
   return (
     <div
@@ -210,7 +218,7 @@ export function Topbar() {
     <>
       <header className="relative z-30 flex items-center justify-between h-12 px-3 bg-card border-b border-border shrink-0">
         <div className="flex items-center gap-1">
-          <TopbarIconButton onClick={toggleNav} title={t.topbar_search}>
+          <TopbarIconButton onClick={toggleNav} title={t.ui_toggle_sidebar}>
             <PanelLeft className="size-[17px]" />
           </TopbarIconButton>
           <div className="h-4 w-px bg-border mx-1" />
@@ -230,7 +238,7 @@ export function Topbar() {
           <RealtimeConnectionIndicator
             status={realtimeConnection.status}
             attempt={realtimeConnection.attempt}
-            lang={lang}
+            translations={t}
           />
 
           {/* Online users avatars */}
@@ -262,11 +270,14 @@ export function Topbar() {
 
           {/* Lang */}
           <button
+            type="button"
             onClick={toggleLang}
+            title={t.topbar_language_toggle}
+            aria-label={t.topbar_language_toggle}
             className="flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-[12px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
           >
             <Globe className="size-3.5" />
-            {lang === "de" ? "DE" : "RU"}
+            {t.common_lang_native}
           </button>
         </div>
       </header>
@@ -305,8 +316,10 @@ function TopbarIconButton({
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       title={title}
+      aria-label={title}
       className="relative flex items-center justify-center size-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
     >
       {children}
@@ -323,30 +336,34 @@ function OnlineAvatars({
   users: ActiveSession[];
   onToggle: () => void;
 }) {
+  const { t } = useLang();
   const maxShow = 8;
   const show = users.slice(0, maxShow);
   const overflow = Math.max(0, users.length - maxShow);
 
   return (
-    <div
+    <button
+      type="button"
       className="flex items-center cursor-pointer -space-x-1.5"
       onClick={onToggle}
+      title={t.topbar_online_users}
+      aria-label={t.topbar_online_users}
     >
       {show.map((u) => (
-        <div
+        <span
           key={u.user_id}
           title={u.user_name}
           className="flex items-center justify-center size-7 rounded-full bg-muted text-[10px] font-medium text-foreground border-2 border-background"
         >
           {initials(u.user_name)}
-        </div>
+        </span>
       ))}
       {overflow > 0 && (
-        <div className="flex items-center justify-center size-7 rounded-full bg-muted-foreground text-[10px] font-medium text-background border-2 border-background">
+        <span className="flex items-center justify-center size-7 rounded-full bg-muted-foreground text-[10px] font-medium text-background border-2 border-background">
           +{overflow}
-        </div>
+        </span>
       )}
-    </div>
+    </button>
   );
 }
 
@@ -565,6 +582,8 @@ function UsersPanel({
             </div>
             <button
               onClick={() => setChatUser(null)}
+              title={t.common_close}
+              aria-label={t.common_close}
               className="size-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             >
               <X className="size-4" />
@@ -614,6 +633,8 @@ function UsersPanel({
             />
             <button
               type="submit"
+              title={t.chat_send}
+              aria-label={t.chat_send}
               className="flex items-center justify-center size-9 rounded-full bg-foreground text-background hover:opacity-80 transition-opacity"
             >
               <Send className="size-4" />

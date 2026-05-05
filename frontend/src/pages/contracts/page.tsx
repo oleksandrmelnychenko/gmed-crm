@@ -51,7 +51,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { useLang } from "@/lib/i18n";
+import { formatEnumLabelFromKeys, useLang, type TranslationKey } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
@@ -128,6 +128,27 @@ const CONTRACT_REALTIME_EVENTS = [
   "quote.status_changed",
 ] as const;
 
+const CONTRACT_STATUS_LABEL_KEYS = {
+  draft: "revenue_contract_status_draft",
+  sent: "revenue_contract_status_sent",
+  signed: "revenue_contract_status_signed",
+  expired: "revenue_contract_status_expired",
+  terminated: "revenue_contract_status_terminated",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const QUOTE_STATUS_LABEL_KEYS = {
+  draft: "revenue_quote_status_draft",
+  sent: "revenue_quote_status_sent",
+  accepted: "revenue_quote_status_accepted",
+  rejected: "revenue_quote_status_rejected",
+  expired: "revenue_quote_status_expired",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const QUOTE_VERSION_REASON_LABEL_KEYS = {
+  initial_snapshot: "revenue_quotes_version_snapshot",
+  status_update: "revenue_quotes_version_status_update",
+} satisfies Partial<Record<string, TranslationKey>>;
+
 export function ContractsPage() {
   const { user } = useAuth();
   const { t, lang } = useLang();
@@ -137,238 +158,94 @@ export function ContractsPage() {
   const permissions = contractsPermissions(user?.role);
   const locale = lang === "de" ? "de-DE" : "ru-RU";
   const text = useMemo(
-    () => (lang === "de"
-    ? {
-        accessDenied:
-          "Verträge und Angebote sind nur für CEO, CEO-Assistenz, Patientenmanager und Abrechnung verfügbar.",
-        workspaceKicker: "Kaufmännischer Arbeitsbereich",
-        workspaceTitle: "Verträge und Angebote",
-        workspaceDescription:
-          "Patientengebundene Rahmenverträge und Angebote auf Basis von Auftragsleistungen, Durchlaufkosten und kaufmännischer Freigabe.",
-        refresh: "Aktualisieren",
-        newContract: "Neuer Vertrag",
-        newQuote: "Neues Angebot",
-        contractsTab: "Rahmenverträge",
-        quotesTab: "Angebote",
-        contractStatsDescription: "unterzeichnet / versendet",
-        quoteStatsDescription: "angenommen",
-        agencyServiceTitle: "Leistungskatalog der Agentur",
-        agencyServiceDescription:
-          "Interner Preiskatalog für agenturseitige Leistungen und künftige Auto-Abrechnungen.",
-        agencyServiceSearchPlaceholder:
-          "Nach Schlüssel, Leistungsname oder Beschreibung suchen",
-        activeOnly: "Nur aktiv",
-        allStatuses: "Alle Status",
-        inactiveOnly: "Nur inaktiv",
-        catalogItems: "Katalogpositionen",
-        activeLabel: "Aktiv",
-        priced: "Mit Preis",
-        noCatalogItems: "Keine Katalogpositionen",
-        noCatalogItemsDescription:
-          "Lege wiederverwendbare Agenturpositionen an, etwa Dolmetscherstunden oder Koordinationspakete.",
-        activeState: "aktiv",
-        inactiveState: "inaktiv",
-        unitPrice: "Einzelpreis",
-        unit: "Einheit",
-        updated: "Aktualisiert",
-        editCatalogItem: "Katalogposition bearbeiten",
-        newCatalogItem: "Neue Katalogposition",
-        catalogHelp:
-          "Verwende stabile Service-Keys wie `interpreter_hours` für künftige Automatisierungen.",
-        cancelEdit: "Bearbeitung verwerfen",
-        serviceKey: "Service-Key",
-        serviceName: "Leistungsname",
-        unitLabel: "Einheitsbezeichnung",
-        currency: "Währung",
-        vatPercent: "MwSt. %",
-        description: "Beschreibung",
-        itemIsActive:
-          "Position ist aktiv und kann in nachgelagerten Workflows verwendet werden",
-        saveCatalogItem: "Katalogposition speichern",
-        createCatalogItem: "Katalogposition anlegen",
-        createContractDescription:
-          "Lege zuerst die patientengebundene kaufmännische Basis fest, bevor Angebote und Ausführungsaufträge erstellt werden.",
-        selectPatient: "Patient auswählen",
-        createContract: "Vertrag anlegen",
-        createQuoteDescription:
-          "Erzeuge ein Angebot aus den aktuellen Auftragsleistungen. Summen werden serverseitig aus den Auftragspositionen berechnet.",
-        loadingOrders: "Aufträge werden geladen...",
-        selectOrder: "Auftrag auswählen",
-        chooseOrder: "Auftrag auswählen",
-        createQuote: "Angebot anlegen",
-        contractSheetDescription:
-          "Status, Laufzeit und kaufmännischer Kontext für den ausgewählten Patienten.",
-        contractOverviewDescription:
-          "Details zur patientengebundenen Vereinbarung und aktueller Lebenszyklus.",
-        linkedContractDescription:
-          "Mit aktuellem Vertragskontext direkt zu Patient, Auftrag oder Dokumenten springen.",
-        orders: "Aufträge",
-        documents: "Dokumente",
-        saveContract: "Vertrag speichern",
-        quoteSheetDescription:
-          "Angebotssummen, Positionen und Zahlungsstatus für den ausgewählten Auftrag.",
-        quoteOverviewDescription:
-          "Kaufmännische Summen und Umfang aus dem verknüpften Auftrag.",
-        vatTotal: "MwSt. gesamt",
-        grossTotal: "Gesamt brutto",
-        snapshotVersion: "Snapshot-Version",
-        linkedQuoteDescription:
-          "Mit aktuellem Angebotskontext direkt zu Patient, Auftrag, Rechnungen oder Dokumenten springen.",
-        order: "Auftrag",
-        invoices: "Rechnungen",
-        quoteLifecycle: "Angebots-Lebenszyklus",
-        quoteLifecycleDescription:
-          "Angebot durch Versand- und Zahlungsbestätigung führen.",
-        saveQuote: "Angebot speichern",
-        lineItems: "Positionen",
-        lineItemsDescription:
-          "Netto-, MwSt.- und Bruttowerte wie im Angebots-Snapshot gespeichert.",
-        noLineItems: "Keine Positionen",
-        noLineItemsDescription:
-          "Dieses Angebot enthält noch keine materialisierten Positionen.",
-        quantity: "Menge",
-        net: "Netto",
-        gross: "Brutto",
-        versionHistory: "Versionsverlauf",
-        versionHistoryDescription:
-          "Unveränderliche Angebots-Snapshots für Lebenszyklus- und Zahlungsstatusänderungen.",
-        noVersions: "Keine Versionen",
-        noVersionsDescription:
-          "Es sind noch keine gespeicherten Angebots-Snapshots vorhanden.",
-        version: "Version",
-        snapshotFallback: "Snapshot",
-        lineItemsCount: "Positionen",
-        updatedAt: "Aktualisiert am",
-        roleLabels: {
-          draft: "Entwurf",
-          sent: "Versendet",
-          signed: "Unterzeichnet",
-          expired: "Abgelaufen",
-          terminated: "Beendet",
-          accepted: "Angenommen",
-          rejected: "Abgelehnt",
-        },
-      }
-    : {
-        accessDenied:
-          "Договоры и предложения доступны только CEO, ассистенту CEO, пациент-менеджерам и биллингу.",
-        workspaceKicker: "Коммерческое рабочее пространство",
-        workspaceTitle: "Договоры и предложения",
-        workspaceDescription:
-          "Рамочные договоры и предложения по пациенту на основе услуг заказа, проходных расходов и коммерческого согласования.",
-        refresh: "Обновить",
-        newContract: "Новый договор",
-        newQuote: "Новое предложение",
-        contractsTab: "Рамочные договоры",
-        quotesTab: "Предложения",
-        contractStatsDescription: "подписано / отправлено",
-        quoteStatsDescription: "принято",
-        agencyServiceTitle: "Каталог агентских услуг",
-        agencyServiceDescription:
-          "Внутренний прайс-каталог для агентских услуг и будущих потоков автоначисления.",
-        agencyServiceSearchPlaceholder:
-          "Поиск по ключу, названию услуги или описанию",
-        activeOnly: "Только активные",
-        allStatuses: "Все статусы",
-        inactiveOnly: "Только неактивные",
-        catalogItems: "Позиции каталога",
-        activeLabel: "Активные",
-        priced: "С ценой",
-        noCatalogItems: "Нет позиций каталога",
-        noCatalogItemsDescription:
-          "Создайте переиспользуемые агентские позиции, например часы переводчика или пакеты координации.",
-        activeState: "активна",
-        inactiveState: "неактивна",
-        unitPrice: "Цена за единицу",
-        unit: "Единица",
-        updated: "Обновлено",
-        editCatalogItem: "Редактировать позицию каталога",
-        newCatalogItem: "Новая позиция каталога",
-        catalogHelp:
-          "Используйте стабильные service keys вроде `interpreter_hours` для будущей автоматизации.",
-        cancelEdit: "Отменить редактирование",
-        serviceKey: "Ключ услуги",
-        serviceName: "Название услуги",
-        unitLabel: "Обозначение единицы",
-        currency: "Валюта",
-        vatPercent: "НДС %",
-        description: "Описание",
-        itemIsActive:
-          "Позиция активна и может использоваться в последующих рабочих процессах",
-        saveCatalogItem: "Сохранить позицию каталога",
-        createCatalogItem: "Создать позицию каталога",
-        createContractDescription:
-          "Сначала задайте коммерческую основу по пациенту, а затем создавайте предложения и рабочие заказы.",
-        selectPatient: "Выберите пациента",
-        createContract: "Создать договор",
-        createQuoteDescription:
-          "Сформируйте предложение из текущих услуг заказа. Итоги рассчитываются на бэкенде по строкам заказа.",
-        loadingOrders: "Загрузка заказов...",
-        selectOrder: "Выберите заказ",
-        chooseOrder: "Выберите заказ",
-        createQuote: "Создать предложение",
-        contractSheetDescription:
-          "Статус, срок действия и коммерческий контекст для выбранного пациента.",
-        contractOverviewDescription:
-          "Детали соглашения по пациенту и его текущий жизненный цикл.",
-        linkedContractDescription:
-          "Быстрый переход к пациенту, заказам или документам в контексте текущего договора.",
-        orders: "Заказы",
-        documents: "Документы",
-        saveContract: "Сохранить договор",
-        quoteSheetDescription:
-          "Суммы предложения, позиции и статус оплаты для выбранного заказа.",
-        quoteOverviewDescription:
-          "Коммерческие итоги и объём, унаследованные из связанного заказа.",
-        vatTotal: "НДС итого",
-        grossTotal: "Итого брутто",
-        snapshotVersion: "Версия снимка",
-        linkedQuoteDescription:
-          "Быстрый переход к пациенту, заказу, счетам или документам в контексте текущего предложения.",
-        order: "Заказ",
-        invoices: "Счета",
-        quoteLifecycle: "Жизненный цикл предложения",
-        quoteLifecycleDescription:
-          "Проведите предложение через этапы отправки и подтверждения оплаты.",
-        saveQuote: "Сохранить предложение",
-        lineItems: "Позиции",
-        lineItemsDescription:
-          "Значения нетто, НДС и брутто в том виде, как они сохранены в снимке предложения.",
-        noLineItems: "Нет позиций",
-        noLineItemsDescription:
-          "В этом предложении пока нет материализованных позиций.",
-        quantity: "Кол-во",
-        net: "Нетто",
-        gross: "Брутто",
-        versionHistory: "История версий",
-        versionHistoryDescription:
-          "Неизменяемые снимки предложения для изменений жизненного цикла и статуса оплаты.",
-        noVersions: "Нет версий",
-        noVersionsDescription:
-          "Сохранённые снимки предложения пока отсутствуют.",
-        version: "Версия",
-        snapshotFallback: "Снимок",
-        lineItemsCount: "позиций",
-        updatedAt: "Обновлено",
-        roleLabels: {
-          draft: "Черновик",
-          sent: "Отправлено",
-          signed: "Подписано",
-          expired: "Истекло",
-          terminated: "Прекращено",
-          accepted: "Принято",
-          rejected: "Отклонено",
-        },
-      }),
-    [lang],
+    () => ({
+      accessDenied: t.revenue_contracts_access_denied,
+      workspaceTitle: t.revenue_contracts_workspace_title,
+      refresh: t.revenue_contracts_refresh,
+      newContract: t.revenue_contracts_new_contract,
+      newQuote: t.revenue_contracts_new_quote,
+      contractsTab: t.revenue_contracts_tab_contracts,
+      quotesTab: t.revenue_contracts_tab_quotes,
+      contractStatsDescription: t.revenue_contracts_stats_signed_sent,
+      quoteStatsDescription: t.revenue_contracts_stats_accepted,
+      agencyServiceTitle: t.revenue_agency_service_title,
+      agencyServiceDescription: t.revenue_agency_service_description,
+      agencyServiceSearchPlaceholder: t.revenue_agency_service_search_placeholder,
+      activeOnly: t.revenue_agency_service_active_only,
+      allStatuses: t.revenue_agency_service_all_statuses,
+      inactiveOnly: t.revenue_agency_service_inactive_only,
+      catalogItems: t.revenue_agency_service_catalog_items,
+      activeLabel: t.revenue_agency_service_active_metric,
+      priced: t.revenue_agency_service_priced_metric,
+      noCatalogItems: t.revenue_agency_service_empty_title,
+      noCatalogItemsDescription: t.revenue_agency_service_empty_description,
+      activeState: t.revenue_agency_service_active_state,
+      inactiveState: t.revenue_agency_service_inactive_state,
+      unitPrice: t.revenue_agency_service_unit_price,
+      unit: t.revenue_agency_service_unit,
+      updated: t.revenue_agency_service_updated,
+      editCatalogItem: t.revenue_agency_service_edit_title,
+      newCatalogItem: t.revenue_agency_service_new_title,
+      catalogHelp: t.revenue_agency_service_help,
+      serviceKey: t.revenue_agency_service_service_key,
+      serviceName: t.revenue_agency_service_service_name,
+      unitLabel: t.revenue_agency_service_unit_label,
+      currency: t.revenue_agency_service_currency,
+      vatPercent: t.revenue_agency_service_vat_percent,
+      description: t.revenue_agency_service_description_label,
+      itemIsActive: t.revenue_agency_service_active_hint,
+      saveCatalogItem: t.revenue_agency_service_save,
+      createCatalogItem: t.revenue_agency_service_create,
+      createContractDescription: t.revenue_contracts_create_description,
+      selectPatient: t.revenue_contracts_select_patient,
+      createContract: t.revenue_contracts_create,
+      createQuoteDescription: t.revenue_quotes_create_description,
+      loadingOrders: t.revenue_quotes_loading_orders,
+      selectOrder: t.revenue_quotes_select_order,
+      chooseOrder: t.revenue_quotes_choose_order,
+      createQuote: t.revenue_quotes_create,
+      contractSheetDescription: t.revenue_contracts_sheet_description,
+      contractOverviewDescription: t.revenue_contracts_overview_description,
+      linkedContractDescription: t.revenue_contracts_linked_description,
+      orders: t.revenue_contracts_orders,
+      documents: t.revenue_contracts_documents,
+      saveContract: t.revenue_contracts_save,
+      quoteSheetDescription: t.revenue_quotes_sheet_description,
+      quoteOverviewDescription: t.revenue_quotes_overview_description,
+      vatTotal: t.revenue_quotes_vat_total,
+      grossTotal: t.revenue_quotes_gross_total,
+      snapshotVersion: t.revenue_quotes_snapshot_version,
+      linkedQuoteDescription: t.revenue_quotes_linked_description,
+      order: t.revenue_quotes_order,
+      invoices: t.revenue_quotes_invoices,
+      quoteLifecycle: t.revenue_quotes_lifecycle,
+      quoteLifecycleDescription: t.revenue_quotes_lifecycle_description,
+      saveQuote: t.revenue_quotes_save,
+      lineItems: t.revenue_quotes_line_items,
+      lineItemsDescription: t.revenue_quotes_line_items_description,
+      noLineItems: t.revenue_quotes_empty_line_items,
+      noLineItemsDescription: t.revenue_quotes_empty_line_items_description,
+      quantity: t.revenue_common_quantity,
+      net: t.revenue_common_net,
+      gross: t.revenue_common_gross,
+      versionHistory: t.revenue_quotes_version_history,
+      versionHistoryDescription: t.revenue_quotes_version_history_description,
+      noVersions: t.revenue_quotes_empty_versions,
+      noVersionsDescription: t.revenue_quotes_empty_versions_description,
+      version: t.revenue_quotes_version,
+      snapshotFallback: t.revenue_quotes_version_snapshot,
+      lineItemsCount: t.revenue_quotes_line_items_count,
+      updatedAt: t.revenue_common_updated_at,
+    }),
+    [t],
   );
   const contractStatusLabel = useCallback(
-    (status: string) => enumLabel(status, text.roleLabels, t),
-    [t, text.roleLabels],
+    (status: string) => formatEnumLabelFromKeys(status, CONTRACT_STATUS_LABEL_KEYS, t),
+    [t],
   );
   const quoteStatusLabel = useCallback(
-    (status: string) => enumLabel(status, text.roleLabels, t),
-    [t, text.roleLabels],
+    (status: string) => formatEnumLabelFromKeys(status, QUOTE_STATUS_LABEL_KEYS, t),
+    [t],
   );
   const roleLabel = useCallback(
     (roleValue: string) => {
@@ -384,17 +261,9 @@ export function ContractsPage() {
   const quoteVersionChangeReasonLabel = useCallback(
     (reason: string | null | undefined) => {
       if (!reason) return text.snapshotFallback;
-      return enumLabel(
-        reason,
-        {
-          initial_snapshot: text.snapshotFallback,
-          status_update:
-            lang === "de" ? "Statusaktualisierung" : "Обновление статуса",
-        },
-        t,
-      );
+      return formatEnumLabelFromKeys(reason, QUOTE_VERSION_REASON_LABEL_KEYS, t);
     },
-    [lang, t, text.snapshotFallback],
+    [t, text.snapshotFallback],
   );
 
   const initialTab =
@@ -460,7 +329,7 @@ export function ContractsPage() {
     DEFAULT_AGENCY_SERVICE_FILTERS,
   );
   const [agencyServiceForm, setAgencyServiceForm] = useState<AgencyServiceFormState>(
-    blankAgencyServiceForm(lang),
+    blankAgencyServiceForm(t.revenue_unit_default),
   );
   const [agencyServiceBusy, setAgencyServiceBusy] = useState(false);
   const [agencyServiceFormError, setAgencyServiceFormError] = useState<string | null>(null);
@@ -1288,7 +1157,7 @@ export function ContractsPage() {
 
       await saveAgencyService(agencyServiceForm.id, payload);
       setAgencyServiceSheetOpen(false);
-      setAgencyServiceForm(blankAgencyServiceForm(lang));
+      setAgencyServiceForm(blankAgencyServiceForm(t.revenue_unit_default));
       setAgencyServicesReloadToken((current) => current + 1);
     } catch (error) {
       setAgencyServiceFormError(
@@ -1307,7 +1176,7 @@ export function ContractsPage() {
 
   function resetAgencyServiceForm() {
     setAgencyServiceFormError(null);
-    setAgencyServiceForm(blankAgencyServiceForm(lang));
+    setAgencyServiceForm(blankAgencyServiceForm(t.revenue_unit_default));
   }
 
   function openNewAgencyServiceSheet() {
@@ -1636,7 +1505,7 @@ export function ContractsPage() {
                     className={cn(selectClassName, "w-[260px] min-w-[260px]")}
                   >
                     <option value="__all__">
-                      {lang === "de" ? "Alle Patienten" : "Все пациенты"}
+                      {t.revenue_filter_all_patients}
                     </option>
                     {patients.map((patient) => (
                       <option key={patient.id} value={patient.id}>
@@ -1755,7 +1624,7 @@ export function ContractsPage() {
                     className={cn(selectClassName, "w-[260px] min-w-[260px]")}
                   >
                     <option value="__all__">
-                      {lang === "de" ? "Alle Patienten" : "Все пациенты"}
+                      {t.revenue_filter_all_patients}
                     </option>
                     {patients.map((patient) => (
                       <option key={patient.id} value={patient.id}>
@@ -1773,7 +1642,7 @@ export function ContractsPage() {
                     className={cn(selectClassName, "w-[260px] min-w-[260px]")}
                   >
                     <option value="__all__">
-                      {lang === "de" ? "Alle Aufträge" : "Все заказы"}
+                      {t.revenue_filter_all_orders}
                     </option>
                     {filteredOrderOptions.map((order) => (
                       <option key={order.id} value={order.id}>
@@ -2155,7 +2024,7 @@ export function ContractsPage() {
                     className={cn(shellInputClassName, !selectedCreateOrder && "text-muted-foreground")}
                     value={
                       selectedCreateOrder
-                        ? `${selectedCreateOrder.order_number} · ${selectedCreateOrder.patient_pid} · ${formatCurrency(selectedCreateOrder.total_estimated)}`
+                        ? `${selectedCreateOrder.order_number} - ${selectedCreateOrder.patient_pid} - ${formatCurrency(selectedCreateOrder.total_estimated)}`
                         : text.chooseOrder
                     }
                   />

@@ -4,7 +4,8 @@ import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
+import { formatEnumLabelFromKeys, useLang, type Translations } from "@/lib/i18n";
+import { CASE_SNIPPET_CATEGORY_LABEL_KEYS } from "@/lib/i18n/catalogs/cases-clinical";
 import {
   CASE_TEXT_SNIPPET_PLACEHOLDERS,
   appendSnippetToNarrative,
@@ -28,12 +29,6 @@ import {
   textareaBaseClassName,
 } from "./primitives";
 
-function tri(lang: string, de: string, ru: string, en: string) {
-  if (lang === "de") return de;
-  if (lang === "ru") return ru;
-  return en;
-}
-
 function doctorOptionLabel(doctor: CaseWorkspaceDoctor) {
   const titlePrefix = doctor.title?.trim() ? `${doctor.title.trim()} ` : "";
   const specialty = doctor.fachbereich?.trim()
@@ -43,20 +38,14 @@ function doctorOptionLabel(doctor: CaseWorkspaceDoctor) {
 }
 
 function snippetCategoryLabel(
-  lang: string,
   category: string,
   translations: Translations,
 ) {
-  const labels: Record<string, string> = {
-    anamnesis: tri(lang, "Anamnese", "Анамнез", "Anamnesis"),
-    cardiology: tri(lang, "Kardiologie", "Кардиология", "Cardiology"),
-    general: tri(lang, "Allgemein", "Общее", "General"),
-    medication: tri(lang, "Medikation", "Медикация", "Medication"),
-    neurology: tri(lang, "Neurologie", "Неврология", "Neurology"),
-    oncology: tri(lang, "Onkologie", "Онкология", "Oncology"),
-    symptoms: tri(lang, "Symptome", "Симптомы", "Symptoms"),
-  };
-  return labels[category] ?? formatUnknownValue(category, translations);
+  return formatEnumLabelFromKeys(
+    category,
+    CASE_SNIPPET_CATEGORY_LABEL_KEYS,
+    translations,
+  );
 }
 
 function initialOverviewForm(
@@ -124,7 +113,7 @@ function OverviewSectionForm({
   sectionError,
   saveOverview,
 }: OverviewSectionFormProps) {
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const [form, setForm] = useState<CaseOverviewForm>(() =>
     initialOverviewForm(detail),
   );
@@ -179,20 +168,15 @@ function OverviewSectionForm({
 
   return (
     <Panel
-      title={tri(lang, "Übersicht", "Обзор", "Overview")}
-      description={tri(
-        lang,
-        "Hauptanfragegrund, Zuweiser und aktuelle Anamnese.",
-        "Причина обращения, направивший врач и текущий анамнез.",
-        "Main reason, referrer, and current anamnesis.",
-      )}
+      title={t.cases_clinical_section_overview}
+      description={t.cases_workspace_overview_description}
     >
       <form onSubmit={handleSubmit} className="space-y-5">
         {sectionError ? <Banner tone="error">{sectionError}</Banner> : null}
 
         <div className="grid gap-4 md:grid-cols-2">
           <Field
-            label={tri(lang, "Hauptanfragegrund", "Причина обращения", "Main reason")}
+            label={t.cases_workspace_overview_main_reason}
             required
           >
             <Input
@@ -202,7 +186,7 @@ function OverviewSectionForm({
               disabled={!canEdit}
             />
           </Field>
-          <Field label={tri(lang, "Zuweiser", "Направивший врач", "Referrer")}>
+          <Field label={t.cases_workspace_overview_referrer}>
             <NativeComboboxSelect
               value={form.zuweiser_doctor_id}
               onChange={(event) => {
@@ -226,12 +210,7 @@ function OverviewSectionForm({
             </NativeComboboxSelect>
           </Field>
           <Field
-            label={tri(
-              lang,
-              "Bezeichnung des Zuweisers",
-              "Наименование направившего врача",
-              "Referrer label",
-            )}
+            label={t.cases_workspace_overview_referrer_label}
           >
             <Input
               value={form.zuweiser}
@@ -243,7 +222,7 @@ function OverviewSectionForm({
         </div>
 
         <Field
-          label={tri(lang, "Aktuelle Anamnese", "Текущий анамнез", "Current anamnesis")}
+          label={t.cases_workspace_overview_current_anamnesis}
           required
         >
           <textarea
@@ -259,20 +238,10 @@ function OverviewSectionForm({
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-sm font-medium text-foreground">
-                {tri(
-                  lang,
-                  "Textbausteine",
-                  "Шаблоны текста",
-                  "Text snippets",
-                )}
+                {t.cases_workspace_overview_snippets_title}
               </p>
               <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                {tri(
-                  lang,
-                  "Wiederverwendbare Fragmente zum Einfügen in den Anamnese-Text.",
-                  "Повторно используемые фрагменты для вставки в текст анамнеза.",
-                  "Reusable fragments to insert into the anamnesis text.",
-                )}
+                {t.cases_workspace_overview_snippets_description}
               </p>
             </div>
             <code className="rounded-lg border border-border/50 bg-card px-3 py-1 text-[11px] text-muted-foreground">
@@ -281,12 +250,7 @@ function OverviewSectionForm({
           </div>
           {activeSnippets.length === 0 ? (
             <p className="mt-3 text-sm text-muted-foreground">
-              {tri(
-                lang,
-                "Keine aktiven Textbausteine vorhanden.",
-                "Активных шаблонов пока нет.",
-                "No active snippets yet.",
-              )}
+              {t.cases_workspace_overview_snippets_empty}
             </p>
           ) : (
             <div className="mt-4 grid gap-3 lg:grid-cols-2">
@@ -306,7 +270,7 @@ function OverviewSectionForm({
                           {snippet.label}
                         </p>
                         <p className="truncate text-xs text-muted-foreground">
-                          {snippetCategoryLabel(lang, snippet.category, t)}
+                          {snippetCategoryLabel(snippet.category, t)}
                         </p>
                       </div>
                     </div>
@@ -322,7 +286,7 @@ function OverviewSectionForm({
                         onClick={() => insertSnippet(snippet)}
                         disabled={!canEdit}
                       >
-                        {tri(lang, "Einfügen", "Вставить", "Insert")}
+                        {t.cases_workspace_overview_snippets_insert}
                       </Button>
                     </div>
                   </div>
@@ -339,12 +303,7 @@ function OverviewSectionForm({
             disabled={busy || !canEdit}
           >
             {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-            {tri(
-              lang,
-              "Übersicht speichern",
-              "Сохранить обзор",
-              "Save overview",
-            )}
+            {t.cases_workspace_overview_save}
           </Button>
         </div>
       </form>

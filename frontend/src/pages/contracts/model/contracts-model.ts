@@ -118,13 +118,13 @@ export function blankQuoteForm(orderId = ""): QuoteFormState {
   };
 }
 
-export function blankAgencyServiceForm(lang: "de" | "ru" = "de"): AgencyServiceFormState {
+export function blankAgencyServiceForm(unitLabel = "unit"): AgencyServiceFormState {
   return {
     id: "",
     serviceKey: "",
     serviceName: "",
     description: "",
-    unitLabel: lang === "de" ? "Einheit" : "ед.",
+    unitLabel,
     unitPrice: "",
     currency: "EUR",
     vatRate: "19",

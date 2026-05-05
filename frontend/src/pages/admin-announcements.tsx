@@ -18,7 +18,7 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
-import { useLang } from "@/lib/i18n";
+import { formatEnumLabelFromKeys, useLang, type TranslationKey } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -53,6 +53,13 @@ const VARIANT_COLORS: Record<string, string> = {
   error: "bg-red-500/15 text-red-700 dark:text-red-400",
   success: "bg-green-500/15 text-green-700 dark:text-green-400",
 };
+
+const ANNOUNCEMENT_VARIANT_LABEL_KEYS = {
+  info: "ann_info",
+  warning: "ann_warning",
+  error: "common_error",
+  success: "ann_success",
+} as const satisfies Partial<Record<string, TranslationKey>>;
 
 const ADMIN_ANNOUNCEMENT_REALTIME_EVENTS = [
   "announcement.created",
@@ -155,6 +162,12 @@ export function AdminAnnouncementsPage() {
     void load();
   }, [load]);
 
+  const variantLabel = useCallback(
+    (value: string | null | undefined) =>
+      formatEnumLabelFromKeys(value, ANNOUNCEMENT_VARIANT_LABEL_KEYS, t),
+    [t],
+  );
+
   const columns = useMemo<ColumnDef<Announcement>[]>(() => [
     {
       id: "title",
@@ -191,7 +204,7 @@ export function AdminAnnouncementsPage() {
             "bg-neutral-500/15 text-neutral-700 dark:text-neutral-400"
           }
         >
-          {announcement.variant}
+          {variantLabel(announcement.variant)}
         </Badge>
       ),
     },
@@ -266,6 +279,7 @@ export function AdminAnnouncementsPage() {
     t.providers_inactive,
     t.users_actions,
     t.users_status,
+    variantLabel,
   ]);
 
   return (

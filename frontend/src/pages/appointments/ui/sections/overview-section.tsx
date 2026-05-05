@@ -100,7 +100,8 @@ function AppointmentOverviewSection({
       <div className="mt-4 flex flex-wrap items-center gap-2">
         {detail.recurrence_frequency ? (
           <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-sky-700">
-            {recurrenceFrequencyLabel(detail.recurrence_frequency)} series
+            {recurrenceFrequencyLabel(detail.recurrence_frequency)}{" "}
+            {t.appointments_recurring_series}
           </span>
         ) : null}
         {detailLineageBadge ? (
@@ -135,8 +136,7 @@ function AppointmentOverviewSection({
       </div>
       {detail.is_blocked ? (
         <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-          Concierge view is intentionally limited for medical slots. Clinical
-          notes and provider specifics stay hidden here.
+          {t.appointments_overview_concierge_limited_warning}
         </div>
       ) : null}
       {!detail.is_blocked && detail.recurrence_frequency ? (

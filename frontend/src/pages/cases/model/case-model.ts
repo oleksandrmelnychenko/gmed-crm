@@ -1,8 +1,13 @@
 import {
+  formatEnumLabelFromKeys,
   getLang,
   t as translateCatalog,
   type Translations,
 } from "@/lib/i18n";
+import {
+  CASE_HISTORY_SECTION_LABEL_KEYS,
+  CASE_STATUS_LABEL_KEYS,
+} from "@/lib/i18n/catalogs/cases-clinical";
 
 import type {
   AllergieItem,
@@ -69,22 +74,9 @@ export function casePermissions(role?: string): CasePermissions {
 
 export function caseStatusLabel(
   status: string,
-  tr: {
-    cases_open: string;
-    cases_in_progress: string;
-    cases_closed: string;
-  },
+  tr: Translations,
 ) {
-  switch (status) {
-    case "open":
-      return tr.cases_open;
-    case "in_progress":
-      return tr.cases_in_progress;
-    case "closed":
-      return tr.cases_closed;
-    default:
-      return status;
-  }
+  return formatEnumLabelFromKeys(status, CASE_STATUS_LABEL_KEYS, tr);
 }
 
 export function blankVorerkrankung(): VorerkrankungItem {
@@ -289,7 +281,7 @@ export function caseText(de: string, ru: string, _en: string) {
 
 export function patientLabel(patient: PatientOption) {
   const name = [patient.first_name, patient.last_name].filter(Boolean).join(" ").trim();
-  return `${name || caseText("Patient", "Пациент", "Patient")} (${patient.patient_id})`;
+  return `${name || runtimeTranslations().cases_clinical_patient_fallback} (${patient.patient_id})`;
 }
 
 export function doctorOptionLabel(doctor: DoctorOption) {
@@ -318,48 +310,20 @@ export function formatDateTime(value: string | null | undefined) {
 }
 
 export function historyValuePreview(value: unknown) {
-  if (value == null) return caseText("leer", "пусто", "empty");
-  if (typeof value === "string") return value || caseText("leer", "пусто", "empty");
+  const empty = runtimeTranslations().cases_clinical_history_value_empty;
+  if (value == null) return empty;
+  if (typeof value === "string") return value || empty;
   const serialized = JSON.stringify(value);
-  if (!serialized) return caseText("leer", "пусто", "empty");
+  if (!serialized) return empty;
   return serialized.length > 180 ? `${serialized.slice(0, 177)}...` : serialized;
 }
 
 export function historySectionLabel(section: string) {
-  switch (section) {
-    case "overview":
-      return caseText("Übersicht", "Обзор", "Overview");
-    case "vorerkrankungen":
-      return caseText("Vorerkrankungen", "Сопутствующие заболевания", "Preconditions");
-    case "allergien":
-      return caseText("Allergien", "Аллергии", "Allergies");
-    case "operationen":
-      return caseText("Operationen", "Операции", "Operations");
-    case "medikamente":
-      return caseText("Medikation", "Медикаменты", "Medication");
-    case "pain_records":
-      return caseText("Schmerzdokumentation", "Записи о боли", "Pain records");
-    case "symptome":
-      return caseText("Symptome", "Симптомы", "Symptoms");
-    case "cardiology":
-      return caseText("Kardiologie", "Кардиология", "Cardiology");
-    case "gastroenterology":
-      return caseText("Gastroenterologie", "Гастроэнтерология", "Gastroenterology");
-    case "orthopedics":
-      return caseText("Orthopädie", "Ортопедия", "Orthopedics");
-    case "neurology":
-      return caseText("Neurologie", "Неврология", "Neurology");
-    case "pulmonology":
-      return caseText("Pneumologie", "Пульмонология", "Pulmonology");
-    case "urology":
-      return caseText("Urologie", "Урология", "Urology");
-    case "vegetative":
-      return caseText("Vegetative Anamnese", "Вегетативный анамнез", "Vegetative");
-    case "impfstatus":
-      return caseText("Impfstatus", "Вакцинация", "Vaccination");
-    default:
-      return section;
-  }
+  return formatEnumLabelFromKeys(
+    section,
+    CASE_HISTORY_SECTION_LABEL_KEYS,
+    runtimeTranslations(),
+  );
 }
 
 export function numericInputToValue(value: string) {

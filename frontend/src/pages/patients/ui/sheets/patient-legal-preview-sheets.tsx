@@ -6,12 +6,18 @@ import { Button } from "@/components/ui/button";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { apiFetch } from "@/lib/api";
+import {
+  documentCategoryLabel,
+  formatPortalCurrency,
+  invoiceTypeLabel,
+  portalStatusLabel,
+} from "../../model/portal-shared";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
-function formatDate(value?: string | null) {
+function formatDate(value?: string | null, lang = "ru") {
   if (!value) return "-";
   try {
-    return new Intl.DateTimeFormat("en-GB", {
+    return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
@@ -39,9 +45,7 @@ export function PatientDocumentsPreviewSheet({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
-  const { lang } = useLang();
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const { t, lang } = useLang();
   const { staffGo } = useStaffNavigate();
   const [items, setItems] = useState<DocumentItem[] | null>(null);
   const busy = items === null;
@@ -69,7 +73,7 @@ export function PatientDocumentsPreviewSheet({
       title={
         <span className="inline-flex items-center gap-2">
           <FileText className="size-4 text-muted-foreground" />
-          {l("Dokumente", "Dokumenty", "Documents")}
+          {t.patient_preview_documents_title}
         </span>
       }
       bodyClassName="px-4 py-3 space-y-3"
@@ -85,7 +89,7 @@ export function PatientDocumentsPreviewSheet({
             staffGo(`/documents?patient=${patientId}`);
           }}
         >
-          {l("Vollansicht", "Otkryt razdel", "Full view")}
+          {t.patient_preview_full_view}
           <ExternalLink className="size-3" />
         </Button>
       </div>
@@ -93,7 +97,7 @@ export function PatientDocumentsPreviewSheet({
       {busy ? (
         <LoadingBlock />
       ) : items.length === 0 ? (
-        <EmptyBlock text={l("Noch nicht erfasst.", "Ne zafiksirovano.", "Not recorded yet.")} />
+        <EmptyBlock text={t.patient_preview_not_recorded} />
       ) : (
         <ul className="space-y-2">
           {items.map((item) => (
@@ -111,13 +115,13 @@ export function PatientDocumentsPreviewSheet({
                 </p>
                 {item.status ? (
                   <Badge variant="outline" className="shrink-0 rounded-full text-[10px]">
-                    {item.status}
+                    {portalStatusLabel(item.status)}
                   </Badge>
                 ) : null}
               </div>
               <p className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
-                {formatDate(item.created_at)}
-                {item.category ? ` | ${item.category}` : ""}
+                {formatDate(item.created_at, lang)}
+                {item.category ? ` | ${documentCategoryLabel(item.category)}` : ""}
                 {item.uploaded_by_name ? ` | ${item.uploaded_by_name}` : ""}
               </p>
             </li>
@@ -147,9 +151,7 @@ export function PatientContractsPreviewSheet({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
-  const { lang } = useLang();
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const { t, lang } = useLang();
   const { staffGo } = useStaffNavigate();
   const [items, setItems] = useState<ContractItem[] | null>(null);
   const busy = items === null;
@@ -177,7 +179,7 @@ export function PatientContractsPreviewSheet({
       title={
         <span className="inline-flex items-center gap-2">
           <FileSignature className="size-4 text-muted-foreground" />
-          {l("Vertraege", "Dogovory", "Contracts")}
+          {t.patient_preview_contracts_title}
         </span>
       }
       bodyClassName="px-4 py-3 space-y-3"
@@ -193,7 +195,7 @@ export function PatientContractsPreviewSheet({
             staffGo(`/contracts?patient=${patientId}`);
           }}
         >
-          {l("Vollansicht", "Otkryt razdel", "Full view")}
+          {t.patient_preview_full_view}
           <ExternalLink className="size-3" />
         </Button>
       </div>
@@ -201,7 +203,7 @@ export function PatientContractsPreviewSheet({
       {busy ? (
         <LoadingBlock />
       ) : items.length === 0 ? (
-        <EmptyBlock text={l("Noch nicht erfasst.", "Ne zafiksirovano.", "Not recorded yet.")} />
+        <EmptyBlock text={t.patient_preview_not_recorded} />
       ) : (
         <ul className="space-y-2">
           {items.map((item) => (
@@ -218,14 +220,14 @@ export function PatientContractsPreviewSheet({
                   {item.contract_number}
                 </p>
                 <Badge variant="outline" className="shrink-0 rounded-full text-[10px]">
-                  {item.status}
+                  {portalStatusLabel(item.status)}
                 </Badge>
               </div>
               <p className="mt-0.5 text-[11.5px] text-muted-foreground">
                 {item.signed_at
-                  ? `${l("signed", "podpisan", "signed")} ${formatDate(item.signed_at)}`
-                  : formatDate(item.created_at)}
-                {item.valid_from ? ` | ${formatDate(item.valid_from)}-${formatDate(item.valid_to)}` : ""}
+                  ? `${t.patient_preview_signed} ${formatDate(item.signed_at, lang)}`
+                  : formatDate(item.created_at, lang)}
+                {item.valid_from ? ` | ${formatDate(item.valid_from, lang)}-${formatDate(item.valid_to, lang)}` : ""}
               </p>
             </li>
           ))}
@@ -255,9 +257,7 @@ export function PatientInvoicesPreviewSheet({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
-  const { lang } = useLang();
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const { t, lang } = useLang();
   const { staffGo } = useStaffNavigate();
   const [items, setItems] = useState<InvoiceItem[] | null>(null);
   const busy = items === null;
@@ -285,7 +285,7 @@ export function PatientInvoicesPreviewSheet({
       title={
         <span className="inline-flex items-center gap-2">
           <ReceiptText className="size-4 text-muted-foreground" />
-          {l("Rechnungen", "Scheta", "Invoices")}
+          {t.patient_preview_invoices_title}
         </span>
       }
       bodyClassName="px-4 py-3 space-y-3"
@@ -301,7 +301,7 @@ export function PatientInvoicesPreviewSheet({
             staffGo(`/invoices?patient=${patientId}`);
           }}
         >
-          {l("Vollansicht", "Otkryt razdel", "Full view")}
+          {t.patient_preview_full_view}
           <ExternalLink className="size-3" />
         </Button>
       </div>
@@ -309,7 +309,7 @@ export function PatientInvoicesPreviewSheet({
       {busy ? (
         <LoadingBlock />
       ) : items.length === 0 ? (
-        <EmptyBlock text={l("Noch nicht erfasst.", "Ne zafiksirovano.", "Not recorded yet.")} />
+        <EmptyBlock text={t.patient_preview_not_recorded} />
       ) : (
         <ul className="space-y-2">
           {items.map((item) => (
@@ -326,14 +326,15 @@ export function PatientInvoicesPreviewSheet({
                   {item.invoice_number}
                 </p>
                 <Badge variant="outline" className="shrink-0 rounded-full text-[10px]">
-                  {item.status}
+                  {portalStatusLabel(item.status)}
                 </Badge>
               </div>
               <p className="mt-0.5 text-[11.5px] text-muted-foreground">
-                {formatDate(item.issued_at)}
-                {item.total_gross ? ` | EUR ${item.total_gross}` : ""}
+                {formatDate(item.issued_at, lang)}
+                {item.invoice_type ? ` | ${invoiceTypeLabel(item.invoice_type)}` : ""}
+                {item.total_gross ? ` | ${formatPortalCurrency(item.total_gross)}` : ""}
                 {item.balance_due && item.balance_due !== "0.00"
-                  ? ` | ${l("due", "ostatok", "due")} EUR ${item.balance_due}`
+                  ? ` | ${t.patient_preview_due} ${formatPortalCurrency(item.balance_due)}`
                   : ""}
               </p>
             </li>
@@ -345,10 +346,11 @@ export function PatientInvoicesPreviewSheet({
 }
 
 function LoadingBlock() {
+  const { t } = useLang();
   return (
     <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
       <LoaderCircle className="mr-2 size-4 animate-spin" />
-      Loading...
+      {t.patient_preview_loading}
     </div>
   );
 }

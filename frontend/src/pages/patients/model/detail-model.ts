@@ -1,3 +1,10 @@
+import {
+  formatEnumLabelFromKeys,
+  getLang,
+  t as translateCatalog,
+  type TranslationKey,
+} from "@/lib/i18n";
+
 export type PatientTimelineItem = {
   entity_type: string;
   entity_id: string;
@@ -50,6 +57,26 @@ export type PatientLabelPayload = {
 
 export type PatientTimelineRangeFilter = "all" | "30d" | "90d" | "180d" | "365d";
 export const PATIENT_DETAIL_REFRESH_EVENT = "patient-detail-refresh";
+
+const PATIENT_RELATION_TYPE_LABEL_KEYS = {
+  caregiver: "patient_relation_type_caregiver",
+  child: "patient_relation_type_child",
+  friend: "patient_relation_type_friend",
+  guardian: "patient_relation_type_guardian",
+  other: "patient_relation_type_other",
+  parent: "patient_relation_type_parent",
+  relative: "patient_relation_type_relative",
+  sibling: "patient_relation_type_sibling",
+  spouse: "patient_relation_type_spouse",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+export function patientRelationTypeLabel(value?: string | null) {
+  return formatEnumLabelFromKeys(
+    value,
+    PATIENT_RELATION_TYPE_LABEL_KEYS,
+    translateCatalog(getLang()),
+  );
+}
 
 type PatientTimelineNavigationAccess = {
   patientId?: string | null;

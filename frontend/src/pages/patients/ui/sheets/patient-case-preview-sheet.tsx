@@ -435,10 +435,10 @@ export function PatientCasePreviewSheet({
       title={
         <span className="inline-flex items-center gap-2">
           <Folder className="size-4 text-muted-foreground" />
-          {activeDetail?.case_id || "Case"}
+          {activeDetail?.case_id || t.patient_case_fallback_title}
         </span>
       }
-      description="Full narrative and structured anamnesis editor for the selected patient case."
+      description={t.patient_case_description}
       bodyClassName="px-6 py-6 space-y-4"
     >
       {caseId && showFullViewAction ? (
@@ -457,7 +457,7 @@ export function PatientCasePreviewSheet({
               );
             }}
           >
-            Full view
+            {t.patient_case_full_view}
             <ExternalLink className="size-3" />
           </Button>
         </div>
@@ -467,7 +467,7 @@ export function PatientCasePreviewSheet({
           {showLoading ? (
             <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
               <LoaderCircle className="mr-2 size-4 animate-spin" />
-              Loading case
+              {t.patient_case_loading}
             </div>
           ) : !activeDetail ? (
             <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
@@ -489,20 +489,20 @@ export function PatientCasePreviewSheet({
                 </div>
 
                 <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  <MetaCard label="Reference code" value={activeDetail.case_id} emptyLabel={t.common_not_set} mono />
+                  <MetaCard label={t.patient_case_reference_code} value={activeDetail.case_id} emptyLabel={t.common_not_set} mono />
                   <MetaCard
-                    label="System case UUID"
+                    label={t.patient_case_system_uuid}
                     value={activeDetail.case_uuid ?? activeDetail.id}
                     emptyLabel={t.common_not_set}
                     mono
                   />
                   <MetaCard
-                    label="Retention until"
+                    label={t.patient_case_retention_until}
                     value={formatDate(activeDetail.retention_until, t.common_not_set, t)}
                     emptyLabel={t.common_not_set}
                   />
                   <MetaCard
-                    label="Last clinical update"
+                    label={t.patient_case_last_clinical_update}
                     value={formatDateTime(
                       activeDetail.last_clinical_update_at ?? activeDetail.updated_at,
                       t.common_not_set,
@@ -580,7 +580,7 @@ export function PatientCasePreviewSheet({
                         item.arzt ?? "",
                       ]
                         .filter(Boolean)
-                        .join(" • "),
+                        .join(" / "),
                     ) ?? []
                   }
                   emptyLabel={t.common_not_set}
@@ -596,7 +596,7 @@ export function PatientCasePreviewSheet({
                         item.verlauf ?? "",
                       ]
                         .filter(Boolean)
-                        .join(" • "),
+                        .join(" / "),
                     ) ?? []
                   }
                   emptyLabel={t.common_not_set}
@@ -605,61 +605,73 @@ export function PatientCasePreviewSheet({
 
               <section className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
                 <h3 className="text-base font-semibold text-slate-950">
-                  Specialized assessments
+                  {t.patient_case_specialized_assessments}
                 </h3>
                 <KeyValueGrid
-                  title="Cardiology"
+                  title={t.patient_case_assessment_cardiology}
                   recommended={activeDetail.cardiology_recommended}
                   data={activeDetail.cardiology}
                   l={l}
                   notSetLabel={t.common_not_set}
                   translations={t}
+                  recommendedLabel={t.patient_case_recommended}
+                  notRequiredLabel={t.patient_case_not_required}
                 />
                 <KeyValueGrid
-                  title="Gastroenterology"
+                  title={t.patient_case_assessment_gastroenterology}
                   recommended={activeDetail.gastroenterology_recommended}
                   data={activeDetail.gastroenterology}
                   l={l}
                   notSetLabel={t.common_not_set}
                   translations={t}
+                  recommendedLabel={t.patient_case_recommended}
+                  notRequiredLabel={t.patient_case_not_required}
                 />
                 <KeyValueGrid
-                  title="Orthopedics"
+                  title={t.patient_case_assessment_orthopedics}
                   recommended={activeDetail.orthopedics_recommended}
                   data={activeDetail.orthopedics}
                   l={l}
                   notSetLabel={t.common_not_set}
                   translations={t}
+                  recommendedLabel={t.patient_case_recommended}
+                  notRequiredLabel={t.patient_case_not_required}
                 />
                 <KeyValueGrid
-                  title="Neurology"
+                  title={t.patient_case_assessment_neurology}
                   recommended={activeDetail.neurology_recommended}
                   data={activeDetail.neurology}
                   l={l}
                   notSetLabel={t.common_not_set}
                   translations={t}
+                  recommendedLabel={t.patient_case_recommended}
+                  notRequiredLabel={t.patient_case_not_required}
                 />
                 <KeyValueGrid
-                  title="Pulmonology"
+                  title={t.patient_case_assessment_pulmonology}
                   recommended={activeDetail.pulmonology_recommended}
                   data={activeDetail.pulmonology}
                   l={l}
                   notSetLabel={t.common_not_set}
                   translations={t}
+                  recommendedLabel={t.patient_case_recommended}
+                  notRequiredLabel={t.patient_case_not_required}
                 />
                 <KeyValueGrid
-                  title="Urology"
+                  title={t.patient_case_assessment_urology}
                   recommended={activeDetail.urology_recommended}
                   data={activeDetail.urology}
                   l={l}
                   notSetLabel={t.common_not_set}
                   translations={t}
+                  recommendedLabel={t.patient_case_recommended}
+                  notRequiredLabel={t.patient_case_not_required}
                 />
               </section>
 
               <section className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
                 <h3 className="text-base font-semibold text-slate-950">
-                  Additional blocks
+                  {t.patient_case_additional_blocks}
                 </h3>
                 <KeyValueGrid
                   title={t.cases_vegetative}
@@ -667,12 +679,14 @@ export function PatientCasePreviewSheet({
                   l={l}
                   notSetLabel={t.common_not_set}
                   translations={t}
+                  recommendedLabel={t.patient_case_recommended}
+                  notRequiredLabel={t.patient_case_not_required}
                 />
                 <Field label={t.cases_vaccination} value={activeDetail.impfstatus} emptyLabel={t.common_not_set} />
               </section>
 
               <section className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
-                <h3 className="text-base font-semibold text-slate-950">History</h3>
+                <h3 className="text-base font-semibold text-slate-950">{t.patient_case_history}</h3>
                 {activeDetail.history?.length ? (
                   <div className="space-y-2">
                     {activeDetail.history.map((entry) => (
@@ -691,15 +705,15 @@ export function PatientCasePreviewSheet({
                         <p className="mt-1 text-sm text-slate-700">
                           {[entry.changed_by_name, caseRoleLabel(entry.changed_by_role, t)]
                             .filter(Boolean)
-                            .join(" • ") || t.common_not_set}
+                            .join(" / ") || t.common_not_set}
                         </p>
                         <div className="mt-2 grid gap-2 lg:grid-cols-2">
                           <CodeBlock
-                            label="Old value"
+                            label={t.patient_case_old_value}
                             value={safeStringify(entry.old_value, l, t)}
                           />
                           <CodeBlock
-                            label="New value"
+                            label={t.patient_case_new_value}
                             value={safeStringify(entry.new_value, l, t)}
                           />
                         </div>
@@ -831,12 +845,16 @@ function KeyValueGrid({
   l,
   notSetLabel,
   translations,
+  recommendedLabel,
+  notRequiredLabel,
 }: {
   title: string;
   recommended?: boolean;
   data?: Record<string, unknown> | null;
   l: (de: string, ru: string, en: string) => string;
   notSetLabel: string;
+  recommendedLabel: string;
+  notRequiredLabel: string;
   translations: {
     common_not_set: string;
     common_unknown: string;
@@ -851,9 +869,7 @@ function KeyValueGrid({
         <p className="text-sm font-semibold text-slate-900">{title}</p>
         {recommended != null ? (
           <Badge variant="outline" className="rounded-full text-[10px]">
-            {recommended
-              ? l("empfohlen", "рекомендовано", "recommended")
-              : l("nicht erforderlich", "не требуется", "not required")}
+            {recommended ? recommendedLabel : notRequiredLabel}
           </Badge>
         ) : null}
       </div>

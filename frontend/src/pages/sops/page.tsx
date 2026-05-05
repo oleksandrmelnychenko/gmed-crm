@@ -40,7 +40,7 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { useAuth } from "@/lib/auth";
-import { useLang } from "@/lib/i18n";
+import { formatEnumLabelFromKeys, useLang, type TranslationKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { statusTone } from "./appearance/status-appearance";
 import {
@@ -63,6 +63,44 @@ import type { EligibleUser, SopFormState, SopItem } from "./model/types";
 
 const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
+
+const SOP_ROLE_LABEL_KEYS = {
+  ceo: "role_ceo",
+  ceo_assistant: "role_ceo_assistant",
+  patient_manager: "role_patient_manager",
+  teamlead_interpreter: "role_teamlead_interpreter",
+  interpreter: "role_interpreter",
+  concierge: "role_concierge",
+  billing: "role_billing",
+  sales: "role_sales",
+  it_admin: "role_it_admin",
+  patient: "role_patient",
+} as const satisfies Partial<Record<string, TranslationKey>>;
+
+const SOP_STATUS_LABEL_KEYS = {
+  approved: "sops_status_approved",
+  pending_approval: "sops_status_pending_approval",
+  rejected: "sops_status_rejected",
+  archived: "sops_status_archived",
+  draft: "sops_status_draft",
+} as const satisfies Partial<Record<string, TranslationKey>>;
+
+const SOP_CATEGORY_LABEL_KEYS = {
+  sop: "sops_category_sop",
+  handbook: "sops_category_handbook",
+  training: "sops_category_training",
+} as const satisfies Partial<Record<string, TranslationKey>>;
+
+const SOP_ACK_LABEL_KEYS = {
+  pending: "sops_ack_pending",
+  acknowledged: "sops_ack_acknowledged",
+  requested: "sops_ack_requested",
+} as const satisfies Partial<Record<string, TranslationKey>>;
+
+const SOP_APPROVAL_ROLE_LABEL_KEYS = {
+  ceo: "sops_approval_role_ceo",
+  patient_manager: "sops_approval_role_patient_manager",
+} as const satisfies Partial<Record<string, TranslationKey>>;
 
 function titleWithDot(title: ReactNode) {
   return (
@@ -136,273 +174,90 @@ function Field({
 export function SopsPage() {
   const { user } = useAuth();
   const { t, lang } = useLang();
-  const tr = t as unknown as Record<string, string>;
-  const l = useCallback(
-    (de: string, ru: string, en: string) =>
-      lang === "de" ? de : lang === "ru" ? ru : en,
-    [lang],
-  );
-
   const text = useMemo(
     () => ({
-      accessDenied: l(
-        "Dieser Bereich steht nur internen Rollen zur Verfügung.",
-        "Этот раздел доступен только внутренним ролям.",
-        "This section is available only for internal roles.",
-      ),
-      loadingWorkspace: l(
-        "SOP-Arbeitsbereich wird geladen...",
-        "Загрузка раздела SOP...",
-        "Loading SOP workspace...",
-      ),
-      title: l("SOP и обучение", "SOP и обучение", "SOP and learning"),
-      subtitle: l(
-        "Библиотека SOP, handbook и training с маршрутами согласования и подтверждением ознакомления.",
-        "Библиотека SOP, handbook и training с маршрутами согласования и подтверждением ознакомления.",
-        "SOP, handbook and training library with approval routing and acknowledgement tracking.",
-      ),
-      refresh: l("Aktualisieren", "Обновить", "Refresh"),
-      newContent: l("Neuer контент", "Новый контент", "New content"),
-      noticesSavedCreate: l(
-        "Контент создан.",
-        "Контент создан.",
-        "Content created.",
-      ),
-      noticesSavedUpdate: l(
-        "Контент обновлен.",
-        "Контент обновлен.",
-        "Content updated.",
-      ),
-      noticesAckRequested: l(
-        "Запрос на подтверждение отправлен.",
-        "Запрос на подтверждение отправлен.",
-        "Acknowledgement request sent.",
-      ),
-      noticesAckDone: l(
-        "Подтверждение зафиксировано.",
-        "Подтверждение зафиксировано.",
-        "Acknowledgement recorded.",
-      ),
-      noticesReviewSaved: l(
-        "Решение ревью сохранено.",
-        "Решение ревью сохранено.",
-        "Review decision saved.",
-      ),
-      failLoad: l(
-        "Не удалось загрузить раздел SOP.",
-        "Не удалось загрузить раздел SOP.",
-        "Failed to load SOP workspace.",
-      ),
-      failSave: l(
-        "Не удалось сохранить контент.",
-        "Не удалось сохранить контент.",
-        "Failed to save content.",
-      ),
-      failAckRequest: l(
-        "Не удалось отправить запрос подтверждения.",
-        "Не удалось отправить запрос подтверждения.",
-        "Failed to request acknowledgement.",
-      ),
-      failAck: l(
-        "Не удалось зафиксировать подтверждение.",
-        "Не удалось зафиксировать подтверждение.",
-        "Failed to acknowledge content.",
-      ),
-      failReview: l(
-        "Не удалось сохранить ревью.",
-        "Не удалось сохранить ревью.",
-        "Failed to review content.",
-      ),
-      metricsVisible: l(
-        "Visible content",
-        "Видимый контент",
-        "Visible content",
-      ),
-      metricsApproved: l("Approved", "Подтверждено", "Approved"),
-      metricsPendingAck: l(
-        "Pending acknowledgement",
-        "Ожидает подтверждения",
-        "Pending acknowledgement",
-      ),
-      queueTitle: l(
-        "Очередь согласования",
-        "Очередь согласования",
-        "Approval queue",
-      ),
-      queueDescription: l(
-        "Элементы, ожидающие решения текущей роли.",
-        "Элементы, ожидающие решения текущей роли.",
-        "Items waiting for decision by current role.",
-      ),
-      queueEmptyTitle: l(
-        "Очередь пустая",
-        "Очередь пустая",
-        "Queue is empty",
-      ),
-      queueEmptyDescription: l(
-        "Сейчас нет SOP в статусе ожидания согласования.",
-        "Сейчас нет SOP в статусе ожидания согласования.",
-        "There are no SOP items waiting for approval.",
-      ),
-      libraryTitle: l("Бухгалтерский реестр SOP", "Реестр SOP", "SOP registry"),
-      libraryDescription: l(
-        "Единый список видимого контента с фильтрацией, статусами и действиями.",
-        "Единый список видимого контента с фильтрацией, статусами и действиями.",
-        "Unified content list with filters, statuses and actions.",
-      ),
-      librarySearchPlaceholder: l(
-        "Поиск по title, summary или роли",
-        "Поиск по title, summary или роли",
-        "Search by title, summary or role",
-      ),
-      libraryEmptyTitle: l(
-        "Контент отсутствует",
-        "Контент отсутствует",
-        "No learning content",
-      ),
-      libraryEmptyDescription: l(
-        "После публикации или назначения контент появится в реестре.",
-        "После публикации или назначения контент появится в реестре.",
-        "Content will appear once approved or assigned.",
-      ),
-      detailTitle: l("Карточка SOP", "Карточка SOP", "SOP detail"),
-      detailDescription: l(
-        "Статус, таргетинг, текст контента и операционные действия.",
-        "Статус, таргетинг, текст контента и операционные действия.",
-        "Status, targeting, content body and operational actions.",
-      ),
-      detailOverview: l("Обзор", "Обзор", "Overview"),
-      detailTargeting: l("Таргетинг", "Таргетинг", "Targeting"),
-      detailBody: l("Контент", "Контент", "Content"),
-      detailActions: l("Действия", "Действия", "Actions"),
-      noSelectionTitle: l(
-        "Запись не выбрана",
-        "Запись не выбрана",
-        "No item selected",
-      ),
-      noSelectionDescription: l(
-        "Выберите запись в таблице, чтобы открыть right view.",
-        "Выберите запись в таблице, чтобы открыть right view.",
-        "Select an item in the table to open right view.",
-      ),
-      targetingModelTitle: l(
-        "Модель таргетинга",
-        "Модель таргетинга",
-        "Targeting model",
-      ),
-      targetingModelDescription: l(
-        "Доступ определяется ролями и прямыми назначениями пользователей.",
-        "Доступ определяется ролями и прямыми назначениями пользователей.",
-        "Visibility is defined by target roles and direct user assignments.",
-      ),
-      scopeTitle: l("Scope", "Scope", "Scope"),
-      scopeDescription: l(
-        "Срез покрывает библиотеку SOP, маршруты approval и подтверждение ознакомления.",
-        "Срез покрывает библиотеку SOP, маршруты approval и подтверждение ознакомления.",
-        "Current slice covers SOP library, approval routing and acknowledgements.",
-      ),
-      formCreateTitle: l(
-        "Новый контент",
-        "Новый контент",
-        "New content",
-      ),
-      formEditTitle: l(
-        "Редактирование контента",
-        "Редактирование контента",
-        "Edit content",
-      ),
-      formTitle: l("Заголовок", "Заголовок", "Title"),
-      formCategory: l("Категория", "Категория", "Category"),
-      formSummary: l("Краткое описание", "Краткое описание", "Summary"),
-      formBody: l("Текст", "Текст", "Body"),
-      formTargetRoles: l("Целевые роли", "Целевые роли", "Target roles"),
-      formDirectUsers: l(
-        "Прямые назначения",
-        "Прямые назначения",
-        "Direct users",
-      ),
-      formRequiresAck: l(
-        "Требуется подтверждение ознакомления",
-        "Требуется подтверждение ознакомления",
-        "Acknowledgement required",
-      ),
-      formCancel: l("Отмена", "Отмена", "Cancel"),
-      formCreate: l("Создать", "Создать", "Create"),
-      formSave: l("Сохранить", "Сохранить", "Save"),
-      reviewTitle: l("Ревью контента", "Ревью контента", "Review content"),
-      reviewDescription: l(
-        "Подтвердите SOP или верните на доработку с заметкой.",
-        "Подтвердите SOP или верните на доработку с заметкой.",
-        "Approve SOP or return it with a review note.",
-      ),
-      reviewDecision: l("Решение", "Решение", "Decision"),
-      reviewNote: l("Заметка ревью", "Заметка ревью", "Review note"),
-      reviewApprove: l("Подтвердить", "Подтвердить", "Approve"),
-      reviewReject: l(
-        "Отклонить / доработка",
-        "Отклонить / доработка",
-        "Reject / changes requested",
-      ),
-      reviewSave: l("Сохранить ревью", "Сохранить ревью", "Save review"),
-      actionOpenReview: l(
-        "Открыть ревью",
-        "Открыть ревью",
-        "Open review",
-      ),
-      actionEdit: l("Редактировать", "Редактировать", "Edit"),
-      actionRequestAck: l(
-        "Запросить ack",
-        "Запросить ack",
-        "Request ack",
-      ),
-      actionAcknowledge: l(
-        "Подтвердить",
-        "Подтвердить",
-        "Acknowledge",
-      ),
-      statusNotSet: l("Не задано", "Не задано", "Not set"),
+      accessDenied: t.sops_access_denied,
+      loadingWorkspace: t.sops_loading_workspace,
+      title: t.sops_title,
+      subtitle: t.sops_subtitle,
+      refresh: t.common_refresh,
+      newContent: t.sops_new_content,
+      noticesSavedCreate: t.sops_notice_created,
+      noticesSavedUpdate: t.sops_notice_updated,
+      noticesAckRequested: t.sops_notice_ack_requested,
+      noticesAckDone: t.sops_notice_ack_done,
+      noticesReviewSaved: t.sops_notice_review_saved,
+      failLoad: t.sops_error_load,
+      failSave: t.sops_error_save,
+      failAckRequest: t.sops_error_ack_request,
+      failAck: t.sops_error_ack,
+      failReview: t.sops_error_review,
+      metricsVisible: t.sops_metric_visible,
+      metricsApproved: t.sops_metric_approved,
+      metricsPendingAck: t.sops_metric_pending_ack,
+      queueTitle: t.sops_queue_title,
+      queueDescription: t.sops_queue_description,
+      queueEmptyTitle: t.sops_queue_empty_title,
+      queueEmptyDescription: t.sops_queue_empty_description,
+      libraryTitle: t.sops_library_title,
+      libraryDescription: t.sops_library_description,
+      librarySearchPlaceholder: t.sops_library_search_placeholder,
+      libraryEmptyTitle: t.sops_library_empty_title,
+      libraryEmptyDescription: t.sops_library_empty_description,
+      detailTitle: t.sops_detail_title,
+      detailDescription: t.sops_detail_description,
+      detailOverview: t.sops_detail_overview,
+      detailTargeting: t.sops_detail_targeting,
+      detailBody: t.sops_detail_body,
+      detailActions: t.sops_detail_actions,
+      noSelectionTitle: t.sops_no_selection_title,
+      noSelectionDescription: t.sops_no_selection_description,
+      targetingModelTitle: t.sops_targeting_model_title,
+      targetingModelDescription: t.sops_targeting_model_description,
+      scopeTitle: t.sops_scope_title,
+      scopeDescription: t.sops_scope_description,
+      formCreateTitle: t.sops_form_create_title,
+      formEditTitle: t.sops_form_edit_title,
+      formTitle: t.sops_form_title,
+      formCategory: t.sops_form_category,
+      formSummary: t.sops_form_summary,
+      formBody: t.sops_form_body,
+      formTargetRoles: t.sops_form_target_roles,
+      formDirectUsers: t.sops_form_direct_users,
+      formRequiresAck: t.sops_form_requires_ack,
+      formCancel: t.common_cancel,
+      formCreate: t.common_create,
+      formSave: t.common_save,
+      reviewTitle: t.sops_review_title,
+      reviewDescription: t.sops_review_description,
+      reviewDecision: t.sops_review_decision,
+      reviewNote: t.sops_review_note,
+      reviewApprove: t.sops_review_approve,
+      reviewReject: t.sops_review_reject,
+      reviewSave: t.sops_review_save,
+      actionOpenReview: t.sops_action_open_review,
+      actionEdit: t.common_edit,
+      actionRequestAck: t.sops_action_request_ack,
+      actionAcknowledge: t.sops_action_acknowledge,
+      statusNotSet: t.common_not_set,
       columns: {
-        title: l("Название", "Название", "Title"),
-        summary: l("Описание", "Описание", "Summary"),
-        status: l("Статус", "Статус", "Status"),
-        category: l("Категория", "Категория", "Category"),
-        revision: l("Ревизия", "Ревизия", "Revision"),
-        updated: l("Обновлено", "Обновлено", "Updated"),
-        author: l("Автор", "Автор", "Author"),
-        ack: l("Ack", "Ack", "Ack"),
-        approval: l("Маршрут approval", "Маршрут approval", "Approval route"),
+        title: t.sops_column_title,
+        summary: t.sops_column_summary,
+        status: t.sops_column_status,
+        category: t.sops_column_category,
+        revision: t.sops_column_revision,
+        updated: t.sops_column_updated,
+        author: t.sops_column_author,
+        ack: t.sops_column_ack,
+        approval: t.sops_column_approval,
       },
-      categoryLabels: {
-        sop: "SOP",
-        handbook: l("Справочник", "Справочник", "Handbook"),
-        training: l("Обучение", "Обучение", "Training"),
-      },
-      statusLabels: {
-        approved: l("Подтверждено", "Подтверждено", "Approved"),
-        pending_approval: l("Ожидает approval", "Ожидает approval", "Pending approval"),
-        rejected: l("Отклонено", "Отклонено", "Rejected"),
-        archived: l("Архив", "Архив", "Archived"),
-        draft: l("Черновик", "Черновик", "Draft"),
-      },
-      ackLabels: {
-        pending: l("Ожидает", "Ожидает", "Pending"),
-        acknowledged: l("Подтверждено", "Подтверждено", "Acknowledged"),
-        requested: l("Запрошено", "Запрошено", "Requested"),
-      },
-      directUsers: l("Прямые пользователи", "Прямые пользователи", "Direct users"),
-      pendingAck: l("Ожидает ack", "Ожидает ack", "Pending ack"),
-      acknowledged: l("Подтвердили", "Подтвердили", "Acknowledged"),
-      myStatus: l("Мой статус", "Мой статус", "My status"),
-      approvalRoleCeo: l("CEO approval", "CEO approval", "CEO approval"),
-      approvalRolePm: l(
-        "Patient-manager approval",
-        "Patient-manager approval",
-        "Patient-manager approval",
-      ),
+      directUsers: t.sops_direct_users,
+      pendingAck: t.sops_pending_ack,
+      acknowledged: t.sops_acknowledged,
+      myStatus: t.sops_my_status,
     }),
-    [l],
+    [t],
   );
-
   const [items, setItems] = useState<SopItem[]>([]);
   const [reviewQueue, setReviewQueue] = useState<SopItem[]>([]);
   const [eligibleUsers, setEligibleUsers] = useState<EligibleUser[]>([]);
@@ -431,33 +286,31 @@ export function SopsPage() {
   const canCreate = roleCanCreate(user?.role);
   const canReviewQueue = roleCanReview(user?.role);
   const canOpenPage = roleCanOpenLearning(user?.role);
-  const queueCopy = useMemo(() => reviewQueueCopy(user?.role), [user?.role]);
+  const queueCopy = useMemo(() => reviewQueueCopy(user?.role, t), [t, user?.role]);
 
-  const roleLabel = useCallback((role: string) => tr[`role_${role}`] ?? role, [tr]);
+  const roleLabel = useCallback(
+    (role: string) => formatEnumLabelFromKeys(role, SOP_ROLE_LABEL_KEYS, t),
+    [t],
+  );
   const statusLabel = useCallback(
     (status: string) =>
-      text.statusLabels[status as keyof typeof text.statusLabels] ?? status,
-    [text],
+      formatEnumLabelFromKeys(status, SOP_STATUS_LABEL_KEYS, t),
+    [t],
   );
   const categoryLabel = useCallback(
     (category: string) =>
-      text.categoryLabels[category as keyof typeof text.categoryLabels] ?? category,
-    [text],
+      formatEnumLabelFromKeys(category, SOP_CATEGORY_LABEL_KEYS, t),
+    [t],
   );
   const ackLabel = useCallback(
     (ackStatus?: string | null) =>
-      text.ackLabels[ackStatus as keyof typeof text.ackLabels] ??
-      ackStatus ??
-      text.statusNotSet,
-    [text],
+      formatEnumLabelFromKeys(ackStatus, SOP_ACK_LABEL_KEYS, t),
+    [t],
   );
   const approvalRoleLabel = useCallback(
-    (value?: string | null) => {
-      if (value === "ceo") return text.approvalRoleCeo;
-      if (value === "patient_manager") return text.approvalRolePm;
-      return text.statusNotSet;
-    },
-    [text],
+    (value?: string | null) =>
+      formatEnumLabelFromKeys(value, SOP_APPROVAL_ROLE_LABEL_KEYS, t),
+    [t],
   );
 
   useEffect(() => {
@@ -599,7 +452,7 @@ export function SopsPage() {
         accessor: (row) => row.updated_at,
         sortable: true,
         width: 170,
-        render: (row) => formatDate(row.updated_at),
+        render: (row) => formatDate(row.updated_at, lang, t),
       },
       {
         id: "author",
@@ -609,7 +462,7 @@ export function SopsPage() {
         render: (row) => row.created_by_name || roleLabel(row.created_by_role),
       },
     ],
-    [approvalRoleLabel, categoryLabel, roleLabel, statusLabel, text],
+    [approvalRoleLabel, categoryLabel, lang, roleLabel, statusLabel, t, text],
   );
 
   const libraryColumns = useMemo<ColumnDef<SopItem>[]>(
@@ -671,7 +524,7 @@ export function SopsPage() {
         accessor: (row) => row.updated_at,
         sortable: true,
         width: 170,
-        render: (row) => formatDate(row.updated_at),
+        render: (row) => formatDate(row.updated_at, lang, t),
       },
       {
         id: "author",
@@ -681,7 +534,7 @@ export function SopsPage() {
         render: (row) => row.created_by_name || roleLabel(row.created_by_role),
       },
     ],
-    [ackLabel, categoryLabel, roleLabel, statusLabel, text],
+    [ackLabel, categoryLabel, lang, roleLabel, statusLabel, t, text],
   );
 
   function resetForm() {
@@ -1074,7 +927,7 @@ export function SopsPage() {
                     <DetailField label={text.columns.revision} value={selectedItem.revision_no} />
                     <DetailField
                       label={text.columns.updated}
-                      value={formatDate(selectedItem.updated_at)}
+                      value={formatDate(selectedItem.updated_at, lang, t)}
                     />
                     <DetailField
                       label={text.columns.author}
@@ -1197,7 +1050,7 @@ export function SopsPage() {
           <form className="flex h-full min-h-0 flex-col" onSubmit={(event) => void submitForm(event)}>
             <AdminSheetScaffold
               title={editing ? text.formEditTitle : text.formCreateTitle}
-              description={formDescription(user?.role)}
+              description={formDescription(user?.role, t)}
               footer={
                 <SheetFormFooter
                   cancelLabel={text.formCancel}
@@ -1374,7 +1227,10 @@ export function SopsPage() {
                   <div className="grid gap-3 p-4">
                     <DetailField label={text.columns.title} value={reviewItem.title} />
                     <DetailField label={text.columns.author} value={reviewItem.created_by_name || roleLabel(reviewItem.created_by_role)} />
-                    <DetailField label={text.columns.updated} value={formatDate(reviewItem.updated_at)} />
+                    <DetailField
+                      label={text.columns.updated}
+                      value={formatDate(reviewItem.updated_at, lang, t)}
+                    />
                   </div>
                 </AdminTableCard>
               ) : null}

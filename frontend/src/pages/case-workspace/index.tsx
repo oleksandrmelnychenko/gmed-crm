@@ -4,7 +4,8 @@ import { useParams, useSearchParams } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { apiFetch } from "@/lib/api";
-import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
+import { formatEnumLabelFromKeys, useLang, type Translations } from "@/lib/i18n";
+import { CASE_STATUS_LABEL_KEYS } from "@/lib/i18n/catalogs/cases-clinical";
 import { cn } from "@/lib/utils";
 
 import { AllergiesSection } from "./allergies-section";
@@ -38,21 +39,11 @@ const STATUS_BADGE_CLASS: Record<string, string> = {
   closed: "border-border/60 bg-muted/25 text-muted-foreground",
 };
 
-function tri(lang: string, de: string, ru: string, en: string) {
-  if (lang === "de") return de;
-  if (lang === "ru") return ru;
-  return en;
-}
-
 function caseStatusLabel(
   status: string,
-  labels: Pick<
-    Translations,
-    "cases_open" | "cases_in_progress" | "cases_closed" | "common_unknown" | "common_unknown_value"
-  >,
+  labels: Translations,
 ) {
-  const dictionary = labels as unknown as Record<string, string>;
-  return dictionary[`cases_${status}`] ?? formatUnknownValue(status, labels);
+  return formatEnumLabelFromKeys(status, CASE_STATUS_LABEL_KEYS, labels);
 }
 
 function renderSection(section: CaseSectionKey) {
@@ -112,7 +103,7 @@ export function CaseWorkspacePage() {
 }
 
 function CaseWorkspaceContent() {
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const [searchParams] = useSearchParams();
   const { caseId, detail, loading, error } = useCaseWorkspace();
   const activeSection = normalizeCaseSectionKey(searchParams.get("section"));
@@ -171,12 +162,7 @@ function CaseWorkspaceContent() {
             ) : null}
           </div>
           <p className="mt-2 max-w-3xl text-xs leading-relaxed text-muted-foreground">
-            {tri(
-              lang,
-              "Workspace für den ausgewählten Patientenfall. Die Sektionen werden aus der linken Navigation geöffnet.",
-              "Рабочее пространство выбранного кейса пациента. Разделы открываются из левого меню.",
-              "Workspace for the selected patient case. Open sections from the left nav.",
-            )}
+            {t.cases_workspace_header_description}
           </p>
           {patientLabelText ? (
             <p className="mt-3 inline-flex items-center gap-2 text-sm text-foreground">

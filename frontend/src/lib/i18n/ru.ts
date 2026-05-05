@@ -1,4 +1,11 @@
 import type { Translations } from "./index";
+import { adminSystemRu } from "./catalogs/admin-system";
+import { casesClinicalRu } from "./catalogs/cases-clinical";
+import { clinicalRu } from "./catalogs/clinical";
+import { operationsRu } from "./catalogs/operations";
+import { patientsPortalRu } from "./catalogs/patients-portal";
+import { revenueRu } from "./catalogs/revenue";
+import { sharedCoreRu } from "./catalogs/shared";
 
 export const ru: Translations = {
   app_name: "GMED CONSOLE",
@@ -1436,4 +1443,11 @@ export const ru: Translations = {
   chat_hours_ago: "ч. назад",
   chat_yesterday: "Вчера",
   nav_chat: "Чат",
+  ...adminSystemRu,
+  ...casesClinicalRu,
+  ...clinicalRu,
+  ...operationsRu,
+  ...patientsPortalRu,
+  ...revenueRu,
+  ...sharedCoreRu,
 };

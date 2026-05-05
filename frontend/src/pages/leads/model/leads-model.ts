@@ -1,4 +1,11 @@
 import type { Lead, LeadDetail } from "@/lib/api/types";
+import {
+  formatEnumLabelFromKeys,
+  getLang,
+  t as translateCatalog,
+  type TranslationKey,
+  type Translations,
+} from "@/lib/i18n";
 
 import type {
   FailedLeadResolutionForm,
@@ -41,6 +48,77 @@ export const LEGAL_SEX_OPTIONS = [
   "diverse",
   "no_entry",
 ] as const;
+
+const LEAD_STATUS_LABEL_KEYS = {
+  new: "lead_status_new",
+  in_progress: "lead_status_in_progress",
+  qualified: "lead_status_qualified",
+  not_qualified: "lead_status_not_qualified",
+  converted: "lead_status_converted",
+  archived: "lead_status_archived",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const LEAD_COMPLIANCE_LABEL_KEYS = {
+  pending: "lead_compliance_pending",
+  documents_sent: "lead_compliance_documents_sent",
+  signed: "lead_compliance_signed",
+  rejected: "lead_compliance_rejected",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const LEAD_FAILED_OUTCOME_LABEL_KEYS = {
+  none: "lead_failed_outcome_none",
+  archived: "lead_failed_outcome_archived",
+  delete_anonymized: "lead_failed_outcome_delete_anonymized",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const LEAD_LEGAL_SEX_LABEL_KEYS = {
+  female: "lead_legal_sex_female",
+  male: "lead_legal_sex_male",
+  diverse: "lead_legal_sex_diverse",
+  no_entry: "lead_legal_sex_no_entry",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const LEAD_SOURCE_LABEL_KEYS = {
+  manual: "lead_source_manual",
+  website: "lead_source_website",
+  website_wizard: "lead_source_website_wizard",
+  visitor_facade: "lead_source_visitor_facade",
+  referral: "lead_source_referral",
+  phone: "lead_source_phone",
+  email: "lead_source_email",
+  whatsapp: "lead_source_whatsapp",
+  partner: "lead_source_partner",
+  social_media: "lead_source_social_media",
+  google_ads: "lead_source_google_ads",
+  facebook: "lead_source_facebook",
+  instagram: "lead_source_instagram",
+  walk_in: "lead_source_walk_in",
+  other: "lead_source_other",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const LEAD_STAGE_LABEL_KEYS = {
+  ...LEAD_STATUS_LABEL_KEYS,
+  qualification: "lead_stage_qualification",
+  conversion: "lead_stage_conversion",
+  failed: "lead_stage_failed",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const LEAD_TRANSITION_LABEL_KEYS = {
+  created: "lead_transition_created",
+  status_change: "lead_transition_status_change",
+  status_changed: "lead_transition_status_change",
+  failed_resolved: "lead_transition_failed_resolved",
+  converted: "lead_transition_converted",
+  gate_updated: "lead_transition_gate_updated",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+function runtimeTranslations(translations?: Translations) {
+  return translations ?? translateCatalog(getLang());
+}
+
+function runtimeLocale() {
+  return getLang() === "de" ? "de-DE" : "ru-RU";
+}
 
 export function leadPermissions(role?: string): LeadPermissions {
   return {
@@ -90,15 +168,22 @@ export function nonempty(value: string): string | null {
   return trimmed || null;
 }
 
-export function yesNo(value: boolean | null | undefined): string {
-  if (value === true) return "Yes";
-  if (value === false) return "No";
-  return "-";
+export function yesNo(
+  value: boolean | null | undefined,
+  translations?: Translations,
+): string {
+  const tr = runtimeTranslations(translations);
+  if (value === true) return tr.common_yes;
+  if (value === false) return tr.common_no;
+  return tr.common_not_set;
 }
 
-export function dashOrValue(value?: string | null): string {
+export function dashOrValue(
+  value?: string | null,
+  translations?: Translations,
+): string {
   const trimmed = value?.trim();
-  return trimmed ? trimmed : "-";
+  return trimmed ? trimmed : runtimeTranslations(translations).common_not_set;
 }
 
 export function formatSize(bytes: number) {
@@ -118,18 +203,88 @@ export function buildLeadsPath(filters: LeadFilters) {
   return query ? `/leads?${query}` : "/leads";
 }
 
-export function statusLabel(status: string) {
-  return status
-    .split("_")
-    .filter(Boolean)
-    .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
-    .join(" ");
+export function statusLabel(status: string, translations?: Translations) {
+  return formatEnumLabelFromKeys(
+    status,
+    LEAD_STATUS_LABEL_KEYS,
+    runtimeTranslations(translations),
+  );
 }
 
-export function formatDate(value?: string | null) {
-  if (!value) return "Not set";
+export function complianceStatusLabel(
+  status: string | null | undefined,
+  translations?: Translations,
+) {
+  return formatEnumLabelFromKeys(
+    status,
+    LEAD_COMPLIANCE_LABEL_KEYS,
+    runtimeTranslations(translations),
+  );
+}
+
+export function failedOutcomeLabel(
+  outcome: string | null | undefined,
+  translations?: Translations,
+) {
+  return formatEnumLabelFromKeys(
+    outcome,
+    LEAD_FAILED_OUTCOME_LABEL_KEYS,
+    runtimeTranslations(translations),
+  );
+}
+
+export function legalSexLabel(
+  sex: string | null | undefined,
+  translations?: Translations,
+) {
+  return formatEnumLabelFromKeys(
+    sex,
+    LEAD_LEGAL_SEX_LABEL_KEYS,
+    runtimeTranslations(translations),
+  );
+}
+
+export function leadSourceLabel(
+  source: string | null | undefined,
+  translations?: Translations,
+) {
+  return formatEnumLabelFromKeys(
+    source,
+    LEAD_SOURCE_LABEL_KEYS,
+    runtimeTranslations(translations),
+  );
+}
+
+export function leadStageLabel(
+  stage: string | null | undefined,
+  translations?: Translations,
+) {
+  return formatEnumLabelFromKeys(
+    stage,
+    LEAD_STAGE_LABEL_KEYS,
+    runtimeTranslations(translations),
+  );
+}
+
+export function leadTransitionKindLabel(
+  kind: string | null | undefined,
+  translations?: Translations,
+) {
+  return formatEnumLabelFromKeys(
+    kind,
+    LEAD_TRANSITION_LABEL_KEYS,
+    runtimeTranslations(translations),
+  );
+}
+
+export function formatDate(
+  value?: string | null,
+  locale = runtimeLocale(),
+  fallback = runtimeTranslations().common_not_set,
+) {
+  if (!value) return fallback;
   try {
-    return new Intl.DateTimeFormat("en-GB", {
+    return new Intl.DateTimeFormat(locale, {
       day: "2-digit",
       month: "short",
       year: "numeric",
@@ -149,7 +304,7 @@ export function computeLeadConversionGate(
   const canConvert = canConvertRole && conversionReady;
   const disabledReason =
     canConvertRole && !conversionReady
-      ? "Missing required data — open the lead to see what's blocking conversion."
+      ? translateCatalog(getLang()).lead_process_readiness_description
       : null;
   return { canConvertRole, canConvert, disabledReason };
 }

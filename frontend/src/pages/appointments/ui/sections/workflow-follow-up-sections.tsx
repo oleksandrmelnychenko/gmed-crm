@@ -201,7 +201,9 @@ function AppointmentDoctorFollowUpSection({
         />
         <span className={appointmentMetaPillClassName}>
           {reminders.length + tasks.length}{" "}
-          {reminders.length + tasks.length === 1 ? "item" : "items"}
+          {reminders.length + tasks.length === 1
+            ? t.appointments_directed_item_singular
+            : t.appointments_directed_item_plural}
         </span>
       </div>
       <div className="mt-4 grid gap-4 xl:grid-cols-2">
@@ -354,8 +356,7 @@ function AppointmentDoctorFollowUpSection({
                   className={cn(checkboxClass, "mt-0.5")}
                 />
                 <span>
-                  Mirror this directive as an operational task for execution and
-                  ownership.
+                  {t.appointments_doctor_follow_up_mirror_task}
                 </span>
               </label>
               <Field label={tr.appointments_title_col}>
@@ -389,7 +390,7 @@ function AppointmentDoctorFollowUpSection({
                 }
               >
                 {submitBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                Create doctor follow-up
+                {t.appointments_doctor_follow_up_create}
               </Button>
             </div>
           </form>
@@ -503,12 +504,14 @@ function AppointmentPackageEndSection({
     <section className={sectionCardClass}>
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <AppointmentSectionHeading
-          title="Package-end follow-up"
-          description="Schedule the required reminder one month before the linked package or order window ends."
+          title={t.appointments_package_follow_up_title}
+          description={t.appointments_package_follow_up_description}
         />
         <span className={appointmentMetaPillClassName}>
-          {reminders.length + tasks.length} package item
-          {reminders.length + tasks.length === 1 ? "" : "s"}
+          {reminders.length + tasks.length}{" "}
+          {reminders.length + tasks.length === 1
+            ? t.appointments_common_package_item
+            : t.appointments_common_package_items}
         </span>
       </div>
       <div className="mt-4 grid gap-4 xl:grid-cols-2">
@@ -613,7 +616,7 @@ function AppointmentPackageEndSection({
             </Field>
             {scheduledReminder ? (
               <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">
-                Reminder will be scheduled for{" "}
+                {t.appointments_package_follow_up_reminder_scheduled_for}{" "}
                 {formatDateTimeLabel(toRfc3339(scheduledReminder))}.
               </div>
             ) : null}
@@ -641,7 +644,7 @@ function AppointmentPackageEndSection({
                   }
                   className={cn(checkboxClass, "mt-0.5")}
                 />
-                <span>{tr.providers_linked_patients}</span>
+                <span>{t.appointments_package_follow_up_create_task}</span>
               </label>
               <Field label={tr.appointments_title_col}>
                 <NativeComboboxSelect
@@ -674,7 +677,7 @@ function AppointmentPackageEndSection({
                 }
               >
                 {submitBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                Schedule package reminder
+                {t.appointments_package_follow_up_schedule}
               </Button>
             </div>
           </form>

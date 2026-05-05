@@ -1,7 +1,9 @@
 import {
+  formatEnumLabelFromKeys,
   formatUnknownValue,
   getLang,
   t as translateCatalog,
+  type TranslationKey,
   type Translations,
 } from "@/lib/i18n";
 import type {
@@ -23,8 +25,199 @@ import type {
   ProviderSummary,
 } from "@/pages/appointments/model/types";
 
+type LabelKeyMap = Partial<Record<string, TranslationKey>>;
+
+const APPOINTMENT_TYPE_LABEL_KEYS = {
+  medical: "apt_type_medical",
+  non_medical: "apt_type_non_medical",
+  internal: "apt_type_internal",
+} satisfies LabelKeyMap;
+
+const CARE_PATH_KIND_LABEL_KEYS = {
+  regular: "appointment_care_path_regular",
+  preventive: "appointment_care_path_preventive",
+  control: "appointment_care_path_control",
+  followup: "appointment_care_path_followup",
+} satisfies LabelKeyMap;
+
+const APPOINTMENT_STATUS_LABEL_KEYS = {
+  planned: "appointment_status_planned",
+  confirmed: "appointment_status_confirmed",
+  in_progress: "appointment_status_in_progress",
+  completed: "appointment_status_completed",
+  cancelled: "appointment_status_cancelled",
+} satisfies LabelKeyMap;
+
+const COMMUNICATION_STATUS_LABEL_KEYS = {
+  planned: "appointment_communication_status_planned",
+  sent: "appointment_communication_status_sent",
+  answered: "appointment_communication_status_answered",
+  closed: "appointment_communication_status_closed",
+  cancelled: "appointment_communication_status_cancelled",
+} satisfies LabelKeyMap;
+
+const COMMUNICATION_CHANNEL_LABEL_KEYS = {
+  phone: "appointment_communication_channel_phone",
+  email: "appointment_communication_channel_email",
+  portal: "appointment_communication_channel_portal",
+  fax: "appointment_communication_channel_fax",
+  whatsapp: "appointment_communication_channel_whatsapp",
+  other: "appointment_communication_channel_other",
+} satisfies LabelKeyMap;
+
+const COMMUNICATION_TARGET_LABEL_KEYS = {
+  doctor: "appointment_communication_target_doctor",
+  service_provider: "appointment_communication_target_service_provider",
+  clinic: "appointment_communication_target_clinic",
+} satisfies LabelKeyMap;
+
+const COMMUNICATION_DIRECTION_LABEL_KEYS = {
+  inbound: "appointment_communication_direction_inbound",
+  outbound: "appointment_communication_direction_outbound",
+} satisfies LabelKeyMap;
+
+const INTERPRETER_RESPONSE_LABEL_KEYS = {
+  pending: "appointment_interpreter_response_pending",
+  accepted: "appointment_interpreter_response_accepted",
+  declined: "appointment_interpreter_response_declined",
+  discussion: "appointment_interpreter_response_discussion",
+} satisfies LabelKeyMap;
+
+const RECURRENCE_FREQUENCY_LABEL_KEYS = {
+  daily: "appointment_recurrence_frequency_daily",
+  weekly: "appointment_recurrence_frequency_weekly",
+  monthly: "appointment_recurrence_frequency_monthly",
+} satisfies LabelKeyMap;
+
+const FINDINGS_ARTIFACT_LABEL_KEYS = {
+  arztbrief: "appointment_findings_artifact_arztbrief",
+  written_findings: "appointment_findings_artifact_written_findings",
+  both: "appointment_findings_artifact_both",
+} satisfies LabelKeyMap;
+
+const INCOMING_DATA_SOURCE_LABEL_KEYS = {
+  patient: "appointment_incoming_source_patient",
+  doctor: "appointment_incoming_source_doctor",
+  clinic: "appointment_incoming_source_clinic",
+  interpreter: "appointment_incoming_source_interpreter",
+  external_lab: "appointment_incoming_source_external_lab",
+  other: "appointment_incoming_source_other",
+} satisfies LabelKeyMap;
+
+const INCOMING_DATA_CATEGORY_LABEL_KEYS = {
+  medical_update: "appointment_incoming_category_medical_update",
+  diagnosis: "appointment_incoming_category_diagnosis",
+  medication: "appointment_incoming_category_medication",
+  symptom: "appointment_incoming_category_symptom",
+  lab_result: "appointment_incoming_category_lab_result",
+  imaging: "appointment_incoming_category_imaging",
+  recommendation: "appointment_incoming_category_recommendation",
+  risk_flag: "appointment_incoming_category_risk_flag",
+  other: "appointment_incoming_category_other",
+} satisfies LabelKeyMap;
+
+const TASK_STATUS_LABEL_KEYS = {
+  open: "appointment_task_status_open",
+  in_progress: "appointment_task_status_in_progress",
+  completed: "appointment_task_status_completed",
+  cancelled: "appointment_task_status_cancelled",
+} satisfies LabelKeyMap;
+
+const TASK_PRIORITY_LABEL_KEYS = {
+  low: "appointment_task_priority_low",
+  normal: "appointment_task_priority_normal",
+  medium: "appointment_task_priority_medium",
+  high: "appointment_task_priority_high",
+  urgent: "appointment_task_priority_urgent",
+} satisfies LabelKeyMap;
+
+const BILLING_HANDOFF_KIND_LABEL_KEYS = {
+  interpreter_hours: "appointment_billing_handoff_kind_interpreter_hours",
+  concierge_settlement: "appointment_billing_handoff_kind_concierge_settlement",
+  patient_invoice: "appointment_billing_handoff_kind_patient_invoice",
+  provider_invoice: "appointment_billing_handoff_kind_provider_invoice",
+  payment_confirmation: "appointment_billing_handoff_kind_payment_confirmation",
+  other: "appointment_billing_handoff_kind_other",
+} satisfies LabelKeyMap;
+
+const CONCIERGE_SERVICE_KIND_LABEL_KEYS = {
+  hotel: "appointment_concierge_service_kind_hotel",
+  transfer: "appointment_concierge_service_kind_transfer",
+  vip_terminal: "appointment_concierge_service_kind_vip_terminal",
+  flight: "appointment_concierge_service_kind_flight",
+  chauffeur: "appointment_concierge_service_kind_chauffeur",
+  translation_support: "appointment_concierge_service_kind_translation_support",
+  other: "appointment_concierge_service_kind_other",
+} satisfies LabelKeyMap;
+
+const CONCIERGE_SERVICE_STATUS_LABEL_KEYS = {
+  planned: "appointment_concierge_service_status_planned",
+  booked: "appointment_concierge_service_status_booked",
+  confirmed: "appointment_concierge_service_status_confirmed",
+  in_service: "appointment_concierge_service_status_in_service",
+  completed: "appointment_concierge_service_status_completed",
+  cancelled: "appointment_concierge_service_status_cancelled",
+} satisfies LabelKeyMap;
+
+const BILLING_STATUS_LABEL_KEYS = {
+  draft: "appointment_billing_status_draft",
+  planned: "appointment_billing_status_planned",
+  ready: "appointment_billing_status_ready",
+  submitted: "appointment_billing_status_submitted",
+  approved: "appointment_billing_status_approved",
+  settled: "appointment_billing_status_settled",
+  paid: "appointment_billing_status_paid",
+  cancelled: "appointment_billing_status_cancelled",
+  billed: "appointment_billing_status_billed",
+  waived: "appointment_billing_status_waived",
+} satisfies LabelKeyMap;
+
+const FOLLOW_UP_PRESET_LABEL_KEYS = {
+  post_1w: "appointment_follow_up_preset_post_1w_label",
+  post_1m: "appointment_follow_up_preset_post_1m_label",
+  post_6m: "appointment_follow_up_preset_post_6m_label",
+} satisfies LabelKeyMap;
+
+const FOLLOW_UP_PRESET_TITLE_KEYS = {
+  post_1w: "appointment_follow_up_preset_post_1w_title",
+  post_1m: "appointment_follow_up_preset_post_1m_title",
+  post_6m: "appointment_follow_up_preset_post_6m_title",
+} satisfies LabelKeyMap;
+
+const INTERPRETER_PREFERENCE_LABEL_KEYS = {
+  preferred: "appointment_interpreter_preference_preferred",
+  neutral: "appointment_interpreter_preference_neutral",
+  avoid: "appointment_interpreter_preference_avoid",
+} satisfies LabelKeyMap;
+
+const INTERPRETER_LANGUAGE_STATUS_LABEL_KEYS = {
+  "language unknown": "appointment_interpreter_language_status_unknown",
+  "language match": "appointment_interpreter_language_status_match",
+  "language missing": "appointment_interpreter_language_status_missing",
+  "missing language": "appointment_interpreter_language_status_missing",
+} satisfies LabelKeyMap;
+
+const INTERPRETER_REASON_LABEL_KEYS = {
+  "preferred for this patient": "appointment_interpreter_reason_preferred_patient",
+  "worked before": "appointment_interpreter_reason_worked_before",
+  "high feedback": "appointment_interpreter_reason_high_feedback",
+  "language match": "appointment_interpreter_reason_language_match",
+} satisfies LabelKeyMap;
+
 function runtimeTranslations() {
   return translateCatalog(getLang());
+}
+
+function translationsFromRecord(tr?: Record<string, string>) {
+  return tr ? (tr as unknown as Translations) : runtimeTranslations();
+}
+
+function labelFromKeys(
+  value: string | null | undefined,
+  labelKeys: LabelKeyMap,
+  translations: Translations = runtimeTranslations(),
+) {
+  return formatEnumLabelFromKeys(value, labelKeys, translations);
 }
 
 function unknownAppointmentValue(value: unknown) {
@@ -49,31 +242,11 @@ export function appointmentTypeLabel(
   type: AppointmentKind,
   tr?: Record<string, string>,
 ) {
-  if (type === "non_medical") {
-    return (
-      tr?.apt_type_non_medical ??
-      appointmentText("Nicht-medizinisch", "Немедицинский", "Non-medical")
-    );
-  }
-  if (type === "internal") {
-    return tr?.apt_type_internal ?? appointmentText("Intern", "Внутренний", "Internal");
-  }
-  return tr?.apt_type_medical ?? appointmentText("Medizinisch", "Медицинский", "Medical");
+  return labelFromKeys(type, APPOINTMENT_TYPE_LABEL_KEYS, translationsFromRecord(tr));
 }
 
 export function carePathKindLabel(value?: string | null) {
-  switch (value) {
-    case "preventive":
-      return appointmentText("Praventiv", "Профилактика", "Preventive");
-    case "control":
-      return appointmentText("Kontrolle", "Контроль", "Control");
-    case "followup":
-      return appointmentText("Nachsorge", "Наблюдение", "Follow-up");
-    case "regular":
-      return appointmentText("Standard", "Стандартный", "Regular");
-    default:
-      return appointmentText("Standard", "Стандартный", "Regular");
-  }
+  return labelFromKeys(value, CARE_PATH_KIND_LABEL_KEYS);
 }
 
 export function normalizeCarePathKindForAppointmentType(
@@ -83,91 +256,41 @@ export function normalizeCarePathKindForAppointmentType(
   return appointmentType === "medical" ? carePathKind : "regular";
 }
 
-export function statusLabel(status: AppointmentStatus) {
-  switch (status) {
-    case "planned":
-      return appointmentText("Geplant", "Запланирован", "Planned");
-    case "confirmed":
-      return appointmentText("Bestatigt", "Подтверждён", "Confirmed");
-    case "in_progress":
-      return appointmentText("Lauft", "В процессе", "In progress");
-    case "completed":
-      return appointmentText("Abgeschlossen", "Завершён", "Completed");
-    case "cancelled":
-      return appointmentText("Abgesagt", "Отменён", "Cancelled");
-  }
+export function statusLabel(status: AppointmentStatus | string | null | undefined) {
+  return labelFromKeys(status, APPOINTMENT_STATUS_LABEL_KEYS);
 }
 
 export function communicationStatusLabel(
-  status: AppointmentCommunicationStatus,
+  status: AppointmentCommunicationStatus | string | null | undefined,
 ) {
-  switch (status) {
-    case "planned":
-      return appointmentText("Geplant", "Запланировано", "Planned");
-    case "sent":
-      return appointmentText("Gesendet", "Отправлено", "Sent");
-    case "answered":
-      return appointmentText("Beantwortet", "Получен ответ", "Answered");
-    case "closed":
-      return appointmentText("Geschlossen", "Закрыто", "Closed");
-    case "cancelled":
-      return appointmentText("Abgebrochen", "Отменено", "Cancelled");
-  }
-  return unknownAppointmentValue(status);
+  return labelFromKeys(status, COMMUNICATION_STATUS_LABEL_KEYS);
 }
 
 export function communicationChannelLabel(
-  channel: AppointmentCommunicationChannel,
+  channel: AppointmentCommunicationChannel | string | null | undefined,
 ) {
-  switch (channel) {
-    case "phone":
-      return appointmentText("Telefon", "Телефон", "Phone");
-    case "email":
-      return appointmentText("E-Mail", "Эл. почта", "Email");
-    case "portal":
-      return appointmentText("Portal", "Портал", "Portal");
-    case "fax":
-      return appointmentText("Fax", "Факс", "Fax");
-    case "whatsapp":
-      return "WhatsApp";
-    case "other":
-      return appointmentText("Anderer Kanal", "Другой канал", "Other");
-  }
-  return unknownAppointmentValue(channel);
+  return labelFromKeys(channel, COMMUNICATION_CHANNEL_LABEL_KEYS);
+}
+
+export function communicationDirectionLabel(value?: string | null) {
+  return labelFromKeys(value, COMMUNICATION_DIRECTION_LABEL_KEYS);
 }
 
 export function communicationTargetLabel(
   target: AppointmentCommunicationTarget,
   detail?: AppointmentDetail | null,
 ) {
-  switch (target) {
-    case "doctor":
-      return detail?.doctor_name || appointmentText("Arzt", "Врач", "Doctor");
-    case "service_provider":
-      return (
-        detail?.provider_name ||
-        appointmentText("Leistungserbringer", "Поставщик услуг", "Service provider")
-      );
-    default:
-      return detail?.provider_name || appointmentText("Klinik", "Клиника", "Clinic");
+  if (target === "doctor") {
+    return detail?.doctor_name || labelFromKeys(target, COMMUNICATION_TARGET_LABEL_KEYS);
   }
+  if (target === "service_provider") {
+    return detail?.provider_name || labelFromKeys(target, COMMUNICATION_TARGET_LABEL_KEYS);
+  }
+  return detail?.provider_name || labelFromKeys("clinic", COMMUNICATION_TARGET_LABEL_KEYS);
 }
 
-export function responseLabel(value: InterpreterResponse) {
-  switch (value) {
-    case "pending":
-      return appointmentText("Ausstehend", "Ожидается", "Pending");
-    case "accepted":
-      return appointmentText("Bestatigt", "Подтверждено", "Accepted");
-    case "declined":
-      return appointmentText("Abgelehnt", "Отклонено", "Declined");
-    case "discussion":
-      return appointmentText(
-        "Klärung erforderlich",
-        "Нужно уточнение",
-        "Needs discussion",
-      );
-  }
+export function responseLabel(value: InterpreterResponse | string | null | undefined) {
+  return labelFromKeys(value, INTERPRETER_RESPONSE_LABEL_KEYS);
 }
 
 export function attentionIssueLabel(count: number) {
@@ -181,12 +304,12 @@ export function reportApprovalLabel(status: string) {
     case "approved":
       return appointmentText("Freigegeben", "Согласовано", "Approved");
     case "rejected":
-      return appointmentText("Zuruckgewiesen", "Отклонено", "Rejected");
+      return appointmentText("Zurückgewiesen", "Отклонено", "Rejected");
     case "pending_review":
-      return appointmentText("Prufung ausstehend", "Ожидает проверки", "Pending review");
+      return appointmentText("Prüfung ausstehend", "Ожидает проверки", "Pending review");
     case "needs_interpreter_revision":
       return appointmentText(
-        "Uberarbeitung durch Dolmetscher",
+        "Überarbeitung durch Dolmetscher",
         "Нужна доработка переводчика",
         "Needs interpreter revision",
       );
@@ -235,153 +358,76 @@ export function staffLabel(option: { name: string; role: string }) {
 }
 
 export function recurrenceFrequencyLabel(
-  value: AppointmentRecurrenceFrequency,
+  value: AppointmentRecurrenceFrequency | string | null | undefined,
 ) {
-  switch (value) {
-    case "daily":
-      return appointmentText("Taglich", "Ежедневно", "Daily");
-    case "weekly":
-      return appointmentText("Wochentlich", "Еженедельно", "Weekly");
-    case "monthly":
-      return appointmentText("Monatlich", "Ежемесячно", "Monthly");
-    default:
-      return unknownAppointmentValue(value);
-  }
+  return labelFromKeys(value, RECURRENCE_FREQUENCY_LABEL_KEYS);
 }
 
-export function findingsArtifactLabel(value: FindingsFollowUpArtifact) {
-  switch (value) {
-    case "arztbrief":
-      return "Arztbrief";
-    case "written_findings":
-      return appointmentText("Schriftlicher Befund", "Письменное заключение", "Written findings");
-    case "both":
-      return appointmentText(
-        "Arztbrief und schriftlicher Befund",
-        "Arztbrief и письменное заключение",
-        "Arztbrief and written findings",
-      );
-    default:
-      return unknownAppointmentValue(value);
-  }
+export function findingsArtifactLabel(
+  value: FindingsFollowUpArtifact | string | null | undefined,
+) {
+  return labelFromKeys(value, FINDINGS_ARTIFACT_LABEL_KEYS);
 }
 
-export function incomingDataSourceLabel(value: IncomingDataSource) {
-  switch (value) {
-    case "patient":
-      return appointmentText("Patient", "Пациент", "Patient");
-    case "doctor":
-      return appointmentText("Arzt", "Врач", "Doctor");
-    case "clinic":
-      return appointmentText("Klinik", "Клиника", "Clinic");
-    case "interpreter":
-      return appointmentText("Dolmetscher", "Переводчик", "Interpreter");
-    case "external_lab":
-      return appointmentText("Externes Labor", "Внешняя лаборатория", "External lab");
-    case "other":
-      return appointmentText("Andere Quelle", "Другой источник", "Other source");
-    default:
-      return unknownAppointmentValue(value);
-  }
+export function incomingDataSourceLabel(
+  value: IncomingDataSource | string | null | undefined,
+) {
+  return labelFromKeys(value, INCOMING_DATA_SOURCE_LABEL_KEYS);
 }
 
-export function incomingDataCategoryLabel(value: IncomingDataCategory) {
-  switch (value) {
-    case "medical_update":
-      return appointmentText("Medizinisch", "Медицинское", "Medical");
-    case "diagnosis":
-      return appointmentText("Diagnose", "Диагноз", "Diagnosis");
-    case "medication":
-      return appointmentText("Medikation", "Назначения", "Medication");
-    case "symptom":
-      return appointmentText("Symptome", "Симптомы", "Symptoms");
-    case "lab_result":
-      return appointmentText("Laborergebnis", "Результат анализа", "Lab result");
-    case "imaging":
-      return appointmentText("Bildgebung", "Визуализация", "Imaging");
-    case "recommendation":
-      return appointmentText("Empfehlung", "Рекомендация", "Recommendation");
-    case "risk_flag":
-      return appointmentText("Risikohinweis", "Флаг риска", "Risk flag");
-    case "other":
-      return appointmentText("Sonstiges", "Другое", "Other");
-    default:
-      return unknownAppointmentValue(value);
-  }
+export function incomingDataCategoryLabel(
+  value: IncomingDataCategory | string | null | undefined,
+) {
+  return labelFromKeys(value, INCOMING_DATA_CATEGORY_LABEL_KEYS);
 }
 
-export function taskStatusLabel(status: string) {
-  switch (status) {
-    case "open":
-      return appointmentText("Offen", "Открыта", "Open");
-    case "in_progress":
-      return appointmentText("In Bearbeitung", "В работе", "In progress");
-    case "completed":
-      return appointmentText("Erledigt", "Завершена", "Completed");
-    case "cancelled":
-      return appointmentText("Abgebrochen", "Отменена", "Cancelled");
-    default:
-      return unknownAppointmentValue(status);
-  }
+export function taskStatusLabel(status: string | null | undefined) {
+  return labelFromKeys(status, TASK_STATUS_LABEL_KEYS);
 }
 
-export function taskPriorityLabel(priority: string) {
-  switch (priority) {
-    case "low":
-      return appointmentText("Niedrig", "Низкий", "Low");
-    case "medium":
-      return appointmentText("Mittel", "Средний", "Medium");
-    case "high":
-      return appointmentText("Hoch", "Высокий", "High");
-    case "urgent":
-      return appointmentText("Dringend", "Срочно", "Urgent");
-    default:
-      return unknownAppointmentValue(priority);
-  }
+export function taskPriorityLabel(priority: string | null | undefined) {
+  return labelFromKeys(priority, TASK_PRIORITY_LABEL_KEYS);
 }
 
-export function billingHandoffKindLabel(kind: BillingHandoffKind) {
-  switch (kind) {
-    case "interpreter_hours":
-      return appointmentText("Dolmetscherstunden", "Часы переводчика", "Interpreter hours");
-    case "concierge_settlement":
-      return appointmentText("Concierge-Abrechnung", "Расчёт concierge", "Concierge settlement");
-    case "patient_invoice":
-      return appointmentText("Patientenrechnung", "Счёт пациенту", "Patient invoice");
-    case "provider_invoice":
-      return appointmentText("Rechnung des Providers", "Счёт провайдера", "Provider invoice");
-    case "payment_confirmation":
-      return appointmentText("Zahlungsbestätigung", "Подтверждение оплаты", "Payment confirmation");
-    case "other":
-      return appointmentText("Sonstiges", "Другое", "Other");
-    default:
-      return unknownAppointmentValue(kind);
-  }
+export function billingHandoffKindLabel(
+  kind: BillingHandoffKind | string | null | undefined,
+) {
+  return labelFromKeys(kind, BILLING_HANDOFF_KIND_LABEL_KEYS);
 }
 
-export function serviceKindLabel(kind: string) {
-  return unknownAppointmentValue(kind);
+export function serviceKindLabel(kind: string | null | undefined) {
+  return labelFromKeys(kind, CONCIERGE_SERVICE_KIND_LABEL_KEYS);
 }
 
-export function billingStatusLabel(status: string) {
-  switch (status) {
-    case "draft":
-      return appointmentText("Entwurf", "Черновик", "Draft");
-    case "planned":
-      return appointmentText("Geplant", "Запланировано", "Planned");
-    case "ready":
-      return appointmentText("Bereit", "Готово", "Ready");
-    case "submitted":
-      return appointmentText("Ubergeben", "Передано", "Submitted");
-    case "approved":
-      return appointmentText("Freigegeben", "Согласовано", "Approved");
-    case "settled":
-      return appointmentText("Abgerechnet", "Рассчитано", "Settled");
-    case "paid":
-      return appointmentText("Bezahlt", "Оплачено", "Paid");
-    case "cancelled":
-      return appointmentText("Abgebrochen", "Отменено", "Cancelled");
-    default:
-      return unknownAppointmentValue(status);
-  }
+export function serviceStatusLabel(status: string | null | undefined) {
+  return labelFromKeys(status, CONCIERGE_SERVICE_STATUS_LABEL_KEYS);
+}
+
+export function billingStatusLabel(status: string | null | undefined) {
+  return labelFromKeys(status, BILLING_STATUS_LABEL_KEYS);
+}
+
+export function followUpPresetLabel(presetId: string | null | undefined) {
+  return labelFromKeys(presetId, FOLLOW_UP_PRESET_LABEL_KEYS);
+}
+
+export function followUpPresetTitle(presetId: string | null | undefined) {
+  return labelFromKeys(presetId, FOLLOW_UP_PRESET_TITLE_KEYS);
+}
+
+export function interpreterPreferenceLabel(value?: string | null) {
+  return labelFromKeys(value, INTERPRETER_PREFERENCE_LABEL_KEYS);
+}
+
+export function interpreterLanguageStatusLabel(value?: string | null) {
+  return labelFromKeys(value, INTERPRETER_LANGUAGE_STATUS_LABEL_KEYS);
+}
+
+export function interpreterSuggestionReasonLabel(value: string) {
+  const labelKey =
+    INTERPRETER_REASON_LABEL_KEYS[
+      value as keyof typeof INTERPRETER_REASON_LABEL_KEYS
+    ];
+  const tr = runtimeTranslations();
+  return labelKey ? tr[labelKey] : value;
 }

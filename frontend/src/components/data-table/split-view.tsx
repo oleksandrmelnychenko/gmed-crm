@@ -1,6 +1,7 @@
 import { X } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 
+import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import type { ViewMode } from "./types";
@@ -25,12 +26,15 @@ export function SplitView({
   children,
   onClose,
   paneWidth = 480,
-  paneLabel = "Detail",
-  closeLabel = "Close",
+  paneLabel,
+  closeLabel,
   className,
 }: SplitViewProps) {
+  const { t } = useLang();
   const responsiveMode = useResponsiveViewMode();
   const mode = explicitMode ?? responsiveMode;
+  const resolvedPaneLabel = paneLabel ?? t.common_detail;
+  const resolvedCloseLabel = closeLabel ?? t.common_close;
 
   useEffect(() => {
     if (!active || !onClose) return;
@@ -48,7 +52,7 @@ export function SplitView({
         <div className="flex min-w-0 flex-1 flex-col">{children}</div>
         {active ? (
           <aside
-            aria-label={paneLabel}
+            aria-label={resolvedPaneLabel}
             className="flex shrink-0 flex-col overflow-hidden rounded-lg border border-border bg-card"
             style={{ width: paneWidth }}
           >
@@ -57,8 +61,8 @@ export function SplitView({
                 <button
                   type="button"
                   onClick={onClose}
-                  aria-label={closeLabel}
-                  title={closeLabel}
+                  aria-label={resolvedCloseLabel}
+                  title={resolvedCloseLabel}
                   className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
                 >
                   <X className="size-3.5" />
@@ -85,7 +89,7 @@ export function SplitView({
             className="absolute inset-0 bg-foreground/20"
           />
           <aside
-            aria-label={paneLabel}
+            aria-label={resolvedPaneLabel}
             role="dialog"
             className="relative flex w-full max-w-md flex-col overflow-hidden border-l border-border bg-card shadow-2xl sm:max-w-lg"
             onClick={(e) => e.stopPropagation()}
@@ -95,8 +99,8 @@ export function SplitView({
                 <button
                   type="button"
                   onClick={onClose}
-                  aria-label={closeLabel}
-                  title={closeLabel}
+                  aria-label={resolvedCloseLabel}
+                  title={resolvedCloseLabel}
                   className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
                 >
                   <X className="size-3.5" />

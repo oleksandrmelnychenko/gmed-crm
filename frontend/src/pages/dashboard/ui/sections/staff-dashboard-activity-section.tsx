@@ -52,7 +52,7 @@ export function StaffDashboardActivitySection({
             <div className="flex items-center gap-2">
               <CalendarDays className="size-4 text-muted-foreground" />
               <h3 className="text-[14px] font-semibold text-foreground">
-                {tr.dash_upcoming ?? "Upcoming"}
+                {tr.dash_upcoming ?? tr.common_unknown}
               </h3>
             </div>
             <button
@@ -60,18 +60,18 @@ export function StaffDashboardActivitySection({
               className="inline-flex items-center gap-1 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
               onClick={onOpenAppointments}
             >
-              {tr.dash_view_all ?? "View all"}
+              {tr.dash_view_all ?? tr.common_unknown}
               <ArrowRight className="size-3" />
             </button>
           </div>
           <div className="divide-y divide-border">
             {loading ? (
               <div className="py-10 text-center text-sm text-muted-foreground">
-                {tr.common_loading ?? "Loading..."}
+                {tr.common_loading ?? tr.common_unknown}
               </div>
             ) : upcoming.length === 0 ? (
               <div className="py-10 text-center text-sm text-muted-foreground">
-                {tr.dash_no_upcoming ?? "No upcoming appointments"}
+                {tr.dash_no_upcoming ?? tr.common_unknown}
               </div>
             ) : (
               upcoming.slice(0, 6).map((appointment) => (
@@ -94,9 +94,9 @@ export function StaffDashboardActivitySection({
                       {appointment.title || appointment.patient_name}
                     </div>
                     <div className="truncate text-[11.5px] text-muted-foreground">
-                      {appointment.time_start ? `${appointment.time_start.slice(0, 5)} · ` : ""}
+                      {appointment.time_start ? `${appointment.time_start.slice(0, 5)} - ` : ""}
                       {appointment.patient_name}
-                      {appointment.location ? ` · ${appointment.location}` : ""}
+                      {appointment.location ? ` - ${appointment.location}` : ""}
                     </div>
                   </div>
                   <StatusDot status={appointment.status} />
@@ -111,7 +111,7 @@ export function StaffDashboardActivitySection({
             <div className="flex items-center gap-2">
               <CheckCircle2 className="size-4 text-muted-foreground" />
               <h3 className="text-[14px] font-semibold text-foreground">
-                {tr.dash_my_tasks ?? "My tasks"}
+                {tr.dash_my_tasks ?? tr.common_unknown}
               </h3>
               {openTasksCount > 0 ? (
                 <span className="rounded-full bg-[var(--brand-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--brand)]">
@@ -123,11 +123,11 @@ export function StaffDashboardActivitySection({
           <div className="divide-y divide-border">
             {loading ? (
               <div className="py-10 text-center text-sm text-muted-foreground">
-                {tr.common_loading ?? "Loading..."}
+                {tr.common_loading ?? tr.common_unknown}
               </div>
             ) : tasks.length === 0 ? (
               <div className="py-10 text-center text-sm text-muted-foreground">
-                {tr.dash_no_tasks ?? "No tasks"}
+                {tr.dash_no_tasks ?? tr.common_unknown}
               </div>
             ) : (
               tasks.slice(0, 6).map((task) => (
@@ -142,8 +142,8 @@ export function StaffDashboardActivitySection({
                     </div>
                     <div className="truncate text-[11.5px] text-muted-foreground">
                       {task.due_date
-                        ? `${tr.dash_due ?? "Due"} ${formatShortDate(task.due_date)}`
-                        : tr.dash_no_due ?? "No deadline"}
+                        ? `${tr.dash_due ?? tr.common_unknown} ${formatShortDate(task.due_date)}`
+                        : tr.dash_no_due ?? tr.common_unknown}
                     </div>
                   </div>
                   <button
@@ -160,14 +160,14 @@ export function StaffDashboardActivitySection({
       </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <QuickLink icon={UsersIcon} label={tr.patients_title ?? "Patients"} onClick={onOpenPatients} />
-        <QuickLink icon={UserPlus} label={tr.leads_title ?? "Leads"} onClick={onOpenLeads} />
+        <QuickLink icon={UsersIcon} label={tr.patients_title ?? tr.common_unknown} onClick={onOpenPatients} />
+        <QuickLink icon={UserPlus} label={tr.leads_title ?? tr.common_unknown} onClick={onOpenLeads} />
         <QuickLink
           icon={CalendarDays}
-          label={tr.appointments_title ?? "Appointments"}
+          label={tr.appointments_title ?? tr.common_unknown}
           onClick={onOpenAppointments}
         />
-        <QuickLink icon={FileText} label={tr.orders_title ?? "Orders"} onClick={onOpenOrders} />
+        <QuickLink icon={FileText} label={tr.orders_title ?? tr.common_unknown} onClick={onOpenOrders} />
       </div>
     </>
   );

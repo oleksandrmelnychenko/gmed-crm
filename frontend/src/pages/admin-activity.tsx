@@ -34,7 +34,13 @@ import {
   SheetContent,
 } from "@/components/ui/sheet";
 import { clearApiCache } from "@/lib/api";
-import { formatUnknownValue, useLang, type Lang, type Translations } from "@/lib/i18n";
+import {
+  formatEnumLabelFromKeys,
+  formatUnknownValue,
+  useLang,
+  type TranslationKey,
+  type Translations,
+} from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { formatAdminDateTime } from "@/pages/admin-pages.helpers";
@@ -57,8 +63,6 @@ interface ActivityRow {
   context: Record<string, unknown> | null;
   created_at: string;
 }
-
-type UnknownTranslations = Pick<Translations, "common_not_set" | "common_unknown" | "common_unknown_value">;
 
 const ADMIN_ACTIVITY_REALTIME_EVENTS = [
   "access_policy.updated",
@@ -191,230 +195,131 @@ function actionTone(action: string) {
   }
 }
 
-const EXACT_ACTION_LABELS = {
-  de: {
-    login: "Anmeldung",
-    create_lead: "Lead erstellt",
-    create_patient: "Patient erstellt",
-    convert_lead: "Lead konvertiert",
-    qualify_lead: "Lead qualifiziert",
-    update_setting: "Einstellung aktualisiert",
-    revoke_all_sessions: "Alle Sitzungen widerrufen",
-    admin_force_logout_user: "Benutzer abgemeldet",
-    revoke_all_users_sessions: "Alle Benutzersitzungen widerrufen",
-    token_theft_detected: "Token-Diebstahl erkannt",
-  },
-  ru: {
-    login: "Вход",
-    create_lead: "Лид создан",
-    create_patient: "Пациент создан",
-    convert_lead: "Лид конвертирован",
-    qualify_lead: "Лид квалифицирован",
-    update_setting: "Настройка обновлена",
-    revoke_all_sessions: "Все сессии отозваны",
-    admin_force_logout_user: "Пользователь выведен из системы",
-    revoke_all_users_sessions: "Все сессии пользователей отозваны",
-    token_theft_detected: "Обнаружена кража токена",
-  },
-} as const;
+const EXACT_ACTION_LABEL_KEYS = {
+  login: "activity_action_login",
+  create_lead: "activity_action_create_lead",
+  create_patient: "activity_action_create_patient",
+  convert_lead: "activity_action_convert_lead",
+  qualify_lead: "activity_action_qualify_lead",
+  update_setting: "activity_action_update_setting",
+  revoke_all_sessions: "activity_action_revoke_all_sessions",
+  admin_force_logout_user: "activity_action_admin_force_logout_user",
+  revoke_all_users_sessions: "activity_action_revoke_all_users_sessions",
+  token_theft_detected: "activity_action_token_theft_detected",
+} as const satisfies Partial<Record<string, TranslationKey>>;
 
-const ACTIVITY_ENTITY_LABELS = {
-  de: {
-    access_policy: "Zugriffsregel",
-    announcement: "Ankuendigung",
-    appointment: "Termin",
-    appointment_checklist: "Termin-Checkliste",
-    appointment_request: "Terminanfrage",
-    case: "Fall",
-    concierge_service: "Concierge-Service",
-    consent: "Einwilligung",
-    custom_field: "Benutzerdefiniertes Feld",
-    document: "Dokument",
-    feedback: "Feedback",
-    framework_contract: "Rahmenvertrag",
-    invoice: "Rechnung",
-    lead: "Lead",
-    notification_channel: "Benachrichtigungskanal",
-    order: "Auftrag",
-    patient: "Patient",
-    pending_login: "Ausstehende Anmeldung",
-    privacy_request: "Datenschutzantrag",
-    provider: "Anbieter",
-    quote: "Angebot",
-    reminder: "Erinnerung",
-    security: "Sicherheit",
-    session: "Sitzung",
-    system_setting: "Systemeinstellung",
-    task: "Aufgabe",
-    user: "Benutzer",
-    workflow_checklist_item: "Workflow-Checkliste",
-  },
-  ru: {
-    access_policy: "Правило доступа",
-    announcement: "Объявление",
-    appointment: "Приём",
-    appointment_checklist: "Чек-лист приёма",
-    appointment_request: "Запрос на приём",
-    case: "Кейс",
-    concierge_service: "Консьерж-сервис",
-    consent: "Согласие",
-    custom_field: "Пользовательское поле",
-    document: "Документ",
-    feedback: "Отзыв",
-    framework_contract: "Рамочный договор",
-    invoice: "Счёт",
-    lead: "Лид",
-    notification_channel: "Канал уведомлений",
-    order: "Заказ",
-    patient: "Пациент",
-    pending_login: "Ожидающий вход",
-    privacy_request: "Запрос приватности",
-    provider: "Провайдер",
-    quote: "Предложение",
-    reminder: "Напоминание",
-    security: "Безопасность",
-    session: "Сессия",
-    system_setting: "Системная настройка",
-    task: "Задача",
-    user: "Пользователь",
-    workflow_checklist_item: "Чек-лист workflow",
-  },
-} as const;
+const ACTIVITY_ENTITY_LABEL_KEYS = {
+  access_policy: "activity_entity_access_policy",
+  announcement: "activity_entity_announcement",
+  appointment: "activity_entity_appointment",
+  appointment_checklist: "activity_entity_appointment_checklist",
+  appointment_request: "activity_entity_appointment_request",
+  case: "activity_entity_case",
+  concierge_service: "activity_entity_concierge_service",
+  consent: "activity_entity_consent",
+  custom_field: "activity_entity_custom_field",
+  document: "activity_entity_document",
+  feedback: "activity_entity_feedback",
+  framework_contract: "activity_entity_framework_contract",
+  invoice: "activity_entity_invoice",
+  lead: "activity_entity_lead",
+  notification_channel: "activity_entity_notification_channel",
+  order: "activity_entity_order",
+  patient: "activity_entity_patient",
+  pending_login: "activity_entity_pending_login",
+  privacy_request: "activity_entity_privacy_request",
+  provider: "activity_entity_provider",
+  quote: "activity_entity_quote",
+  reminder: "activity_entity_reminder",
+  security: "activity_entity_security",
+  session: "activity_entity_session",
+  system_setting: "activity_entity_system_setting",
+  task: "activity_entity_task",
+  user: "activity_entity_user",
+  workflow_checklist_item: "activity_entity_workflow_checklist_item",
+} as const satisfies Partial<Record<string, TranslationKey>>;
 
-const ACTIVITY_EVENT_LABELS = {
-  de: {
-    activated: "aktiviert",
-    added: "hinzugefuegt",
-    approved: "genehmigt",
-    assigned: "zugewiesen",
-    assignment_revoked: "Zuweisung widerrufen",
-    billing_ready: "abrechnungsbereit",
-    cancelled: "abgesagt",
-    completed: "abgeschlossen",
-    confirmed: "bestaetigt",
-    converted: "konvertiert",
-    created: "erstellt",
-    deactivated: "deaktiviert",
-    debt_management_updated: "Debt-Management aktualisiert",
-    deleted: "geloescht",
-    doctor_created: "Arzt erstellt",
-    doctor_deleted: "Arzt geloescht",
-    doctor_updated: "Arzt aktualisiert",
-    dunning_created: "Mahnung erstellt",
-    executed: "ausgefuehrt",
-    execution_flow_updated: "Ausfuehrung aktualisiert",
-    external_invoice_created: "externe Rechnung erstellt",
-    external_invoice_overdue: "externe Rechnung ueberfaellig",
-    external_invoice_updated: "externe Rechnung aktualisiert",
-    failed_resolved: "Fehlschlag geklaert",
-    followup_flow_updated: "Nachsorge aktualisiert",
-    force_password_reset: "Passwort-Reset erzwungen",
-    generated: "erzeugt",
-    granted: "erteilt",
-    ip_whitelist_added: "IP-Freigabe hinzugefuegt",
-    ip_whitelist_deleted: "IP-Freigabe geloescht",
-    leistung_added: "Leistung hinzugefuegt",
-    leistung_approved: "Leistung genehmigt",
-    maintenance_toggled: "Wartung umgeschaltet",
-    medication_expiry_confirmed: "Medikamentenablauf bestaetigt",
-    medication_expiry_flagged: "Medikamentenablauf markiert",
-    mfa_toggled: "MFA umgeschaltet",
-    overdue_marked: "ueberfaellig markiert",
-    password_reset: "Passwort zurueckgesetzt",
-    payment_proof_uploaded: "Zahlungsnachweis hochgeladen",
-    phase_changed: "Phase geaendert",
-    planning_preparation_updated: "Planung aktualisiert",
-    portal_released: "im Portal freigegeben",
-    portal_revoked: "Portalfreigabe widerrufen",
-    process_gates_updated: "Prozess-Gates aktualisiert",
-    rejected: "abgelehnt",
-    reset: "zurueckgesetzt",
-    reviewed: "geprueft",
-    revoked: "widerrufen",
-    revoked_all: "alle widerrufen",
-    service_created: "Service erstellt",
-    service_deleted: "Service geloescht",
-    service_updated: "Service aktualisiert",
-    status_changed: "Status geaendert",
-    submitted: "eingereicht",
-    translation_requested: "Uebersetzung angefragt",
-    translation_updated: "Uebersetzung aktualisiert",
-    unlocked: "entsperrt",
-    updated: "aktualisiert",
-    uploaded: "hochgeladen",
-  },
-  ru: {
-    activated: "активирован",
-    added: "добавлено",
-    approved: "одобрен",
-    assigned: "назначен",
-    assignment_revoked: "назначение отозвано",
-    billing_ready: "готово к биллингу",
-    cancelled: "отменён",
-    completed: "завершён",
-    confirmed: "подтверждён",
-    converted: "конвертирован",
-    created: "создан",
-    deactivated: "деактивирован",
-    debt_management_updated: "debt-management обновлён",
-    deleted: "удалён",
-    doctor_created: "врач создан",
-    doctor_deleted: "врач удалён",
-    doctor_updated: "врач обновлён",
-    dunning_created: "напоминание об оплате создано",
-    executed: "исполнен",
-    execution_flow_updated: "исполнение обновлено",
-    external_invoice_created: "внешний счёт создан",
-    external_invoice_overdue: "внешний счёт просрочен",
-    external_invoice_updated: "внешний счёт обновлён",
-    failed_resolved: "ошибка закрыта",
-    followup_flow_updated: "follow-up обновлён",
-    force_password_reset: "сброс пароля принудительно",
-    generated: "сгенерирован",
-    granted: "выдан",
-    ip_whitelist_added: "IP добавлен в whitelist",
-    ip_whitelist_deleted: "IP удалён из whitelist",
-    leistung_added: "услуга добавлена",
-    leistung_approved: "услуга одобрена",
-    maintenance_toggled: "режим обслуживания переключён",
-    medication_expiry_confirmed: "срок препарата подтверждён",
-    medication_expiry_flagged: "срок препарата отмечен",
-    mfa_toggled: "MFA переключена",
-    overdue_marked: "помечен просроченным",
-    password_reset: "пароль сброшен",
-    payment_proof_uploaded: "подтверждение оплаты загружено",
-    phase_changed: "фаза изменена",
-    planning_preparation_updated: "планирование обновлено",
-    portal_released: "опубликован в портале",
-    portal_revoked: "публикация в портале отозвана",
-    process_gates_updated: "process gates обновлены",
-    rejected: "отклонён",
-    reset: "сброшен",
-    reviewed: "проверен",
-    revoked: "отозван",
-    revoked_all: "все отозваны",
-    service_created: "сервис создан",
-    service_deleted: "сервис удалён",
-    service_updated: "сервис обновлён",
-    status_changed: "статус изменён",
-    submitted: "отправлен",
-    translation_requested: "перевод запрошен",
-    translation_updated: "перевод обновлён",
-    unlocked: "разблокирован",
-    updated: "обновлён",
-    uploaded: "загружен",
-  },
-} as const;
+const ACTIVITY_EVENT_LABEL_KEYS = {
+  activated: "activity_event_activated",
+  added: "activity_event_added",
+  approved: "activity_event_approved",
+  assigned: "activity_event_assigned",
+  assignment_revoked: "activity_event_assignment_revoked",
+  billing_ready: "activity_event_billing_ready",
+  cancelled: "activity_event_cancelled",
+  completed: "activity_event_completed",
+  confirmed: "activity_event_confirmed",
+  converted: "activity_event_converted",
+  created: "activity_event_created",
+  deactivated: "activity_event_deactivated",
+  debt_management_updated: "activity_event_debt_management_updated",
+  deleted: "activity_event_deleted",
+  doctor_created: "activity_event_doctor_created",
+  doctor_deleted: "activity_event_doctor_deleted",
+  doctor_updated: "activity_event_doctor_updated",
+  dunning_created: "activity_event_dunning_created",
+  executed: "activity_event_executed",
+  execution_flow_updated: "activity_event_execution_flow_updated",
+  external_invoice_created: "activity_event_external_invoice_created",
+  external_invoice_overdue: "activity_event_external_invoice_overdue",
+  external_invoice_updated: "activity_event_external_invoice_updated",
+  failed_resolved: "activity_event_failed_resolved",
+  followup_flow_updated: "activity_event_followup_flow_updated",
+  force_password_reset: "activity_event_force_password_reset",
+  generated: "activity_event_generated",
+  granted: "activity_event_granted",
+  ip_whitelist_added: "activity_event_ip_whitelist_added",
+  ip_whitelist_deleted: "activity_event_ip_whitelist_deleted",
+  leistung_added: "activity_event_leistung_added",
+  leistung_approved: "activity_event_leistung_approved",
+  maintenance_toggled: "activity_event_maintenance_toggled",
+  medication_expiry_confirmed: "activity_event_medication_expiry_confirmed",
+  medication_expiry_flagged: "activity_event_medication_expiry_flagged",
+  mfa_toggled: "activity_event_mfa_toggled",
+  overdue_marked: "activity_event_overdue_marked",
+  password_reset: "activity_event_password_reset",
+  payment_proof_uploaded: "activity_event_payment_proof_uploaded",
+  phase_changed: "activity_event_phase_changed",
+  planning_preparation_updated: "activity_event_planning_preparation_updated",
+  portal_released: "activity_event_portal_released",
+  portal_revoked: "activity_event_portal_revoked",
+  process_gates_updated: "activity_event_process_gates_updated",
+  rejected: "activity_event_rejected",
+  reset: "activity_event_reset",
+  reviewed: "activity_event_reviewed",
+  revoked: "activity_event_revoked",
+  revoked_all: "activity_event_revoked_all",
+  service_created: "activity_event_service_created",
+  service_deleted: "activity_event_service_deleted",
+  service_updated: "activity_event_service_updated",
+  status_changed: "activity_event_status_changed",
+  submitted: "activity_event_submitted",
+  translation_requested: "activity_event_translation_requested",
+  translation_updated: "activity_event_translation_updated",
+  unlocked: "activity_event_unlocked",
+  updated: "activity_event_updated",
+  uploaded: "activity_event_uploaded",
+} as const satisfies Partial<Record<string, TranslationKey>>;
 
-function actionLabel(action: string, translations: UnknownTranslations, lang: Lang): string {
-  const exactLabels = EXACT_ACTION_LABELS[lang] as Record<string, string>;
-  const exact = exactLabels[action];
-  if (exact) return exact;
+function actionLabel(action: string, translations: Translations): string {
+  const exact = formatEnumLabelFromKeys(action, EXACT_ACTION_LABEL_KEYS, translations);
+  if (exact !== translations.common_unknown_value && exact !== translations.common_unknown) {
+    return exact;
+  }
 
   const [entityKey, eventKey] = action.split(".");
-  const entityLabel = (ACTIVITY_ENTITY_LABELS[lang] as Record<string, string>)[entityKey ?? ""];
-  const eventLabel = (ACTIVITY_EVENT_LABELS[lang] as Record<string, string>)[eventKey ?? ""];
-  if (entityLabel && eventLabel) {
+  const entityLabel = entityKey
+    ? formatEnumLabelFromKeys(entityKey, ACTIVITY_ENTITY_LABEL_KEYS, translations)
+    : translations.common_not_set;
+  const eventLabel = eventKey
+    ? formatEnumLabelFromKeys(eventKey, ACTIVITY_EVENT_LABEL_KEYS, translations)
+    : translations.common_not_set;
+  if (
+    entityKey &&
+    eventKey &&
+    entityLabel !== translations.common_unknown_value &&
+    eventLabel !== translations.common_unknown_value
+  ) {
     return `${entityLabel}: ${eventLabel}`;
   }
 
@@ -450,16 +355,15 @@ function entityTechnicalValue(entityType: string | null, entityId: unknown): str
   return entity ? `${entity} ${idStr}\u2026` : idStr;
 }
 
-function entityTypeLabel(entityType: string | null, translations: UnknownTranslations, lang: Lang): string {
+function entityTypeLabel(entityType: string | null, translations: Translations): string {
   if (!entityType) return translations.common_not_set;
-  return (ACTIVITY_ENTITY_LABELS[lang] as Record<string, string>)[entityType] ?? formatUnknownValue(entityType, translations);
+  return formatEnumLabelFromKeys(entityType, ACTIVITY_ENTITY_LABEL_KEYS, translations);
 }
 
 function entityDisplay(
   entityType: string | null,
   entityId: unknown,
-  translations: UnknownTranslations,
-  lang: Lang,
+  translations: Translations,
 ): string {
   let idStr = "";
   if (typeof entityId === "string") {
@@ -468,7 +372,7 @@ function entityDisplay(
     idStr = String(entityId).slice(0, 8);
   }
 
-  const entity = entityTypeLabel(entityType, translations, lang);
+  const entity = entityTypeLabel(entityType, translations);
   return idStr ? `${entity} ${idStr}\u2026` : entity;
 }
 
@@ -611,7 +515,7 @@ export function AdminActivityPage() {
       width: 180,
       render: (activity) => (
         <StatusBadge tone={actionTone(activity.action)}>
-          {actionLabel(activity.action, t, lang)}
+          {actionLabel(activity.action, t)}
         </StatusBadge>
       ),
     },
@@ -622,7 +526,7 @@ export function AdminActivityPage() {
       width: 180,
       render: (activity) => (
         <span className="font-mono text-xs text-muted-foreground">
-          {entityDisplay(activity.entity_type, activity.entity_id, t, lang)}
+          {entityDisplay(activity.entity_type, activity.entity_id, t)}
         </span>
       ),
     },
@@ -693,7 +597,7 @@ export function AdminActivityPage() {
               <option value="__all__">{t.providers_all}</option>
               {actionOptions.map((value) => (
                 <option key={value} value={value}>
-                  {actionLabel(value, t, lang)}
+                  {actionLabel(value, t)}
                 </option>
               ))}
             </NativeComboboxSelect>
@@ -742,7 +646,7 @@ export function AdminActivityPage() {
             tone="slate"
             label={t.settings_title}
             value={metrics.settingsUpdates}
-            description={`${metrics.loginCount} ${actionLabel("login", t, lang)}`}
+            description={`${metrics.loginCount} ${actionLabel("login", t)}`}
           />
         </div>
 
@@ -782,7 +686,7 @@ export function AdminActivityPage() {
       <Sheet open={detailOpen} onOpenChange={setDetailOpen}>
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
           <AdminSheetScaffold
-            title={selectedActivity ? actionLabel(selectedActivity.action, t, lang) : t.activity_details}
+            title={selectedActivity ? actionLabel(selectedActivity.action, t) : t.activity_details}
             description={
               selectedActivity
                 ? `${selectedActivity.user_name} - ${formatAdminDateTime(selectedActivity.created_at, lang)}`
@@ -823,14 +727,14 @@ export function AdminActivityPage() {
                       <p className="text-[11.5px] text-muted-foreground">{t.activity_action}</p>
                       <div className="mt-1">
                         <StatusBadge tone={actionTone(selectedActivity.action)}>
-                          {actionLabel(selectedActivity.action, t, lang)}
+                          {actionLabel(selectedActivity.action, t)}
                         </StatusBadge>
                       </div>
                     </div>
                     <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
                       <p className="text-[11.5px] text-muted-foreground">{t.activity_entity}</p>
                       <p className="mt-1 text-sm font-medium text-foreground">
-                        {entityDisplay(selectedActivity.entity_type, selectedActivity.entity_id, t, lang) || "-"}
+                        {entityDisplay(selectedActivity.entity_type, selectedActivity.entity_id, t) || "-"}
                       </p>
                     </div>
                     <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">

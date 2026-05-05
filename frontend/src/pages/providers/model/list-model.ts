@@ -12,57 +12,42 @@ import type {
   ServiceItem,
 } from "./types";
 import {
-  formatEnumLabel,
+  formatEnumLabelFromKeys,
   getLang,
   t as translateCatalog,
-  type Translations,
+  type TranslationKey,
 } from "@/lib/i18n";
 
-type EnumLabelTranslations = Pick<
-  Translations,
-  "common_not_set" | "common_unknown" | "common_unknown_value"
->;
+const PROVIDER_TYPE_LABEL_KEYS = {
+  medical: "providers_type_medical",
+  non_medical: "providers_type_non_medical",
+} satisfies Partial<Record<string, TranslationKey>>;
 
-function enumTranslationsFromRecord(
-  tr: Record<string, string>,
-): EnumLabelTranslations {
-  const runtime = translateCatalog(getLang());
-  return {
-    common_not_set: tr.common_not_set ?? runtime.common_not_set,
-    common_unknown: tr.common_unknown ?? runtime.common_unknown,
-    common_unknown_value:
-      tr.common_unknown_value ?? runtime.common_unknown_value,
-  };
-}
-
-function localizedCodeLabels(tr = translateCatalog(getLang())) {
-  const de = getLang() === "de";
-  return {
-    appointment: de ? "Termin" : "Запись",
-    leistung: de ? "Leistung" : "Услуга",
-    concierge_service: de ? "Concierge-Service" : "Консьерж-сервис",
-    medical: tr.providers_type_medical,
-    non_medical: tr.providers_type_non_medical,
-    internal: de ? "Intern" : "Внутренний",
-    planned: de ? "Geplant" : "Запланировано",
-    booked: de ? "Gebucht" : "Забронировано",
-    confirmed: de ? "Bestätigt" : "Подтверждено",
-    in_progress: de ? "In Bearbeitung" : "В работе",
-    in_service: de ? "In Leistung" : "В процессе",
-    completed: de ? "Abgeschlossen" : "Завершено",
-    cancelled: tr.invoices_workspace_status_cancelled,
-    draft: tr.invoices_workspace_status_draft,
-    delivered: de ? "Erbracht" : "Оказано",
-    approved: de ? "Freigegeben" : "Утверждено",
-    hotel: de ? "Hotel" : "Отель",
-    transfer: de ? "Transfer" : "Трансфер",
-    vip_terminal: de ? "VIP-Terminal" : "VIP-терминал",
-    flight: de ? "Flug" : "Авиаперелет",
-    chauffeur: de ? "Chauffeur" : "Шофер",
-    translation_support: de ? "Übersetzungsunterstützung" : "Поддержка перевода",
-    other: de ? "Sonstiges" : "Другое",
-  };
-}
+const PROVIDER_CODE_LABEL_KEYS = {
+  appointment: "appointments_title",
+  leistung: "providers_leistungen",
+  concierge_service: "services_title",
+  medical: "providers_type_medical",
+  non_medical: "providers_type_non_medical",
+  internal: "operations_status_internal",
+  planned: "operations_status_planned",
+  booked: "operations_status_booked",
+  confirmed: "operations_status_confirmed",
+  in_progress: "operations_status_in_progress",
+  in_service: "operations_status_in_service",
+  completed: "common_completed",
+  cancelled: "invoices_workspace_status_cancelled",
+  draft: "invoices_workspace_status_draft",
+  delivered: "operations_status_delivered",
+  approved: "operations_status_approved",
+  hotel: "services_type_hotel",
+  transfer: "services_type_transfer",
+  vip_terminal: "services_type_vip_terminal",
+  flight: "services_type_flight",
+  chauffeur: "services_type_chauffeur",
+  translation_support: "services_type_translation_support",
+  other: "services_type_other",
+} satisfies Partial<Record<string, TranslationKey>>;
 
 export const DEFAULT_FILTERS: ProviderFilters = {
   search: "",
@@ -305,14 +290,14 @@ export function parseCommaList(value: string) {
 }
 
 export function providerTypeLabel(value: string, tr: Record<string, string>) {
-  return formatEnumLabel(
-    value,
-    {
-      medical: tr.providers_type_medical,
-      non_medical: tr.providers_type_non_medical,
-    },
-    enumTranslationsFromRecord(tr),
-  );
+  const translations = translateCatalog(getLang());
+  return formatEnumLabelFromKeys(value, PROVIDER_TYPE_LABEL_KEYS, {
+    ...translations,
+    providers_type_medical:
+      tr.providers_type_medical ?? translations.providers_type_medical,
+    providers_type_non_medical:
+      tr.providers_type_non_medical ?? translations.providers_type_non_medical,
+  });
 }
 
 export function compactDateTime(value?: string | null, fallback = "Not set") {
@@ -480,7 +465,7 @@ export function toServicePayload(form: ServiceFormState) {
 
 export function humanizeCode(value: string) {
   const translations = translateCatalog(getLang());
-  return formatEnumLabel(value, localizedCodeLabels(translations), translations);
+  return formatEnumLabelFromKeys(value, PROVIDER_CODE_LABEL_KEYS, translations);
 }
 
 export function moneyLabel(price: string, currency: string) {

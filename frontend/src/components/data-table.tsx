@@ -84,7 +84,7 @@ export function PopoverFooter({
         onClick={onClose}
         className="text-[12px] text-foreground hover:text-[var(--brand)]"
       >
-        {tr.common_confirm ?? "OK"}
+        {tr.common_confirm}
       </button>
     </div>
   );

@@ -29,11 +29,8 @@ export function AdminGuideButton({
   showTableToolbarGuide = true,
   buttonClassName = "size-9 rounded-lg bg-card",
 }: AdminGuideButtonProps) {
-  const { lang } = useLang();
+  const { t } = useLang();
   const [open, setOpen] = useState(false);
-
-  const guideLabel = lang === "de" ? "Anleitung" : "Гайд";
-  const closeLabel = lang === "de" ? "Schließen" : "Закрыть";
 
   return (
     <>
@@ -42,8 +39,8 @@ export function AdminGuideButton({
         variant="outline"
         size="icon-sm"
         className={buttonClassName}
-        title={guideLabel}
-        aria-label={guideLabel}
+        title={t.admin_guide_open}
+        aria-label={t.admin_guide_open}
         onClick={() => setOpen(true)}
       >
         <HelpCircle className="size-4" />
@@ -58,7 +55,7 @@ export function AdminGuideButton({
 
           <div className="space-y-4 text-[13px]">
             {children}
-            {showTableToolbarGuide ? <TableToolbarGuide lang={lang} /> : null}
+            {showTableToolbarGuide ? <TableToolbarGuide /> : null}
           </div>
 
           <DialogFooter>
@@ -68,7 +65,7 @@ export function AdminGuideButton({
               className="h-9 rounded-lg"
               onClick={() => setOpen(false)}
             >
-              {closeLabel}
+              {t.common_close}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -93,45 +90,31 @@ export function GuideSection({ title, children }: GuideSectionProps) {
   );
 }
 
-function TableToolbarGuide({ lang }: { lang: "de" | "ru" }) {
-  const isDe = lang === "de";
+function TableToolbarGuide() {
+  const { t } = useLang();
+
   return (
-    <GuideSection title={isDe ? "Tabellen-Toolbar" : "Панель таблицы"}>
+    <GuideSection title={t.admin_guide_table_toolbar}>
       <ul className="space-y-1">
         <li>
-          <span className="font-medium text-foreground">+ {isDe ? "Filter" : "Фильтр"}</span>{" "}
-          —{" "}
-          {isDe
-            ? "beliebige Spalte filtern (Text/Auswahl/Datum/Zahl)."
-            : "фильтрация по любой колонке (текст/список/дата/число)."}
+          <span className="font-medium text-foreground">+ {t.table_filter}</span>{" "}
+          - {t.admin_guide_filter_hint}
         </li>
         <li>
-          <span className="font-medium text-foreground">↑↓ {isDe ? "Sortierung" : "Сортировка"}</span>{" "}
-          —{" "}
-          {isDe
-            ? "mehrstufige Sortierung; Klick auf Spaltenkopf — schnelles Toggle, Shift+Klick — hinzufügen."
-            : "многоступенчатая сортировка; клик по заголовку — быстрый toggle, Shift+клик — добавить."}
+          <span className="font-medium text-foreground">{"\u2191\u2193"} {t.common_sort}</span>{" "}
+          - {t.admin_guide_sort_hint}
         </li>
         <li>
-          <span className="font-medium text-foreground">{isDe ? "Spalten" : "Колонки"}</span>{" "}
-          —{" "}
-          {isDe
-            ? "Sichtbarkeit + Fixierung links (max 3 fixierte)."
-            : "видимость + закрепление слева (до 3 закреплённых)."}
+          <span className="font-medium text-foreground">{t.table_columns}</span>{" "}
+          - {t.admin_guide_columns_hint}
         </li>
         <li>
-          <span className="font-medium text-foreground">{isDe ? "Dichte" : "Плотность"}</span>{" "}
-          —{" "}
-          {isDe
-            ? "Zeilenhöhe: Komfortabel / Kompakt / Dicht."
-            : "высота строк: Свободно / Компактно / Плотно."}
+          <span className="font-medium text-foreground">{t.table_density}</span>{" "}
+          - {t.admin_guide_density_hint}
         </li>
         <li>
-          <span className="font-medium text-foreground">{isDe ? "Spaltenbreite" : "Ширина колонок"}</span>{" "}
-          —{" "}
-          {isDe
-            ? "rechte Kante des Headers ziehen; wird im Browser gespeichert."
-            : "тяни правый край заголовка; сохраняется в браузере."}
+          <span className="font-medium text-foreground">{t.admin_guide_column_width}</span>{" "}
+          - {t.admin_guide_column_width_hint}
         </li>
       </ul>
     </GuideSection>

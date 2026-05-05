@@ -1,8 +1,9 @@
 import { buildApiUrl, getAccessToken } from "@/lib/api";
 import {
-  formatUnknownValue,
+  formatEnumLabelFromKeys,
   getLang,
   t as translateCatalog,
+  type TranslationKey,
 } from "@/lib/i18n";
 
 export type PortalDocumentItem = {
@@ -431,61 +432,247 @@ function portalLocale() {
   return "en-GB";
 }
 
-function portalUnknownValue(value: unknown) {
-  return formatUnknownValue(value, translateCatalog(getLang()));
+function portalTranslations() {
+  return translateCatalog(getLang());
 }
 
+function portalEnumLabel(
+  value: string | null | undefined,
+  labelKeys: Partial<Record<string, TranslationKey>>,
+) {
+  return formatEnumLabelFromKeys(value, labelKeys, portalTranslations());
+}
+
+const PORTAL_STATUS_LABEL_KEYS = {
+  active: "portal_status_active",
+  approved: "portal_status_approved",
+  archived: "portal_status_archived",
+  booked: "portal_status_booked",
+  cancelled: "portal_status_cancelled",
+  closed: "portal_status_closed",
+  completed: "portal_status_completed",
+  confirmed: "portal_status_confirmed",
+  converted: "portal_status_converted",
+  declined: "portal_status_declined",
+  draft: "portal_status_draft",
+  executed: "portal_status_executed",
+  expired: "portal_status_expired",
+  in_progress: "portal_status_in_progress",
+  in_service: "portal_status_in_service",
+  not_started: "portal_status_not_started",
+  open: "portal_status_open",
+  overdue: "portal_status_overdue",
+  paid: "portal_status_paid",
+  partially_paid: "portal_status_partially_paid",
+  pending: "portal_status_pending",
+  planned: "portal_status_planned",
+  ready: "portal_status_ready",
+  rejected: "portal_status_rejected",
+  released: "portal_status_released",
+  retention_hold: "portal_status_retention_hold",
+  reviewed: "portal_status_reviewed",
+  scheduled: "portal_status_scheduled",
+  sent: "portal_status_sent",
+  signed: "portal_status_signed",
+  superseded: "portal_status_superseded",
+  terminated: "portal_status_terminated",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const PORTAL_DOCUMENT_VALUE_LABEL_KEYS = {
+  administrative: "portal_document_label_administrative",
+  analyses: "portal_document_label_analyses",
+  analysis: "portal_document_label_analyses",
+  blood_results: "portal_document_label_analyses",
+  clinical: "portal_document_label_clinical",
+  clinic_correspondence: "portal_document_label_correspondence",
+  clinic_letter: "portal_document_label_correspondence",
+  conclusions: "portal_document_label_conclusions",
+  contract: "portal_document_label_contract",
+  correspondence: "portal_document_label_correspondence",
+  discharge_report: "portal_document_label_discharge_report",
+  general: "portal_document_label_general",
+  identity: "portal_document_label_identity",
+  imaging: "portal_document_label_imaging",
+  insurance: "portal_document_label_insurance_document",
+  insurance_document: "portal_document_label_insurance_document",
+  invoice: "portal_document_label_invoice",
+  invoice_pdf: "portal_document_label_invoice",
+  invoices: "portal_document_label_invoice",
+  lab: "portal_document_label_lab",
+  medical: "portal_document_label_medical",
+  medical_report: "portal_document_label_medical_report",
+  payment_proof: "portal_document_label_payment_proof",
+  report: "portal_document_label_medical_report",
+  translated_letter: "portal_document_label_translation",
+  translations: "portal_document_label_translation",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const PORTAL_DOCUMENT_SOURCE_LABEL_KEYS = {
+  patient_portal: "portal_document_source_patient_portal",
+  portal_release: "portal_document_source_portal_release",
+  provider: "portal_document_source_provider",
+  staff_workspace: "portal_document_source_staff_workspace",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const PORTAL_INVOICE_TYPE_LABEL_KEYS = {
+  advance: "portal_invoice_type_advance",
+  final: "portal_invoice_type_final",
+  interim: "portal_invoice_type_interim",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const PORTAL_PRIVACY_REQUEST_LABEL_KEYS = {
+  erasure: "portal_privacy_request_erasure",
+  restriction: "portal_privacy_request_restriction",
+  third_party_revoke: "portal_privacy_request_third_party_revoke",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const PORTAL_PRIVACY_SOURCE_LABEL_KEYS = {
+  patient_portal: "portal_privacy_source_patient_portal",
+  staff_workspace: "portal_privacy_source_staff_workspace",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const PORTAL_FEEDBACK_SOURCE_LABEL_KEYS = {
+  patient_portal: "portal_feedback_source_patient_portal",
+  staff_capture: "portal_feedback_source_staff_capture",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const PORTAL_RECOMMENDATION_TYPE_LABEL_KEYS = {
+  consultation: "portal_recommendation_type_consultation",
+  document: "portal_recommendation_type_document",
+  follow_up: "portal_recommendation_type_follow_up",
+  imaging: "portal_recommendation_type_imaging",
+  lab_test: "portal_recommendation_type_lab_test",
+  medication_review: "portal_recommendation_type_medication_review",
+  other: "portal_recommendation_type_other",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const PORTAL_RECOMMENDATION_PRIORITY_LABEL_KEYS = {
+  high: "portal_recommendation_priority_high",
+  low: "portal_recommendation_priority_low",
+  normal: "portal_recommendation_priority_normal",
+  urgent: "portal_recommendation_priority_urgent",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const PORTAL_RECOMMENDATION_DECISION_LABEL_KEYS = {
+  already_done: "portal_recommendation_decision_already_done",
+  declined: "portal_recommendation_decision_declined",
+  need_consultation: "portal_recommendation_decision_need_consultation",
+  schedule: "portal_recommendation_decision_schedule",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const PORTAL_APPOINTMENT_TYPE_LABEL_KEYS = {
+  internal: "portal_appointment_type_internal",
+  medical: "portal_appointment_type_medical",
+  non_medical: "portal_appointment_type_non_medical",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const PORTAL_CARE_PATH_LABEL_KEYS = {
+  control: "portal_care_path_control",
+  followup: "portal_care_path_followup",
+  preventive: "portal_care_path_preventive",
+  regular: "portal_care_path_regular",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const PORTAL_TIME_OF_DAY_LABEL_KEYS = {
+  afternoon: "portal_time_of_day_afternoon",
+  evening: "portal_time_of_day_evening",
+  flexible: "portal_time_of_day_flexible",
+  midday: "portal_time_of_day_midday",
+  morning: "portal_time_of_day_morning",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const PORTAL_ORDER_PHASE_LABEL_KEYS = {
+  closure: "portal_order_phase_closure",
+  discovery: "portal_order_phase_discovery",
+  execution: "portal_order_phase_execution",
+  followup: "portal_order_phase_followup",
+  intake: "portal_order_phase_intake",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const PORTAL_CONCIERGE_KIND_LABEL_KEYS = {
+  chauffeur: "portal_concierge_kind_chauffeur",
+  flight: "portal_concierge_kind_flight",
+  hotel: "portal_concierge_kind_hotel",
+  other: "portal_concierge_kind_other",
+  transfer: "portal_concierge_kind_transfer",
+  translation_support: "portal_concierge_kind_translation_support",
+  vip_terminal: "portal_concierge_kind_vip_terminal",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const PORTAL_CONCIERGE_SOURCE_LABEL_KEYS = {
+  appointment_bootstrap: "portal_concierge_source_appointment_bootstrap",
+  patient_portal: "portal_concierge_source_patient_portal",
+  staff_capture: "portal_concierge_source_staff",
+  staff_workspace: "portal_concierge_source_staff",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const PATIENT_INVOICE_SERVICE_TYPE_LABEL_KEYS = {
+  cost_passthrough: "patient_invoice_service_type_cost_passthrough",
+  medical: "patient_invoice_service_type_medical",
+  non_medical: "patient_invoice_service_type_non_medical",
+  other: "patient_invoice_service_type_other",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const PATIENT_INVOICE_LEDGER_DIRECTION_LABEL_KEYS = {
+  expense: "patient_invoice_ledger_direction_expense",
+  income: "patient_invoice_ledger_direction_income",
+  revenue: "patient_invoice_ledger_direction_revenue",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const PATIENT_INVOICE_LEDGER_CATEGORY_LABEL_KEYS = {
+  cost_passthrough_revenue: "patient_invoice_ledger_category_cost_passthrough_revenue",
+  provider_expense: "patient_invoice_ledger_category_provider_expense",
+  service_revenue: "patient_invoice_ledger_category_service_revenue",
+} satisfies Partial<Record<string, TranslationKey>>;
+
 export function portalNotSetLabel() {
-  return portalText("Nicht festgelegt", "Не указано", "Not set");
+  return portalTranslations().common_not_set;
 }
 
 export function portalStatusLabel(value?: string | null) {
-  if (!value) return portalNotSetLabel();
-  if (value === "active") return portalText("Aktiv", "Активно", "Active");
-  if (value === "approved") return portalText("Genehmigt", "Одобрено", "Approved");
-  if (value === "archived") return portalText("Archiviert", "Архивировано", "Archived");
-  if (value === "booked") return portalText("Gebucht", "Забронировано", "Booked");
-  if (value === "cancelled") return portalText("Storniert", "Отменено", "Cancelled");
-  if (value === "completed") return portalText("Abgeschlossen", "Завершено", "Completed");
-  if (value === "confirmed") return portalText("Bestätigt", "Подтверждено", "Confirmed");
-  if (value === "converted") return portalText("Umgewandelt", "Преобразовано", "Converted");
-  if (value === "draft") return portalText("Entwurf", "Черновик", "Draft");
-  if (value === "executed") return portalText("Ausgeführt", "Исполнено", "Executed");
-  if (value === "in_progress") return portalText("In Bearbeitung", "В работе", "In progress");
-  if (value === "in_service") return portalText("In Betreuung", "В исполнении", "In service");
-  if (value === "open") return portalText("Offen", "Открыто", "Open");
-  if (value === "overdue") return portalText("Überfällig", "Просрочено", "Overdue");
-  if (value === "paid") return portalText("Bezahlt", "Оплачено", "Paid");
-  if (value === "partially_paid") return portalText("Teilweise bezahlt", "Частично оплачено", "Partially paid");
-  if (value === "pending") return portalText("Ausstehend", "В ожидании", "Pending");
-  if (value === "planned") return portalText("Geplant", "Запланировано", "Planned");
-  if (value === "ready") return portalText("Bereit", "Готово", "Ready");
-  if (value === "rejected") return portalText("Abgelehnt", "Отклонено", "Rejected");
-  if (value === "released") return portalText("Freigegeben", "Опубликовано", "Released");
-  if (value === "retention_hold") return portalText("Aufbewahrungssperre", "Удержание по хранению", "Retention hold");
-  if (value === "reviewed") return portalText("Geprüft", "Проверено", "Reviewed");
-  if (value === "scheduled") return portalText("Eingeplant", "Назначено", "Scheduled");
-  if (value === "sent") return portalText("Versendet", "Отправлено", "Sent");
-  return portalUnknownValue(value);
+  return portalEnumLabel(value, PORTAL_STATUS_LABEL_KEYS);
 }
 
 export function documentCategoryLabel(value?: string | null) {
-  if (!value) return portalNotSetLabel();
-  if (value === "administrative") return portalText("Administrativ", "Административный", "Administrative");
-  if (value === "clinical") return portalText("Klinisch", "Клинический", "Clinical");
-  if (value === "contract") return portalText("Vertrag", "Договор", "Contract");
-  if (value === "imaging") return portalText("Bildgebung", "Визуализация", "Imaging");
-  if (value === "invoice") return portalText("Rechnung", "Счет", "Invoice");
-  if (value === "lab") return portalText("Labor", "Лаборатория", "Lab");
-  if (value === "medical") return portalText("Medizinisch", "Медицинский", "Medical");
-  return portalUnknownValue(value);
+  return portalEnumLabel(value, PORTAL_DOCUMENT_VALUE_LABEL_KEYS);
 }
 
 export function invoiceTypeLabel(value: string) {
-  if (value === "advance") return portalText("Vorkasse", "Авансовый счет", "Advance");
-  if (value === "interim") return portalText("Zwischenrechnung", "Промежуточный счет", "Interim");
-  if (value === "final") return portalText("Schlussrechnung", "Итоговый счет", "Final");
-  return portalUnknownValue(value);
+  return portalEnumLabel(value, PORTAL_INVOICE_TYPE_LABEL_KEYS);
+}
+
+export function portalDocumentValueLabel(value?: string | null) {
+  return portalEnumLabel(value, PORTAL_DOCUMENT_VALUE_LABEL_KEYS);
+}
+
+export function portalDocumentSourceLabel(
+  source?: string | null,
+  clinic?: string | null,
+) {
+  if (!source) {
+    return clinic || portalTranslations().portal_document_source_portal_release;
+  }
+  return portalEnumLabel(source, PORTAL_DOCUMENT_SOURCE_LABEL_KEYS);
+}
+
+export function portalOrderPhaseLabel(value?: string | null) {
+  return portalEnumLabel(value, PORTAL_ORDER_PHASE_LABEL_KEYS);
+}
+
+export function privacyRequestSourceLabel(value?: string | null) {
+  return portalEnumLabel(value, PORTAL_PRIVACY_SOURCE_LABEL_KEYS);
+}
+
+export function patientInvoiceServiceTypeLabel(value?: string | null) {
+  return portalEnumLabel(value, PATIENT_INVOICE_SERVICE_TYPE_LABEL_KEYS);
+}
+
+export function patientInvoiceLedgerDirectionLabel(value?: string | null) {
+  return portalEnumLabel(value, PATIENT_INVOICE_LEDGER_DIRECTION_LABEL_KEYS);
+}
+
+export function patientInvoiceLedgerCategoryLabel(value?: string | null) {
+  return portalEnumLabel(value, PATIENT_INVOICE_LEDGER_CATEGORY_LABEL_KEYS);
 }
 
 export function formatPortalDateTime(value?: string | null) {
@@ -539,10 +726,7 @@ export function formatPortalCurrency(value: unknown) {
 }
 
 export function privacyRequestLabel(value: string) {
-  if (value === "erasure") return portalText("Daten löschen", "Удалить данные", "Erase data");
-  if (value === "restriction") return portalText("Verarbeitung einschränken", "Ограничить обработку", "Restrict processing");
-  if (value === "third_party_revoke") return portalText("Weitergabe an Dritte widerrufen", "Отозвать передачу третьим лицам", "Revoke third-party sharing");
-  return portalUnknownValue(value);
+  return portalEnumLabel(value, PORTAL_PRIVACY_REQUEST_LABEL_KEYS);
 }
 
 export function privacyStatusTone(status: string) {
@@ -564,9 +748,7 @@ export function feedbackStatusTone(status: string) {
 }
 
 export function feedbackSourceLabel(source: string) {
-  if (source === "patient_portal") return portalText("Patientenportal", "Портал пациента", "Patient portal");
-  if (source === "staff_capture") return portalText("Durch Mitarbeitende erfasst", "Зафиксировано сотрудником", "Staff capture");
-  return portalUnknownValue(source);
+  return portalEnumLabel(source, PORTAL_FEEDBACK_SOURCE_LABEL_KEYS);
 }
 
 export function formatPortalAverage(value?: number | null) {
@@ -575,9 +757,10 @@ export function formatPortalAverage(value?: number | null) {
 }
 
 export function npsBandLabel(value: number) {
-  if (value >= 9) return portalText("Promotor", "Промоутер", "Promoter");
-  if (value >= 7) return portalText("Passiv", "Нейтральный", "Passive");
-  return portalText("Kritiker", "Критик", "Detractor");
+  const translations = portalTranslations();
+  if (value >= 9) return translations.portal_nps_band_promoter;
+  if (value >= 7) return translations.portal_nps_band_passive;
+  return translations.portal_nps_band_detractor;
 }
 
 export function documentTone(item: PortalDocumentItem) {
@@ -618,33 +801,15 @@ export function recommendationStatusTone(status: string) {
 }
 
 export function recommendationTypeLabel(value?: string | null) {
-  if (!value) return portalNotSetLabel();
-  if (value === "follow_up") return portalText("Nachsorge", "Последующее наблюдение", "Follow-up");
-  if (value === "consultation") return portalText("Konsultation", "Консультация", "Consultation");
-  if (value === "lab_test") return portalText("Laboranalyse", "Лабораторный анализ", "Lab test");
-  if (value === "imaging") return portalText("Bildgebung", "Визуализация", "Imaging");
-  if (value === "document") return portalText("Dokument", "Документ", "Document");
-  if (value === "medication_review") return portalText("Medikationsprüfung", "Проверка назначений", "Medication review");
-  if (value === "other") return portalText("Sonstiges", "Другое", "Other");
-  return portalUnknownValue(value);
+  return portalEnumLabel(value, PORTAL_RECOMMENDATION_TYPE_LABEL_KEYS);
 }
 
 export function recommendationPriorityLabel(value?: string | null) {
-  if (!value) return portalNotSetLabel();
-  if (value === "low") return portalText("Niedrig", "Низкий", "Low");
-  if (value === "normal") return portalText("Normal", "Обычный", "Normal");
-  if (value === "high") return portalText("Hoch", "Высокий", "High");
-  if (value === "urgent") return portalText("Dringend", "Срочный", "Urgent");
-  return portalUnknownValue(value);
+  return portalEnumLabel(value, PORTAL_RECOMMENDATION_PRIORITY_LABEL_KEYS);
 }
 
 export function recommendationDecisionLabel(value?: string | null) {
-  if (!value) return portalNotSetLabel();
-  if (value === "schedule") return portalText("Termin planen", "Запланировать визит", "Schedule");
-  if (value === "already_done") return portalText("Schon erledigt", "Уже выполнено", "Already done");
-  if (value === "need_consultation") return portalText("Beratung nötig", "Нужна консультация", "Needs consultation");
-  if (value === "declined") return portalText("Abgelehnt", "Отклонено", "Declined");
-  return portalUnknownValue(value);
+  return portalEnumLabel(value, PORTAL_RECOMMENDATION_DECISION_LABEL_KEYS);
 }
 
 export function nextActionTone(kind: string, priority?: string | null) {
@@ -701,37 +866,20 @@ export function followupStatusTone(status: string) {
   return "border-slate-200 bg-slate-100 text-slate-700";
 }
 
-export function appointmentTypeLabel(value: string) {
-  if (value === "medical") return portalText("Medizinisch", "Медицинский", "Medical");
-  if (value === "non_medical") return portalText("Nicht medizinisch", "Немедицинский", "Non-medical");
-  if (value === "internal") return portalText("Intern", "Внутренний", "Internal");
-  return portalUnknownValue(value);
+export function appointmentTypeLabel(value?: string | null) {
+  return portalEnumLabel(value, PORTAL_APPOINTMENT_TYPE_LABEL_KEYS);
 }
 
 export function appointmentCarePathKindLabel(value?: string | null) {
-  if (value === "preventive") return portalText("Präventiv", "Профилактический", "Preventive");
-  if (value === "control") return portalText("Kontrolle", "Контрольный", "Control");
-  if (value === "followup") return portalText("Nachsorge", "Последующее наблюдение", "Follow-up");
-  return portalText("Regulär", "Обычный", "Regular");
+  return portalEnumLabel(value, PORTAL_CARE_PATH_LABEL_KEYS);
 }
 
 export function appointmentTimeOfDayLabel(value?: string | null) {
-  if (!value) return portalText("Flexibel", "Гибко", "Flexible");
-  if (value === "morning") return portalText("Morgens", "Утром", "Morning");
-  if (value === "midday") return portalText("Mittags", "Днем", "Midday");
-  if (value === "afternoon") return portalText("Nachmittags", "После обеда", "Afternoon");
-  if (value === "evening") return portalText("Abends", "Вечером", "Evening");
-  return portalText("Flexibel", "Гибко", "Flexible");
+  return portalEnumLabel(value || "flexible", PORTAL_TIME_OF_DAY_LABEL_KEYS);
 }
 
-export function conciergeServiceKindLabel(value: string) {
-  if (value === "hotel") return portalText("Hotel", "Отель", "Hotel");
-  if (value === "transfer") return portalText("Transfer", "Трансфер", "Transfer");
-  if (value === "vip_terminal") return portalText("VIP-Terminal", "VIP-терминал", "VIP terminal");
-  if (value === "flight") return portalText("Flug", "Перелет", "Flight");
-  if (value === "chauffeur") return portalText("Chauffeur", "Шофер", "Chauffeur");
-  if (value === "translation_support") return portalText("Sprachunterstützung", "Языковая поддержка", "Translation support");
-  return portalText("Zusatzservice", "Дополнительная услуга", "Additional service");
+export function conciergeServiceKindLabel(value?: string | null) {
+  return portalEnumLabel(value, PORTAL_CONCIERGE_KIND_LABEL_KEYS);
 }
 
 export function conciergeServiceStatusTone(status: string) {
@@ -743,10 +891,8 @@ export function conciergeServiceStatusTone(status: string) {
   return "border-amber-200 bg-amber-50 text-amber-700";
 }
 
-export function conciergeServiceSourceLabel(value: string) {
-  if (value === "patient_portal") return portalText("Anfrage aus dem Portal", "Запрос из портала", "Portal request");
-  if (value === "appointment_bootstrap") return portalText("Care-Team-Workflow", "Поток команды сопровождения", "Care-team flow");
-  return portalText("Eintrag durch Care-Team", "Запись команды сопровождения", "Care-team entry");
+export function conciergeServiceSourceLabel(value?: string | null) {
+  return portalEnumLabel(value, PORTAL_CONCIERGE_SOURCE_LABEL_KEYS);
 }
 
 async function fetchPortalBlob(path: string) {

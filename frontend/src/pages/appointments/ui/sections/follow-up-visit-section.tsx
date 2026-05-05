@@ -30,9 +30,11 @@ import { formatAppointmentSlotLabel as slotLabel } from "@/pages/appointments/mo
 import { buildConflictQuery } from "@/pages/appointments/model/query-builders";
 import { buildFollowUpVisitForm } from "@/pages/appointments/model/form-factories";
 import {
-  appointmentText,
+  appointmentText as appointmentTextBase,
   carePathKindLabel,
   doctorLabel,
+  followUpPresetLabel,
+  followUpPresetTitle,
   normalizeCarePathKindForAppointmentType,
   roleLabel,
 } from "@/pages/appointments/model/labels";
@@ -96,6 +98,10 @@ function AppointmentFollowUpVisitSection({
 }: AppointmentFollowUpVisitSectionProps) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
+  const appointmentText = (de: string, ru: string, en: string) =>
+    en === "Create follow-up visit"
+      ? t.appointments_follow_up_visit_create
+      : appointmentTextBase(de, ru, en);
   const interpreterFieldLabel =
     tr.role_interpreter ??
     appointmentText("Dolmetscher", "Переводчик", "Interpreter");
@@ -229,7 +235,7 @@ function AppointmentFollowUpVisitSection({
         : current.timeEnd,
       title:
         current.title.trim() === "" || current.title.startsWith(t.phase_followup)
-          ? preset.title
+          ? followUpPresetTitle(preset.id)
           : current.title,
       reminderAt: nextReminderAt || current.reminderAt,
     }));
@@ -280,7 +286,7 @@ function AppointmentFollowUpVisitSection({
       }
 
       const notice = result.conflicts
-        ? `${buildScheduleNotice(result.conflicts, localWarnings)} Follow-up visit created.`
+        ? `${buildScheduleNotice(result.conflicts, localWarnings)} ${t.appointments_follow_up_visit_created}`
         : tr.common_active;
       setForm(buildFollowUpVisitForm(detail, form.reminderUserId, tr.phase_followup));
       onCreated({ id: result.id, notice });
@@ -299,8 +305,8 @@ function AppointmentFollowUpVisitSection({
     <section className={sectionCardClass}>
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <AppointmentSectionHeading
-          title="Follow-up visit planning"
-          description="Schedule the next control visit or examination directly from the current appointment context."
+          title={t.appointments_follow_up_visit_title}
+          description={t.appointments_follow_up_visit_description}
         />
         <div className="flex flex-wrap gap-2">
           {FOLLOW_UP_PRESETS.map((preset) => (
@@ -311,7 +317,7 @@ function AppointmentFollowUpVisitSection({
               size="sm"
               onClick={() => applyPreset(preset)}
             >
-              {preset.label}
+              {followUpPresetLabel(preset.id)}
             </Button>
           ))}
         </div>
@@ -545,7 +551,7 @@ function AppointmentFollowUpVisitSection({
               }
               className={cn(checkboxClass, "mt-0.5")}
             />
-            <span>Create a preparation reminder on the new follow-up visit.</span>
+            <span>{t.appointments_follow_up_visit_create_reminder}</span>
           </label>
           <Field label={tr.patients_assign_owner}>
             <NativeComboboxSelect

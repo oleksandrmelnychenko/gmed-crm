@@ -1,4 +1,4 @@
-﻿import {
+import {
   startTransition,
   useCallback,
   useEffect,
@@ -32,7 +32,12 @@ import {
   SheetContent,
 } from "@/components/ui/sheet";
 import { useSheetDirtyGuard } from "@/hooks/use-sheet-dirty-guard";
-import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
+import {
+  formatEnumLabelFromKeys,
+  formatUnknownValue,
+  useLang,
+  type TranslationKey,
+} from "@/lib/i18n";
 import {
   Banner,
   EmptyCell,
@@ -95,53 +100,35 @@ type AccessMatrixRow = {
 
 const ACCESS_CYCLE = ["full", "masked", "hidden", "conditional"] as const;
 
-const ACCESS_FIELD_LABELS = {
-  de: {
-    name: "Name",
-    birth_date: "Geburtsdatum",
-    phone: "Telefon",
-    email: "E-Mail",
-    nationality: "Nationalitaet",
-    languages: "Sprachen",
-    insurance: "Versicherung",
-    diagnosis: "Diagnosen",
-    medications: "Medikamente",
-    allergies: "Allergien",
-    vitals: "Vitalwerte",
-    internal_notes: "Interne Notizen",
-    travel_data: "Reisedaten",
-    functional_labels: "Funktionslabels",
-  },
-  ru: {
-    name: "Имя",
-    birth_date: "Дата рождения",
-    phone: "Телефон",
-    email: "Email",
-    nationality: "Гражданство",
-    languages: "Языки",
-    insurance: "Страхование",
-    diagnosis: "Диагнозы",
-    medications: "Медикаменты",
-    allergies: "Аллергии",
-    vitals: "Показатели",
-    internal_notes: "Внутренние заметки",
-    travel_data: "Данные поездки",
-    functional_labels: "Функциональные метки",
-  },
-} as const;
+const ACCESS_FIELD_LABEL_KEYS = {
+  name: "field_name",
+  birth_date: "field_birth_date",
+  phone: "field_phone",
+  email: "field_email",
+  nationality: "field_nationality",
+  languages: "field_languages",
+  insurance: "field_insurance",
+  diagnosis: "field_diagnosis",
+  medications: "field_medications",
+  allergies: "field_allergies",
+  vitals: "field_vitals",
+  internal_notes: "field_internal_notes",
+  travel_data: "field_travel_data",
+  functional_labels: "access_field_functional_labels",
+} as const satisfies Partial<Record<string, TranslationKey>>;
 
-const ACCESS_UI_LABELS = {
-  de: {
-    clickToChange: "Klicken zum Aendern",
-    entityPatient: "Patient",
-    fieldWorkspace: "Feld-Workspace",
-  },
-  ru: {
-    clickToChange: "Нажмите для изменения",
-    entityPatient: "Пациент",
-    fieldWorkspace: "Рабочая область поля",
-  },
-} as const;
+const ROLE_LABEL_KEYS = {
+  ceo: "role_ceo",
+  ceo_assistant: "role_ceo_assistant",
+  patient_manager: "role_patient_manager",
+  teamlead_interpreter: "role_teamlead_interpreter",
+  interpreter: "role_interpreter",
+  concierge: "role_concierge",
+  billing: "role_billing",
+  sales: "role_sales",
+  it_admin: "role_it_admin",
+  patient: "role_patient",
+} as const satisfies Partial<Record<string, TranslationKey>>;
 
 const LEVEL_CONFIG: Record<
   string,
@@ -198,17 +185,9 @@ function accessTone(level: string, locked: boolean) {
   }
 }
 
-type UnknownTranslations = Pick<Translations, "common_unknown" | "common_unknown_value">;
-
-function roleLabel(role: string, dictionary: Record<string, string>, translations: UnknownTranslations) {
-  return dictionary[`role_${role}`] ?? formatUnknownValue(role, translations);
-}
-
 export function AdminAccessPage() {
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const ui = ACCESS_UI_LABELS[lang];
-  const fieldLabels = ACCESS_FIELD_LABELS[lang];
   const closeUnsavedConfirmMessage =
     t.common_discard_unsaved_confirm;
 
@@ -242,9 +221,20 @@ export function AdminAccessPage() {
     void loadPolicies();
   });
 
+  const fieldLabel = useCallback(
+    (value: string | null | undefined) =>
+      formatEnumLabelFromKeys(value, ACCESS_FIELD_LABEL_KEYS, t),
+    [t],
+  );
+  const roleLabel = useCallback(
+    (value: string | null | undefined) =>
+      formatEnumLabelFromKeys(value, ROLE_LABEL_KEYS, t),
+    [t],
+  );
+
   const accessRows = useMemo<AccessMatrixRow[]>(
-    () => FIELD_KEYS.map((field) => ({ field, label: fieldLabels[field] })),
-    [fieldLabels],
+    () => FIELD_KEYS.map((field) => ({ field, label: fieldLabel(field) })),
+    [fieldLabel],
   );
 
   const metrics = useMemo(() => {
@@ -373,14 +363,14 @@ export function AdminAccessPage() {
         >
           <div className="truncate font-medium text-foreground">{row.label}</div>
           <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
-            {ui.fieldWorkspace}
+            {t.admin_system_field_workspace}
           </div>
         </button>
       ),
     },
     ...ROLE_KEYS.map<ColumnDef<AccessMatrixRow>>((role) => ({
       id: `role:${role}`,
-      label: roleLabel(role, tr, t),
+      label: roleLabel(role),
       accessor: (row) => {
         const policy = policies.find(
           (item) => item.role === role && item.field_name === row.field,
@@ -410,7 +400,7 @@ export function AdminAccessPage() {
               title={
                 locked
                   ? t.access_system_locked
-                  : `${levelLabel(level, false)} - ${ui.clickToChange}`
+                  : `${levelLabel(level, false)} - ${t.admin_system_click_to_change}`
               }
               disabled={locked || busy}
               onClick={(event) => {
@@ -438,11 +428,9 @@ export function AdminAccessPage() {
   ], [
     levelLabel,
     policies,
+    roleLabel,
     saveBusyToken,
     t,
-    tr,
-    ui.clickToChange,
-    ui.fieldWorkspace,
     updatePolicy,
   ]);
 
@@ -461,22 +449,18 @@ export function AdminAccessPage() {
           actions={(
             <>
               <AdminGuideButton
-                title={lang === "de" ? "Zugriffsstufen — Anleitung" : "Уровни доступа — гайд"}
-                description={
-                  lang === "de"
-                    ? "So funktionieren die Felder, Buttons und Symbole auf dieser Seite."
-                    : "Как работают поля, кнопки и иконки на этой странице."
-                }
+                title={t.admin_system_access_levels_guide_title}
+                description={t.admin_system_access_levels_guide_description}
               >
-                <GuideSection title={lang === "de" ? "Zugriffsstufen" : "Уровни доступа"}>
+                <GuideSection title={t.access_title}>
                   <ul className="space-y-2">
                     {(
                       [
-                        ["full", t.access_full, lang === "de" ? "Volle Sichtbarkeit und Bearbeitung." : "Полная видимость и редактирование."],
-                        ["masked", t.access_masked, lang === "de" ? "Wert nur teilweise sichtbar (z. B. ****)." : "Значение видно частично (например, ****)."],
-                        ["hidden", t.access_hidden, lang === "de" ? "Feld komplett ausgeblendet." : "Поле полностью скрыто."],
-                        ["conditional", t.access_conditional, lang === "de" ? "Sichtbar nur unter bestimmten Bedingungen (z. B. nach Freigabe)." : "Видно только при выполнении условий (например, после одобрения)."],
-                        ["locked", t.access_system_locked, lang === "de" ? "Vom System gesperrt — kann nicht geändert werden." : "Заблокировано системой — менять нельзя."],
+                        ["full", t.access_full, t.admin_system_access_level_full_description],
+                        ["masked", t.access_masked, t.admin_system_access_level_masked_description],
+                        ["hidden", t.access_hidden, t.admin_system_access_level_hidden_description],
+                        ["conditional", t.access_conditional, t.admin_system_access_level_conditional_description],
+                        ["locked", t.access_system_locked, t.admin_system_access_level_locked_description],
                       ] as const
                     ).map(([key, label, description]) => {
                       const Icon = LEVEL_CONFIG[key].icon;
@@ -500,24 +484,18 @@ export function AdminAccessPage() {
                   </ul>
                 </GuideSection>
 
-                <GuideSection title={lang === "de" ? "Wie ändern" : "Как менять"}>
-                  <p>
-                    {lang === "de"
-                      ? "Eine Zeile in der Tabelle anklicken → rechts öffnet sich der Workspace. Im Block „Permissions“ auf den Stufen-Button neben einer Rolle klicken — die Stufe wechselt im Zyklus:"
-                      : "Кликни строку в таблице — справа откроется рабочая область. В блоке «Permissions» жми кнопку рядом с ролью — уровень меняется по циклу:"}
-                  </p>
+                <GuideSection title={t.admin_system_access_how_change_title}>
+                  <p>{t.admin_system_access_how_change_body}</p>
                   <p className="mt-1 rounded-md bg-muted/40 px-2.5 py-1.5 font-mono text-[12px] text-foreground">
                     {t.access_full} → {t.access_masked} → {t.access_hidden} → {t.access_conditional} → {t.access_full}
                   </p>
                   <p className="mt-1 text-[12px]">
-                    {lang === "de" ? "Gesperrte Felder (Schloss-Symbol) sind vom System fixiert." : "Заблокированные поля (иконка замка) фиксируются системой."}
+                    {t.admin_system_access_locked_hint}
                   </p>
                 </GuideSection>
 
-                <GuideSection title={lang === "de" ? "Reset" : "Сброс"}>
-                  {lang === "de"
-                    ? "Die orange Schaltfläche oben rechts (Reset) setzt alle Stufen auf den Standardzustand zurück."
-                    : "Оранжевая кнопка вверху (Reset) возвращает все уровни к дефолтным."}
+                <GuideSection title={t.admin_system_access_reset_title}>
+                  {t.admin_system_access_reset_body}
                 </GuideSection>
               </AdminGuideButton>
               <Button
@@ -545,7 +523,7 @@ export function AdminAccessPage() {
         />
 
         <div className="flex flex-wrap items-center gap-1.5">
-          <StatusBadge tone="info">{`${t.access_entity}: ${ui.entityPatient}`}</StatusBadge>
+          <StatusBadge tone="info">{`${t.access_entity}: ${t.admin_system_patient_entity}`}</StatusBadge>
         </div>
 
         <div className="flex flex-wrap gap-x-8 gap-y-4">
@@ -561,7 +539,7 @@ export function AdminAccessPage() {
             tone="emerald"
             label={t.users_role}
             value={metrics.roles}
-            description={ui.entityPatient}
+            description={t.admin_system_patient_entity}
           />
           <AdminInlineMetric
             icon={Zap}
@@ -629,7 +607,7 @@ export function AdminAccessPage() {
       <Sheet open={Boolean(selectedField)} onOpenChange={handleDetailOpenChange}>
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
           <AdminSheetScaffold
-            title={selectedField ? fieldLabels[selectedField] : t.access_title}
+            title={selectedField ? fieldLabel(selectedField) : t.access_title}
             footer={(
               <SheetActionsFooter>
                 <Button
@@ -648,10 +626,10 @@ export function AdminAccessPage() {
                 <section className={cn("space-y-3 rounded-xl p-3.5", tokens.surface.softCard)}>
                   <div className="space-y-1">
                     <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
-                      Permissions
+                      {t.admin_system_permissions}
                     </h3>
                     <p className="text-[11px] text-muted-foreground">
-                      {ui.clickToChange} — {t.access_full} → {t.access_masked} → {t.access_hidden} → {t.access_conditional}.
+                      {t.admin_system_access_cycle_hint}
                     </p>
                   </div>
 
@@ -695,7 +673,7 @@ export function AdminAccessPage() {
                       >
                         <div className="flex items-center justify-between gap-3">
                           <p className="text-[13px] font-semibold text-foreground">
-                            {roleLabel(role, tr, t)}
+                            {roleLabel(role)}
                           </p>
                           <Button
                             type="button"
@@ -706,7 +684,7 @@ export function AdminAccessPage() {
                             title={
                               locked
                                 ? t.access_system_locked
-                                : `${ui.clickToChange} → ${levelLabel(nextLevel ?? level, false)}`
+                                : `${t.admin_system_click_to_change} → ${levelLabel(nextLevel ?? level, false)}`
                             }
                             onClick={() => void updatePolicy(role, selectedField)}
                           >

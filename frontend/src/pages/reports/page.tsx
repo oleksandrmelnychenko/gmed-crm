@@ -27,7 +27,7 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { clearApiCache } from "@/lib/api";
 import { Banner as ShellBanner, PageHeader, StatusBadge, tokens } from "@/components/ui-shell";
 import { useAuth } from "@/lib/auth";
-import { formatUnknownValue, useLang } from "@/lib/i18n";
+import { formatEnumLabelFromKeys, formatUnknownValue, type TranslationKey, useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { fetchReportsExport, fetchReportsWorkspace } from "./data/reports-api";
@@ -399,6 +399,11 @@ type ReportDetailState =
   | { kind: "doctor"; row: DoctorReportRow }
   | { kind: "provider_cost"; row: ProviderCostRow }
   | null;
+
+const REPORT_PROVIDER_TYPE_LABEL_KEYS = {
+  medical: "providers_type_medical",
+  non_medical: "providers_type_non_medical",
+} satisfies Partial<Record<string, TranslationKey>>;
 
 function metricCard(label: string, value: string | number, icon: LucideIcon) {
   const Icon = icon;
@@ -890,6 +895,11 @@ export function ReportsPage() {
       formatUnknownValue(status, t),
     [t, text],
   );
+  const providerTypeLabel = useCallback(
+    (providerType: string) =>
+      formatEnumLabelFromKeys(providerType, REPORT_PROVIDER_TYPE_LABEL_KEYS, t),
+    [t],
+  );
   const [data, setData] = useState<ReportsWorkspacePayload | null>(null);
   const [forecasting, setForecasting] = useState<ForecastingPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -994,7 +1004,7 @@ export function ReportsPage() {
         label: text.common.services,
         accessor: (row) => row.provider_type,
         width: 160,
-        render: (row) => <span className="text-xs text-foreground">{row.provider_type}</span>,
+        render: (row) => <span className="text-xs text-foreground">{providerTypeLabel(row.provider_type)}</span>,
       },
       {
         id: "patients",
@@ -1053,7 +1063,7 @@ export function ReportsPage() {
         ),
       },
     ],
-    [locale, text],
+    [locale, providerTypeLabel, text],
   );
   const serviceTypeColumns = useMemo<ColumnDef<ServiceTypeReportRow>[]>(
     () => [
@@ -2274,7 +2284,7 @@ export function ReportsPage() {
                         <div className="grid gap-3 p-3 sm:grid-cols-2">
                           <div className={card("p-3")}>
                             <p className="text-xs text-muted-foreground">{text.common.services}</p>
-                            <p className="mt-1 text-sm font-medium text-foreground">{detail.row.provider_type}</p>
+                            <p className="mt-1 text-sm font-medium text-foreground">{providerTypeLabel(detail.row.provider_type)}</p>
                           </div>
                           <div className={card("p-3")}>
                             <p className="text-xs text-muted-foreground">{text.countries.title}</p>

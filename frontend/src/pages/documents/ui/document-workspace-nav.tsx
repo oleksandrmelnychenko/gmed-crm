@@ -14,34 +14,24 @@ type WorkspaceItem = {
 
 export function DocumentWorkspaceNav() {
   const { pathname } = useLocation();
-  const { lang } = useLang();
-  const l = (de: string, ru: string, fallbackUk: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : fallbackUk;
+  const { t } = useLang();
 
   const items: WorkspaceItem[] = [
     {
       key: "intake",
-      label: l(
-        "Intake-Dokumentenwarteschlange",
-        "Очередь intake документов",
-        "Черга intake документів",
-      ),
+      label: t.documents_intake_queue,
       to: "/documents/intake",
       icon: Inbox,
     },
     {
       key: "documents",
-      label: l("Dokumente", "Документы", "Документи"),
+      label: t.nav_documents,
       to: "/documents",
       icon: FileText,
     },
     {
       key: "translation-requests",
-      label: l(
-        "Übersetzungsanfragen",
-        "Запросы на перевод",
-        "Запити на переклад",
-      ),
+      label: t.documents_translation_requests,
       to: "/documents/translation-requests",
       icon: Languages,
     },

@@ -32,7 +32,7 @@ import {
 } from "@/pages/appointments/model/runtime-formatters";
 import { blankBillingHandoffForm } from "@/pages/appointments/model/form-factories";
 import {
-  appointmentText,
+  appointmentText as appointmentTextBase,
   billingHandoffKindLabel,
   reportApprovalLabel,
   roleLabel,
@@ -113,6 +113,18 @@ function AppointmentBillingHandoffSection({
 }: AppointmentBillingHandoffSectionProps) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
+  const appointmentText = (de: string, ru: string, en: string) => {
+    switch (en) {
+      case "Select billing assignee":
+        return t.appointments_billing_select_assignee;
+      case "Open billing chat draft":
+        return t.appointments_billing_open_chat;
+      case "Create billing handoff":
+        return t.appointments_billing_create_handoff;
+      default:
+        return appointmentTextBase(de, ru, en);
+    }
+  };
   const { staffGo } = useStaffNavigate();
 
   const buildDefaultForm = useCallback(
@@ -555,7 +567,7 @@ function AppointmentBillingHandoffSection({
                 }
                 className={checkboxClass}
               />
-              Mirror this billing handoff as a task
+              {t.appointments_billing_mirror_task}
             </label>
             <div className="flex flex-wrap justify-end gap-3">
               <Button

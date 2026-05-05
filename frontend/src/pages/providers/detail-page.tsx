@@ -30,6 +30,7 @@ import {
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { formatUnknownValue, useLang } from "@/lib/i18n";
+import { localizeDocumentCode } from "@/lib/required-document-labels";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
@@ -515,11 +516,11 @@ export function ProviderDetailPage() {
                         </Badge>
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
-                        <span>{template.art}</span>
+                        <span>{localizeDocumentCode(template.art, l)}</span>
                         {template.auto_send_on_confirmed_appointment ? (
                           <span>{l("Automatisch bei Bestätigung senden", "Автоотправка при подтверждении", "Auto-send on confirmation")}</span>
                         ) : null}
-                        <span>· {template.category}</span>
+                        <span>· {localizeDocumentCode(template.category, l)}</span>
                         {template.doctor_name ? (
                           <span>· {template.doctor_name}</span>
                         ) : null}
@@ -648,9 +649,9 @@ export function ProviderDetailPage() {
                     }
                     className={inputClassName}
                   >
-                    <option value="draft">{l("Entwurf", "Черновик", "Draft")}</option>
-                    <option value="active">{l("Aktiv", "Активно", "Active")}</option>
-                    <option value="archived">{l("Archiviert", "В архиве", "Archived")}</option>
+                    <option value="draft">{t.documents_status_draft}</option>
+                    <option value="active">{t.documents_status_active}</option>
+                    <option value="archived">{t.documents_status_archived}</option>
                   </NativeComboboxSelect>
                 </div>
                 <div className="space-y-2">
@@ -693,10 +694,10 @@ export function ProviderDetailPage() {
                     }
                     className={inputClassName}
                   >
-                    <option value="patient_visible">{l("Für Patienten sichtbar", "Видно пациенту", "Patient visible")}</option>
-                    <option value="internal">{l("Intern", "Внутреннее", "Internal")}</option>
-                    <option value="released_internal">{l("Intern freigegeben", "Внутренне опубликовано", "Released internal")}</option>
-                    <option value="released_external">{l("Extern freigegeben", "Внешне опубликовано", "Released external")}</option>
+                    <option value="patient_visible">{t.documents_visibility_patient_visible}</option>
+                    <option value="internal">{t.documents_visibility_internal}</option>
+                    <option value="released_internal">{t.documents_visibility_released_internal}</option>
+                    <option value="released_external">{t.documents_visibility_released_external}</option>
                   </NativeComboboxSelect>
                 </div>
                 <div className="flex flex-wrap items-center gap-5 md:col-span-2">

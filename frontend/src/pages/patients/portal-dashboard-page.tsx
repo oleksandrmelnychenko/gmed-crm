@@ -36,6 +36,7 @@ import {
   formatPortalDateTime,
   invoiceStatusTone,
   nextActionTone,
+  portalDocumentValueLabel as sharedPortalDocumentValueLabel,
   portalStatusLabel,
   privacyRequestLabel,
   privacyStatusTone,
@@ -150,6 +151,7 @@ function portalDocumentValueLabel(
   l: (de: string, ru: string, en: string) => string,
   translations: { common_unknown: string; common_unknown_value: string },
 ) {
+  return sharedPortalDocumentValueLabel(value);
   switch (value) {
     case "general":
       return l("Allgemein", "Общий", "General");

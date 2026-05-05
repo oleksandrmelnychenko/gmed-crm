@@ -436,6 +436,7 @@ function formatTranslationStatusLabel(
 ) {
   switch (status) {
     case "requested":
+    case "pending":
       return tr.documents_translation_requested;
     case "in_progress":
       return tr.documents_translation_in_progress;
@@ -2088,7 +2089,7 @@ function StaffDocumentsPage({
               }
               list="documents-art-options"
               className="h-8 rounded-lg bg-background text-[13px]"
-              placeholder={t.documents_category}
+              placeholder={t.operations_document_type}
             />
           </div>
           <div className="grid gap-1.5 md:grid-cols-2 xl:grid-cols-4">
@@ -2206,7 +2207,7 @@ function StaffDocumentsPage({
         </div>
         <datalist id="documents-art-options">
           {arts.map((art) => (
-            <option key={art} value={art} />
+            <option key={art} value={art} label={localizeDocumentCode(art, l)} />
           ))}
         </datalist>
         {selectedDocumentIds.length > 0 ? (
@@ -2459,7 +2460,7 @@ function StaffDocumentsPage({
                   ))}
                 </NativeComboboxSelect>
               </Field>
-              <Field label={t.users_status}>
+              <Field label={text.visibilityHeader}>
                 <NativeComboboxSelect
                   value={generateForm.visibility}
                   onChange={(event) =>
@@ -2724,7 +2725,7 @@ function StaffDocumentsPage({
                   ))}
                 </NativeComboboxSelect>
               </Field>
-              <Field label={t.documents_category}>
+              <Field label={t.operations_document_type}>
                 <Input
                   value={uploadForm.art}
                   onChange={(event) =>
@@ -2778,7 +2779,7 @@ function StaffDocumentsPage({
                 </Field>
               ) : null}
               {canManage ? (
-                <Field label={t.users_status}>
+                <Field label={text.visibilityHeader}>
                   <NativeComboboxSelect
                     value={uploadForm.visibility}
                     onChange={(event) =>
@@ -3179,7 +3180,7 @@ function StaffDocumentsPage({
                       className={shellInputClassName}
                     />
                   </Field>
-                  <Field label={t.documents_category} required>
+                  <Field label={t.operations_document_type} required>
                     <Input
                       value={editForm.art}
                       onChange={(event) =>
@@ -3235,7 +3236,7 @@ function StaffDocumentsPage({
                       ))}
                     </NativeComboboxSelect>
                   </Field>
-                  <Field label={t.users_status}>
+                  <Field label={text.visibilityHeader}>
                     <NativeComboboxSelect
                       value={editForm.visibility}
                       onChange={(event) =>
@@ -3585,11 +3586,11 @@ function StaffDocumentsPage({
                           "\u0422\u0438\u043f \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u0430",
                           "Document type",
                         )}
-                        value={detail.art || t.common_not_set}
+                        value={detail.art ? localizeDocumentCode(detail.art, l) : t.common_not_set}
                       />
                       <DocumentMetaLine
                         label={t.documents_category}
-                        value={detail.category || t.common_not_set}
+                        value={detail.category ? localizeDocumentCode(detail.category, l) : t.common_not_set}
                       />
                       <DocumentMetaLine
                         label={t.common_provider}

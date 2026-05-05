@@ -32,9 +32,7 @@ export function CaseWorkspaceNav() {
   }
 
   const backHref = patientContext ? `/patients/${patientContext}?tab=cases` : "/cases";
-  const backLabel = patientContext
-    ? (lang === "de" ? "Patient" : lang === "ru" ? "Пациент" : "Patient")
-    : t.cases_title;
+  const backLabel = patientContext ? t.patients_col_patient : t.cases_title;
 
   const groupedSections = GROUP_ORDER.map((group) => ({
     group,

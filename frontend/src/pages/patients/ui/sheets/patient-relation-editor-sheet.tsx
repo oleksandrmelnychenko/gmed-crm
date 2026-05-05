@@ -14,12 +14,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/components/ui/toast";
 import { checkboxClass, inputClass, selectClass } from "@/components/ui-shell";
+import { useLang } from "@/lib/i18n";
 
 import { usePatientLookupOptions } from "../../data/use-patient-lookup-options";
 import { upsertPatientRelation } from "../../data/patient-detail-mutations";
 import {
   formatRelatedPatientName,
   formatRelatedPatientOption,
+  patientRelationTypeLabel,
 } from "../../model/detail-model";
 import type { RelationItem } from "../../model/detail-tab-types";
 import {
@@ -67,12 +69,12 @@ function PatientRelationEditorSheet({
   canManageRelations,
   editingRelation,
   dictionary,
-  lang,
   textareaClassName,
   onOpenChange,
   onSaved,
   onError,
 }: PatientRelationEditorSheetProps) {
+  const { t } = useLang();
   const [form, setForm] = useState<RelationFormState>(blankRelationForm);
   const [busy, setBusy] = useState(false);
   const [patientSearch, setPatientSearch] = useState("");
@@ -80,9 +82,6 @@ function PatientRelationEditorSheet({
   const { patientOptions, patientOptionsLoading } = usePatientLookupOptions({
     enabled: open && canManageRelations,
   });
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
-
   useEffect(() => {
     if (!open) {
       setForm(blankRelationForm());
@@ -174,8 +173,8 @@ function PatientRelationEditorSheet({
       onSubmit={handleSubmit}
       title={
         editingRelation
-          ? l("Beziehung bearbeiten", "Redaktirovat svyaz", "Edit relation")
-          : l("Beziehung hinzufugen", "Dobavit svyaz", "Add relation")
+          ? t.patient_relation_title_edit
+          : t.patient_relation_title_add
       }
       bodyClassName="px-4 py-4 space-y-4"
       footer={
@@ -206,18 +205,14 @@ function PatientRelationEditorSheet({
           className="text-[11.5px] font-medium text-muted-foreground leading-tight"
           htmlFor="relation-patient-search"
         >
-          {l(
-            "Bestehenden Patienten suchen",
-            "Poisk suschestvuyuschego pacienta",
-            "Search existing patient",
-          )}
+          {t.patient_relation_search_existing}
         </Label>
         <Input
           id="relation-patient-search"
           value={patientSearch}
           onChange={(event) => setPatientSearch(event.target.value)}
           className={inputClass}
-          placeholder={l("PID oder Patientenname", "PID ili imya pacienta", "PID or patient name")}
+          placeholder={t.patient_relation_search_placeholder}
         />
       </div>
 
@@ -226,11 +221,7 @@ function PatientRelationEditorSheet({
           className="text-[11.5px] font-medium text-muted-foreground leading-tight"
           htmlFor="relation-linked-patient"
         >
-          {l(
-            "Patient im System verknupfen",
-            "Svyazat pacienta v sisteme",
-            "Link patient in system",
-          )}
+          {t.patient_relation_link_patient}
         </Label>
         <NativeComboboxSelect
           id="relation-linked-patient"
@@ -254,7 +245,7 @@ function PatientRelationEditorSheet({
           disabled={patientOptionsLoading}
         >
           <option value="">
-            {l("Eigenstandiger Kontakt", "Samostoyatelnyy kontakt", "Standalone contact")}
+            {t.patient_relation_standalone_contact}
           </option>
           {filteredPatientOptions.map((option) => (
             <option key={option.id} value={option.id}>
@@ -264,22 +255,10 @@ function PatientRelationEditorSheet({
         </NativeComboboxSelect>
         <p className="text-[11.5px] leading-tight text-muted-foreground">
           {patientOptionsLoading
-            ? l(
-                "Patientenverzeichnis wird geladen...",
-                "Zagruzka spravochnika pacientov...",
-                "Loading patient directory...",
-              )
+            ? t.patient_relation_loading_directory
             : selectedRelatedPatient
-              ? l(
-                  "Verknupfte Beziehungen bleiben mit einem bestehenden Patientendatensatz synchronisiert.",
-                  "Svyazannye otnosheniya sinhroniziruyutsya s suschestvuyuschim pacientom.",
-                  "Linked relations stay synced to an existing patient record.",
-                )
-              : l(
-                  "Leer lassen fur Kontakte, die keine Patienten im System sind.",
-                  "Ostavte pustym dlya kontaktov, kotorye ne yavlyayutsya pacientami v sisteme.",
-                  "Keep this empty for contacts who are not patients in the system.",
-                )}
+              ? t.patient_relation_linked_sync_hint
+              : t.patient_relation_unlinked_hint}
         </p>
       </div>
 
@@ -289,7 +268,7 @@ function PatientRelationEditorSheet({
             className="text-[11.5px] font-medium text-muted-foreground leading-tight"
             htmlFor="relation-name"
           >
-            {l("Name", "Imya", "Name")}
+            {t.patient_relation_name}
           </Label>
           <Input
             id="relation-name"
@@ -298,11 +277,7 @@ function PatientRelationEditorSheet({
               setForm((current) => ({ ...current, relatedName: event.target.value }))
             }
             className={inputClass}
-            placeholder={l(
-              "Name eines Angehorigen oder Betreuers",
-              "Imya rodstvennika ili opekuna",
-              "Relative or caregiver name",
-            )}
+            placeholder={t.patient_relation_name_placeholder}
             disabled={Boolean(form.relatedPatientId)}
           />
         </div>
@@ -311,7 +286,7 @@ function PatientRelationEditorSheet({
             className="text-[11.5px] font-medium text-muted-foreground leading-tight"
             htmlFor="relation-type"
           >
-            {l("Beziehungstyp", "Tip svyazi", "Relation type")}
+            {t.patient_relation_type_label}
           </Label>
           <NativeComboboxSelect
             id="relation-type"
@@ -323,7 +298,7 @@ function PatientRelationEditorSheet({
           >
             {RELATION_TYPE_OPTIONS.map((option) => (
               <option key={option} value={option}>
-                {option}
+                {patientRelationTypeLabel(option)}
               </option>
             ))}
           </NativeComboboxSelect>
@@ -333,7 +308,7 @@ function PatientRelationEditorSheet({
             className="text-[11.5px] font-medium text-muted-foreground leading-tight"
             htmlFor="relation-phone"
           >
-            {l("Telefon", "Telefon", "Phone")}
+            {t.patient_relation_phone}
           </Label>
           <Input
             id="relation-phone"
@@ -357,7 +332,7 @@ function PatientRelationEditorSheet({
               }))
             }
           />
-          {l("Notfallkontakt", "Ekstrennyy kontakt", "Emergency contact")}
+          {t.patient_relation_emergency_contact}
         </label>
       </div>
 
@@ -366,7 +341,7 @@ function PatientRelationEditorSheet({
           className="text-[11.5px] font-medium text-muted-foreground leading-tight"
           htmlFor="relation-notes"
         >
-          {l("Notizen", "Zametki", "Notes")}
+          {t.patient_relation_notes}
         </Label>
         <textarea
           id="relation-notes"
@@ -375,11 +350,7 @@ function PatientRelationEditorSheet({
           onChange={(event) =>
             setForm((current) => ({ ...current, notes: event.target.value }))
           }
-          placeholder={l(
-            "Erreichbarkeit, Kontakthinweise oder besondere Anweisungen",
-            "Dostupnost, zametki po kontaktu ili osobye instrukcii",
-            "Availability, contact notes or special instructions",
-          )}
+          placeholder={t.patient_relation_notes_placeholder}
         />
       </div>
     </PatientSheetScaffold>

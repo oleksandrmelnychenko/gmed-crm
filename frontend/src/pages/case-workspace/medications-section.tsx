@@ -17,7 +17,15 @@ import {
   type GermanEquivalent,
   type MedicationDrugMatchResponse,
 } from "@/lib/api/clinical";
-import { useLang } from "@/lib/i18n";
+import {
+  formatEnumLabelFromKeys,
+  useLang,
+  type Translations,
+} from "@/lib/i18n";
+import {
+  CASE_MEDICATION_TYPE_LABEL_KEYS,
+  CASE_MEDICATION_TYPE_VALUES,
+} from "@/lib/i18n/catalogs/cases-clinical";
 
 import { CaseItemList } from "./case-item-list";
 import { MedicationEquivalentsPanel } from "./medication-equivalents-panel";
@@ -65,14 +73,7 @@ const BLANK: MedikamentItem = {
   expiry_date: "",
 };
 
-const MED_TYP_OPTIONS: Array<{
-  value: string;
-  labels: { de: string; ru: string; en: string };
-}> = [
-  { value: "permanent", labels: { de: "Dauermedikation", ru: "Постоянная", en: "Permanent" } },
-  { value: "temporary", labels: { de: "Befristet", ru: "Временная", en: "Temporary" } },
-  { value: "as_needed", labels: { de: "Bei Bedarf", ru: "По необходимости", en: "As needed" } },
-];
+const MED_TYP_OPTIONS = CASE_MEDICATION_TYPE_VALUES;
 
 function verificationStatusLabel(lang: string, status?: string | null) {
   if (status === "verified") return tri(lang, "Verifiziert", "Проверено", "Verified");
@@ -82,11 +83,19 @@ function verificationStatusLabel(lang: string, status?: string | null) {
   return tri(lang, "Unbekannter Status", "Неизвестный статус", "Unknown status");
 }
 
-function medicationTypeLabel(lang: string, value?: string | null) {
-  const option = MED_TYP_OPTIONS.find((item) => item.value === value);
-  return option
-    ? tri(lang, option.labels.de, option.labels.ru, option.labels.en)
-    : tri(lang, "Unbekannter Typ", "Неизвестный тип", "Unknown type");
+function medicationTypeLabel(
+  value: string | null | undefined,
+  translations: Translations,
+) {
+  return formatEnumLabelFromKeys(
+    value,
+    CASE_MEDICATION_TYPE_LABEL_KEYS,
+    translations,
+  );
+}
+
+function isKnownMedicationType(value: string) {
+  return (CASE_MEDICATION_TYPE_VALUES as readonly string[]).includes(value);
 }
 
 function parseDrugImportRows(value: string) {
@@ -421,16 +430,16 @@ export function MedicationsSection() {
                 variant="outline"
                 className="rounded-full border-border/60 bg-muted/25 text-[11px] font-medium text-muted-foreground"
               >
-                {medicationTypeLabel(lang, item.med_typ)}
+                {medicationTypeLabel(item.med_typ, t)}
               </Badge>
             ) : null}
           </div>
           {item.is_expired ? (
             <div className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-amber-700">
               <AlertTriangle className="size-3" />
-              {tri(lang, "Abgelaufen", "Истёк срок", "Expired")}
+              {t.cases_clinical_medication_expired}
               {item.pending_expiry_confirmation
-                ? ` · ${tri(lang, "Bestätigung nötig", "Требуется подтверждение", "Confirmation required")}`
+                ? ` · ${t.cases_clinical_medication_confirmation_required}`
                 : ""}
             </div>
           ) : null}
@@ -505,10 +514,15 @@ export function MedicationsSection() {
                 disabled={disabled}
               >
                 {MED_TYP_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {tri(lang, option.labels.de, option.labels.ru, option.labels.en)}
+                  <option key={option} value={option}>
+                    {medicationTypeLabel(option, t)}
                   </option>
                 ))}
+                {form.med_typ && !isKnownMedicationType(form.med_typ) ? (
+                  <option value={form.med_typ}>
+                    {medicationTypeLabel(form.med_typ, t)}
+                  </option>
+                ) : null}
               </NativeComboboxSelect>
             </Field>
             <Field label={tri(lang, "Gültig bis", "Действительно до", "Valid until")}>

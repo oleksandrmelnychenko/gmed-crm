@@ -211,13 +211,16 @@ function ProvidersPage() {
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
-  const providerColumnGroupLabels = {
-    identity: l("Identität", "Идентичность", "Identity"),
-    registry: l("Register", "Реестр", "Registry"),
-    contact: l("Kontakt", "Контакты", "Contact"),
-    activity: l("Aktivität", "Активность", "Activity"),
-    audit: l("Audit", "Аудит", "Audit"),
-  };
+  const providerColumnGroupLabels = useMemo(
+    () => ({
+      identity: t.operations_column_group_identity,
+      registry: t.operations_column_group_registry,
+      contact: t.operations_column_group_contact,
+      activity: t.operations_column_group_activity,
+      audit: t.operations_column_group_audit,
+    }),
+    [t],
+  );
   const { staffGo } = useStaffNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = useMemo(() => providerPermissions(user?.role), [user?.role]);
