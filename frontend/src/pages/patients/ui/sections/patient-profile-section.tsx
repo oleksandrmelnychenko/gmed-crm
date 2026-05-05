@@ -292,15 +292,11 @@ export function PatientProfileTab({
   return (
     <div className="space-y-6 mt-4 min-h-[400px]">
       <WorkspaceSectionIntro
-        title={l("Identität und Kommunikation", "Идентификация и коммуникация", "Identity and communication")}
-        description={l(
-          "Stammdaten, Kontaktkanäle, Adresse, Versicherung und Notfallkontakt sind hier als klarer Intake-Bereich gebündelt.",
-          "Базовые данные, каналы связи, адрес, страхование и экстренный контакт собраны здесь в понятный intake-блок.",
-          "Core identity, contact channels, address, insurance and emergency contact are grouped here as one clear intake block.",
-        )}
+        title={t.patient_profile_identity_and_communication}
+        description={t.patient_profile_core_identity_contact_channels_address_insurance_and_emergency_c}
       />
       <div className="grid gap-4 xl:grid-cols-2">
-        <FormSection title={l("Persönliche Daten", "Личные данные", "Personal data")}>
+        <FormSection title={t.patient_profile_personal_data}>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             <InfoRow label={t.patients_birth_date} value={formatDate(detail.birth_date, t.common_not_set)} />
             <InfoRow label={t.patients_gender} value={genderLabel(detail.gender, tr)} />
@@ -308,7 +304,7 @@ export function PatientProfileTab({
             <InfoRow label={t.patients_residence_country} value={fieldValue(detail.residence_country, t.common_not_set)} onEdit={editAction} editLabel={editPatientFieldLabel(t.patients_residence_country)} />
             <InfoRow label={t.patients_languages} value={fieldValue(detail.languages, t.common_not_set)} onEdit={editAction} editLabel={editPatientFieldLabel(t.patients_languages)} />
             <InfoRow
-              label={l("Funktionale Labels", "Функциональные метки", "Functional labels")}
+              label={t.patient_profile_functional_labels}
               value={
                 detail.functional_labels?.length
                   ? detail.functional_labels
@@ -317,12 +313,12 @@ export function PatientProfileTab({
                   : t.common_not_set
               }
               onEdit={editAction}
-              editLabel={editPatientFieldLabel(l("Funktionale Labels", "Функциональные метки", "Functional labels"))}
+              editLabel={editPatientFieldLabel(t.patient_profile_functional_labels)}
             />
           </div>
         </FormSection>
 
-        <FormSection title={l("Kontakt", "Контакты", "Contact")}>
+        <FormSection title={t.patient_profile_contact}>
           <div className="grid gap-4 md:grid-cols-2">
             <InfoRow label={t.patients_phone_primary} value={fieldValue(detail.phone_primary, t.common_not_set)} onEdit={editAction} editLabel={editPatientFieldLabel(t.patients_phone_primary)} />
             <InfoRow label={t.patients_phone_secondary} value={fieldValue(detail.phone_secondary, t.common_not_set)} onEdit={editAction} editLabel={editPatientFieldLabel(t.patients_phone_secondary)} />
@@ -330,7 +326,7 @@ export function PatientProfileTab({
           </div>
         </FormSection>
 
-        <FormSection title={l("Versicherung und Kostenträger", "Страхование и плательщик", "Insurance and payer")}>
+        <FormSection title={t.patient_profile_insurance_and_payer}>
           <div className="grid gap-4 md:grid-cols-2">
             <InfoRow label={t.patients_insurance_type} value={insuranceLabel(detail.insurance_type, tr)} onEdit={editAction} editLabel={editPatientFieldLabel(t.patients_insurance_type)} />
             <InfoRow label={t.patients_insurance_provider} value={fieldValue(detail.insurance_provider, t.common_not_set)} onEdit={editAction} editLabel={editPatientFieldLabel(t.patients_insurance_provider)} />
@@ -338,7 +334,7 @@ export function PatientProfileTab({
           </div>
         </FormSection>
 
-        <FormSection title={l("Adresse", "Адрес", "Address")}>
+        <FormSection title={t.patient_profile_address}>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <InfoRow label={t.patients_address_street} value={fieldValue(detail.address_street, t.common_not_set)} onEdit={editAction} editLabel={editPatientFieldLabel(t.patients_address_street)} />
             <InfoRow label={t.patients_address_city} value={fieldValue(detail.address_city, t.common_not_set)} onEdit={editAction} editLabel={editPatientFieldLabel(t.patients_address_city)} />
@@ -348,7 +344,7 @@ export function PatientProfileTab({
         </FormSection>
 
         <FormSection
-          title={l("Notfallkontakt", "Экстренный контакт", "Emergency contact")}
+          title={t.patient_profile_emergency_contact}
           accessory={
             canEditPatientProfile ? (
               <Button
@@ -358,7 +354,7 @@ export function PatientProfileTab({
                 onClick={openProfileEditor}
               >
                 <Pencil className="size-3.5" />
-                {l("Bearbeiten", "Редактировать", "Edit")}
+                {t.patient_profile_edit}
               </Button>
             ) : null
           }
@@ -372,12 +368,8 @@ export function PatientProfileTab({
       </div>
 
       <WorkspaceSectionIntro
-        title={l("Compliance und Rechtsstatus", "Комплаенс и правовой статус", "Compliance and legal status")}
-        description={l(
-          "Vertragsbereitschaft, Pflichtbestätigungen und patientenbezogene Rechtsnotizen mit direkten Verknüpfungen in die zugehörigen Bereiche.",
-          "Готовность по договорам, обязательные подтверждения и правовые заметки пациента с прямыми переходами в связанные разделы.",
-          "Contract readiness, required confirmations and patient legal notes with direct links into the related workspaces.",
-        )}
+        title={t.patient_profile_compliance_and_legal_status}
+        description={t.patient_profile_contract_readiness_required_confirmations_and_patient_legal_note}
       />
       <FormSection
         title={
@@ -390,7 +382,7 @@ export function PatientProfileTab({
           canEditPatientProfile ? (
             <Button type="button" size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => handleLegalStatusSheetOpenChange(true)}>
               <Pencil className="size-3.5" />
-              {l("Status aktualisieren", "Обновить статус", "Update status")}
+              {t.patient_profile_update_status}
             </Button>
           ) : null
         }
@@ -398,13 +390,13 @@ export function PatientProfileTab({
         <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
           <div className="flex flex-col gap-1.5 rounded-xl border border-border/50 bg-muted/25 px-4 py-3 xl:col-span-2">
             <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-              {l("Vertragsstatus", "Статус договора", "Contract status")}
+              {t.patient_profile_contract_status}
             </span>
             <p className="text-base font-semibold text-foreground">
               {patientDetailStatusLabel(legalStatus.contractStatus)}
             </p>
             <p className="text-xs text-muted-foreground">
-              {legalStatusCompletion.completed}/{legalStatusCompletion.total} {l("erledigt", "выполнено", "done")}
+              {legalStatusCompletion.completed}/{legalStatusCompletion.total} {t.patient_profile_done}
             </p>
           </div>
           {legalStatusChecklist.map((item) => (
@@ -430,7 +422,7 @@ export function PatientProfileTab({
         {legalStatus.notes ? (
           <div className="flex flex-col gap-1.5 rounded-xl border border-border/50 bg-muted/25 px-4 py-3">
             <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-              {l("Notizen", "Заметки", "Notes")}
+              {t.patient_profile_notes}
             </span>
             <p className="whitespace-pre-wrap text-sm text-foreground">{legalStatus.notes}</p>
           </div>
@@ -447,7 +439,7 @@ export function PatientProfileTab({
               onClick={() => void handleExportPatientCompliance()}
             >
               {complianceExportBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-              {l("DSGVO-Export", "Экспорт DSGVO", "DSGVO export")}
+              {t.patient_profile_dsgvo_export}
             </Button>
           ) : null}
           {canOpenComplianceWorkspace ? (
@@ -458,7 +450,7 @@ export function PatientProfileTab({
               className="h-8 rounded-lg"
               onClick={() => staffGo(`/admin/compliance?patient=${id}`)}
             >
-              {l("DSGVO-Bereich öffnen", "Открыть раздел DSGVO", "Open DSGVO workspace")}
+              {t.patient_profile_open_dsgvo_workspace}
             </Button>
           ) : null}
           {canViewDocuments ? (
@@ -469,7 +461,7 @@ export function PatientProfileTab({
               className="h-8 rounded-lg"
               onClick={() => handleDocumentsPreviewOpenChange(true)}
             >
-              {l("Dokumente öffnen", "Открыть документы", "Open documents")}
+              {t.patient_profile_open_documents}
             </Button>
           ) : null}
           {canViewContracts ? (
@@ -480,7 +472,7 @@ export function PatientProfileTab({
               className="h-8 rounded-lg"
               onClick={() => handleContractsPreviewOpenChange(true)}
             >
-              {l("Verträge öffnen", "Открыть договоры", "Open contracts")}
+              {t.patient_profile_open_contracts}
             </Button>
           ) : null}
           {canViewInvoices ? (
@@ -491,7 +483,7 @@ export function PatientProfileTab({
               className="h-8 rounded-lg"
               onClick={() => handleInvoicesPreviewOpenChange(true)}
             >
-              {l("Rechnungen öffnen", "Открыть счета", "Open invoices")}
+              {t.patient_profile_open_invoices}
             </Button>
           ) : null}
         </div>
@@ -562,12 +554,8 @@ export function PatientProfileTab({
 
       {hasClinicalSurface ? (
         <WorkspaceSectionIntro
-          title={l("Klinische Oberfläche", "Клинический блок", "Clinical surface")}
-          description={l(
-            "Warnhinweise, Vitalverlauf, Kliniklog, Anordnungen und Risikobewertungen für das operative Behandlungsteam.",
-            "Предупреждения, динамика показателей, клинический журнал, назначения и риск-оценки для операционной команды.",
-            "Warnings, vitals, clinical log, orders and risk assessments for the operational care team.",
-          )}
+          title={t.patient_profile_clinical_surface}
+          description={t.patient_profile_warnings_vitals_clinical_log_orders_and_risk_assessments_for_the}
           accessory={<CountBadge>{clinicalSurfaceItemCount}</CountBadge>}
         />
       ) : null}
@@ -575,7 +563,7 @@ export function PatientProfileTab({
       {canManagePatientVitals || detail.clinical_warnings || vitalsHistory.length > 0 ? (
         <div className="space-y-6">
           <FormSection
-            title={l("CAVE-Hinweise", "Заметки CAVE", "Cave notes")}
+            title={t.patient_profile_cave_notes}
             accessory={
               canEditPatientProfile ? (
                 <Button
@@ -585,7 +573,7 @@ export function PatientProfileTab({
                   onClick={() => handleCaveSheetOpenChange(true)}
                 >
                   <Pencil className="size-3.5" />
-                  {l("Aktualisieren", "Обновить", "Update")}
+                  {t.patient_profile_update}
                 </Button>
               ) : null
             }
@@ -595,14 +583,14 @@ export function PatientProfileTab({
                 <p className="whitespace-pre-wrap text-sm text-rose-900">{detail.clinical_warnings}</p>
               ) : (
                 <p className="text-sm text-rose-700">
-                  {l("Keine aktiven CAVE-Hinweise dokumentiert.", "Активные заметки CAVE не задокументированы.", "No active cave notes documented.")}
+                  {t.patient_profile_no_active_cave_notes_documented}
                 </p>
               )}
             </div>
           </FormSection>
 
           <FormSection
-            title={l("Vitalwerte-Verlauf", "История показателей", "Vitals history")}
+            title={t.patient_profile_vitals_history}
             accessory={
               <div className="flex items-center gap-2">
                 <Badge variant="outline" className="rounded-full border-border/60 bg-muted/25 text-foreground">
@@ -611,7 +599,7 @@ export function PatientProfileTab({
                 {canManagePatientVitals ? (
                   <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => handleVitalsSheetOpenChange(true)}>
                     <Plus className="size-3.5" />
-                    {l("Hinzufügen", "Добавить", "Add")}
+                    {t.patient_profile_add}
                   </Button>
                 ) : null}
               </div>
@@ -619,7 +607,7 @@ export function PatientProfileTab({
           >
             {vitalsHistory.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border/60 bg-muted/25 px-4 py-6 text-sm text-muted-foreground">
-                {l("Für diesen Patienten wurden noch keine Vitalwerte dokumentiert.", "Для этого пациента пока не зафиксированы показатели.", "No vitals have been recorded for this patient yet.")}
+                {t.patient_profile_no_vitals_have_been_recorded_for_this_patient_yet}
               </div>
             ) : null}
 
@@ -633,7 +621,7 @@ export function PatientProfileTab({
                           {formatDateTime(item.measured_at, t.common_not_set)}
                         </p>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          {l("Erfasst von", "Записал", "Recorded by")} {item.recorded_by_name ?? t.common_unknown}
+                          {t.patient_profile_recorded_by} {item.recorded_by_name ?? t.common_unknown}
                         </p>
                       </div>
                       <div className="flex flex-col items-end gap-0.5 text-xs text-muted-foreground">
@@ -664,7 +652,7 @@ export function PatientProfileTab({
 
       {canManagePatientCardEntries || cardEntries.length > 0 ? (
         <FormSection
-          title={l("Klinisches Kartenprotokoll", "Журнал клинической карты", "Clinical card log")}
+          title={t.patient_profile_clinical_card_log}
           accessory={
             <div className="flex items-center gap-2">
               <CountBadge>
@@ -673,14 +661,14 @@ export function PatientProfileTab({
               {canManagePatientCardEntries ? (
                 <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => handleCardEntrySheetOpenChange(true)}>
                   <Plus className="size-3.5" />
-                  {l("Hinzufügen", "Добавить", "Add")}
+                  {t.patient_profile_add}
                 </Button>
               ) : null}
             </div>
           }
         >
           {cardEntries.length === 0 ? (
-            <EmptyCell>{l("Für diesen Patienten wurden noch keine klinischen Karteneinträge erfasst.", "Для этого пациента пока нет записей клинической карты.", "No clinical card log entries have been recorded for this patient yet.")}</EmptyCell>
+            <EmptyCell>{t.patient_profile_no_clinical_card_log_entries_have_been_recorded_for_this_patient}</EmptyCell>
           ) : (
             <div className="space-y-2">
               {cardEntries.slice(0, 6).map((entry) => (
@@ -697,14 +685,14 @@ export function PatientProfileTab({
                   {entry.source ? (
                     <div className="flex flex-col gap-1">
                       <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-                        {l("Quelle", "Источник", "Source")}
+                        {t.patient_profile_source}
                       </span>
                       <p className="text-[13px] text-foreground">{entry.source}</p>
                     </div>
                   ) : null}
                   <div className="flex flex-col gap-1">
                     <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-                      {l("Inhalt", "Содержание", "Content")}
+                      {t.patient_profile_content}
                     </span>
                     <p className="whitespace-pre-wrap text-[13px] text-foreground">{entry.content}</p>
                   </div>
@@ -728,23 +716,23 @@ export function PatientProfileTab({
 
       {canManagePatientMedicalOrders || medicalOrders.length > 0 ? (
         <FormSection
-          title={l("Medizinische Anordnungen", "Медицинские назначения", "Medical orders")}
+          title={t.patient_profile_medical_orders}
           accessory={
             <div className="flex items-center gap-2">
               <CountBadge>
-                {l(`${medicalOrders.length} назначений`, `${medicalOrders.length} назначений`, `${medicalOrders.length} orders`)}
+                {l(`${medicalOrders.length} Anordnungen`, `${medicalOrders.length} назначений`, `${medicalOrders.length} orders`)}
               </CountBadge>
               {canManagePatientMedicalOrders ? (
                 <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => handleMedicalOrderSheetOpenChange(true)}>
                   <Plus className="size-3.5" />
-                  {l("Hinzufügen", "Добавить", "Add")}
+                  {t.patient_profile_add}
                 </Button>
               ) : null}
             </div>
           }
         >
           {medicalOrders.length === 0 ? (
-            <EmptyCell>{l("Für diesen Patienten wurden noch keine medizinischen Anordnungen erfasst.", "Для этого пациента пока нет медицинских назначений.", "No medical orders have been recorded for this patient yet.")}</EmptyCell>
+            <EmptyCell>{t.patient_profile_no_medical_orders_have_been_recorded_for_this_patient_yet}</EmptyCell>
           ) : (
             <div className="space-y-2">
               {medicalOrders.map((order) => (
@@ -752,7 +740,7 @@ export function PatientProfileTab({
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <p className="text-[13px] text-foreground">
                       <span className="font-medium">{formatDateTime(order.order_date, t.common_not_set)}</span>
-                      <span className="text-muted-foreground"> · {l("Angeordnet von", "Назначил", "Ordered by")} {order.ordered_by_name ?? t.common_unknown}</span>
+                      <span className="text-muted-foreground"> · {t.patient_profile_ordered_by} {order.ordered_by_name ?? t.common_unknown}</span>
                     </p>
                     <Badge
                       variant="outline"
@@ -766,30 +754,30 @@ export function PatientProfileTab({
                   </div>
                   <div className="flex flex-col gap-1">
                     <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-                      {l("Titel", "Название", "Title")}
+                      {t.patient_profile_title}
                     </span>
                     <p className="text-[13px] text-foreground">{order.title}</p>
                   </div>
                   <div className="flex flex-col gap-1">
                     <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-                      {l("Typ", "Тип", "Type")}
+                      {t.patient_profile_type}
                     </span>
                     <p className="text-[13px] text-foreground">
                       {patientMedicalOrderTypeLabel(order.order_type)}
-                      {order.due_date ? ` · ${l("Fällig", "Срок", "Due")} ${order.due_date}` : ""}
+                      {order.due_date ? ` · ${t.patient_profile_due} ${order.due_date}` : ""}
                     </p>
                   </div>
                   {order.source ? (
                     <div className="flex flex-col gap-1">
                       <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-                        {l("Quelle", "Источник", "Source")}
+                        {t.patient_profile_source}
                       </span>
                       <p className="text-[13px] text-foreground">{order.source}</p>
                     </div>
                   ) : null}
                   <div className="flex flex-col gap-1">
                     <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-                      {l("Anweisungen", "Инструкции", "Instructions")}
+                      {t.patient_profile_instructions}
                     </span>
                     <p className="whitespace-pre-wrap text-[13px] text-foreground">{order.instructions}</p>
                   </div>
@@ -804,7 +792,7 @@ export function PatientProfileTab({
                         onClick={() => void handleUpdatePatientMedicalOrderStatus(order.id, "completed")}
                       >
                         {medicalOrderActionId === order.id ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-                        {l("Abschließen", "Завершить", "Complete")}
+                        {t.patient_profile_complete}
                       </Button>
                       <Button
                         type="button"
@@ -815,7 +803,7 @@ export function PatientProfileTab({
                         onClick={() => void handleUpdatePatientMedicalOrderStatus(order.id, "cancelled")}
                       >
                         {medicalOrderActionId === order.id ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-                        {l("Stornieren", "Отменить", "Cancel")}
+                        {t.patient_profile_cancel}
                       </Button>
                     </div>
                   ) : null}
@@ -839,7 +827,7 @@ export function PatientProfileTab({
 
       {canManagePatientRiskScores || riskScores.length > 0 ? (
         <FormSection
-          title={l("Risikoscores", "Риск-скоры", "Risk scores")}
+          title={t.patient_profile_risk_scores}
           accessory={
             <div className="flex items-center gap-2">
               <CountBadge>
@@ -848,14 +836,14 @@ export function PatientProfileTab({
               {canManagePatientRiskScores ? (
                 <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => handleRiskScoreSheetOpenChange(true)}>
                   <Plus className="size-3.5" />
-                  {l("Hinzufügen", "Добавить", "Add")}
+                  {t.patient_profile_add}
                 </Button>
               ) : null}
             </div>
           }
         >
           {riskScores.length === 0 ? (
-            <EmptyCell>{l("Für diesen Patienten wurden noch keine Risikoscores erfasst.", "Для этого пациента пока нет риск-скоров.", "No risk scores have been recorded for this patient yet.")}</EmptyCell>
+            <EmptyCell>{t.patient_profile_no_risk_scores_have_been_recorded_for_this_patient_yet}</EmptyCell>
           ) : (
             <div className="space-y-2">
               {riskScores.map((score) => (
@@ -863,7 +851,7 @@ export function PatientProfileTab({
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <p className="text-[13px] text-foreground">
                       <span className="font-medium">{formatDateTime(score.computed_at, t.common_not_set)}</span>
-                      <span className="text-muted-foreground"> · {l("Erfasst von", "Записал", "Recorded by")} {score.recorded_by_name ?? t.common_unknown}</span>
+                      <span className="text-muted-foreground"> · {t.patient_profile_recorded_by} {score.recorded_by_name ?? t.common_unknown}</span>
                     </p>
                     <Badge variant="outline" className="rounded-full">
                       {formatVitalNumber(score.score_value)}
@@ -872,14 +860,14 @@ export function PatientProfileTab({
                   </div>
                   <div className="flex flex-col gap-1">
                     <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-                      {l("Typ", "Тип", "Type")}
+                      {t.patient_profile_type}
                     </span>
                     <p className="text-[13px] text-foreground">{patientRiskScoreTypeLabel(score.score_type)}</p>
                   </div>
                   {score.source ? (
                     <div className="flex flex-col gap-1">
                       <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-                        {l("Quelle", "Источник", "Source")}
+                        {t.patient_profile_source}
                       </span>
                       <p className="text-[13px] text-foreground">{score.source}</p>
                     </div>
@@ -887,7 +875,7 @@ export function PatientProfileTab({
                   {score.interpretation ? (
                     <div className="flex flex-col gap-1">
                       <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-                        {l("Interpretation", "Интерпретация", "Interpretation")}
+                        {t.patient_profile_interpretation}
                       </span>
                       <p className="whitespace-pre-wrap text-[13px] text-foreground">{score.interpretation}</p>
                     </div>
@@ -895,7 +883,7 @@ export function PatientProfileTab({
                   {score.inputs ? (
                     <div className="flex flex-col gap-1">
                       <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-                        {l("Eingaben", "Входные данные", "Inputs")}
+                        {t.patient_profile_inputs}
                       </span>
                       <pre className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-[12px] text-foreground overflow-x-auto whitespace-pre-wrap">
                         {JSON.stringify(score.inputs, null, 2)}
@@ -921,12 +909,8 @@ export function PatientProfileTab({
       ) : null}
 
       <WorkspaceSectionIntro
-        title={l("Notizen und Kontext", "Заметки и контекст", "Notes and context")}
-        description={l(
-          "Freitext für operative Hinweise, die weder in klinische Anordnungen noch in den Rechtsstatus gehören.",
-          "Свободный текст для операционных заметок, которые не относятся ни к клиническим назначениям, ни к правовому статусу.",
-          "Free-form context for operational notes that do not belong in clinical orders or legal status.",
-        )}
+        title={t.patient_profile_notes_and_context}
+        description={t.patient_profile_free_form_context_for_operational_notes_that_do_not_belong_in_cl}
       />
 
       <FormSection
@@ -940,7 +924,7 @@ export function PatientProfileTab({
               onClick={() => handleNotesSheetOpenChange(true)}
             >
               {detail.notes ? <Pencil className="size-3.5" /> : <Plus className="size-3.5" />}
-              {detail.notes ? l("Bearbeiten", "Редактировать", "Edit") : l("Hinzufügen", "Добавить", "Add")}
+              {detail.notes ? t.patient_profile_edit : t.patient_profile_add}
             </Button>
           ) : null
         }
@@ -950,7 +934,7 @@ export function PatientProfileTab({
             <p className="text-sm text-foreground whitespace-pre-wrap">{detail.notes}</p>
           ) : (
             <p className="text-sm text-muted-foreground italic">
-              {l("Keine Notizen erfasst.", "Заметок пока нет.", "No notes yet.")}
+              {t.patient_profile_no_notes_yet}
             </p>
           )}
         </div>

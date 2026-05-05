@@ -20,6 +20,7 @@ import {
 import {
   formatEnumLabelFromKeys,
   useLang,
+  type Lang,
   type Translations,
 } from "@/lib/i18n";
 import {
@@ -41,12 +42,6 @@ import {
   nativeSelectClassName,
   textareaBaseClassName,
 } from "./primitives";
-
-function tri(lang: string, de: string, ru: string, en: string) {
-  if (lang === "de") return de;
-  if (lang === "ru") return ru;
-  return en;
-}
 
 function doctorOptionLabel(doctor: CaseWorkspaceDoctor) {
   const titlePrefix = doctor.title?.trim() ? `${doctor.title.trim()} ` : "";
@@ -75,12 +70,15 @@ const BLANK: MedikamentItem = {
 
 const MED_TYP_OPTIONS = CASE_MEDICATION_TYPE_VALUES;
 
-function verificationStatusLabel(lang: string, status?: string | null) {
-  if (status === "verified") return tri(lang, "Verifiziert", "Проверено", "Verified");
-  if (status === "rejected") return tri(lang, "Abgelehnt", "Отклонено", "Rejected");
-  if (status === "candidate") return tri(lang, "Kandidat", "Кандидат", "Candidate");
-  if (status === "pending") return tri(lang, "Ausstehend", "Ожидает", "Pending");
-  return tri(lang, "Unbekannter Status", "Неизвестный статус", "Unknown status");
+function verificationStatusLabel(
+  translations: Translations,
+  status?: string | null,
+) {
+  if (status === "verified") return translations.cases_medications_status_verified;
+  if (status === "rejected") return translations.cases_medications_status_rejected;
+  if (status === "candidate") return translations.cases_medications_status_candidate;
+  if (status === "pending") return translations.cases_medications_status_pending;
+  return translations.cases_medications_status_unknown;
 }
 
 function medicationTypeLabel(
@@ -124,6 +122,20 @@ function parseDrugImportRows(value: string) {
         verification_status: "candidate",
       };
     });
+}
+
+function formatCatalogMessage(
+  template: string,
+  values: Record<string, string>,
+) {
+  return template.replace(/\{(\w+)\}/g, (_, key: string) => values[key] ?? "");
+}
+
+function medicationDrugMatchNote(lang: Lang) {
+  if (lang === "de") {
+    return "Aus der Arzneimittel-Referenzsuche ausgewählt.";
+  }
+  return "Выбрано из справочника препаратов.";
 }
 
 export function MedicationsSection() {
@@ -210,12 +222,7 @@ export function MedicationsSection() {
       setEquivalentError(
         error instanceof Error
           ? error.message
-            : tri(
-                lang,
-                "Medikationsäquivalente konnten nicht geladen werden.",
-                "Не удалось загрузить эквиваленты медикации.",
-                "Failed to load medication equivalents.",
-              ),
+          : t.cases_medications_equivalents_load_error,
       );
     } finally {
       setEquivalentLoading(false);
@@ -235,7 +242,7 @@ export function MedicationsSection() {
       setEquivalentError(
         error instanceof Error
           ? error.message
-          : tri(lang, "Äquivalent konnte nicht verifiziert werden.", "Не удалось проверить эквивалент.", "Failed to verify drug equivalent."),
+          : t.cases_medications_equivalent_verify_error,
       );
     } finally {
       setVerifyingEquivalentId(null);
@@ -244,7 +251,7 @@ export function MedicationsSection() {
 
   async function handleSearchDrugs() {
     if (!drugSearchQuery.trim()) {
-      setDrugSearchError(tri(lang, "Arzneiname, ATC-Code oder Wirkstoff eingeben.", "Введите название препарата, ATC-код или действующее вещество.", "Enter a drug name, ATC code, or substance."));
+      setDrugSearchError(t.cases_medications_drug_search_required);
       return;
     }
     setDrugSearchLoading(true);
@@ -259,7 +266,9 @@ export function MedicationsSection() {
     } catch (error) {
       setDrugSearchResults([]);
       setDrugSearchError(
-        error instanceof Error ? error.message : tri(lang, "Arzneisuche fehlgeschlagen.", "Не удалось выполнить поиск препаратов.", "Failed to search drugs."),
+        error instanceof Error
+          ? error.message
+          : t.cases_medications_drug_search_failed,
       );
     } finally {
       setDrugSearchLoading(false);
@@ -277,7 +286,9 @@ export function MedicationsSection() {
       await handleSearchDrugs();
     } catch (error) {
       setDrugSearchError(
-        error instanceof Error ? error.message : tri(lang, "Produkt konnte nicht verifiziert werden.", "Не удалось проверить препарат.", "Failed to verify drug product."),
+        error instanceof Error
+          ? error.message
+          : t.cases_medications_product_verify_failed,
       );
     } finally {
       setProductUpdatingId(null);
@@ -292,7 +303,7 @@ export function MedicationsSection() {
       const match = await createMedicationDrugMatch(caseId, selectedEquivalentMedication.id, {
         drug_product_id: productId,
         confidence: 0.85,
-        note: tri(lang, "Aus der Arzneimittel-Referenzsuche ausgewählt.", "Выбрано из справочника препаратов.", "Selected from drug reference search."),
+        note: medicationDrugMatchNote(lang),
       });
       setLastMedicationMatch(match);
       await handleFindEquivalent();
@@ -300,7 +311,7 @@ export function MedicationsSection() {
       setDrugSearchError(
         error instanceof Error
           ? error.message
-          : tri(lang, "Medikations-Match konnte nicht erstellt werden.", "Не удалось создать связь с препаратом.", "Failed to create medication drug match."),
+          : t.cases_medications_drug_match_create_failed,
       );
     } finally {
       setMatchUpdatingId(null);
@@ -329,7 +340,7 @@ export function MedicationsSection() {
       setDrugSearchError(
         error instanceof Error
           ? error.message
-          : tri(lang, "Medikations-Match konnte nicht verifiziert werden.", "Не удалось проверить связь с препаратом.", "Failed to verify medication drug match."),
+          : t.cases_medications_drug_match_verify_failed,
       );
     } finally {
       setMatchUpdatingId(null);
@@ -339,7 +350,7 @@ export function MedicationsSection() {
   async function handlePreviewDrugImport() {
     const rows = parseDrugImportRows(drugImportText);
     if (rows.length === 0) {
-      setDrugImportError(tri(lang, "Mindestens eine CSV-Zeile für die Vorschau einfügen.", "Вставьте минимум одну CSV-строку для предпросмотра.", "Paste at least one CSV row to preview."));
+      setDrugImportError(t.cases_medications_import_preview_required);
       return;
     }
     setDrugImportLoading(true);
@@ -349,7 +360,9 @@ export function MedicationsSection() {
     } catch (error) {
       setDrugImportPreview(null);
       setDrugImportError(
-        error instanceof Error ? error.message : tri(lang, "Importvorschau konnte nicht erstellt werden.", "Не удалось создать предпросмотр импорта.", "Failed to preview drug import."),
+        error instanceof Error
+          ? error.message
+          : t.cases_medications_import_preview_failed,
       );
     } finally {
       setDrugImportLoading(false);
@@ -359,283 +372,241 @@ export function MedicationsSection() {
   return (
     <>
       <CaseItemList<MedikamentItem>
-      title={tri(lang, "Medikamente", "Медикаменты", "Medications")}
-      description={tri(
-        lang,
-        "Aktuelle Medikation, Dosierung, Ablaufdatum und Verordner.",
-        "Текущая медикация, дозировка, срок и назначивший врач.",
-        "Current medications, dosing, expiry, and prescriber.",
-      )}
-      items={medications}
-      blankItem={BLANK}
-      cloneItem={(item) => ({ ...BLANK, ...item })}
-      isValid={(form) => form.handelsname.trim().length > 0}
-      save={saveMedications}
-      busy={sectionBusy === "medications"}
-      sectionError={sectionError}
-      canEdit={permissions.canEdit}
-      sheetTitle={{
-        create: tri(lang, "Neues Medikament", "Новый медикамент", "New medication"),
-        edit: tri(lang, "Medikament bearbeiten", "Редактировать медикамент", "Edit medication"),
-      }}
-      sheetWidth="wide"
-      emptyTitle={tri(
-        lang,
-        "Keine Medikamente erfasst.",
-        "Медикаментов пока нет.",
-        "No medications recorded yet.",
-      )}
-      addFirstLabel={tri(
-        lang,
-        "Erstes Medikament hinzufügen",
-        "Добавить первый медикамент",
-        "Add first medication",
-      )}
-      missingPrimaryMessage={tri(
-        lang,
-        "Bitte den Handelsnamen eingeben.",
-        "Укажите торговое название.",
-        "Please enter the brand name.",
-      )}
-      renderCard={(item) => (
-        <>
-          <div className="flex items-center gap-2">
-            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
-            <p className="truncate text-sm font-medium text-foreground">
-              {item.handelsname || tri(lang, "Ohne Namen", "Без названия", "Untitled")}
-            </p>
-          </div>
-          {item.wirkstoff ? (
-            <p className="truncate text-xs text-muted-foreground">{item.wirkstoff}</p>
-          ) : null}
-          <div className="flex flex-wrap gap-1.5">
-            {item.dosis ? (
-              <Badge
-                variant="outline"
-                className="rounded-full border-border/60 bg-muted/25 text-[11px] font-medium text-muted-foreground"
-              >
-                {item.dosis} {item.dosis_einheit ?? ""}
-              </Badge>
-            ) : null}
-            {item.einnahmeschema ? (
-              <Badge
-                variant="outline"
-                className="rounded-full border-border/60 bg-muted/25 text-[11px] font-medium text-muted-foreground"
-              >
-                {item.einnahmeschema}
-              </Badge>
-            ) : null}
-            {item.med_typ ? (
-              <Badge
-                variant="outline"
-                className="rounded-full border-border/60 bg-muted/25 text-[11px] font-medium text-muted-foreground"
-              >
-                {medicationTypeLabel(item.med_typ, t)}
-              </Badge>
-            ) : null}
-          </div>
-          {item.is_expired ? (
-            <div className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-amber-700">
-              <AlertTriangle className="size-3" />
-              {t.cases_clinical_medication_expired}
-              {item.pending_expiry_confirmation
-                ? ` · ${t.cases_clinical_medication_confirmation_required}`
-                : ""}
+        title={t.cases_medications_title}
+        description={t.cases_medications_description}
+        items={medications}
+        blankItem={BLANK}
+        cloneItem={(item) => ({ ...BLANK, ...item })}
+        isValid={(form) => form.handelsname.trim().length > 0}
+        save={saveMedications}
+        busy={sectionBusy === "medications"}
+        sectionError={sectionError}
+        canEdit={permissions.canEdit}
+        sheetTitle={{
+          create: t.cases_medications_sheet_create,
+          edit: t.cases_medications_sheet_edit,
+        }}
+        sheetWidth="wide"
+        emptyTitle={t.cases_medications_empty_title}
+        addFirstLabel={t.cases_medications_add_first}
+        missingPrimaryMessage={t.cases_medications_missing_brand}
+        renderCard={(item) => (
+          <>
+            <div className="flex items-center gap-2">
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+              <p className="truncate text-sm font-medium text-foreground">
+                {item.handelsname || t.cases_medications_untitled}
+              </p>
             </div>
-          ) : null}
-        </>
-      )}
-      renderForm={({ form, setForm, updateField, disabled }) => (
-        <>
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field
-              label={tri(lang, "Handelsname", "Торговое название", "Brand name")}
-              required
-            >
-              <Input
-                value={form.handelsname}
-                autoFocus
-                onChange={(event) => updateField("handelsname", event.target.value)}
-                className={inputBaseClassName}
-                disabled={disabled}
-              />
-            </Field>
-            <Field label={tri(lang, "Wirkstoff", "Действующее вещество", "Active ingredient")}>
-              <Input
-                value={form.wirkstoff ?? ""}
-                onChange={(event) => updateField("wirkstoff", event.target.value)}
-                className={inputBaseClassName}
-                disabled={disabled}
-              />
-            </Field>
-          </div>
+            {item.wirkstoff ? (
+              <p className="truncate text-xs text-muted-foreground">{item.wirkstoff}</p>
+            ) : null}
+            <div className="flex flex-wrap gap-1.5">
+              {item.dosis ? (
+                <Badge
+                  variant="outline"
+                  className="rounded-full border-border/60 bg-muted/25 text-[11px] font-medium text-muted-foreground"
+                >
+                  {item.dosis} {item.dosis_einheit ?? ""}
+                </Badge>
+              ) : null}
+              {item.einnahmeschema ? (
+                <Badge
+                  variant="outline"
+                  className="rounded-full border-border/60 bg-muted/25 text-[11px] font-medium text-muted-foreground"
+                >
+                  {item.einnahmeschema}
+                </Badge>
+              ) : null}
+              {item.med_typ ? (
+                <Badge
+                  variant="outline"
+                  className="rounded-full border-border/60 bg-muted/25 text-[11px] font-medium text-muted-foreground"
+                >
+                  {medicationTypeLabel(item.med_typ, t)}
+                </Badge>
+              ) : null}
+            </div>
+            {item.is_expired ? (
+              <div className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-amber-700">
+                <AlertTriangle className="size-3" />
+                {t.cases_medications_expired}
+                {item.pending_expiry_confirmation
+                  ? ` · ${t.cases_medications_confirmation_required}`
+                  : ""}
+              </div>
+            ) : null}
+          </>
+        )}
+        renderForm={({ form, setForm, updateField, disabled }) => (
+          <>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label={t.cases_medications_brand_name} required>
+                <Input
+                  value={form.handelsname}
+                  autoFocus
+                  onChange={(event) => updateField("handelsname", event.target.value)}
+                  className={inputBaseClassName}
+                  disabled={disabled}
+                />
+              </Field>
+              <Field label={t.cases_medications_active_ingredient}>
+                <Input
+                  value={form.wirkstoff ?? ""}
+                  onChange={(event) => updateField("wirkstoff", event.target.value)}
+                  className={inputBaseClassName}
+                  disabled={disabled}
+                />
+              </Field>
+            </div>
 
-          <div className="grid gap-4 md:grid-cols-3">
-            <Field label={tri(lang, "Dosis", "Доза", "Dose")}>
-              <Input
-                value={form.dosis ?? ""}
-                onChange={(event) => updateField("dosis", event.target.value)}
-                className={inputBaseClassName}
-                disabled={disabled}
-              />
-            </Field>
-            <Field label={tri(lang, "Einheit", "Единица", "Unit")}>
-              <Input
-                value={form.dosis_einheit ?? ""}
-                onChange={(event) => updateField("dosis_einheit", event.target.value)}
-                className={inputBaseClassName}
-                disabled={disabled}
-              />
-            </Field>
-            <Field label={tri(lang, "Schema", "Схема приёма", "Regimen")}>
-              <Input
-                value={form.einnahmeschema ?? ""}
-                onChange={(event) => updateField("einnahmeschema", event.target.value)}
-                className={inputBaseClassName}
-                disabled={disabled}
-              />
-            </Field>
-          </div>
+            <div className="grid gap-4 md:grid-cols-3">
+              <Field label={t.cases_medications_dose}>
+                <Input
+                  value={form.dosis ?? ""}
+                  onChange={(event) => updateField("dosis", event.target.value)}
+                  className={inputBaseClassName}
+                  disabled={disabled}
+                />
+              </Field>
+              <Field label={t.cases_medications_unit}>
+                <Input
+                  value={form.dosis_einheit ?? ""}
+                  onChange={(event) => updateField("dosis_einheit", event.target.value)}
+                  className={inputBaseClassName}
+                  disabled={disabled}
+                />
+              </Field>
+              <Field label={t.cases_medications_regimen}>
+                <Input
+                  value={form.einnahmeschema ?? ""}
+                  onChange={(event) => updateField("einnahmeschema", event.target.value)}
+                  className={inputBaseClassName}
+                  disabled={disabled}
+                />
+              </Field>
+            </div>
 
-          <div className="grid gap-4 md:grid-cols-3">
-            <Field label={tri(lang, "Darreichungsform", "Форма", "Form")}>
-              <Input
-                value={form.darreichungsform ?? ""}
-                onChange={(event) => updateField("darreichungsform", event.target.value)}
-                className={inputBaseClassName}
-                disabled={disabled}
-              />
-            </Field>
-            <Field label={tri(lang, "Typ", "Тип", "Type")}>
+            <div className="grid gap-4 md:grid-cols-3">
+              <Field label={t.cases_medications_form}>
+                <Input
+                  value={form.darreichungsform ?? ""}
+                  onChange={(event) => updateField("darreichungsform", event.target.value)}
+                  className={inputBaseClassName}
+                  disabled={disabled}
+                />
+              </Field>
+              <Field label={t.cases_medications_type}>
+                <NativeComboboxSelect
+                  value={form.med_typ ?? "permanent"}
+                  onChange={(event) => updateField("med_typ", event.target.value)}
+                  className={nativeSelectClassName}
+                  disabled={disabled}
+                >
+                  {MED_TYP_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {medicationTypeLabel(option, t)}
+                    </option>
+                  ))}
+                  {form.med_typ && !isKnownMedicationType(form.med_typ) ? (
+                    <option value={form.med_typ}>
+                      {medicationTypeLabel(form.med_typ, t)}
+                    </option>
+                  ) : null}
+                </NativeComboboxSelect>
+              </Field>
+              <Field label={t.cases_medications_valid_until}>
+                <Input
+                  type="date"
+                  value={form.expiry_date ?? ""}
+                  onChange={(event) => updateField("expiry_date", event.target.value)}
+                  className={inputBaseClassName}
+                  disabled={disabled}
+                />
+              </Field>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label={t.cases_medications_since}>
+                <Input
+                  value={form.seit ?? ""}
+                  onChange={(event) => updateField("seit", event.target.value)}
+                  className={inputBaseClassName}
+                  disabled={disabled}
+                />
+              </Field>
+              <Field label={t.cases_medications_reason}>
+                <Input
+                  value={form.grund ?? ""}
+                  onChange={(event) => updateField("grund", event.target.value)}
+                  className={inputBaseClassName}
+                  disabled={disabled}
+                />
+              </Field>
+            </div>
+
+            <Field label={t.cases_medications_prescriber_registry}>
               <NativeComboboxSelect
-                value={form.med_typ ?? "permanent"}
-                onChange={(event) => updateField("med_typ", event.target.value)}
+                value={form.verordnender_arzt_id ?? ""}
+                onChange={(event) => {
+                  const doctorId = event.target.value;
+                  const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
+                  setForm({
+                    ...form,
+                    verordnender_arzt_id: doctorId,
+                    verordnender_arzt: selectedDoctor
+                      ? selectedDoctor.name
+                      : form.verordnender_arzt ?? "",
+                  });
+                }}
                 className={nativeSelectClassName}
                 disabled={disabled}
               >
-                {MED_TYP_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {medicationTypeLabel(option, t)}
+                <option value="">{t.common_not_set}</option>
+                {doctors.map((doctor) => (
+                  <option key={doctor.id} value={doctor.id}>
+                    {doctorOptionLabel(doctor)}
                   </option>
                 ))}
-                {form.med_typ && !isKnownMedicationType(form.med_typ) ? (
-                  <option value={form.med_typ}>
-                    {medicationTypeLabel(form.med_typ, t)}
-                  </option>
-                ) : null}
               </NativeComboboxSelect>
             </Field>
-            <Field label={tri(lang, "Gültig bis", "Действительно до", "Valid until")}>
+
+            <Field label={t.cases_medications_doctor_label}>
               <Input
-                type="date"
-                value={form.expiry_date ?? ""}
-                onChange={(event) => updateField("expiry_date", event.target.value)}
+                value={form.verordnender_arzt ?? ""}
+                onChange={(event) => updateField("verordnender_arzt", event.target.value)}
                 className={inputBaseClassName}
                 disabled={disabled}
               />
             </Field>
-          </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field label={tri(lang, "Seit", "Начало приёма", "Since")}>
-              <Input
-                value={form.seit ?? ""}
-                onChange={(event) => updateField("seit", event.target.value)}
-                className={inputBaseClassName}
+            <Field label={t.cases_medications_note}>
+              <textarea
+                value={form.anmerkung ?? ""}
+                onChange={(event) => updateField("anmerkung", event.target.value)}
+                className={textareaBaseClassName}
+                rows={3}
                 disabled={disabled}
               />
             </Field>
-            <Field label={tri(lang, "Grund", "Причина", "Reason")}>
-              <Input
-                value={form.grund ?? ""}
-                onChange={(event) => updateField("grund", event.target.value)}
-                className={inputBaseClassName}
-                disabled={disabled}
-              />
-            </Field>
-          </div>
 
-          <Field
-            label={tri(lang, "Verordnender Arzt (Register)", "Назначивший врач (реестр)", "Prescriber (registry)")}
-          >
-            <NativeComboboxSelect
-              value={form.verordnender_arzt_id ?? ""}
-              onChange={(event) => {
-                const doctorId = event.target.value;
-                const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
-                setForm({
-                  ...form,
-                  verordnender_arzt_id: doctorId,
-                  verordnender_arzt: selectedDoctor
-                    ? selectedDoctor.name
-                    : form.verordnender_arzt ?? "",
-                });
-              }}
-              className={nativeSelectClassName}
-              disabled={disabled}
-            >
-              <option value="">{t.common_not_set}</option>
-              {doctors.map((doctor) => (
-                <option key={doctor.id} value={doctor.id}>
-                  {doctorOptionLabel(doctor)}
-                </option>
-              ))}
-            </NativeComboboxSelect>
-          </Field>
-
-          <Field label={tri(lang, "Freitext Arzt", "Наименование врача", "Doctor label")}>
-            <Input
-              value={form.verordnender_arzt ?? ""}
-              onChange={(event) => updateField("verordnender_arzt", event.target.value)}
-              className={inputBaseClassName}
-              disabled={disabled}
-            />
-          </Field>
-
-          <Field label={tri(lang, "Anmerkung", "Комментарий", "Note")}>
-            <textarea
-              value={form.anmerkung ?? ""}
-              onChange={(event) => updateField("anmerkung", event.target.value)}
-              className={textareaBaseClassName}
-              rows={3}
-              disabled={disabled}
-            />
-          </Field>
-
-          {form.is_expired && form.pending_expiry_confirmation ? (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[12.5px] text-amber-800">
-              <div className="flex items-center gap-1.5 font-semibold">
-                <AlertTriangle className="size-3.5" />
-                {tri(
-                  lang,
-                  "Ablaufprüfung ausstehend",
-                  "Требуется подтверждение истечения",
-                  "Expiry review pending",
-                )}
+            {form.is_expired && form.pending_expiry_confirmation ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[12.5px] text-amber-800">
+                <div className="flex items-center gap-1.5 font-semibold">
+                  <AlertTriangle className="size-3.5" />
+                  {t.cases_medications_expiry_review_pending}
+                </div>
+                <p className="mt-1 leading-relaxed">
+                  {t.cases_medications_expiry_review_full_editor}
+                </p>
               </div>
-              <p className="mt-1 leading-relaxed">
-                {tri(
-                  lang,
-                  "Die Bestätigung des Ablaufs erfolgt im vollständigen Editor.",
-                  "Подтверждение делается в полном редакторе.",
-                  "Confirmation is handled in the full editor.",
-                )}
-              </p>
-            </div>
-          ) : null}
-        </>
-      )}
-    />
+            ) : null}
+          </>
+        )}
+      />
       {selectedEquivalentMedication ? (
         <div className="mt-4 space-y-3">
-          <Field
-            label={tri(
-              lang,
-              "Medikation für die Suche nach deutschem Äquivalent",
-              "Медикация для поиска немецкого эквивалента",
-              "Medication for German equivalent lookup",
-            )}
-          >
+          <Field label={t.cases_medications_equivalent_lookup_medication}>
             <NativeComboboxSelect
               value={selectedEquivalentMedication.id}
               onChange={(event) => setEquivalentMedicationId(event.target.value)}
@@ -669,21 +640,16 @@ export function MedicationsSection() {
             }
           />
           <Panel
-            title={tri(lang, "Arzneimittel-Referenz", "Справочник препаратов", "Drug reference admin")}
-            description={tri(
-              lang,
-              "Kuratierte Produkte suchen, Datensätze prüfen und einen Produkt-Match zur ausgewählten Medikation hinzufügen.",
-              "Поиск по справочнику, проверка записей и привязка препарата к выбранной медикации.",
-              "Search curated products, verify product records, and attach a product match to the selected medication.",
-            )}
+            title={t.cases_medications_reference_title}
+            description={t.cases_medications_reference_description}
             action={
               <Badge variant="outline" className="rounded-full">
-                {tri(lang, "Nur Team", "Только команда", "Staff only")}
+                {t.cases_medications_staff_only}
               </Badge>
             }
           >
             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_120px_auto]">
-              <Field label={tri(lang, "Arzneisuche", "Поиск препаратов", "Drug search")}>
+              <Field label={t.cases_medications_drug_search}>
                 <Input
                   value={drugSearchQuery}
                   onChange={(event) => setDrugSearchQuery(event.target.value)}
@@ -691,7 +657,7 @@ export function MedicationsSection() {
                   placeholder="Atorvastatin, Sortis, C10AA05"
                 />
               </Field>
-              <Field label={tri(lang, "Land", "Страна", "Country")}>
+              <Field label={t.cases_medications_country}>
                 <Input
                   value={drugSearchCountry}
                   onChange={(event) => setDrugSearchCountry(event.target.value)}
@@ -707,8 +673,8 @@ export function MedicationsSection() {
                   onClick={() => void handleSearchDrugs()}
                 >
                   {drugSearchLoading
-                    ? tri(lang, "Suche...", "Поиск...", "Searching...")
-                    : tri(lang, "Suchen", "Найти", "Search")}
+                    ? t.cases_medications_searching
+                    : t.cases_medications_search}
                 </button>
               </div>
             </div>
@@ -718,7 +684,7 @@ export function MedicationsSection() {
                 checked={includeDrugCandidates}
                 onChange={(event) => setIncludeDrugCandidates(event.target.checked)}
               />
-              {tri(lang, "Kandidaten und abgelehnte Produkte für Team-Prüfung einschließen", "Включить кандидаты и отклоненные препараты для проверки командой", "Include candidate and rejected products for staff verification")}
+              {t.cases_medications_include_candidates}
             </label>
             {drugSearchError ? (
               <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -729,9 +695,12 @@ export function MedicationsSection() {
               <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div>
-                    <p className="font-semibold">{tri(lang, "Medikations-Match gespeichert", "Связь с препаратом сохранена", "Medication match saved")}</p>
+                    <p className="font-semibold">
+                      {t.cases_medications_match_saved}
+                    </p>
                     <p className="mt-1 text-xs text-sky-800/80">
-                      {tri(lang, "Match", "Связь", "Match")} {lastMedicationMatch.id} - {verificationStatusLabel(lang, lastMedicationMatch.verification_status)}
+                      {t.cases_medications_match_label} {lastMedicationMatch.id} -{" "}
+                      {verificationStatusLabel(t, lastMedicationMatch.verification_status)}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -741,7 +710,7 @@ export function MedicationsSection() {
                       disabled={matchUpdatingId === lastMedicationMatch.id}
                       onClick={() => void handleVerifyMedicationMatch("verified")}
                     >
-                      {tri(lang, "Match prüfen", "Проверить связь", "Verify match")}
+                      {t.cases_medications_match_verify}
                     </button>
                     <button
                       type="button"
@@ -749,7 +718,7 @@ export function MedicationsSection() {
                       disabled={matchUpdatingId === lastMedicationMatch.id}
                       onClick={() => void handleVerifyMedicationMatch("rejected")}
                     >
-                      {tri(lang, "Match ablehnen", "Отклонить связь", "Reject match")}
+                      {t.cases_medications_match_reject}
                     </button>
                   </div>
                 </div>
@@ -757,7 +726,7 @@ export function MedicationsSection() {
             ) : null}
             {drugSearchResults.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border/60 bg-muted/25 px-4 py-6 text-center text-sm text-muted-foreground">
-                {tri(lang, "Suchergebnisse erscheinen hier.", "Результаты поиска появятся здесь.", "Search results will appear here.")}
+                {t.cases_medications_search_results_empty}
               </div>
             ) : (
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -778,11 +747,12 @@ export function MedicationsSection() {
                         </p>
                       </div>
                       <Badge variant="outline" className="rounded-full">
-                        {verificationStatusLabel(lang, product.verification_status)}
+                        {verificationStatusLabel(t, product.verification_status)}
                       </Badge>
                     </div>
                     <p className="mt-2 text-xs text-muted-foreground">
-                      {tri(lang, "Wirkstoffe", "Действующие вещества", "Substances")}: {product.substances.join(", ") || tri(lang, "Unbekannt", "Неизвестно", "Unknown")}
+                      {t.cases_medications_substances}:{" "}
+                      {product.substances.join(", ") || t.cases_medications_unknown}
                     </p>
                     {product.clinical_note ? (
                       <p className="mt-1 text-xs text-muted-foreground">
@@ -796,7 +766,7 @@ export function MedicationsSection() {
                         disabled={productUpdatingId === product.id}
                         onClick={() => void handleVerifyDrugProduct(product.id, "verified")}
                       >
-                        {tri(lang, "Produkt prüfen", "Проверить препарат", "Verify product")}
+                        {t.cases_medications_product_verify}
                       </button>
                       <button
                         type="button"
@@ -804,7 +774,7 @@ export function MedicationsSection() {
                         disabled={productUpdatingId === product.id}
                         onClick={() => void handleVerifyDrugProduct(product.id, "rejected")}
                       >
-                        {tri(lang, "Ablehnen", "Отклонить", "Reject")}
+                        {t.cases_medications_reject}
                       </button>
                       <button
                         type="button"
@@ -812,7 +782,7 @@ export function MedicationsSection() {
                         disabled={!selectedEquivalentMedication?.id || matchUpdatingId === product.id}
                         onClick={() => void handleCreateMedicationMatch(product.id)}
                       >
-                        {tri(lang, "Für Medikation nutzen", "Использовать для медикации", "Use for medication")}
+                        {t.cases_medications_use_for_medication}
                       </button>
                     </div>
                   </article>
@@ -821,13 +791,8 @@ export function MedicationsSection() {
             )}
           </Panel>
           <Panel
-            title={tri(lang, "Arzneiimport-Vorschau", "Предпросмотр импорта препаратов", "Drug import skeleton")}
-            description={tri(
-              lang,
-              "CSV-Testlauf für zukünftige Arzneiimporte. Format: brand,country,substance,strength,form,manufacturer,atc.",
-              "Тестовый CSV-предпросмотр будущего импорта препаратов. Формат: brand,country,substance,strength,form,manufacturer,atc.",
-              "Dry-run CSV preview for future drug imports. Format: brand,country,substance,strength,form,manufacturer,atc.",
-            )}
+            title={t.cases_medications_import_title}
+            description={t.cases_medications_import_description}
           >
             <textarea
               value={drugImportText}
@@ -848,8 +813,8 @@ export function MedicationsSection() {
                 onClick={() => void handlePreviewDrugImport()}
               >
                 {drugImportLoading
-                  ? tri(lang, "Vorschau...", "Предпросмотр...", "Previewing...")
-                  : tri(lang, "Import prüfen", "Проверить импорт", "Preview import")}
+                  ? t.cases_medications_previewing
+                  : t.cases_medications_preview_import}
               </button>
             </div>
             {drugImportError ? (
@@ -863,12 +828,11 @@ export function MedicationsSection() {
                   {drugImportPreview.message}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {tri(
-                    lang,
-                    `${drugImportPreview.received_count} Zeilen empfangen - ${drugImportPreview.valid_preview_count} gültige Vorschauzeilen - ${drugImportPreview.issue_preview_count} mit Hinweisen`,
-                    `${drugImportPreview.received_count} строк получено - ${drugImportPreview.valid_preview_count} валидных строк предпросмотра - ${drugImportPreview.issue_preview_count} с замечаниями`,
-                    `${drugImportPreview.received_count} rows received - ${drugImportPreview.valid_preview_count} valid preview rows - ${drugImportPreview.issue_preview_count} with issues`,
-                  )}
+                  {formatCatalogMessage(t.cases_medications_import_summary, {
+                    received: String(drugImportPreview.received_count),
+                    valid: String(drugImportPreview.valid_preview_count),
+                    issues: String(drugImportPreview.issue_preview_count),
+                  })}
                 </p>
                 <div className="mt-3 grid gap-2">
                   {drugImportPreview.preview.map((row) => (
@@ -880,8 +844,10 @@ export function MedicationsSection() {
                         #{row.row_number} {row.brand_name} ({row.country_code})
                       </p>
                       <p className="mt-1 text-muted-foreground">
-                        {row.substances?.join(", ") || tri(lang, "Keine Wirkstoffe", "Нет действующих веществ", "No substances")}
-                        {row.issues.length > 0 ? ` - ${tri(lang, "Hinweise", "Замечания", "issues")}: ${row.issues.join(", ")}` : ""}
+                        {row.substances?.join(", ") || t.cases_medications_no_substances}
+                        {row.issues.length > 0
+                          ? ` - ${t.cases_medications_issues}: ${row.issues.join(", ")}`
+                          : ""}
                       </p>
                     </div>
                   ))}

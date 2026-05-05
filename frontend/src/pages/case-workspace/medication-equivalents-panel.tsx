@@ -2,7 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CountBadge } from "@/components/ui-shell";
 import type { GermanEquivalent } from "@/lib/api/clinical";
-import { useLang } from "@/lib/i18n";
+import { useLang, type Translations } from "@/lib/i18n";
 
 import { Panel } from "./primitives";
 
@@ -22,18 +22,15 @@ type MedicationEquivalentsPanelProps = {
   ) => void;
 };
 
-function tri(lang: string, de: string, ru: string, en: string) {
-  if (lang === "de") return de;
-  if (lang === "ru") return ru;
-  return en;
-}
-
-function verificationStatusLabel(lang: string, status?: string | null) {
-  if (status === "verified") return tri(lang, "Verifiziert", "Проверено", "Verified");
-  if (status === "rejected") return tri(lang, "Abgelehnt", "Отклонено", "Rejected");
-  if (status === "candidate") return tri(lang, "Kandidat", "Кандидат", "Candidate");
-  if (status === "pending") return tri(lang, "Ausstehend", "Ожидает", "Pending");
-  return tri(lang, "Unbekannter Status", "Неизвестный статус", "Unknown status");
+function verificationStatusLabel(
+  translations: Translations,
+  status?: string | null,
+) {
+  if (status === "verified") return translations.cases_medications_status_verified;
+  if (status === "rejected") return translations.cases_medications_status_rejected;
+  if (status === "candidate") return translations.cases_medications_status_candidate;
+  if (status === "pending") return translations.cases_medications_status_pending;
+  return translations.cases_medications_status_unknown;
 }
 
 export function MedicationEquivalentsPanel({
@@ -48,20 +45,17 @@ export function MedicationEquivalentsPanel({
   onToggleCandidates,
   onVerifyEquivalent,
 }: MedicationEquivalentsPanelProps) {
-  const { lang } = useLang();
+  const { t } = useLang();
 
   return (
     <Panel
-      title={tri(lang, "Deutsches Äquivalent finden", "Найти немецкий эквивалент", "Find German equivalent")}
-      description={tri(
-        lang,
-        "Team-Referenz für deutsche Medikationsäquivalente. Keine Verordnung.",
-        "Справочная информация для команды по немецким эквивалентам. Это не назначение.",
-        "Staff reference for German medication equivalents. This is not a prescription.",
-      )}
+      title={t.cases_medications_equivalents_title}
+      description={t.cases_medications_equivalents_description}
       action={
         <>
-          <CountBadge>{candidates.length} {tri(lang, "Kandidaten", "кандидатов", "candidates")}</CountBadge>
+          <CountBadge>
+            {candidates.length} {t.cases_medications_equivalents_count_label}
+          </CountBadge>
           {onFind ? (
             <Button
               type="button"
@@ -71,26 +65,24 @@ export function MedicationEquivalentsPanel({
               onClick={onFind}
               disabled={loading}
             >
-              {loading ? tri(lang, "Suche...", "Поиск...", "Searching...") : tri(lang, "Finden", "Найти", "Find")}
+              {loading
+                ? t.cases_medications_searching
+                : t.cases_medications_equivalents_find}
             </Button>
           ) : null}
         </>
       }
     >
       <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-800">
-        {tri(
-          lang,
-          "Deutsche Äquivalente sind nur Team-Referenzinformationen, keine Verordnung. Ungeprüfte Kandidaten dürfen nicht patientenseitig angezeigt werden.",
-          "Немецкие эквиваленты являются только справочной информацией для команды, не назначением. Непроверенные кандидаты нельзя показывать пациенту.",
-          "German equivalents are staff reference information only, not a prescription. Unverified candidates must not be shown patient-facing.",
-        )}
+        {t.cases_medications_equivalents_warning}
       </div>
 
       <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-3">
         <p className="text-sm font-semibold text-foreground">{medicationName}</p>
         {medicationSubstance ? (
           <p className="mt-1 text-xs text-muted-foreground">
-            {tri(lang, "Wirkstoff", "Действующее вещество", "Active substance")}: {medicationSubstance}
+            {t.cases_medications_equivalents_active_substance}:{" "}
+            {medicationSubstance}
           </p>
         ) : null}
       </div>
@@ -108,13 +100,13 @@ export function MedicationEquivalentsPanel({
             checked={includeCandidates}
             onChange={(event) => onToggleCandidates(event.target.checked)}
           />
-          {tri(lang, "Ungeprüfte Team-Kandidaten einschließen", "Включить непроверенные кандидаты только для команды", "Include unverified staff-only candidates")}
+          {t.cases_medications_equivalents_include_unverified}
         </label>
       ) : null}
 
       {candidates.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border/60 bg-muted/25 px-4 py-8 text-center text-sm text-muted-foreground">
-          {tri(lang, "Noch keine deutschen Äquivalente gefunden.", "Немецкие эквиваленты пока не найдены.", "No German equivalents found yet.")}
+          {t.cases_medications_equivalents_empty}
         </div>
       ) : (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -135,18 +127,21 @@ export function MedicationEquivalentsPanel({
                   </p>
                 </div>
                 <Badge variant="outline" className="rounded-full">
-                  {verificationStatusLabel(lang, candidate.verification_status)}
+                  {verificationStatusLabel(t, candidate.verification_status)}
                 </Badge>
               </div>
               <p className="mt-2 text-xs text-muted-foreground">
-                {tri(lang, "Wirkstoffe", "Действующие вещества", "Substances")}: {candidate.substances.join(", ") || tri(lang, "Unbekannt", "Неизвестно", "Unknown")}
+                {t.cases_medications_substances}:{" "}
+                {candidate.substances.join(", ") ||
+                  t.cases_medications_unknown}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {tri(lang, "Trefferquote", "Уверенность", "Confidence")}: {candidate.confidence}
+                {t.cases_medications_equivalents_confidence}:{" "}
+                {candidate.confidence}
               </p>
               {candidate.verification_status !== "verified" ? (
                 <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800">
-                  {tri(lang, "Ungeprüfter Kandidat: nur für das Team, nicht patientenseitig.", "Непроверенный кандидат: только для команды, не показывать пациенту.", "Unverified candidate: staff-only, not patient-facing.")}
+                  {t.cases_medications_equivalents_unverified_warning}
                 </p>
               ) : null}
               {onVerifyEquivalent && candidate.relationship_id ? (
@@ -161,7 +156,7 @@ export function MedicationEquivalentsPanel({
                       onVerifyEquivalent(candidate.relationship_id!, "verified")
                     }
                   >
-                    {tri(lang, "Prüfen", "Проверить", "Verify")}
+                    {t.cases_medications_equivalents_verify}
                   </Button>
                   <Button
                     type="button"
@@ -173,12 +168,12 @@ export function MedicationEquivalentsPanel({
                       onVerifyEquivalent(candidate.relationship_id!, "rejected")
                     }
                   >
-                    {tri(lang, "Ablehnen", "Отклонить", "Reject")}
+                    {t.cases_medications_reject}
                   </Button>
                 </div>
               ) : candidate.verification_status !== "verified" ? (
                 <p className="mt-2 text-[11px] text-muted-foreground">
-                  {tri(lang, "Noch keine kuratierte Äquivalent-Verknüpfung vorhanden. Zuerst einen Produkt-Match hinzufügen.", "Курируемой связи с эквивалентом пока нет. Сначала добавьте связь с препаратом.", "No curated equivalent link exists yet. Add a product match first.")}
+                  {t.cases_medications_equivalents_no_link}
                 </p>
               ) : null}
             </article>

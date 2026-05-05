@@ -67,7 +67,7 @@ const PORTAL_INVOICE_REALTIME_EVENTS = [
 ] as const;
 
 export function PatientInvoicesPage() {
-  const { lang } = useLang();
+  const { t, lang } = useLang();
   const [invoices, setInvoices] = useState<PortalInvoiceItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -122,7 +122,7 @@ export function PatientInvoicesPage() {
         });
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : l("Rechnungen konnten nicht geladen werden.", "Не удалось загрузить счета.", "Failed to load invoices."));
+        setError(err instanceof Error ? err.message : t.portal_invoices_failed_to_load_invoices);
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -135,7 +135,7 @@ export function PatientInvoicesPage() {
     return () => {
       cancelled = true;
     };
-  }, [loading, version, l]);
+  }, [loading, t.portal_invoices_failed_to_load_invoices, version, l]);
 
   useEffect(() => {
     if (!selectedInvoiceId) {
@@ -155,7 +155,7 @@ export function PatientInvoicesPage() {
         setDetailError("");
       } catch (err) {
         if (cancelled) return;
-        setDetailError(err instanceof Error ? err.message : l("Rechnungsdetails konnten nicht geladen werden.", "Не удалось загрузить детали счета.", "Failed to load invoice detail."));
+        setDetailError(err instanceof Error ? err.message : t.portal_invoices_failed_to_load_invoice_detail);
       } finally {
         if (!cancelled) {
           setDetailBusy(false);
@@ -167,7 +167,7 @@ export function PatientInvoicesPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedInvoiceId, version, l]);
+  }, [selectedInvoiceId, t.portal_invoices_failed_to_load_invoice_detail, version, l]);
 
   const totalBalance = useMemo(
     () =>
@@ -200,7 +200,7 @@ export function PatientInvoicesPage() {
     event.preventDefault();
     if (!detail) return;
     if (!uploadFile) {
-      setUploadError(l("Bitte zuerst eine Datei auswählen.", "Сначала выберите файл.", "Choose a file first."));
+      setUploadError(t.portal_invoices_choose_a_file_first);
       return;
     }
 
@@ -219,13 +219,13 @@ export function PatientInvoicesPage() {
       }
 
       await uploadPortalPaymentProof(formData);
-      setNotice(l("Zahlungsnachweis wurde für das Abrechnungsteam hochgeladen.", "Подтверждение оплаты загружено для отдела биллинга.", "Payment proof uploaded for the billing team."));
+      setNotice(t.portal_invoices_payment_proof_uploaded_for_the_billing_team);
       setUploadOpen(false);
       setUploadFile(null);
       setUploadNote("");
       setVersion((value) => value + 1);
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : l("Zahlungsnachweis konnte nicht hochgeladen werden.", "Не удалось загрузить подтверждение оплаты.", "Failed to upload payment proof."));
+      setUploadError(err instanceof Error ? err.message : t.portal_invoices_failed_to_upload_payment_proof);
     } finally {
       setUploadBusy(false);
     }
@@ -242,19 +242,15 @@ export function PatientInvoicesPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title={l("Meine Rechnungen", "Мои счета", "My invoices")}
-        description={l(
-                "Prüfen Sie freigegebene Rechnungsstände, verfolgen Sie den Zahlungsstatus und laden Sie einen Zahlungsnachweis hoch, wenn Sie bereits überwiesen haben.",
-                "Просматривайте опубликованные счета, отслеживайте статус оплаты и загружайте подтверждение, если средства уже переведены.",
-                "Review released invoice snapshots, track payment state and upload payment proof when you already transferred funds.",
-              )}
+        title={t.portal_invoices_my_invoices}
+        description={t.portal_invoices_review_released_invoice_snapshots_track_payment_state_and_upload}
         actions={
           <>
-            <CountBadge>{l("Patientenportal", "Портал пациента", "Patient portal")}</CountBadge>
+            <CountBadge>{t.portal_invoices_patient_portal}</CountBadge>
             <a href="/documents">
               <Button variant="outline" className={tokens.control.primaryButton}>
                 <Upload className="size-4" />
-                {l("Dokumente öffnen", "Открыть документы", "Open documents")}
+                {t.portal_invoices_open_documents}
               </Button>
             </a>
             <Button
@@ -263,7 +259,7 @@ export function PatientInvoicesPage() {
               onClick={() => setVersion((value) => value + 1)}
             >
               {refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-              {l("Aktualisieren", "Обновить", "Refresh")}
+              {t.portal_invoices_refresh}
             </Button>
           </>
         }
@@ -272,17 +268,17 @@ export function PatientInvoicesPage() {
       {error ? <Banner tone="error">{error}</Banner> : null}
 
       <section className="grid gap-4 md:grid-cols-3">
-        <StatCard label={l("Sichtbare Rechnungen", "Видимые счета", "Visible invoices")} value={String(invoices.length)} />
-        <StatCard label={l("Offener Saldo", "Остаток к оплате", "Outstanding balance")} value={hiddenAmountCount > 0 ? l("Teilweise verborgen", "Частично скрыто", "Partly hidden") : formatPortalCurrency(totalBalance)} />
-        <StatCard label={l("Fehlender Zahlungsnachweis", "Отсутствует подтверждение оплаты", "Missing payment proof")} value={String(proofPendingCount)} description={l(`${overdueCount} überfällig`, `${overdueCount} просрочено`, `${overdueCount} overdue`)} />
+        <StatCard label={t.portal_invoices_visible_invoices} value={String(invoices.length)} />
+        <StatCard label={t.portal_invoices_outstanding_balance} value={hiddenAmountCount > 0 ? t.portal_invoices_partly_hidden : formatPortalCurrency(totalBalance)} />
+        <StatCard label={t.portal_invoices_missing_payment_proof} value={String(proofPendingCount)} description={l(`${overdueCount} überfällig`, `${overdueCount} просрочено`, `${overdueCount} overdue`)} />
       </section>
 
-      <Section title={l("Meine Rechnungen", "Мои счета", "My invoices")} accessory={<CountBadge>{invoices.length}</CountBadge>}>
+      <Section title={t.portal_invoices_my_invoices} accessory={<CountBadge>{invoices.length}</CountBadge>}>
         {invoices.length === 0 ? (
           <EmptyCell>
-            <p className="text-base font-semibold text-foreground">{l("Noch keine Rechnungen freigegeben", "Счета пока не опубликованы", "No invoices released yet")}</p>
+            <p className="text-base font-semibold text-foreground">{t.portal_invoices_no_invoices_released_yet}</p>
             <p className="mt-2 text-sm text-muted-foreground">
-              {l("Rechnungsstände erscheinen hier, sobald sie für das Portal freigegeben sind.", "Снимки счетов появятся здесь, как только будут доступны в портале.", "Billing snapshots will appear here once they are available for portal access.")}
+              {t.portal_invoices_billing_snapshots_will_appear_here_once_they_are_available_for_p}
             </p>
           </EmptyCell>
         ) : (
@@ -305,7 +301,7 @@ export function PatientInvoicesPage() {
                       <div className={tokens.text.eyebrow}>{invoice.invoice_number}</div>
                       <h2 className="mt-2 text-base font-semibold text-foreground">{invoice.order_number}</h2>
                       <p className="mt-1 text-sm text-muted-foreground">
-                        {l("Ausgestellt", "Выставлен", "Issued")} {formatPortalDateTime(invoice.issued_at)}
+                        {t.portal_invoices_issued} {formatPortalDateTime(invoice.issued_at)}
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -320,18 +316,18 @@ export function PatientInvoicesPage() {
                   <div className="grid gap-3 sm:grid-cols-3">
                     <InfoRow
                       className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
-                      label={l("Gesamt", "Итого", "Total")}
-                      value={amountsVisible ? formatPortalCurrency(invoice.total_gross) : l("Verborgen", "Скрыто", "Hidden")}
+                      label={t.portal_invoices_total}
+                      value={amountsVisible ? formatPortalCurrency(invoice.total_gross) : t.portal_invoices_hidden}
                     />
                     <InfoRow
                       className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
-                      label={l("Offen", "Открыто", "Open")}
-                      value={amountsVisible ? formatPortalCurrency(balanceDue) : l("Verborgen", "Скрыто", "Hidden")}
+                      label={t.portal_invoices_open}
+                      value={amountsVisible ? formatPortalCurrency(balanceDue) : t.portal_invoices_hidden}
                     />
                     <InfoRow
                       className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
-                      label={l("Zahlungsnachweis", "Подтверждение оплаты", "Payment proof")}
-                      value={invoice.last_payment_proof_at ? `${l("Hochgeladen", "Загружено", "Uploaded")} ${formatPortalDate(invoice.last_payment_proof_at)}` : l("Nicht hochgeladen", "Не загружено", "Not uploaded")}
+                      label={t.portal_invoices_payment_proof}
+                      value={invoice.last_payment_proof_at ? `${t.portal_invoices_uploaded} ${formatPortalDate(invoice.last_payment_proof_at)}` : t.portal_invoices_not_uploaded}
                     />
                   </div>
                 </ListItem>
@@ -344,8 +340,8 @@ export function PatientInvoicesPage() {
       <Sheet open={Boolean(selectedInvoiceId)} onOpenChange={(open) => { if (!open) setSelectedInvoiceId(""); }}>
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
           <AdminSheetScaffold
-            title={detail ? detail.invoice_number : l("Rechnungsdetails", "Детали счета", "Invoice detail")}
-            description={l("Kaufmännische Summen, Positionen und Übergabe des Zahlungsnachweises für die ausgewählte Rechnung.", "Коммерческие суммы, позиции и передача подтверждения оплаты для выбранного счета.", "Commercial totals, line items and payment-proof handoff for the selected invoice.")}
+            title={detail ? detail.invoice_number : t.portal_invoices_invoice_detail}
+            description={t.portal_invoices_commercial_totals_line_items_and_payment_proof_handoff_for_the_s}
             headerClassName="px-4 py-3"
             bodyClassName="min-h-0 overscroll-y-contain px-4 py-2"
           >
@@ -353,7 +349,7 @@ export function PatientInvoicesPage() {
             {detailBusy ? (
               <div className={cn("flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-muted-foreground", tokens.surface.softCard)}>
                 <LoaderCircle className="size-4 animate-spin" />
-                {l("Rechnungsdetails werden geladen...", "Загрузка деталей счета...", "Loading invoice detail...")}
+                {t.portal_invoices_loading_invoice_detail}
               </div>
             ) : detailError ? (
               <Banner tone="error">
@@ -361,7 +357,7 @@ export function PatientInvoicesPage() {
               </Banner>
             ) : !detail ? (
               <div className={cn("rounded-xl px-4 py-6 text-sm text-muted-foreground", tokens.surface.dashed)}>
-                {l("Wählen Sie eine Rechnungskarte, um die Detailansicht zu öffnen.", "Выберите карточку счета, чтобы открыть детальное представление.", "Choose an invoice card to open the detail workspace.")}
+                {t.portal_invoices_choose_an_invoice_card_to_open_the_detail_workspace}
               </div>
             ) : (
               <>
@@ -370,9 +366,9 @@ export function PatientInvoicesPage() {
                     <div>
                       <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
                         <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
-                        <span>{l("Rechnungsübersicht", "Обзор счета", "Invoice overview")}</span>
+                        <span>{t.portal_invoices_invoice_overview}</span>
                       </h2>
-                      <p className={cn("mt-1", tokens.text.muted)}>{l("Beträge, Fälligkeitsdatum und verknüpfter Angebots-/Auftragskontext.", "Суммы, срок оплаты и связанный контекст предложения/заказа.", "Amounts, due date and linked quote/order context.")}</p>
+                      <p className={cn("mt-1", tokens.text.muted)}>{t.portal_invoices_amounts_due_date_and_linked_quote_order_context}</p>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <Button
@@ -381,11 +377,11 @@ export function PatientInvoicesPage() {
                         className={cn(tokens.control.primaryButton, !invoicePdfVisible(detail) && "hidden")}
                         onClick={() =>
                           void openPortalInvoicePdf(detail.id).catch((err) => {
-                            setDetailError(err instanceof Error ? err.message : l("Rechnungs-PDF konnte nicht geöffnet werden.", "Не удалось открыть PDF счета.", "Failed to open invoice PDF."));
+                            setDetailError(err instanceof Error ? err.message : t.portal_invoices_failed_to_open_invoice_pdf);
                           })
                         }
                       >
-                        {l("PDF-Vorschau", "Предпросмотр PDF", "Preview PDF")}
+                        {t.portal_invoices_preview_pdf}
                       </Button>
                       <Button
                         type="button"
@@ -393,12 +389,12 @@ export function PatientInvoicesPage() {
                         className={cn(tokens.control.primaryButton, !invoicePdfVisible(detail) && "hidden")}
                         onClick={() =>
                           void downloadPortalInvoicePdf(detail.id, `${detail.invoice_number}.pdf`).catch((err) => {
-                            setDetailError(err instanceof Error ? err.message : l("Rechnungs-PDF konnte nicht heruntergeladen werden.", "Не удалось скачать PDF счета.", "Failed to download invoice PDF."));
+                            setDetailError(err instanceof Error ? err.message : t.portal_invoices_failed_to_download_invoice_pdf);
                           })
                         }
                       >
                         <Download className="size-4" />
-                        {l("PDF herunterladen", "Скачать PDF", "Download PDF")}
+                        {t.portal_invoices_download_pdf}
                       </Button>
                       <StatusBadge status={detail.status}>
                         {portalStatusLabel(detail.status)}
@@ -409,12 +405,12 @@ export function PatientInvoicesPage() {
                     </div>
                   </div>
                   <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={l("Ausgestellt am", "Выставлен", "Issued at")} value={formatPortalDateTime(detail.issued_at)} />
-                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={l("Fällig am", "Срок оплаты", "Due date")} value={formatPortalDate(detail.due_date)} />
-                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={l("Auftrag", "Заказ", "Order")} value={detail.order_number} />
-                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={l("Angebot", "Предложение", "Quote")} value={detail.quote_number || l("Nicht festgelegt", "Не указано", "Not set")} />
-                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={l("Brutto gesamt", "Итого брутто", "Total gross")} value={invoiceAmountsVisible(detail) ? formatPortalCurrency(detail.total_gross) : l("Verborgen", "Скрыто", "Hidden")} />
-                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={l("Offener Saldo", "Остаток к оплате", "Open balance")} value={invoiceAmountsVisible(detail) ? formatPortalCurrency(detail.balance_due) : l("Verborgen", "Скрыто", "Hidden")} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_issued_at} value={formatPortalDateTime(detail.issued_at)} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_due_date} value={formatPortalDate(detail.due_date)} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_order} value={detail.order_number} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_quote} value={detail.quote_number || t.portal_invoices_not_set} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_total_gross} value={invoiceAmountsVisible(detail) ? formatPortalCurrency(detail.total_gross) : t.portal_invoices_hidden} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_open_balance} value={invoiceAmountsVisible(detail) ? formatPortalCurrency(detail.balance_due) : t.portal_invoices_hidden} />
                   </div>
                   {detail.notes ? (
                     <div className={cn("mt-4 rounded-xl px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
@@ -428,10 +424,10 @@ export function PatientInvoicesPage() {
                     <div>
                       <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
                         <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
-                        <span>{l("Zahlungsnachweis", "Подтверждение оплаты", "Payment proof")}</span>
+                        <span>{t.portal_invoices_payment_proof}</span>
                       </h2>
                       <p className={cn("mt-1", tokens.text.muted)}>
-                        {l("Laden Sie Überweisungsbeleg oder Zahlungsbestätigung hoch, sobald die Zahlung erfolgt ist.", "Загрузите квитанцию о переводе или подтверждение оплаты после отправки средств.", "Upload transfer receipt or payment confirmation once funds were sent.")}
+                        {t.portal_invoices_upload_transfer_receipt_or_payment_confirmation_once_funds_were}
                       </p>
                     </div>
                     <Button
@@ -444,14 +440,14 @@ export function PatientInvoicesPage() {
                       }}
                     >
                       <Upload className="size-4" />
-                      {l("Zahlungsnachweis hochladen", "Загрузить подтверждение оплаты", "Upload payment proof")}
+                      {t.portal_invoices_upload_payment_proof}
                     </Button>
                   </div>
                   <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={l("Hochgeladene Nachweise", "Загруженные подтверждения", "Uploaded proofs")} value={String(detail.payment_proof_count ?? 0)} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_uploaded_proofs} value={String(detail.payment_proof_count ?? 0)} />
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
-                      label={l("Letzter Upload", "Последняя загрузка", "Latest upload")}
-                      value={detail.last_payment_proof_at ? formatPortalDateTime(detail.last_payment_proof_at) : l("Nicht hochgeladen", "Не загружено", "Not uploaded")}
+                      label={t.portal_invoices_latest_upload}
+                      value={detail.last_payment_proof_at ? formatPortalDateTime(detail.last_payment_proof_at) : t.portal_invoices_not_uploaded}
                     />
                   </div>
                 </section>
@@ -459,13 +455,13 @@ export function PatientInvoicesPage() {
                 <section className={cn("rounded-xl p-5", tokens.surface.card)}>
                   <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
                     <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
-                    <span>{l("Positionen", "Позиции", "Line items")}</span>
+                    <span>{t.portal_invoices_line_items}</span>
                   </h2>
-                  <p className={cn("mt-1", tokens.text.muted)}>{l("Materialisierte Abrechnungspositionen für den aktuellen Rechnungsstand.", "Материализованные строки биллинга для текущего снимка счета.", "Materialized billing lines for the current invoice snapshot.")}</p>
+                  <p className={cn("mt-1", tokens.text.muted)}>{t.portal_invoices_materialized_billing_lines_for_the_current_invoice_snapshot}</p>
                   <div className="mt-5 space-y-3">
                     {!detail.line_items || detail.line_items.length === 0 ? (
                       <div className={cn("rounded-xl px-4 py-6 text-sm text-muted-foreground", tokens.surface.dashed)}>
-                        {l("Keine Positionen verfügbar.", "Нет доступных позиций.", "No line items available.")}
+                        {t.portal_invoices_no_line_items_available}
                       </div>
                     ) : (
                       detail.line_items.map((line, index) => (
@@ -493,13 +489,13 @@ export function PatientInvoicesPage() {
       >
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>{l("Zahlungsnachweis hochladen", "Загрузить подтверждение оплаты", "Upload payment proof")}</DialogTitle>
+            <DialogTitle>{t.portal_invoices_upload_payment_proof}</DialogTitle>
             <DialogDescription>
-              {l("Diese Datei wird intern für die Abrechnungsnachverfolgung angehängt und nicht automatisch im Portal freigegeben.", "Этот файл прикрепляется внутри системы для биллинга и не публикуется автоматически обратно в портал.", "This file is attached internally for billing follow-up and is not auto-shared back to the portal.")}
+              {t.portal_invoices_this_file_is_attached_internally_for_billing_follow_up_and_is_no}
             </DialogDescription>
           </DialogHeader>
           <form className="space-y-4" onSubmit={(event) => void handlePaymentProofUpload(event)}>
-            <Field label={l("Datei", "Файл", "File")} htmlFor="invoice-payment-proof">
+            <Field label={t.portal_invoices_file} htmlFor="invoice-payment-proof">
               <input
                 id="invoice-payment-proof"
                 type="file"
@@ -510,11 +506,11 @@ export function PatientInvoicesPage() {
                 onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
               />
             </Field>
-            <Field label={l("Notiz", "Заметка", "Note")} htmlFor="invoice-payment-proof-note">
+            <Field label={t.portal_invoices_note} htmlFor="invoice-payment-proof-note">
               <textarea
                 id="invoice-payment-proof-note"
                 className={cn(textareaClass, "min-h-[110px]")}
-                placeholder={l("Optionale Überweisungsreferenz, Zahlungsdatum oder Erläuterung.", "Необязательная ссылка на перевод, дата оплаты или пояснение.", "Optional transfer reference, payment date or clarification.")}
+                placeholder={t.portal_invoices_optional_transfer_reference_payment_date_or_clarification}
                 value={uploadNote}
                 onChange={(event) => setUploadNote(event.target.value)}
               />
@@ -522,11 +518,11 @@ export function PatientInvoicesPage() {
             {uploadError ? <Banner tone="error">{uploadError}</Banner> : null}
             <DialogFooter>
               <Button type="button" variant="outline" className={tokens.control.primaryButton} onClick={() => setUploadOpen(false)}>
-                {l("Abbrechen", "Отмена", "Cancel")}
+                {t.portal_invoices_cancel}
               </Button>
               <Button type="submit" className={tokens.control.primaryButton} disabled={uploadBusy}>
                 {uploadBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Upload className="size-4" />}
-                {l("Nachweis senden", "Отправить подтверждение", "Send proof")}
+                {t.portal_invoices_send_proof}
               </Button>
             </DialogFooter>
           </form>
@@ -537,15 +533,14 @@ export function PatientInvoicesPage() {
 }
 
 function InvoiceLineCard({ line }: { line: PortalInvoiceLineItem }) {
-  const { lang } = useLang();
-  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
+  const { t } = useLang();
   return (
     <article className={cn("rounded-xl px-4 py-4", tokens.surface.mutedCard)}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-foreground">{line.description}</p>
           <p className={cn("mt-1", tokens.text.muted)}>
-            {l("Menge", "Кол-во", "Qty")} {line.quantity} · {l("Einheit", "Цена за единицу", "Unit")} {formatPortalCurrency(line.unit_price)} · VAT {line.vat_rate}%
+            {t.portal_invoices_qty} {line.quantity} · {t.portal_invoices_unit} {formatPortalCurrency(line.unit_price)} · VAT {line.vat_rate}%
           </p>
         </div>
         <CountBadge>{formatPortalCurrency(line.line_gross)}</CountBadge>

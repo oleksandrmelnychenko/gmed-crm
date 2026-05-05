@@ -26,12 +26,6 @@ type CaseItemEditSheetProps = {
   width?: "default" | "wide";
 };
 
-function tri(lang: string, de: string, ru: string, en: string) {
-  if (lang === "de") return de;
-  if (lang === "ru") return ru;
-  return en;
-}
-
 export function CaseItemEditSheet({
   open,
   onOpenChange,
@@ -48,11 +42,11 @@ export function CaseItemEditSheet({
   children,
   width = "default",
 }: CaseItemEditSheetProps) {
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const defaultSubmit =
     mode === "create"
-      ? tri(lang, "Hinzufugen", "Добавить", "Add")
-      : tri(lang, "Anderungen speichern", "Сохранить изменения", "Save changes");
+      ? t.cases_workspace_item_submit_create
+      : t.cases_workspace_item_submit_edit;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -92,7 +86,7 @@ export function CaseItemEditSheet({
                         disabled={busy || !canDelete}
                       >
                         <Trash2 className="size-4" />
-                        {tri(lang, "Entfernen", "Удалить", "Remove")}
+                        {t.cases_workspace_item_remove}
                       </Button>
                     ) : null}
                   </div>

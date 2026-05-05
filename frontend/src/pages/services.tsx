@@ -40,17 +40,19 @@ import {
 } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { useLang } from "@/lib/i18n";
+import {
+  formatEnumLabelFromKeys,
+  useLang,
+  type Translations,
+  type TranslationKey,
+} from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { toRfc3339 } from "@/pages/appointments/model/workflow-helpers";
 import {
-  conciergeServiceKindLabel,
-  conciergeServiceSourceLabel,
   conciergeServiceStatusTone,
   formatPortalCurrency,
   formatPortalDateTime,
-  portalStatusLabel,
 } from "@/pages/patients/model/portal-shared";
 
 const PatientServicesPage = lazy(() =>
@@ -153,6 +155,38 @@ const SERVICE_KIND_OPTIONS = [
   "other",
 ];
 
+const SERVICE_STATUS_LABEL_KEYS = {
+  planned: "operations_status_planned",
+  booked: "operations_status_booked",
+  confirmed: "operations_status_confirmed",
+  in_service: "operations_status_in_service",
+  completed: "staff_services_status_completed",
+  cancelled: "staff_services_status_cancelled",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const SERVICE_BILLING_STATUS_LABEL_KEYS = {
+  draft: "staff_services_billing_status_draft",
+  ready: "staff_services_billing_status_ready",
+  billed: "staff_services_billing_status_billed",
+  settled: "staff_services_billing_status_settled",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const SERVICE_KIND_LABEL_KEYS = {
+  hotel: "staff_services_kind_hotel",
+  transfer: "staff_services_kind_transfer",
+  vip_terminal: "staff_services_kind_vip_terminal",
+  flight: "staff_services_kind_flight",
+  chauffeur: "staff_services_kind_chauffeur",
+  translation_support: "staff_services_kind_translation_support",
+  other: "staff_services_kind_other",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const SERVICE_SOURCE_LABEL_KEYS = {
+  patient_portal: "staff_services_source_patient_portal",
+  appointment_bootstrap: "staff_services_source_appointment_bootstrap",
+  care_team: "staff_services_source_care_team",
+} satisfies Partial<Record<string, TranslationKey>>;
+
 function blankCreateServiceForm(defaultConciergeId = ""): CreateServiceFormState {
   return {
     patientId: "",
@@ -202,13 +236,27 @@ function billingStatusTone(status: string) {
   return "border-slate-200 bg-slate-100 text-slate-700";
 }
 
-type ServicesText = (de: string, ru: string, en: string) => string;
+function serviceStatusLabel(value: string, t: Translations) {
+  return formatEnumLabelFromKeys(value, SERVICE_STATUS_LABEL_KEYS, t);
+}
 
-function buildServiceColumns(l: ServicesText): ColumnDef<StaffConciergeService>[] {
+function billingStatusLabel(value: string, t: Translations) {
+  return formatEnumLabelFromKeys(value, SERVICE_BILLING_STATUS_LABEL_KEYS, t);
+}
+
+function serviceKindLabel(value: string, t: Translations) {
+  return formatEnumLabelFromKeys(value, SERVICE_KIND_LABEL_KEYS, t);
+}
+
+function serviceSourceLabel(value: string, t: Translations) {
+  return formatEnumLabelFromKeys(value, SERVICE_SOURCE_LABEL_KEYS, t);
+}
+
+function buildServiceColumns(t: Translations): ColumnDef<StaffConciergeService>[] {
   return [
     {
       id: "title",
-      label: l("Service", "Сервис", "Service"),
+      label: t.staff_services_column_service,
       accessor: (row) => row.title,
       filterType: "text",
       pinned: "left",
@@ -220,40 +268,40 @@ function buildServiceColumns(l: ServicesText): ColumnDef<StaffConciergeService>[
     },
     {
       id: "status",
-      label: l("Status", "Статус", "Status"),
+      label: t.staff_services_column_status,
       accessor: (row) => row.status,
       filterType: "enum",
       filterOptions: ["planned", "booked", "confirmed", "in_service", "completed", "cancelled"].map(
-        (value) => ({ value, label: portalStatusLabel(value) }),
+        (value) => ({ value, label: serviceStatusLabel(value, t) }),
       ),
       width: 130,
       sortable: true,
       render: (row) => (
         <Badge variant="outline" className={cn("rounded-full", conciergeServiceStatusTone(row.status))}>
-          {portalStatusLabel(row.status)}
+          {serviceStatusLabel(row.status, t)}
         </Badge>
       ),
     },
     {
       id: "billing_status",
-      label: l("Abrechnung", "Биллинг", "Billing"),
+      label: t.staff_services_column_billing,
       accessor: (row) => row.billing_status,
       filterType: "enum",
       filterOptions: ["draft", "ready", "billed", "settled"].map((value) => ({
         value,
-        label: portalStatusLabel(value),
+        label: billingStatusLabel(value, t),
       })),
       width: 110,
       sortable: true,
       render: (row) => (
         <Badge variant="outline" className={cn("rounded-full", billingStatusTone(row.billing_status))}>
-          {portalStatusLabel(row.billing_status)}
+          {billingStatusLabel(row.billing_status, t)}
         </Badge>
       ),
     },
     {
       id: "patient",
-      label: l("Patient", "Пациент", "Patient"),
+      label: t.staff_services_column_patient,
       accessor: (row) => row.patient_name,
       filterType: "text",
       width: 200,
@@ -271,40 +319,40 @@ function buildServiceColumns(l: ServicesText): ColumnDef<StaffConciergeService>[
     },
     {
       id: "service_kind",
-      label: l("Art", "Тип", "Kind"),
+      label: t.staff_services_column_kind,
       accessor: (row) => row.service_kind,
       filterType: "enum",
       filterOptions: ["hotel", "transfer", "vip_terminal", "flight", "chauffeur", "translation_support"].map(
-        (value) => ({ value, label: conciergeServiceKindLabel(value) }),
+        (value) => ({ value, label: serviceKindLabel(value, t) }),
       ),
       width: 140,
       sortable: true,
       render: (row) => (
         <Badge variant="outline" className="rounded-full">
-          {conciergeServiceKindLabel(row.service_kind)}
+          {serviceKindLabel(row.service_kind, t)}
         </Badge>
       ),
     },
     {
       id: "request_source",
-      label: l("Quelle", "Источник", "Source"),
+      label: t.staff_services_column_source,
       accessor: (row) => row.request_source,
       filterType: "enum",
       filterOptions: ["patient_portal", "appointment_bootstrap", "care_team"].map((value) => ({
         value,
-        label: conciergeServiceSourceLabel(value),
+        label: serviceSourceLabel(value, t),
       })),
       width: 160,
       sortable: true,
       render: (row) => (
         <Badge variant="outline" className="rounded-full">
-          {conciergeServiceSourceLabel(row.request_source)}
+          {serviceSourceLabel(row.request_source, t)}
         </Badge>
       ),
     },
     {
       id: "vendor",
-      label: l("Anbieter", "Поставщик", "Vendor"),
+      label: t.staff_services_column_vendor,
       accessor: (row) => row.vendor_name,
       filterType: "text",
       width: 180,
@@ -317,7 +365,7 @@ function buildServiceColumns(l: ServicesText): ColumnDef<StaffConciergeService>[
     },
     {
       id: "booking",
-      label: l("Buchung", "Бронь", "Booking"),
+      label: t.staff_services_column_booking,
       accessor: (row) => row.booking_reference,
       filterType: "text",
       width: 140,
@@ -330,7 +378,7 @@ function buildServiceColumns(l: ServicesText): ColumnDef<StaffConciergeService>[
     },
     {
       id: "schedule",
-      label: l("Zeitplan", "Расписание", "Schedule"),
+      label: t.staff_services_column_schedule,
       accessor: (row) => row.starts_at,
       filterType: "date",
       width: 230,
@@ -348,7 +396,7 @@ function buildServiceColumns(l: ServicesText): ColumnDef<StaffConciergeService>[
     },
     {
       id: "cost",
-      label: l("Kosten", "Стоимость", "Cost"),
+      label: t.staff_services_column_cost,
       accessor: (row) => Number(row.actual_cost ?? row.cost_estimate ?? 0),
       filterType: "number",
       width: 110,
@@ -364,7 +412,7 @@ function buildServiceColumns(l: ServicesText): ColumnDef<StaffConciergeService>[
     },
     {
       id: "concierge",
-      label: l("Concierge", "Консьерж", "Concierge"),
+      label: t.staff_services_column_concierge,
       accessor: (row) => row.assigned_concierge_name,
       filterType: "text",
       width: 170,
@@ -379,7 +427,7 @@ function buildServiceColumns(l: ServicesText): ColumnDef<StaffConciergeService>[
 }
 
 function StaffServicesPage() {
-  const { lang } = useLang();
+  const { t } = useLang();
   const { user } = useAuth();
   const [items, setItems] = useState<StaffConciergeService[]>([]);
   const [loading, setLoading] = useState(true);
@@ -406,11 +454,6 @@ function StaffServicesPage() {
     blankCreateServiceForm(),
   );
 
-  const l = useCallback(
-    (de: string, ru: string, en: string) =>
-      lang === "de" ? de : lang === "ru" ? ru : en,
-    [lang],
-  );
   const canCreateService =
     user?.role === "ceo" ||
     user?.role === "patient_manager" ||
@@ -421,7 +464,7 @@ function StaffServicesPage() {
     setVersion((value) => value + 1);
   }, 250);
 
-  const baseColumns = useMemo(() => buildServiceColumns(l), [l]);
+  const baseColumns = useMemo(() => buildServiceColumns(t), [t]);
   const columns = useMemo<ColumnDef<StaffConciergeService>[]>(() => {
     const frozenSet = new Set(frozenColumns);
     return baseColumns.map((column) => ({
@@ -504,11 +547,7 @@ function StaffServicesPage() {
         setLookupError(
           err instanceof Error
             ? err.message
-            : l(
-                "Stammdaten konnten nicht geladen werden.",
-                "Не удалось загрузить справочники.",
-                "Failed to load lookup data.",
-              ),
+            : t.staff_services_lookup_failed,
         );
       } finally {
         if (!cancelled) setLookupsLoading(false);
@@ -519,7 +558,7 @@ function StaffServicesPage() {
     return () => {
       cancelled = true;
     };
-  }, [canCreateService, l]);
+  }, [canCreateService, t]);
 
   useEffect(() => {
     let cancelled = false;
@@ -546,11 +585,7 @@ function StaffServicesPage() {
         setError(
           err instanceof Error
             ? err.message
-            : l(
-                "Concierge-Services konnten nicht geladen werden.",
-                "Не удалось загрузить concierge-сервисы.",
-                "Failed to load concierge services.",
-              ),
+            : t.staff_services_load_failed,
         );
       } finally {
         if (!cancelled) {
@@ -564,7 +599,7 @@ function StaffServicesPage() {
     return () => {
       cancelled = true;
     };
-  }, [l, loading, mineOnly, search, version]);
+  }, [loading, mineOnly, search, t, version]);
 
   async function handleCreateService(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -572,36 +607,24 @@ function StaffServicesPage() {
 
     const title = createForm.title.trim();
     if (!createForm.patientId) {
-      setCreateError(l("Patient ist erforderlich.", "Пациент обязателен.", "Patient is required."));
+      setCreateError(t.staff_services_patient_required);
       return;
     }
     if (!title) {
-      setCreateError(l("Titel ist erforderlich.", "Название обязательно.", "Title is required."));
+      setCreateError(t.staff_services_title_required);
       return;
     }
 
     const costEstimate = optionalMoney(createForm.costEstimate);
     const actualCost = optionalMoney(createForm.actualCost);
     if (Number.isNaN(costEstimate) || Number.isNaN(actualCost)) {
-      setCreateError(
-        l(
-          "Kostenfelder müssen gültige Zahlen sein.",
-          "Поля стоимости должны быть корректными числами.",
-          "Cost fields must be valid numbers.",
-        ),
-      );
+      setCreateError(t.staff_services_cost_invalid);
       return;
     }
 
     const currency = createForm.currency.trim().toUpperCase() || "EUR";
     if (currency.length !== 3) {
-      setCreateError(
-        l(
-          "Währung muss aus 3 Buchstaben bestehen.",
-          "Валюта должна состоять из 3 букв.",
-          "Currency must be 3 letters.",
-        ),
-      );
+      setCreateError(t.staff_services_currency_invalid);
       return;
     }
 
@@ -636,11 +659,7 @@ function StaffServicesPage() {
       setCreateError(
         err instanceof Error
           ? err.message
-          : l(
-              "Concierge-Service konnte nicht erstellt werden.",
-              "Не удалось создать concierge-сервис.",
-              "Failed to create concierge service.",
-            ),
+          : t.staff_services_create_failed,
       );
     } finally {
       setCreateBusy(false);
@@ -662,24 +681,24 @@ function StaffServicesPage() {
 
   const operatorLabels = useMemo(
     () => ({
-      contains: l("enthält", "содержит", "contains"),
-      does_not_contain: l("enthält nicht", "не содержит", "does not contain"),
-      is_empty: l("ist leer", "пусто", "is empty"),
-      is_not_empty: l("ist nicht leer", "не пусто", "is not empty"),
-      is: l("ist", "равно", "is"),
-      is_not: l("ist nicht", "не равно", "is not"),
-      is_any_of: l("ist eines von", "одно из", "is any of"),
-      is_none_of: l("ist keines von", "ни одно из", "is none of"),
-      has_any: l("hat eines von", "имеет любое", "has any"),
-      has_all: l("hat alle", "имеет все", "has all"),
-      has_none: l("hat keines", "не имеет", "has none"),
-      before: l("vor", "до", "before"),
-      after: l("nach", "после", "after"),
-      between: l("zwischen", "между", "between"),
-      last_n_days: l("letzte N Tage", "за N дней", "last N days"),
-      equals: l("gleich", "равно", "equals"),
+      contains: t.filter_op_contains,
+      does_not_contain: t.filter_op_does_not_contain,
+      is_empty: t.filter_op_is_empty,
+      is_not_empty: t.filter_op_is_not_empty,
+      is: t.filter_op_is,
+      is_not: t.filter_op_is_not,
+      is_any_of: t.filter_op_is_any_of,
+      is_none_of: t.filter_op_is_none_of,
+      has_any: t.filter_op_has_any,
+      has_all: t.filter_op_has_all,
+      has_none: t.filter_op_has_none,
+      before: t.filter_op_before,
+      after: t.filter_op_after,
+      between: t.filter_op_between,
+      last_n_days: t.filter_op_last_n_days,
+      equals: t.filter_op_equals,
     }),
-    [l],
+    [t],
   );
 
   if (loading) {
@@ -687,7 +706,7 @@ function StaffServicesPage() {
       <div className="flex min-h-[60vh] items-center justify-center">
         <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm text-slate-500 shadow-sm">
           <LoaderCircle className="size-4 animate-spin" />
-          {l("Concierge-Services werden geladen...", "Загрузка concierge-сервисов...", "Loading concierge services...")}
+          {t.staff_services_loading}
         </div>
       </div>
     );
@@ -696,7 +715,7 @@ function StaffServicesPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title={l("Concierge-Services", "Concierge-сервисы", "Concierge services")}
+        title={t.staff_services_title}
         actions={
           canCreateService ? (
             <Button
@@ -706,7 +725,7 @@ function StaffServicesPage() {
               disabled={lookupsLoading && patients.length === 0}
             >
               <Plus className="size-3.5" />
-              {l("Service hinzufügen", "Добавить сервис", "Add service")}
+              {t.staff_services_add_service}
             </Button>
           ) : null
         }
@@ -724,9 +743,9 @@ function StaffServicesPage() {
       ) : null}
 
       <div className="grid gap-3 md:grid-cols-3">
-        <StatCard label={l("Aktiv", "Активные", "Active")} value={activeCount} />
-        <StatCard label={l("Billing-ready", "Готовы к биллингу", "Billing-ready")} value={readyForBillingCount} />
-        <StatCard label={l("Portal-Anfragen", "Запросы портала", "Portal requests")} value={portalRequestCount} />
+        <StatCard label={t.staff_services_stat_active} value={activeCount} />
+        <StatCard label={t.staff_services_stat_billing_ready} value={readyForBillingCount} />
+        <StatCard label={t.staff_services_stat_portal_requests} value={portalRequestCount} />
       </div>
 
       <div className="relative z-30 flex flex-col gap-2">
@@ -736,7 +755,7 @@ function StaffServicesPage() {
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder={l("Patient, Anbieter, Buchung...", "Пациент, провайдер, бронь...", "Patient, provider, booking...")}
+              placeholder={t.staff_services_search_placeholder}
               className="h-8 w-full rounded-lg bg-background pl-8 text-[13px]"
             />
           </div>
@@ -748,7 +767,7 @@ function StaffServicesPage() {
               onChange={(event) => setMineOnly(event.target.checked)}
               className={checkboxClass}
             />
-            {l("Meine", "Мои", "Mine")}
+            {t.staff_services_mine}
           </label>
 
           <div className="ml-auto flex items-center gap-1.5">
@@ -761,8 +780,8 @@ function StaffServicesPage() {
               type="button"
               variant="outline"
               size="icon-sm"
-              title={l("Aktualisieren", "Обновить", "Refresh")}
-              aria-label={l("Aktualisieren", "Обновить", "Refresh")}
+              title={t.common_refresh}
+              aria-label={t.common_refresh}
               onClick={() => setVersion((value) => value + 1)}
             >
               <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
@@ -777,14 +796,14 @@ function StaffServicesPage() {
             filters={filterPredicates}
             onChange={setFilterPredicates}
             translations={{
-              addFilter: l("Filter", "Фильтр", "Filter"),
-              clearAll: l("Leeren", "Очистить", "Clear"),
-              searchPlaceholder: l("Felder suchen", "Поиск полей", "Search fields"),
-              noFields: l("Keine verfügbaren Felder", "Нет доступных полей", "No available fields"),
-              remove: l("Filter entfernen", "Удалить фильтр", "Remove filter"),
-              valuePlaceholder: l("Wert", "Значение", "Value"),
-              yes: l("Ja", "Да", "Yes"),
-              no: l("Nein", "Нет", "No"),
+              addFilter: t.table_filter,
+              clearAll: t.common_clear,
+              searchPlaceholder: t.table_filter_search_fields,
+              noFields: t.table_filter_no_fields,
+              remove: t.table_filter_remove,
+              valuePlaceholder: t.common_value,
+              yes: t.common_yes,
+              no: t.common_no,
               operatorLabels,
             }}
           />
@@ -794,14 +813,14 @@ function StaffServicesPage() {
             value={sortStack}
             onChange={setSortStack}
             translations={{
-              addSort: l("Sortierung hinzufügen", "Добавить сортировку", "Add sort"),
-              clearAll: l("Leeren", "Очистить", "Clear"),
-              ascending: l("Aufsteigend", "По возрастанию", "Asc"),
-              descending: l("Absteigend", "По убыванию", "Desc"),
-              emptyHint: l("Sortierung", "Сортировка", "Sort"),
-              moveUp: l("Nach oben", "Выше", "Move up"),
-              moveDown: l("Nach unten", "Ниже", "Move down"),
-              remove: l("Sortierung entfernen", "Удалить сортировку", "Remove sort"),
+              addSort: t.table_sort_add,
+              clearAll: t.table_sort_clear,
+              ascending: t.table_sort_ascending,
+              descending: t.table_sort_descending,
+              emptyHint: t.common_sort,
+              moveUp: t.table_sort_move_up,
+              moveDown: t.table_sort_move_down,
+              remove: t.table_sort_remove,
             }}
           />
 
@@ -815,25 +834,25 @@ function StaffServicesPage() {
               onFrozenColumnsChange={setFrozenColumns}
               defaultFrozen={DEFAULT_FROZEN_COLUMNS}
               maxFrozenColumns={MAX_FROZEN_COLUMNS}
-              buttonLabel={l("Spalten", "Колонки", "Columns")}
-              searchPlaceholder={l("Spalten suchen", "Поиск колонок", "Search columns")}
-              resetLabel={l("Zurücksetzen", "Сбросить", "Reset")}
-              showAllLabel={l("Alle anzeigen", "Показать все", "Show all")}
-              hideAllLabel={l("Alle ausblenden", "Скрыть все", "Hide all")}
-              noMatchLabel={l("Keine Treffer", "Нет совпадений", "No match")}
-              requiredNoteLabel={l("erforderlich", "обязательная", "required")}
-              freezeLabel={l("Fixieren", "Закрепить", "Freeze")}
-              unfreezeLabel={l("Lösen", "Открепить", "Unfreeze")}
-              frozenNoteLabel={l("fixiert", "закреплена", "frozen")}
+              buttonLabel={t.table_columns}
+              searchPlaceholder={t.table_columns_search}
+              resetLabel={t.common_reset}
+              showAllLabel={t.table_columns_show_all}
+              hideAllLabel={t.table_columns_hide_all}
+              noMatchLabel={t.common_no_results}
+              requiredNoteLabel={t.table_columns_required}
+              freezeLabel={t.table_columns_freeze}
+              unfreezeLabel={t.table_columns_unfreeze}
+              frozenNoteLabel={t.table_columns_frozen}
             />
             <DensityToggle
               value={density}
               onChange={setDensity}
-              ariaLabel={l("Zeilendichte", "Плотность строк", "Row density")}
+              ariaLabel={t.table_density}
               labels={{
-                comfortable: l("Komfortabel", "Свободно", "Comfortable"),
-                compact: l("Kompakt", "Компактно", "Compact"),
-                condensed: l("Dicht", "Плотно", "Condensed"),
+                comfortable: t.table_density_comfortable,
+                compact: t.table_density_compact,
+                condensed: t.table_density_condensed,
               }}
             />
           </div>
@@ -842,11 +861,7 @@ function StaffServicesPage() {
 
       {items.length === 0 ? (
         <EmptyCell>
-          {l(
-            "Keine Concierge-Services im aktuellen Filter.",
-            "Нет concierge-сервисов в текущем фильтре.",
-            "No concierge services in the current filter.",
-          )}
+          {t.staff_services_empty}
         </EmptyCell>
       ) : (
         <DataTable
@@ -871,22 +886,18 @@ function StaffServicesPage() {
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[760px]">
           <form onSubmit={handleCreateService} className="flex h-full min-h-0 flex-col">
             <AdminSheetScaffold
-              title={l("Concierge-Service hinzufugen", "\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c concierge-\u0441\u0435\u0440\u0432\u0438\u0441", "Add concierge service")}
+              title={t.staff_services_create_title}
               description={
                 selectedPatient
                   ? patientOptionLabel(selectedPatient)
-                  : l(
-                      "Patient, Serviceart und Zeitfenster festlegen.",
-                      "\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u043f\u0430\u0446\u0438\u0435\u043d\u0442\u0430, \u0442\u0438\u043f \u0441\u0435\u0440\u0432\u0438\u0441\u0430 \u0438 \u0432\u0440\u0435\u043c\u0435\u043d\u043d\u043e\u0435 \u043e\u043a\u043d\u043e.",
-                      "Set patient, service kind, and schedule window.",
-                    )
+                  : t.staff_services_create_description
               }
               bodyClassName="space-y-4 px-5 py-4"
               footer={
                 <SheetFormFooter
-                  cancelLabel={l("Abbrechen", "\u041e\u0442\u043c\u0435\u043d\u0430", "Cancel")}
-                  submitLabel={l("Speichern", "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c", "Save")}
-                  submittingLabel={l("Speichern", "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c", "Save")}
+                  cancelLabel={t.common_cancel}
+                  submitLabel={t.common_save}
+                  submittingLabel={t.common_save}
                   submitting={createBusy}
                   submitDisabled={createBusy || lookupsLoading}
                   onCancel={closeCreateSheet}
@@ -903,7 +914,7 @@ function StaffServicesPage() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {l("Patient", "Пациент", "Patient")}
+                      {t.staff_services_form_patient}
                     </span>
                     <NativeComboboxSelect
                       required
@@ -913,7 +924,7 @@ function StaffServicesPage() {
                       }
                       className={formSelectClassName}
                     >
-                      <option value="">{l("Auswählen", "Выбрать", "Select")}</option>
+                      <option value="">{t.staff_services_select}</option>
                       {patients.map((patient) => (
                         <option key={patient.id} value={patient.id}>
                           {patientOptionLabel(patient)}
@@ -924,7 +935,7 @@ function StaffServicesPage() {
 
                   <label className="space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {l("Serviceart", "Тип сервиса", "Service kind")}
+                      {t.staff_services_form_kind}
                     </span>
                     <NativeComboboxSelect
                       value={createForm.serviceKind}
@@ -935,7 +946,7 @@ function StaffServicesPage() {
                     >
                       {SERVICE_KIND_OPTIONS.map((kind) => (
                         <option key={kind} value={kind}>
-                          {conciergeServiceKindLabel(kind)}
+                          {serviceKindLabel(kind, t)}
                         </option>
                       ))}
                     </NativeComboboxSelect>
@@ -944,7 +955,7 @@ function StaffServicesPage() {
 
                 <label className="block space-y-1.5 text-sm">
                   <span className="text-xs font-medium text-muted-foreground">
-                    {l("Titel", "Название", "Title")}
+                    {t.staff_services_form_title}
                   </span>
                   <Input
                     required
@@ -959,7 +970,7 @@ function StaffServicesPage() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {l("Provider", "Провайдер", "Provider")}
+                      {t.staff_services_form_provider}
                     </span>
                     <NativeComboboxSelect
                       value={createForm.providerId}
@@ -968,7 +979,7 @@ function StaffServicesPage() {
                       }
                       className={formSelectClassName}
                     >
-                      <option value="">{l("Optional", "Опционально", "Optional")}</option>
+                      <option value="">{t.staff_services_optional}</option>
                       {providers.map((provider) => (
                         <option key={provider.id} value={provider.id}>
                           {provider.name}
@@ -979,7 +990,7 @@ function StaffServicesPage() {
 
                   <label className="space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {l("Concierge", "Консьерж", "Concierge")}
+                      {t.staff_services_form_concierge}
                     </span>
                     <NativeComboboxSelect
                       value={createForm.assignedConciergeId}
@@ -991,7 +1002,7 @@ function StaffServicesPage() {
                       }
                       className={formSelectClassName}
                     >
-                      <option value="">{l("Nicht zugewiesen", "Не назначен", "Unassigned")}</option>
+                      <option value="">{t.staff_services_unassigned}</option>
                       {conciergeStaff.map((member) => (
                         <option key={member.id} value={member.id}>
                           {member.name}
@@ -1004,7 +1015,7 @@ function StaffServicesPage() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {l("Start", "Начало", "Start")}
+                      {t.staff_services_form_start}
                     </span>
                     <Input
                       type="datetime-local"
@@ -1017,7 +1028,7 @@ function StaffServicesPage() {
                   </label>
                   <label className="space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {l("Ende", "Конец", "End")}
+                      {t.staff_services_form_end}
                     </span>
                     <Input
                       type="datetime-local"
@@ -1033,7 +1044,7 @@ function StaffServicesPage() {
                 <div className="grid gap-3 sm:grid-cols-3">
                   <label className="space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {l("Kostenschätzung", "Оценка стоимости", "Cost estimate")}
+                      {t.staff_services_form_cost_estimate}
                     </span>
                     <Input
                       inputMode="decimal"
@@ -1049,7 +1060,7 @@ function StaffServicesPage() {
                   </label>
                   <label className="space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {l("Ist-Kosten", "Фактическая стоимость", "Actual cost")}
+                      {t.staff_services_form_actual_cost}
                     </span>
                     <Input
                       inputMode="decimal"
@@ -1062,7 +1073,7 @@ function StaffServicesPage() {
                   </label>
                   <label className="space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {l("Währung", "Валюта", "Currency")}
+                      {t.staff_services_form_currency}
                     </span>
                     <Input
                       value={createForm.currency}
@@ -1078,7 +1089,7 @@ function StaffServicesPage() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {l("Buchungsreferenz", "Номер брони", "Booking reference")}
+                      {t.staff_services_form_booking_reference}
                     </span>
                     <Input
                       value={createForm.bookingReference}
@@ -1093,7 +1104,7 @@ function StaffServicesPage() {
                   </label>
                   <label className="space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {l("Vendor", "Поставщик", "Vendor")}
+                      {t.staff_services_form_vendor}
                     </span>
                     <Input
                       value={createForm.vendorName}
@@ -1107,7 +1118,7 @@ function StaffServicesPage() {
 
                 <label className="block space-y-1.5 text-sm">
                   <span className="text-xs font-medium text-muted-foreground">
-                    {l("Vendor-Kontakt", "Контакт поставщика", "Vendor contact")}
+                    {t.staff_services_form_vendor_contact}
                   </span>
                   <Input
                     value={createForm.vendorContact}
@@ -1120,7 +1131,7 @@ function StaffServicesPage() {
 
                 <label className="block space-y-1.5 text-sm">
                   <span className="text-xs font-medium text-muted-foreground">
-                    {l("Service-Notizen", "Заметки по сервису", "Service notes")}
+                    {t.staff_services_form_service_notes}
                   </span>
                   <textarea
                     value={createForm.serviceNotes}
@@ -1134,7 +1145,7 @@ function StaffServicesPage() {
 
                 <label className="block space-y-1.5 text-sm">
                   <span className="text-xs font-medium text-muted-foreground">
-                    {l("Billing-Notizen", "Заметки по биллингу", "Billing notes")}
+                    {t.staff_services_form_billing_notes}
                   </span>
                   <textarea
                     value={createForm.billingNotes}

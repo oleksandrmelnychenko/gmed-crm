@@ -31,7 +31,7 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
-import { formatUnknownValue, useLang } from "@/lib/i18n";
+import { useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { localizeRequiredDocumentLabel } from "@/lib/required-document-labels";
 import {
@@ -80,69 +80,15 @@ const PORTAL_DOCUMENT_REALTIME_EVENTS = [
 
 function portalDocumentValueLabel(
   value: string | null | undefined,
-  l: (de: string, ru: string, en: string) => string,
-  translations: { common_unknown: string; common_unknown_value: string },
 ) {
   return sharedPortalDocumentValueLabel(value);
-  switch (value) {
-    case "general":
-      return l("Allgemein", "Общий", "General");
-    case "report":
-    case "medical_report":
-      return l("Medizinischer Bericht", "Медицинский отчет", "Medical report");
-    case "discharge_report":
-      return l("Entlassungsbericht", "Выписной отчет", "Discharge report");
-    case "clinic_letter":
-    case "clinic_correspondence":
-    case "correspondence":
-      return l("Korrespondenz", "Переписка", "Correspondence");
-    case "blood_results":
-    case "analyses":
-    case "analysis":
-      return l("Analysen", "Анализы", "Analyses");
-    case "conclusions":
-      return l("Befunde", "Заключения", "Conclusions");
-    case "invoice_pdf":
-    case "invoices":
-      return l("Rechnung", "Счет", "Invoice");
-    case "translated_letter":
-    case "translations":
-      return l("Ubersetzung", "Перевод", "Translation");
-    case "insurance":
-    case "insurance_document":
-      return l("Versicherungsdokument", "Страховой документ", "Insurance document");
-    case "identity":
-      return l("Identitat", "Идентификация", "Identity");
-    case "payment_proof":
-      return l("Zahlungsnachweis", "Подтверждение оплаты", "Payment proof");
-    default:
-      return formatUnknownValue(value, translations);
-  }
 }
 
 function portalDocumentSourceLabel(
   source: string | null | undefined,
   clinic: string | null | undefined,
-  l: (de: string, ru: string, en: string) => string,
-  translations: { common_unknown: string; common_unknown_value: string },
 ) {
   return sharedPortalDocumentSourceLabel(source, clinic);
-  switch (source) {
-    case "patient_portal":
-      return l("Patientenportal", "Портал пациента", "Patient portal");
-    case "provider":
-      return l("Provider", "Провайдер", "Provider");
-    case "staff_workspace":
-      return l("Team-Workspace", "Рабочая область команды", "Team workspace");
-    case "portal_release":
-      return l("Portalfreigabe", "Публикация в портале", "Portal release");
-    case null:
-    case undefined:
-    case "":
-      return clinic || l("Portalfreigabe", "Публикация в портале", "Portal release");
-    default:
-      return formatUnknownValue(source, translations);
-  }
 }
 
 export function PatientDocumentsPage() {
@@ -204,7 +150,7 @@ export function PatientDocumentsPage() {
         });
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : l("Dokumente konnten nicht geladen werden.", "Не удалось загрузить документы.", "Failed to load documents."));
+        setError(err instanceof Error ? err.message : t.portal_documents_failed_to_load_documents);
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -217,7 +163,7 @@ export function PatientDocumentsPage() {
     return () => {
       cancelled = true;
     };
-  }, [loading, version, l]);
+  }, [loading, t.portal_documents_failed_to_load_documents, version, l]);
 
   const pending = useMemo(
     () => documents.filter((item) => item.requires_confirmation && !item.confirmed).length,
@@ -242,7 +188,7 @@ export function PatientDocumentsPage() {
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!uploadFile) {
-      setUploadError(l("Bitte zuerst eine Datei auswählen.", "Сначала выберите файл.", "Choose a file first."));
+      setUploadError(t.portal_documents_choose_a_file_first);
       return;
     }
 
@@ -263,14 +209,14 @@ export function PatientDocumentsPage() {
 
       await uploadPortalDocument(formData);
 
-      setNotice(l("Upload wurde an das Betreuungsteam gesendet.", "Загрузка отправлена команде сопровождения.", "Upload sent to the care team."));
+      setNotice(t.portal_documents_upload_sent_to_the_care_team);
       setUploadFile(null);
       setUploadName("");
       setUploadNotes("");
       setUploadKind("general");
       setVersion((value) => value + 1);
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : l("Dokument konnte nicht hochgeladen werden.", "Не удалось загрузить документ.", "Failed to upload document."));
+      setUploadError(err instanceof Error ? err.message : t.portal_documents_failed_to_upload_document);
     } finally {
       setUploadBusy(false);
     }
@@ -283,10 +229,10 @@ export function PatientDocumentsPage() {
 
     try {
       await confirmPortalDocument(documentId);
-      setNotice(l("Dokumentenerhalt bestätigt.", "Получение документа подтверждено.", "Document receipt confirmed."));
+      setNotice(t.portal_documents_document_receipt_confirmed);
       setVersion((value) => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : l("Freigabe konnte nicht bestätigt werden.", "Не удалось подтвердить публикацию.", "Failed to confirm release."));
+      setError(err instanceof Error ? err.message : t.portal_documents_failed_to_confirm_release);
     } finally {
       setBusyId(null);
     }
@@ -300,7 +246,7 @@ export function PatientDocumentsPage() {
     try {
       await downloadPortalDocument(item.id, item.original_filename ?? item.auto_name);
     } catch (err) {
-      setError(err instanceof Error ? err.message : l("Dokument konnte nicht heruntergeladen werden.", "Не удалось скачать документ.", "Failed to download document."));
+      setError(err instanceof Error ? err.message : t.portal_documents_failed_to_download_document);
     } finally {
       setBusyId(null);
     }
@@ -325,12 +271,12 @@ export function PatientDocumentsPage() {
         requested_language: translationLanguage,
         note: translationNote.trim() || undefined,
       });
-      setNotice(l("Übersetzungsanfrage wurde an das Betreuungsteam gesendet.", "Запрос на перевод отправлен команде сопровождения.", "Translation request sent to the care team."));
+      setNotice(t.portal_documents_translation_request_sent_to_the_care_team);
       setTranslationDocument(null);
       clearApiCache("/me/translation-requests");
       setVersion((value) => value + 1);
     } catch (err) {
-      setTranslationError(err instanceof Error ? err.message : l("Übersetzung konnte nicht angefragt werden.", "Не удалось запросить перевод.", "Failed to request translation."));
+      setTranslationError(err instanceof Error ? err.message : t.portal_documents_failed_to_request_translation);
     } finally {
       setTranslationBusy(false);
     }
@@ -344,7 +290,7 @@ export function PatientDocumentsPage() {
     try {
       await downloadPortalUpload(item.id, item.original_filename ?? item.auto_name);
     } catch (err) {
-      setError(err instanceof Error ? err.message : l("Hochgeladenes Dokument konnte nicht heruntergeladen werden.", "Не удалось скачать загруженный документ.", "Failed to download uploaded document."));
+      setError(err instanceof Error ? err.message : t.portal_documents_failed_to_download_uploaded_document);
     } finally {
       setBusyId(null);
     }
@@ -361,19 +307,19 @@ export function PatientDocumentsPage() {
   return (
     <TabShell className="mt-0 space-y-6">
       <PageHeader
-        title={l("Meine Dokumente", "Мои документы", "My documents")}
-        description={l("Hier sind nur Dateien sichtbar, die ausdrücklich für Ihr Portal freigegeben wurden.", "Здесь видны только файлы, явно опубликованные для вашего портала.", "Only files explicitly released to your portal are visible here.")}
+        title={t.portal_documents_my_documents}
+        description={t.portal_documents_only_files_explicitly_released_to_your_portal_are_visible_here}
         actions={
           <>
             <CountBadge>
-              {l("Ausstehende Bestätigungen", "Ожидающие подтверждения", "Pending confirmations")}: {pending}
+              {t.portal_documents_pending_confirmations}: {pending}
             </CountBadge>
             <CountBadge>
-              {l("Meine Uploads", "Мои загрузки", "My uploads")}: {uploads.length}
+              {t.portal_documents_my_uploads}: {uploads.length}
             </CountBadge>
             <Button variant="outline" className="h-9 rounded-lg" onClick={() => setVersion((value) => value + 1)}>
               <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
-              {l("Aktualisieren", "Обновить", "Refresh")}
+              {t.portal_documents_refresh}
             </Button>
           </>
         }
@@ -383,17 +329,17 @@ export function PatientDocumentsPage() {
       {error ? <Banner tone="error">{error}</Banner> : null}
 
       <section className="grid gap-4 md:grid-cols-3">
-        <StatCard label={l("Für mich freigegeben", "Опубликовано для меня", "Released to me")} value={String(documents.length)} />
-        <StatCard label={l("Ausstehende Bestätigungen", "Ожидающие подтверждения", "Pending confirmations")} value={String(pending)} />
-        <StatCard label={l("Meine Uploads", "Мои загрузки", "My uploads")} value={String(uploads.length)} />
+        <StatCard label={t.portal_documents_released_to_me} value={String(documents.length)} />
+        <StatCard label={t.portal_documents_pending_confirmations} value={String(pending)} />
+        <StatCard label={t.portal_documents_my_uploads} value={String(uploads.length)} />
       </section>
 
       {documentAlerts && documentAlerts.configured_rule_count > 0 ? (
         <Section
-          title={l("Erforderliche Dokumente", "Обязательные документы", "Required documents")}
+          title={t.portal_documents_required_documents}
           accessory={
             <CountBadge>
-              {l("Erfüllt", "Выполнено", "Fulfilled")}: {documentAlerts.required_documents.filter((item) => item.fulfilled).length}/
+              {t.portal_documents_fulfilled}: {documentAlerts.required_documents.filter((item) => item.fulfilled).length}/
               {documentAlerts.configured_rule_count}
             </CountBadge>
           }
@@ -401,10 +347,10 @@ export function PatientDocumentsPage() {
           {documentAlerts.document_pack_complete ? (
             <SuccessBanner>
               <p className="font-semibold">
-                {l("Ihr Mindest-Dokumentenpaket ist vollständig.", "Минимальный комплект документов уже собран.", "Your minimum document pack is complete")}
+                {t.portal_documents_your_minimum_document_pack_is_complete}
               </p>
               <p className="mt-1 text-sm">
-                {l("Sie haben bereits alle erforderlichen Basisdokumente hochgeladen oder erhalten.", "Вы уже загрузили или получили все обязательные базовые документы.", "You already uploaded or received all required base documents.")}
+                {t.portal_documents_you_already_uploaded_or_received_all_required_base_documents}
               </p>
             </SuccessBanner>
           ) : (
@@ -419,7 +365,7 @@ export function PatientDocumentsPage() {
                     )}
                   </p>
                   <p className="mt-1 text-sm">
-                    {l("Nutzen Sie das Upload-Formular unten, um die fehlenden Unterlagen an Ihr Betreuungsteam zu senden.", "Используйте форму загрузки ниже, чтобы отправить недостающие документы вашей команде сопровождения.", "Use the upload form below to send the missing items to your care team.")}
+                    {t.portal_documents_use_the_upload_form_below_to_send_the_missing_items_to_your_care}
                   </p>
                 </div>
                 {documentAlerts.missing_count > 0 ? (
@@ -465,20 +411,20 @@ export function PatientDocumentsPage() {
       <section className="grid gap-6 xl:grid-cols-[1.2fr_0.9fr]">
         <section className="space-y-4">
           <Section
-            title={l("Für mich freigegeben", "Опубликовано для меня", "Released to me")}
+            title={t.portal_documents_released_to_me}
             accessory={<CountBadge>{visibleDocuments.length}</CountBadge>}
           >
             <p className="text-sm text-muted-foreground">
-              {l("Hier sind nur Dateien sichtbar, die von Ihrem Betreuungsteam ausdrücklich freigegeben wurden.", "Здесь видны только файлы, которые команда сопровождения явно опубликовала для вас.", "Only files explicitly released by your care team are visible here.")}
+              {t.portal_documents_only_files_explicitly_released_by_your_care_team_are_visible_her}
             </p>
 
             {visibleDocuments.length === 0 ? (
               <EmptyCell>
                 <p className="text-base font-semibold text-foreground">
-                  {l("Keine Dokumente in dieser Kategorie", "Нет документов в этой категории", "No documents in this category")}
+                  {t.portal_documents_no_documents_in_this_category}
                 </p>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  {l("Ihr Betreuungsteam veröffentlicht Dateien hier, sobald sie für den Portalzugang freigegeben sind.", "Команда сопровождения опубликует здесь файлы, как только они будут допущены к доступу через портал.", "Your care team will publish files here once they are cleared for portal access.")}
+                  {t.portal_documents_your_care_team_will_publish_files_here_once_they_are_cleared_for}
                 </p>
               </EmptyCell>
             ) : (
@@ -495,15 +441,15 @@ export function PatientDocumentsPage() {
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
                             <StatusBadge className={documentTone(item)}>
-                              {item.confirmed ? l("Bestätigt", "Подтверждено", "Confirmed") : item.requires_confirmation ? l("Bestätigung erforderlich", "Требуется подтверждение", "Needs confirmation") : l("Freigegeben", "Опубликовано", "Released")}
+                              {item.confirmed ? t.portal_documents_confirmed : item.requires_confirmation ? t.portal_documents_needs_confirmation : t.portal_documents_released}
                             </StatusBadge>
                             <StatusBadge status={item.status}>{portalStatusLabel(item.status)}</StatusBadge>
                           </div>
                           <h2 className="mt-3 text-base font-semibold text-foreground">{item.auto_name}</h2>
                           <p className="mt-2 text-sm text-muted-foreground">
                             {[
-                              portalDocumentValueLabel(item.art, l, t),
-                              item.category ? portalDocumentValueLabel(item.category, l, t) : null,
+                              portalDocumentValueLabel(item.art),
+                              item.category ? portalDocumentValueLabel(item.category) : null,
                               formatPortalFileSize(item.file_size),
                             ].filter(Boolean).join(" / ")}
                           </p>
@@ -516,23 +462,23 @@ export function PatientDocumentsPage() {
                       <dl className="grid gap-3 sm:grid-cols-2">
                         <InfoRow
                           className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
-                          label={l("Freigegeben von", "Опубликовано", "Released by")}
-                          value={item.shared_by_name || l("Betreuungsteam", "Команда сопровождения", "Care team")}
+                          label={t.portal_documents_released_by}
+                          value={item.shared_by_name || t.portal_documents_care_team}
                         />
                         <InfoRow
                           className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
-                          label={l("Freigegeben am", "Опубликовано", "Released at")}
+                          label={t.portal_documents_released_at}
                           value={formatPortalDateTime(item.shared_at)}
                         />
                         <InfoRow
                           className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
-                          label={l("Dateiname", "Имя файла", "Filename")}
+                          label={t.portal_documents_filename}
                           value={item.original_filename || item.auto_name}
                         />
                         <InfoRow
                           className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
-                          label={l("Quelle", "Источник", "Source")}
-                          value={portalDocumentSourceLabel(item.ursprung, item.klinik, l, t)}
+                          label={t.portal_documents_source}
+                          value={portalDocumentSourceLabel(item.ursprung, item.klinik)}
                         />
                       </dl>
 
@@ -549,7 +495,7 @@ export function PatientDocumentsPage() {
                           onClick={() => void handleDownload(item)}
                         >
                           {busy ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
-                          {l("Herunterladen", "Скачать", "Download")}
+                          {t.portal_documents_download}
                         </Button>
                         {item.requires_confirmation && !item.confirmed ? (
                           <Button
@@ -559,7 +505,7 @@ export function PatientDocumentsPage() {
                             onClick={() => void handleConfirm(item.id)}
                           >
                             {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                            {l("Empfang bestätigen", "Подтвердить получение", "Confirm receipt")}
+                            {t.portal_documents_confirm_receipt}
                           </Button>
                         ) : null}
                         <Button
@@ -568,7 +514,7 @@ export function PatientDocumentsPage() {
                           disabled={busy}
                           onClick={() => openTranslationDialog(item)}
                         >
-                          {l("Übersetzung anfragen", "Запросить перевод", "Request translation")}
+                          {t.portal_documents_request_translation}
                         </Button>
                       </div>
 
@@ -583,7 +529,7 @@ export function PatientDocumentsPage() {
                               )}
                             >
                               <span>
-                                {l("Übersetzung", "Перевод", "Translation")} {request.requested_language.toUpperCase()} / {formatPortalDateTime(request.requested_at)}
+                                {t.portal_documents_translation} {request.requested_language.toUpperCase()} / {formatPortalDateTime(request.requested_at)}
                               </span>
                               <StatusBadge status={request.status} className={translationRequestTone(request.status)}>
                                 {portalStatusLabel(request.status)}
@@ -602,39 +548,39 @@ export function PatientDocumentsPage() {
 
         <section className="space-y-4">
           <Section
-            title={l("Dokumente hochladen", "Загрузить документы", "Upload documents")}
+            title={t.portal_documents_upload_documents}
             accessory={<Upload className="size-4 text-muted-foreground" />}
           >
             <p className="text-sm text-muted-foreground">
-              {l("Senden Sie Dateien an das Betreuungsteam. Zahlungsnachweise bleiben intern und können im Rechnungsbereich hochgeladen werden.", "Отправляйте файлы команде сопровождения. Подтверждения оплаты остаются внутренними и загружаются из раздела счетов.", "Send files to the care team. Payment proofs stay internal and can be uploaded from the invoice workspace.")}
+              {t.portal_documents_send_files_to_the_care_team_payment_proofs_stay_internal_and_can}
             </p>
             <form className="space-y-4" onSubmit={(event) => void handleUpload(event)}>
-              <Field label={l("Kategorie", "Категория", "Category")} htmlFor="portal-document-upload-kind">
+              <Field label={t.portal_documents_category} htmlFor="portal-document-upload-kind">
                 <NativeComboboxSelect
                   id="portal-document-upload-kind"
                   value={uploadKind}
                   onChange={(event) => setUploadKind(event.target.value)}
                   className={selectClass}
                 >
-                  <option value="general">{l("Allgemein", "Общий", "General")}</option>
-                  <option value="correspondence">{l("Korrespondenz", "Переписка", "Correspondence")}</option>
-                  <option value="analyses">{l("Analysen", "Анализы", "Analyses")}</option>
-                  <option value="conclusions">{l("Befunde / Schluesse", "Заключения", "Conclusions")}</option>
-                  <option value="invoices">{l("Rechnungen", "Счета", "Invoices")}</option>
-                  <option value="translations">{l("Uebersetzungen", "Переводы", "Translations")}</option>
-                  <option value="insurance_document">{l("Versicherungsdokument", "Страховой документ", "Insurance document")}</option>
+                  <option value="general">{t.portal_documents_general}</option>
+                  <option value="correspondence">{t.portal_documents_correspondence}</option>
+                  <option value="analyses">{t.portal_documents_analyses}</option>
+                  <option value="conclusions">{t.portal_documents_conclusions}</option>
+                  <option value="invoices">{t.portal_documents_invoices}</option>
+                  <option value="translations">{t.portal_documents_translations}</option>
+                  <option value="insurance_document">{t.portal_documents_insurance_document}</option>
                 </NativeComboboxSelect>
               </Field>
-              <Field label={l("Titel", "Название", "Title")} htmlFor="portal-document-upload-title">
+              <Field label={t.portal_documents_title} htmlFor="portal-document-upload-title">
                 <input
                   id="portal-document-upload-title"
                   value={uploadName}
                   onChange={(event) => setUploadName(event.target.value)}
-                  placeholder={l("Optionaler Titel", "Необязательное название", "Optional title")}
+                  placeholder={t.portal_documents_optional_title}
                   className={cn(inputClass, "w-full border border-input px-3 text-sm")}
                 />
               </Field>
-              <Field label={l("Datei", "Файл", "File")} htmlFor="portal-document-upload-file">
+              <Field label={t.portal_documents_file} htmlFor="portal-document-upload-file">
                 <input
                   id="portal-document-upload-file"
                   type="file"
@@ -645,12 +591,12 @@ export function PatientDocumentsPage() {
                   )}
                 />
               </Field>
-              <Field label={l("Notiz", "Заметка", "Note")} htmlFor="portal-document-upload-note">
+              <Field label={t.portal_documents_note} htmlFor="portal-document-upload-note">
                 <textarea
                   id="portal-document-upload-note"
                   value={uploadNotes}
                   onChange={(event) => setUploadNotes(event.target.value)}
-                  placeholder={l("Optionaler Kontext für das Betreuungsteam", "Необязательный контекст для команды сопровождения", "Optional context for the care team")}
+                  placeholder={t.portal_documents_optional_context_for_the_care_team}
                   className={cn(textareaClass, "min-h-[110px]")}
                 />
               </Field>
@@ -661,21 +607,21 @@ export function PatientDocumentsPage() {
                 disabled={uploadBusy}
               >
                 {uploadBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Upload className="size-4" />}
-                {l("Upload senden", "Отправить загрузку", "Send upload")}
+                {t.portal_documents_send_upload}
               </Button>
             </form>
           </Section>
 
           <Section
-            title={l("Meine Uploads", "Мои загрузки", "My uploads")}
+            title={t.portal_documents_my_uploads}
             accessory={<CountBadge>{uploads.length}</CountBadge>}
           >
             <p className="text-sm text-muted-foreground">
-              {l("Dateien, die Sie bereits aus dem Portal gesendet haben.", "Файлы, которые вы уже отправили из портала.", "Files you already sent from the portal.")}
+              {t.portal_documents_files_you_already_sent_from_the_portal}
             </p>
             {uploads.length === 0 ? (
               <EmptyCell>
-                {l("Noch keine Portal-Uploads.", "Пока нет загрузок из портала.", "No portal uploads yet.")}
+                {t.portal_documents_no_portal_uploads_yet}
               </EmptyCell>
             ) : (
               <div className="space-y-3">
@@ -688,13 +634,13 @@ export function PatientDocumentsPage() {
                         <div className="min-w-0">
                           <div className="flex flex-wrap gap-2">
                             <StatusBadge className={uploadedDocumentTone(item)}>
-                              {portalDocumentValueLabel(item.art, l, t)}
+                              {portalDocumentValueLabel(item.art)}
                             </StatusBadge>
                           </div>
                           <p className="mt-3 text-sm font-semibold text-foreground">{item.auto_name}</p>
                           <p className="mt-1 text-xs text-muted-foreground">
                             {[
-                              item.category ? portalDocumentValueLabel(item.category, l, t) : null,
+                              item.category ? portalDocumentValueLabel(item.category) : null,
                               item.order_number,
                               item.appointment_title,
                               formatPortalFileSize(item.file_size),
@@ -708,11 +654,11 @@ export function PatientDocumentsPage() {
                           onClick={() => void handleUploadDownload(item)}
                         >
                           {busy ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
-                          {l("Herunterladen", "Скачать", "Download")}
+                          {t.portal_documents_download}
                         </Button>
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        {l("Hochgeladen", "Загружено", "Uploaded")} {formatPortalDateTime(item.created_at)}
+                        {t.portal_documents_uploaded} {formatPortalDateTime(item.created_at)}
                       </p>
                       {item.notes ? (
                         <div className={cn("rounded-lg px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
@@ -740,33 +686,33 @@ export function PatientDocumentsPage() {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>
-              {l("Übersetzung anfragen", "Запросить перевод", "Request translation")}
+              {t.portal_documents_request_translation}
             </DialogTitle>
             <DialogDescription>
               {translationDocument?.auto_name ??
-                l("Dokument auswählen", "Выберите документ", "Select document")}
+                t.portal_documents_select_document}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <Field label={l("Zielsprache", "Язык перевода", "Target language")} htmlFor="portal-translation-language">
+            <Field label={t.portal_documents_target_language} htmlFor="portal-translation-language">
               <NativeComboboxSelect
                 id="portal-translation-language"
                 value={translationLanguage}
                 onChange={(event) => setTranslationLanguage(event.target.value)}
                 className={selectClass}
               >
-                <option value="de">{l("Deutsch", "Немецкий", "German")}</option>
-                <option value="en">{l("Englisch", "Английский", "English")}</option>
-                <option value="uk">{l("Ukrainisch", "Украинский", "Ukrainian")}</option>
-                <option value="ru">{l("Russisch", "Русский", "Russian")}</option>
+                <option value="de">{t.portal_documents_german}</option>
+                <option value="en">{t.portal_documents_english}</option>
+                <option value="uk">{t.portal_documents_ukrainian}</option>
+                <option value="ru">{t.portal_documents_russian}</option>
               </NativeComboboxSelect>
             </Field>
-            <Field label={l("Notiz", "Заметка", "Note")} htmlFor="portal-translation-note">
+            <Field label={t.portal_documents_note} htmlFor="portal-translation-note">
               <textarea
                 id="portal-translation-note"
                 value={translationNote}
                 onChange={(event) => setTranslationNote(event.target.value)}
-                placeholder={l("Optionaler Kontext für das Betreuungsteam", "Необязательный контекст для команды сопровождения", "Optional context for the care team")}
+                placeholder={t.portal_documents_optional_context_for_the_care_team}
                 className={cn(textareaClass, "min-h-[110px]")}
               />
             </Field>
@@ -780,7 +726,7 @@ export function PatientDocumentsPage() {
               disabled={translationBusy}
               onClick={() => setTranslationDocument(null)}
             >
-              {l("Abbrechen", "Отмена", "Cancel")}
+              {t.portal_documents_cancel}
             </Button>
             <Button
               type="button"
@@ -789,7 +735,7 @@ export function PatientDocumentsPage() {
               onClick={() => void handleRequestTranslation()}
             >
               {translationBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-              {l("Anfrage senden", "Отправить запрос", "Send request")}
+              {t.portal_documents_send_request}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -6,12 +6,6 @@ import { CaseItemList } from "./case-item-list";
 import { type PainItem, useCaseWorkspace } from "./context";
 import { Field, inputBaseClassName } from "./primitives";
 
-function tri(lang: string, de: string, ru: string, en: string) {
-  if (lang === "de") return de;
-  if (lang === "ru") return ru;
-  return en;
-}
-
 function parseNrs(value: string): number | null {
   const trimmed = value.trim().replace(",", ".");
   if (!trimmed) return null;
@@ -40,7 +34,7 @@ const BLANK: PainItem = {
 };
 
 export function PainSection() {
-  const { lang } = useLang();
+  const { t } = useLang();
   const {
     detail,
     permissions,
@@ -51,13 +45,8 @@ export function PainSection() {
 
   return (
     <CaseItemList<PainItem>
-      title={tri(lang, "Schmerz", "Боль", "Pain")}
-      description={tri(
-        lang,
-        "Schmerz-Lokalisation, Qualität und Intensität.",
-        "Локализация, характер и интенсивность боли.",
-        "Pain location, quality, and intensity.",
-      )}
+      title={t.cases_pain_title}
+      description={t.cases_pain_description}
       items={detail?.pain_records ?? []}
       blankItem={BLANK}
       cloneItem={(item) => ({ ...BLANK, ...item })}
@@ -67,35 +56,19 @@ export function PainSection() {
       sectionError={sectionError}
       canEdit={permissions.canEdit}
       sheetTitle={{
-        create: tri(lang, "Neuer Schmerzbefund", "Новая запись о боли", "New pain record"),
-        edit: tri(lang, "Schmerzbefund bearbeiten", "Редактировать запись о боли", "Edit pain record"),
+        create: t.cases_pain_sheet_create,
+        edit: t.cases_pain_sheet_edit,
       }}
       sheetWidth="wide"
-      emptyTitle={tri(
-        lang,
-        "Keine Schmerzbefunde erfasst.",
-        "Записей о боли пока нет.",
-        "No pain records yet.",
-      )}
-      addFirstLabel={tri(
-        lang,
-        "Ersten Befund hinzufügen",
-        "Добавить первую запись",
-        "Add first entry",
-      )}
-      missingPrimaryMessage={tri(
-        lang,
-        "Bitte die Lokalisation angeben.",
-        "Укажите локализацию.",
-        "Please enter the location.",
-      )}
+      emptyTitle={t.cases_pain_empty_title}
+      addFirstLabel={t.cases_pain_add_first}
+      missingPrimaryMessage={t.cases_pain_missing_location}
       renderCard={(item) => (
         <>
           <div className="flex items-center gap-2">
             <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
             <p className="truncate text-sm font-medium text-foreground">
-              {item.lokalisierung ||
-                tri(lang, "Ohne Lokalisation", "Без локализации", "No location")}
+              {item.lokalisierung || t.cases_pain_no_location}
             </p>
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -112,7 +85,7 @@ export function PainSection() {
                 variant="outline"
                 className="rounded-full border-border/60 bg-muted/25 text-[11px] font-medium text-muted-foreground"
               >
-                {tri(lang, "seit", "с", "since")} {item.seit_wann}
+                {t.cases_pain_since} {item.seit_wann}
               </Badge>
             ) : null}
             {item.qualitaet ? (
@@ -127,7 +100,7 @@ export function PainSection() {
           {item.ursache ? (
             <p className="line-clamp-3 whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">
               <span className="mr-1 text-[11.5px] font-medium text-muted-foreground">
-                {tri(lang, "Ursache", "Причина", "Cause")}:
+                {t.cases_pain_cause}:
               </span>
               {item.ursache}
             </p>
@@ -137,10 +110,7 @@ export function PainSection() {
       renderForm={({ form, updateField, disabled }) => (
         <>
           <div className="grid gap-4 md:grid-cols-2">
-            <Field
-              label={tri(lang, "Lokalisation", "Локализация", "Location")}
-              required
-            >
+            <Field label={t.cases_pain_location} required>
               <Input
                 value={form.lokalisierung}
                 autoFocus
@@ -149,7 +119,7 @@ export function PainSection() {
                 disabled={disabled}
               />
             </Field>
-            <Field label={tri(lang, "Seit wann", "С какого времени", "Since when")}>
+            <Field label={t.cases_pain_since_when}>
               <Input
                 value={form.seit_wann ?? ""}
                 onChange={(event) => updateField("seit_wann", event.target.value)}
@@ -160,7 +130,7 @@ export function PainSection() {
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
-            <Field label={tri(lang, "Ursache", "Причина", "Cause")}>
+            <Field label={t.cases_pain_cause}>
               <Input
                 value={form.ursache ?? ""}
                 onChange={(event) => updateField("ursache", event.target.value)}
@@ -168,7 +138,7 @@ export function PainSection() {
                 disabled={disabled}
               />
             </Field>
-            <Field label={tri(lang, "Qualität", "Характер", "Quality")}>
+            <Field label={t.cases_pain_quality}>
               <Input
                 value={form.qualitaet ?? ""}
                 onChange={(event) => updateField("qualitaet", event.target.value)}
@@ -179,7 +149,7 @@ export function PainSection() {
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
-            <Field label={tri(lang, "Kontinuität", "Постоянство", "Continuity")}>
+            <Field label={t.cases_pain_continuity}>
               <Input
                 value={form.kontinuitaet ?? ""}
                 onChange={(event) => updateField("kontinuitaet", event.target.value)}
@@ -187,7 +157,7 @@ export function PainSection() {
                 disabled={disabled}
               />
             </Field>
-            <Field label={tri(lang, "Entwicklung", "Развитие", "Evolution")}>
+            <Field label={t.cases_pain_evolution}>
               <Input
                 value={form.entwicklung ?? ""}
                 onChange={(event) => updateField("entwicklung", event.target.value)}
@@ -198,9 +168,7 @@ export function PainSection() {
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
-            <Field
-              label={tri(lang, "NRS aktuell (0–10)", "NRS сейчас (0–10)", "NRS current (0–10)")}
-            >
+            <Field label={t.cases_pain_nrs_current}>
               <Input
                 value={nrsToString(form.nrs_aktuell)}
                 onChange={(event) => updateField("nrs_aktuell", parseNrs(event.target.value))}
@@ -209,9 +177,7 @@ export function PainSection() {
                 inputMode="numeric"
               />
             </Field>
-            <Field
-              label={tri(lang, "NRS Anfang", "NRS в начале", "NRS initial")}
-            >
+            <Field label={t.cases_pain_nrs_initial}>
               <Input
                 value={nrsToString(form.nrs_anfang)}
                 onChange={(event) => updateField("nrs_anfang", parseNrs(event.target.value))}
@@ -223,7 +189,7 @@ export function PainSection() {
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
-            <Field label={tri(lang, "Dauer Anfang", "Длительность в начале", "Initial duration")}>
+            <Field label={t.cases_pain_initial_duration}>
               <Input
                 value={form.dauer_anfang ?? ""}
                 onChange={(event) => updateField("dauer_anfang", event.target.value)}
@@ -231,7 +197,7 @@ export function PainSection() {
                 disabled={disabled}
               />
             </Field>
-            <Field label={tri(lang, "Dauer aktuell", "Длительность сейчас", "Current duration")}>
+            <Field label={t.cases_pain_current_duration}>
               <Input
                 value={form.dauer_aktuell ?? ""}
                 onChange={(event) => updateField("dauer_aktuell", event.target.value)}
@@ -242,7 +208,7 @@ export function PainSection() {
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
-            <Field label={tri(lang, "Ausstrahlung", "Иррадиация", "Radiation")}>
+            <Field label={t.cases_pain_radiation}>
               <Input
                 value={form.ausstrahlung ?? ""}
                 onChange={(event) => updateField("ausstrahlung", event.target.value)}
@@ -250,7 +216,7 @@ export function PainSection() {
                 disabled={disabled}
               />
             </Field>
-            <Field label={tri(lang, "Auftreten", "Провоцирующие факторы", "Triggers")}>
+            <Field label={t.cases_pain_triggers}>
               <Input
                 value={form.auftreten ?? ""}
                 onChange={(event) => updateField("auftreten", event.target.value)}

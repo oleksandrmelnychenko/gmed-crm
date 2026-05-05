@@ -4,7 +4,7 @@ import { ExternalLink, Folder, LoaderCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
-import { formatUnknownValue, useLang } from "@/lib/i18n";
+import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
@@ -120,41 +120,40 @@ function caseStatusLabel(
 
 function caseHistorySectionLabel(
   section: string | null | undefined,
-  l: (de: string, ru: string, en: string) => string,
-  translations: { common_unknown: string; common_unknown_value: string },
+  translations: Translations,
 ) {
   switch (section) {
     case "overview":
-      return l("Ubersicht", "Обзор", "Overview");
+      return translations.patient_case_preview_section_overview;
     case "vorerkrankungen":
-      return l("Vorerkrankungen", "Сопутствующие заболевания", "Preconditions");
+      return translations.patient_case_preview_section_preconditions;
     case "allergien":
-      return l("Allergien", "Аллергии", "Allergies");
+      return translations.patient_case_preview_section_allergies;
     case "operationen":
-      return l("Operationen", "Операции", "Operations");
+      return translations.patient_case_preview_section_operations;
     case "medikamente":
-      return l("Medikation", "Медикаменты", "Medication");
+      return translations.patient_case_preview_section_medication;
     case "pain_records":
-      return l("Schmerzdokumentation", "Записи о боли", "Pain records");
+      return translations.patient_case_preview_section_pain_records;
     case "symptome":
-      return l("Symptome", "Симптомы", "Symptoms");
+      return translations.patient_case_preview_section_symptoms;
     case "cardiology":
-      return l("Kardiologie", "Кардиология", "Cardiology");
+      return translations.patient_case_preview_section_cardiology;
     case "gastroenterology":
-      return l("Gastroenterologie", "Гастроэнтерология", "Gastroenterology");
+      return translations.patient_case_preview_section_gastroenterology;
     case "orthopedics":
-      return l("Orthopadie", "Ортопедия", "Orthopedics");
+      return translations.patient_case_preview_section_orthopedics;
     case "neurology":
-      return l("Neurologie", "Неврология", "Neurology");
+      return translations.patient_case_preview_section_neurology;
     case "pulmonology":
-      return l("Pneumologie", "Пульмонология", "Pulmonology");
+      return translations.patient_case_preview_section_pulmonology;
     case "urology":
-      return l("Urologie", "Урология", "Urology");
+      return translations.patient_case_preview_section_urology;
     case "vegetative":
     case "vegetative_anamnese":
-      return l("Vegetative Anamnese", "Вегетативный анамнез", "Vegetative");
+      return translations.patient_case_preview_section_vegetative;
     case "impfstatus":
-      return l("Impfstatus", "Вакцинация", "Vaccination");
+      return translations.patient_case_preview_section_vaccination;
     default:
       return formatUnknownValue(section, translations);
   }
@@ -162,134 +161,133 @@ function caseHistorySectionLabel(
 
 function caseFieldLabel(
   key: string,
-  l: (de: string, ru: string, en: string) => string,
-  translations: { common_unknown: string; common_unknown_value: string },
+  translations: Translations,
 ) {
   switch (key) {
     case "is_relevant":
-      return l("Relevant", "Релевантно", "Relevant");
+      return translations.patient_case_preview_field_relevant;
     case "chest_pain":
-      return l("Brustschmerz", "Боль в груди", "Chest pain");
+      return translations.patient_case_preview_field_chest_pain;
     case "dyspnea":
-      return l("Dyspnoe", "Одышка", "Dyspnea");
+      return translations.patient_case_preview_field_dyspnea;
     case "palpitations":
-      return l("Palpitationen", "Сердцебиение", "Palpitations");
+      return translations.patient_case_preview_field_palpitations;
     case "syncope":
-      return l("Synkope", "Обморок", "Syncope");
+      return translations.patient_case_preview_field_syncope;
     case "edema":
-      return l("Odeme", "Отеки", "Edema");
+      return translations.patient_case_preview_field_edema;
     case "known_diagnosis":
-      return l("Bekannte Diagnose", "Известный диагноз", "Known diagnosis");
+      return translations.patient_case_preview_field_known_diagnosis;
     case "prior_cardiac_workup":
-      return l("Bisherige Kardiologie", "Предыдущее кардиообследование", "Prior cardiac workup");
+      return translations.patient_case_preview_field_prior_cardiac_workup;
     case "cardiovascular_risk_factors":
-      return l("Kardiovaskulare Risiken", "Сердечно-сосудистые риски", "Cardiovascular risks");
+      return translations.patient_case_preview_field_cardiovascular_risks;
     case "anticoagulation":
-      return l("Antikoagulation", "Антикоагуляция", "Anticoagulation");
+      return translations.patient_case_preview_field_anticoagulation;
     case "family_history":
-      return l("Familienanamnese", "Семейный анамнез", "Family history");
+      return translations.patient_case_preview_field_family_history;
     case "red_flags":
-      return l("Warnzeichen", "Красные флаги", "Red flags");
+      return translations.patient_case_preview_field_red_flags;
     case "notes":
-      return l("Notizen", "Заметки", "Notes");
+      return translations.patient_case_preview_field_notes;
     case "abdominal_pain":
-      return l("Bauchschmerz", "Боль в животе", "Abdominal pain");
+      return translations.patient_case_preview_field_abdominal_pain;
     case "reflux":
-      return l("Reflux", "Рефлюкс", "Reflux");
+      return translations.patient_case_preview_field_reflux;
     case "nausea":
-      return l("Ubelkeit", "Тошнота", "Nausea");
+      return translations.patient_case_preview_field_nausea;
     case "diarrhea":
-      return l("Diarrho", "Диарея", "Diarrhea");
+      return translations.patient_case_preview_field_diarrhea;
     case "constipation":
-      return l("Obstipation", "Запор", "Constipation");
+      return translations.patient_case_preview_field_constipation;
     case "gi_bleeding":
-      return l("GI-Blutung", "ЖКТ-кровотечение", "GI bleeding");
+      return translations.patient_case_preview_field_gi_bleeding;
     case "prior_endoscopy":
-      return l("Bisherige Endoskopie", "Предыдущая эндоскопия", "Prior endoscopy");
+      return translations.patient_case_preview_field_prior_endoscopy;
     case "bowel_habits":
-      return l("Stuhlgewohnheiten", "Особенности стула", "Bowel habits");
+      return translations.patient_case_preview_field_bowel_habits;
     case "liver_history":
-      return l("Leberanamnese", "Печеночный анамнез", "Liver history");
+      return translations.patient_case_preview_field_liver_history;
     case "food_intolerance":
-      return l("Nahrungsmittelintoleranz", "Пищевая непереносимость", "Food intolerance");
+      return translations.patient_case_preview_field_food_intolerance;
     case "joint_pain":
-      return l("Gelenkschmerz", "Боль в суставах", "Joint pain");
+      return translations.patient_case_preview_field_joint_pain;
     case "back_pain":
-      return l("Ruckenschmerz", "Боль в спине", "Back pain");
+      return translations.patient_case_preview_field_back_pain;
     case "mobility_limitation":
-      return l("Mobilitatseinschrankung", "Ограничение подвижности", "Mobility limitation");
+      return translations.patient_case_preview_field_mobility_limitation;
     case "trauma_history":
-      return l("Traumaanamnese", "Травматологический анамнез", "Trauma history");
+      return translations.patient_case_preview_field_trauma_history;
     case "prior_imaging":
-      return l("Bisherige Bildgebung", "Предыдущая визуализация", "Prior imaging");
+      return translations.patient_case_preview_field_prior_imaging;
     case "assistive_devices":
-      return l("Hilfsmittel", "Вспомогательные средства", "Assistive devices");
+      return translations.patient_case_preview_field_assistive_devices;
     case "physiotherapy_history":
-      return l("Physiotherapie-Anamnese", "Физиотерапия в анамнезе", "Physiotherapy history");
+      return translations.patient_case_preview_field_physiotherapy_history;
     case "pain_triggers":
-      return l("Schmerzausloser", "Триггеры боли", "Pain triggers");
+      return translations.patient_case_preview_field_pain_triggers;
     case "headache":
-      return l("Kopfschmerz", "Головная боль", "Headache");
+      return translations.patient_case_preview_field_headache;
     case "dizziness":
-      return l("Schwindel", "Головокружение", "Dizziness");
+      return translations.patient_case_preview_field_dizziness;
     case "sensory_changes":
-      return l("Sensibilitatsanderungen", "Изменения чувствительности", "Sensory changes");
+      return translations.patient_case_preview_field_sensory_changes;
     case "weakness":
-      return l("Schwache", "Слабость", "Weakness");
+      return translations.patient_case_preview_field_weakness;
     case "seizure_history":
-      return l("Krampfanamnese", "Судорожный анамнез", "Seizure history");
+      return translations.patient_case_preview_field_seizure_history;
     case "gait_balance_issues":
-      return l("Gang / Gleichgewicht", "Походка / равновесие", "Gait / balance");
+      return translations.patient_case_preview_field_gait_balance;
     case "prior_neuro_imaging":
-      return l("Bisherige Neuro-Bildgebung", "Предыдущая нейровизуализация", "Prior neuro imaging");
+      return translations.patient_case_preview_field_prior_neuro_imaging;
     case "prior_neurology_workup":
-      return l("Bisherige Neurologie", "Предыдущее неврологическое обследование", "Prior neurology workup");
+      return translations.patient_case_preview_field_prior_neurology_workup;
     case "cognitive_changes":
-      return l("Kognitive Veranderungen", "Когнитивные изменения", "Cognitive changes");
+      return translations.patient_case_preview_field_cognitive_changes;
     case "chronic_cough":
-      return l("Chronischer Husten", "Хронический кашель", "Chronic cough");
+      return translations.patient_case_preview_field_chronic_cough;
     case "wheezing":
-      return l("Giemen", "Свистящее дыхание", "Wheezing");
+      return translations.patient_case_preview_field_wheezing;
     case "chest_tightness":
-      return l("Engegefuhl Brust", "Стеснение в груди", "Chest tightness");
+      return translations.patient_case_preview_field_chest_tightness;
     case "hemoptysis":
-      return l("Hamoptyse", "Кровохарканье", "Hemoptysis");
+      return translations.patient_case_preview_field_hemoptysis;
     case "smoking_history":
-      return l("Raucheranamnese", "Курительный анамнез", "Smoking history");
+      return translations.patient_case_preview_field_smoking_history;
     case "prior_chest_imaging":
-      return l("Bisherige Thorax-Bildgebung", "Предыдущая визуализация грудной клетки", "Prior chest imaging");
+      return translations.patient_case_preview_field_prior_chest_imaging;
     case "inhaler_therapy":
-      return l("Inhalationstherapie", "Ингаляционная терапия", "Inhaler therapy");
+      return translations.patient_case_preview_field_inhaler_therapy;
     case "sleep_apnea_history":
-      return l("Schlafapnoe-Anamnese", "Анамнез апноэ сна", "Sleep apnea history");
+      return translations.patient_case_preview_field_sleep_apnea_history;
     case "dysuria":
-      return l("Dysurie", "Дизурия", "Dysuria");
+      return translations.patient_case_preview_field_dysuria;
     case "hematuria":
-      return l("Hamaturie", "Гематурия", "Hematuria");
+      return translations.patient_case_preview_field_hematuria;
     case "flank_pain":
-      return l("Flankenschmerz", "Боль в боку", "Flank pain");
+      return translations.patient_case_preview_field_flank_pain;
     case "urinary_frequency":
-      return l("Haufiges Wasserlassen", "Частое мочеиспускание", "Urinary frequency");
+      return translations.patient_case_preview_field_urinary_frequency;
     case "urinary_retention":
-      return l("Harnverhalt", "Задержка мочи", "Urinary retention");
+      return translations.patient_case_preview_field_urinary_retention;
     case "incontinence":
-      return l("Inkontinenz", "Недержание", "Incontinence");
+      return translations.patient_case_preview_field_incontinence;
     case "prior_urology_workup":
-      return l("Bisherige Urologie", "Предыдущее урологическое обследование", "Prior urology workup");
+      return translations.patient_case_preview_field_prior_urology_workup;
     case "catheter_history":
-      return l("Katheteranamnese", "Катетеризация в анамнезе", "Catheter history");
+      return translations.patient_case_preview_field_catheter_history;
     case "stone_history":
-      return l("Steinanamnese", "Анамнез камней", "Stone history");
+      return translations.patient_case_preview_field_stone_history;
     case "appetit_durst":
-      return l("Appetit / Durst", "Аппетит / жажда", "Appetite / thirst");
+      return translations.patient_case_preview_field_appetite_thirst;
     case "koerpergroesse":
-      return l("Korpergroesse", "Рост", "Height");
+      return translations.patient_case_preview_field_height;
     case "gewicht":
-      return l("Gewicht", "Вес", "Weight");
+      return translations.patient_case_preview_field_weight;
     case "gewichtsveraenderung":
-      return l("Gewichtsveranderung", "Изменение веса", "Weight change");
+      return translations.patient_case_preview_field_weight_change;
     case "grund":
-      return l("Grund", "Причина", "Reason");
+      return translations.patient_case_preview_field_reason;
     default:
       return formatUnknownValue(key, translations);
   }
@@ -317,9 +315,7 @@ export function PatientCasePreviewSheet({
   onOpenChange: (v: boolean) => void;
   showFullViewAction?: boolean;
 }) {
-  const { t, lang } = useLang();
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const { t } = useLang();
   const { staffGo } = useStaffNavigate();
   const [detailState, setDetailState] = useState<{
     caseId: string | null;
@@ -611,7 +607,6 @@ export function PatientCasePreviewSheet({
                   title={t.patient_case_assessment_cardiology}
                   recommended={activeDetail.cardiology_recommended}
                   data={activeDetail.cardiology}
-                  l={l}
                   notSetLabel={t.common_not_set}
                   translations={t}
                   recommendedLabel={t.patient_case_recommended}
@@ -621,7 +616,6 @@ export function PatientCasePreviewSheet({
                   title={t.patient_case_assessment_gastroenterology}
                   recommended={activeDetail.gastroenterology_recommended}
                   data={activeDetail.gastroenterology}
-                  l={l}
                   notSetLabel={t.common_not_set}
                   translations={t}
                   recommendedLabel={t.patient_case_recommended}
@@ -631,7 +625,6 @@ export function PatientCasePreviewSheet({
                   title={t.patient_case_assessment_orthopedics}
                   recommended={activeDetail.orthopedics_recommended}
                   data={activeDetail.orthopedics}
-                  l={l}
                   notSetLabel={t.common_not_set}
                   translations={t}
                   recommendedLabel={t.patient_case_recommended}
@@ -641,7 +634,6 @@ export function PatientCasePreviewSheet({
                   title={t.patient_case_assessment_neurology}
                   recommended={activeDetail.neurology_recommended}
                   data={activeDetail.neurology}
-                  l={l}
                   notSetLabel={t.common_not_set}
                   translations={t}
                   recommendedLabel={t.patient_case_recommended}
@@ -651,7 +643,6 @@ export function PatientCasePreviewSheet({
                   title={t.patient_case_assessment_pulmonology}
                   recommended={activeDetail.pulmonology_recommended}
                   data={activeDetail.pulmonology}
-                  l={l}
                   notSetLabel={t.common_not_set}
                   translations={t}
                   recommendedLabel={t.patient_case_recommended}
@@ -661,7 +652,6 @@ export function PatientCasePreviewSheet({
                   title={t.patient_case_assessment_urology}
                   recommended={activeDetail.urology_recommended}
                   data={activeDetail.urology}
-                  l={l}
                   notSetLabel={t.common_not_set}
                   translations={t}
                   recommendedLabel={t.patient_case_recommended}
@@ -676,7 +666,6 @@ export function PatientCasePreviewSheet({
                 <KeyValueGrid
                   title={t.cases_vegetative}
                   data={activeDetail.vegetative_anamnese}
-                  l={l}
                   notSetLabel={t.common_not_set}
                   translations={t}
                   recommendedLabel={t.patient_case_recommended}
@@ -696,7 +685,7 @@ export function PatientCasePreviewSheet({
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                            {caseHistorySectionLabel(entry.section, l, t)}
+                            {caseHistorySectionLabel(entry.section, t)}
                           </span>
                           <span className="text-xs text-slate-500">
                             {formatDateTime(entry.created_at, t.common_not_set, t)}
@@ -710,11 +699,11 @@ export function PatientCasePreviewSheet({
                         <div className="mt-2 grid gap-2 lg:grid-cols-2">
                           <CodeBlock
                             label={t.patient_case_old_value}
-                            value={safeStringify(entry.old_value, l, t)}
+                            value={safeStringify(entry.old_value, t)}
                           />
                           <CodeBlock
                             label={t.patient_case_new_value}
-                            value={safeStringify(entry.new_value, l, t)}
+                            value={safeStringify(entry.new_value, t)}
                           />
                         </div>
                       </div>
@@ -842,7 +831,6 @@ function KeyValueGrid({
   title,
   recommended,
   data,
-  l,
   notSetLabel,
   translations,
   recommendedLabel,
@@ -851,15 +839,10 @@ function KeyValueGrid({
   title: string;
   recommended?: boolean;
   data?: Record<string, unknown> | null;
-  l: (de: string, ru: string, en: string) => string;
   notSetLabel: string;
   recommendedLabel: string;
   notRequiredLabel: string;
-  translations: {
-    common_not_set: string;
-    common_unknown: string;
-    common_unknown_value: string;
-  };
+  translations: Translations;
 }) {
   const entries = Object.entries(data ?? {});
 
@@ -880,18 +863,18 @@ function KeyValueGrid({
           {entries.map(([key, value]) => (
             <div key={key} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
               <p className="text-[11px] uppercase tracking-[0.1em] text-slate-500">
-                {caseFieldLabel(key, l, translations)}
+                {caseFieldLabel(key, translations)}
               </p>
               <p className="mt-1 break-words text-sm text-slate-900">
                 {typeof value === "string"
                   ? value || notSetLabel
                   : typeof value === "boolean"
                     ? value
-                      ? l("Ja", "Да", "Yes")
-                      : l("Nein", "Нет", "No")
+                      ? translations.patient_case_preview_value_yes
+                      : translations.patient_case_preview_value_no
                     : value == null
                       ? notSetLabel
-                      : safeStringify(value, l, translations)}
+                      : safeStringify(value, translations)}
               </p>
             </div>
           ))}
@@ -914,12 +897,11 @@ function CodeBlock({ label, value }: { label: string; value: string }) {
 
 function safeStringify(
   value: unknown,
-  l: (de: string, ru: string, en: string) => string,
-  translations: { common_not_set: string; common_unknown: string; common_unknown_value: string },
+  translations: Translations,
 ) {
   if (value == null) return translations.common_not_set;
   if (typeof value === "string") return value || translations.common_not_set;
-  if (typeof value === "boolean") return value ? l("Ja", "Да", "Yes") : l("Nein", "Нет", "No");
+  if (typeof value === "boolean") return value ? translations.patient_case_preview_value_yes_2 : translations.patient_case_preview_value_no_2;
   if (typeof value === "number") return value.toLocaleString();
   try {
     return JSON.stringify(value, null, 2);

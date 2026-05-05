@@ -54,7 +54,6 @@ function PatientProfileEditorSheet({
   patientId,
   detail,
   dictionary,
-  lang,
   statusLabel,
   onOpenChange,
   onSaved,
@@ -62,8 +61,6 @@ function PatientProfileEditorSheet({
 }: PatientProfileEditorSheetProps) {
   const [form, setForm] = useState<PatientEditFormState | null>(null);
   const [busy, setBusy] = useState(false);
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
 
   useEffect(() => {
     if (!open) {
@@ -162,11 +159,7 @@ function PatientProfileEditorSheet({
       onOpenChange={onOpenChange}
       width="detail-wide"
       onSubmit={handleSubmit}
-      title={l(
-        "Patientenprofil bearbeiten",
-        "Редактировать профиль пациента",
-        "Edit patient profile"
-      )}
+      title={dictionary.patient_profile_editor_edit_patient_profile}
       footer={
         form ? (
           <>
@@ -176,7 +169,7 @@ function PatientProfileEditorSheet({
               className="h-9 rounded-lg"
               onClick={() => onOpenChange(false)}
             >
-              {l("Abbrechen", "Отмена", "Cancel")}
+              {dictionary.patient_profile_editor_cancel}
             </Button>
             <Button
               type="submit"
@@ -184,7 +177,7 @@ function PatientProfileEditorSheet({
               disabled={busy}
             >
               {busy ? <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : null}
-              {l("Patient speichern", "Сохранить пациента", "Save patient")}
+              {dictionary.patient_profile_editor_save_patient}
             </Button>
           </>
         ) : undefined
@@ -192,16 +185,16 @@ function PatientProfileEditorSheet({
     >
       {form ? (
         <div className="space-y-3">
-              <FormSection title={l("Persönliche Daten", "Личные данные", "Personal data")}>
+              <FormSection title={dictionary.patient_profile_editor_personal_data}>
                 <div className="grid gap-3 md:grid-cols-3">
-                  <FormField label={l("Titel", "Обращение", "Title")}>
+                  <FormField label={dictionary.patient_profile_editor_title}>
                     <Input
                       value={form.title}
                       onChange={(event) => updateField("title", event.target.value)}
                       className={formInputClassName}
                     />
                   </FormField>
-                  <FormField label={l("Vorname", "Имя", "First name")}>
+                  <FormField label={dictionary.patient_profile_editor_first_name}>
                     <Input
                       value={form.firstName}
                       onChange={(event) => updateField("firstName", event.target.value)}
@@ -209,7 +202,7 @@ function PatientProfileEditorSheet({
                       className={formInputClassName}
                     />
                   </FormField>
-                  <FormField label={l("Nachname", "Фамилия", "Last name")}>
+                  <FormField label={dictionary.patient_profile_editor_last_name}>
                     <Input
                       value={form.lastName}
                       onChange={(event) => updateField("lastName", event.target.value)}
@@ -219,14 +212,14 @@ function PatientProfileEditorSheet({
                   </FormField>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
-                  <FormField label={l("Nationalität", "Гражданство", "Nationality")}>
+                  <FormField label={dictionary.patient_profile_editor_nationality}>
                     <Input
                       value={form.nationality}
                       onChange={(event) => updateField("nationality", event.target.value)}
                       className={formInputClassName}
                     />
                   </FormField>
-                  <FormField label={l("Wohnsitzland", "Страна проживания", "Residence country")}>
+                  <FormField label={dictionary.patient_profile_editor_residence_country}>
                     <Input
                       value={form.residenceCountry}
                       onChange={(event) =>
@@ -236,7 +229,7 @@ function PatientProfileEditorSheet({
                     />
                   </FormField>
                 </div>
-                <FormField label={l("Sprachen", "Языки", "Languages")}>
+                <FormField label={dictionary.patient_profile_editor_languages}>
                   <Input
                     value={form.languages}
                     onChange={(event) => updateField("languages", event.target.value)}
@@ -245,11 +238,7 @@ function PatientProfileEditorSheet({
                   />
                 </FormField>
                 <FormField
-                  label={l(
-                    "Funktionale Labels",
-                    "Функциональные метки",
-                    "Functional labels"
-                  )}
+                  label={dictionary.patient_profile_editor_functional_labels}
                 >
                   <FunctionalLabelChips
                     value={form.functionalLabels}
@@ -258,10 +247,10 @@ function PatientProfileEditorSheet({
                 </FormField>
               </FormSection>
 
-              <FormSection title={l("Kontakt", "Контакты", "Contact")}>
+              <FormSection title={dictionary.patient_profile_editor_contact}>
                 <div className="grid gap-3 md:grid-cols-3">
                   <FormField
-                    label={l("Primäre Telefonnummer", "Основной телефон", "Primary phone")}
+                    label={dictionary.patient_profile_editor_primary_phone}
                   >
                     <Input
                       value={form.phonePrimary}
@@ -270,11 +259,7 @@ function PatientProfileEditorSheet({
                     />
                   </FormField>
                   <FormField
-                    label={l(
-                      "Sekundäre Telefonnummer",
-                      "Доп. телефон",
-                      "Secondary phone"
-                    )}
+                    label={dictionary.patient_profile_editor_secondary_phone}
                   >
                     <Input
                       value={form.phoneSecondary}
@@ -282,7 +267,7 @@ function PatientProfileEditorSheet({
                       className={formInputClassName}
                     />
                   </FormField>
-                  <FormField label={l("E-Mail", "Эл. почта", "Email")}>
+                  <FormField label={dictionary.patient_profile_editor_email}>
                     <Input
                       type="email"
                       value={form.email}
@@ -293,8 +278,8 @@ function PatientProfileEditorSheet({
                 </div>
               </FormSection>
 
-              <FormSection title={l("Adresse", "Адрес", "Address")}>
-                <FormField label={l("Straße", "Улица", "Street")}>
+              <FormSection title={dictionary.patient_profile_editor_address}>
+                <FormField label={dictionary.patient_profile_editor_street}>
                   <Input
                     value={form.addressStreet}
                     onChange={(event) => updateField("addressStreet", event.target.value)}
@@ -302,21 +287,21 @@ function PatientProfileEditorSheet({
                   />
                 </FormField>
                 <div className="grid gap-3 md:grid-cols-3">
-                  <FormField label={l("Stadt", "Город", "City")}>
+                  <FormField label={dictionary.patient_profile_editor_city}>
                     <Input
                       value={form.addressCity}
                       onChange={(event) => updateField("addressCity", event.target.value)}
                       className={formInputClassName}
                     />
                   </FormField>
-                  <FormField label={l("PLZ", "Индекс", "ZIP")}>
+                  <FormField label={dictionary.patient_profile_editor_zip}>
                     <Input
                       value={form.addressZip}
                       onChange={(event) => updateField("addressZip", event.target.value)}
                       className={formInputClassName}
                     />
                   </FormField>
-                  <FormField label={l("Adressland", "Страна адреса", "Address country")}>
+                  <FormField label={dictionary.patient_profile_editor_address_country}>
                     <Input
                       value={form.addressCountry}
                       onChange={(event) => updateField("addressCountry", event.target.value)}
@@ -326,9 +311,9 @@ function PatientProfileEditorSheet({
                 </div>
               </FormSection>
 
-              <FormSection title={l("Versicherung", "Страхование", "Insurance")}>
+              <FormSection title={dictionary.patient_profile_editor_insurance}>
                 <div className="grid gap-3 md:grid-cols-3">
-                  <FormField label={l("Versicherer", "Страховая компания", "Insurance provider")}>
+                  <FormField label={dictionary.patient_profile_editor_insurance_provider}>
                     <Input
                       value={form.insuranceProvider}
                       onChange={(event) =>
@@ -338,7 +323,7 @@ function PatientProfileEditorSheet({
                     />
                   </FormField>
                   <FormField
-                    label={l("Versicherungsnummer", "Номер полиса", "Insurance number")}
+                    label={dictionary.patient_profile_editor_insurance_number}
                   >
                     <Input
                       value={form.insuranceNumber}
@@ -348,7 +333,7 @@ function PatientProfileEditorSheet({
                       className={formInputClassName}
                     />
                   </FormField>
-                  <FormField label={l("Versicherungstyp", "Тип страхования", "Insurance type")}>
+                  <FormField label={dictionary.patient_profile_editor_insurance_type}>
                     <NativeComboboxSelect
                       value={form.insuranceType || "__unset__"}
 
@@ -358,18 +343,18 @@ function PatientProfileEditorSheet({
                           event.target.value === "__unset__" ? "" : event.target.value ?? ""
                         )} className={cn("w-full", formInputClassName)}>
                         <option value="__unset__">{dictionary.common_not_set}</option>
-                        <option value="private">{l("Privat", "Частная", "Private")}</option>
-                        <option value="public">{l("Gesetzlich", "Государственная", "Public")}</option>
-                        <option value="self_pay">{l("Selbstzahler", "Самооплата", "Self pay")}</option>
-                        <option value="foreign">{l("Ausland", "Иностранная", "Foreign")}</option>
+                        <option value="private">{dictionary.patient_profile_editor_private}</option>
+                        <option value="public">{dictionary.patient_profile_editor_public}</option>
+                        <option value="self_pay">{dictionary.patient_profile_editor_self_pay}</option>
+                        <option value="foreign">{dictionary.patient_profile_editor_foreign}</option>
                       </NativeComboboxSelect>
                   </FormField>
                 </div>
               </FormSection>
 
-              <FormSection title={l("Notfallkontakt", "Экстренный контакт", "Emergency contact")}>
+              <FormSection title={dictionary.patient_profile_editor_emergency_contact}>
                 <div className="grid gap-3 md:grid-cols-3">
-                  <FormField label={l("Notfallkontakt", "Контакт", "Contact")}>
+                  <FormField label={dictionary.patient_profile_editor_contact_2}>
                     <Input
                       value={form.emergencyContactName}
                       onChange={(event) =>
@@ -378,7 +363,7 @@ function PatientProfileEditorSheet({
                       className={formInputClassName}
                     />
                   </FormField>
-                  <FormField label={l("Notfalltelefon", "Телефон", "Phone")}>
+                  <FormField label={dictionary.patient_profile_editor_phone}>
                     <Input
                       value={form.emergencyContactPhone}
                       onChange={(event) =>
@@ -387,7 +372,7 @@ function PatientProfileEditorSheet({
                       className={formInputClassName}
                     />
                   </FormField>
-                  <FormField label={l("Beziehung", "Связь", "Relation")}>
+                  <FormField label={dictionary.patient_profile_editor_relation}>
                     <Input
                       value={form.emergencyContactRelation}
                       onChange={(event) =>
@@ -407,39 +392,23 @@ function PatientProfileEditorSheet({
                   {[
                     {
                       key: "dsgvoSigned",
-                      label: l("DSGVO unterschrieben", "DSGVO подписано", "DSGVO signed"),
+                      label: dictionary.patient_profile_editor_dsgvo_signed,
                     },
                     {
                       key: "confidentialityReleaseSigned",
-                      label: l(
-                        "Schweigepflicht freigegeben",
-                        "Снятие врачебной тайны",
-                        "Confidentiality released"
-                      ),
+                      label: dictionary.patient_profile_editor_confidentiality_released,
                     },
                     {
                       key: "identityVerified",
-                      label: l(
-                        "Identität bestätigt",
-                        "Личность подтверждена",
-                        "Identity verified"
-                      ),
+                      label: dictionary.patient_profile_editor_identity_verified,
                     },
                     {
                       key: "documentPackComplete",
-                      label: l(
-                        "Dokumentenpaket vollständig",
-                        "Пакет документов собран",
-                        "Document pack complete"
-                      ),
+                      label: dictionary.patient_profile_editor_document_pack_complete,
                     },
                     {
                       key: "complianceCompleted",
-                      label: l(
-                        "Bereit bestätigt",
-                        "Готовность подтверждена",
-                        "Readiness confirmed"
-                      ),
+                      label: dictionary.patient_profile_editor_readiness_confirmed,
                     },
                   ].map((item) => {
                     const key = item.key as keyof PatientLegalStatus;
@@ -464,7 +433,7 @@ function PatientProfileEditorSheet({
                     );
                   })}
                 </div>
-                <FormField label={l("Vertragsstatus", "Статус договора", "Contract status")}>
+                <FormField label={dictionary.patient_profile_editor_contract_status}>
                   <NativeComboboxSelect
                     value={form.legalStatus.contractStatus}
 
@@ -477,36 +446,28 @@ function PatientProfileEditorSheet({
                       ))}
                     </NativeComboboxSelect>
                 </FormField>
-                <FormField label={l("Notizen", "Заметки", "Notes")}>
+                <FormField label={dictionary.patient_profile_editor_notes}>
                   <textarea
                     className={formTextareaClassName}
                     value={form.legalStatus.notes}
                     onChange={(event) => updateLegalStatusField("notes", event.target.value)}
-                    placeholder={l(
-                      "Ausstehende Unterschriften, fehlende IDs, offene Compliance-Fragen",
-                      "Ожидающие подписи, отсутствующие ID, открытые вопросы compliance",
-                      "Pending signatures, missing IDs, open compliance questions"
-                    )}
+                    placeholder={dictionary.patient_profile_editor_pending_signatures_missing_ids_open_compliance_questions}
                   />
                 </FormField>
               </FormSection>
 
-              <FormSection title={l("CAVE-Hinweise", "Предупреждения CAVE", "CAVE warnings")}>
+              <FormSection title={dictionary.patient_profile_editor_cave_warnings}>
                 <textarea
                   className={formTextareaClassName}
                   value={form.clinicalWarnings}
                   onChange={(event) =>
                     updateField("clinicalWarnings", event.target.value)
                   }
-                  placeholder={l(
-                    "Dauerhafte klinische Warnhinweise oder Sicherheitshinweise",
-                    "Постоянные клинические предупреждения или сигналы безопасности",
-                    "Persistent clinical warnings or safety alerts"
-                  )}
+                  placeholder={dictionary.patient_profile_editor_persistent_clinical_warnings_or_safety_alerts}
                 />
               </FormSection>
 
-              <FormSection title={l("Notizen", "Заметки", "Notes")}>
+              <FormSection title={dictionary.patient_profile_editor_notes}>
                 <textarea
                   className={formTextareaClassName}
                   value={form.notes}

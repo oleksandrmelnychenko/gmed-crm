@@ -13,7 +13,13 @@ import {
   selectClass,
   tokens,
 } from "@/components/ui-shell";
-import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
+import {
+  formatEnumLabelFromKeys,
+  formatUnknownValue,
+  useLang,
+  type Translations,
+  type TranslationKey,
+} from "@/lib/i18n";
 import type {
   CreateOrderServiceGroupInput,
   OrderServiceGroup,
@@ -91,43 +97,40 @@ const blankWizardForm: WizardForm = {
   participants: [{ ...blankParticipant }],
 };
 
-function textForLang(lang: string, de: string, ru: string, en: string) {
-  if (lang === "de") return de;
-  if (lang === "ru") return ru;
-  return en;
+const SERVICE_GROUP_STATUS_LABEL_KEYS = {
+  draft: "orders_service_group_status_draft",
+  generated: "orders_service_group_status_generated",
+  in_progress: "operations_status_in_progress",
+  open: "orders_service_group_status_open",
+  partially_generated: "orders_service_group_status_partially_generated",
+  ready: "orders_service_group_status_ready",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const SERVICE_GROUP_LINE_ACTION_LABEL_KEYS: Partial<Record<string, TranslationKey>> = {
+  skip_duplicate: "orders_service_group_line_action_duplicate",
+  generate: "orders_service_group_line_action_generate",
+  update: "orders_service_group_line_action_update",
+};
+
+function formatCountMessage(template: string, count: number) {
+  return template.replace(/\{count\}/g, String(count));
 }
 
-function serviceGroupStatusLabel(status: string, lang: string, translations: Translations) {
-  const labels: Record<string, string> = {
-    draft: textForLang(lang, "Entwurf", "Черновик", "Draft"),
-    generated: textForLang(lang, "Generiert", "Сгенерировано", "Generated"),
-    in_progress: textForLang(lang, "In Bearbeitung", "В работе", "In progress"),
-    open: textForLang(lang, "Offen", "Открыто", "Open"),
-    partially_generated: textForLang(lang, "Teilweise generiert", "Частично сгенерировано", "Partially generated"),
-    ready: textForLang(lang, "Bereit", "Готово", "Ready"),
-  };
-  return labels[status] ?? formatUnknownValue(status, translations);
+function serviceGroupStatusLabel(status: string, translations: Translations) {
+  return formatEnumLabelFromKeys(status, SERVICE_GROUP_STATUS_LABEL_KEYS, translations);
 }
 
 function lineActionLabel(
   action: string,
   index: number,
-  lang: string,
   translations: Translations,
 ) {
-  if (action === "skip_duplicate") {
-    return textForLang(lang, "Duplikat", "Дубликат", "Duplicate");
-  }
-  if (action === "generate") {
-    return textForLang(lang, "Neue Zeile", "Новая строка", "New line");
-  }
-  if (action === "update") {
-    return textForLang(lang, "Aktualisieren", "Обновить", "Update");
-  }
   if (!action) {
-    return textForLang(lang, `Zeile ${index + 1}`, `Строка ${index + 1}`, `Line ${index + 1}`);
+    return `${translations.orders_service_group_line_action_line_prefix} ${index + 1}`;
   }
-  return formatUnknownValue(action, translations);
+  return SERVICE_GROUP_LINE_ACTION_LABEL_KEYS[action]
+    ? formatEnumLabelFromKeys(action, SERVICE_GROUP_LINE_ACTION_LABEL_KEYS, translations)
+    : formatUnknownValue(action, translations);
 }
 
 export function OrderServiceGroupPanel({
@@ -137,8 +140,7 @@ export function OrderServiceGroupPanel({
   error,
   onGenerate,
 }: OrderServiceGroupPanelProps) {
-  const { t, lang } = useLang();
-  const l = (de: string, ru: string, en: string) => textForLang(lang, de, ru, en);
+  const { t } = useLang();
   const [overrideDuplicates, setOverrideDuplicates] = useState(false);
   const previewCount = group.participants.length;
   const generatedLineCount = group.generated_line_count ?? 0;
@@ -147,8 +149,8 @@ export function OrderServiceGroupPanel({
 
   return (
     <Section
-      title={l("Leistung nach Ärzten aufteilen", "Разделение услуги по врачам", "Split service by doctors")}
-      accessory={<CountBadge>{previewCount} {l("Teilnehmer", "участников", "participants")}</CountBadge>}
+      title={t.orders_service_group_split_title}
+      accessory={<CountBadge>{previewCount} {t.orders_service_group_participants}</CountBadge>}
     >
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
@@ -156,28 +158,24 @@ export function OrderServiceGroupPanel({
             {group.group_title}
           </h3>
           <p className={tokens.text.muted}>
-            {l(
-              `${previewCount} Ärzte erzeugen ${previewCount} Abrechnungszeilen. Bestehende Zeilen werden über den Teilnehmerbezug erkannt.`,
-              `${previewCount} врачей создают ${previewCount} строк биллинга. Существующие строки определяются по связи с участником.`,
-              `${previewCount} doctors create ${previewCount} generated billing lines. Existing lines are detected through the participant link.`,
-            )}
+            {formatCountMessage(t.orders_service_group_summary, previewCount)}
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
             <Badge variant="outline" className="rounded-full">
-              {serviceGroupStatusLabel(group.status, lang, t)}
+              {serviceGroupStatusLabel(group.status, t)}
             </Badge>
             <Badge variant="outline" className="rounded-full">
               {group.quantity} x {group.unit_price} {group.currency}
             </Badge>
             <Badge variant="outline" className="rounded-full">
-              {l("MwSt.", "НДС", "VAT")} {group.vat_rate}%
+              {t.orders_service_group_vat} {group.vat_rate}%
             </Badge>
             <Badge variant="outline" className="rounded-full">
-              {generatedLineCount} {l("generiert", "сгенерировано", "generated")}
+              {generatedLineCount} {t.orders_service_group_generated}
             </Badge>
             {duplicateCount > 0 ? (
               <Badge variant="outline" className="rounded-full border-amber-200 bg-amber-50 text-amber-700">
-                {duplicateCount} {l("duplikatsicher", "без дублей", "duplicate-safe")}
+                {duplicateCount} {t.orders_service_group_duplicate_safe}
               </Badge>
             ) : null}
           </div>
@@ -190,7 +188,7 @@ export function OrderServiceGroupPanel({
                 checked={overrideDuplicates}
                 onChange={(event) => setOverrideDuplicates(event.target.checked)}
               />
-              {l("Bestehende Zeilen neu generieren", "Перегенерировать существующие строки", "Regenerate existing lines")}
+              {t.orders_service_group_regenerate_existing}
             </label>
             <Button
               type="button"
@@ -200,10 +198,10 @@ export function OrderServiceGroupPanel({
               onClick={() => onGenerate(overrideDuplicates)}
             >
               {generating
-                ? l("Generierung...", "Генерация...", "Generating...")
+                ? t.orders_service_group_generating
                 : overrideDuplicates
-                  ? l("Zeilen neu generieren", "Перегенерировать строки", "Regenerate lines")
-                  : l("Neue Zeilen generieren", "Сгенерировать новые строки", "Generate new lines")}
+                  ? t.orders_service_group_regenerate_lines
+                  : t.orders_service_group_generate_new_lines}
             </Button>
           </div>
         ) : null}
@@ -213,9 +211,9 @@ export function OrderServiceGroupPanel({
 
       {preview ? (
         <div className="grid gap-3 md:grid-cols-3">
-          <PreviewMetric label={l("Wird erzeugt", "Будет создано", "Will generate")} value={preview.generate_count} />
-          <PreviewMetric label={l("Wird aktualisiert", "Будет обновлено", "Will update")} value={preview.update_count} />
-          <PreviewMetric label={l("Duplikate überspringen", "Пропустить дубли", "Will skip duplicates")} value={preview.skip_duplicate_count} />
+          <PreviewMetric label={t.orders_service_group_preview_generate_metric} value={preview.generate_count} />
+          <PreviewMetric label={t.orders_service_group_preview_update_metric} value={preview.update_count} />
+          <PreviewMetric label={t.orders_service_group_preview_skip_duplicates_metric} value={preview.skip_duplicate_count} />
         </div>
       ) : null}
 
@@ -229,21 +227,21 @@ export function OrderServiceGroupPanel({
                 <LineHeader
                   doctorName={line.doctor_name}
                   providerName={line.provider_name}
-                  actionLabel={lineActionLabel(line.action, index, lang, t)}
+                  actionLabel={lineActionLabel(line.action, index, t)}
                 />
                 <p className="mt-2 text-xs text-muted-foreground">
                   {line.description}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {line.quantity} x {line.unit_price} {line.currency} - {l("MwSt.", "НДС", "VAT")} {line.vat_rate}%
+                  {line.quantity} x {line.unit_price} {line.currency} - {t.orders_service_group_vat} {line.vat_rate}%
                 </p>
                 {line.existing_leistung_id ? (
                   <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800">
-                    {l("Bestehende Zeile", "Существующая строка", "Existing line")}: {line.existing_leistung_id}
+                    {t.orders_service_group_existing_line}: {line.existing_leistung_id}
                   </p>
                 ) : (
                   <p className="mt-2 rounded-lg border border-dashed border-border/60 bg-muted/25 px-2.5 py-1 text-[11px] text-muted-foreground">
-                    {l("Nur Vorschau: Eine neue Abrechnungszeile wird erstellt.", "Только предпросмотр: будет создана новая строка биллинга.", "Preview only: a new billing line will be created.")}
+                    {t.orders_service_group_preview_new_line_hint}
                   </p>
                 )}
               </article>
@@ -259,7 +257,6 @@ export function OrderServiceGroupPanel({
                   actionLabel={lineActionLabel(
                     participant.generated_leistung_id ? "skip_duplicate" : "generate",
                     index,
-                    lang,
                     t,
                   )}
                 />
@@ -270,11 +267,11 @@ export function OrderServiceGroupPanel({
                 ) : null}
                 {participant.generated_leistung_id ? (
                   <p className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700">
-                    {l("Generierte Zeile", "Сгенерированная строка", "Generated line")}: {participant.generated_leistung_id}
+                    {t.orders_service_group_generated_line}: {participant.generated_leistung_id}
                   </p>
                 ) : (
                   <p className="mt-2 rounded-lg border border-dashed border-border/60 bg-muted/25 px-2.5 py-1 text-[11px] text-muted-foreground">
-                    {l("Nur Vorschau: Aus diesem Teilnehmer wird eine Abrechnungszeile erstellt.", "Только предпросмотр: по этому участнику будет создана строка биллинга.", "Preview only: billing line will be created from this participant.")}
+                    {t.orders_service_group_preview_participant_line_hint}
                   </p>
                 )}
               </article>
@@ -292,11 +289,13 @@ export function OrderServiceGroupWizard({
   onLoadProviderDoctors,
   onCreate,
 }: OrderServiceGroupWizardProps) {
-  const { lang } = useLang();
-  const l = (de: string, ru: string, en: string) => textForLang(lang, de, ru, en);
+  const { t } = useLang();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<WizardForm>(blankWizardForm);
   const [localError, setLocalError] = useState("");
+  const selectedDoctorCount = form.participants.filter(
+    (item) => item.provider_id && item.doctor_id,
+  ).length;
 
   const duplicateDoctorCount = useMemo(() => {
     const selected = form.participants
@@ -318,7 +317,7 @@ export function OrderServiceGroupWizard({
     event.preventDefault();
     const title = form.group_title.trim();
     if (!title) {
-      setLocalError(l("Gruppentitel ist erforderlich.", "Название группы обязательно.", "Group title is required."));
+      setLocalError(t.orders_service_group_wizard_title_required);
       return;
     }
     const participants = form.participants
@@ -329,11 +328,11 @@ export function OrderServiceGroupWizard({
         role_label: participant.role_label.trim() || null,
       }));
     if (participants.length === 0) {
-      setLocalError(l("Mindestens ein Arzt muss ausgewählt sein.", "Нужен минимум один врач-участник.", "At least one doctor participant is required."));
+      setLocalError(t.orders_service_group_wizard_doctor_required);
       return;
     }
     if (duplicateDoctorCount > 0) {
-      setLocalError(l("Ein Arzt darf nur einmal in der Leistungsgruppe vorkommen.", "Врач может быть добавлен в группу услуг только один раз.", "A doctor can only appear once in a service group."));
+      setLocalError(t.orders_service_group_wizard_duplicate_doctor);
       return;
     }
 
@@ -351,7 +350,7 @@ export function OrderServiceGroupWizard({
       });
     } catch (error) {
       setLocalError(
-        error instanceof Error ? error.message : l("Leistungsgruppe konnte nicht erstellt werden.", "Не удалось создать группу услуг.", "Failed to create service group."),
+        error instanceof Error ? error.message : t.orders_service_group_failed_create,
       );
       return;
     }
@@ -361,7 +360,7 @@ export function OrderServiceGroupWizard({
 
   return (
     <Section
-      title={l("Assistent für mehrere Ärzte", "Мастер услуги на нескольких врачей", "Multi-doctor service wizard")}
+      title={t.orders_service_group_wizard_title}
       accessory={
         <Button
           type="button"
@@ -370,16 +369,12 @@ export function OrderServiceGroupWizard({
           className="rounded-lg"
           onClick={() => setOpen((current) => !current)}
         >
-          {open ? l("Assistent schließen", "Закрыть мастер", "Close wizard") : l("Split-Gruppe erstellen", "Создать split-группу", "Create split group")}
+          {open ? t.orders_service_group_wizard_close : t.orders_service_group_wizard_create}
         </Button>
       }
     >
       <p className={tokens.text.muted}>
-        {l(
-          "Schritt 1: Gruppe definieren. Schritt 2: Ärzte hinzufügen. Schritt 3: Vorschau prüfen. Schritt 4: teilnehmerbezogene Abrechnungszeilen erzeugen.",
-          "Шаг 1: задайте группу. Шаг 2: добавьте врачей. Шаг 3: проверьте предпросмотр. Шаг 4: создайте строки биллинга по участникам.",
-          "Step 1: define the group. Step 2: add doctors. Step 3: review the preview. Step 4: generate participant-scoped billing lines.",
-        )}
+        {t.orders_service_group_wizard_steps}
       </p>
       {!open ? null : (
         <form onSubmit={(event) => void handleSubmit(event)} className="space-y-4">
@@ -387,15 +382,15 @@ export function OrderServiceGroupWizard({
             <Banner tone="error" withIcon>{error ?? localError}</Banner>
           ) : null}
           <div className="grid gap-3 md:grid-cols-4">
-            <Field label={l("Gruppentitel", "Название группы", "Group title")} className="md:col-span-2">
+            <Field label={t.orders_service_group_title} className="md:col-span-2">
               <Input
                 value={form.group_title}
                 onChange={(event) => setForm({ ...form, group_title: event.target.value })}
                 className={inputClass}
-                placeholder={l("Kardiologie-Board", "Кардиологический консилиум", "Cardiology board")}
+                placeholder={t.orders_service_group_title_placeholder}
               />
             </Field>
-            <Field label={l("Leistungsdatum", "Дата услуги", "Service date")}>
+            <Field label={t.orders_service_group_service_date}>
               <Input
                 type="date"
                 value={form.service_date}
@@ -403,7 +398,7 @@ export function OrderServiceGroupWizard({
                 className={inputClass}
               />
             </Field>
-            <Field label={l("Währung", "Валюта", "Currency")}>
+            <Field label={t.orders_service_group_currency}>
               <Input
                 value={form.currency}
                 onChange={(event) => setForm({ ...form, currency: event.target.value })}
@@ -412,28 +407,28 @@ export function OrderServiceGroupWizard({
             </Field>
           </div>
           <div className="grid gap-3 md:grid-cols-4">
-            <Field label={l("Menge", "Количество", "Quantity")}>
+            <Field label={t.orders_service_group_quantity}>
               <Input
                 value={form.quantity}
                 onChange={(event) => setForm({ ...form, quantity: event.target.value })}
                 className={inputClass}
               />
             </Field>
-            <Field label={l("Einzelpreis", "Цена за единицу", "Unit price")}>
+            <Field label={t.orders_service_group_unit_price}>
               <Input
                 value={form.unit_price}
                 onChange={(event) => setForm({ ...form, unit_price: event.target.value })}
                 className={inputClass}
               />
             </Field>
-            <Field label={l("MwSt. %", "НДС %", "VAT %")}>
+            <Field label={t.orders_service_group_vat_percent}>
               <Input
                 value={form.vat_rate}
                 onChange={(event) => setForm({ ...form, vat_rate: event.target.value })}
                 className={inputClass}
               />
             </Field>
-            <Field label={l("Beschreibung", "Описание", "Description")}>
+            <Field label={t.orders_service_group_description}>
               <Input
                 value={form.description}
                 onChange={(event) => setForm({ ...form, description: event.target.value })}
@@ -444,7 +439,7 @@ export function OrderServiceGroupWizard({
 
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <h4 className="text-sm font-semibold text-foreground">{l("Ärzte", "Врачи", "Doctors")}</h4>
+              <h4 className="text-sm font-semibold text-foreground">{t.orders_service_group_doctors}</h4>
               <Button
                 type="button"
                 variant="outline"
@@ -457,7 +452,7 @@ export function OrderServiceGroupWizard({
                   }))
                 }
               >
-                {l("Arzt hinzufügen", "Добавить врача", "Add doctor")}
+                {t.orders_service_group_add_doctor}
               </Button>
             </div>
             {form.participants.map((participant, index) => {
@@ -469,7 +464,7 @@ export function OrderServiceGroupWizard({
                   key={index}
                   className="grid gap-2 rounded-xl border border-border/50 bg-muted/20 p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]"
                 >
-                  <Field label={l("Leistungserbringer", "Провайдер", "Provider")}>
+                  <Field label={t.orders_service_group_provider}>
                     <NativeComboboxSelect
                       value={participant.provider_id}
                       onChange={(event) => {
@@ -482,7 +477,7 @@ export function OrderServiceGroupWizard({
                       }}
                       className={selectClass}
                     >
-                      <option value="">{l("Leistungserbringer auswählen", "Выберите провайдера", "Select provider")}</option>
+                      <option value="">{t.orders_service_group_select_provider}</option>
                       {providers.map((provider) => (
                         <option key={provider.id} value={provider.id}>
                           {provider.name}
@@ -490,7 +485,7 @@ export function OrderServiceGroupWizard({
                       ))}
                     </NativeComboboxSelect>
                   </Field>
-                  <Field label={l("Arzt", "Врач", "Doctor")}>
+                  <Field label={t.orders_service_group_doctor}>
                     <NativeComboboxSelect
                       value={participant.doctor_id}
                       onChange={(event) =>
@@ -499,7 +494,7 @@ export function OrderServiceGroupWizard({
                       className={selectClass}
                       disabled={!participant.provider_id}
                     >
-                      <option value="">{l("Arzt auswählen", "Выберите врача", "Select doctor")}</option>
+                      <option value="">{t.orders_service_group_select_doctor}</option>
                       {doctors.map((doctor) => (
                         <option key={doctor.id} value={doctor.id}>
                           {doctor.name}{doctor.fachbereich ? ` - ${doctor.fachbereich}` : ""}
@@ -507,14 +502,14 @@ export function OrderServiceGroupWizard({
                       ))}
                     </NativeComboboxSelect>
                   </Field>
-                  <Field label={l("Rollenlabel", "Роль", "Role label")}>
+                  <Field label={t.orders_service_group_role_label}>
                     <Input
                       value={participant.role_label}
                       onChange={(event) =>
                         updateParticipant(index, { role_label: event.target.value })
                       }
                       className={inputClass}
-                      placeholder={l("Lead, Zweitmeinung", "Ведущий, второе мнение", "Lead, second opinion")}
+                      placeholder={t.orders_service_group_role_placeholder}
                     />
                   </Field>
                   <div className="flex items-end">
@@ -533,7 +528,7 @@ export function OrderServiceGroupWizard({
                         }))
                       }
                     >
-                      {l("Entfernen", "Удалить", "Remove")}
+                      {t.orders_service_group_remove}
                     </Button>
                   </div>
                 </div>
@@ -544,24 +539,20 @@ export function OrderServiceGroupWizard({
           <div className="rounded-xl border border-border/50 bg-card/60 px-4 py-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <h4 className="text-sm font-semibold text-foreground">{l("Vorschau", "Предпросмотр", "Preview")}</h4>
+                <h4 className="text-sm font-semibold text-foreground">{t.orders_service_group_preview}</h4>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {l(
-                    `${form.participants.filter((item) => item.provider_id && item.doctor_id).length} ausgewählte Ärzte erzeugen die gleiche Anzahl Abrechnungszeilen.`,
-                    `${form.participants.filter((item) => item.provider_id && item.doctor_id).length} выбранных врачей создадут такое же количество строк биллинга.`,
-                    `${form.participants.filter((item) => item.provider_id && item.doctor_id).length} selected doctors will create the same number of billing lines.`,
-                  )}
+                  {formatCountMessage(t.orders_service_group_wizard_preview_summary, selectedDoctorCount)}
                 </p>
               </div>
               <CountBadge>
-                {duplicateDoctorCount > 0 ? l("Duplikate", "Дубли", "Duplicates") : l("Bereit", "Готово", "Ready")}
+                {duplicateDoctorCount > 0 ? t.orders_service_group_duplicates : t.orders_service_group_ready}
               </CountBadge>
             </div>
           </div>
 
           <div className="flex justify-end">
             <Button type="submit" className="rounded-lg" disabled={creating}>
-              {creating ? l("Erstellung...", "Создание...", "Creating...") : l("Gruppenvorschau speichern", "Сохранить предпросмотр группы", "Save group preview")}
+              {creating ? t.orders_service_group_creating : t.orders_service_group_save_preview}
             </Button>
           </div>
         </form>

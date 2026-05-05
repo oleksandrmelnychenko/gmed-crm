@@ -19,7 +19,7 @@ import {
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { formatUnknownValue, useLang } from "@/lib/i18n";
+import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { localizeRequiredDocumentLabel } from "@/lib/required-document-labels";
 import {
@@ -119,73 +119,26 @@ function compareNextActions(a: PortalNextActionItem, b: PortalNextActionItem) {
   return aDue - bDue;
 }
 
-function formatNextActionKind(
-  kind: string,
-  l: (de: string, ru: string, en: string) => string,
-  translations: { common_unknown: string; common_unknown_value: string },
-) {
-  switch (kind) {
-    case "invoice_payment":
-      return l("Rechnung bezahlen", "Оплата счета", "Invoice payment");
-    case "package_approval":
-      return l("Paket freigeben", "Подтверждение пакета", "Package approval");
-    case "document_confirmation":
-      return l("Dokument bestatigen", "Подтверждение документа", "Document confirmation");
-    case "recommendation_decision":
-      return l("Empfehlung entscheiden", "Решение по рекомендации", "Recommendation decision");
-    case "appointment_request":
-      return l("Terminanfrage", "Запрос на визит", "Appointment request");
-    case "privacy_request":
-      return l("Datenschutzanfrage", "Запрос приватности", "Privacy request");
-    case "feedback_request":
-      return l("Feedback abgeben", "Оставить отзыв", "Feedback request");
-    case "concierge_service":
-      return l("Zusatzservice", "Дополнительная услуга", "Concierge service");
-    default:
-      return formatUnknownValue(kind, translations);
-  }
+const NEXT_ACTION_KIND_LABEL_KEYS = {
+  invoice_payment: "portal_dashboard_next_action_invoice_payment",
+  package_approval: "portal_dashboard_next_action_package_approval",
+  document_confirmation: "portal_dashboard_next_action_document_confirmation",
+  recommendation_decision: "portal_dashboard_next_action_recommendation_decision",
+  appointment_request: "portal_dashboard_next_action_appointment_request",
+  privacy_request: "portal_dashboard_next_action_privacy_request",
+  feedback_request: "portal_dashboard_next_action_feedback_request",
+  concierge_service: "portal_dashboard_next_action_concierge_service",
+} satisfies Partial<Record<string, keyof Translations>>;
+
+function formatNextActionKind(kind: string, translations: Translations) {
+  const labelKey = NEXT_ACTION_KIND_LABEL_KEYS[kind as keyof typeof NEXT_ACTION_KIND_LABEL_KEYS];
+  return labelKey ? translations[labelKey] : formatUnknownValue(kind, translations);
 }
 
 function portalDocumentValueLabel(
   value: string | null | undefined,
-  l: (de: string, ru: string, en: string) => string,
-  translations: { common_unknown: string; common_unknown_value: string },
 ) {
   return sharedPortalDocumentValueLabel(value);
-  switch (value) {
-    case "general":
-      return l("Allgemein", "Общий", "General");
-    case "report":
-    case "medical_report":
-      return l("Medizinischer Bericht", "Медицинский отчет", "Medical report");
-    case "discharge_report":
-      return l("Entlassungsbericht", "Выписной отчет", "Discharge report");
-    case "clinic_letter":
-    case "clinic_correspondence":
-    case "correspondence":
-      return l("Korrespondenz", "Переписка", "Correspondence");
-    case "blood_results":
-    case "analyses":
-    case "analysis":
-      return l("Analysen", "Анализы", "Analyses");
-    case "conclusions":
-      return l("Befunde", "Заключения", "Conclusions");
-    case "invoice_pdf":
-    case "invoices":
-      return l("Rechnung", "Счет", "Invoice");
-    case "translated_letter":
-    case "translations":
-      return l("Ubersetzung", "Перевод", "Translation");
-    case "insurance":
-    case "insurance_document":
-      return l("Versicherungsdokument", "Страховой документ", "Insurance document");
-    case "identity":
-      return l("Identitat", "Идентификация", "Identity");
-    case "payment_proof":
-      return l("Zahlungsnachweis", "Подтверждение оплаты", "Payment proof");
-    default:
-      return formatUnknownValue(value, translations);
-  }
 }
 
 export function PatientDashboardPage() {
@@ -210,8 +163,8 @@ export function PatientDashboardPage() {
       lang === "de" ? de : lang === "ru" ? ru : en,
     [lang],
   );
-  const greeting = l("Hallo", "Здравствуйте", "Hello");
-  const patientLabel = l("Patient", "Пациент", "Patient");
+  const greeting = t.portal_dashboard_hello;
+  const patientLabel = t.portal_dashboard_patient;
 
   useRealtimeSubscription(PATIENT_DASHBOARD_REALTIME_EVENTS, () => {
     clearApiCache("/me/appointments");
@@ -257,7 +210,7 @@ export function PatientDashboardPage() {
         });
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : l("Patientenportal konnte nicht geladen werden.", "Не удалось загрузить портал пациента.", "Failed to load portal workspace."));
+        setError(err instanceof Error ? err.message : t.portal_dashboard_failed_to_load_portal_workspace);
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -270,7 +223,7 @@ export function PatientDashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [loading, version, l]);
+  }, [loading, t.portal_dashboard_failed_to_load_portal_workspace, version, l]);
 
   const releasedDocuments = documents.length;
   const upcomingAppointments = useMemo(
@@ -328,7 +281,7 @@ export function PatientDashboardPage() {
     try {
       await downloadPatientPortalExport();
     } catch (err) {
-      setError(err instanceof Error ? err.message : l("Patientendaten konnten nicht exportiert werden.", "Не удалось экспортировать данные пациента.", "Failed to export patient data."));
+      setError(err instanceof Error ? err.message : t.portal_dashboard_failed_to_export_patient_data);
     } finally {
       setExportBusy(false);
     }
@@ -346,48 +299,44 @@ export function PatientDashboardPage() {
     <TabShell className="mt-0 min-h-0">
       <PageHeader
         title={`${greeting}, ${user?.name ?? patientLabel}`}
-        description={l(
-          "Hier werden nur ausdrucklich freigegebene Dokumente und Datenschutz-Workflows angezeigt.",
-          "Здесь отображаются только явно опубликованные документы и процессы по защите данных.",
-          "Only explicitly released documents and privacy workflows are shown here.",
-        )}
+        description={t.portal_dashboard_only_explicitly_released_documents_and_privacy_workflows_are_sho}
         actions={
           <>
-            <CountBadge>{l("Patientenportal", "Портал пациента", "Patient portal")}</CountBadge>
+            <CountBadge>{t.portal_dashboard_patient_portal}</CountBadge>
             <a href="/documents">
               <Button variant="outline" className={tokens.control.primaryButton}>
                 <Download className="size-4" />
-                {l("Meine Dokumente", "Мои документы", "My documents")}
+                {t.portal_dashboard_my_documents}
               </Button>
             </a>
             <a href="/appointments">
               <Button variant="outline" className={tokens.control.primaryButton}>
                 <Download className="size-4" />
-                {l("Meine Termine", "Мои записи", "My appointments")}
+                {t.portal_dashboard_my_appointments}
               </Button>
             </a>
             <a href="/privacy">
               <Button variant="outline" className={tokens.control.primaryButton}>
                 <ShieldCheck className="size-4" />
-                {l("Datenschutzanfragen", "Запросы по приватности", "Privacy requests")}
+                {t.portal_dashboard_privacy_requests}
               </Button>
             </a>
             <a href="/feedback">
               <Button variant="outline" className={tokens.control.primaryButton}>
                 <ShieldCheck className="size-4" />
-                {l("Mein Feedback", "Мои отзывы", "My feedback")}
+                {t.portal_dashboard_my_feedback}
               </Button>
             </a>
             <a href="/services">
               <Button variant="outline" className={tokens.control.primaryButton}>
                 <Download className="size-4" />
-                {l("Meine Services", "Мои сервисы", "My services")}
+                {t.portal_dashboard_my_services}
               </Button>
             </a>
             <a href="/invoices">
               <Button variant="outline" className={tokens.control.primaryButton}>
                 <Download className="size-4" />
-                {l("Meine Rechnungen", "Мои счета", "My invoices")}
+                {t.portal_dashboard_my_invoices}
               </Button>
             </a>
             <Button
@@ -397,7 +346,7 @@ export function PatientDashboardPage() {
               disabled={exportBusy}
             >
               {exportBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
-              {l("Meine Daten exportieren", "Экспортировать мои данные", "Export my data")}
+              {t.portal_dashboard_export_my_data}
             </Button>
             <Button
               variant="outline"
@@ -405,7 +354,7 @@ export function PatientDashboardPage() {
               onClick={() => setVersion((value) => value + 1)}
             >
               {refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-              {l("Aktualisieren", "Обновить", "Refresh")}
+              {t.portal_dashboard_refresh}
             </Button>
           </>
         }
@@ -419,28 +368,24 @@ export function PatientDashboardPage() {
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <p className={tokens.text.eyebrow}>
-                  {l("Erforderliche Dokumente", "Обязательные документы", "Required documents")}
+                  {t.portal_dashboard_required_documents}
                 </p>
                 <p className="mt-2 text-sm font-semibold text-foreground">
-                  {l("Ihr Mindest-Dokumentenpaket ist vollständig.", "Минимальный комплект документов уже собран.", "Your minimum document pack is complete")}
+                  {t.portal_dashboard_your_minimum_document_pack_is_complete}
                 </p>
                 <p className={cn("mt-1", tokens.text.muted)}>
-                  {l(
-                    "Ihr Betreuungsteam hat bereits den erforderlichen Mindest-Dokumentensatz.",
-                    "У команды сопровождения уже есть минимально необходимый комплект документов.",
-                    "Your care team already has the minimum required document set.",
-                  )}
+                  {t.portal_dashboard_your_care_team_already_has_the_minimum_required_document_set}
                 </p>
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-2">
                 <CountBadge>
-                  {l("Erfüllt", "Выполнено", "Fulfilled")}:{" "}
+                  {t.portal_dashboard_fulfilled}:{" "}
                   {documentAlerts.required_documents.filter((item) => item.fulfilled).length}/
                   {documentAlerts.configured_rule_count}
                 </CountBadge>
                 <a href="/documents">
                   <Button variant="outline" className={tokens.control.accessoryButton}>
-                    {l("Dokumente öffnen", "Открыть документы", "Open documents")}
+                    {t.portal_dashboard_open_documents}
                   </Button>
                 </a>
               </div>
@@ -451,7 +396,7 @@ export function PatientDashboardPage() {
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <p className={tokens.text.eyebrow}>
-                  {l("Erforderliche Dokumente", "Обязательные документы", "Required documents")}
+                  {t.portal_dashboard_required_documents}
                 </p>
                 <p className="mt-2 text-sm font-semibold text-foreground">
                   {l(
@@ -461,11 +406,7 @@ export function PatientDashboardPage() {
                   )}
                 </p>
                 <p className={cn("mt-1", tokens.text.muted)}>
-                  {l(
-                    "Laden Sie die fehlenden Unterlagen im Portal hoch, damit Ihr Team ohne manuelles Nachfassen weiterarbeiten kann.",
-                    "Загрузите недостающие документы в портал, чтобы команда могла продолжить работу без ручного напоминания.",
-                    "Upload the missing items in the portal so your care team can continue without manual follow-up.",
-                  )}
+                  {t.portal_dashboard_upload_the_missing_items_in_the_portal_so_your_care_team_can_con}
                 </p>
                 {documentAlerts.missing_count > 0 ? (
                   <div className="mt-3 flex flex-wrap gap-2">
@@ -479,13 +420,13 @@ export function PatientDashboardPage() {
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-2">
                 <CountBadge>
-                  {l("Erfüllt", "Выполнено", "Fulfilled")}:{" "}
+                  {t.portal_dashboard_fulfilled}:{" "}
                   {documentAlerts.required_documents.filter((item) => item.fulfilled).length}/
                   {documentAlerts.configured_rule_count}
                 </CountBadge>
                 <a href="/documents">
                   <Button variant="outline" className={tokens.control.accessoryButton}>
-                    {l("Dokumente öffnen", "Открыть документы", "Open documents")}
+                    {t.portal_dashboard_open_documents}
                   </Button>
                 </a>
               </div>
@@ -496,31 +437,31 @@ export function PatientDashboardPage() {
 
       <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
         <Section
-          title={l("Nächste Schritte", "Следующие действия", "Next actions")}
+          title={t.portal_dashboard_next_actions}
           accessory={
             <div className="flex flex-wrap items-center gap-2">
               <CountBadge>
-                {l("Priorität", "Приоритет", "Priority")}: {urgentNextActionCount} / {nextActions.length}
+                {t.portal_dashboard_priority}: {urgentNextActionCount} / {nextActions.length}
               </CountBadge>
               <a href="/recommendations" className="text-sm font-medium text-primary hover:underline">
-                {l("Empfehlungen", "Рекомендации", "Recommendations")}
+                {t.portal_dashboard_recommendations}
               </a>
             </div>
           }
         >
           <p className="text-sm text-muted-foreground">
-            {l("Ein konsolidierter Block aus Terminen, Empfehlungen, Dokumenten und sichtbaren Rechnungen.", "Единый блок из визитов, рекомендаций, документов и видимых счетов.", "A consolidated block from appointments, recommendations, documents and visible invoices.")}
+            {t.portal_dashboard_a_consolidated_block_from_appointments_recommendations_documents}
           </p>
           {nextActionKindSummary.length > 0 ? (
             <div className="flex flex-wrap gap-2">
               {nextActionKindSummary.map(([kind, count]) => (
-                <CountBadge key={kind}>{formatNextActionKind(kind, l, t)}: {count}</CountBadge>
+                <CountBadge key={kind}>{formatNextActionKind(kind, t)}: {count}</CountBadge>
               ))}
             </div>
           ) : null}
           <div className="space-y-3">
             {topNextActions.length === 0 ? (
-              <EmptyCell>{l("Aktuell sind keine offenen Portal-Aktionen vorhanden.", "Сейчас нет открытых действий в портале.", "No open portal actions right now.")}</EmptyCell>
+              <EmptyCell>{t.portal_dashboard_no_open_portal_actions_right_now}</EmptyCell>
             ) : (
               topNextActions.map((item) => (
                 <ListItem key={item.id} className="space-y-3">
@@ -528,7 +469,7 @@ export function PatientDashboardPage() {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <StatusBadge className={nextActionTone(item.kind, item.priority)}>
-                          {formatNextActionKind(item.kind, l, t)}
+                          {formatNextActionKind(item.kind, t)}
                         </StatusBadge>
                         <CountBadge>{recommendationPriorityLabel(item.priority || "normal")}</CountBadge>
                       </div>
@@ -539,10 +480,10 @@ export function PatientDashboardPage() {
                   {(item.due_at || item.amount) ? (
                     <div className="grid gap-3 sm:grid-cols-2">
                       {item.due_at ? (
-                        <InfoRow label={l("Fällig", "Срок", "Due")} value={formatPortalDateTime(item.due_at)} />
+                        <InfoRow label={t.portal_dashboard_due} value={formatPortalDateTime(item.due_at)} />
                       ) : null}
                       {item.amount ? (
-                        <InfoRow label={l("Betrag", "Сумма", "Amount")} value={formatPortalCurrency(item.amount)} />
+                        <InfoRow label={t.portal_dashboard_amount} value={formatPortalCurrency(item.amount)} />
                       ) : null}
                     </div>
                   ) : null}
@@ -558,19 +499,19 @@ export function PatientDashboardPage() {
         </Section>
 
         <Section
-          title={l("Empfehlungen", "Рекомендации", "Recommendations")}
+          title={t.portal_dashboard_recommendations}
           accessory={
             <a href="/recommendations" className="text-sm font-medium text-primary hover:underline">
-              {l("Alle öffnen", "Открыть все", "Open all")}
+              {t.portal_dashboard_open_all}
             </a>
           }
         >
           <p className="text-sm text-muted-foreground">
-            {l("Vom Betreuungsteam freigegebene medizinische Empfehlungen.", "Медицинские рекомендации, опубликованные командой сопровождения.", "Care-team recommendations released to your portal.")}
+            {t.portal_dashboard_care_team_recommendations_released_to_your_portal}
           </p>
           <div className="space-y-3">
             {recentRecommendations.length === 0 ? (
-              <EmptyCell>{l("Noch keine Empfehlungen freigegeben.", "Пока нет опубликованных рекомендаций.", "No recommendations released yet.")}</EmptyCell>
+              <EmptyCell>{t.portal_dashboard_no_recommendations_released_yet}</EmptyCell>
             ) : (
               recentRecommendations.map((item) => (
                 <ListItem key={item.recommendation_id || item.id}>
@@ -589,8 +530,8 @@ export function PatientDashboardPage() {
                   </div>
                   <p className={cn("mt-3", tokens.text.muted)}>
                     {item.due_at
-                      ? `${l("Fällig", "Срок", "Due")} ${formatPortalDateTime(item.due_at)}`
-                      : l("Ohne Frist", "Без срока", "No due date")}
+                      ? `${t.portal_dashboard_due} ${formatPortalDateTime(item.due_at)}`
+                      : t.portal_dashboard_no_due_date}
                   </p>
                 </ListItem>
               ))
@@ -600,28 +541,28 @@ export function PatientDashboardPage() {
       </section>
 
       <section className="grid gap-4 md:grid-cols-5">
-        <StatCard label={l("Kommende Termine", "Предстоящие визиты", "Upcoming visits")} value={upcomingAppointments} description={l(`${releasedDocuments} freigegebene Dokumente`, `${releasedDocuments} опубликованных документа`, `${releasedDocuments} released documents`)} />
-        <StatCard label={l("Offene Serviceanfragen", "Открытые сервисные запросы", "Open service requests")} value={openServiceRequests} description={l(`${services.length} Concierge-Einträge gesamt`, `${services.length} записей concierge всего`, `${services.length} total concierge entries`)} />
-        <StatCard label={l("Offener Saldo", "Остаток к оплате", "Outstanding balance")} value={outstandingBalance === 0 ? formatPortalCurrency(0) : formatPortalCurrency(outstandingBalance)} />
-        <StatCard label={l("Offene Datenschutzanfragen", "Открытые запросы по приватности", "Open privacy requests")} value={openRequests} description={l(`${pendingConfirmations} ausstehende Bestätigungen`, `${pendingConfirmations} ожидающих подтверждений`, `${pendingConfirmations} pending confirmations`)} />
-        <StatCard label={l("Gesendetes Feedback", "Отправленные отзывы", "Feedback sent")} value={feedback.length} description={l(`${promoterCount} Promotor-Bewertungen`, `${promoterCount} оценок промоутеров`, `${promoterCount} promoter ratings`)} />
+        <StatCard label={t.portal_dashboard_upcoming_visits} value={upcomingAppointments} description={l(`${releasedDocuments} freigegebene Dokumente`, `${releasedDocuments} опубликованных документа`, `${releasedDocuments} released documents`)} />
+        <StatCard label={t.portal_dashboard_open_service_requests} value={openServiceRequests} description={l(`${services.length} Concierge-Einträge gesamt`, `Всего ${services.length} записей консьерж-сервиса`, `${services.length} total concierge entries`)} />
+        <StatCard label={t.portal_dashboard_outstanding_balance} value={outstandingBalance === 0 ? formatPortalCurrency(0) : formatPortalCurrency(outstandingBalance)} />
+        <StatCard label={t.portal_dashboard_open_privacy_requests} value={openRequests} description={l(`${pendingConfirmations} ausstehende Bestätigungen`, `${pendingConfirmations} ожидающих подтверждений`, `${pendingConfirmations} pending confirmations`)} />
+        <StatCard label={t.portal_dashboard_feedback_sent} value={feedback.length} description={l(`${promoterCount} Promotor-Bewertungen`, `${promoterCount} оценок промоутеров`, `${promoterCount} promoter ratings`)} />
       </section>
 
       <section className="grid gap-6 xl:grid-cols-3 2xl:grid-cols-6">
         <Section
-          title={l("Kommende Termine", "Предстоящие визиты", "Upcoming visits")}
+          title={t.portal_dashboard_upcoming_visits}
           accessory={
             <a href="/appointments" className="text-sm font-medium text-primary hover:underline">
-              {l("Alle öffnen", "Открыть все", "Open all")}
+              {t.portal_dashboard_open_all}
             </a>
           }
         >
           <p className="text-sm text-muted-foreground">
-            {l("Geplante patientenseitige Termine.", "Запланированные визиты для пациента.", "Scheduled patient-facing appointments.")}
+            {t.portal_dashboard_scheduled_patient_facing_appointments}
           </p>
           <div className="space-y-3">
             {recentAppointments.length === 0 ? (
-              <EmptyCell>{l("Noch keine geplanten Termine.", "Пока нет запланированных визитов.", "No scheduled visits yet.")}</EmptyCell>
+              <EmptyCell>{t.portal_dashboard_no_scheduled_visits_yet}</EmptyCell>
             ) : (
               recentAppointments.map((item) => (
                 <ListItem key={item.id}>
@@ -644,19 +585,19 @@ export function PatientDashboardPage() {
         </Section>
 
         <Section
-          title={l("Aktuelle Dokumente", "Недавние документы", "Recent documents")}
+          title={t.portal_dashboard_recent_documents}
           accessory={
             <a href="/documents" className="text-sm font-medium text-primary hover:underline">
-              {l("Alle öffnen", "Открыть все", "Open all")}
+              {t.portal_dashboard_open_all}
             </a>
           }
         >
           <p className="text-sm text-muted-foreground">
-            {l("Von Ihrem Betreuungsteam für den Portalzugang freigegebene Dateien.", "Файлы, опубликованные командой сопровождения для доступа через портал.", "Files released by your care team for portal access.")}
+            {t.portal_dashboard_files_released_by_your_care_team_for_portal_access}
           </p>
           <div className="space-y-3">
             {recentDocuments.length === 0 ? (
-              <EmptyCell>{l("Es wurden noch keine Dokumente für Ihr Portal freigegeben.", "Для вашего портала пока не опубликовано ни одного документа.", "No documents have been released to your portal yet.")}</EmptyCell>
+              <EmptyCell>{t.portal_dashboard_no_documents_have_been_released_to_your_portal_yet}</EmptyCell>
             ) : (
               recentDocuments.map((item) => (
                 <ListItem key={item.id}>
@@ -665,18 +606,18 @@ export function PatientDashboardPage() {
                       <p className="text-sm font-semibold text-foreground">{item.auto_name}</p>
                       <p className={cn("mt-1", tokens.text.muted)}>
                         {[
-                          portalDocumentValueLabel(item.art, l, t),
-                          item.category ? portalDocumentValueLabel(item.category, l, t) : null,
+                          portalDocumentValueLabel(item.art),
+                          item.category ? portalDocumentValueLabel(item.category) : null,
                           item.shared_by_name,
                         ].filter(Boolean).join(" / ")}
                       </p>
                     </div>
                     <StatusBadge tone={item.confirmed ? "success" : item.requires_confirmation ? "warning" : "info"}>
-                      {item.confirmed ? l("Bestätigt", "Подтверждено", "Confirmed") : item.requires_confirmation ? l("Bestätigung erforderlich", "Требуется подтверждение", "Needs confirmation") : l("Freigegeben", "Опубликовано", "Released")}
+                      {item.confirmed ? t.portal_dashboard_confirmed : item.requires_confirmation ? t.portal_dashboard_needs_confirmation : t.portal_dashboard_released}
                     </StatusBadge>
                   </div>
                   <p className={cn("mt-3", tokens.text.muted)}>
-                    {l("Freigegeben", "Опубликовано", "Released")} {formatPortalDateTime(item.shared_at)}
+                    {t.portal_dashboard_released} {formatPortalDateTime(item.shared_at)}
                   </p>
                 </ListItem>
               ))
@@ -685,19 +626,19 @@ export function PatientDashboardPage() {
         </Section>
 
         <Section
-          title={l("Aktuelle Rechnungen", "Недавние счета", "Recent invoices")}
+          title={t.portal_dashboard_recent_invoices}
           accessory={
             <a href="/invoices" className="text-sm font-medium text-primary hover:underline">
-              {l("Alle öffnen", "Открыть все", "Open all")}
+              {t.portal_dashboard_open_all}
             </a>
           }
         >
           <p className="text-sm text-muted-foreground">
-            {l("Abrechnungs-Snapshots und aktueller Zahlungsstand.", "Снимки счетов и текущий статус оплаты.", "Billing snapshots and current payment state.")}
+            {t.portal_dashboard_billing_snapshots_and_current_payment_state}
           </p>
           <div className="space-y-3">
             {recentInvoices.length === 0 ? (
-              <EmptyCell>{l("Es wurden noch keine Rechnungen im Portal freigegeben.", "В портале пока нет опубликованных счетов.", "No invoices released to the portal yet.")}</EmptyCell>
+              <EmptyCell>{t.portal_dashboard_no_invoices_released_to_the_portal_yet}</EmptyCell>
             ) : (
               recentInvoices.map((item) => (
                 <ListItem key={item.id}>
@@ -705,7 +646,7 @@ export function PatientDashboardPage() {
                     <div>
                       <p className="text-sm font-semibold text-foreground">{item.invoice_number}</p>
                       <p className={cn("mt-1", tokens.text.muted)}>
-                        {item.order_number} / {l("Fällig", "Срок оплаты", "Due")} {formatPortalDate(item.due_date)}
+                        {item.order_number} / {t.portal_dashboard_due_2} {formatPortalDate(item.due_date)}
                       </p>
                     </div>
                     <StatusBadge status={item.status} className={invoiceStatusTone(item.status)}>
@@ -713,7 +654,7 @@ export function PatientDashboardPage() {
                     </StatusBadge>
                   </div>
                   <p className={cn("mt-3", tokens.text.muted)}>
-                    {l("Offen", "Открыто", "Open")} {formatPortalCurrency(item.balance_due)}
+                    {t.portal_dashboard_open} {formatPortalCurrency(item.balance_due)}
                   </p>
                 </ListItem>
               ))
@@ -722,19 +663,19 @@ export function PatientDashboardPage() {
         </Section>
 
         <Section
-          title={l("Meine Services", "Мои сервисы", "My services")}
+          title={t.portal_dashboard_my_services}
           accessory={
             <a href="/services" className="text-sm font-medium text-primary hover:underline">
-              {l("Alle öffnen", "Открыть все", "Open all")}
+              {t.portal_dashboard_open_all}
             </a>
           }
         >
           <p className="text-sm text-muted-foreground">
-            {l("Concierge- und Zusatzleistungen aus Ihrem Portal.", "Консьерж- и дополнительные услуги из вашего портала.", "Concierge and add-on services from your portal.")}
+            {t.portal_dashboard_concierge_and_add_on_services_from_your_portal}
           </p>
           <div className="space-y-3">
             {recentServices.length === 0 ? (
-              <EmptyCell>{l("Noch keine Services angelegt.", "Пока нет сервисов.", "No services yet.")}</EmptyCell>
+              <EmptyCell>{t.portal_dashboard_no_services_yet}</EmptyCell>
             ) : (
               recentServices.map((item) => (
                 <ListItem key={item.id}>
@@ -760,19 +701,19 @@ export function PatientDashboardPage() {
         </Section>
 
         <Section
-          title={l("Verlauf der Datenschutzanfragen", "История запросов по приватности", "Privacy request history")}
+          title={t.portal_dashboard_privacy_request_history}
           accessory={
             <a href="/privacy" className="text-sm font-medium text-primary hover:underline">
-              {l("Alle öffnen", "Открыть все", "Open all")}
+              {t.portal_dashboard_open_all}
             </a>
           }
         >
           <p className="text-sm text-muted-foreground">
-            {l("Bereits eingereichte DSGVO-bezogene Anfragen.", "Уже отправленные запросы по защите данных.", "DSGVO-related requests you already submitted.")}
+            {t.portal_dashboard_dsgvo_related_requests_you_already_submitted}
           </p>
           <div className="space-y-3">
             {recentRequests.length === 0 ? (
-              <EmptyCell>{l("Noch keine Datenschutzanfragen eingereicht.", "Запросы по приватности еще не отправлялись.", "No privacy requests submitted yet.")}</EmptyCell>
+              <EmptyCell>{t.portal_dashboard_no_privacy_requests_submitted_yet}</EmptyCell>
             ) : (
               recentRequests.map((item) => (
                 <ListItem key={item.id}>
@@ -782,7 +723,7 @@ export function PatientDashboardPage() {
                         {privacyRequestLabel(item.request_type)}
                       </p>
                       <p className={cn("mt-1", tokens.text.muted)}>
-                        {l("Angefragt", "Запрошено", "Requested")} {formatPortalDateTime(item.requested_at)}
+                        {t.portal_dashboard_requested} {formatPortalDateTime(item.requested_at)}
                       </p>
                     </div>
                     <StatusBadge status={item.status} className={privacyStatusTone(item.status)}>
@@ -790,7 +731,7 @@ export function PatientDashboardPage() {
                     </StatusBadge>
                   </div>
                   <p className={cn("mt-3", tokens.text.muted)}>
-                    {l("Fällig", "Срок", "Due")} {formatPortalDate(item.due_at)}
+                    {t.portal_dashboard_due} {formatPortalDate(item.due_at)}
                   </p>
                 </ListItem>
               ))
@@ -799,26 +740,26 @@ export function PatientDashboardPage() {
         </Section>
 
         <Section
-          title={l("Aktuelles Feedback", "Недавние отзывы", "Recent feedback")}
+          title={t.portal_dashboard_recent_feedback}
           accessory={
             <a href="/feedback" className="text-sm font-medium text-primary hover:underline">
-              {l("Alle öffnen", "Открыть все", "Open all")}
+              {t.portal_dashboard_open_all}
             </a>
           }
         >
           <p className="text-sm text-muted-foreground">
-            {l("Eingereichte Qualitätsumfragen und deren Review-Status.", "Отправленные опросы качества и их статус проверки.", "Submitted quality surveys and review follow-up.")}
+            {t.portal_dashboard_submitted_quality_surveys_and_review_follow_up}
           </p>
           <div className="space-y-3">
             {recentFeedback.length === 0 ? (
-              <EmptyCell>{l("Noch kein Feedback eingereicht.", "Отзывы еще не отправлялись.", "No feedback submitted yet.")}</EmptyCell>
+              <EmptyCell>{t.portal_dashboard_no_feedback_submitted_yet}</EmptyCell>
             ) : (
               recentFeedback.map((item) => (
                 <ListItem key={item.id}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-foreground">
-                        {item.appointment_title || item.provider_name || l("Allgemeines Feedback", "Общий отзыв", "General feedback")}
+                        {item.appointment_title || item.provider_name || t.portal_dashboard_general_feedback}
                       </p>
                       <p className={cn("mt-1", tokens.text.muted)}>
                         NPS {item.nps_score} / {formatPortalDateTime(item.submitted_at)}

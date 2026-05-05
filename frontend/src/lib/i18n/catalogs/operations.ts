@@ -23,6 +23,186 @@ export interface OperationsTranslations {
   orders_service_groups_failed_load: string;
   orders_service_group_lines_failed_generate: string;
   orders_service_group_failed_create: string;
+  orders_service_group_status_draft: string;
+  orders_service_group_status_generated: string;
+  orders_service_group_status_open: string;
+  orders_service_group_status_partially_generated: string;
+  orders_service_group_status_ready: string;
+  orders_service_group_line_action_duplicate: string;
+  orders_service_group_line_action_generate: string;
+  orders_service_group_line_action_update: string;
+  orders_service_group_line_action_line_prefix: string;
+  orders_service_group_split_title: string;
+  orders_service_group_participants: string;
+  orders_service_group_summary: string;
+  orders_service_group_vat: string;
+  orders_service_group_generated: string;
+  orders_service_group_duplicate_safe: string;
+  orders_service_group_regenerate_existing: string;
+  orders_service_group_generating: string;
+  orders_service_group_regenerate_lines: string;
+  orders_service_group_generate_new_lines: string;
+  orders_service_group_preview_generate_metric: string;
+  orders_service_group_preview_update_metric: string;
+  orders_service_group_preview_skip_duplicates_metric: string;
+  orders_service_group_existing_line: string;
+  orders_service_group_preview_new_line_hint: string;
+  orders_service_group_generated_line: string;
+  orders_service_group_preview_participant_line_hint: string;
+  orders_service_group_wizard_title_required: string;
+  orders_service_group_wizard_doctor_required: string;
+  orders_service_group_wizard_duplicate_doctor: string;
+  orders_service_group_wizard_title: string;
+  orders_service_group_wizard_close: string;
+  orders_service_group_wizard_create: string;
+  orders_service_group_wizard_steps: string;
+  orders_service_group_title: string;
+  orders_service_group_title_placeholder: string;
+  orders_service_group_service_date: string;
+  orders_service_group_currency: string;
+  orders_service_group_quantity: string;
+  orders_service_group_unit_price: string;
+  orders_service_group_vat_percent: string;
+  orders_service_group_description: string;
+  orders_service_group_doctors: string;
+  orders_service_group_add_doctor: string;
+  orders_service_group_provider: string;
+  orders_service_group_select_provider: string;
+  orders_service_group_doctor: string;
+  orders_service_group_select_doctor: string;
+  orders_service_group_role_label: string;
+  orders_service_group_role_placeholder: string;
+  orders_service_group_remove: string;
+  orders_service_group_preview: string;
+  orders_service_group_wizard_preview_summary: string;
+  orders_service_group_duplicates: string;
+  orders_service_group_ready: string;
+  orders_service_group_creating: string;
+  orders_service_group_save_preview: string;
+  staff_services_status_completed: string;
+  staff_services_status_cancelled: string;
+  staff_services_billing_status_draft: string;
+  staff_services_billing_status_ready: string;
+  staff_services_billing_status_billed: string;
+  staff_services_billing_status_settled: string;
+  staff_services_kind_hotel: string;
+  staff_services_kind_transfer: string;
+  staff_services_kind_vip_terminal: string;
+  staff_services_kind_flight: string;
+  staff_services_kind_chauffeur: string;
+  staff_services_kind_translation_support: string;
+  staff_services_kind_other: string;
+  staff_services_source_patient_portal: string;
+  staff_services_source_appointment_bootstrap: string;
+  staff_services_source_care_team: string;
+  staff_services_column_service: string;
+  staff_services_column_status: string;
+  staff_services_column_billing: string;
+  staff_services_column_patient: string;
+  staff_services_column_kind: string;
+  staff_services_column_source: string;
+  staff_services_column_vendor: string;
+  staff_services_column_booking: string;
+  staff_services_column_schedule: string;
+  staff_services_column_cost: string;
+  staff_services_column_concierge: string;
+  staff_services_lookup_failed: string;
+  staff_services_load_failed: string;
+  staff_services_patient_required: string;
+  staff_services_title_required: string;
+  staff_services_cost_invalid: string;
+  staff_services_currency_invalid: string;
+  staff_services_create_failed: string;
+  staff_services_loading: string;
+  staff_services_title: string;
+  staff_services_add_service: string;
+  staff_services_stat_active: string;
+  staff_services_stat_billing_ready: string;
+  staff_services_stat_portal_requests: string;
+  staff_services_search_placeholder: string;
+  staff_services_mine: string;
+  staff_services_empty: string;
+  staff_services_create_title: string;
+  staff_services_create_description: string;
+  staff_services_form_patient: string;
+  staff_services_form_kind: string;
+  staff_services_form_title: string;
+  staff_services_form_provider: string;
+  staff_services_form_concierge: string;
+  staff_services_form_start: string;
+  staff_services_form_end: string;
+  staff_services_form_cost_estimate: string;
+  staff_services_form_actual_cost: string;
+  staff_services_form_currency: string;
+  staff_services_form_booking_reference: string;
+  staff_services_form_vendor: string;
+  staff_services_form_vendor_contact: string;
+  staff_services_form_service_notes: string;
+  staff_services_form_billing_notes: string;
+  staff_services_select: string;
+  staff_services_optional: string;
+  staff_services_unassigned: string;
+  orders_new_button: string;
+  orders_metric_total_description: string;
+  orders_metric_active_label: string;
+  orders_metric_active_description: string;
+  orders_metric_execution_label: string;
+  orders_metric_execution_description: string;
+  orders_metric_business_volume_label: string;
+  orders_metric_business_volume_description: string;
+  orders_all_patients: string;
+  orders_filter_doctor: string;
+  orders_refresh: string;
+  orders_services_metric_total_description: string;
+  orders_services_pending_approval_label: string;
+  orders_services_pending_approval_description: string;
+  orders_services_approved_label: string;
+  orders_services_approved_description: string;
+  orders_services_gross_description: string;
+  orders_services_section_description: string;
+  orders_add_service: string;
+  orders_services_empty_description: string;
+  orders_approve: string;
+  orders_external_invoices_title: string;
+  orders_external_invoices_description: string;
+  orders_external_invoices_count_label: string;
+  orders_external_invoices_count_description: string;
+  orders_external_invoices_overdue_label: string;
+  orders_external_invoices_overdue_description: string;
+  orders_external_invoices_paid_label: string;
+  orders_external_invoices_paid_description: string;
+  orders_external_invoices_gross_label: string;
+  orders_external_invoices_gross_description: string;
+  orders_external_invoice_create_title: string;
+  orders_external_invoice_create_description: string;
+  orders_external_invoice_number: string;
+  orders_external_invoice_date: string;
+  orders_external_invoice_due_date: string;
+  orders_external_invoice_net: string;
+  orders_external_invoice_vat: string;
+  orders_external_invoice_gross: string;
+  orders_external_invoice_status: string;
+  orders_external_invoice_add: string;
+  orders_external_invoices_empty_title: string;
+  orders_external_invoices_empty_description: string;
+  orders_external_invoice_received: string;
+  orders_external_invoice_paid: string;
+  orders_external_invoice_updated: string;
+  orders_external_invoice_mark_approved: string;
+  orders_external_invoice_mark_paid: string;
+  orders_external_invoice_cancel: string;
+  orders_create_title: string;
+  orders_create_description: string;
+  orders_patient_fallback: string;
+  orders_intake_note: string;
+  orders_add_service_title: string;
+  orders_service_description: string;
+  orders_service_notes: string;
+  orders_service_quantity: string;
+  orders_service_unit_price: string;
+  orders_service_vat_percent: string;
+  orders_service_provider: string;
+  orders_service_doctor: string;
   providers_tax_id: string;
   providers_rating: string;
   concierge_open_requests: string;
@@ -193,6 +373,212 @@ export const operationsRu: OperationsTranslations = {
   orders_service_group_lines_failed_generate:
     "Не удалось сгенерировать строки группы услуг.",
   orders_service_group_failed_create: "Не удалось создать группу услуг.",
+  orders_service_group_status_draft: "Черновик",
+  orders_service_group_status_generated: "Сгенерировано",
+  orders_service_group_status_open: "Открыто",
+  orders_service_group_status_partially_generated: "Частично сгенерировано",
+  orders_service_group_status_ready: "Готово",
+  orders_service_group_line_action_duplicate: "Дубликат",
+  orders_service_group_line_action_generate: "Новая строка",
+  orders_service_group_line_action_update: "Обновить",
+  orders_service_group_line_action_line_prefix: "Строка",
+  orders_service_group_split_title: "Разделение услуги по врачам",
+  orders_service_group_participants: "участников",
+  orders_service_group_summary:
+    "{count} врачей создают {count} строк биллинга. Существующие строки определяются по связи с участником.",
+  orders_service_group_vat: "НДС",
+  orders_service_group_generated: "сгенерировано",
+  orders_service_group_duplicate_safe: "без дублей",
+  orders_service_group_regenerate_existing:
+    "Перегенерировать существующие строки",
+  orders_service_group_generating: "Генерация...",
+  orders_service_group_regenerate_lines: "Перегенерировать строки",
+  orders_service_group_generate_new_lines: "Сгенерировать новые строки",
+  orders_service_group_preview_generate_metric: "Будет создано",
+  orders_service_group_preview_update_metric: "Будет обновлено",
+  orders_service_group_preview_skip_duplicates_metric: "Пропустить дубли",
+  orders_service_group_existing_line: "Существующая строка",
+  orders_service_group_preview_new_line_hint:
+    "Только предпросмотр: будет создана новая строка биллинга.",
+  orders_service_group_generated_line: "Сгенерированная строка",
+  orders_service_group_preview_participant_line_hint:
+    "Только предпросмотр: по этому участнику будет создана строка биллинга.",
+  orders_service_group_wizard_title_required: "Название группы обязательно.",
+  orders_service_group_wizard_doctor_required:
+    "Нужен минимум один врач-участник.",
+  orders_service_group_wizard_duplicate_doctor:
+    "Врач может быть добавлен в группу услуг только один раз.",
+  orders_service_group_wizard_title: "Мастер услуги на нескольких врачей",
+  orders_service_group_wizard_close: "Закрыть мастер",
+  orders_service_group_wizard_create: "Создать split-группу",
+  orders_service_group_wizard_steps:
+    "Шаг 1: задайте группу. Шаг 2: добавьте врачей. Шаг 3: проверьте предпросмотр. Шаг 4: создайте строки биллинга по участникам.",
+  orders_service_group_title: "Название группы",
+  orders_service_group_title_placeholder: "Кардиологический консилиум",
+  orders_service_group_service_date: "Дата услуги",
+  orders_service_group_currency: "Валюта",
+  orders_service_group_quantity: "Количество",
+  orders_service_group_unit_price: "Цена за единицу",
+  orders_service_group_vat_percent: "НДС %",
+  orders_service_group_description: "Описание",
+  orders_service_group_doctors: "Врачи",
+  orders_service_group_add_doctor: "Добавить врача",
+  orders_service_group_provider: "Провайдер",
+  orders_service_group_select_provider: "Выберите провайдера",
+  orders_service_group_doctor: "Врач",
+  orders_service_group_select_doctor: "Выберите врача",
+  orders_service_group_role_label: "Роль",
+  orders_service_group_role_placeholder: "Ведущий, второе мнение",
+  orders_service_group_remove: "Удалить",
+  orders_service_group_preview: "Предпросмотр",
+  orders_service_group_wizard_preview_summary:
+    "{count} выбранных врачей создадут такое же количество строк биллинга.",
+  orders_service_group_duplicates: "Дубли",
+  orders_service_group_ready: "Готово",
+  orders_service_group_creating: "Создание...",
+  orders_service_group_save_preview: "Сохранить предпросмотр группы",
+  staff_services_status_completed: "Завершено",
+  staff_services_status_cancelled: "Отменено",
+  staff_services_billing_status_draft: "Черновик",
+  staff_services_billing_status_ready: "Готово",
+  staff_services_billing_status_billed: "Выставлен счёт",
+  staff_services_billing_status_settled: "Оплачено",
+  staff_services_kind_hotel: "Отель",
+  staff_services_kind_transfer: "Трансфер",
+  staff_services_kind_vip_terminal: "VIP-терминал",
+  staff_services_kind_flight: "Перелёт",
+  staff_services_kind_chauffeur: "Шофёр",
+  staff_services_kind_translation_support: "Поддержка перевода",
+  staff_services_kind_other: "Другое",
+  staff_services_source_patient_portal: "Портал пациента",
+  staff_services_source_appointment_bootstrap: "Из приёма",
+  staff_services_source_care_team: "Команда сопровождения",
+  staff_services_column_service: "Сервис",
+  staff_services_column_status: "Статус",
+  staff_services_column_billing: "Биллинг",
+  staff_services_column_patient: "Пациент",
+  staff_services_column_kind: "Тип",
+  staff_services_column_source: "Источник",
+  staff_services_column_vendor: "Поставщик",
+  staff_services_column_booking: "Бронь",
+  staff_services_column_schedule: "Расписание",
+  staff_services_column_cost: "Стоимость",
+  staff_services_column_concierge: "Консьерж",
+  staff_services_lookup_failed: "Не удалось загрузить справочники.",
+  staff_services_load_failed: "Не удалось загрузить concierge-сервисы.",
+  staff_services_patient_required: "Пациент обязателен.",
+  staff_services_title_required: "Название обязательно.",
+  staff_services_cost_invalid: "Поля стоимости должны быть корректными числами.",
+  staff_services_currency_invalid: "Валюта должна состоять из 3 букв.",
+  staff_services_create_failed: "Не удалось создать concierge-сервис.",
+  staff_services_loading: "Загрузка concierge-сервисов...",
+  staff_services_title: "Concierge-сервисы",
+  staff_services_add_service: "Добавить сервис",
+  staff_services_stat_active: "Активные",
+  staff_services_stat_billing_ready: "Готовы к биллингу",
+  staff_services_stat_portal_requests: "Запросы портала",
+  staff_services_search_placeholder: "Пациент, провайдер, бронь...",
+  staff_services_mine: "Мои",
+  staff_services_empty: "Нет concierge-сервисов в текущем фильтре.",
+  staff_services_create_title: "Добавить concierge-сервис",
+  staff_services_create_description:
+    "Выберите пациента, тип сервиса и временное окно.",
+  staff_services_form_patient: "Пациент",
+  staff_services_form_kind: "Тип сервиса",
+  staff_services_form_title: "Название",
+  staff_services_form_provider: "Провайдер",
+  staff_services_form_concierge: "Консьерж",
+  staff_services_form_start: "Начало",
+  staff_services_form_end: "Конец",
+  staff_services_form_cost_estimate: "Оценка стоимости",
+  staff_services_form_actual_cost: "Фактическая стоимость",
+  staff_services_form_currency: "Валюта",
+  staff_services_form_booking_reference: "Номер брони",
+  staff_services_form_vendor: "Поставщик",
+  staff_services_form_vendor_contact: "Контакт поставщика",
+  staff_services_form_service_notes: "Заметки по сервису",
+  staff_services_form_billing_notes: "Заметки по биллингу",
+  staff_services_select: "Выбрать",
+  staff_services_optional: "Опционально",
+  staff_services_unassigned: "Не назначен",
+  orders_new_button: "Создать заказ",
+  orders_metric_total_description: "Все заказы в текущем видимом скоупе.",
+  orders_metric_active_label: "Активные заказы",
+  orders_metric_active_description:
+    "Заказы с активной операционной работой в видимом скоупе.",
+  orders_metric_execution_label: "В исполнении",
+  orders_metric_execution_description:
+    "Заказы, которые сейчас находятся в фазе исполнения.",
+  orders_metric_business_volume_label: "Оценочный объём",
+  orders_metric_business_volume_description:
+    "Оценочный совокупный объём видимых заказов.",
+  orders_all_patients: "Все пациенты",
+  orders_filter_doctor: "Врач",
+  orders_refresh: "Обновить",
+  orders_services_metric_total_description:
+    "Текущие позиции услуг в этом заказе.",
+  orders_services_pending_approval_label: "Ждут утверждения",
+  orders_services_pending_approval_description:
+    "Позиции услуг, ожидающие утверждения PM.",
+  orders_services_approved_label: "Утверждено",
+  orders_services_approved_description:
+    "Позиции услуг, уже утверждённые в текущем заказе.",
+  orders_services_gross_description:
+    "Количество x цена по всем видимым позициям услуг.",
+  orders_services_section_description:
+    "Привязанные к провайдеру и врачу услуги внутри текущего заказа.",
+  orders_add_service: "Добавить услугу",
+  orders_services_empty_description:
+    "Используйте позиции, привязанные к провайдеру, чтобы собрать объём исполнения заказа и дать биллингу достаточный контекст.",
+  orders_approve: "Утвердить",
+  orders_external_invoices_title: "Внешние счета",
+  orders_external_invoices_description:
+    "Отслеживание счетов от клиник и поставщиков, которые нужно проверить, оплатить или эскалировать в контексте заказа.",
+  orders_external_invoices_count_label: "Учтённые счета",
+  orders_external_invoices_count_description:
+    "Внешние счета, привязанные к текущему заказу.",
+  orders_external_invoices_overdue_label: "Просрочено",
+  orders_external_invoices_overdue_description:
+    "Счета, у которых уже прошёл срок оплаты.",
+  orders_external_invoices_paid_label: "Оплачено",
+  orders_external_invoices_paid_description:
+    "Счета, уже отмеченные как погашенные.",
+  orders_external_invoices_gross_label: "Учтённое брутто",
+  orders_external_invoices_gross_description:
+    "Совокупное брутто по всем привязанным внешним счетам.",
+  orders_external_invoice_create_title: "Зарегистрировать внешний счёт",
+  orders_external_invoice_create_description:
+    "Используйте для входящих счетов клиник или партнёров, по которым нужно отслеживать дедлайны.",
+  orders_external_invoice_number: "Номер счёта",
+  orders_external_invoice_date: "Дата счёта",
+  orders_external_invoice_due_date: "Срок оплаты",
+  orders_external_invoice_net: "Нетто",
+  orders_external_invoice_vat: "НДС",
+  orders_external_invoice_gross: "Брутто",
+  orders_external_invoice_status: "Статус",
+  orders_external_invoice_add: "Добавить внешний счёт",
+  orders_external_invoices_empty_title: "Внешних счетов пока нет",
+  orders_external_invoices_empty_description:
+    "Регистрируйте здесь входящие счета от провайдеров и клиник, чтобы отслеживать дедлайны и просрочки.",
+  orders_external_invoice_received: "Получен",
+  orders_external_invoice_paid: "Оплачен",
+  orders_external_invoice_updated: "Последнее обновление",
+  orders_external_invoice_mark_approved: "Отметить как утверждённый",
+  orders_external_invoice_mark_paid: "Отметить как оплаченный",
+  orders_external_invoice_cancel: "Отменить",
+  orders_create_title: "Создать заказ",
+  orders_create_description:
+    "Выберите пациента, проверьте re-check существующего клиента и добавьте intake-заметку для нового заказа.",
+  orders_patient_fallback: "Пациент",
+  orders_intake_note: "Заметка по потребности / intake",
+  orders_add_service_title: "Добавить услугу",
+  orders_service_description: "Описание",
+  orders_service_notes: "Заметки",
+  orders_service_quantity: "Количество",
+  orders_service_unit_price: "Цена за единицу",
+  orders_service_vat_percent: "НДС %",
+  orders_service_provider: "Провайдер",
+  orders_service_doctor: "Врач",
   providers_tax_id: "Налоговый ID",
   providers_rating: "Рейтинг",
   concierge_open_requests: "Открытые запросы",
@@ -373,6 +759,212 @@ export const operationsDe: OperationsTranslations = {
     "Zeilen der Leistungsgruppe konnten nicht generiert werden.",
   orders_service_group_failed_create:
     "Leistungsgruppe konnte nicht erstellt werden.",
+  orders_service_group_status_draft: "Entwurf",
+  orders_service_group_status_generated: "Generiert",
+  orders_service_group_status_open: "Offen",
+  orders_service_group_status_partially_generated: "Teilweise generiert",
+  orders_service_group_status_ready: "Bereit",
+  orders_service_group_line_action_duplicate: "Duplikat",
+  orders_service_group_line_action_generate: "Neue Zeile",
+  orders_service_group_line_action_update: "Aktualisieren",
+  orders_service_group_line_action_line_prefix: "Zeile",
+  orders_service_group_split_title: "Leistung nach Ärzten aufteilen",
+  orders_service_group_participants: "Teilnehmer",
+  orders_service_group_summary:
+    "{count} Ärzte erzeugen {count} Abrechnungszeilen. Bestehende Zeilen werden über den Teilnehmerbezug erkannt.",
+  orders_service_group_vat: "MwSt.",
+  orders_service_group_generated: "generiert",
+  orders_service_group_duplicate_safe: "duplikatsicher",
+  orders_service_group_regenerate_existing:
+    "Bestehende Zeilen neu generieren",
+  orders_service_group_generating: "Generierung...",
+  orders_service_group_regenerate_lines: "Zeilen neu generieren",
+  orders_service_group_generate_new_lines: "Neue Zeilen generieren",
+  orders_service_group_preview_generate_metric: "Wird erzeugt",
+  orders_service_group_preview_update_metric: "Wird aktualisiert",
+  orders_service_group_preview_skip_duplicates_metric: "Duplikate überspringen",
+  orders_service_group_existing_line: "Bestehende Zeile",
+  orders_service_group_preview_new_line_hint:
+    "Nur Vorschau: Eine neue Abrechnungszeile wird erstellt.",
+  orders_service_group_generated_line: "Generierte Zeile",
+  orders_service_group_preview_participant_line_hint:
+    "Nur Vorschau: Aus diesem Teilnehmer wird eine Abrechnungszeile erstellt.",
+  orders_service_group_wizard_title_required: "Gruppentitel ist erforderlich.",
+  orders_service_group_wizard_doctor_required:
+    "Mindestens ein Arzt muss ausgewählt sein.",
+  orders_service_group_wizard_duplicate_doctor:
+    "Ein Arzt darf nur einmal in der Leistungsgruppe vorkommen.",
+  orders_service_group_wizard_title: "Assistent für mehrere Ärzte",
+  orders_service_group_wizard_close: "Assistent schließen",
+  orders_service_group_wizard_create: "Split-Gruppe erstellen",
+  orders_service_group_wizard_steps:
+    "Schritt 1: Gruppe definieren. Schritt 2: Ärzte hinzufügen. Schritt 3: Vorschau prüfen. Schritt 4: teilnehmerbezogene Abrechnungszeilen erzeugen.",
+  orders_service_group_title: "Gruppentitel",
+  orders_service_group_title_placeholder: "Kardiologie-Board",
+  orders_service_group_service_date: "Leistungsdatum",
+  orders_service_group_currency: "Währung",
+  orders_service_group_quantity: "Menge",
+  orders_service_group_unit_price: "Einzelpreis",
+  orders_service_group_vat_percent: "MwSt. %",
+  orders_service_group_description: "Beschreibung",
+  orders_service_group_doctors: "Ärzte",
+  orders_service_group_add_doctor: "Arzt hinzufügen",
+  orders_service_group_provider: "Leistungserbringer",
+  orders_service_group_select_provider: "Leistungserbringer auswählen",
+  orders_service_group_doctor: "Arzt",
+  orders_service_group_select_doctor: "Arzt auswählen",
+  orders_service_group_role_label: "Rollenlabel",
+  orders_service_group_role_placeholder: "Lead, Zweitmeinung",
+  orders_service_group_remove: "Entfernen",
+  orders_service_group_preview: "Vorschau",
+  orders_service_group_wizard_preview_summary:
+    "{count} ausgewählte Ärzte erzeugen die gleiche Anzahl Abrechnungszeilen.",
+  orders_service_group_duplicates: "Duplikate",
+  orders_service_group_ready: "Bereit",
+  orders_service_group_creating: "Erstellung...",
+  orders_service_group_save_preview: "Gruppenvorschau speichern",
+  staff_services_status_completed: "Abgeschlossen",
+  staff_services_status_cancelled: "Storniert",
+  staff_services_billing_status_draft: "Entwurf",
+  staff_services_billing_status_ready: "Bereit",
+  staff_services_billing_status_billed: "Abgerechnet",
+  staff_services_billing_status_settled: "Beglichen",
+  staff_services_kind_hotel: "Hotel",
+  staff_services_kind_transfer: "Transfer",
+  staff_services_kind_vip_terminal: "VIP-Terminal",
+  staff_services_kind_flight: "Flug",
+  staff_services_kind_chauffeur: "Chauffeur",
+  staff_services_kind_translation_support: "Dolmetscher-Support",
+  staff_services_kind_other: "Sonstiges",
+  staff_services_source_patient_portal: "Patientenportal",
+  staff_services_source_appointment_bootstrap: "Aus Termin",
+  staff_services_source_care_team: "Care-Team",
+  staff_services_column_service: "Service",
+  staff_services_column_status: "Status",
+  staff_services_column_billing: "Abrechnung",
+  staff_services_column_patient: "Patient",
+  staff_services_column_kind: "Art",
+  staff_services_column_source: "Quelle",
+  staff_services_column_vendor: "Anbieter",
+  staff_services_column_booking: "Buchung",
+  staff_services_column_schedule: "Zeitplan",
+  staff_services_column_cost: "Kosten",
+  staff_services_column_concierge: "Concierge",
+  staff_services_lookup_failed: "Stammdaten konnten nicht geladen werden.",
+  staff_services_load_failed: "Concierge-Services konnten nicht geladen werden.",
+  staff_services_patient_required: "Patient ist erforderlich.",
+  staff_services_title_required: "Titel ist erforderlich.",
+  staff_services_cost_invalid: "Kostenfelder müssen gültige Zahlen sein.",
+  staff_services_currency_invalid: "Währung muss aus 3 Buchstaben bestehen.",
+  staff_services_create_failed: "Concierge-Service konnte nicht erstellt werden.",
+  staff_services_loading: "Concierge-Services werden geladen...",
+  staff_services_title: "Concierge-Services",
+  staff_services_add_service: "Service hinzufügen",
+  staff_services_stat_active: "Aktiv",
+  staff_services_stat_billing_ready: "Billing-ready",
+  staff_services_stat_portal_requests: "Portal-Anfragen",
+  staff_services_search_placeholder: "Patient, Anbieter, Buchung...",
+  staff_services_mine: "Meine",
+  staff_services_empty: "Keine Concierge-Services im aktuellen Filter.",
+  staff_services_create_title: "Concierge-Service hinzufügen",
+  staff_services_create_description:
+    "Patient, Serviceart und Zeitfenster festlegen.",
+  staff_services_form_patient: "Patient",
+  staff_services_form_kind: "Serviceart",
+  staff_services_form_title: "Titel",
+  staff_services_form_provider: "Provider",
+  staff_services_form_concierge: "Concierge",
+  staff_services_form_start: "Start",
+  staff_services_form_end: "Ende",
+  staff_services_form_cost_estimate: "Kostenschätzung",
+  staff_services_form_actual_cost: "Ist-Kosten",
+  staff_services_form_currency: "Währung",
+  staff_services_form_booking_reference: "Buchungsreferenz",
+  staff_services_form_vendor: "Vendor",
+  staff_services_form_vendor_contact: "Vendor-Kontakt",
+  staff_services_form_service_notes: "Service-Notizen",
+  staff_services_form_billing_notes: "Billing-Notizen",
+  staff_services_select: "Auswählen",
+  staff_services_optional: "Optional",
+  staff_services_unassigned: "Nicht zugewiesen",
+  orders_new_button: "Neuen Auftrag",
+  orders_metric_total_description: "Alle Aufträge im aktuellen Filter-Scope.",
+  orders_metric_active_label: "Aktive Aufträge",
+  orders_metric_active_description:
+    "Aufträge mit laufender Bearbeitung im sichtbaren Scope.",
+  orders_metric_execution_label: "In Durchführung",
+  orders_metric_execution_description:
+    "Aufträge, die sich aktuell in der Durchführung befinden.",
+  orders_metric_business_volume_label: "Geschäftsvolumen",
+  orders_metric_business_volume_description:
+    "Geschätztes Gesamtvolumen der sichtbaren Aufträge.",
+  orders_all_patients: "Alle Patienten",
+  orders_filter_doctor: "Arzt",
+  orders_refresh: "Aktualisieren",
+  orders_services_metric_total_description:
+    "Aktuelle Leistungspositionen in diesem Auftrag.",
+  orders_services_pending_approval_label: "Zur Freigabe",
+  orders_services_pending_approval_description:
+    "Leistungspositionen, die auf PM-Freigabe warten.",
+  orders_services_approved_label: "Freigegeben",
+  orders_services_approved_description:
+    "Bereits freigegebene Leistungspositionen in diesem Auftrag.",
+  orders_services_gross_description:
+    "Menge x Preis über alle sichtbaren Leistungspositionen.",
+  orders_services_section_description:
+    "Provider- und arztbezogene Leistungen innerhalb dieses Auftrags.",
+  orders_add_service: "Leistung hinzufügen",
+  orders_services_empty_description:
+    "Mit providerbezogenen Positionen den Leistungsumfang des Auftrags aufbauen und Billing genug Kontext geben.",
+  orders_approve: "Freigeben",
+  orders_external_invoices_title: "Externe Rechnungen",
+  orders_external_invoices_description:
+    "Lieferanten- und Klinikrechnungen im Auftragskontext nachverfolgen, die geprüft, bezahlt oder eskaliert werden müssen.",
+  orders_external_invoices_count_label: "Erfasste Rechnungen",
+  orders_external_invoices_count_description:
+    "Externe Rechnungen, die mit dem aktuellen Auftrag verknüpft sind.",
+  orders_external_invoices_overdue_label: "Überfällig",
+  orders_external_invoices_overdue_description:
+    "Rechnungen, deren Fälligkeitsdatum bereits überschritten ist.",
+  orders_external_invoices_paid_label: "Bezahlt",
+  orders_external_invoices_paid_description:
+    "Rechnungen, die bereits als beglichen markiert sind.",
+  orders_external_invoices_gross_label: "Erfasstes Brutto",
+  orders_external_invoices_gross_description:
+    "Gesamtes Bruttoexposure aller verknüpften externen Rechnungen.",
+  orders_external_invoice_create_title: "Externe Rechnung erfassen",
+  orders_external_invoice_create_description:
+    "Für eingehende Klinik- oder Partnerrechnungen verwenden, die ein Fristen-Tracking brauchen.",
+  orders_external_invoice_number: "Rechnungsnummer",
+  orders_external_invoice_date: "Rechnungsdatum",
+  orders_external_invoice_due_date: "Fälligkeitsdatum",
+  orders_external_invoice_net: "Netto",
+  orders_external_invoice_vat: "MwSt.",
+  orders_external_invoice_gross: "Brutto",
+  orders_external_invoice_status: "Status",
+  orders_external_invoice_add: "Externe Rechnung hinzufügen",
+  orders_external_invoices_empty_title: "Noch keine externen Rechnungen",
+  orders_external_invoices_empty_description:
+    "Eingehende Provider- oder Klinikrechnungen hier erfassen, um Fälligkeiten und überfällige Nachverfolgung zu steuern.",
+  orders_external_invoice_received: "Eingegangen",
+  orders_external_invoice_paid: "Bezahlt",
+  orders_external_invoice_updated: "Letzte Aktualisierung",
+  orders_external_invoice_mark_approved: "Als freigegeben markieren",
+  orders_external_invoice_mark_paid: "Als bezahlt markieren",
+  orders_external_invoice_cancel: "Stornieren",
+  orders_create_title: "Auftrag anlegen",
+  orders_create_description:
+    "Patient auswählen, Bestandskunden-Re-Check prüfen und Intake-Notiz für den neuen Auftrag erfassen.",
+  orders_patient_fallback: "Patient",
+  orders_intake_note: "Bedarfs- / Intake-Notiz",
+  orders_add_service_title: "Leistung hinzufügen",
+  orders_service_description: "Beschreibung",
+  orders_service_notes: "Notizen",
+  orders_service_quantity: "Menge",
+  orders_service_unit_price: "Einzelpreis",
+  orders_service_vat_percent: "MwSt. %",
+  orders_service_provider: "Provider",
+  orders_service_doctor: "Arzt",
   providers_tax_id: "Steuer-ID",
   providers_rating: "Bewertung",
   concierge_open_requests: "Offene Anfragen",

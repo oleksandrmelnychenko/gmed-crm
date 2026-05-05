@@ -2080,7 +2080,7 @@ export function OrdersPage() {
                 onClick={() => setCreateOpen(true)}
               >
                 <Plus className="size-4" />
-                {l("Neuen Auftrag", "Создать заказ")}
+                {t.orders_new_button}
               </Button>
             ) : null}
           </>
@@ -2092,40 +2092,28 @@ export function OrdersPage() {
           icon={ClipboardList}
           label={tx.orders_title}
           value={String(metrics.total)}
-          description={l(
-            "Alle Auftrage im aktuellen Filter-Scope.",
-            "Все заказы в текущем видимом скоупе.",
-          )}
+          description={t.orders_metric_total_description}
           tone="sky"
         />
         <AdminInlineMetric
           icon={CheckCircle2}
-          label={l("Aktive Auftrage", "Активные заказы")}
+          label={t.orders_metric_active_label}
           value={String(metrics.active)}
-          description={l(
-            "Auftrage mit laufender Bearbeitung im sichtbaren Scope.",
-            "Заказы с активной операционной работой в видимом скоупе.",
-          )}
+          description={t.orders_metric_active_description}
           tone="emerald"
         />
         <AdminInlineMetric
           icon={Stethoscope}
-          label={l("In Durchfuhrung", "В исполнении")}
+          label={t.orders_metric_execution_label}
           value={String(metrics.execution)}
-          description={l(
-            "Auftrage, die sich aktuell in der Durchfuhrung befinden.",
-            "Заказы, которые сейчас находятся в фазе исполнения.",
-          )}
+          description={t.orders_metric_execution_description}
           tone="amber"
         />
         <AdminInlineMetric
           icon={Wallet}
-          label={l("Geschaftsvolumen", "Оценочный объём")}
+          label={t.orders_metric_business_volume_label}
           value={formatMoney(metrics.estimatedTotal)}
-          description={l(
-            "Geschatztes Gesamtvolumen der sichtbaren Auftrage.",
-            "Оценочный совокупный объём видимых заказов.",
-          )}
+          description={t.orders_metric_business_volume_description}
           tone="slate"
         />
       </div>
@@ -2287,11 +2275,11 @@ export function OrdersPage() {
             className={cn(selectClassName, "h-8 w-[210px] bg-background text-[13px]")}
           >
             <option value="__all__">
-              {l("Alle Patienten", "Все пациенты")}
+              {t.orders_all_patients}
             </option>
             {patients.map((patient) => (
               <option key={patient.id} value={patient.id}>
-                {patientLabel(patient, l("Patient", "Пациент"))}
+                {patientLabel(patient, t.orders_patient_fallback)}
               </option>
             ))}
           </NativeComboboxSelect>
@@ -2328,7 +2316,7 @@ export function OrdersPage() {
             disabled={!filters.providerId}
             className={cn(selectClassName, "h-8 w-[190px] bg-background text-[13px]")}
           >
-            <option value="__all__">{l("Arzt", "Врач")}</option>
+            <option value="__all__">{t.orders_filter_doctor}</option>
             {filterDoctorOptions.map((doctor) => (
               <option key={doctor.id} value={doctor.id}>
                 {doctor.name}
@@ -2342,8 +2330,8 @@ export function OrdersPage() {
               type="button"
               variant="outline"
               size="icon-sm"
-              title={l("Aktualisieren", "Обновить")}
-              aria-label={l("Aktualisieren", "Обновить")}
+              title={t.orders_refresh}
+              aria-label={t.orders_refresh}
               onClick={triggerReload}
             >
               <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
@@ -2409,7 +2397,7 @@ export function OrdersPage() {
                     onClick={() => setCreateOpen(true)}
                   >
                     <Plus className="size-4" />
-                    {l("Neuen Auftrag", "Создать заказ")}
+                    {t.orders_new_button}
                   </Button>
                 ) : undefined
               }
@@ -4556,40 +4544,28 @@ export function OrdersPage() {
                         icon={ClipboardList}
                         label={eyebrowWithDot(tx.providers_services)}
                         value={String(leistungMetrics.total)}
-                        description={l(
-                          "Aktuelle Leistungspositionen in diesem Auftrag.",
-                          "\u0422\u0435\u043a\u0443\u0449\u0438\u0435 \u043f\u043e\u0437\u0438\u0446\u0438\u0438 \u0443\u0441\u043b\u0443\u0433 \u0432 \u044d\u0442\u043e\u043c \u0437\u0430\u043a\u0430\u0437\u0435.",
-                        )}
+                        description={t.orders_services_metric_total_description}
                         tone="sky"
                       />
                       <AdminInlineMetric
                         icon={CheckCircle2}
-                        label={eyebrowWithDot(l("Zur Freigabe", "\u0416\u0434\u0443\u0442 \u0443\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u044f"))}
+                        label={eyebrowWithDot(t.orders_services_pending_approval_label)}
                         value={String(leistungMetrics.delivered)}
-                        description={l(
-                          "Leistungspositionen, die auf PM-Freigabe warten.",
-                          "\u041f\u043e\u0437\u0438\u0446\u0438\u0438 \u0443\u0441\u043b\u0443\u0433, \u043e\u0436\u0438\u0434\u0430\u044e\u0449\u0438\u0435 \u0443\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u044f PM.",
-                        )}
+                        description={t.orders_services_pending_approval_description}
                         tone="amber"
                       />
                       <AdminInlineMetric
                         icon={Wallet}
-                        label={eyebrowWithDot(l("Freigegeben", "\u0423\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u043e"))}
+                        label={eyebrowWithDot(t.orders_services_approved_label)}
                         value={String(leistungMetrics.approved)}
-                        description={l(
-                          "Bereits freigegebene Leistungspositionen in diesem Auftrag.",
-                          "\u041f\u043e\u0437\u0438\u0446\u0438\u0438 \u0443\u0441\u043b\u0443\u0433, \u0443\u0436\u0435 \u0443\u0442\u0432\u0435\u0440\u0436\u0434\u0451\u043d\u043d\u044b\u0435 \u0432 \u0442\u0435\u043a\u0443\u0449\u0435\u043c \u0437\u0430\u043a\u0430\u0437\u0435.",
-                        )}
+                        description={t.orders_services_approved_description}
                         tone="emerald"
                       />
                       <AdminInlineMetric
                         icon={Building2}
                         label={eyebrowWithDot(tx.contracts_total)}
                         value={formatMoney(leistungMetrics.gross)}
-                        description={l(
-                          "Menge x Preis uber alle sichtbaren Leistungspositionen.",
-                          "\u041a\u043e\u043b\u0438\u0447\u0435\u0441\u0442\u0432\u043e x \u0446\u0435\u043d\u0430 \u043f\u043e \u0432\u0441\u0435\u043c \u0432\u0438\u0434\u0438\u043c\u044b\u043c \u043f\u043e\u0437\u0438\u0446\u0438\u044f\u043c \u0443\u0441\u043b\u0443\u0433.",
-                        )}
+                        description={t.orders_services_gross_description}
                         tone="slate"
                       />
                     </div>
@@ -4646,15 +4622,12 @@ export function OrdersPage() {
 
                     <SectionCard
                       title={tx.providers_services}
-                      description={l(
-                        "Provider- und arztbezogene Leistungen innerhalb dieses Auftrags.",
-                        "Привязанные к провайдеру и врачу услуги внутри текущего заказа.",
-                      )}
+                      description={t.orders_services_section_description}
                       action={
                         permissions.canAddLeistung ? (
                           <Button onClick={() => resetLeistungDialog(true)}>
                             <Plus className="mr-2 size-4" />
-                            {l("Leistung hinzufugen", "Добавить Leistung")}
+                            {t.orders_add_service}
                           </Button>
                         ) : null
                       }
@@ -4662,15 +4635,12 @@ export function OrdersPage() {
                   {orderDetail.leistungen.length === 0 ? (
                     <EmptyState
                       title={tx.common_not_set}
-                      description={l(
-                        "Mit providerbezogenen Positionen den Leistungsumfang des Auftrags aufbauen und Billing genug Kontext geben.",
-                        "Используйте позиции, привязанные к провайдеру, чтобы собрать объём исполнения заказа и дать биллингу достаточный контекст.",
-                      )}
+                      description={t.orders_services_empty_description}
                       action={
                         permissions.canAddLeistung ? (
                           <Button onClick={() => resetLeistungDialog(true)}>
                             <Plus className="mr-2 size-4" />
-                            {l("Leistung hinzufugen", "Добавить Leistung")}
+                            {t.orders_add_service}
                           </Button>
                         ) : undefined
                       }
@@ -4881,7 +4851,7 @@ export function OrdersPage() {
                                   ) : (
                                     <CheckCircle2 className="mr-2 size-4" />
                                   )}
-                                  {l("Freigeben", "Утвердить")}
+                                  {t.orders_approve}
                                 </Button>
                               ) : null}
                             </div>
@@ -4896,47 +4866,32 @@ export function OrdersPage() {
 
                 {shouldRenderOrderSection("invoices") ? (
                   <SectionCard
-                    title={l("Externe Rechnungen", "Внешние счета")}
-                    description={l(
-                      "Lieferanten- und Klinikrechnungen im Auftragskontext nachverfolgen, die gepruft, bezahlt oder eskaliert werden mussen.",
-                      "Отслеживание счетов от клиник и поставщиков, которые нужно проверить, оплатить или эскалировать в контексте заказа.",
-                    )}
+                    title={t.orders_external_invoices_title}
+                    description={t.orders_external_invoices_description}
                   >
                   <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                     <StatCard
-                      label={l("Erfasste Rechnungen", "Учтённые счета")}
+                      label={t.orders_external_invoices_count_label}
                       value={String(externalInvoiceMetrics.total)}
-                      description={l(
-                        "Externe Rechnungen, die mit dem aktuellen Auftrag verknupft sind.",
-                        "Внешние счета, привязанные к текущему заказу.",
-                      )}
+                      description={t.orders_external_invoices_count_description}
                       icon={<Wallet className="size-4" />}
                     />
                     <StatCard
-                      label={l("Überfällig", "Просрочено")}
+                      label={t.orders_external_invoices_overdue_label}
                       value={String(externalInvoiceMetrics.overdue)}
-                      description={l(
-                        "Rechnungen, deren Fälligkeitsdatum bereits überschritten ist.",
-                        "Счета, у которых уже прошёл срок оплаты.",
-                      )}
+                      description={t.orders_external_invoices_overdue_description}
                       icon={<CalendarClock className="size-4" />}
                     />
                     <StatCard
-                      label={l("Bezahlt", "Оплачено")}
+                      label={t.orders_external_invoices_paid_label}
                       value={String(externalInvoiceMetrics.paid)}
-                      description={l(
-                        "Rechnungen, die bereits als beglichen markiert sind.",
-                        "Счета, уже отмеченные как погашенные.",
-                      )}
+                      description={t.orders_external_invoices_paid_description}
                       icon={<CheckCircle2 className="size-4" />}
                     />
                     <StatCard
-                      label={l("Erfasstes Brutto", "Учтённое брутто")}
+                      label={t.orders_external_invoices_gross_label}
                       value={formatMoney(externalInvoiceMetrics.gross)}
-                      description={l(
-                        "Gesamtes Bruttoexposure aller verknüpften externen Rechnungen.",
-                        "Совокупное брутто по всем привязанным внешним счетам.",
-                      )}
+                      description={t.orders_external_invoices_gross_description}
                       icon={<Building2 className="size-4" />}
                     />
                   </div>
@@ -4951,14 +4906,11 @@ export function OrdersPage() {
                           <div>
                             <h3 className="text-sm font-semibold text-foreground">
                               {titleWithDot(
-                                l("Externe Rechnung erfassen", "Зарегистрировать внешний счёт"),
+                                t.orders_external_invoice_create_title,
                               )}
                             </h3>
                             <p className="mt-1 text-sm text-muted-foreground">
-                              {l(
-                                "Für eingehende Klinik- oder Partnerrechnungen verwenden, die ein Fristen-Tracking brauchen.",
-                                "Используйте для входящих счетов клиник или партнёров, по которым нужно отслеживать дедлайны.",
-                              )}
+                              {t.orders_external_invoice_create_description}
                             </p>
                           </div>
                         </div>
@@ -4968,7 +4920,7 @@ export function OrdersPage() {
                           </div>
                         ) : null}
                         <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                          <Field label={l("Rechnungsnummer", "Номер счёта")}>
+                          <Field label={t.orders_external_invoice_number}>
                             <Input
                               value={externalInvoiceForm.externalInvoiceNumber}
                               onChange={(event) =>
@@ -4999,7 +4951,7 @@ export function OrdersPage() {
                               ))}
                             </NativeComboboxSelect>
                           </Field>
-                          <Field label={l("Rechnungsdatum", "Дата счёта")}>
+                          <Field label={t.orders_external_invoice_date}>
                             <Input
                               type="date"
                               value={externalInvoiceForm.invoiceDate}
@@ -5012,7 +4964,7 @@ export function OrdersPage() {
                               className={inputClassName}
                             />
                           </Field>
-                          <Field label={l("Fälligkeitsdatum", "Срок оплаты")}>
+                          <Field label={t.orders_external_invoice_due_date}>
                             <Input
                               type="date"
                               value={externalInvoiceForm.dueDate}
@@ -5025,7 +4977,7 @@ export function OrdersPage() {
                               className={inputClassName}
                             />
                           </Field>
-                          <Field label={l("Netto", "Нетто")}>
+                          <Field label={t.orders_external_invoice_net}>
                             <Input
                               value={externalInvoiceForm.amountNet}
                               onChange={(event) =>
@@ -5037,7 +4989,7 @@ export function OrdersPage() {
                               className={inputClassName}
                             />
                           </Field>
-                          <Field label={l("MwSt.", "НДС")}>
+                          <Field label={t.orders_external_invoice_vat}>
                             <Input
                               value={externalInvoiceForm.amountVat}
                               onChange={(event) =>
@@ -5049,7 +5001,7 @@ export function OrdersPage() {
                               className={inputClassName}
                             />
                           </Field>
-                          <Field label={l("Brutto", "Брутто")}>
+                          <Field label={t.orders_external_invoice_gross}>
                             <Input
                               value={externalInvoiceForm.amountGross}
                               onChange={(event) =>
@@ -5061,7 +5013,7 @@ export function OrdersPage() {
                               className={inputClassName}
                             />
                           </Field>
-                          <Field label={l("Status", "Статус")}>
+                          <Field label={t.orders_external_invoice_status}>
                             <NativeComboboxSelect
                               value={externalInvoiceForm.status}
                               onChange={(event) =>
@@ -5103,7 +5055,7 @@ export function OrdersPage() {
                             ) : (
                               <Plus className="mr-2 size-4" />
                             )}
-                            {l("Externe Rechnung hinzufügen", "Добавить внешний счёт")}
+                            {t.orders_external_invoice_add}
                           </Button>
                         </div>
                       </form>
@@ -5111,14 +5063,8 @@ export function OrdersPage() {
 
                     {(orderDetail.external_invoices ?? []).length === 0 ? (
                       <EmptyState
-                        title={l(
-                          "Noch keine externen Rechnungen",
-                          "Внешних счетов пока нет",
-                        )}
-                        description={l(
-                          "Eingehende Provider- oder Klinikrechnungen hier erfassen, um Fälligkeiten und überfällige Nachverfolgung zu steuern.",
-                          "Регистрируйте здесь входящие счета от провайдеров и клиник, чтобы отслеживать дедлайны и просрочки.",
-                        )}
+                        title={t.orders_external_invoices_empty_title}
+                        description={t.orders_external_invoices_empty_description}
                       />
                     ) : (
                       <div className="space-y-3">
@@ -5154,46 +5100,46 @@ export function OrdersPage() {
                                   </div>
                                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                                     <DetailField
-                                      label={l("Rechnungsdatum", "Дата счёта")}
+                                      label={t.orders_external_invoice_date}
                                       value={formatDateLabel(invoice.invoice_date)}
                                     />
                                     <DetailField
-                                      label={l("Fälligkeitsdatum", "Срок оплаты")}
+                                      label={t.orders_external_invoice_due_date}
                                       value={formatDateLabel(invoice.due_date)}
                                     />
                                     <DetailField
-                                      label={l("Netto", "Нетто")}
+                                      label={t.orders_external_invoice_net}
                                       value={formatMoney(
                                         invoice.amount_net,
                                         invoice.currency,
                                       )}
                                     />
                                     <DetailField
-                                      label={l("MwSt.", "НДС")}
+                                      label={t.orders_external_invoice_vat}
                                       value={formatMoney(
                                         invoice.amount_vat,
                                         invoice.currency,
                                       )}
                                     />
                                     <DetailField
-                                      label={l("Brutto", "Брутто")}
+                                      label={t.orders_external_invoice_gross}
                                       value={formatMoney(
                                         invoice.amount_gross,
                                         invoice.currency,
                                       )}
                                     />
                                     <DetailField
-                                      label={l("Eingegangen", "Получен")}
+                                      label={t.orders_external_invoice_received}
                                       value={formatDateTimeLabel(
                                         invoice.received_at,
                                       )}
                                     />
                                     <DetailField
-                                      label={l("Bezahlt", "Оплачен")}
+                                      label={t.orders_external_invoice_paid}
                                       value={formatDateTimeLabel(invoice.paid_at)}
                                     />
                                     <DetailField
-                                      label={l("Letzte Aktualisierung", "Последнее обновление")}
+                                      label={t.orders_external_invoice_updated}
                                       value={formatDateTimeLabel(invoice.updated_at)}
                                     />
                                   </div>
@@ -5224,7 +5170,7 @@ export function OrdersPage() {
                                         invoice.id ? (
                                           <LoaderCircle className="mr-2 size-4 animate-spin" />
                                         ) : null}
-                                        {l("Als freigegeben markieren", "Отметить как утверждённый")}
+                                        {t.orders_external_invoice_mark_approved}
                                       </Button>
                                     ) : null}
                                     {invoice.status !== "paid" ? (
@@ -5245,7 +5191,7 @@ export function OrdersPage() {
                                         invoice.id ? (
                                           <LoaderCircle className="mr-2 size-4 animate-spin" />
                                         ) : null}
-                                        {l("Als bezahlt markieren", "Отметить как оплаченный")}
+                                        {t.orders_external_invoice_mark_paid}
                                       </Button>
                                     ) : null}
                                     {invoice.status !== "cancelled" ? (
@@ -5266,7 +5212,7 @@ export function OrdersPage() {
                                         invoice.id ? (
                                           <LoaderCircle className="mr-2 size-4 animate-spin" />
                                         ) : null}
-                                        {l("Stornieren", "Отменить")}
+                                        {t.orders_external_invoice_cancel}
                                       </Button>
                                     ) : null}
                                   </div>
@@ -5290,11 +5236,8 @@ export function OrdersPage() {
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
           <form className="flex h-full flex-col" onSubmit={handleCreateOrder}>
             <AdminSheetScaffold
-              title={l("Auftrag anlegen", "Создать заказ")}
-              description={l(
-                "Patient auswahlen, Bestandskunden-Re-Check prufen und Intake-Notiz fur den neuen Auftrag erfassen.",
-                "Выберите пациента, проверьте re-check существующего клиента и добавьте intake-заметку для нового заказа.",
-              )}
+              title={t.orders_create_title}
+              description={t.orders_create_description}
               footer={
                 <SheetFormFooter
                   cancelLabel={t.common_cancel}
@@ -5339,7 +5282,7 @@ export function OrdersPage() {
                 <option value="__empty__">{t.orders_patient}</option>
                 {patients.map((patient) => (
                   <option key={patient.id} value={patient.id}>
-                    {patientLabel(patient, l("Patient", "Пациент"))}
+                    {patientLabel(patient, t.orders_patient_fallback)}
                   </option>
                 ))}
               </NativeComboboxSelect>
@@ -5587,7 +5530,7 @@ export function OrdersPage() {
               </div>
             ) : null}
 
-            <Field label={l("Bedarfs- / Intake-Notiz", "Заметка по потребности / intake")}>
+            <Field label={t.orders_intake_note}>
               <textarea
                 value={createForm.needsDescription}
                 onChange={(event) =>
@@ -5610,7 +5553,7 @@ export function OrdersPage() {
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
           <form onSubmit={handleAddLeistung} className="flex h-full min-h-0 flex-col">
             <AdminSheetScaffold
-              title={l("Leistung hinzufugen", "\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c Leistung")}
+              title={t.orders_add_service_title}
               footer={
                 <SheetFormFooter
                   cancelLabel={t.common_cancel}
@@ -5629,7 +5572,7 @@ export function OrdersPage() {
             ) : null}
 
             <div className="grid gap-4 md:grid-cols-2">
-              <Field label={l("Beschreibung", "Описание")}>
+              <Field label={t.orders_service_description}>
                 <Input
                   required
                   value={leistungForm.description}
@@ -5642,7 +5585,7 @@ export function OrdersPage() {
                   className={inputClassName}
                 />
               </Field>
-              <Field label={l("Notizen", "Заметки")}>
+              <Field label={t.orders_service_notes}>
                 <Input
                   value={leistungForm.notes}
                   onChange={(event) =>
@@ -5657,7 +5600,7 @@ export function OrdersPage() {
             </div>
 
             <div className="grid gap-4 md:grid-cols-3">
-              <Field label={l("Menge", "Количество")}>
+              <Field label={t.orders_service_quantity}>
                 <Input
                   value={leistungForm.quantity}
                   onChange={(event) =>
@@ -5669,7 +5612,7 @@ export function OrdersPage() {
                   className={inputClassName}
                 />
               </Field>
-              <Field label={l("Einzelpreis", "Цена за единицу")}>
+              <Field label={t.orders_service_unit_price}>
                 <Input
                   value={leistungForm.unitPrice}
                   onChange={(event) =>
@@ -5681,7 +5624,7 @@ export function OrdersPage() {
                   className={inputClassName}
                 />
               </Field>
-              <Field label={l("MwSt. %", "НДС %")}>
+              <Field label={t.orders_service_vat_percent}>
                 <Input
                   value={leistungForm.vatRate}
                   onChange={(event) =>
@@ -5696,7 +5639,7 @@ export function OrdersPage() {
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
-              <Field label={l("Provider", "Провайдер")}>
+              <Field label={t.orders_service_provider}>
                 <NativeComboboxSelect
                   value={leistungForm.providerId}
                   onChange={(event) => {
@@ -5720,7 +5663,7 @@ export function OrdersPage() {
                   ))}
                 </NativeComboboxSelect>
               </Field>
-              <Field label={l("Arzt", "Врач")}>
+              <Field label={t.orders_service_doctor}>
                 <NativeComboboxSelect
                   value={leistungForm.doctorId}
                   onChange={(event) =>

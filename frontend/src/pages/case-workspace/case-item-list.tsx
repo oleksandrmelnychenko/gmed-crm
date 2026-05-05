@@ -9,12 +9,6 @@ import { cn } from "@/lib/utils";
 import { CaseItemEditSheet } from "./item-sheet";
 import { Panel } from "./primitives";
 
-function tri(lang: string, de: string, ru: string, en: string) {
-  if (lang === "de") return de;
-  if (lang === "ru") return ru;
-  return en;
-}
-
 type SheetState =
   | { mode: "closed" }
   | { mode: "create" }
@@ -70,7 +64,7 @@ export function CaseItemList<T>({
   addFirstLabel,
   missingPrimaryMessage,
 }: CaseItemListProps<T>) {
-  const { lang } = useLang();
+  const { t } = useLang();
   const [sheet, setSheet] = useState<SheetState>({ mode: "closed" });
   const [form, setForm] = useState<T>(blankItem);
   const [sheetError, setSheetError] = useState("");
@@ -128,14 +122,7 @@ export function CaseItemList<T>({
     if (ok) {
       closeSheet();
     } else {
-      setSheetError(
-        tri(
-          lang,
-          "Speichern fehlgeschlagen. Versuchen Sie es erneut.",
-          "Не удалось сохранить. Попробуйте ещё раз.",
-          "Failed to save. Please try again.",
-        ),
-      );
+      setSheetError(t.cases_workspace_item_save_failed);
     }
   }
 
@@ -147,14 +134,7 @@ export function CaseItemList<T>({
     if (ok) {
       closeSheet();
     } else {
-      setSheetError(
-        tri(
-          lang,
-          "Entfernen fehlgeschlagen.",
-          "Не удалось удалить.",
-          "Failed to remove.",
-        ),
-      );
+      setSheetError(t.cases_workspace_item_remove_failed);
     }
   }
 
@@ -168,7 +148,7 @@ export function CaseItemList<T>({
         action={
           <>
             <CountBadge>
-              {items.length} {tri(lang, "Einträge", "записей", "items")}
+              {items.length} {t.cases_workspace_item_count_label}
             </CountBadge>
             {canEdit ? (
               <Button
@@ -180,7 +160,7 @@ export function CaseItemList<T>({
                 disabled={busy}
               >
                 <Plus className="size-4" />
-                {tri(lang, "Hinzufügen", "Добавить", "Add")}
+                {t.cases_workspace_item_add}
               </Button>
             ) : null}
           </>

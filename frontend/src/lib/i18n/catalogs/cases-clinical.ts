@@ -76,6 +76,114 @@ export interface CasesClinicalTranslations {
   cases_workspace_overview_snippets_empty: string;
   cases_workspace_overview_snippets_insert: string;
   cases_workspace_overview_save: string;
+
+  cases_workspace_item_save_failed: string;
+  cases_workspace_item_remove_failed: string;
+  cases_workspace_item_count_label: string;
+  cases_workspace_item_add: string;
+  cases_workspace_item_submit_create: string;
+  cases_workspace_item_submit_edit: string;
+  cases_workspace_item_remove: string;
+
+  cases_medications_title: string;
+  cases_medications_description: string;
+  cases_medications_sheet_create: string;
+  cases_medications_sheet_edit: string;
+  cases_medications_empty_title: string;
+  cases_medications_add_first: string;
+  cases_medications_missing_brand: string;
+  cases_medications_untitled: string;
+  cases_medications_brand_name: string;
+  cases_medications_active_ingredient: string;
+  cases_medications_dose: string;
+  cases_medications_unit: string;
+  cases_medications_regimen: string;
+  cases_medications_form: string;
+  cases_medications_type: string;
+  cases_medications_valid_until: string;
+  cases_medications_since: string;
+  cases_medications_reason: string;
+  cases_medications_prescriber_registry: string;
+  cases_medications_doctor_label: string;
+  cases_medications_note: string;
+  cases_medications_expired: string;
+  cases_medications_confirmation_required: string;
+  cases_medications_status_verified: string;
+  cases_medications_status_rejected: string;
+  cases_medications_status_candidate: string;
+  cases_medications_status_pending: string;
+  cases_medications_status_unknown: string;
+  cases_medications_equivalents_load_error: string;
+  cases_medications_equivalent_verify_error: string;
+  cases_medications_drug_search_required: string;
+  cases_medications_drug_search_failed: string;
+  cases_medications_product_verify_failed: string;
+  cases_medications_drug_match_create_failed: string;
+  cases_medications_drug_match_verify_failed: string;
+  cases_medications_import_preview_required: string;
+  cases_medications_import_preview_failed: string;
+  cases_medications_expiry_review_pending: string;
+  cases_medications_expiry_review_full_editor: string;
+  cases_medications_equivalent_lookup_medication: string;
+  cases_medications_reference_title: string;
+  cases_medications_reference_description: string;
+  cases_medications_staff_only: string;
+  cases_medications_drug_search: string;
+  cases_medications_country: string;
+  cases_medications_searching: string;
+  cases_medications_search: string;
+  cases_medications_include_candidates: string;
+  cases_medications_match_saved: string;
+  cases_medications_match_label: string;
+  cases_medications_match_verify: string;
+  cases_medications_match_reject: string;
+  cases_medications_search_results_empty: string;
+  cases_medications_substances: string;
+  cases_medications_unknown: string;
+  cases_medications_product_verify: string;
+  cases_medications_reject: string;
+  cases_medications_use_for_medication: string;
+  cases_medications_import_title: string;
+  cases_medications_import_description: string;
+  cases_medications_previewing: string;
+  cases_medications_preview_import: string;
+  cases_medications_import_summary: string;
+  cases_medications_no_substances: string;
+  cases_medications_issues: string;
+  cases_medications_equivalents_title: string;
+  cases_medications_equivalents_description: string;
+  cases_medications_equivalents_count_label: string;
+  cases_medications_equivalents_find: string;
+  cases_medications_equivalents_warning: string;
+  cases_medications_equivalents_active_substance: string;
+  cases_medications_equivalents_include_unverified: string;
+  cases_medications_equivalents_empty: string;
+  cases_medications_equivalents_confidence: string;
+  cases_medications_equivalents_unverified_warning: string;
+  cases_medications_equivalents_verify: string;
+  cases_medications_equivalents_no_link: string;
+
+  cases_pain_title: string;
+  cases_pain_description: string;
+  cases_pain_sheet_create: string;
+  cases_pain_sheet_edit: string;
+  cases_pain_empty_title: string;
+  cases_pain_add_first: string;
+  cases_pain_missing_location: string;
+  cases_pain_no_location: string;
+  cases_pain_since: string;
+  cases_pain_cause: string;
+  cases_pain_location: string;
+  cases_pain_since_when: string;
+  cases_pain_quality: string;
+  cases_pain_continuity: string;
+  cases_pain_evolution: string;
+  cases_pain_nrs_current: string;
+  cases_pain_nrs_initial: string;
+  cases_pain_initial_duration: string;
+  cases_pain_current_duration: string;
+  cases_pain_radiation: string;
+  cases_pain_triggers: string;
 }
 
 export const casesClinicalRu: CasesClinicalTranslations = {
@@ -164,6 +272,138 @@ export const casesClinicalRu: CasesClinicalTranslations = {
   cases_workspace_overview_snippets_empty: "Активных шаблонов пока нет.",
   cases_workspace_overview_snippets_insert: "Вставить",
   cases_workspace_overview_save: "Сохранить обзор",
+  cases_workspace_item_save_failed:
+    "Не удалось сохранить. Попробуйте ещё раз.",
+  cases_workspace_item_remove_failed: "Не удалось удалить.",
+  cases_workspace_item_count_label: "записей",
+  cases_workspace_item_add: "Добавить",
+  cases_workspace_item_submit_create: "Добавить",
+  cases_workspace_item_submit_edit: "Сохранить изменения",
+  cases_workspace_item_remove: "Удалить",
+
+  cases_medications_title: "Медикаменты",
+  cases_medications_description:
+    "Текущая медикация, дозировка, срок действия и назначивший врач.",
+  cases_medications_sheet_create: "Новый медикамент",
+  cases_medications_sheet_edit: "Редактировать медикамент",
+  cases_medications_empty_title: "Медикаментов пока нет.",
+  cases_medications_add_first: "Добавить первый медикамент",
+  cases_medications_missing_brand: "Укажите торговое название.",
+  cases_medications_untitled: "Без названия",
+  cases_medications_brand_name: "Торговое название",
+  cases_medications_active_ingredient: "Действующее вещество",
+  cases_medications_dose: "Доза",
+  cases_medications_unit: "Единица",
+  cases_medications_regimen: "Схема приёма",
+  cases_medications_form: "Форма",
+  cases_medications_type: "Тип",
+  cases_medications_valid_until: "Действительно до",
+  cases_medications_since: "Начало приёма",
+  cases_medications_reason: "Причина",
+  cases_medications_prescriber_registry: "Назначивший врач (реестр)",
+  cases_medications_doctor_label: "Наименование врача",
+  cases_medications_note: "Комментарий",
+  cases_medications_expired: "Истёк срок",
+  cases_medications_confirmation_required: "Требуется подтверждение",
+  cases_medications_status_verified: "Проверено",
+  cases_medications_status_rejected: "Отклонено",
+  cases_medications_status_candidate: "Кандидат",
+  cases_medications_status_pending: "Ожидает",
+  cases_medications_status_unknown: "Неизвестный статус",
+  cases_medications_equivalents_load_error:
+    "Не удалось загрузить эквиваленты медикации.",
+  cases_medications_equivalent_verify_error:
+    "Не удалось проверить эквивалент.",
+  cases_medications_drug_search_required:
+    "Введите название препарата, ATC-код или действующее вещество.",
+  cases_medications_drug_search_failed:
+    "Не удалось выполнить поиск препаратов.",
+  cases_medications_product_verify_failed:
+    "Не удалось проверить препарат.",
+  cases_medications_drug_match_create_failed:
+    "Не удалось создать связь с препаратом.",
+  cases_medications_drug_match_verify_failed:
+    "Не удалось проверить связь с препаратом.",
+  cases_medications_import_preview_required:
+    "Вставьте минимум одну CSV-строку для предпросмотра.",
+  cases_medications_import_preview_failed:
+    "Не удалось создать предпросмотр импорта.",
+  cases_medications_expiry_review_pending:
+    "Требуется подтверждение истечения срока",
+  cases_medications_expiry_review_full_editor:
+    "Подтверждение выполняется в полном редакторе.",
+  cases_medications_equivalent_lookup_medication:
+    "Медикация для поиска немецкого эквивалента",
+  cases_medications_reference_title: "Справочник препаратов",
+  cases_medications_reference_description:
+    "Поиск по справочнику, проверка записей и привязка препарата к выбранной медикации.",
+  cases_medications_staff_only: "Только команда",
+  cases_medications_drug_search: "Поиск препаратов",
+  cases_medications_country: "Страна",
+  cases_medications_searching: "Поиск...",
+  cases_medications_search: "Найти",
+  cases_medications_include_candidates:
+    "Включить кандидаты и отклонённые препараты для проверки командой",
+  cases_medications_match_saved: "Связь с препаратом сохранена",
+  cases_medications_match_label: "Связь",
+  cases_medications_match_verify: "Проверить связь",
+  cases_medications_match_reject: "Отклонить связь",
+  cases_medications_search_results_empty:
+    "Результаты поиска появятся здесь.",
+  cases_medications_substances: "Действующие вещества",
+  cases_medications_unknown: "Неизвестно",
+  cases_medications_product_verify: "Проверить препарат",
+  cases_medications_reject: "Отклонить",
+  cases_medications_use_for_medication: "Использовать для медикации",
+  cases_medications_import_title: "Предпросмотр импорта препаратов",
+  cases_medications_import_description:
+    "Тестовый CSV-предпросмотр будущего импорта препаратов. Формат: brand,country,substance,strength,form,manufacturer,atc.",
+  cases_medications_previewing: "Предпросмотр...",
+  cases_medications_preview_import: "Проверить импорт",
+  cases_medications_import_summary:
+    "{received} строк получено - {valid} валидных строк предпросмотра - {issues} с замечаниями",
+  cases_medications_no_substances: "Нет действующих веществ",
+  cases_medications_issues: "замечания",
+  cases_medications_equivalents_title: "Найти немецкий эквивалент",
+  cases_medications_equivalents_description:
+    "Справочная информация для команды по немецким эквивалентам. Это не назначение.",
+  cases_medications_equivalents_count_label: "кандидатов",
+  cases_medications_equivalents_find: "Найти",
+  cases_medications_equivalents_warning:
+    "Немецкие эквиваленты являются только справочной информацией для команды, не назначением. Непроверенные кандидаты нельзя показывать пациенту.",
+  cases_medications_equivalents_active_substance: "Действующее вещество",
+  cases_medications_equivalents_include_unverified:
+    "Включить непроверенные кандидаты только для команды",
+  cases_medications_equivalents_empty:
+    "Немецкие эквиваленты пока не найдены.",
+  cases_medications_equivalents_confidence: "Уверенность",
+  cases_medications_equivalents_unverified_warning:
+    "Непроверенный кандидат: только для команды, не показывать пациенту.",
+  cases_medications_equivalents_verify: "Проверить",
+  cases_medications_equivalents_no_link:
+    "Курируемой связи с эквивалентом пока нет. Сначала добавьте связь с препаратом.",
+
+  cases_pain_title: "Боль",
+  cases_pain_description: "Локализация, характер и интенсивность боли.",
+  cases_pain_sheet_create: "Новая запись о боли",
+  cases_pain_sheet_edit: "Редактировать запись о боли",
+  cases_pain_empty_title: "Записей о боли пока нет.",
+  cases_pain_add_first: "Добавить первую запись",
+  cases_pain_missing_location: "Укажите локализацию.",
+  cases_pain_no_location: "Без локализации",
+  cases_pain_since: "с",
+  cases_pain_cause: "Причина",
+  cases_pain_location: "Локализация",
+  cases_pain_since_when: "С какого времени",
+  cases_pain_quality: "Характер",
+  cases_pain_continuity: "Постоянство",
+  cases_pain_evolution: "Развитие",
+  cases_pain_nrs_current: "NRS сейчас (0-10)",
+  cases_pain_nrs_initial: "NRS в начале",
+  cases_pain_initial_duration: "Длительность в начале",
+  cases_pain_current_duration: "Длительность сейчас",
+  cases_pain_radiation: "Иррадиация",
+  cases_pain_triggers: "Провоцирующие факторы",
 };
 
 export const casesClinicalDe: CasesClinicalTranslations = {
@@ -254,6 +494,136 @@ export const casesClinicalDe: CasesClinicalTranslations = {
     "Keine aktiven Textbausteine vorhanden.",
   cases_workspace_overview_snippets_insert: "Einfügen",
   cases_workspace_overview_save: "Übersicht speichern",
+  cases_workspace_item_save_failed:
+    "Speichern fehlgeschlagen. Versuchen Sie es erneut.",
+  cases_workspace_item_remove_failed: "Entfernen fehlgeschlagen.",
+  cases_workspace_item_count_label: "Einträge",
+  cases_workspace_item_add: "Hinzufügen",
+  cases_workspace_item_submit_create: "Hinzufügen",
+  cases_workspace_item_submit_edit: "Änderungen speichern",
+  cases_workspace_item_remove: "Entfernen",
+
+  cases_medications_title: "Medikamente",
+  cases_medications_description:
+    "Aktuelle Medikation, Dosierung, Ablaufdatum und Verordner.",
+  cases_medications_sheet_create: "Neues Medikament",
+  cases_medications_sheet_edit: "Medikament bearbeiten",
+  cases_medications_empty_title: "Keine Medikamente erfasst.",
+  cases_medications_add_first: "Erstes Medikament hinzufügen",
+  cases_medications_missing_brand: "Bitte den Handelsnamen eingeben.",
+  cases_medications_untitled: "Ohne Namen",
+  cases_medications_brand_name: "Handelsname",
+  cases_medications_active_ingredient: "Wirkstoff",
+  cases_medications_dose: "Dosis",
+  cases_medications_unit: "Einheit",
+  cases_medications_regimen: "Schema",
+  cases_medications_form: "Darreichungsform",
+  cases_medications_type: "Typ",
+  cases_medications_valid_until: "Gültig bis",
+  cases_medications_since: "Seit",
+  cases_medications_reason: "Grund",
+  cases_medications_prescriber_registry: "Verordnender Arzt (Register)",
+  cases_medications_doctor_label: "Freitext Arzt",
+  cases_medications_note: "Anmerkung",
+  cases_medications_expired: "Abgelaufen",
+  cases_medications_confirmation_required: "Bestätigung nötig",
+  cases_medications_status_verified: "Verifiziert",
+  cases_medications_status_rejected: "Abgelehnt",
+  cases_medications_status_candidate: "Kandidat",
+  cases_medications_status_pending: "Ausstehend",
+  cases_medications_status_unknown: "Unbekannter Status",
+  cases_medications_equivalents_load_error:
+    "Medikationsäquivalente konnten nicht geladen werden.",
+  cases_medications_equivalent_verify_error:
+    "Äquivalent konnte nicht verifiziert werden.",
+  cases_medications_drug_search_required:
+    "Arzneiname, ATC-Code oder Wirkstoff eingeben.",
+  cases_medications_drug_search_failed: "Arzneisuche fehlgeschlagen.",
+  cases_medications_product_verify_failed:
+    "Produkt konnte nicht verifiziert werden.",
+  cases_medications_drug_match_create_failed:
+    "Medikations-Match konnte nicht erstellt werden.",
+  cases_medications_drug_match_verify_failed:
+    "Medikations-Match konnte nicht verifiziert werden.",
+  cases_medications_import_preview_required:
+    "Mindestens eine CSV-Zeile für die Vorschau einfügen.",
+  cases_medications_import_preview_failed:
+    "Importvorschau konnte nicht erstellt werden.",
+  cases_medications_expiry_review_pending: "Ablaufprüfung ausstehend",
+  cases_medications_expiry_review_full_editor:
+    "Die Bestätigung des Ablaufs erfolgt im vollständigen Editor.",
+  cases_medications_equivalent_lookup_medication:
+    "Medikation für die Suche nach deutschem Äquivalent",
+  cases_medications_reference_title: "Arzneimittel-Referenz",
+  cases_medications_reference_description:
+    "Kuratierte Produkte suchen, Datensätze prüfen und einen Produkt-Match zur ausgewählten Medikation hinzufügen.",
+  cases_medications_staff_only: "Nur Team",
+  cases_medications_drug_search: "Arzneisuche",
+  cases_medications_country: "Land",
+  cases_medications_searching: "Suche...",
+  cases_medications_search: "Suchen",
+  cases_medications_include_candidates:
+    "Kandidaten und abgelehnte Produkte für Team-Prüfung einschließen",
+  cases_medications_match_saved: "Medikations-Match gespeichert",
+  cases_medications_match_label: "Match",
+  cases_medications_match_verify: "Match prüfen",
+  cases_medications_match_reject: "Match ablehnen",
+  cases_medications_search_results_empty:
+    "Suchergebnisse erscheinen hier.",
+  cases_medications_substances: "Wirkstoffe",
+  cases_medications_unknown: "Unbekannt",
+  cases_medications_product_verify: "Produkt prüfen",
+  cases_medications_reject: "Ablehnen",
+  cases_medications_use_for_medication: "Für Medikation nutzen",
+  cases_medications_import_title: "Arzneiimport-Vorschau",
+  cases_medications_import_description:
+    "CSV-Testlauf für zukünftige Arzneiimporte. Format: brand,country,substance,strength,form,manufacturer,atc.",
+  cases_medications_previewing: "Vorschau...",
+  cases_medications_preview_import: "Import prüfen",
+  cases_medications_import_summary:
+    "{received} Zeilen empfangen - {valid} gültige Vorschauzeilen - {issues} mit Hinweisen",
+  cases_medications_no_substances: "Keine Wirkstoffe",
+  cases_medications_issues: "Hinweise",
+  cases_medications_equivalents_title: "Deutsches Äquivalent finden",
+  cases_medications_equivalents_description:
+    "Team-Referenz für deutsche Medikationsäquivalente. Keine Verordnung.",
+  cases_medications_equivalents_count_label: "Kandidaten",
+  cases_medications_equivalents_find: "Finden",
+  cases_medications_equivalents_warning:
+    "Deutsche Äquivalente sind nur Team-Referenzinformationen, keine Verordnung. Ungeprüfte Kandidaten dürfen nicht patientenseitig angezeigt werden.",
+  cases_medications_equivalents_active_substance: "Wirkstoff",
+  cases_medications_equivalents_include_unverified:
+    "Ungeprüfte Team-Kandidaten einschließen",
+  cases_medications_equivalents_empty:
+    "Noch keine deutschen Äquivalente gefunden.",
+  cases_medications_equivalents_confidence: "Trefferquote",
+  cases_medications_equivalents_unverified_warning:
+    "Ungeprüfter Kandidat: nur für das Team, nicht patientenseitig.",
+  cases_medications_equivalents_verify: "Prüfen",
+  cases_medications_equivalents_no_link:
+    "Noch keine kuratierte Äquivalent-Verknüpfung vorhanden. Zuerst einen Produkt-Match hinzufügen.",
+
+  cases_pain_title: "Schmerz",
+  cases_pain_description: "Schmerz-Lokalisation, Qualität und Intensität.",
+  cases_pain_sheet_create: "Neuer Schmerzbefund",
+  cases_pain_sheet_edit: "Schmerzbefund bearbeiten",
+  cases_pain_empty_title: "Keine Schmerzbefunde erfasst.",
+  cases_pain_add_first: "Ersten Befund hinzufügen",
+  cases_pain_missing_location: "Bitte die Lokalisation angeben.",
+  cases_pain_no_location: "Ohne Lokalisation",
+  cases_pain_since: "seit",
+  cases_pain_cause: "Ursache",
+  cases_pain_location: "Lokalisation",
+  cases_pain_since_when: "Seit wann",
+  cases_pain_quality: "Qualität",
+  cases_pain_continuity: "Kontinuität",
+  cases_pain_evolution: "Entwicklung",
+  cases_pain_nrs_current: "NRS aktuell (0-10)",
+  cases_pain_nrs_initial: "NRS Anfang",
+  cases_pain_initial_duration: "Dauer Anfang",
+  cases_pain_current_duration: "Dauer aktuell",
+  cases_pain_radiation: "Ausstrahlung",
+  cases_pain_triggers: "Auftreten",
 };
 
 export const CASE_STATUS_LABEL_KEYS = {

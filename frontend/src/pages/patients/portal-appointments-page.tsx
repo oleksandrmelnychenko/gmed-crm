@@ -24,7 +24,7 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
-import { formatUnknownValue, useLang } from "@/lib/i18n";
+import { useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import {
   createPortalAppointmentRequest,
@@ -89,24 +89,8 @@ const PORTAL_APPOINTMENT_REALTIME_EVENTS = [
 
 function portalOrderPhaseLabel(
   value: string | null | undefined,
-  l: (de: string, ru: string, en: string) => string,
-  translations: { common_unknown: string; common_unknown_value: string },
 ) {
   return sharedPortalOrderPhaseLabel(value);
-  switch (value) {
-    case "discovery":
-      return l("Discovery", "Диагностика потребности", "Discovery");
-    case "intake":
-      return l("Aufnahme", "Интейк", "Intake");
-    case "execution":
-      return l("Ausfuhrung", "Исполнение", "Execution");
-    case "closure":
-      return l("Abschluss", "Закрытие", "Closure");
-    case "followup":
-      return l("Nachbetreuung", "Наблюдение", "Follow-up");
-    default:
-      return formatUnknownValue(value, translations);
-  }
 }
 
 export function PatientAppointmentsPage() {
@@ -157,7 +141,7 @@ export function PatientAppointmentsPage() {
         });
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : l("Terminbereich konnte nicht geladen werden.", "Не удалось загрузить раздел записей.", "Failed to load appointment workspace."));
+        setError(err instanceof Error ? err.message : t.portal_appointments_failed_to_load_appointment_workspace);
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -170,7 +154,7 @@ export function PatientAppointmentsPage() {
     return () => {
       cancelled = true;
     };
-  }, [loading, version, l]);
+  }, [loading, t.portal_appointments_failed_to_load_appointment_workspace, version, l]);
 
   const upcomingAppointments = useMemo(
     () => appointments.filter((item) => item.date >= new Date().toISOString().slice(0, 10)),
@@ -209,11 +193,11 @@ export function PatientAppointmentsPage() {
         reason: requestForm.reason || undefined,
         notes: requestForm.notes || undefined,
       });
-      setNotice(l("Terminanfrage wurde an das Betreuungsteam gesendet.", "Запрос на запись отправлен команде сопровождения.", "Appointment request sent to the care team."));
+      setNotice(t.portal_appointments_appointment_request_sent_to_the_care_team);
       setRequestForm(blankRequestForm());
       setVersion((value) => value + 1);
     } catch (err) {
-      setRequestError(err instanceof Error ? err.message : l("Terminanfrage konnte nicht gesendet werden.", "Не удалось отправить запрос на запись.", "Failed to send appointment request."));
+      setRequestError(err instanceof Error ? err.message : t.portal_appointments_failed_to_send_appointment_request);
     } finally {
       setRequestBusy(false);
     }
@@ -230,22 +214,18 @@ export function PatientAppointmentsPage() {
   return (
     <TabShell className="mt-0 space-y-6">
       <PageHeader
-        title={l("Meine Termine", "Мои записи", "My appointments")}
-        description={l(
-                "Prüfen Sie geplante Termine und senden Sie neue Terminwünsche an das Betreuungsteam zur Prüfung und Buchung.",
-                "Просматривайте запланированные визиты и отправляйте новые запросы на запись для обработки и бронирования командой сопровождения.",
-                "Review scheduled visits and send new appointment requests for the care team to triage and book.",
-              )}
+        title={t.portal_appointments_my_appointments}
+        description={t.portal_appointments_review_scheduled_visits_and_send_new_appointment_requests_for_th}
         actions={
           <>
-            <CountBadge>{l("Patientenportal", "Портал пациента", "Patient portal")}</CountBadge>
+            <CountBadge>{t.portal_appointments_patient_portal}</CountBadge>
             <Button
               variant="outline"
               className="h-9 rounded-lg"
               onClick={() => setVersion((value) => value + 1)}
             >
               {refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-              {l("Aktualisieren", "Обновить", "Refresh")}
+              {t.portal_appointments_refresh}
             </Button>
           </>
         }
@@ -255,30 +235,30 @@ export function PatientAppointmentsPage() {
       {error ? <Banner tone="error">{error}</Banner> : null}
 
       <section className="grid gap-4 md:grid-cols-3">
-        <StatCard label={l("Kommende Termine", "Предстоящие визиты", "Upcoming visits")} value={String(upcomingAppointments.length)} />
-        <StatCard label={l("Offene Anfragen", "Открытые запросы", "Open requests")} value={String(openRequests.length)} />
+        <StatCard label={t.portal_appointments_upcoming_visits} value={String(upcomingAppointments.length)} />
+        <StatCard label={t.portal_appointments_open_requests} value={String(openRequests.length)} />
         <StatCard
-          label={l("Nächster Termin", "Следующий слот", "Next slot")}
-          value={nextAppointment ? formatPortalDate(nextAppointment.date) : l("Nicht festgelegt", "Не указано", "Not set")}
-          description={nextAppointment ? nextAppointment.title : l("Keine bevorstehenden Termine", "Нет предстоящих визитов", "No upcoming visits")}
+          label={t.portal_appointments_next_slot}
+          value={nextAppointment ? formatPortalDate(nextAppointment.date) : t.portal_appointments_not_set}
+          description={nextAppointment ? nextAppointment.title : t.portal_appointments_no_upcoming_visits}
         />
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[1.15fr_0.95fr]">
         <section className="space-y-4">
           <Section
-            title={l("Geplante Termine", "Запланированные визиты", "Scheduled visits")}
+            title={t.portal_appointments_scheduled_visits}
             accessory={<CountBadge>{appointments.length}</CountBadge>}
           >
             <p className="text-sm text-muted-foreground">
-              {l("Ihre derzeit mit dem Patientenprofil verknüpften extern sichtbaren Termine.", "Ваши не внутренние записи, привязанные к профилю пациента.", "Your non-internal appointments currently linked to the patient record.")}
+              {t.portal_appointments_your_non_internal_appointments_currently_linked_to_the_patient_r}
             </p>
 
             {appointments.length === 0 ? (
               <EmptyCell>
-                <p className="text-base font-semibold text-foreground">{l("Noch keine Termine", "Пока нет записей", "No appointments yet")}</p>
+                <p className="text-base font-semibold text-foreground">{t.portal_appointments_no_appointments_yet}</p>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  {l("Sobald das Betreuungsteam einen Termin plant, erscheint er hier.", "Как только команда сопровождения запланирует визит, он появится здесь.", "Once a visit is scheduled by the care team, it will appear here.")}
+                  {t.portal_appointments_once_a_visit_is_scheduled_by_the_care_team_it_will_appear_here}
                 </p>
               </EmptyCell>
             ) : (
@@ -308,13 +288,13 @@ export function PatientAppointmentsPage() {
                     <div className="grid gap-3 sm:grid-cols-2">
                       <InfoRow
                         className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
-                        label={l("Datum", "Дата", "Date")}
+                        label={t.portal_appointments_date}
                         value={formatPortalDate(item.date)}
                       />
                       <InfoRow
                         className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
-                        label={l("Zeit", "Время", "Time")}
-                        value={[item.time_start, item.time_end].filter(Boolean).join(" - ") || l("Nicht festgelegt", "Не указано", "Not set")}
+                        label={t.portal_appointments_time}
+                        value={[item.time_start, item.time_end].filter(Boolean).join(" - ") || t.portal_appointments_not_set}
                       />
                     </div>
                   </ListItem>
@@ -324,52 +304,52 @@ export function PatientAppointmentsPage() {
           </Section>
 
           <Section
-            title={l("Nachsorge-Meilensteine", "Этапы последующего наблюдения", "Follow-up milestones")}
+            title={t.portal_appointments_follow_up_milestones}
             accessory={<CountBadge>{followupMilestones.length}</CountBadge>}
           >
             <p className="text-sm text-muted-foreground">
-              {l("Meilensteine nach der Behandlung, die mit Ihren aktuellen Aufträgen verknüpft sind, auch wenn daraus noch keine konkreten Termine entstanden sind.", "Этапы после лечения, связанные с вашими текущими заказами, даже если команда еще не превратила их в конкретные визиты.", "Post-care milestones linked to your current orders, even when the team has not yet converted them into concrete visits.")}
+              {t.portal_appointments_post_care_milestones_linked_to_your_current_orders_even_when_the}
             </p>
 
             {followupMilestones.length === 0 ? (
               <EmptyCell>
-                {l("Noch keine sichtbaren Nachsorge-Meilensteine.", "Пока нет видимых этапов последующего наблюдения.", "No follow-up milestones are visible yet.")}
+                {t.portal_appointments_no_follow_up_milestones_are_visible_yet}
               </EmptyCell>
             ) : (
               <div className="space-y-3">
                 {followupMilestones.map((item) => {
                   const milestoneRows = [
                     {
-                      label: l("Ärztlich angeordnet", "По назначению врача", "Doctor-directed"),
+                      label: t.portal_appointments_doctor_directed,
                       value: portalStatusLabel(item.doctor_followup_status),
                       tone: followupStatusTone(item.doctor_followup_status),
                     },
                     {
-                      label: l("1 Woche", "1 неделя", "1-week"),
+                      label: t.portal_appointments_1_week,
                       value: portalStatusLabel(item.followup_1w_status),
                       tone: followupStatusTone(item.followup_1w_status),
                       hint: formatPortalDateTime(item.recommended_followup_1w_at),
                     },
                     {
-                      label: l("1 Monat", "1 месяц", "1-month"),
+                      label: t.portal_appointments_1_month,
                       value: portalStatusLabel(item.followup_1m_status),
                       tone: followupStatusTone(item.followup_1m_status),
                       hint: formatPortalDateTime(item.recommended_followup_1m_at),
                     },
                     {
-                      label: l("6 Monate", "6 месяцев", "6-month"),
+                      label: t.portal_appointments_6_month,
                       value: portalStatusLabel(item.followup_6m_status),
                       tone: followupStatusTone(item.followup_6m_status),
                       hint: formatPortalDateTime(item.recommended_followup_6m_at),
                     },
                     {
-                      label: l("Paketende", "Завершение пакета", "Package end"),
+                      label: t.portal_appointments_package_end,
                       value: portalStatusLabel(item.package_end_status),
                       tone: followupStatusTone(item.package_end_status),
                       hint: formatPortalDate(item.package_end_date ?? item.suggested_package_end_date),
                     },
                     {
-                      label: l("Ergebnisübergabe", "Передача результатов", "Results handoff"),
+                      label: t.portal_appointments_results_handoff,
                       value: portalStatusLabel(item.results_handoff_status),
                       tone: followupStatusTone(item.results_handoff_status),
                       hint: l(`${item.results_portal_shares} geteilte Dokumente`, `${item.results_portal_shares} переданных документов`, `${item.results_portal_shares} shared document(s)`),
@@ -381,14 +361,14 @@ export function PatientAppointmentsPage() {
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="min-w-0">
                           <p className="text-sm font-semibold text-foreground">
-                            {item.order_number} / {portalOrderPhaseLabel(item.phase, l, t)}
+                            {item.order_number} / {portalOrderPhaseLabel(item.phase)}
                           </p>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            {l("Abschlussanker", "Точка закрытия", "Closure anchor")} {formatPortalDateTime(item.closure_anchor_at)}
+                            {t.portal_appointments_closure_anchor} {formatPortalDateTime(item.closure_anchor_at)}
                           </p>
                         </div>
                         <StatusBadge tone={item.followup_ready ? "success" : "warning"}>
-                          {item.followup_ready ? l("bereit", "готово", "ready") : l("in Bearbeitung", "в работе", "in progress")}
+                          {item.followup_ready ? t.portal_appointments_ready : t.portal_appointments_in_progress}
                         </StatusBadge>
                       </div>
 
@@ -421,16 +401,16 @@ export function PatientAppointmentsPage() {
           </Section>
 
           <Section
-            title={l("Anfrageverlauf", "История запросов", "Request history")}
+            title={t.portal_appointments_request_history}
             accessory={<CountBadge>{requests.length}</CountBadge>}
           >
             <p className="text-sm text-muted-foreground">
-              {l("Terminwünsche aus dem Portal und ihr Bearbeitungsstatus.", "Запросы на запись из портала и их статус рассмотрения.", "Portal appointment requests and their review status.")}
+              {t.portal_appointments_portal_appointment_requests_and_their_review_status}
             </p>
 
             {requests.length === 0 ? (
               <EmptyCell>
-                {l("Noch keine Anfragen gesendet.", "Запросы еще не отправлялись.", "No requests submitted yet.")}
+                {t.portal_appointments_no_requests_submitted_yet}
               </EmptyCell>
             ) : (
               <div className="space-y-3">
@@ -439,13 +419,13 @@ export function PatientAppointmentsPage() {
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-foreground">
-                          {appointmentTypeLabel(item.appointment_type)} {l("Anfrage", "запрос", "request")}
+                          {appointmentTypeLabel(item.appointment_type)} {t.portal_appointments_request}
                         </p>
                         <p className="mt-1 text-xs text-muted-foreground">
                           {appointmentCarePathKindLabel(item.care_path_kind)}
                         </p>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          {l("Angefragt", "Запрошено", "Requested")} {formatPortalDateTime(item.requested_at)}
+                          {t.portal_appointments_requested} {formatPortalDateTime(item.requested_at)}
                         </p>
                       </div>
                       <StatusBadge status={item.status} className={appointmentRequestStatusTone(item.status)}>
@@ -455,24 +435,24 @@ export function PatientAppointmentsPage() {
                     <div className="grid gap-3 sm:grid-cols-2">
                       <InfoRow
                         className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
-                        label={l("Bevorzugt ab", "Предпочтительно с", "Preferred from")}
+                        label={t.portal_appointments_preferred_from}
                         value={formatPortalDate(item.preferred_date_from)}
                       />
                       <InfoRow
                         className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
-                        label={l("Zeitfenster", "Временное окно", "Time window")}
+                        label={t.portal_appointments_time_window}
                         value={appointmentTimeOfDayLabel(item.preferred_time_of_day)}
                       />
                     </div>
                     {item.reason ? <p className="text-sm text-muted-foreground">{item.reason}</p> : null}
                     {item.review_note ? (
                       <div className={cn("rounded-lg px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
-                        {l("Prüfnotiz", "Комментарий по рассмотрению", "Review note")}: {item.review_note}
+                        {t.portal_appointments_review_note}: {item.review_note}
                       </div>
                     ) : null}
                     {item.converted_appointment_id ? (
                       <SuccessBanner>
-                        {l("Eingeplant als", "Назначено как", "Scheduled as")} {item.converted_appointment_title || l("Termin", "запись", "appointment")} {l("am", "на", "on")} {formatPortalDate(item.converted_appointment_date)}
+                        {t.portal_appointments_scheduled_as} {item.converted_appointment_title || t.portal_appointments_appointment} {t.portal_appointments_on} {formatPortalDate(item.converted_appointment_date)}
                       </SuccessBanner>
                     ) : null}
                   </ListItem>
@@ -483,14 +463,14 @@ export function PatientAppointmentsPage() {
         </section>
 
         <Section
-          title={l("Termin anfragen", "Запросить запись", "Request a visit")}
+          title={t.portal_appointments_request_a_visit}
           accessory={<Stethoscope className="size-4 text-muted-foreground" />}
         >
           <p className="text-sm text-muted-foreground">
-            {l("Senden Sie bevorzugte Termine und Kontext. Das Betreuungsteam prüft die Anfrage und wandelt sie in einen echten Termin um.", "Отправьте предпочтительные даты и контекст. Команда сопровождения рассмотрит запрос и превратит его в реальную запись.", "Send preferred dates and context. The care team reviews and converts the request into a real appointment.")}
+            {t.portal_appointments_send_preferred_dates_and_context_the_care_team_reviews_and_conve}
           </p>
           <form className="space-y-4" onSubmit={(event) => void handleSubmitRequest(event)}>
-            <Field label={l("Typ", "Тип", "Type")} htmlFor="portal-appointment-type">
+            <Field label={t.portal_appointments_type} htmlFor="portal-appointment-type">
               <NativeComboboxSelect
                 id="portal-appointment-type"
                 value={requestForm.appointmentType}
@@ -504,11 +484,11 @@ export function PatientAppointmentsPage() {
                 }
                 className={selectClass}
               >
-                <option value="medical">{l("Medizinisch", "Медицинский", "Medical")}</option>
-                <option value="non_medical">{l("Nicht medizinisch", "Немедицинский", "Non-medical")}</option>
+                <option value="medical">{t.portal_appointments_medical}</option>
+                <option value="non_medical">{t.portal_appointments_non_medical}</option>
               </NativeComboboxSelect>
             </Field>
-            <Field label={l("Versorgungspfad", "Траектория сопровождения", "Care path")} htmlFor="portal-appointment-care-path">
+            <Field label={t.portal_appointments_care_path} htmlFor="portal-appointment-care-path">
               <NativeComboboxSelect
                 id="portal-appointment-care-path"
                 value={requestForm.carePathKind}
@@ -521,14 +501,14 @@ export function PatientAppointmentsPage() {
                 disabled={requestForm.appointmentType !== "medical"}
                 className={selectClass}
               >
-                <option value="regular">{l("Regulär", "Обычный", "Regular")}</option>
-                <option value="preventive">{l("Präventiv", "Профилактический", "Preventive")}</option>
-                <option value="control">{l("Kontrolle", "Контрольный", "Control")}</option>
-                <option value="followup">{l("Nachsorge", "Последующее наблюдение", "Follow-up")}</option>
+                <option value="regular">{t.portal_appointments_regular}</option>
+                <option value="preventive">{t.portal_appointments_preventive}</option>
+                <option value="control">{t.portal_appointments_control}</option>
+                <option value="followup">{t.portal_appointments_follow_up}</option>
               </NativeComboboxSelect>
             </Field>
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label={l("Bevorzugt ab", "Предпочтительно с", "Preferred from")} htmlFor="portal-appointment-preferred-from">
+              <Field label={t.portal_appointments_preferred_from} htmlFor="portal-appointment-preferred-from">
                 <Input
                   id="portal-appointment-preferred-from"
                   type="date"
@@ -537,7 +517,7 @@ export function PatientAppointmentsPage() {
                   className={inputClass}
                 />
               </Field>
-              <Field label={l("Bevorzugt bis", "Предпочтительно до", "Preferred to")} htmlFor="portal-appointment-preferred-to">
+              <Field label={t.portal_appointments_preferred_to} htmlFor="portal-appointment-preferred-to">
                 <Input
                   id="portal-appointment-preferred-to"
                   type="date"
@@ -547,53 +527,53 @@ export function PatientAppointmentsPage() {
                 />
               </Field>
             </div>
-            <Field label={l("Zeitfenster", "Временное окно", "Time window")} htmlFor="portal-appointment-time-window">
+            <Field label={t.portal_appointments_time_window} htmlFor="portal-appointment-time-window">
               <NativeComboboxSelect
                 id="portal-appointment-time-window"
                 value={requestForm.preferredTimeOfDay}
                 onChange={(event) => setRequestForm((current) => ({ ...current, preferredTimeOfDay: event.target.value }))}
                 className={selectClass}
               >
-                <option value="flexible">{l("Flexibel", "Гибко", "Flexible")}</option>
-                <option value="morning">{l("Morgens", "Утром", "Morning")}</option>
-                <option value="midday">{l("Mittags", "Днем", "Midday")}</option>
-                <option value="afternoon">{l("Nachmittags", "После обеда", "Afternoon")}</option>
-                <option value="evening">{l("Abends", "Вечером", "Evening")}</option>
+                <option value="flexible">{t.portal_appointments_flexible}</option>
+                <option value="morning">{t.portal_appointments_morning}</option>
+                <option value="midday">{t.portal_appointments_midday}</option>
+                <option value="afternoon">{t.portal_appointments_afternoon}</option>
+                <option value="evening">{t.portal_appointments_evening}</option>
               </NativeComboboxSelect>
             </Field>
-            <Field label={l("Fachgebiet oder Thema", "Специальность или тема", "Specialty or topic")} htmlFor="portal-appointment-specialty">
+            <Field label={t.portal_appointments_specialty_or_topic} htmlFor="portal-appointment-specialty">
               <input
                 id="portal-appointment-specialty"
                 value={requestForm.specialty}
                 onChange={(event) => setRequestForm((current) => ({ ...current, specialty: event.target.value }))}
-                placeholder={l("Kardiologie, Diagnostik, Transfer, Hotel usw.", "Кардиология, диагностика, трансфер, отель и т. д.", "Cardiology, diagnostics, transfer, hotel, etc.")}
+                placeholder={t.portal_appointments_cardiology_diagnostics_transfer_hotel_etc}
                 className={cn(inputClass, "w-full border border-input px-3 text-sm")}
               />
             </Field>
-            <Field label={l("Ortpräferenz", "Предпочтительное место", "Location preference")} htmlFor="portal-appointment-location">
+            <Field label={t.portal_appointments_location_preference} htmlFor="portal-appointment-location">
               <input
                 id="portal-appointment-location"
                 value={requestForm.location}
                 onChange={(event) => setRequestForm((current) => ({ ...current, location: event.target.value }))}
-                placeholder={l("Klinik, Stadt oder Remote-Anfrage", "Клиника, город или удаленный формат", "Clinic, city or remote request")}
+                placeholder={t.portal_appointments_clinic_city_or_remote_request}
                 className={cn(inputClass, "w-full border border-input px-3 text-sm")}
               />
             </Field>
-            <Field label={l("Anlass", "Причина", "Reason")} htmlFor="portal-appointment-reason">
+            <Field label={t.portal_appointments_reason} htmlFor="portal-appointment-reason">
               <textarea
                 id="portal-appointment-reason"
                 value={requestForm.reason}
                 onChange={(event) => setRequestForm((current) => ({ ...current, reason: event.target.value }))}
-                placeholder={l("Was benötigen Sie und was sollte das Team berücksichtigen?", "Что вам нужно и что команде следует учесть?", "What do you need and what should the team consider?")}
+                placeholder={t.portal_appointments_what_do_you_need_and_what_should_the_team_consider}
                 className={cn(textareaClass, "min-h-[120px]")}
               />
             </Field>
-            <Field label={l("Zusätzliche Notiz", "Дополнительная заметка", "Additional note")} htmlFor="portal-appointment-notes">
+            <Field label={t.portal_appointments_additional_note} htmlFor="portal-appointment-notes">
               <textarea
                 id="portal-appointment-notes"
                 value={requestForm.notes}
                 onChange={(event) => setRequestForm((current) => ({ ...current, notes: event.target.value }))}
-                placeholder={l("Optionaler logistischer oder klinischer Kontext.", "Необязательный логистический или клинический контекст.", "Optional logistical or clinical context.")}
+                placeholder={t.portal_appointments_optional_logistical_or_clinical_context}
                 className={cn(textareaClass, "min-h-[100px]")}
               />
             </Field>
@@ -604,7 +584,7 @@ export function PatientAppointmentsPage() {
               disabled={requestBusy}
             >
               {requestBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
-              {l("Terminanfrage senden", "Отправить запрос на запись", "Send appointment request")}
+              {t.portal_appointments_send_appointment_request}
             </Button>
           </form>
         </Section>
