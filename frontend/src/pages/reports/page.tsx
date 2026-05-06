@@ -480,11 +480,11 @@ function lineMetric(label: string, value: string | number) {
 
 function capsuleMetric(label: string, value: string | number) {
   return (
-    <div className="flex min-w-[210px] flex-1 items-center justify-between gap-3 rounded-full border border-border bg-muted/20 px-3 py-1.5">
+    <div className="flex min-w-[210px] flex-1 items-center justify-between gap-3 rounded-full border border-border bg-muted/20 px-4 py-2">
       <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
         {label}
       </span>
-      <span className="shrink-0 text-lg font-semibold leading-none text-foreground">
+      <span className="shrink-0 text-sm font-semibold leading-none text-foreground">
         {value}
       </span>
     </div>
