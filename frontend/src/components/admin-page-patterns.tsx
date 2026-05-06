@@ -3,11 +3,7 @@ import { LoaderCircle, type LucideIcon } from "lucide-react";
 
 import { CountBadge } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
-import {
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
 type MetricTone = "sky" | "emerald" | "amber" | "slate" | "rose";
@@ -129,11 +125,12 @@ export function AdminSheetScaffold({
   headerClassName?: string;
   bodyClassName?: string;
 }) {
+  void description;
+
   return (
     <div className={cn("flex flex-1 min-h-0 flex-col", className)}>
       <SheetHeader className={cn("shrink-0 px-4 pt-3 pb-1", headerClassName)}>
         <SheetTitle>{title}</SheetTitle>
-        {description ? <SheetDescription>{description}</SheetDescription> : null}
       </SheetHeader>
       <div
         className={cn("flex-1 overflow-y-auto px-4 py-2 space-y-4", bodyClassName)}
