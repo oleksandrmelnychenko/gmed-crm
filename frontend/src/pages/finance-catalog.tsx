@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+} from "react";
 import { LoaderCircle, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -12,7 +18,6 @@ import {
   Field,
   PageHeader,
   Section,
-  StatCard,
   inputClass,
   selectClass,
   textareaClass,
@@ -318,6 +323,28 @@ export function FinanceCatalogPage() {
     [servicePackages],
   );
   const defaultTaxProfile = taxProfiles.find((item) => item.is_default);
+  const financeCatalogMetrics = [
+    {
+      label: t.finance_catalog_active_tax_profiles,
+      value: activeTaxProfiles,
+      description: totalCountLabel(taxProfiles.length),
+    },
+    {
+      label: t.finance_catalog_default_vat,
+      value: defaultTaxProfile ? `${defaultTaxProfile.vat_rate}%` : t.common_not_set,
+      description: defaultTaxProfile?.name ?? t.finance_catalog_no_default_profile,
+    },
+    {
+      label: t.finance_catalog_active_packages,
+      value: activePackages,
+      description: totalCountLabel(servicePackages.length),
+    },
+    {
+      label: t.finance_catalog_catalog_services,
+      value: catalogRows.length,
+      description: t.finance_catalog_vat_mapping_rows,
+    },
+  ];
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -564,27 +591,271 @@ export function FinanceCatalogPage() {
         </Banner>
       ) : null}
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          label={t.finance_catalog_active_tax_profiles}
-          value={activeTaxProfiles}
-          description={totalCountLabel(taxProfiles.length)}
-        />
-        <StatCard
-          label={t.finance_catalog_default_vat}
-          value={defaultTaxProfile ? `${defaultTaxProfile.vat_rate}%` : t.common_not_set}
-          description={defaultTaxProfile?.name ?? t.finance_catalog_no_default_profile}
-        />
-        <StatCard
-          label={t.finance_catalog_active_packages}
-          value={activePackages}
-          description={totalCountLabel(servicePackages.length)}
-        />
-        <StatCard
-          label={t.finance_catalog_catalog_services}
-          value={catalogRows.length}
-          description={t.finance_catalog_vat_mapping_rows}
-        />
+      <div className="space-y-4">
+        <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {financeCatalogMetrics.map((metric, index) => (
+            <article
+              key={`instrument-${index}`}
+              className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-md border border-border bg-card px-3 py-2"
+            >
+              <div className="flex size-14 items-center justify-center rounded-full border border-border bg-muted/25">
+                <div className="flex size-10 items-center justify-center rounded-full border-2 border-[var(--brand)]/55 bg-card">
+                  <span className="max-w-8 truncate text-sm font-semibold leading-none text-foreground">
+                    {metric.value}
+                  </span>
+                </div>
+              </div>
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  Gauge {index + 1}
+                </p>
+                <p className="mt-1 text-sm font-medium leading-snug text-foreground">
+                  {metric.label}
+                </p>
+                <p className="mt-1 truncate text-xs text-muted-foreground">
+                  {metric.description}
+                </p>
+              </div>
+            </article>
+          ))}
+        </section>
+
+        <section className="rounded-md border border-border bg-card px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {financeCatalogMetrics.map((metric, index) => (
+              <div
+                key={`capsule-${index}`}
+                className="flex min-w-[210px] flex-1 items-center justify-between gap-3 rounded-full border border-border bg-muted/20 px-3 py-1.5"
+              >
+                <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+                  {metric.label}
+                </span>
+                <span className="shrink-0 text-lg font-semibold leading-none text-foreground">
+                  {metric.value}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="grid gap-px overflow-hidden rounded-md border border-border bg-border md:grid-cols-2 xl:grid-cols-4">
+          {financeCatalogMetrics.map((metric, index) => (
+            <article key={`barcode-${index}`} className="bg-card px-3 py-2">
+              <div className="flex items-end gap-1">
+                <span className="h-4 w-1 rounded-full bg-border" />
+                <span className="h-7 w-1 rounded-full bg-[var(--brand)]/45" />
+                <span className="h-5 w-1 rounded-full bg-border" />
+                <span className="h-8 w-1 rounded-full bg-[var(--brand)]/65" />
+                <div className="ml-2 min-w-0">
+                  <p className="truncate text-xs text-muted-foreground">
+                    {metric.label}
+                  </p>
+                  <p className="mt-1 text-xl font-semibold leading-none text-foreground">
+                    {metric.value}
+                  </p>
+                </div>
+              </div>
+            </article>
+          ))}
+        </section>
+
+        <section className="overflow-hidden rounded-md border border-border bg-card">
+          <div className="grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-4">
+            {financeCatalogMetrics.map((metric, index) => (
+              <div key={`ticker-cell-${index}`} className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 px-3 py-2">
+                <span className="text-[10px] font-semibold text-muted-foreground">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-medium text-foreground">
+                    {metric.label}
+                  </p>
+                  <p className="mt-1 truncate font-mono text-lg leading-none text-foreground">
+                    {metric.value}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="grid gap-2 md:grid-cols-2">
+          {financeCatalogMetrics.map((metric, index) => (
+            <article
+              key={`ribbon-${index}`}
+              className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-l-4 border-[var(--brand)]/55 bg-card px-3 py-2 ring-1 ring-border"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-foreground">
+                  {metric.label}
+                </p>
+                <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                  {metric.description}
+                </p>
+              </div>
+              <p className="text-xl font-semibold leading-none text-foreground">
+                {metric.value}
+              </p>
+            </article>
+          ))}
+        </section>
+
+        <section className="rounded-md border border-border bg-card px-3 py-2">
+          <div className="grid gap-2 xl:grid-cols-4">
+            {financeCatalogMetrics.map((metric, index) => (
+              <div key={`stacked-line-${index}`} className="min-w-0">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="truncate text-xs font-medium text-muted-foreground">
+                    {metric.label}
+                  </p>
+                  <p className="text-lg font-semibold leading-none text-foreground">
+                    {metric.value}
+                  </p>
+                </div>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                  <span
+                    className="block h-full rounded-full bg-[var(--brand)]/60"
+                    style={{ width: `${35 + index * 15}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="overflow-hidden rounded-md border border-border bg-card">
+          <div className="grid gap-px bg-border sm:grid-cols-2 xl:grid-cols-4">
+            {financeCatalogMetrics.map((metric, index) => (
+              <div key={`corner-tag-${index}`} className="relative bg-card px-3 py-2">
+                <span className="absolute right-2 top-2 text-[10px] font-semibold text-muted-foreground">
+                  M{index + 1}
+                </span>
+                <p className="max-w-[75%] truncate text-xs font-medium text-muted-foreground">
+                  {metric.label}
+                </p>
+                <p className="mt-3 text-2xl font-semibold leading-none text-foreground">
+                  {metric.value}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+          {financeCatalogMetrics.map((metric, index) => (
+            <article
+              key={`mini-terminal-${index}`}
+              className="rounded-md border border-border bg-muted/20 px-3 py-2"
+            >
+              <p className="truncate font-mono text-[11px] text-muted-foreground">
+                metric.{index + 1}
+              </p>
+              <p className="mt-1 truncate font-mono text-lg leading-none text-foreground">
+                {metric.value}
+              </p>
+              <p className="mt-1 truncate text-xs text-muted-foreground">
+                {metric.label}
+              </p>
+            </article>
+          ))}
+        </section>
+
+        <section className="rounded-md border border-border bg-card px-3 py-2">
+          <div className="grid gap-3 lg:grid-cols-4">
+            {financeCatalogMetrics.map((metric, index) => (
+              <div key={`switchboard-${index}`} className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2">
+                <span className="flex h-8 w-5 items-center justify-center rounded-full border border-border bg-muted/30">
+                  <span className="size-2 rounded-full bg-[var(--brand)]/70" />
+                </span>
+                <div className="min-w-0">
+                  <p className="truncate text-xs text-muted-foreground">
+                    {metric.label}
+                  </p>
+                  <p className="mt-0.5 text-xl font-semibold leading-none text-foreground">
+                    {metric.value}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="overflow-hidden rounded-md border border-border bg-card">
+          <div className="grid md:grid-cols-[180px_minmax(0,1fr)]">
+            <div className="border-b border-border px-3 py-2 md:border-b-0 md:border-r">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                Compact Strip
+              </p>
+            </div>
+            <div className="grid gap-px bg-border sm:grid-cols-2 xl:grid-cols-4">
+              {financeCatalogMetrics.map((metric, index) => (
+                <div key={`compact-strip-${index}`} className="bg-card px-3 py-2">
+                  <p className="truncate text-[11px] text-muted-foreground">
+                    {metric.label}
+                  </p>
+                  <p className="mt-1 text-lg font-semibold leading-none text-foreground">
+                    {metric.value}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="space-y-3 bg-transparent py-1">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            No Frame: Baseline
+          </p>
+          <div className="grid gap-x-8 gap-y-4 md:grid-cols-2 xl:grid-cols-4">
+            {financeCatalogMetrics.map((metric, index) => (
+              <div key={`noframe-baseline-${index}`} className="min-w-0">
+                <p className="text-3xl font-semibold leading-none text-foreground">
+                  {metric.value}
+                </p>
+                <p className="mt-1 truncate text-sm font-medium text-foreground">
+                  {metric.label}
+                </p>
+                <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                  {metric.description}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="bg-transparent py-2">
+          <div className="flex flex-wrap gap-x-10 gap-y-4">
+            {financeCatalogMetrics.map((metric, index) => (
+              <div key={`noframe-rule-${index}`} className="min-w-[180px]">
+                <div className="mb-2 h-px w-12 bg-[var(--brand)]/60" />
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  {metric.label}
+                </p>
+                <p className="mt-1 text-2xl font-semibold leading-none text-foreground">
+                  {metric.value}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="bg-transparent py-1">
+          <div className="grid gap-y-2 md:grid-cols-2 xl:grid-cols-4">
+            {financeCatalogMetrics.map((metric, index) => (
+              <div key={`noframe-pair-${index}`} className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-2 pr-6">
+                <span className="font-mono text-xl leading-none text-foreground">
+                  {metric.value}
+                </span>
+                <span className="min-w-0 truncate text-sm text-muted-foreground">
+                  {metric.label}
+                </span>
+                <span className="col-start-2 truncate text-xs text-muted-foreground/80">
+                  {metric.description}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
       </div>
 
       <Section

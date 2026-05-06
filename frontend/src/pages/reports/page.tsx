@@ -15,7 +15,6 @@ import {
 
 import {
   AdminSheetScaffold,
-  AdminInlineMetric,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
 import { DataTable } from "@/components/data-table/data-table";
@@ -405,12 +404,90 @@ const REPORT_PROVIDER_TYPE_LABEL_KEYS = {
   non_medical: "providers_type_non_medical",
 } satisfies Partial<Record<string, TranslationKey>>;
 
-function metricCard(label: string, value: string | number, icon: LucideIcon) {
+function metricCard(
+  label: string,
+  value: string | number,
+  icon: LucideIcon,
+  options?: {
+    borderless?: boolean;
+    grouped?: boolean;
+    groupedLast?: boolean;
+    hideIcon?: boolean;
+    connector?: boolean;
+  },
+) {
   const Icon = icon;
+  if (!options?.borderless) {
+    return (
+      <article
+        className={cn(
+          "relative min-h-[44px] min-w-[190px] px-3 py-1",
+          options?.grouped ? null : "border border-border",
+        )}
+      >
+        {options?.grouped && !options.groupedLast ? (
+          <span className="absolute right-0 top-1/2 hidden -translate-y-1/2 space-y-1 xl:block">
+            <span className="block h-1.5 w-px bg-border" />
+            <span className="block h-1.5 w-px bg-border" />
+            <span className="block h-1.5 w-px bg-border" />
+          </span>
+        ) : null}
+        <div className="flex items-baseline gap-2">
+          <Icon className="size-4.5 shrink-0 text-muted-foreground/55" />
+          <p className="text-2xl font-semibold leading-[0.75] text-foreground">
+            {value}
+          </p>
+        </div>
+        <p className="mt-0.5 line-clamp-2 text-xs font-medium leading-tight text-muted-foreground">
+          {label}
+        </p>
+      </article>
+    );
+  }
+
   return (
-    <article className={card("p-4")}>
-      <AdminInlineMetric icon={Icon} label={label} value={value} tone="slate" />
+    <article
+      className={cn(
+        "flex min-w-[210px] items-center justify-between gap-3 px-3 py-1.5",
+        options?.borderless ? null : "border border-border",
+      )}
+    >
+      <span className="flex min-w-0 items-center gap-2">
+        {options?.hideIcon ? null : (
+          <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+        )}
+        <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+          {label}
+        </span>
+      </span>
+      {options?.connector ? (
+        <span className="h-px min-w-6 flex-1 bg-border/70" />
+      ) : null}
+      <span className="shrink-0 text-base font-semibold leading-none text-foreground">
+        {value}
+      </span>
     </article>
+  );
+}
+
+function lineMetric(label: string, value: string | number) {
+  return metricCard(label, value, Activity, {
+    borderless: true,
+    connector: true,
+    hideIcon: true,
+  });
+}
+
+function capsuleMetric(label: string, value: string | number) {
+  return (
+    <div className="flex min-w-[210px] flex-1 items-center justify-between gap-3 rounded-full border border-border bg-muted/20 px-3 py-1.5">
+      <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+        {label}
+      </span>
+      <span className="shrink-0 text-lg font-semibold leading-none text-foreground">
+        {value}
+      </span>
+    </div>
   );
 }
 
@@ -1691,6 +1768,19 @@ export function ReportsPage() {
     );
   }
 
+  const summaryMetricNodes = data ? [
+    metricCard(text.summary.activePatients, data.summary.active_patients, Globe2, { grouped: true }),
+    metricCard(text.summary.activeOrders, data.summary.active_orders, Rows3, { grouped: true }),
+    metricCard(text.summary.activeClinics, data.summary.active_clinics, Building2, { grouped: true }),
+    metricCard(text.summary.deliveredServiceItems, data.summary.delivered_service_items, BarChart3, { grouped: true }),
+    metricCard(
+      text.summary.deliveredServiceVolume,
+      data.summary.delivered_service_volume ? formatMoney(data.summary.delivered_service_volume, locale) : text.roleScoped,
+      BarChart3,
+      { grouped: true, groupedLast: true },
+    ),
+  ] : [];
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -1713,16 +1803,8 @@ export function ReportsPage() {
 
       {data ? (
         <>
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-            {metricCard(text.summary.activePatients, data.summary.active_patients, Globe2)}
-            {metricCard(text.summary.activeOrders, data.summary.active_orders, Rows3)}
-            {metricCard(text.summary.activeClinics, data.summary.active_clinics, Building2)}
-            {metricCard(text.summary.deliveredServiceItems, data.summary.delivered_service_items, BarChart3)}
-            {metricCard(
-              text.summary.deliveredServiceVolume,
-              data.summary.delivered_service_volume ? formatMoney(data.summary.delivered_service_volume, locale) : text.roleScoped,
-              BarChart3,
-            )}
+          <section className="grid overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 md:grid-cols-2 xl:grid-cols-5">
+            {summaryMetricNodes}
           </section>
 
           {allowedSections.has("billing_kpis") && data.billing_kpis ? (
@@ -1735,47 +1817,66 @@ export function ReportsPage() {
                   {text.billing.trackedInvoices(data.billing_kpis.tracked_invoice_count)}
                 </Badge>
               </div>
-              <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {metricCard(text.billing.invoices30d, data.billing_kpis.invoices_30d, Wallet)}
-                {metricCard(
-                  text.billing.openReceivables,
-                  formatMoneyMetric(data.billing_kpis.outstanding_receivables_total, locale),
-                  Wallet,
-                )}
-                {metricCard(
-                  text.billing.paid14d,
-                  formatPercent(data.billing_kpis.paid_within_14d_rate_pct, text.noBaseline),
-                  Activity,
-                )}
-                {metricCard(
-                  text.billing.dunningShare,
-                  formatPercent(data.billing_kpis.dunning_rate_pct, text.noBaseline),
-                  BarChart3,
-                )}
-                {metricCard(
-                  text.billing.avgServiceToInvoice,
-                  formatDays(data.billing_kpis.avg_service_to_invoice_days, text.noBaseline),
-                  CalendarDays,
-                )}
-                {metricCard(
-                  text.billing.selfPayShare,
-                  formatPercent(data.billing_kpis.self_pay_share_pct, text.noBaseline),
-                  Globe2,
-                )}
-              </div>
-              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                <article className={cn("rounded-xl px-4 py-4", tokens.surface.mutedCard)}>
-                  <p className={tokens.text.eyebrow}>{text.billing.averageInvoiceGross}</p>
-                  <p className={cn("mt-2", tokens.text.body)}>{formatMoneyMetric(data.billing_kpis.avg_invoice_gross, locale)}</p>
-                </article>
-                <article className={cn("rounded-xl px-4 py-4", tokens.surface.mutedCard)}>
-                  <p className={tokens.text.eyebrow}>{text.billing.overdueInvoices}</p>
-                  <p className={cn("mt-2", tokens.text.body)}>{data.billing_kpis.overdue_invoice_count}</p>
-                </article>
-                <article className={cn("rounded-xl px-4 py-4", tokens.surface.mutedCard)}>
-                  <p className={tokens.text.eyebrow}>{text.billing.costPassthroughShare}</p>
-                  <p className={cn("mt-2", tokens.text.body)}>{formatPercent(data.billing_kpis.cost_passthrough_share_pct, text.noBaseline)}</p>
-                </article>
+              <div className="mt-5 grid gap-3 xl:grid-cols-3">
+                <div className="grid gap-2 rounded-xl bg-card p-3">
+                  {metricCard(text.billing.invoices30d, data.billing_kpis.invoices_30d, Wallet, {
+                    borderless: true,
+                    connector: true,
+                    hideIcon: true,
+                  })}
+                  {metricCard(
+                    text.billing.openReceivables,
+                    formatMoneyMetric(data.billing_kpis.outstanding_receivables_total, locale),
+                    Wallet,
+                    { borderless: true, connector: true, hideIcon: true },
+                  )}
+                  {metricCard(
+                    text.billing.paid14d,
+                    formatPercent(data.billing_kpis.paid_within_14d_rate_pct, text.noBaseline),
+                    Activity,
+                    { borderless: true, connector: true, hideIcon: true },
+                  )}
+                </div>
+                <div className="grid gap-2 rounded-xl bg-card p-3">
+                  {metricCard(
+                    text.billing.dunningShare,
+                    formatPercent(data.billing_kpis.dunning_rate_pct, text.noBaseline),
+                    BarChart3,
+                    { borderless: true, connector: true, hideIcon: true },
+                  )}
+                  {metricCard(
+                    text.billing.avgServiceToInvoice,
+                    formatDays(data.billing_kpis.avg_service_to_invoice_days, text.noBaseline),
+                    CalendarDays,
+                    { borderless: true, connector: true, hideIcon: true },
+                  )}
+                  {metricCard(
+                    text.billing.selfPayShare,
+                    formatPercent(data.billing_kpis.self_pay_share_pct, text.noBaseline),
+                    Globe2,
+                    { borderless: true, connector: true, hideIcon: true },
+                  )}
+                </div>
+                <div className="grid gap-2 rounded-xl bg-card p-3">
+                  {metricCard(
+                    text.billing.averageInvoiceGross,
+                    formatMoneyMetric(data.billing_kpis.avg_invoice_gross, locale),
+                    Wallet,
+                    { borderless: true, connector: true, hideIcon: true },
+                  )}
+                  {metricCard(
+                    text.billing.overdueInvoices,
+                    data.billing_kpis.overdue_invoice_count,
+                    CalendarDays,
+                    { borderless: true, connector: true, hideIcon: true },
+                  )}
+                  {metricCard(
+                    text.billing.costPassthroughShare,
+                    formatPercent(data.billing_kpis.cost_passthrough_share_pct, text.noBaseline),
+                    BarChart3,
+                    { borderless: true, connector: true, hideIcon: true },
+                  )}
+                </div>
               </div>
             </section>
           ) : null}
@@ -1790,36 +1891,82 @@ export function ReportsPage() {
                   {text.sales.leadCountries(data.sales_kpis.active_lead_country_count)}
                 </Badge>
               </div>
-              <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                {metricCard(text.sales.newLeads30d, data.sales_kpis.new_leads_30d, Activity)}
-                {metricCard(text.sales.qualified30d, data.sales_kpis.qualified_leads_30d, Rows3)}
-                {metricCard(text.sales.converted30d, data.sales_kpis.converted_leads_30d, Wallet)}
-                {metricCard(
-                  text.sales.leadToPatient,
-                  formatPercent(data.sales_kpis.lead_to_patient_conversion_rate_pct, text.noBaseline),
-                  BarChart3,
-                )}
-              </div>
-              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-[0.8fr_1.2fr]">
-                <article className={cn("rounded-xl px-4 py-4", tokens.surface.mutedCard)}>
-                  <p className={tokens.text.eyebrow}>{text.sales.newPartnerClinicsQuarter}</p>
-                  <p className={cn("mt-2", tokens.text.body)}>{data.sales_kpis.new_partner_clinics_90d}</p>
-                </article>
-                <article className={cn("rounded-xl px-4 py-4", tokens.surface.mutedCard)}>
-                  <div className="flex items-center justify-between gap-3">
-                    <p className={tokens.text.eyebrow}>{text.sales.topLeadCountries90d}</p>
-                    <Badge variant="outline">{data.sales_kpis.top_countries.length}</Badge>
+              <div className="mt-5 grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,0.65fr)]">
+                <div className="grid gap-1.5 rounded-xl bg-card p-2.5">
+                  {metricCard(text.sales.newLeads30d, data.sales_kpis.new_leads_30d, Activity, {
+                    borderless: true,
+                    connector: true,
+                    hideIcon: true,
+                  })}
+                  {metricCard(text.sales.qualified30d, data.sales_kpis.qualified_leads_30d, Rows3, {
+                    borderless: true,
+                    connector: true,
+                    hideIcon: true,
+                  })}
+                  {metricCard(text.sales.converted30d, data.sales_kpis.converted_leads_30d, Wallet, {
+                    borderless: true,
+                    connector: true,
+                    hideIcon: true,
+                  })}
+                  {metricCard(
+                    text.sales.leadToPatient,
+                    formatPercent(data.sales_kpis.lead_to_patient_conversion_rate_pct, text.noBaseline),
+                    BarChart3,
+                    { borderless: true, connector: true, hideIcon: true },
+                  )}
+                  {metricCard(
+                    text.sales.newPartnerClinicsQuarter,
+                    data.sales_kpis.new_partner_clinics_90d,
+                    Building2,
+                    { borderless: true, connector: true, hideIcon: true },
+                  )}
+                </div>
+                <article className="relative overflow-hidden rounded-xl px-4 py-3">
+                  <span className="pointer-events-none absolute right-3 top-3 size-20 rounded-full bg-[var(--brand)]/10 blur-2xl" />
+                  <div className="relative flex items-center justify-between gap-3">
+                    <p className="min-w-0 truncate text-sm font-semibold text-foreground">
+                      {text.sales.topLeadCountries90d}
+                    </p>
+                    <Badge variant="outline" className="rounded-full bg-card/70">
+                      {data.sales_kpis.top_countries.length}
+                    </Badge>
                   </div>
-                  <div className="mt-3 space-y-2">
-                    {data.sales_kpis.top_countries.length > 0 ? data.sales_kpis.top_countries.map((item) => (
-                      <div key={item.country} className="flex items-center justify-between gap-3 text-sm">
-                        <span className="text-muted-foreground">{item.country}</span>
-                        <span className="font-semibold text-foreground">{item.lead_count}</span>
+                  {data.sales_kpis.top_countries.length > 0 ? (() => {
+                    const maxLeadCount = Math.max(
+                      ...data.sales_kpis.top_countries.map((item) => item.lead_count),
+                      1,
+                    );
+
+                    return (
+                      <div className="relative mt-3">
+                        <div className="grid min-h-[148px] grid-cols-[repeat(auto-fit,minmax(34px,1fr))] items-end gap-2 pb-2">
+                          {data.sales_kpis.top_countries.map((item, index) => (
+                            <div
+                              key={item.country}
+                              className="flex min-w-0 flex-col items-center gap-1.5"
+                            >
+                              <span className="text-xs font-semibold tabular-nums text-foreground">
+                                {item.lead_count}
+                              </span>
+                              <span
+                                className="w-full rounded-t-md bg-[var(--brand)]/65"
+                                style={{
+                                  height: `${Math.max(14, Math.round((item.lead_count / maxLeadCount) * 112))}px`,
+                                }}
+                              />
+                              <span className="max-w-full truncate text-[11px] text-muted-foreground">
+                                {item.country}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    )) : (
-                      <p className="text-sm text-muted-foreground">{text.sales.noLeadGeographyYet}</p>
-                    )}
-                  </div>
+                    );
+                  })() : (
+                    <p className="relative mt-3 text-sm text-muted-foreground">
+                      {text.sales.noLeadGeographyYet}
+                    </p>
+                  )}
                 </article>
               </div>
             </section>
@@ -1827,28 +1974,31 @@ export function ReportsPage() {
 
           {forecasting ? (
             <>
-              <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                {metricCard(text.forecast.openQuotes, forecasting.summary.open_quotes, Activity)}
+              <section className="grid overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 md:grid-cols-2 xl:grid-cols-4">
+                {metricCard(text.forecast.openQuotes, forecasting.summary.open_quotes, Activity, { grouped: true })}
                 {metricCard(
                   text.forecast.pipelineGross,
                   forecasting.summary.pipeline_gross_total
                     ? formatMoney(forecasting.summary.pipeline_gross_total, locale)
                     : text.countsOnly,
                   Wallet,
+                  { grouped: true },
                 )}
                 {metricCard(
                   text.forecast.milestones30d,
                   forecasting.summary.followup_milestones_next_30d,
                   CalendarDays,
+                  { grouped: true },
                 )}
                 {metricCard(
                   text.forecast.appointments30d,
                   forecasting.summary.appointments_next_30d,
                   BarChart3,
+                  { grouped: true, groupedLast: true },
                 )}
               </section>
 
-              <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+              <section className="space-y-6">
                 {forecastSections.has("quote_pipeline") && forecasting.quote_pipeline ? (
                   <section className={card("p-6")}>
                     <div className="flex items-start justify-between gap-4">
@@ -1859,26 +2009,18 @@ export function ReportsPage() {
                         {text.forecast.quotes(forecasting.quote_pipeline.open_quotes)}
                       </Badge>
                     </div>
-                    <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                      <div className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}>
-                        <p className={tokens.text.eyebrow}>{text.forecast.expiring14d}</p>
-                        <p className={cn("mt-2", tokens.text.body)}>{forecasting.quote_pipeline.expiring_next_14d}</p>
-                      </div>
-                      <div className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}>
-                        <p className={tokens.text.eyebrow}>{text.forecast.grossPipeline}</p>
-                        <p className={cn("mt-2", tokens.text.body)}>
-                          {forecasting.quote_pipeline.gross_total ? formatMoney(forecasting.quote_pipeline.gross_total, locale) : text.countsOnly}
-                        </p>
-                      </div>
-                      <div className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}>
-                        <p className={tokens.text.eyebrow}>{text.forecast.weighted}</p>
-                        <p className={cn("mt-2", tokens.text.body)}>
-                          {forecasting.quote_pipeline.weighted_gross ? formatMoney(forecasting.quote_pipeline.weighted_gross, locale) : text.countsOnly}
-                        </p>
-                      </div>
-                      <div className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}>
-                        <p className={tokens.text.eyebrow}>{text.forecast.readModel}</p>
-                        <p className={cn("mt-2", tokens.text.body)}>{text.forecast.readModelLegend}</p>
+                    <div className="mt-5 grid gap-2 md:grid-cols-3">
+                      {capsuleMetric(text.forecast.expiring14d, forecasting.quote_pipeline.expiring_next_14d)}
+                      {capsuleMetric(
+                        text.forecast.grossPipeline,
+                        forecasting.quote_pipeline.gross_total ? formatMoney(forecasting.quote_pipeline.gross_total, locale) : text.countsOnly,
+                      )}
+                      {capsuleMetric(
+                        text.forecast.weighted,
+                        forecasting.quote_pipeline.weighted_gross ? formatMoney(forecasting.quote_pipeline.weighted_gross, locale) : text.countsOnly,
+                      )}
+                      <div className="md:col-span-3">
+                        {capsuleMetric(text.forecast.readModel, text.forecast.readModelLegend)}
                       </div>
                     </div>
                     <div className="mt-5">
@@ -1892,69 +2034,51 @@ export function ReportsPage() {
                   </section>
                 ) : null}
 
-                <div className="space-y-6">
+                <div className={cn("grid gap-6 p-6 xl:grid-cols-2", card())}>
                   {forecastSections.has("collections") && forecasting.collections ? (
-                    <section className={card("p-6")}>
+                    <section>
                       <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.forecast.collectionsTitle)}</h2>
                       <p className={cn("mt-1", tokens.text.muted)}>
                         {text.forecast.collectionsDescription}
                       </p>
-                      <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                        <div className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}>
-                          <p className={tokens.text.eyebrow}>{text.forecast.due14d}</p>
-                          <p className={cn("mt-2", tokens.text.body)}>
-                            {forecasting.collections.due_next_14d_count} / {forecasting.collections.due_next_14d_total ? formatMoney(forecasting.collections.due_next_14d_total, locale) : text.countsOnly}
-                          </p>
-                        </div>
-                        <div className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}>
-                          <p className={tokens.text.eyebrow}>{text.forecast.overdue}</p>
-                          <p className={cn("mt-2", tokens.text.body)}>
-                            {forecasting.collections.overdue_invoice_count} / {forecasting.collections.overdue_open_total ? formatMoney(forecasting.collections.overdue_open_total, locale) : text.countsOnly}
-                          </p>
-                        </div>
-                        <div className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}>
-                          <p className={tokens.text.eyebrow}>{text.forecast.debtWorkflows}</p>
-                          <p className={cn("mt-2", tokens.text.body)}>
-                            {text.forecast.workflowOpenReview(forecasting.collections.workflow_open_count, forecasting.collections.reviews_due_7d)}
-                          </p>
-                        </div>
-                        <div className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}>
-                          <p className={tokens.text.eyebrow}>{text.forecast.escalationSplit}</p>
-                          <p className={cn("mt-2", tokens.text.body)}>
-                            {text.forecast.escalationSplitValue(forecasting.collections.payment_plan_count, forecasting.collections.escalated_count)}
-                          </p>
-                        </div>
+                      <div className="mt-5 grid gap-2 rounded-xl bg-card p-3">
+                        {lineMetric(
+                          text.forecast.due14d,
+                          `${forecasting.collections.due_next_14d_count} / ${forecasting.collections.due_next_14d_total ? formatMoney(forecasting.collections.due_next_14d_total, locale) : text.countsOnly}`,
+                        )}
+                        {lineMetric(
+                          text.forecast.overdue,
+                          `${forecasting.collections.overdue_invoice_count} / ${forecasting.collections.overdue_open_total ? formatMoney(forecasting.collections.overdue_open_total, locale) : text.countsOnly}`,
+                        )}
+                        {lineMetric(
+                          text.forecast.debtWorkflows,
+                          text.forecast.workflowOpenReview(forecasting.collections.workflow_open_count, forecasting.collections.reviews_due_7d),
+                        )}
+                        {lineMetric(
+                          text.forecast.escalationSplit,
+                          text.forecast.escalationSplitValue(forecasting.collections.payment_plan_count, forecasting.collections.escalated_count),
+                        )}
                       </div>
                     </section>
                   ) : null}
 
                   {forecastSections.has("followup") && forecasting.followup ? (
-                    <section className={card("p-6")}>
+                    <section>
                       <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.forecast.followupTitle)}</h2>
                       <p className={cn("mt-1", tokens.text.muted)}>
                         {text.forecast.followupDescription}
                       </p>
-                      <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                        <div className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}>
-                          <p className={tokens.text.eyebrow}>{text.forecast.activeFollowupOrders}</p>
-                          <p className={cn("mt-2", tokens.text.body)}>{forecasting.followup.active_orders}</p>
-                        </div>
-                        <div className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}>
-                          <p className={tokens.text.eyebrow}>{text.forecast.milestones30d}</p>
-                          <p className={cn("mt-2", tokens.text.body)}>{forecasting.followup.milestones_due_next_30d}</p>
-                        </div>
-                        <div className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}>
-                          <p className={tokens.text.eyebrow}>{text.forecast.oneWeekOneMonthSixMonth}</p>
-                          <p className={cn("mt-2", tokens.text.body)}>
-                            {forecasting.followup.followup_1w_due_next_30d} / {forecasting.followup.followup_1m_due_next_30d} / {forecasting.followup.followup_6m_due_next_30d}
-                          </p>
-                        </div>
-                        <div className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}>
-                          <p className={tokens.text.eyebrow}>{text.forecast.doctorPackageResults}</p>
-                          <p className={cn("mt-2", tokens.text.body)}>
-                            {forecasting.followup.doctor_followup_open} / {forecasting.followup.package_end_due_next_30d} / {forecasting.followup.results_handoff_pending}
-                          </p>
-                        </div>
+                      <div className="mt-5 grid gap-2 rounded-xl bg-card p-3">
+                        {lineMetric(text.forecast.activeFollowupOrders, forecasting.followup.active_orders)}
+                        {lineMetric(text.forecast.milestones30d, forecasting.followup.milestones_due_next_30d)}
+                        {lineMetric(
+                          text.forecast.oneWeekOneMonthSixMonth,
+                          `${forecasting.followup.followup_1w_due_next_30d} / ${forecasting.followup.followup_1m_due_next_30d} / ${forecasting.followup.followup_6m_due_next_30d}`,
+                        )}
+                        {lineMetric(
+                          text.forecast.doctorPackageResults,
+                          `${forecasting.followup.doctor_followup_open} / ${forecasting.followup.package_end_due_next_30d} / ${forecasting.followup.results_handoff_pending}`,
+                        )}
                       </div>
                     </section>
                   ) : null}
