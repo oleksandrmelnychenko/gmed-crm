@@ -10,6 +10,9 @@ export interface RevenueTranslations {
   finance_catalog_catalog_services: string;
   finance_catalog_vat_mapping_rows: string;
   finance_catalog_tax_profiles: string;
+  finance_catalog_tax_profile_identity: string;
+  finance_catalog_tax_profile_rules: string;
+  finance_catalog_tax_profile_notes: string;
   finance_catalog_new_tax_profile: string;
   finance_catalog_profile_key: string;
   finance_catalog_name: string;
@@ -28,6 +31,10 @@ export interface RevenueTranslations {
   finance_catalog_edit: string;
   finance_catalog_service_package_catalog: string;
   finance_catalog_new_package: string;
+  finance_catalog_package_basics: string;
+  finance_catalog_package_pricing: string;
+  finance_catalog_package_validity: string;
+  finance_catalog_package_notes: string;
   finance_catalog_package_key: string;
   finance_catalog_base_net_price: string;
   finance_catalog_package_vat_profile: string;
@@ -244,6 +251,9 @@ export const revenueRu: RevenueTranslations = {
   finance_catalog_catalog_services: "Услуги каталога",
   finance_catalog_vat_mapping_rows: "Строки сопоставления НДС",
   finance_catalog_tax_profiles: "Налоговые профили",
+  finance_catalog_tax_profile_identity: "Основные данные",
+  finance_catalog_tax_profile_rules: "НДС и период действия",
+  finance_catalog_tax_profile_notes: "Описание профиля",
   finance_catalog_new_tax_profile: "Новый налоговый профиль",
   finance_catalog_profile_key: "Ключ профиля",
   finance_catalog_name: "Название",
@@ -262,6 +272,10 @@ export const revenueRu: RevenueTranslations = {
   finance_catalog_edit: "Изменить",
   finance_catalog_service_package_catalog: "Каталог сервисных пакетов",
   finance_catalog_new_package: "Новый пакет",
+  finance_catalog_package_basics: "Параметры пакета",
+  finance_catalog_package_pricing: "Цена и НДС",
+  finance_catalog_package_validity: "Период и статус",
+  finance_catalog_package_notes: "Описание пакета",
   finance_catalog_package_key: "Ключ пакета",
   finance_catalog_base_net_price: "Базовая цена нетто",
   finance_catalog_package_vat_profile: "Профиль НДС пакета",
@@ -502,6 +516,9 @@ export const revenueDe: RevenueTranslations = {
   finance_catalog_catalog_services: "Katalogleistungen",
   finance_catalog_vat_mapping_rows: "Zeilen der USt.-Zuordnung",
   finance_catalog_tax_profiles: "Steuerprofile",
+  finance_catalog_tax_profile_identity: "Stammdaten",
+  finance_catalog_tax_profile_rules: "USt. und Gültigkeit",
+  finance_catalog_tax_profile_notes: "Profilbeschreibung",
   finance_catalog_new_tax_profile: "Neues Steuerprofil",
   finance_catalog_profile_key: "Profilschlüssel",
   finance_catalog_name: "Name",
@@ -520,6 +537,10 @@ export const revenueDe: RevenueTranslations = {
   finance_catalog_edit: "Bearbeiten",
   finance_catalog_service_package_catalog: "Servicepaket-Katalog",
   finance_catalog_new_package: "Neues Paket",
+  finance_catalog_package_basics: "Параметры пакета",
+  finance_catalog_package_pricing: "Цена и НДС",
+  finance_catalog_package_validity: "Период и статус",
+  finance_catalog_package_notes: "Описание пакета",
   finance_catalog_package_key: "Paketschlüssel",
   finance_catalog_base_net_price: "Basispreis netto",
   finance_catalog_package_vat_profile: "USt.-Profil des Pakets",
