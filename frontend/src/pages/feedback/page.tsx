@@ -137,6 +137,20 @@ function feedbackReviewStatusLabel(status: string, translations: Translations) {
   return formatEnumLabelFromKeys(status, FEEDBACK_STATUS_LABEL_KEYS, translations);
 }
 
+function feedbackStatusTone(status: string) {
+  if (status === "reviewed") return "success";
+  if (status === "submitted") return "warning";
+  if (status === "archived") return "neutral";
+  return toneForStatus(status);
+}
+
+function feedbackStatusAccentClass(status: string) {
+  if (status === "reviewed") return "bg-emerald-500";
+  if (status === "submitted") return "bg-amber-500";
+  if (status === "archived") return "bg-muted-foreground/45";
+  return "bg-sky-500";
+}
+
 function feedbackSourceDisplay(source: string | null | undefined, translations: Translations) {
   return formatEnumLabelFromKeys(source, FEEDBACK_SOURCE_LABEL_KEYS, translations);
 }
@@ -242,6 +256,59 @@ function FeedbackTextSection({
         </div>
       </div>
       <div className="mt-5 text-sm text-foreground">{children}</div>
+    </section>
+  );
+}
+
+function FeedbackReviewHeaderVariants({ item, t }: { item: PortalFeedbackItem; t: Translations }) {
+  const title = item.patient_name || t.feedback_patient_feedback;
+  const context =
+    [item.patient_pid, item.appointment_title, item.provider_name, item.doctor_name]
+      .filter(Boolean)
+      .join(" - ") || t.feedback_general_feedback;
+  const submittedAt = formatPortalDateTime(item.submitted_at);
+  const tags = (
+    <>
+      <Badge variant="outline" className="rounded-full">
+        {feedbackSourceDisplay(item.source, t)}
+      </Badge>
+      <Badge variant="outline" className="rounded-full">
+        NPS {item.nps_score} - {npsBandLabel(item.nps_score)}
+      </Badge>
+    </>
+  );
+
+  return (
+    <section className="rounded-xl border border-border bg-card">
+      <div className="relative overflow-hidden px-4 py-4">
+        <span
+          className={cn(
+            "absolute left-0 top-4 h-12 w-1 rounded-r-full",
+            feedbackStatusAccentClass(item.status),
+          )}
+        />
+        <div className="grid gap-4 pl-3 md:grid-cols-[minmax(0,1fr)_120px]">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="h-px w-8 bg-border" />
+              <StatusBadge tone={feedbackStatusTone(item.status)}>
+                {feedbackReviewStatusLabel(item.status, t)}
+              </StatusBadge>
+            </div>
+            <h3 className="mt-2 text-lg font-semibold leading-none text-foreground">{title}</h3>
+            <p className="mt-2 text-xs leading-5 text-muted-foreground">{context}</p>
+            <div className="mt-3 flex flex-wrap gap-2">{tags}</div>
+          </div>
+          <div className="flex flex-col justify-between border-l border-dashed border-border pl-4">
+            <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+              {feedbackSourceDisplay(item.source, t)}
+            </span>
+            <span className="text-right text-xs font-medium leading-5 text-foreground">
+              {submittedAt}
+            </span>
+          </div>
+        </div>
+      </div>
     </section>
   );
 }
@@ -421,77 +488,56 @@ function FeedbackFormNotes({
 function feedbackCard(item: PortalFeedbackItem, t: Translations, withInternal = false) {
   const notRated = t.feedback_not_rated;
   return (
-    <div className={cn("space-y-4 rounded-xl p-4", tokens.surface.card)}>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold text-foreground">
-            {item.patient_name || t.feedback_patient_feedback}
-          </h3>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {[item.patient_pid, item.appointment_title, item.provider_name, item.doctor_name]
-              .filter(Boolean)
-              .join(" - ") || t.feedback_general_feedback}
-          </p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <StatusBadge tone={toneForStatus(item.status)}>{feedbackReviewStatusLabel(item.status, t)}</StatusBadge>
-            <Badge variant="outline" className="rounded-full">
-              {feedbackSourceDisplay(item.source, t)}
-            </Badge>
-            <Badge variant="outline" className="rounded-full">
-              NPS {item.nps_score} - {npsBandLabel(item.nps_score)}
-            </Badge>
-          </div>
-        </div>
-        <div className="text-xs text-muted-foreground">{formatPortalDateTime(item.submitted_at)}</div>
-      </div>
+    <>
+        <FeedbackReviewHeaderVariants item={item} t={t} />
 
-      <section className="rounded-xl border border-border bg-card p-6">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.feedback_scores)}</h2>
+        <section className="rounded-xl border border-border bg-card p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.feedback_scores)}</h2>
+            </div>
           </div>
-        </div>
-        <div className="mt-5 grid gap-3 xl:grid-cols-2">
-          <div className="grid gap-2 rounded-xl bg-card p-3">
-            <FeedbackSummaryLine label={t.feedback_overall} value={String(item.overall_score)} />
-            <FeedbackSummaryLine label="PM" value={item.patient_manager_score ? String(item.patient_manager_score) : notRated} />
-            <FeedbackSummaryLine label={t.feedback_interpreter} value={item.interpreter_score ? String(item.interpreter_score) : notRated} />
-            <FeedbackSummaryLine label={t.feedback_concierge} value={item.concierge_score ? String(item.concierge_score) : notRated} />
-            <FeedbackSummaryLine label={t.feedback_treatment} value={item.treatment_score ? String(item.treatment_score) : notRated} />
-            <FeedbackSummaryLine label={t.feedback_doctor} value={item.doctor_score ? String(item.doctor_score) : notRated} />
+          <div className="mt-5 grid gap-3 xl:grid-cols-2">
+            <div className="grid gap-2 rounded-xl bg-card p-3">
+              <FeedbackSummaryLine label={t.feedback_overall} value={String(item.overall_score)} />
+              <FeedbackSummaryLine label="PM" value={item.patient_manager_score ? String(item.patient_manager_score) : notRated} />
+              <FeedbackSummaryLine label={t.feedback_interpreter} value={item.interpreter_score ? String(item.interpreter_score) : notRated} />
+              <FeedbackSummaryLine label={t.feedback_concierge} value={item.concierge_score ? String(item.concierge_score) : notRated} />
+              <FeedbackSummaryLine label={t.feedback_treatment} value={item.treatment_score ? String(item.treatment_score) : notRated} />
+              <FeedbackSummaryLine label={t.feedback_doctor} value={item.doctor_score ? String(item.doctor_score) : notRated} />
+            </div>
+            <div className="grid gap-2 rounded-xl bg-card p-3">
+              <FeedbackSummaryLine label={t.feedback_organization} value={item.organization_score ? String(item.organization_score) : notRated} />
+              <FeedbackSummaryLine label={t.feedback_service} value={item.service_score ? String(item.service_score) : notRated} />
+              <FeedbackSummaryLine label={t.feedback_ambience} value={item.infrastructure_score ? String(item.infrastructure_score) : notRated} />
+              <FeedbackSummaryLine label={t.feedback_price_value} value={item.price_value_score ? String(item.price_value_score) : notRated} />
+              <FeedbackSummaryLine label={t.feedback_treatment_success} value={treatmentSuccessLabel(item.treatment_success, t)} />
+              <FeedbackSummaryLine label={t.feedback_complication} value={item.complication_reported ? t.feedback_complication_reported : t.common_no} />
+            </div>
           </div>
-          <div className="grid gap-2 rounded-xl bg-card p-3">
-            <FeedbackSummaryLine label={t.feedback_organization} value={item.organization_score ? String(item.organization_score) : notRated} />
-            <FeedbackSummaryLine label={t.feedback_service} value={item.service_score ? String(item.service_score) : notRated} />
-            <FeedbackSummaryLine label={t.feedback_ambience} value={item.infrastructure_score ? String(item.infrastructure_score) : notRated} />
-            <FeedbackSummaryLine label={t.feedback_price_value} value={item.price_value_score ? String(item.price_value_score) : notRated} />
-            <FeedbackSummaryLine label={t.feedback_treatment_success} value={treatmentSuccessLabel(item.treatment_success, t)} />
-            <FeedbackSummaryLine label={t.feedback_complication} value={item.complication_reported ? t.feedback_complication_reported : t.common_no} />
-          </div>
-        </div>
-      </section>
+        </section>
 
-      {item.comments ? (
-        <FeedbackTextSection title={t.feedback_comment}>
-          {item.comments}
-        </FeedbackTextSection>
-      ) : null}
-      {item.improvement_notes ? (
-        <FeedbackTextSection title={t.feedback_improvement_notes}>
-          {item.improvement_notes}
-        </FeedbackTextSection>
-      ) : null}
-      {withInternal && item.internal_note ? (
-        <FeedbackTextSection title={t.feedback_internal_note}>
-          {item.internal_note}
-        </FeedbackTextSection>
-      ) : null}
-      {item.review_note ? (
-        <FeedbackTextSection title={t.feedback_review_note}>
-          {item.review_note}
-        </FeedbackTextSection>
-      ) : null}
-    </div>
+        {item.comments ? (
+          <FeedbackTextSection title={t.feedback_comment}>
+            {item.comments}
+          </FeedbackTextSection>
+        ) : null}
+        {item.improvement_notes ? (
+          <FeedbackTextSection title={t.feedback_improvement_notes}>
+            {item.improvement_notes}
+          </FeedbackTextSection>
+        ) : null}
+        {withInternal && item.internal_note ? (
+          <FeedbackTextSection title={t.feedback_internal_note}>
+            {item.internal_note}
+          </FeedbackTextSection>
+        ) : null}
+        {item.review_note ? (
+          <FeedbackTextSection title={t.feedback_review_note}>
+            {item.review_note}
+          </FeedbackTextSection>
+        ) : null}
+    </>
   );
 }
 
@@ -638,7 +684,7 @@ function PatientFeedbackWorkspace() {
         accessor: (row) => row.status,
         width: 140,
         render: (row) => (
-          <StatusBadge tone={toneForStatus(row.status)}>{feedbackReviewStatusLabel(row.status, t)}</StatusBadge>
+          <StatusBadge tone={feedbackStatusTone(row.status)}>{feedbackReviewStatusLabel(row.status, t)}</StatusBadge>
         ),
       },
       {
@@ -1582,37 +1628,39 @@ function StaffFeedbackWorkspace() {
                   />
                 }
               >
-                {feedbackCard(activeReview, t, true)}
+                <div className="space-y-4 rounded-xl p-4">
+                  {feedbackCard(activeReview, t, true)}
 
-                <section className="rounded-xl border border-border bg-card p-6">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <h2 className={tokens.text.sectionTitle}>
-                        {titleWithDot(t.feedback_review_actions)}
-                      </h2>
+                  <section className="rounded-xl border border-border bg-card p-6">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h2 className={tokens.text.sectionTitle}>
+                          {titleWithDot(t.feedback_review_actions)}
+                        </h2>
+                      </div>
                     </div>
-                  </div>
-                  <div className="mt-5 space-y-3">
-                    <Field label={t.feedback_review_status}>
-                      <NativeComboboxSelect
-                        value={reviewStatus}
-                        onChange={(event) => setReviewStatus(event.target.value || reviewStatus)}
-                        className={selectClassName}
-                      >
-                        <option value="reviewed">{feedbackReviewStatusLabel("reviewed", t)}</option>
-                        <option value="archived">{feedbackReviewStatusLabel("archived", t)}</option>
-                      </NativeComboboxSelect>
-                    </Field>
-                    <Field label={t.feedback_review_note}>
-                      <textarea
-                        value={reviewNote}
-                        onChange={(event) => setReviewNote(event.target.value)}
-                        className={textareaClassName}
-                        placeholder={t.feedback_review_note_placeholder}
-                      />
-                    </Field>
-                  </div>
-                </section>
+                    <div className="mt-5 space-y-3">
+                      <Field label={t.feedback_review_status}>
+                        <NativeComboboxSelect
+                          value={reviewStatus}
+                          onChange={(event) => setReviewStatus(event.target.value || reviewStatus)}
+                          className={selectClassName}
+                        >
+                          <option value="reviewed">{feedbackReviewStatusLabel("reviewed", t)}</option>
+                          <option value="archived">{feedbackReviewStatusLabel("archived", t)}</option>
+                        </NativeComboboxSelect>
+                      </Field>
+                      <Field label={t.feedback_review_note}>
+                        <textarea
+                          value={reviewNote}
+                          onChange={(event) => setReviewNote(event.target.value)}
+                          className={textareaClassName}
+                          placeholder={t.feedback_review_note_placeholder}
+                        />
+                      </Field>
+                    </div>
+                  </section>
+                </div>
               </AdminSheetScaffold>
             </form>
           ) : null}
