@@ -526,7 +526,7 @@ export function AdminAccessPage() {
           <StatusBadge tone="info">{`${t.access_entity}: ${t.admin_system_patient_entity}`}</StatusBadge>
         </div>
 
-        <div className="flex flex-wrap gap-x-8 gap-y-4">
+        <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
           <AdminInlineMetric
             icon={ShieldCheck}
             tone="sky"

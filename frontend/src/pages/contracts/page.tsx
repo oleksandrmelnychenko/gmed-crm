@@ -14,6 +14,7 @@ import {
   FileBadge2,
   FileSpreadsheet,
   LoaderCircle,
+  type LucideIcon,
   Plus,
   RefreshCw,
   Search,
@@ -24,7 +25,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  AdminInlineMetric,
   AdminSheetScaffold,
   SheetActionsFooter,
   AdminTableCard,
@@ -148,6 +148,40 @@ const QUOTE_VERSION_REASON_LABEL_KEYS = {
   initial_snapshot: "revenue_quotes_version_snapshot",
   status_update: "revenue_quotes_version_status_update",
 } satisfies Partial<Record<string, TranslationKey>>;
+
+function contractMetricCard(
+  label: ReactNode,
+  value: ReactNode,
+  description: ReactNode,
+  icon: LucideIcon,
+  options?: { groupedLast?: boolean },
+) {
+  const Icon = icon;
+
+  return (
+    <article className="relative min-h-[44px] min-w-[190px] px-3 py-1">
+      {!options?.groupedLast ? (
+        <span className="absolute right-0 top-1/2 hidden -translate-y-1/2 space-y-1 xl:block">
+          <span className="block h-1.5 w-px bg-border" />
+          <span className="block h-1.5 w-px bg-border" />
+          <span className="block h-1.5 w-px bg-border" />
+        </span>
+      ) : null}
+      <div className="flex items-baseline gap-2">
+        <Icon className="size-4.5 shrink-0 text-muted-foreground/55" />
+        <p className="text-2xl font-semibold leading-[0.75] text-foreground">
+          {value}
+        </p>
+      </div>
+      <p className="mt-[4px] line-clamp-2 text-[11px] leading-tight text-muted-foreground/75">
+        {description}
+      </p>
+      <p className="mt-0.5 line-clamp-2 text-xs font-medium leading-tight text-muted-foreground">
+        {label}
+      </p>
+    </article>
+  );
+}
 
 export function ContractsPage() {
   const { user } = useAuth();
@@ -1317,36 +1351,33 @@ export function ContractsPage() {
           }
         />
 
-        <div className="flex flex-wrap gap-6 rounded-xl border border-border bg-card px-4 py-3">
-          <AdminInlineMetric
-            icon={ShieldCheck}
-            label={t.contracts_title}
-            value={String(contractStats.total)}
-            description={`${contractStats.signed} / ${contractStats.sent} ${text.contractStatsDescription}`}
-            tone="sky"
-          />
-          <AdminInlineMetric
-            icon={FileSpreadsheet}
-            label={text.quotesTab}
-            value={String(quoteStats.total)}
-            description={`${quoteStats.accepted} ${text.quoteStatsDescription}`}
-            tone="emerald"
-          />
-          <AdminInlineMetric
-            icon={Wallet}
-            label={t.contracts_total}
-            value={formatCurrency(quoteStats.gross)}
-            description={t.contracts_subtitle}
-            tone="amber"
-          />
-          <AdminInlineMetric
-            icon={CalendarClock}
-            label={t.invoices_paid_at}
-            value={formatCurrency(quoteStats.paid)}
-            description={t.invoices_subtitle}
-            tone="slate"
-          />
-        </div>
+        <section className="grid overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 md:grid-cols-2 xl:grid-cols-4">
+          {contractMetricCard(
+            t.contracts_title,
+            String(contractStats.total),
+            `${contractStats.signed} / ${contractStats.sent} ${text.contractStatsDescription}`,
+            ShieldCheck,
+          )}
+          {contractMetricCard(
+            text.quotesTab,
+            String(quoteStats.total),
+            `${quoteStats.accepted} ${text.quoteStatsDescription}`,
+            FileSpreadsheet,
+          )}
+          {contractMetricCard(
+            t.contracts_total,
+            formatCurrency(quoteStats.gross),
+            t.contracts_subtitle,
+            Wallet,
+          )}
+          {contractMetricCard(
+            t.invoices_paid_at,
+            formatCurrency(quoteStats.paid),
+            t.invoices_subtitle,
+            CalendarClock,
+            { groupedLast: true },
+          )}
+        </section>
 
         {optionsError ? <ShellBanner tone="error">{optionsError}</ShellBanner> : null}
 

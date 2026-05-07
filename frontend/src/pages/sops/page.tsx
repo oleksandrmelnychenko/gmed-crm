@@ -705,7 +705,7 @@ export function SopsPage() {
         {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
         {error ? <ShellBanner tone="error">{error}</ShellBanner> : null}
 
-        <div className="flex flex-wrap gap-6 rounded-xl border border-border bg-card px-4 py-3">
+        <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
           <AdminInlineMetric
             icon={BookOpen}
             label={text.metricsVisible}

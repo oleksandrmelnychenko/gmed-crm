@@ -5,12 +5,23 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { LoaderCircle, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import {
+  BadgePercent,
+  Boxes,
+  ClipboardList,
+  LoaderCircle,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Trash2,
+  Wallet,
+} from "lucide-react";
 
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  AdminInlineMetric,
   AdminSheetScaffold,
   SheetFormFooter,
 } from "@/components/admin-page-patterns";
@@ -638,53 +649,28 @@ export function FinanceCatalogPage() {
         </Banner>
       ) : null}
 
-      <div className="space-y-4">
-        <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {financeCatalogMetrics.map((metric, index) => (
-            <article
-              key={`instrument-${index}`}
-              className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-md border border-border bg-card px-3 py-2"
-            >
-              <div className="flex size-14 items-center justify-center rounded-full border border-border bg-muted/25">
-                <div className="flex size-10 items-center justify-center rounded-full border-2 border-[var(--brand)]/55 bg-card">
-                  <span className="max-w-8 truncate text-sm font-semibold leading-none text-foreground">
-                    {metric.value}
-                  </span>
-                </div>
-              </div>
-              <div className="min-w-0">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                  Gauge {index + 1}
-                </p>
-                <p className="mt-1 text-sm font-medium leading-snug text-foreground">
-                  {metric.label}
-                </p>
-                <p className="mt-1 truncate text-xs text-muted-foreground">
-                  {metric.description}
-                </p>
-              </div>
-            </article>
-          ))}
-        </section>
-
-        <section className="rounded-md border border-border bg-card px-3 py-2">
-          <div className="flex flex-wrap items-center gap-2">
-            {financeCatalogMetrics.map((metric, index) => (
-              <div
-                key={`capsule-${index}`}
-                className="flex min-w-[210px] flex-1 items-center justify-between gap-3 rounded-full border border-border bg-muted/20 px-3 py-1.5"
-              >
-                <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
-                  {metric.label}
-                </span>
-                <span className="shrink-0 text-lg font-semibold leading-none text-foreground">
-                  {metric.value}
-                </span>
-              </div>
-            ))}
-          </div>
-        </section>
-      </div>
+      <section className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
+        <AdminInlineMetric
+          icon={ClipboardList}
+          label={financeCatalogMetrics[0].label}
+          value={financeCatalogMetrics[0].value}
+        />
+        <AdminInlineMetric
+          icon={BadgePercent}
+          label={financeCatalogMetrics[1].label}
+          value={financeCatalogMetrics[1].value}
+        />
+        <AdminInlineMetric
+          icon={Wallet}
+          label={financeCatalogMetrics[2].label}
+          value={financeCatalogMetrics[2].value}
+        />
+        <AdminInlineMetric
+          icon={Boxes}
+          label={financeCatalogMetrics[3].label}
+          value={financeCatalogMetrics[3].value}
+        />
+      </section>
 
       <Section
         title={t.finance_catalog_tax_profiles}

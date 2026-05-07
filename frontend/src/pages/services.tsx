@@ -9,13 +9,13 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { LoaderCircle, Plus, RefreshCw, Search } from "lucide-react";
+import { Activity, ClipboardList, LoaderCircle, Plus, RefreshCw, Search, Wallet } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import { AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
+import { AdminInlineMetric, AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
 import { ColumnVisibilityMenu } from "@/components/data-table/column-visibility-menu";
 import { DataTable } from "@/components/data-table/data-table";
 import { DensityToggle } from "@/components/data-table/density-toggle";
@@ -32,7 +32,6 @@ import type {
 import {
   EmptyCell,
   PageHeader,
-  StatCard,
   checkboxClass,
   inputClass as shellInputClassName,
   selectClass as shellSelectClassName,
@@ -742,10 +741,10 @@ function StaffServicesPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-3 md:grid-cols-3">
-        <StatCard label={t.staff_services_stat_active} value={activeCount} />
-        <StatCard label={t.staff_services_stat_billing_ready} value={readyForBillingCount} />
-        <StatCard label={t.staff_services_stat_portal_requests} value={portalRequestCount} />
+      <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
+        <AdminInlineMetric icon={Activity} label={t.staff_services_stat_active} value={activeCount} />
+        <AdminInlineMetric icon={Wallet} label={t.staff_services_stat_billing_ready} value={readyForBillingCount} />
+        <AdminInlineMetric icon={ClipboardList} label={t.staff_services_stat_portal_requests} value={portalRequestCount} />
       </div>
 
       <div className="relative z-30 flex flex-col gap-2">

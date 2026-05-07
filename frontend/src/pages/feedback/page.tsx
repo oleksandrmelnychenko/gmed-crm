@@ -719,7 +719,7 @@ function PatientFeedbackWorkspace() {
       {notice ? <Banner tone="success">{notice}</Banner> : null}
       {error ? <Banner tone="error">{error}</Banner> : null}
 
-      <div className="flex flex-wrap gap-5 rounded-xl border border-border bg-card px-4 py-3">
+      <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
         <AdminInlineMetric
           icon={MessageSquare}
           label={t.feedback_submitted_feedback_metric}
@@ -728,7 +728,7 @@ function PatientFeedbackWorkspace() {
         />
         <AdminInlineMetric
           icon={Star}
-          label={t.feedback_promoters_metric}
+          label={null}
           value={promoters}
           tone="emerald"
         />
@@ -1301,7 +1301,7 @@ function StaffFeedbackWorkspace() {
       {notice ? <Banner tone="success">{notice}</Banner> : null}
       {error ? <Banner tone="error">{error}</Banner> : null}
 
-      <div className="flex flex-wrap gap-5 rounded-xl border border-border bg-card px-4 py-3">
+      <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
         <AdminInlineMetric
           icon={MessageSquare}
           label={t.feedback_total_metric}
@@ -1310,7 +1310,7 @@ function StaffFeedbackWorkspace() {
         />
         <AdminInlineMetric
           icon={Star}
-          label="NPS"
+          label={null}
           value={summary?.nps_score ?? 0}
           description={`${summary?.promoters ?? 0} ${t.feedback_promoters_metric} / ${summary?.detractors ?? 0} ${t.feedback_detractors_metric}`}
           tone="emerald"

@@ -31,6 +31,7 @@ import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import {
+  AdminInlineMetric,
   AdminSheetScaffold,
   SheetActionsFooter,
   SheetFormFooter,
@@ -52,9 +53,7 @@ import { SortBuilder } from "@/components/data-table/sort-builder";
 import type { DensityLevel, FilterPredicate, SortStack } from "@/components/data-table/types";
 import { useLocalStorage, useVersionedLocalStorage } from "@/components/data-table/use-local-storage";
 import { readDataTableState, writeDataTableState } from "@/components/data-table/url-state";
-import {
-  KpiInlineStat,
-} from "@/components/data-table";
+
 import {
   createProvider,
   deleteProvider,
@@ -765,21 +764,21 @@ function ProvidersPage() {
         />
 
         {/* KPI inline stats */}
-        <div className="flex flex-wrap items-center gap-x-8 gap-y-3 rounded-xl border border-border/50 bg-card px-4 py-3">
-          <KpiInlineStat icon={Building2} label={t.providers_title} value={metrics.total} tone="sky" />
-          <KpiInlineStat
+        <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
+          <AdminInlineMetric icon={Building2} label={t.providers_title} value={metrics.total} tone="sky" />
+          <AdminInlineMetric
             icon={UsersRound}
             label={permissions.forceNonMedical ? l("Services", "Сервисы", "Services") : t.providers_doctors}
             value={permissions.forceNonMedical ? metrics.services : metrics.doctors}
             tone="emerald"
           />
-          <KpiInlineStat
+          <AdminInlineMetric
             icon={Stethoscope}
             label={t.providers_linked_patients}
             value={metrics.patients}
             tone="amber"
           />
-          <KpiInlineStat
+          <AdminInlineMetric
             icon={CalendarClock}
             label={permissions.forceNonMedical ? l("Offene Anfragen", "Открытые запросы", "Open requests") : t.providers_appointments}
             value={permissions.forceNonMedical ? metrics.openConciergeRequests : metrics.appointments}

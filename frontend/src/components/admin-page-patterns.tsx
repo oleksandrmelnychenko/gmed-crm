@@ -8,14 +8,6 @@ import { cn } from "@/lib/utils";
 
 type MetricTone = "sky" | "emerald" | "amber" | "slate" | "rose";
 
-const METRIC_TONE_CLASS: Record<MetricTone, string> = {
-  sky: "bg-sky-100 text-sky-700",
-  emerald: "bg-emerald-100 text-emerald-700",
-  amber: "bg-amber-100 text-amber-700",
-  slate: "bg-slate-100 text-slate-700",
-  rose: "bg-rose-100 text-rose-700",
-};
-
 export function AdminToolbar({
   children,
   className,
@@ -50,26 +42,45 @@ export function AdminInlineMetric({
   description?: ReactNode;
   tone?: MetricTone;
 }) {
+  void tone;
+  const hasLabel = Boolean(label);
+  const hasDescription = Boolean(description);
+  const hasTwoLabels = hasLabel && hasDescription;
+  const singleLabel = hasLabel ? label : description;
+
   return (
-    <div className="flex min-w-[170px] items-center gap-3">
-      <span
-        className={cn(
-          "flex size-10 shrink-0 items-center justify-center rounded-2xl",
-          METRIC_TONE_CLASS[tone],
-        )}
-      >
-        <Icon className="size-4.5" />
+    <article
+      className={cn(
+        "relative min-w-[190px] flex-1 px-3 py-1",
+        hasTwoLabels ? "min-h-[68px]" : "min-h-[44px]",
+      )}
+    >
+      <span className="admin-inline-metric-separator absolute right-0 top-1/2 hidden -translate-y-1/2 space-y-1">
+        <span className="block h-1.5 w-px bg-border" />
+        <span className="block h-1.5 w-px bg-border" />
+        <span className="block h-1.5 w-px bg-border" />
       </span>
-      <div className="min-w-0">
-        <span className="text-[12px] text-muted-foreground">{label}</span>
-        <p className="mt-1 text-[20px] font-semibold tracking-tight text-foreground leading-none">
+      <div className="flex items-baseline gap-2">
+        <Icon className="size-4.5 shrink-0 text-muted-foreground/55" />
+        <p className="text-2xl font-semibold leading-[0.75] text-foreground">
           {value}
         </p>
-        {description ? (
-          <p className="mt-1 text-[11.5px] text-muted-foreground">{description}</p>
-        ) : null}
       </div>
-    </div>
+      {hasTwoLabels ? (
+        <>
+          <p className="mt-[4px] line-clamp-2 text-[11px] leading-tight text-muted-foreground/75">
+            {description}
+          </p>
+          <p className="mt-0.5 line-clamp-2 text-xs font-medium leading-tight text-muted-foreground">
+            {label}
+          </p>
+        </>
+      ) : singleLabel ? (
+        <p className="mt-0.5 line-clamp-2 text-xs font-medium leading-tight text-muted-foreground">
+          {singleLabel}
+        </p>
+      ) : null}
+    </article>
   );
 }
 
