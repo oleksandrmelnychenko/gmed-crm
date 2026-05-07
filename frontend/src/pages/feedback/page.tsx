@@ -212,6 +212,20 @@ function DetailField({ label, value }: { label: string; value?: string | null })
   );
 }
 
+function FeedbackSummaryLine({ label, value }: { label: string; value?: string | null }) {
+  return (
+    <div className="flex min-w-0 items-center gap-2 px-3 py-1.5">
+      <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+        {label}
+      </span>
+      <span className="h-px min-w-6 flex-1 bg-border/70" />
+      <span className="shrink-0 text-sm font-semibold leading-none text-foreground">
+        {value || portalNotSetLabel()}
+      </span>
+    </div>
+  );
+}
+
 function appointmentOptionLabel(item: PatientAppointmentOption) {
   return [formatPortalDate(item.date), item.title, item.provider_name, item.doctor_name]
     .filter(Boolean)
@@ -456,14 +470,21 @@ function RankingList({
   title,
   empty,
   rows,
+  horizontal = false,
 }: {
   title: string;
   empty: string;
   rows: Array<{ id: string; name: string; subtitle: string; value: string }>;
+  horizontal?: boolean;
 }) {
   return (
-    <AdminTableCard title={titleWithDot(title)}>
-      <div className="space-y-2 p-3">
+    <section className="rounded-xl border border-border bg-card p-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
+        </div>
+      </div>
+      <div className={cn("mt-5", horizontal ? "grid gap-2 md:grid-cols-2 xl:grid-cols-5" : "space-y-2")}>
         {rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">{empty}</p>
         ) : (
@@ -478,7 +499,7 @@ function RankingList({
           ))
         )}
       </div>
-    </AdminTableCard>
+    </section>
   );
 }
 
@@ -1329,87 +1350,39 @@ function StaffFeedbackWorkspace() {
         />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1.25fr_0.95fr]">
-        <div className="space-y-4">
-          <AdminTableCard
-            title={titleWithDot(t.feedback_queue_title)}
-            description={t.feedback_queue_description}
-            count={feedback.length}
-          >
-            <DataTableSurface
-              rows={feedback}
-              columns={feedbackColumns}
-              rowId={(row) => row.id}
-              defaultDensity="compact"
-              defaultFrozenColumns={FEEDBACK_DEFAULT_FROZEN_COLUMNS}
-              defaultHiddenColumns={FEEDBACK_DEFAULT_HIDDEN_COLUMNS}
-              dictionary={feedbackTableDictionary}
-              groupLabels={feedbackColumnGroups}
-              loading={refreshing}
-              maxFrozenColumns={FEEDBACK_MAX_FROZEN_COLUMNS}
-              tableClassName="min-h-[560px] xl:min-h-[640px]"
-              toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
-              activeRowId={activeReview?.id ?? null}
-              onRowClick={(row) => openReview(row)}
-              rowAccent={(row) => {
-                if (row.id === activeReview?.id) return "bg-sky-500";
-                if (row.status === "submitted") return "bg-amber-500";
-                if (row.status === "reviewed") return "bg-emerald-500";
-                if (row.status === "archived") return "bg-slate-400";
-                return null;
-              }}
-              rowActionsLabel={feedbackTableDictionary.table_actions}
-              rowActionsWidth={150}
-              rowActions={(row) => (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-7 rounded-md px-2 text-[11px]"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    openReview(row);
-                  }}
-                >
-                  <ClipboardPen className="size-3.5" />
-                  {t.feedback_review_button}
-                </Button>
-              )}
-              emptyState={
-                <EmptyState
-                  title={t.feedback_queue_empty_title}
-                  description={t.feedback_queue_empty_description}
-                />
-              }
-            />
-          </AdminTableCard>
-        </div>
-
-        <div className="space-y-4">
-          {summary ? (
-            <>
-              <AdminTableCard
-                title={titleWithDot(t.feedback_summary_title)}
-                description={t.feedback_summary_description}
-              >
-                <div className="grid gap-3 p-3 md:grid-cols-2">
-                  <DetailField label={t.feedback_overall_average} value={formatPortalAverage(summary.average_scores.overall)} />
-                  <DetailField label={t.feedback_interpreter_average} value={formatPortalAverage(summary.average_scores.interpreter)} />
-                  <DetailField label={t.feedback_concierge_average} value={formatPortalAverage(summary.average_scores.concierge)} />
-                  <DetailField label={t.feedback_treatment_average} value={formatPortalAverage(summary.average_scores.treatment)} />
-                  <DetailField label={t.feedback_service_average} value={formatPortalAverage(summary.average_scores.service)} />
-                  <DetailField label={t.feedback_ambience_average} value={formatPortalAverage(summary.average_scores.infrastructure)} />
-                  <DetailField label={t.feedback_value_average} value={formatPortalAverage(summary.average_scores.price_value)} />
-                  <DetailField
-                    label={t.feedback_complication_rate}
-                    value={
-                      summary.complication_rate === null || summary.complication_rate === undefined
-                        ? portalNotSetLabel()
-                        : `${summary.complication_rate.toFixed(1)}%`
-                    }
-                  />
+      <div className="space-y-4">
+        {summary ? (
+          <div className="grid gap-4 xl:grid-cols-4">
+              <section className="rounded-xl border border-border bg-card p-6 xl:col-span-2">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className={tokens.text.sectionTitle}>
+                      {titleWithDot(t.feedback_summary_title)}
+                    </h2>
+                  </div>
                 </div>
-              </AdminTableCard>
+                <div className="mt-5 grid gap-3 xl:grid-cols-2">
+                  <div className="grid gap-2 rounded-xl bg-card p-3">
+                    <FeedbackSummaryLine label={t.feedback_overall_average} value={formatPortalAverage(summary.average_scores.overall)} />
+                    <FeedbackSummaryLine label={t.feedback_interpreter_average} value={formatPortalAverage(summary.average_scores.interpreter)} />
+                    <FeedbackSummaryLine label={t.feedback_concierge_average} value={formatPortalAverage(summary.average_scores.concierge)} />
+                    <FeedbackSummaryLine label={t.feedback_treatment_average} value={formatPortalAverage(summary.average_scores.treatment)} />
+                  </div>
+                  <div className="grid gap-2 rounded-xl bg-card p-3">
+                    <FeedbackSummaryLine label={t.feedback_service_average} value={formatPortalAverage(summary.average_scores.service)} />
+                    <FeedbackSummaryLine label={t.feedback_ambience_average} value={formatPortalAverage(summary.average_scores.infrastructure)} />
+                    <FeedbackSummaryLine label={t.feedback_value_average} value={formatPortalAverage(summary.average_scores.price_value)} />
+                    <FeedbackSummaryLine
+                      label={t.feedback_complication_rate}
+                      value={
+                        summary.complication_rate === null || summary.complication_rate === undefined
+                          ? portalNotSetLabel()
+                          : `${summary.complication_rate.toFixed(1)}%`
+                      }
+                    />
+                  </div>
+                </div>
+              </section>
 
               <RankingList
                 title={t.feedback_top_promoters_title}
@@ -1433,19 +1406,74 @@ function StaffFeedbackWorkspace() {
                 }))}
               />
 
-              <RankingList
-                title={t.feedback_clinic_ranking_title}
-                empty={t.feedback_no_clinic_ranking}
-                rows={summary.clinic_ranking.slice(0, 5).map((item) => ({
-                  id: item.provider_id ?? item.name,
-                  name: item.name,
-                  subtitle: `${item.feedback_count} ${t.feedback_rating_count_suffix}`,
-                  value: item.average_score.toFixed(1),
-                }))}
+              <div className="xl:col-span-4">
+                <RankingList
+                  title={t.feedback_clinic_ranking_title}
+                  empty={t.feedback_no_clinic_ranking}
+                  horizontal
+                  rows={summary.clinic_ranking.slice(0, 5).map((item) => ({
+                    id: item.provider_id ?? item.name,
+                    name: item.name,
+                    subtitle: `${item.feedback_count} ${t.feedback_rating_count_suffix}`,
+                    value: item.average_score.toFixed(1),
+                  }))}
+                />
+              </div>
+          </div>
+        ) : null}
+
+        <AdminTableCard
+          title={titleWithDot(t.feedback_queue_title)}
+          description={t.feedback_queue_description}
+          count={feedback.length}
+        >
+          <DataTableSurface
+            rows={feedback}
+            columns={feedbackColumns}
+            rowId={(row) => row.id}
+            defaultDensity="compact"
+            defaultFrozenColumns={FEEDBACK_DEFAULT_FROZEN_COLUMNS}
+            defaultHiddenColumns={FEEDBACK_DEFAULT_HIDDEN_COLUMNS}
+            dictionary={feedbackTableDictionary}
+            groupLabels={feedbackColumnGroups}
+            loading={refreshing}
+            maxFrozenColumns={FEEDBACK_MAX_FROZEN_COLUMNS}
+            tableClassName="min-h-[560px] xl:min-h-[640px]"
+            toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
+            activeRowId={activeReview?.id ?? null}
+            onRowClick={(row) => openReview(row)}
+            rowAccent={(row) => {
+              if (row.id === activeReview?.id) return "bg-sky-500";
+              if (row.status === "submitted") return "bg-amber-500";
+              if (row.status === "reviewed") return "bg-emerald-500";
+              if (row.status === "archived") return "bg-slate-400";
+              return null;
+            }}
+            rowActionsLabel={feedbackTableDictionary.table_actions}
+            rowActionsWidth={150}
+            rowActions={(row) => (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 rounded-md px-2 text-[11px]"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openReview(row);
+                }}
+              >
+                <ClipboardPen className="size-3.5" />
+                {t.feedback_review_button}
+              </Button>
+            )}
+            emptyState={
+              <EmptyState
+                title={t.feedback_queue_empty_title}
+                description={t.feedback_queue_empty_description}
               />
-            </>
-          ) : null}
-        </div>
+            }
+          />
+        </AdminTableCard>
       </div>
 
       <Sheet open={captureOpen} onOpenChange={setCaptureOpen}>
