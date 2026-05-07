@@ -10,6 +10,7 @@ import {
 } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  ArrowUpRight,
   CalendarClock,
   Download,
   LoaderCircle,
@@ -28,6 +29,7 @@ import {
 } from "@/components/admin-page-patterns";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -1538,73 +1540,90 @@ function StaffInvoicesPage() {
                 />
               )}
             >
-              {createError ? <ShellBanner tone="error">{createError}</ShellBanner> : null}
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label={t.contracts_type} className="sm:col-span-2">
-                  <NativeComboboxSelect
-                    value={createForm.quoteId || "__empty__"}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        quoteId:
-                          event.target.value && event.target.value !== "__empty__"
-                            ? event.target.value
-                            : "",
-                      }))
-                    }
-                    className={selectClassName}
-                  >
-                    <option value="__empty__">{text.chooseQuote}</option>
-                    {filteredQuotes.map((quote) => (
-                      <option key={quote.id} value={quote.id}>
-                        {`${quote.quote_number} | ${quote.order_number} | ${quote.patient_pid}`}
-                      </option>
-                    ))}
-                  </NativeComboboxSelect>
-                </Field>
-                <Field label={t.invoices_type}>
-                  <NativeComboboxSelect
-                    value={createForm.invoiceType}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        invoiceType: event.target.value as InvoiceType,
-                      }))
-                    }
-                    className={selectClassName}
-                  >
-                    {INVOICE_TYPES.map((invoiceType) => (
-                      <option key={invoiceType} value={invoiceType}>
-                        {invoiceTypeLabel(invoiceType)}
-                      </option>
-                    ))}
-                  </NativeComboboxSelect>
-                </Field>
-                <Field label={t.invoices_due_at}>
-                  <Input
-                    type="date"
-                    className={shellInputClassName}
-                    value={createForm.dueDate}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({ ...current, dueDate: event.target.value }))
-                    }
-                  />
-                </Field>
-                <Field label={text.selectedQuoteSnapshot} className="sm:col-span-2">
-                  <div className={cn("rounded-xl px-3 py-2 text-sm text-foreground", tokens.surface.mutedCard)}>
-                    {selectedCreateQuote
-                      ? `${selectedCreateQuote.quote_number} | ${selectedCreateQuote.order_number} | ${formatMoney(selectedCreateQuote.total_gross)}`
-                      : text.chooseQuote}
+              <div className="space-y-4 rounded-xl p-4">
+                {createError ? <ShellBanner tone="error">{createError}</ShellBanner> : null}
+                <section className="rounded-xl border border-border bg-card p-5">
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot("Предложение")}</h2>
+                  <div className="mt-5 space-y-4">
+                    <Field label={t.contracts_type}>
+                      <NativeComboboxSelect
+                        value={createForm.quoteId || "__empty__"}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({
+                            ...current,
+                            quoteId:
+                              event.target.value && event.target.value !== "__empty__"
+                                ? event.target.value
+                                : "",
+                          }))
+                        }
+                        className={selectClassName}
+                      >
+                        <option value="__empty__">{text.chooseQuote}</option>
+                        {filteredQuotes.map((quote) => (
+                          <option key={quote.id} value={quote.id}>
+                            {`${quote.quote_number} | ${quote.order_number} | ${quote.patient_pid}`}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                    </Field>
+                    <Field label={text.selectedQuoteSnapshot}>
+                      <div className={cn("rounded-xl px-3 py-2 text-sm text-foreground", tokens.surface.mutedCard)}>
+                        {selectedCreateQuote
+                          ? `${selectedCreateQuote.quote_number} | ${selectedCreateQuote.order_number} | ${formatMoney(selectedCreateQuote.total_gross)}`
+                          : text.chooseQuote}
+                      </div>
+                    </Field>
                   </div>
-                </Field>
-                <Field label={text.notes} className="sm:col-span-2">
-                  <textarea
-                    className={textareaClassName}
-                    value={createForm.notes}
-                    onChange={(event) => setCreateForm((current) => ({ ...current, notes: event.target.value }))}
-                    placeholder={text.billingNotePlaceholder}
-                  />
-                </Field>
+                </section>
+
+                <section className="rounded-xl border border-border bg-card p-5">
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot("Параметры счёта")}</h2>
+                  <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                    <Field label={t.invoices_type}>
+                      <NativeComboboxSelect
+                        value={createForm.invoiceType}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({
+                            ...current,
+                            invoiceType: event.target.value as InvoiceType,
+                          }))
+                        }
+                        className={selectClassName}
+                      >
+                        {INVOICE_TYPES.map((invoiceType) => (
+                          <option key={invoiceType} value={invoiceType}>
+                            {invoiceTypeLabel(invoiceType)}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                    </Field>
+                    <Field label={t.invoices_due_at}>
+                      <Input
+                        type="date"
+                        className={shellInputClassName}
+                        value={createForm.dueDate}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({ ...current, dueDate: event.target.value }))
+                        }
+                      />
+                    </Field>
+                  </div>
+                </section>
+
+                <section className="rounded-xl border border-border bg-card p-5">
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot("Заметки")}</h2>
+                  <div className="mt-5">
+                    <Field label={text.notes}>
+                      <textarea
+                        className={textareaClassName}
+                        value={createForm.notes}
+                        onChange={(event) => setCreateForm((current) => ({ ...current, notes: event.target.value }))}
+                        placeholder={text.billingNotePlaceholder}
+                      />
+                    </Field>
+                  </div>
+                </section>
               </div>
             </AdminSheetScaffold>
           </form>
@@ -1630,65 +1649,168 @@ function StaffInvoicesPage() {
           >
             {detailBusy ? <LoadingState label={t.common_loading} /> : detailError ? <ShellBanner tone="error">{detailError}</ShellBanner> : !detail ? <EmptyState title={text.noInvoiceSelected} description={text.noInvoiceSelectedDescription} /> : (
               <div className="space-y-6">
-                <SectionCard
-                  title={text.invoiceOverview}
-                  description={text.invoiceOverviewDescription}
-                  action={
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="rounded-lg"
-                        onClick={() =>
-                          void openInvoicePdfPreview(detail.id, text.popupBlocked).catch((error) =>
-                            setDetailError(error instanceof Error ? error.message : text.pdfOpenError),
-                          )
-                        }
-                      >
-                        {text.previewPdf}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="rounded-lg"
-                        onClick={() =>
-                          void downloadInvoicePdf(detail.id, `${detail.invoice_number}.pdf`).catch((error) =>
-                            setDetailError(error instanceof Error ? error.message : text.pdfDownloadError),
-                          )
-                        }
-                      >
-                        <Download className="size-4" />
-                        {text.downloadPdf}
-                      </Button>
-                      <StatusBadge tone={statusBadgeClass(detail.status)}>
-                        {invoiceStatusLabel(detail.status)}
-                      </StatusBadge>
-                      <StatusBadge tone={invoiceTypeTone(detail.invoice_type)}>
-                        {invoiceTypeLabel(detail.invoice_type)}
-                      </StatusBadge>
+                <section className="rounded-xl border border-border bg-card">
+                  <div className="relative overflow-hidden px-4 py-4">
+                    <span
+                      className={cn(
+                        "absolute left-0 top-4 h-12 w-1 rounded-r-full",
+                        detail.status === "paid"
+                          ? "bg-emerald-500"
+                          : detail.status === "overdue"
+                            ? "bg-rose-500"
+                            : detail.status === "cancelled"
+                              ? "bg-slate-400"
+                              : "bg-sky-500",
+                      )}
+                    />
+                    <div className="grid gap-4 pl-3 md:grid-cols-[minmax(0,1fr)_180px]">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="h-px w-8 bg-border" />
+                          <StatusBadge tone={statusBadgeClass(detail.status)}>
+                            {invoiceStatusLabel(detail.status)}
+                          </StatusBadge>
+                        </div>
+                        <h3 className="mt-2 text-lg font-semibold leading-none text-foreground">
+                          {detail.patient_name}
+                        </h3>
+                        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                          {[detail.invoice_number, detail.order_number, detail.quote_number]
+                            .filter(Boolean)
+                            .join(" - ")}
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Badge variant="outline" className="rounded-full">
+                            {invoiceTypeLabel(detail.invoice_type)}
+                          </Badge>
+                        </div>
+                      </div>
+                      <div className="flex flex-col justify-between gap-4 border-l border-dashed border-border pl-4">
+                        <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                          PDF счёта
+                        </span>
+                        <div className="flex flex-col gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="justify-center rounded-lg"
+                            onClick={() =>
+                              void openInvoicePdfPreview(detail.id, text.popupBlocked).catch((error) =>
+                                setDetailError(error instanceof Error ? error.message : text.pdfOpenError),
+                              )
+                            }
+                          >
+                            {text.previewPdf}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="justify-center rounded-lg"
+                            onClick={() =>
+                              void downloadInvoicePdf(detail.id, `${detail.invoice_number}.pdf`).catch((error) =>
+                                setDetailError(error instanceof Error ? error.message : text.pdfDownloadError),
+                              )
+                            }
+                          >
+                            <Download className="size-3.5" />
+                            {text.downloadPdf}
+                          </Button>
+                        </div>
+                      </div>
                     </div>
-                  }
-                >
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                    <DetailField label={t.invoices_patient} value={`${detail.patient_name} (${detail.patient_pid})`} />
-                    <DetailField label={t.orders_title} value={detail.order_number} />
-                    <DetailField label={t.contracts_type} value={detail.quote_number ?? t.common_not_set} />
-                    <DetailField label={t.invoices_issued_at} value={formatDateTime(detail.issued_at, locale, t.common_not_set)} />
-                    <DetailField label={t.invoices_due_at} value={formatDate(detail.due_date, locale, t.common_not_set)} />
-                    <DetailField label={t.invoices_paid_at} value={formatDateTime(detail.paid_at, locale, t.common_not_set)} />
-                    <DetailField label={text.grossTotal} value={formatMoney(detail.total_gross)} />
-                    <DetailField label={t.invoices_paid} value={formatMoney(detail.paid_amount)} />
-                    <DetailField label={text.balanceDue} value={formatMoney(detail.balance_due)} />
-                    <DetailField label={text.notes} value={detail.notes || t.common_not_set} />
+                  </div>
+                </section>
+
+                <SectionCard title={text.invoiceOverview}>
+                  <div className="space-y-5">
+                    <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
+                      <SummaryLine label={t.invoices_patient} value={`${detail.patient_name} (${detail.patient_pid})`} />
+                      <SummaryLine label={t.orders_title} value={detail.order_number} />
+                      <SummaryLine label={t.contracts_type} value={detail.quote_number ?? t.common_not_set} />
+                      <SummaryLine label={t.invoices_issued_at} value={formatDateTime(detail.issued_at, locale, t.common_not_set)} />
+                      <SummaryLine label={t.invoices_due_at} value={formatDate(detail.due_date, locale, t.common_not_set)} />
+                      <SummaryLine label={t.invoices_paid_at} value={formatDateTime(detail.paid_at, locale, t.common_not_set)} />
+                      <SummaryLine label={text.grossTotal} value={formatMoney(detail.total_gross)} />
+                      <SummaryLine label={t.invoices_paid} value={formatMoney(detail.paid_amount)} />
+                      <SummaryLine label={text.balanceDue} value={formatMoney(detail.balance_due)} />
+                    </div>
+                    <div className="space-y-3">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.notes)}</h2>
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-border bg-background/60 p-4 text-sm leading-snug text-muted-foreground">
+                        {detail.notes || t.common_not_set}
+                      </div>
+                    </div>
                   </div>
                 </SectionCard>
 
-                <SectionCard title={t.providers_linked_patients} description={text.linkedContextDescription}>
-                  <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" className="rounded-lg" onClick={() => staffGo(`/patients?patient=${detail.patient_id}`)}>{t.invoices_patient}</Button>
-                    <Button type="button" variant="outline" className="rounded-lg" onClick={() => staffGo(`/orders?order=${detail.order_id}&patient=${detail.patient_id}`)}>{text.linkedOrder}</Button>
-                    <Button type="button" variant="outline" className="rounded-lg" onClick={() => staffGo(`/contracts?quote=${detail.quote_id ?? ""}&order=${detail.order_id}&patient=${detail.patient_id}&tab=quotes`)}>{text.quotes}</Button>
-                    <Button type="button" variant="outline" className="rounded-lg" onClick={() => staffGo(`/documents?order=${detail.order_id}&patient=${detail.patient_id}`)}>{text.documents}</Button>
+                <SectionCard title={t.providers_linked_patients}>
+                  <div className="grid gap-3 md:grid-cols-4">
+                    <button
+                      type="button"
+                      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                      onClick={() => window.open(`/patients?patient=${detail.patient_id}`, "_blank", "noopener,noreferrer")}
+                    >
+                      <div className="relative z-10">
+                        <h3 className="text-sm font-semibold text-foreground">{t.invoices_patient}</h3>
+                        <p className="mt-2 text-xs leading-tight text-muted-foreground">
+                          Откройте карточку пациента, связанного с этим счётом.
+                        </p>
+                      </div>
+                      <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
+                        <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                      onClick={() => window.open(`/orders?order=${detail.order_id}&patient=${detail.patient_id}`, "_blank", "noopener,noreferrer")}
+                    >
+                      <div className="relative z-10">
+                        <h3 className="text-sm font-semibold text-foreground">{text.linkedOrder}</h3>
+                        <p className="mt-2 text-xs leading-tight text-muted-foreground">
+                          Проверьте заказ, на основании которого выставлен счёт.
+                        </p>
+                      </div>
+                      <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
+                        <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                      onClick={() => window.open(`/contracts?quote=${detail.quote_id ?? ""}&order=${detail.order_id}&patient=${detail.patient_id}&tab=quotes`, "_blank", "noopener,noreferrer")}
+                    >
+                      <div className="relative z-10">
+                        <h3 className="text-sm font-semibold text-foreground">{text.quotes}</h3>
+                        <p className="mt-2 text-xs leading-tight text-muted-foreground">
+                          Откройте предложение, связанное с этим счётом.
+                        </p>
+                      </div>
+                      <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
+                        <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                      onClick={() => window.open(`/documents?order=${detail.order_id}&patient=${detail.patient_id}`, "_blank", "noopener,noreferrer")}
+                    >
+                      <div className="relative z-10">
+                        <h3 className="text-sm font-semibold text-foreground">{text.documents}</h3>
+                        <p className="mt-2 text-xs leading-tight text-muted-foreground">
+                          Проверьте документы заказа и пациента по этому счёту.
+                        </p>
+                      </div>
+                      <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
+                        <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                      </span>
+                    </button>
                   </div>
                 </SectionCard>
 
@@ -2165,6 +2287,16 @@ function MiniMetric({ label, value }: { label: string; value: ReactNode }) {
     <div className="flex min-w-[210px] flex-1 items-center justify-between gap-3 rounded-full border border-border bg-muted/20 px-4 py-2">
       <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">{label}</span>
       <span className="shrink-0 text-sm font-semibold leading-none text-foreground">{value}</span>
+    </div>
+  );
+}
+
+function SummaryLine({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 rounded-lg py-2">
+      <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
+      <span className="h-px min-w-6 flex-1 bg-border/70" />
+      <span className="max-w-[48%] text-right text-sm font-semibold leading-tight text-foreground">{value}</span>
     </div>
   );
 }
