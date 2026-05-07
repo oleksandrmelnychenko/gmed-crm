@@ -26,7 +26,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   AdminSheetScaffold,
-  SheetActionsFooter,
   AdminTableCard,
   AdminToolbar,
   SheetFormFooter,
@@ -1743,118 +1742,139 @@ export function ContractsPage() {
             >
               <div className="space-y-4 rounded-xl p-4">
                 {agencyServiceFormError ? <ShellBanner tone="error">{agencyServiceFormError}</ShellBanner> : null}
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label={text.serviceKey}>
-                    <Input
-                      required
-                      className={shellInputClassName}
-                      value={agencyServiceForm.serviceKey}
-                      onChange={(event) =>
-                        setAgencyServiceForm((current) => ({ ...current, serviceKey: event.target.value }))
-                      }
-                    />
-                  </Field>
-                  <Field label={text.serviceName}>
-                    <Input
-                      required
-                      className={shellInputClassName}
-                      value={agencyServiceForm.serviceName}
-                      onChange={(event) =>
-                        setAgencyServiceForm((current) => ({ ...current, serviceName: event.target.value }))
-                      }
-                    />
-                  </Field>
-                  <Field label={text.unitLabel}>
-                    <Input
-                      className={shellInputClassName}
-                      value={agencyServiceForm.unitLabel}
-                      onChange={(event) =>
-                        setAgencyServiceForm((current) => ({ ...current, unitLabel: event.target.value }))
-                      }
-                    />
-                  </Field>
-                  <Field label={text.currency}>
-                    <Input
-                      className={shellInputClassName}
-                      value={agencyServiceForm.currency}
-                      onChange={(event) =>
-                        setAgencyServiceForm((current) => ({ ...current, currency: event.target.value }))
-                      }
-                    />
-                  </Field>
-                  <Field label={text.unitPrice}>
-                    <Input
-                      required
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      className={shellInputClassName}
-                      value={agencyServiceForm.unitPrice}
-                      onChange={(event) =>
-                        setAgencyServiceForm((current) => ({ ...current, unitPrice: event.target.value }))
-                      }
-                    />
-                  </Field>
-                  <Field label={text.vatPercent}>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="100"
-                      className={shellInputClassName}
-                      value={agencyServiceForm.vatRate}
-                      onChange={(event) =>
-                        setAgencyServiceForm((current) => ({ ...current, vatRate: event.target.value }))
-                      }
-                    />
-                  </Field>
-                  <Field label={t.providers_service_valid_from}>
-                    <Input
-                      required
-                      type="date"
-                      className={shellInputClassName}
-                      value={agencyServiceForm.validFrom}
-                      onChange={(event) =>
-                        setAgencyServiceForm((current) => ({ ...current, validFrom: event.target.value }))
-                      }
-                    />
-                  </Field>
-                  <Field label={t.providers_service_valid_to}>
-                    <Input
-                      type="date"
-                      className={shellInputClassName}
-                      value={agencyServiceForm.validTo}
-                      onChange={(event) =>
-                        setAgencyServiceForm((current) => ({ ...current, validTo: event.target.value }))
-                      }
-                    />
-                  </Field>
-                  <Field label={text.description} className="sm:col-span-2">
-                    <textarea
-                      className={textareaClassName}
-                      value={agencyServiceForm.description}
-                      onChange={(event) =>
-                        setAgencyServiceForm((current) => ({ ...current, description: event.target.value }))
-                      }
-                    />
-                  </Field>
-                  <label
-                    className={cn(
-                      "sm:col-span-2 flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-foreground",
-                      tokens.surface.mutedCard,
-                    )}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={agencyServiceForm.isActive}
-                      onChange={(event) =>
-                        setAgencyServiceForm((current) => ({ ...current, isActive: event.target.checked }))
-                      }
-                      className={checkboxClass}
-                    />
-                    {text.itemIsActive}
-                  </label>
-                </div>
+                <section className="rounded-xl border border-border bg-card p-5">
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot("Основные данные")}</h2>
+                  <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                    <Field label={text.serviceKey}>
+                      <Input
+                        required
+                        className={shellInputClassName}
+                        value={agencyServiceForm.serviceKey}
+                        onChange={(event) =>
+                          setAgencyServiceForm((current) => ({ ...current, serviceKey: event.target.value }))
+                        }
+                      />
+                    </Field>
+                    <Field label={text.serviceName}>
+                      <Input
+                        required
+                        className={shellInputClassName}
+                        value={agencyServiceForm.serviceName}
+                        onChange={(event) =>
+                          setAgencyServiceForm((current) => ({ ...current, serviceName: event.target.value }))
+                        }
+                      />
+                    </Field>
+                    <Field label={text.unitLabel}>
+                      <Input
+                        className={shellInputClassName}
+                        value={agencyServiceForm.unitLabel}
+                        onChange={(event) =>
+                          setAgencyServiceForm((current) => ({ ...current, unitLabel: event.target.value }))
+                        }
+                      />
+                    </Field>
+                    <Field label={text.currency}>
+                      <Input
+                        className={shellInputClassName}
+                        value={agencyServiceForm.currency}
+                        onChange={(event) =>
+                          setAgencyServiceForm((current) => ({ ...current, currency: event.target.value }))
+                        }
+                      />
+                    </Field>
+                  </div>
+                </section>
+
+                <section className="rounded-xl border border-border bg-card p-5">
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot("Цена и НДС")}</h2>
+                  <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                    <Field label={text.unitPrice}>
+                      <Input
+                        required
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        className={shellInputClassName}
+                        value={agencyServiceForm.unitPrice}
+                        onChange={(event) =>
+                          setAgencyServiceForm((current) => ({ ...current, unitPrice: event.target.value }))
+                        }
+                      />
+                    </Field>
+                    <Field label={text.vatPercent}>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max="100"
+                        className={shellInputClassName}
+                        value={agencyServiceForm.vatRate}
+                        onChange={(event) =>
+                          setAgencyServiceForm((current) => ({ ...current, vatRate: event.target.value }))
+                        }
+                      />
+                    </Field>
+                  </div>
+                </section>
+
+                <section className="rounded-xl border border-border bg-card p-5">
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot("Период действия")}</h2>
+                  <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                    <Field label={t.providers_service_valid_from}>
+                      <Input
+                        required
+                        type="date"
+                        className={shellInputClassName}
+                        value={agencyServiceForm.validFrom}
+                        onChange={(event) =>
+                          setAgencyServiceForm((current) => ({ ...current, validFrom: event.target.value }))
+                        }
+                      />
+                    </Field>
+                    <Field label={t.providers_service_valid_to}>
+                      <Input
+                        type="date"
+                        className={shellInputClassName}
+                        value={agencyServiceForm.validTo}
+                        onChange={(event) =>
+                          setAgencyServiceForm((current) => ({ ...current, validTo: event.target.value }))
+                        }
+                      />
+                    </Field>
+                  </div>
+                </section>
+
+                <section className="rounded-xl border border-border bg-card p-5">
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot("Описание и статус")}</h2>
+                  <div className="mt-5 space-y-4">
+                    <Field label={text.description}>
+                      <textarea
+                        className={textareaClassName}
+                        value={agencyServiceForm.description}
+                        onChange={(event) =>
+                          setAgencyServiceForm((current) => ({ ...current, description: event.target.value }))
+                        }
+                      />
+                    </Field>
+                    <label
+                      className={cn(
+                        "flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-foreground",
+                        tokens.surface.mutedCard,
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={agencyServiceForm.isActive}
+                        onChange={(event) =>
+                          setAgencyServiceForm((current) => ({ ...current, isActive: event.target.checked }))
+                        }
+                        className={checkboxClass}
+                      />
+                      {text.itemIsActive}
+                    </label>
+                  </div>
+                </section>
               </div>
             </AdminSheetScaffold>
           </form>
@@ -1878,91 +1898,106 @@ export function ContractsPage() {
             >
               <div className="space-y-4 rounded-xl p-4">
                 {createContractError ? <ShellBanner tone="error">{createContractError}</ShellBanner> : null}
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label={t.contracts_patient}>
-                    <NativeComboboxSelect
-                      value={createContractForm.patientId || "__empty__"}
-                      onChange={(event) =>
-                        setCreateContractForm((current) => ({
-                          ...current,
-                          patientId:
-                            event.target.value && event.target.value !== "__empty__"
-                              ? event.target.value
-                              : "",
-                        }))
-                      }
-                      className={selectClassName}
-                    >
-                      <option value="__empty__">{text.selectPatient}</option>
-                      {patients.map((patient) => (
-                        <option key={patient.id} value={patient.id}>
-                          {patientOptionLabel(patient)}
-                        </option>
-                      ))}
-                    </NativeComboboxSelect>
-                  </Field>
-                  <Field label={t.users_status}>
-                    <NativeComboboxSelect
-                      value={createContractForm.status}
-                      onChange={(event) =>
-                        setCreateContractForm((current) => ({
-                          ...current,
-                          status: event.target.value as ContractStatus,
-                        }))
-                      }
-                      className={selectClassName}
-                    >
-                      {CONTRACT_STATUSES.map((status) => (
-                        <option key={status} value={status}>
-                          {contractStatusLabel(status)}
-                        </option>
-                      ))}
-                    </NativeComboboxSelect>
-                  </Field>
-                  <Field label={t.providers_service_valid_from}>
-                    <Input
-                      type="date"
-                      className={shellInputClassName}
-                      value={createContractForm.validFrom}
-                      onChange={(event) =>
-                        setCreateContractForm((current) => ({ ...current, validFrom: event.target.value }))
-                      }
-                    />
-                  </Field>
-                  <Field label={t.providers_service_valid_to}>
-                    <Input
-                      type="date"
-                      className={shellInputClassName}
-                      value={createContractForm.validTo}
-                      onChange={(event) =>
-                        setCreateContractForm((current) => ({ ...current, validTo: event.target.value }))
-                      }
-                    />
-                  </Field>
-                  <Field label={t.contracts_signed_at} className="sm:col-span-2">
-                    <Input
-                      type="datetime-local"
-                      className={shellInputClassName}
-                      value={createContractForm.signedAt}
-                      onChange={(event) =>
-                        setCreateContractForm((current) => ({ ...current, signedAt: event.target.value }))
-                      }
-                    />
-                  </Field>
-                  <Field label={t.contracts_notes} className="sm:col-span-2">
-                    <textarea
-                      className={textareaClassName}
-                      value={createContractForm.conditionsText}
-                      onChange={(event) =>
-                        setCreateContractForm((current) => ({
-                          ...current,
-                          conditionsText: event.target.value,
-                        }))
-                      }
-                      placeholder='{"language":"de","jurisdiction":"DE"}'
-                    />
-                  </Field>
-                </div>
+                <section className="rounded-xl border border-border bg-card p-5">
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot("Пациент и статус")}</h2>
+                  <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                    <Field label={t.contracts_patient}>
+                      <NativeComboboxSelect
+                        value={createContractForm.patientId || "__empty__"}
+                        onChange={(event) =>
+                          setCreateContractForm((current) => ({
+                            ...current,
+                            patientId:
+                              event.target.value && event.target.value !== "__empty__"
+                                ? event.target.value
+                                : "",
+                          }))
+                        }
+                        className={selectClassName}
+                      >
+                        <option value="__empty__">{text.selectPatient}</option>
+                        {patients.map((patient) => (
+                          <option key={patient.id} value={patient.id}>
+                            {patientOptionLabel(patient)}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                    </Field>
+                    <Field label={t.users_status}>
+                      <NativeComboboxSelect
+                        value={createContractForm.status}
+                        onChange={(event) =>
+                          setCreateContractForm((current) => ({
+                            ...current,
+                            status: event.target.value as ContractStatus,
+                          }))
+                        }
+                        className={selectClassName}
+                      >
+                        {CONTRACT_STATUSES.map((status) => (
+                          <option key={status} value={status}>
+                            {contractStatusLabel(status)}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                    </Field>
+                  </div>
+                </section>
+
+                <section className="rounded-xl border border-border bg-card p-5">
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot("Сроки договора")}</h2>
+                  <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                    <Field label={t.providers_service_valid_from}>
+                      <Input
+                        type="date"
+                        className={shellInputClassName}
+                        value={createContractForm.validFrom}
+                        onChange={(event) =>
+                          setCreateContractForm((current) => ({ ...current, validFrom: event.target.value }))
+                        }
+                      />
+                    </Field>
+                    <Field label={t.providers_service_valid_to}>
+                      <Input
+                        type="date"
+                        className={shellInputClassName}
+                        value={createContractForm.validTo}
+                        onChange={(event) =>
+                          setCreateContractForm((current) => ({ ...current, validTo: event.target.value }))
+                        }
+                      />
+                    </Field>
+                    <Field label={t.contracts_signed_at} className="sm:col-span-2">
+                      <Input
+                        type="datetime-local"
+                        className={shellInputClassName}
+                        value={createContractForm.signedAt}
+                        onChange={(event) =>
+                          setCreateContractForm((current) => ({ ...current, signedAt: event.target.value }))
+                        }
+                      />
+                    </Field>
+                  </div>
+                </section>
+
+                <section className="rounded-xl border border-border bg-card p-5">
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot("Условия")}</h2>
+                  <div className="mt-5">
+                    <Field label={t.contracts_notes}>
+                      <textarea
+                        className={textareaClassName}
+                        value={createContractForm.conditionsText}
+                        onChange={(event) =>
+                          setCreateContractForm((current) => ({
+                            ...current,
+                            conditionsText: event.target.value,
+                          }))
+                        }
+                        placeholder='{"language":"de","jurisdiction":"DE"}'
+                      />
+                    </Field>
+                  </div>
+                </section>
               </div>
             </AdminSheetScaffold>
           </form>
@@ -1987,64 +2022,73 @@ export function ContractsPage() {
             >
               <div className="space-y-4 rounded-xl p-4">
                 {createQuoteError ? <ShellBanner tone="error">{createQuoteError}</ShellBanner> : null}
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label={t.orders_title} className="sm:col-span-2">
-                    <NativeComboboxSelect
-                      value={createQuoteForm.orderId || "__empty__"}
-                      onChange={(event) =>
-                        setCreateQuoteForm((current) => ({
-                          ...current,
-                          orderId:
-                            event.target.value && event.target.value !== "__empty__"
-                              ? event.target.value
-                              : "",
-                        }))
-                      }
-                      disabled={optionsLoading}
-                      className={selectClassName}
-                    >
-                      <option value="__empty__">
-                        {optionsLoading ? text.loadingOrders : text.selectOrder}
-                      </option>
-                      {filteredOrderOptions.map((order) => (
-                        <option key={order.id} value={order.id}>
-                          {orderOptionLabel(order)}
+                <section className="rounded-xl border border-border bg-card p-5">
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot("Заказ")}</h2>
+                  <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                    <Field label={t.orders_title} className="sm:col-span-2">
+                      <NativeComboboxSelect
+                        value={createQuoteForm.orderId || "__empty__"}
+                        onChange={(event) =>
+                          setCreateQuoteForm((current) => ({
+                            ...current,
+                            orderId:
+                              event.target.value && event.target.value !== "__empty__"
+                                ? event.target.value
+                                : "",
+                          }))
+                        }
+                        disabled={optionsLoading}
+                        className={selectClassName}
+                      >
+                        <option value="__empty__">
+                          {optionsLoading ? text.loadingOrders : text.selectOrder}
                         </option>
-                      ))}
-                    </NativeComboboxSelect>
-                  </Field>
-                  <Field label={t.providers_service_valid_to}>
-                    <Input
-                      type="date"
-                      className={shellInputClassName}
-                      value={createQuoteForm.validUntil}
-                      onChange={(event) =>
-                        setCreateQuoteForm((current) => ({ ...current, validUntil: event.target.value }))
-                      }
-                    />
-                  </Field>
-                  <Field label={t.orders_title}>
-                    <Input
-                      readOnly
-                      className={cn(shellInputClassName, !selectedCreateOrder && "text-muted-foreground")}
-                      value={
-                        selectedCreateOrder
-                          ? `${selectedCreateOrder.order_number} - ${selectedCreateOrder.patient_pid} - ${formatCurrency(selectedCreateOrder.total_estimated)}`
-                          : text.chooseOrder
-                      }
-                    />
-                  </Field>
-                  <Field label={t.contracts_notes} className="sm:col-span-2">
-                    <textarea
-                      className={textareaClassName}
-                      value={createQuoteForm.notes}
-                      onChange={(event) =>
-                        setCreateQuoteForm((current) => ({ ...current, notes: event.target.value }))
-                      }
-                      placeholder={t.patients_notes}
-                    />
-                  </Field>
-                </div>
+                        {filteredOrderOptions.map((order) => (
+                          <option key={order.id} value={order.id}>
+                            {orderOptionLabel(order)}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                    </Field>
+                    <Field label={t.orders_title}>
+                      <Input
+                        readOnly
+                        className={cn(shellInputClassName, !selectedCreateOrder && "text-muted-foreground")}
+                        value={
+                          selectedCreateOrder
+                            ? `${selectedCreateOrder.order_number} - ${selectedCreateOrder.patient_pid} - ${formatCurrency(selectedCreateOrder.total_estimated)}`
+                            : text.chooseOrder
+                        }
+                      />
+                    </Field>
+                    <Field label={t.providers_service_valid_to}>
+                      <Input
+                        type="date"
+                        className={shellInputClassName}
+                        value={createQuoteForm.validUntil}
+                        onChange={(event) =>
+                          setCreateQuoteForm((current) => ({ ...current, validUntil: event.target.value }))
+                        }
+                      />
+                    </Field>
+                  </div>
+                </section>
+
+                <section className="rounded-xl border border-border bg-card p-5">
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot("Заметки")}</h2>
+                  <div className="mt-5">
+                    <Field label={t.contracts_notes}>
+                      <textarea
+                        className={textareaClassName}
+                        value={createQuoteForm.notes}
+                        onChange={(event) =>
+                          setCreateQuoteForm((current) => ({ ...current, notes: event.target.value }))
+                        }
+                        placeholder={t.patients_notes}
+                      />
+                    </Field>
+                  </div>
+                </section>
               </div>
             </AdminSheetScaffold>
           </form>
@@ -2252,7 +2296,7 @@ export function ContractsPage() {
                           />
                         </Field>
                       </div>
-                      <SheetActionsFooter>
+                      <div className="flex justify-end pt-1">
                         <Button
                           type="button"
                           className="h-9 rounded-lg px-3.5"
@@ -2262,7 +2306,7 @@ export function ContractsPage() {
                           {contractStatusBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
                           {text.saveContract}
                         </Button>
-                      </SheetActionsFooter>
+                      </div>
                     </div>
                   </section>
                 </>
@@ -2288,145 +2332,239 @@ export function ContractsPage() {
             title={quoteDetail ? `${quoteDetail.quote_number} / ${quoteDetail.patient_name}` : text.quotesTab}
             description={text.quoteSheetDescription}
           >
-            {quoteDetailLoading ? (
-              <LoadingState label={t.common_loading} />
-            ) : quoteDetailError ? (
-              <ShellBanner tone="error">{quoteDetailError}</ShellBanner>
-            ) : !quoteDetail ? (
-              <EmptyState title={t.common_not_set} description={t.contracts_subtitle} />
-            ) : (
-              <>
-                <AdminTableCard
-                  title={titleWithDot(text.quotesTab)}
-                  description={text.quoteOverviewDescription}
-                  accessory={
-                    <Badge variant="outline" className={cn("rounded-full", quoteStatusClassName(quoteDetail.status))}>
-                      {quoteStatusLabel(quoteDetail.status)}
-                    </Badge>
-                  }
-                >
-                  <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
-                    <DetailField label={t.contracts_patient} value={`${quoteDetail.patient_name} (${quoteDetail.patient_pid})`} />
-                    <DetailField label={t.orders_title} value={quoteDetail.order_number} />
-                    <DetailField label={t.providers_service_valid_to} value={formatDate(quoteDetail.valid_until, locale, t.common_not_set)} />
-                    <DetailField label={t.invoices_paid_at} value={formatDateTime(quoteDetail.paid_at, locale, t.common_not_set)} />
-                    <DetailField label={t.invoices_subtotal} value={formatCurrency(quoteDetail.total_net)} />
-                    <DetailField label={text.vatTotal} value={formatCurrency(quoteDetail.total_vat)} />
-                    <DetailField label={text.grossTotal} value={formatCurrency(quoteDetail.total_gross)} />
-                    <DetailField label={t.invoices_paid} value={formatCurrency(quoteDetail.paid_amount)} />
-                    <DetailField
-                      label={text.snapshotVersion}
-                      value={
-                        quoteDetail.current_version_number
-                          ? `${quoteDetail.current_version_number} / ${quoteDetail.version_count ?? quoteDetail.current_version_number}`
-                          : "0"
-                      }
-                    />
-                    <DetailField label={t.contracts_notes} value={quoteDetail.notes || t.common_not_set} />
-                  </div>
-                </AdminTableCard>
-
-                <AdminTableCard title={titleWithDot(t.providers_linked_patients)} description={text.linkedQuoteDescription}>
-                  <div className="flex flex-wrap gap-2 p-4">
-                    <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={() => staffGo(`/patients?patient=${quoteDetail.patient_id}`)}>
-                      {t.contracts_patient}
-                    </Button>
-                    <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={() => staffGo(`/orders?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>
-                      {text.order}
-                    </Button>
-                    <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={() => staffGo(`/invoices?quote=${quoteDetail.id}&order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>
-                      {text.invoices}
-                    </Button>
-                    <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={() => staffGo(`/documents?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>
-                      {text.documents}
-                    </Button>
-                  </div>
-                </AdminTableCard>
-
-                <AdminTableCard title={titleWithDot(text.quoteLifecycle)} description={text.quoteLifecycleDescription}>
-                  <div className="space-y-4 p-4">
-                    {quoteStatusError ? <ShellBanner tone="error">{quoteStatusError}</ShellBanner> : null}
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <Field label={t.users_status}>
-                        <NativeComboboxSelect
-                          value={quoteStatusForm.status}
-                          onChange={(event) =>
-                            setQuoteStatusForm((current) => ({
-                              ...current,
-                              status: event.target.value as QuoteStatus,
-                            }))
-                          }
-                          className={selectClassName}
-                        >
-                          {QUOTE_STATUSES.map((status) => (
-                            <option key={status} value={status}>
-                              {quoteStatusLabel(status)}
-                            </option>
-                          ))}
-                        </NativeComboboxSelect>
-                      </Field>
-                      <Field label={t.invoices_paid_at}>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          className={shellInputClassName}
-                          value={quoteStatusForm.paidAmount}
-                          onChange={(event) =>
-                            setQuoteStatusForm((current) => ({ ...current, paidAmount: event.target.value }))
-                          }
-                        />
-                      </Field>
-                      <Field label={t.contracts_notes} className="sm:col-span-2">
-                        <textarea
-                          className={textareaClassName}
-                          value={quoteStatusForm.notes}
-                          onChange={(event) =>
-                            setQuoteStatusForm((current) => ({ ...current, notes: event.target.value }))
-                          }
-                        />
-                      </Field>
+            <div className="space-y-4 rounded-xl p-4">
+              {quoteDetailLoading ? (
+                <LoadingState label={t.common_loading} />
+              ) : quoteDetailError ? (
+                <ShellBanner tone="error">{quoteDetailError}</ShellBanner>
+              ) : !quoteDetail ? (
+                <EmptyState title={t.common_not_set} description={t.contracts_subtitle} />
+              ) : (
+                <>
+                  <section className="rounded-xl border border-border bg-card p-6">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.quotesTab)}</h2>
+                      </div>
+                      <Badge variant="outline" className={cn("rounded-full", quoteStatusClassName(quoteDetail.status))}>
+                        {quoteStatusLabel(quoteDetail.status)}
+                      </Badge>
                     </div>
-                    <SheetActionsFooter>
-                      <Button
+                    <div className="mt-5 space-y-5">
+                      <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
+                        <ContractSummaryLine
+                          label={t.contracts_patient}
+                          value={`${quoteDetail.patient_name} (${quoteDetail.patient_pid})`}
+                        />
+                        <ContractSummaryLine label={t.orders_title} value={quoteDetail.order_number} />
+                        <ContractSummaryLine
+                          label={t.providers_service_valid_to}
+                          value={formatDate(quoteDetail.valid_until, locale, t.common_not_set)}
+                        />
+                        <ContractSummaryLine
+                          label={t.invoices_paid_at}
+                          value={formatDateTime(quoteDetail.paid_at, locale, t.common_not_set)}
+                        />
+                        <ContractSummaryLine label={t.invoices_subtotal} value={formatCurrency(quoteDetail.total_net)} />
+                        <ContractSummaryLine label={text.vatTotal} value={formatCurrency(quoteDetail.total_vat)} />
+                        <ContractSummaryLine label={text.grossTotal} value={formatCurrency(quoteDetail.total_gross)} />
+                        <ContractSummaryLine label={t.invoices_paid} value={formatCurrency(quoteDetail.paid_amount)} />
+                        <ContractSummaryLine
+                          label={text.snapshotVersion}
+                          value={
+                            quoteDetail.current_version_number
+                              ? `${quoteDetail.current_version_number} / ${quoteDetail.version_count ?? quoteDetail.current_version_number}`
+                              : "0"
+                          }
+                        />
+                      </div>
+                      <div className="space-y-3">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.contracts_notes)}</h2>
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-border bg-background/60 p-4 text-sm leading-snug text-muted-foreground">
+                          {quoteDetail.notes || t.common_not_set}
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="rounded-xl border border-border bg-card p-6">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.providers_linked_patients)}</h2>
+                      </div>
+                    </div>
+                    <div className="mt-5 grid gap-3 md:grid-cols-4">
+                      <button
                         type="button"
-                        className="h-9 rounded-lg px-3.5"
-                        onClick={() => void handleSaveQuoteStatus()}
-                        disabled={quoteStatusBusy || !permissions.canManageQuote}
+                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                        onClick={() => window.open(`/patients?patient=${quoteDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
-                        {quoteStatusBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                        {text.saveQuote}
-                      </Button>
-                    </SheetActionsFooter>
-                  </div>
-                </AdminTableCard>
+                        <div className="relative z-10">
+                          <h3 className="text-sm font-semibold text-foreground">{t.contracts_patient}</h3>
+                          <p className="mt-2 text-xs leading-tight text-muted-foreground">
+                            Откройте карточку пациента, связанного с предложением.
+                          </p>
+                        </div>
+                        <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
+                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                        onClick={() => window.open(`/orders?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`, "_blank", "noopener,noreferrer")}
+                      >
+                        <div className="relative z-10">
+                          <h3 className="text-sm font-semibold text-foreground">{text.order}</h3>
+                          <p className="mt-2 text-xs leading-tight text-muted-foreground">
+                            Откройте заказ, из которого сформировано это предложение.
+                          </p>
+                        </div>
+                        <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
+                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                        onClick={() => window.open(`/invoices?quote=${quoteDetail.id}&order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`, "_blank", "noopener,noreferrer")}
+                      >
+                        <div className="relative z-10">
+                          <h3 className="text-sm font-semibold text-foreground">{text.invoices}</h3>
+                          <p className="mt-2 text-xs leading-tight text-muted-foreground">
+                            Проверьте счета и оплаты, связанные с этим предложением.
+                          </p>
+                        </div>
+                        <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
+                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                        onClick={() => window.open(`/documents?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`, "_blank", "noopener,noreferrer")}
+                      >
+                        <div className="relative z-10">
+                          <h3 className="text-sm font-semibold text-foreground">{text.documents}</h3>
+                          <p className="mt-2 text-xs leading-tight text-muted-foreground">
+                            Откройте документы заказа и пациента по этому предложению.
+                          </p>
+                        </div>
+                        <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
+                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                        </span>
+                      </button>
+                    </div>
+                  </section>
 
-                <AdminTableCard title={titleWithDot(text.lineItems)} description={text.lineItemsDescription}>
-                  <DataTableSurface
-                    rows={quoteLineItemRows}
-                    columns={quoteLineItemColumns}
-                    rowId={(row) => row.id}
-                    defaultDensity="compact"
-                    dictionary={t as unknown as Record<string, string>}
-                    rowAccent={(row) => (row.is_cost_passthrough ? "bg-amber-500" : null)}
-                    emptyState={<EmptyState title={text.noLineItems} description={text.noLineItemsDescription} />}
-                  />
-                </AdminTableCard>
+                  <section className="rounded-xl border border-border bg-card p-6">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.quoteLifecycle)}</h2>
+                      </div>
+                    </div>
+                    <div className="mt-5 space-y-4">
+                      {quoteStatusError ? <ShellBanner tone="error">{quoteStatusError}</ShellBanner> : null}
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <Field label={t.users_status}>
+                          <NativeComboboxSelect
+                            value={quoteStatusForm.status}
+                            onChange={(event) =>
+                              setQuoteStatusForm((current) => ({
+                                ...current,
+                                status: event.target.value as QuoteStatus,
+                              }))
+                            }
+                            className={selectClassName}
+                          >
+                            {QUOTE_STATUSES.map((status) => (
+                              <option key={status} value={status}>
+                                {quoteStatusLabel(status)}
+                              </option>
+                            ))}
+                          </NativeComboboxSelect>
+                        </Field>
+                        <Field label={t.invoices_paid_at}>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            className={shellInputClassName}
+                            value={quoteStatusForm.paidAmount}
+                            onChange={(event) =>
+                              setQuoteStatusForm((current) => ({ ...current, paidAmount: event.target.value }))
+                            }
+                          />
+                        </Field>
+                        <Field label={t.contracts_notes} className="sm:col-span-2">
+                          <textarea
+                            className={textareaClassName}
+                            value={quoteStatusForm.notes}
+                            onChange={(event) =>
+                              setQuoteStatusForm((current) => ({ ...current, notes: event.target.value }))
+                            }
+                          />
+                        </Field>
+                      </div>
+                      <div className="flex justify-end pt-1">
+                        <Button
+                          type="button"
+                          className="h-9 rounded-lg px-3.5"
+                          onClick={() => void handleSaveQuoteStatus()}
+                          disabled={quoteStatusBusy || !permissions.canManageQuote}
+                        >
+                          {quoteStatusBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                          {text.saveQuote}
+                        </Button>
+                      </div>
+                    </div>
+                  </section>
 
-                <AdminTableCard title={titleWithDot(text.versionHistory)} description={text.versionHistoryDescription}>
-                  {quoteVersionsError ? <div className="p-4"><ShellBanner tone="error">{quoteVersionsError}</ShellBanner></div> : null}
-                  <DataTableSurface
-                    rows={quoteVersions}
-                    columns={quoteVersionColumns}
-                    rowId={(row) => row.id}
-                    defaultDensity="compact"
-                    dictionary={t as unknown as Record<string, string>}
-                    loading={quoteVersionsLoading}
-                    emptyState={<EmptyState title={text.noVersions} description={text.noVersionsDescription} />}
-                  />
-                </AdminTableCard>
-              </>
-            )}
+                  <section className="rounded-xl border border-border bg-card p-6">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.lineItems)}</h2>
+                      </div>
+                    </div>
+                    <div className="mt-5">
+                      <DataTableSurface
+                        rows={quoteLineItemRows}
+                        columns={quoteLineItemColumns}
+                        rowId={(row) => row.id}
+                        defaultDensity="compact"
+                        dictionary={t as unknown as Record<string, string>}
+                        rowAccent={(row) => (row.is_cost_passthrough ? "bg-amber-500" : null)}
+                        emptyState={<EmptyState title={text.noLineItems} description={text.noLineItemsDescription} />}
+                      />
+                    </div>
+                  </section>
+
+                  <section className="rounded-xl border border-border bg-card p-6">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.versionHistory)}</h2>
+                      </div>
+                    </div>
+                    <div className="mt-5 space-y-4">
+                      {quoteVersionsError ? <ShellBanner tone="error">{quoteVersionsError}</ShellBanner> : null}
+                      <DataTableSurface
+                        rows={quoteVersions}
+                        columns={quoteVersionColumns}
+                        rowId={(row) => row.id}
+                        defaultDensity="compact"
+                        dictionary={t as unknown as Record<string, string>}
+                        loading={quoteVersionsLoading}
+                        emptyState={<EmptyState title={text.noVersions} description={text.noVersionsDescription} />}
+                      />
+                    </div>
+                  </section>
+                </>
+              )}
+            </div>
           </AdminSheetScaffold>
         </SheetContent>
       </Sheet>
