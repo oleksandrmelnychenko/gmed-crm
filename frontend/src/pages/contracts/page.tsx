@@ -1379,6 +1379,20 @@ export function ContractsPage() {
           </div>
 
           <div className="mt-5 space-y-4 border-b border-border pb-4">
+            <div className="grid gap-2 sm:grid-cols-3">
+              <MiniMetric label={text.catalogItems} value={String(agencyServiceStats.total)} />
+              <MiniMetric label={text.activeLabel} value={String(agencyServiceStats.active)} />
+              <MiniMetric label={text.priced} value={String(agencyServiceStats.priced)} />
+            </div>
+
+            <div className="flex items-center gap-2" aria-hidden>
+              <span className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-border" />
+              <span className="h-1.5 w-1.5 rounded-full bg-orange-400" />
+              <span className="h-1.5 w-1.5 rounded-full bg-orange-300" />
+              <span className="h-1.5 w-1.5 rounded-full bg-orange-200" />
+              <span className="h-px flex-1 bg-gradient-to-r from-border via-border to-transparent" />
+            </div>
+
             <AdminToolbar className="rounded-none border-0 bg-transparent p-0 shadow-none">
               <div className="relative min-w-[260px] flex-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -1422,12 +1436,6 @@ export function ContractsPage() {
                 {t.access_reset}
               </Button>
             </AdminToolbar>
-
-            <div className="grid gap-3 sm:grid-cols-3">
-              <MiniMetric label={text.catalogItems} value={String(agencyServiceStats.total)} />
-              <MiniMetric label={text.activeLabel} value={String(agencyServiceStats.active)} />
-              <MiniMetric label={text.priced} value={String(agencyServiceStats.priced)} />
-            </div>
 
             {agencyServicesError ? <ShellBanner tone="error">{agencyServicesError}</ShellBanner> : null}
           </div>
@@ -2596,11 +2604,11 @@ function DetailField({ label, value }: { label: string; value: ReactNode }) {
 
 function MiniMetric({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="rounded-xl border border-border bg-muted/20 px-4 py-3">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+    <div className="flex min-w-[210px] flex-1 items-center justify-between gap-3 rounded-full border border-border bg-muted/20 px-4 py-2">
+      <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
         {label}
-      </div>
-      <div className="mt-2 text-sm text-foreground">{value}</div>
+      </span>
+      <span className="shrink-0 text-sm font-semibold leading-none text-foreground">{value}</span>
     </div>
   );
 }
