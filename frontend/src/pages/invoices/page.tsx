@@ -2029,41 +2029,69 @@ function StaffInvoicesPage() {
                   </div>
                 </SectionCard>
 
-                <SectionCard title={text.lineItems} description={text.lineItemsDescription}>
+                <SectionCard title={text.lineItems}>
                   {!detail.line_items || detail.line_items.length === 0 ? <EmptyState title={text.noLineItems} description={text.noLineItemsDescription} /> : (
                     <div className="space-y-3">
                       {detail.line_items.map((line, index) => (
-                        <div key={`${line.description}-${index}`} className={cn("rounded-xl p-4", tokens.surface.mutedCard)}>
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <h3 className={tokens.text.sectionTitle}>{line.description}</h3>
-                              <p className={cn("mt-1", tokens.text.muted)}>{`${text.quantity} ${line.quantity} | ${text.unit} ${formatMoney(line.unit_price)}`}</p>
-                              <p className={cn("mt-1", tokens.text.muted)}>
-                                {line.vat_source_explanation ??
-                                  `${text.vatSource}: ${vatSourceLabel(line.vat_source ?? "legacy")}`}
-                              </p>
+                        <article
+                          key={`${line.description}-${index}`}
+                          className="overflow-hidden rounded-2xl border border-border bg-card"
+                        >
+                          <div className="grid lg:grid-cols-[minmax(0,1fr)_180px]">
+                            <div className="p-4">
+                              <div className="flex items-start gap-3">
+                                <div className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted/30 text-xs font-semibold text-muted-foreground">
+                                  {index + 1}
+                                </div>
+                                <div className="min-w-0">
+                                  <h3 className="text-sm font-semibold leading-snug text-foreground">{line.description}</h3>
+                                  <div className="mt-2 flex flex-wrap gap-1.5">
+                                    <StatusBadge tone="neutral">{`${t.invoices_vat} ${line.vat_rate}%`}</StatusBadge>
+                                    <StatusBadge tone="neutral">
+                                      {taxProfileLabel(
+                                        line.tax_profile_name,
+                                        line.tax_profile_key,
+                                        line.vat_source,
+                                      )}
+                                    </StatusBadge>
+                                    {line.is_cost_passthrough ? (
+                                      <StatusBadge tone="warning">{t.orders_cost_pass_through_badge}</StatusBadge>
+                                    ) : null}
+                                  </div>
+                                  <p className="mt-3 max-w-2xl text-xs leading-snug text-muted-foreground">
+                                    {line.vat_source_explanation ??
+                                      `${text.vatSource}: ${vatSourceLabel(line.vat_source ?? "legacy")}`}
+                                  </p>
+                                </div>
+                              </div>
                             </div>
-                            <div className="flex flex-wrap gap-2">
-                              <StatusBadge tone="neutral">{`${t.invoices_vat} ${line.vat_rate}%`}</StatusBadge>
-                              <StatusBadge tone="neutral">
-                                {taxProfileLabel(
-                                  line.tax_profile_name,
-                                  line.tax_profile_key,
-                                  line.vat_source,
-                                )}
-                              </StatusBadge>
-                              {line.is_cost_passthrough ? (
-                                <StatusBadge tone="warning">{t.orders_cost_pass_through_badge}</StatusBadge>
-                              ) : null}
+                            <div className="relative border-t border-border px-4 py-4 lg:border-t-0 lg:pl-5 lg:before:absolute lg:before:bottom-4 lg:before:left-0 lg:before:top-4 lg:before:border-l lg:before:border-dashed lg:before:border-border">
+                              <div className="text-xs text-muted-foreground">{text.gross}</div>
+                              <div className="mt-1 text-xl font-semibold leading-none text-foreground">
+                                {formatMoney(line.line_gross)}
+                              </div>
                             </div>
                           </div>
-                          <div className="mt-4 grid gap-3 md:grid-cols-3">
-                            <MiniMetric label={text.net} value={formatMoney(line.line_net)} />
-                            <MiniMetric label={t.invoices_vat} value={formatMoney(line.line_vat)} />
-                            <MiniMetric label={text.gross} value={formatMoney(line.line_gross)} />
+                          <div className="grid border-t border-border bg-muted/15 sm:grid-cols-3">
+                            <div className="px-4 py-3">
+                              <div className="text-xs text-muted-foreground">{text.net}</div>
+                              <div className="mt-1 text-sm font-semibold text-foreground">{formatMoney(line.line_net)}</div>
+                            </div>
+                            <div className="border-t border-border px-4 py-3 sm:border-l sm:border-t-0">
+                              <div className="text-xs text-muted-foreground">{t.invoices_vat}</div>
+                              <div className="mt-1 text-sm font-semibold text-foreground">{formatMoney(line.line_vat)}</div>
+                            </div>
+                            <div className="border-t border-border px-4 py-3 sm:border-l sm:border-t-0">
+                              <div className="text-xs text-muted-foreground">{text.gross}</div>
+                              <div className="mt-1 text-sm font-semibold text-foreground">{formatMoney(line.line_gross)}</div>
+                            </div>
                           </div>
-                          {line.notes ? <div className="mt-3 text-sm text-muted-foreground">{line.notes}</div> : null}
-                        </div>
+                          {line.notes ? (
+                            <div className="border-t border-border px-4 py-2 text-xs leading-snug text-muted-foreground">
+                              {line.notes}
+                            </div>
+                          ) : null}
+                        </article>
                       ))}
                     </div>
                   )}
