@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/sheet";
 import {
   Banner as ShellBanner,
+  Section as FormSection,
   PageHeader,
   StatusBadge,
   SuccessBanner,
@@ -1311,10 +1312,6 @@ function StaffFeedbackWorkspace() {
                 {t.feedback_capture_button}
               </Button>
             ) : null}
-            <Button variant="outline" className="h-9 rounded-lg" onClick={() => setVersion((value) => value + 1)}>
-              {refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-              {t.common_refresh}
-            </Button>
           </>
         }
       />
@@ -1492,55 +1489,66 @@ function StaffFeedbackWorkspace() {
                 />
               }
             >
-              <Field label={t.feedback_patient}>
-                <NativeComboboxSelect
-                  value={selectedPatientId || "__empty__"}
-                  onChange={(event) =>
-                    setSelectedPatientId(
-                      event.target.value === "__empty__" || !event.target.value ? "" : event.target.value,
-                    )
-                  }
-                  className={selectClassName}
-                >
-                  <option value="__empty__">
-                    {t.feedback_select_patient}
-                  </option>
-                  {patients.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {patientLabel(item)}
-                    </option>
-                  ))}
-                </NativeComboboxSelect>
-              </Field>
+              <div className="space-y-3">
+                <FormSection title={`${t.feedback_patient} / ${t.feedback_visit}`}>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <Field label={t.feedback_patient}>
+                      <NativeComboboxSelect
+                        value={selectedPatientId || "__empty__"}
+                        onChange={(event) =>
+                          setSelectedPatientId(
+                            event.target.value === "__empty__" || !event.target.value ? "" : event.target.value,
+                          )
+                        }
+                        className={selectClassName}
+                      >
+                        <option value="__empty__">
+                          {t.feedback_select_patient}
+                        </option>
+                        {patients.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {patientLabel(item)}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                    </Field>
 
-              <Field label={t.feedback_visit}>
-                <NativeComboboxSelect
-                  value={form.appointmentId || "__general__"}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      appointmentId:
-                        event.target.value === "__general__" || !event.target.value
-                          ? ""
-                          : event.target.value,
-                    }))
-                  }
-                  disabled={!selectedPatientId}
-                  className={selectClassName}
-                >
-                  <option value="__general__">
-                    {t.feedback_general_feedback}
-                  </option>
-                  {patientAppointments.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {appointmentOptionLabel(item)}
-                    </option>
-                  ))}
-                </NativeComboboxSelect>
-              </Field>
+                    <Field label={t.feedback_visit}>
+                      <NativeComboboxSelect
+                        value={form.appointmentId || "__general__"}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            appointmentId:
+                              event.target.value === "__general__" || !event.target.value
+                                ? ""
+                                : event.target.value,
+                          }))
+                        }
+                        disabled={!selectedPatientId}
+                        className={selectClassName}
+                      >
+                        <option value="__general__">
+                          {t.feedback_general_feedback}
+                        </option>
+                        {patientAppointments.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {appointmentOptionLabel(item)}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                    </Field>
+                  </div>
+                </FormSection>
 
-              <ScoreGrid t={t} form={form} setForm={setForm} />
-              <FeedbackFormNotes t={t} form={form} setForm={setForm} includeInternal />
+                <FormSection title={t.feedback_scores}>
+                  <ScoreGrid t={t} form={form} setForm={setForm} />
+                </FormSection>
+
+                <FormSection title={`${t.feedback_comment} / ${t.feedback_internal_note}`}>
+                  <FeedbackFormNotes t={t} form={form} setForm={setForm} includeInternal />
+                </FormSection>
+              </div>
             </AdminSheetScaffold>
           </form>
         </SheetContent>
