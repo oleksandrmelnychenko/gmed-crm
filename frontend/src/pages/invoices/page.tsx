@@ -35,7 +35,6 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -274,6 +273,12 @@ function StaffInvoicesPage() {
     saveInvoice: t.invoices_workspace_save_invoice,
     dunningTitle: t.invoices_workspace_dunning_title,
     dunningDescription: t.invoices_workspace_dunning_description,
+    dunningHistory: t.invoices_workspace_dunning_history,
+    dunningAction: t.invoices_workspace_dunning_action,
+    dunningSentAt: t.invoices_workspace_dunning_sent_at,
+    dunningResponsible: t.invoices_workspace_dunning_responsible,
+    dunningBalanceDue: t.invoices_workspace_dunning_balance_due,
+    createDunning: t.invoices_workspace_create_dunning,
     noDunningEvents: t.invoices_workspace_no_dunning_events,
     noDunningEventsDescription: t.invoices_workspace_no_dunning_events_description,
     nextEscalation: t.invoices_workspace_next_escalation,
@@ -410,6 +415,7 @@ function StaffInvoicesPage() {
   const [dunningBusy, setDunningBusy] = useState(false);
   const [dunningError, setDunningError] = useState<string | null>(null);
   const [dunningForm, setDunningForm] = useState<DunningForm>({ note: "" });
+  const [dunningDialogOpen, setDunningDialogOpen] = useState(false);
   const [accountingYear, setAccountingYear] = useState(currentYear);
   const [accountingLedger, setAccountingLedger] = useState<AccountingLedgerPayload | null>(null);
   const [accountingBusy, setAccountingBusy] = useState(false);
@@ -1073,6 +1079,7 @@ function StaffInvoicesPage() {
       });
       setDunningEvents((current) => [...current, created]);
       setDunningForm({ note: "" });
+      setDunningDialogOpen(false);
       setDunningError(null);
       setReloadToken((current) => current + 1);
     } catch (error) {
@@ -1755,7 +1762,7 @@ function StaffInvoicesPage() {
                 >
                   <div className="space-y-5">
                     <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
-                      <SummaryLine label={t.invoices_patient} value={`${detail.patient_name} (${detail.patient_pid})`} />
+                      <SummaryLine label={t.invoices_patient} value={detail.patient_pid} />
                       <SummaryLine label={t.orders_title} value={detail.order_number} />
                       <SummaryLine label={t.contracts_type} value={detail.quote_number ?? t.common_not_set} />
                       <SummaryLine label={t.invoices_issued_at} value={formatDateTime(detail.issued_at, locale, t.common_not_set)} />
@@ -1949,45 +1956,76 @@ function StaffInvoicesPage() {
                     </section>
                   </div>
 
-                <SectionCard title={text.dunningTitle} description={text.dunningDescription}>
+                <SectionCard
+                  title={text.dunningTitle}
+                  description={text.dunningDescription}
+                  action={
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setDunningDialogOpen(true)}
+                      disabled={!access.canManage || !nextDunning}
+                    >
+                      {nextDunning ? text.createDunning : text.noFurtherEscalation}
+                    </Button>
+                  }
+                >
                   {dunningError ? <ShellBanner tone="error">{dunningError}</ShellBanner> : null}
-                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-                    <div className="space-y-3">
-                      {dunningEvents.length === 0 ? (
-                        <EmptyState title={text.noDunningEvents} description={text.noDunningEventsDescription} />
-                      ) : (
-                        dunningEvents.map((event) => (
-                          <div key={event.id} className={cn("rounded-xl p-4", tokens.surface.mutedCard)}>
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                              <div>
-                                <div className={tokens.text.sectionTitle}>{dunningLevelLabel(event.level)}</div>
-                                <div className={cn("mt-1", tokens.text.muted)}>{`${formatDateTime(event.sent_at, locale, t.common_not_set)} | ${event.created_by_name ?? text.system}`}</div>
+                  <div className="space-y-3">
+                    {dunningEvents.length === 0 ? (
+                      <EmptyState title={text.noDunningEvents} description={text.noDunningEventsDescription} />
+                    ) : (
+                      <div className="space-y-3 pl-6">
+                        {dunningEvents.map((event, index) => (
+                          <div
+                            key={event.id}
+                            className={cn(
+                              "relative",
+                              index < dunningEvents.length - 1 &&
+                                "before:absolute before:-bottom-5 before:-left-4 before:top-3 before:w-px before:bg-border",
+                            )}
+                          >
+                            <span className="absolute -left-[1.125rem] top-1.5 z-10 size-2 rounded-full bg-muted-foreground ring-4 ring-background" />
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className={tokens.text.sectionTitle}>
+                                {dunningLevelLabel(event.level)}
                               </div>
-                              <StatusBadge tone="error">{formatMoney(event.balance_due)}</StatusBadge>
+                              <span className="text-xs text-muted-foreground">
+                                {formatDateTime(event.sent_at, locale, t.common_not_set)}
+                              </span>
                             </div>
-                            {event.note ? <div className="mt-3 text-sm text-muted-foreground">{event.note}</div> : null}
+                            <div className="mt-2 overflow-hidden rounded-2xl border border-border bg-card">
+                              <div className="grid gap-0 sm:grid-cols-[minmax(0,1fr)_190px]">
+                                <div className="px-4 py-3">
+                                  <div className="text-xs text-muted-foreground">
+                                    {text.dunningBalanceDue}
+                                  </div>
+                                  <div className="mt-1 text-2xl font-semibold leading-none text-foreground">
+                                    {formatMoney(event.balance_due)}
+                                  </div>
+                                  {event.note ? (
+                                    <div className="mt-3 max-w-xl text-xs leading-snug text-muted-foreground">
+                                      {event.note}
+                                    </div>
+                                  ) : null}
+                                </div>
+                                <div className="relative border-t border-border px-4 py-3 sm:border-t-0 sm:pl-5 sm:before:absolute sm:before:bottom-3 sm:before:left-0 sm:before:top-3 sm:before:border-l sm:before:border-dashed sm:before:border-border">
+                                  <div className="space-y-2 text-xs leading-tight">
+                                    <div>
+                                      <div className="text-muted-foreground">{text.dunningResponsible}</div>
+                                      <div className="mt-0.5 font-medium text-foreground">
+                                        {event.created_by_name ?? text.system}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
                           </div>
-                        ))
-                      )}
-                    </div>
-                    <div className={cn("rounded-xl p-4", tokens.surface.mutedCard)}>
-                      <div className={tokens.text.eyebrow}>{text.nextEscalation}</div>
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <StatusBadge tone={nextDunning ? dunningLevelTone(nextDunning) : "neutral"}>
-                          {nextDunning ? dunningLevelLabel(nextDunning) : text.completed}
-                        </StatusBadge>
-                        <span className="text-sm text-muted-foreground">{`${text.balancePrefix} ${formatMoney(detail.balance_due)}`}</span>
+                        ))}
                       </div>
-                      <div className="mt-4 space-y-3">
-                        <Field label={text.dunningNote}>
-                          <textarea className={textareaClassName} value={dunningForm.note} onChange={(event) => setDunningForm({ note: event.target.value })} disabled={!access.canManage || !nextDunning} placeholder={text.dunningPlaceholder} />
-                        </Field>
-                        <Button type="button" className="w-full" onClick={() => void handleCreateDunning()} disabled={dunningBusy || !access.canManage || !nextDunning}>
-                          {dunningBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                          {nextDunning ? text.sendDunning(dunningLevelLabel(nextDunning)) : text.noFurtherEscalation}
-                        </Button>
-                      </div>
-                    </div>
+                    )}
                   </div>
                 </SectionCard>
 
@@ -2082,6 +2120,59 @@ function StaffInvoicesPage() {
         </SheetContent>
       </Sheet>
 
+      <Dialog open={dunningDialogOpen} onOpenChange={setDunningDialogOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <form
+            className="space-y-5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleCreateDunning();
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>{text.nextEscalation}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 rounded-xl p-4">
+              {dunningError ? <ShellBanner tone="error">{dunningError}</ShellBanner> : null}
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="rounded-xl border border-border bg-card px-4 py-3">
+                  <div className="text-xs text-muted-foreground">{text.nextEscalation}</div>
+                  <div className="mt-1">
+                    <StatusBadge tone={nextDunning ? dunningLevelTone(nextDunning) : "neutral"}>
+                      {nextDunning ? dunningLevelLabel(nextDunning) : text.completed}
+                    </StatusBadge>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-border bg-card px-4 py-3">
+                  <div className="text-xs text-muted-foreground">{text.balancePrefix}</div>
+                  <div className="mt-1 text-lg font-semibold leading-none text-foreground">
+                    {detail ? formatMoney(detail.balance_due) : t.common_not_set}
+                  </div>
+                </div>
+              </div>
+              <Field label={text.dunningNote}>
+                <textarea
+                  className={textareaClassName}
+                  value={dunningForm.note}
+                  onChange={(event) => setDunningForm({ note: event.target.value })}
+                  disabled={!access.canManage || !nextDunning}
+                  placeholder={text.dunningPlaceholder}
+                />
+              </Field>
+              <div className="flex justify-end">
+                <Button
+                  type="submit"
+                  disabled={dunningBusy || !access.canManage || !nextDunning}
+                >
+                  {dunningBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+                  {nextDunning ? text.createDunning : text.noFurtherEscalation}
+                </Button>
+              </div>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
         <DialogContent className="sm:max-w-2xl">
           <form
@@ -2094,76 +2185,70 @@ function StaffInvoicesPage() {
             <DialogHeader>
               <DialogTitle>{t.invoices_status}</DialogTitle>
             </DialogHeader>
-            {statusError ? <ShellBanner tone="error">{statusError}</ShellBanner> : null}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label={t.users_status}>
-                <NativeComboboxSelect
-                  value={statusForm.status}
-                  onChange={(event) =>
-                    setStatusForm((current) => ({
-                      ...current,
-                      status: event.target.value as InvoiceStatus,
-                    }))
-                  }
-                  className={selectClassName}
-                  disabled={!access.canManage}
-                >
-                  {INVOICE_STATUSES.map((status) => (
-                    <option key={status} value={status}>
-                      {invoiceStatusLabel(status)}
-                    </option>
-                  ))}
-                </NativeComboboxSelect>
-              </Field>
-              <Field label={t.invoices_due_at}>
-                <Input
-                  type="date"
-                  className={shellInputClassName}
-                  value={statusForm.dueDate}
-                  onChange={(event) =>
-                    setStatusForm((current) => ({ ...current, dueDate: event.target.value }))
-                  }
-                  disabled={!access.canManage}
-                />
-              </Field>
-              <Field label={t.invoices_paid}>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  className={shellInputClassName}
-                  value={statusForm.paidAmount}
-                  onChange={(event) =>
-                    setStatusForm((current) => ({ ...current, paidAmount: event.target.value }))
-                  }
-                  disabled={!access.canManage}
-                />
-              </Field>
-              <Field label={text.notes} className="sm:col-span-2">
-                <textarea
-                  className={textareaClassName}
-                  value={statusForm.notes}
-                  onChange={(event) =>
-                    setStatusForm((current) => ({ ...current, notes: event.target.value }))
-                  }
-                  disabled={!access.canManage}
-                />
-              </Field>
+            <div className="space-y-4 rounded-xl p-4">
+              {statusError ? <ShellBanner tone="error">{statusError}</ShellBanner> : null}
+              <div className="grid gap-4 lg:grid-cols-3">
+                <Field label={t.users_status}>
+                  <NativeComboboxSelect
+                    value={statusForm.status}
+                    onChange={(event) =>
+                      setStatusForm((current) => ({
+                        ...current,
+                        status: event.target.value as InvoiceStatus,
+                      }))
+                    }
+                    className={selectClassName}
+                    disabled={!access.canManage}
+                  >
+                    {INVOICE_STATUSES.map((status) => (
+                      <option key={status} value={status}>
+                        {invoiceStatusLabel(status)}
+                      </option>
+                    ))}
+                  </NativeComboboxSelect>
+                </Field>
+                <Field label={t.invoices_due_at}>
+                  <Input
+                    type="date"
+                    className={shellInputClassName}
+                    value={statusForm.dueDate}
+                    onChange={(event) =>
+                      setStatusForm((current) => ({ ...current, dueDate: event.target.value }))
+                    }
+                    disabled={!access.canManage}
+                  />
+                </Field>
+                <Field label={t.invoices_paid}>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    className={shellInputClassName}
+                    value={statusForm.paidAmount}
+                    onChange={(event) =>
+                      setStatusForm((current) => ({ ...current, paidAmount: event.target.value }))
+                    }
+                    disabled={!access.canManage}
+                  />
+                </Field>
+                <Field label={text.notes} className="lg:col-span-3">
+                  <textarea
+                    className={textareaClassName}
+                    value={statusForm.notes}
+                    onChange={(event) =>
+                      setStatusForm((current) => ({ ...current, notes: event.target.value }))
+                    }
+                    disabled={!access.canManage}
+                  />
+                </Field>
+              </div>
+              <div className="flex justify-end">
+                <Button type="submit" disabled={statusBusy || !access.canManage}>
+                  {statusBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+                  {text.saveInvoice}
+                </Button>
+              </div>
             </div>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setStatusDialogOpen(false)}
-                disabled={statusBusy}
-              >
-                {t.common_cancel}
-              </Button>
-              <Button type="submit" disabled={statusBusy || !access.canManage}>
-                {statusBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                {text.saveInvoice}
-              </Button>
-            </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
@@ -2180,108 +2265,102 @@ function StaffInvoicesPage() {
             <DialogHeader>
               <DialogTitle>{t.revenue_invoices_patient_preview}</DialogTitle>
             </DialogHeader>
-            {visibilityError ? <ShellBanner tone="error">{visibilityError}</ShellBanner> : null}
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="flex min-h-[48px] items-center gap-3 rounded-xl border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={visibilityForm.portalVisible}
-                  onChange={(event) =>
-                    setVisibilityForm((current) => ({
-                      ...current,
-                      portalVisible: event.target.checked,
-                    }))
-                  }
-                  disabled={!access.canManage || visibilityBusy}
-                />
-                {t.revenue_invoices_portal_visible}
-              </label>
-              <label className="flex min-h-[48px] items-center gap-3 rounded-xl border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={visibilityForm.hideAmountsFromPatient}
-                  onChange={(event) =>
-                    setVisibilityForm((current) => ({
-                      ...current,
-                      hideAmountsFromPatient: event.target.checked,
-                      lineItemsVisibleToPatient: event.target.checked
-                        ? false
-                        : current.lineItemsVisibleToPatient,
-                      pdfVisibleToPatient: event.target.checked
-                        ? false
-                        : current.pdfVisibleToPatient,
-                    }))
-                  }
-                  disabled={!access.canManage || visibilityBusy}
-                />
-                {t.revenue_invoices_hide_amounts}
-              </label>
-              <label className="flex min-h-[48px] items-center gap-3 rounded-xl border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={visibilityForm.lineItemsVisibleToPatient}
-                  onChange={(event) =>
-                    setVisibilityForm((current) => ({
-                      ...current,
-                      lineItemsVisibleToPatient: event.target.checked,
-                    }))
-                  }
-                  disabled={
-                    !access.canManage ||
-                    visibilityBusy ||
-                    visibilityForm.hideAmountsFromPatient ||
-                    !visibilityForm.portalVisible
-                  }
-                />
-                {t.revenue_invoices_patient_sees_lines}
-              </label>
-              <label className="flex min-h-[48px] items-center gap-3 rounded-xl border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={visibilityForm.pdfVisibleToPatient}
-                  onChange={(event) =>
-                    setVisibilityForm((current) => ({
-                      ...current,
-                      pdfVisibleToPatient: event.target.checked,
-                    }))
-                  }
-                  disabled={
-                    !access.canManage ||
-                    visibilityBusy ||
-                    visibilityForm.hideAmountsFromPatient ||
-                    !visibilityForm.portalVisible
-                  }
-                />
-                {t.revenue_invoices_patient_pdf_available}
-              </label>
-              <Field label={t.revenue_invoices_visibility_note} className="sm:col-span-2">
-                <textarea
-                  className={textareaClassName}
-                  value={visibilityForm.visibilityNote}
-                  onChange={(event) =>
-                    setVisibilityForm((current) => ({
-                      ...current,
-                      visibilityNote: event.target.value,
-                    }))
-                  }
-                  disabled={!access.canManage || visibilityBusy}
-                />
-              </Field>
+            <div className="space-y-4 rounded-xl p-4">
+              {visibilityError ? <ShellBanner tone="error">{visibilityError}</ShellBanner> : null}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="flex items-center gap-1.5 rounded-md bg-card py-0.5 pr-1.5 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={visibilityForm.portalVisible}
+                    onChange={(event) =>
+                      setVisibilityForm((current) => ({
+                        ...current,
+                        portalVisible: event.target.checked,
+                      }))
+                    }
+                    disabled={!access.canManage || visibilityBusy}
+                  />
+                  {t.revenue_invoices_portal_visible}
+                </label>
+                <label className="flex items-center gap-1.5 rounded-md bg-card py-0.5 pr-1.5 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={visibilityForm.hideAmountsFromPatient}
+                    onChange={(event) =>
+                      setVisibilityForm((current) => ({
+                        ...current,
+                        hideAmountsFromPatient: event.target.checked,
+                        lineItemsVisibleToPatient: event.target.checked
+                          ? false
+                          : current.lineItemsVisibleToPatient,
+                        pdfVisibleToPatient: event.target.checked
+                          ? false
+                          : current.pdfVisibleToPatient,
+                      }))
+                    }
+                    disabled={!access.canManage || visibilityBusy}
+                  />
+                  {t.revenue_invoices_hide_amounts}
+                </label>
+                <label className="flex items-center gap-1.5 rounded-md bg-card py-0.5 pr-1.5 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={visibilityForm.lineItemsVisibleToPatient}
+                    onChange={(event) =>
+                      setVisibilityForm((current) => ({
+                        ...current,
+                        lineItemsVisibleToPatient: event.target.checked,
+                      }))
+                    }
+                    disabled={
+                      !access.canManage ||
+                      visibilityBusy ||
+                      visibilityForm.hideAmountsFromPatient ||
+                      !visibilityForm.portalVisible
+                    }
+                  />
+                  {t.revenue_invoices_patient_sees_lines}
+                </label>
+                <label className="flex items-center gap-1.5 rounded-md bg-card py-0.5 pr-1.5 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={visibilityForm.pdfVisibleToPatient}
+                    onChange={(event) =>
+                      setVisibilityForm((current) => ({
+                        ...current,
+                        pdfVisibleToPatient: event.target.checked,
+                      }))
+                    }
+                    disabled={
+                      !access.canManage ||
+                      visibilityBusy ||
+                      visibilityForm.hideAmountsFromPatient ||
+                      !visibilityForm.portalVisible
+                    }
+                  />
+                  {t.revenue_invoices_patient_pdf_available}
+                </label>
+                <Field label={t.revenue_invoices_visibility_note} className="sm:col-span-2 mt-2">
+                  <textarea
+                    className={textareaClassName}
+                    value={visibilityForm.visibilityNote}
+                    onChange={(event) =>
+                      setVisibilityForm((current) => ({
+                        ...current,
+                        visibilityNote: event.target.value,
+                      }))
+                    }
+                    disabled={!access.canManage || visibilityBusy}
+                  />
+                </Field>
+              </div>
+              <div className="flex justify-end">
+                <Button type="submit" disabled={visibilityBusy || !access.canManage}>
+                  {visibilityBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+                  {t.revenue_invoices_save_visibility}
+                </Button>
+              </div>
             </div>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setVisibilityDialogOpen(false)}
-                disabled={visibilityBusy}
-              >
-                {t.common_cancel}
-              </Button>
-              <Button type="submit" disabled={visibilityBusy || !access.canManage}>
-                {visibilityBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                {t.revenue_invoices_save_visibility}
-              </Button>
-            </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
@@ -2298,102 +2377,96 @@ function StaffInvoicesPage() {
             <DialogHeader>
               <DialogTitle>{t.revenue_invoices_current_payer}</DialogTitle>
             </DialogHeader>
-            {payerError ? <ShellBanner tone="error">{payerError}</ShellBanner> : null}
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label={t.revenue_invoices_payer_relation_id}>
-                <Input
-                  className={shellInputClassName}
-                  value={payerForm.payerPatientRelationId}
-                  onChange={(event) =>
-                    setPayerForm((current) => ({
-                      ...current,
-                      payerPatientRelationId: event.target.value,
-                    }))
-                  }
-                  disabled={!access.canManage || payerBusy}
-                  placeholder={t.revenue_invoices_optional_uuid}
-                />
-              </Field>
-              <Field label={t.revenue_invoices_contact_name}>
-                <Input
-                  className={shellInputClassName}
-                  value={payerForm.contactName}
-                  onChange={(event) =>
-                    setPayerForm((current) => ({
-                      ...current,
-                      contactName: event.target.value,
-                    }))
-                  }
-                  disabled={!access.canManage || payerBusy}
-                />
-              </Field>
-              <Field label={t.revenue_invoices_email}>
-                <Input
-                  className={shellInputClassName}
-                  value={payerForm.contactEmail}
-                  onChange={(event) =>
-                    setPayerForm((current) => ({
-                      ...current,
-                      contactEmail: event.target.value,
-                    }))
-                  }
-                  disabled={!access.canManage || payerBusy}
-                />
-              </Field>
-              <Field label={t.revenue_invoices_phone}>
-                <Input
-                  className={shellInputClassName}
-                  value={payerForm.contactPhone}
-                  onChange={(event) =>
-                    setPayerForm((current) => ({
-                      ...current,
-                      contactPhone: event.target.value,
-                    }))
-                  }
-                  disabled={!access.canManage || payerBusy}
-                />
-              </Field>
-              <Field label={t.revenue_invoices_relationship}>
-                <Input
-                  className={shellInputClassName}
-                  value={payerForm.contactRelationship}
-                  onChange={(event) =>
-                    setPayerForm((current) => ({
-                      ...current,
-                      contactRelationship: event.target.value,
-                    }))
-                  }
-                  disabled={!access.canManage || payerBusy}
-                />
-              </Field>
-              <Field label={t.revenue_invoices_payer_notes} className="sm:col-span-2">
-                <textarea
-                  className={textareaClassName}
-                  value={payerForm.notes}
-                  onChange={(event) =>
-                    setPayerForm((current) => ({
-                      ...current,
-                      notes: event.target.value,
-                    }))
-                  }
-                  disabled={!access.canManage || payerBusy}
-                />
-              </Field>
+            <div className="space-y-4 rounded-xl p-4">
+              {payerError ? <ShellBanner tone="error">{payerError}</ShellBanner> : null}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label={t.revenue_invoices_payer_relation_id}>
+                  <Input
+                    className={shellInputClassName}
+                    value={payerForm.payerPatientRelationId}
+                    onChange={(event) =>
+                      setPayerForm((current) => ({
+                        ...current,
+                        payerPatientRelationId: event.target.value,
+                      }))
+                    }
+                    disabled={!access.canManage || payerBusy}
+                    placeholder={t.revenue_invoices_optional_uuid}
+                  />
+                </Field>
+                <Field label={t.revenue_invoices_contact_name}>
+                  <Input
+                    className={shellInputClassName}
+                    value={payerForm.contactName}
+                    onChange={(event) =>
+                      setPayerForm((current) => ({
+                        ...current,
+                        contactName: event.target.value,
+                      }))
+                    }
+                    disabled={!access.canManage || payerBusy}
+                  />
+                </Field>
+                <Field label={t.revenue_invoices_email}>
+                  <Input
+                    className={shellInputClassName}
+                    value={payerForm.contactEmail}
+                    onChange={(event) =>
+                      setPayerForm((current) => ({
+                        ...current,
+                        contactEmail: event.target.value,
+                      }))
+                    }
+                    disabled={!access.canManage || payerBusy}
+                  />
+                </Field>
+                <Field label={t.revenue_invoices_phone}>
+                  <Input
+                    className={shellInputClassName}
+                    value={payerForm.contactPhone}
+                    onChange={(event) =>
+                      setPayerForm((current) => ({
+                        ...current,
+                        contactPhone: event.target.value,
+                      }))
+                    }
+                    disabled={!access.canManage || payerBusy}
+                  />
+                </Field>
+                <Field label={t.revenue_invoices_relationship}>
+                  <Input
+                    className={shellInputClassName}
+                    value={payerForm.contactRelationship}
+                    onChange={(event) =>
+                      setPayerForm((current) => ({
+                        ...current,
+                        contactRelationship: event.target.value,
+                      }))
+                    }
+                    disabled={!access.canManage || payerBusy}
+                  />
+                </Field>
+                <Field label={t.revenue_invoices_payer_notes} className="sm:col-span-2">
+                  <textarea
+                    className={textareaClassName}
+                    value={payerForm.notes}
+                    onChange={(event) =>
+                      setPayerForm((current) => ({
+                        ...current,
+                        notes: event.target.value,
+                      }))
+                    }
+                    disabled={!access.canManage || payerBusy}
+                  />
+                </Field>
+              </div>
+              <div className="flex justify-end">
+                <Button type="submit" disabled={payerBusy || !access.canManage}>
+                  {payerBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+                  {t.revenue_invoices_save_payer}
+                </Button>
+              </div>
             </div>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setPayerDialogOpen(false)}
-                disabled={payerBusy}
-              >
-                {t.common_cancel}
-              </Button>
-              <Button type="submit" disabled={payerBusy || !access.canManage}>
-                {payerBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                {t.revenue_invoices_save_payer}
-              </Button>
-            </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>

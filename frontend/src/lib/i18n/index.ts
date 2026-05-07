@@ -1038,6 +1038,12 @@ export interface Translations
   invoices_workspace_save_invoice: string;
   invoices_workspace_dunning_title: string;
   invoices_workspace_dunning_description: string;
+  invoices_workspace_dunning_history: string;
+  invoices_workspace_dunning_action: string;
+  invoices_workspace_dunning_sent_at: string;
+  invoices_workspace_dunning_responsible: string;
+  invoices_workspace_dunning_balance_due: string;
+  invoices_workspace_create_dunning: string;
   invoices_workspace_no_dunning_events: string;
   invoices_workspace_no_dunning_events_description: string;
   invoices_workspace_next_escalation: string;
