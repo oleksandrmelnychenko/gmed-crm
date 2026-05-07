@@ -8,6 +8,7 @@ import {
 import {
   BadgePercent,
   Boxes,
+  ChevronDown,
   ClipboardList,
   LoaderCircle,
   Pencil,
@@ -768,81 +769,183 @@ export function FinanceCatalogPage() {
         ) : servicePackages.length === 0 ? (
           <EmptyCell>{t.finance_catalog_empty_packages}</EmptyCell>
         ) : (
-          <div className="grid gap-2">
+          <div className="space-y-0">
             {servicePackages.map((item) => (
-              <article
+              <details
                 key={item.id}
-                className="group relative grid gap-4 rounded-xl border border-border bg-card px-4 py-3 transition-colors duration-200 hover:border-orange-200 md:grid-cols-[minmax(0,1fr)_155px_110px_110px_125px]"
+                className={cn(
+                  "group relative pl-9",
+                  !item.is_active && "opacity-75",
+                )}
               >
-                <div className="min-w-0">
-                  <div className="flex min-w-0 items-baseline gap-2">
-                    <p className="truncate text-sm font-semibold text-foreground">
-                      {item.name}
-                    </p>
-                    <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-                      {item.package_key}
+                <summary className="relative grid cursor-pointer list-none gap-2 rounded-lg px-3 py-3 pr-12 transition hover:bg-[#f9fdff] group-open:bg-[#f9fdff] group-open:ring-1 group-open:ring-border/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                  <div className="absolute -left-9 bottom-0 top-0 flex w-8 items-start justify-center pt-3">
+                    <span
+                      className={cn(
+                        "inline-flex size-7 shrink-0 items-center justify-center rounded-full transition-colors",
+                        item.is_active
+                          ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+                          : "bg-slate-50 text-slate-500 ring-1 ring-slate-200",
+                      )}
+                    >
+                      <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
                     </span>
                   </div>
-                  <p className="mt-2 max-w-full truncate text-xs text-muted-foreground">
-                    {t.finance_catalog_tax_profile_prefix}
-                    <span className="mx-2 text-border">/</span>
-                    <span className="font-medium text-foreground">
-                      {taxProfileLabel(item.tax_profile_name, item.tax_profile_key)}
-                    </span>
-                  </p>
-                </div>
 
-                <div className="relative pl-4 before:absolute before:left-0 before:top-1 before:h-8 before:w-px before:bg-gradient-to-b before:from-transparent before:via-orange-300 before:to-transparent">
-                  <p className="text-[11px] text-muted-foreground">
-                    {t.finance_catalog_package_total}
-                  </p>
-                  <p className="mt-1 text-xl font-semibold leading-none text-foreground">
-                    {formatMoney(item.base_price_gross, item.currency)}
-                  </p>
-                </div>
-                <div className="relative pl-4 before:absolute before:left-0 before:top-1 before:h-8 before:w-px before:bg-border/80">
-                  <p className="text-[11px] text-muted-foreground">
-                    {t.finance_catalog_net_label}
-                  </p>
-                  <p className="mt-1 text-sm font-medium text-foreground">
-                    {formatMoney(item.base_price_net, item.currency)}
-                  </p>
-                </div>
-                <div className="relative pl-4 before:absolute before:left-0 before:top-1 before:h-8 before:w-px before:bg-border/80">
-                  <p className="text-[11px] text-muted-foreground">
-                    {t.finance_catalog_vat_label}
-                  </p>
-                  <p className="mt-1 text-sm font-medium text-foreground">
-                    {formatMoney(item.base_price_vat, item.currency)}
-                  </p>
-                </div>
-
-                <div className="flex items-center justify-between gap-2 md:justify-end">
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      "h-7 rounded-full px-2.5",
-                      item.is_active
-                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                        : "border-slate-200 bg-slate-50 text-slate-600",
-                    )}
-                  >
-                    {item.is_active ? t.common_active : t.common_inactive}
-                  </Badge>
                   {canManageTaxProfiles ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 rounded-lg px-2 text-xs text-muted-foreground transition-colors duration-200 hover:bg-orange-100 hover:text-orange-700"
-                      onClick={() => openEditPackage(item)}
+                    <div
+                      className="absolute right-3 top-3 z-20"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                      }}
+                      onKeyDown={(event) => event.stopPropagation()}
                     >
-                      <Pencil className="size-3.5" />
-                      {t.finance_catalog_edit}
-                    </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        className="size-7 rounded-full bg-white text-muted-foreground shadow-sm ring-1 ring-border/60 hover:bg-[#f9fdff] hover:text-foreground"
+                        onClick={() => openEditPackage(item)}
+                        aria-label={t.finance_catalog_edit}
+                      >
+                        <Pencil className="size-3.5" />
+                      </Button>
+                    </div>
                   ) : null}
+
+                  <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                        <p className="max-w-full truncate text-[15px] font-semibold leading-5 text-foreground">
+                          {item.name}
+                        </p>
+                        <span className="size-1 rounded-full bg-muted-foreground/35" />
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {item.package_key}
+                        </span>
+                        <span className="size-1 rounded-full bg-muted-foreground/35" />
+                        <span className="text-xs tabular-nums text-muted-foreground">
+                          {item.valid_from}
+                          {item.valid_to ? ` - ${item.valid_to}` : ""}
+                        </span>
+                      </div>
+                      <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                        <span>
+                          {t.finance_catalog_tax_profile_prefix}: {" "}
+                          <span className="font-medium text-foreground">
+                            {taxProfileLabel(item.tax_profile_name, item.tax_profile_key)}
+                          </span>
+                        </span>
+                        {item.description ? (
+                          <>
+                            <span className="size-1 rounded-full bg-muted-foreground/35" />
+                            <span className="max-w-[420px] truncate">
+                              {item.description}
+                            </span>
+                          </>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="flex min-w-0 flex-wrap justify-start gap-1.5 lg:max-w-[520px] lg:justify-end lg:pr-1">
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "rounded-full",
+                          item.is_active
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-slate-200 bg-slate-50 text-slate-600",
+                        )}
+                      >
+                        {item.is_active ? t.common_active : t.common_inactive}
+                      </Badge>
+                      <Badge
+                        variant="outline"
+                        className="rounded-full border-0 bg-[#f9fdff] px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+                      >
+                        {t.finance_catalog_package_total}: {" "}
+                        <span className="ml-1 font-semibold text-foreground">
+                          {formatMoney(item.base_price_gross, item.currency)}
+                        </span>
+                      </Badge>
+                      <Badge
+                        variant="outline"
+                        className="rounded-full border-0 bg-white px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
+                      >
+                        {t.finance_catalog_net_label}: {" "}
+                        <span className="ml-1 font-semibold text-foreground">
+                          {formatMoney(item.base_price_net, item.currency)}
+                        </span>
+                      </Badge>
+                      <Badge
+                        variant="outline"
+                        className="rounded-full border-0 bg-white px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
+                      >
+                        {t.finance_catalog_vat_label}: {" "}
+                        <span className="ml-1 font-semibold text-foreground">
+                          {formatMoney(item.base_price_vat, item.currency)}
+                        </span>
+                      </Badge>
+                    </div>
+                  </div>
+                </summary>
+
+                <div
+                  aria-hidden="true"
+                  className="ml-20 flex h-3 items-center px-3"
+                >
+                  <span className="h-px w-12 bg-gradient-to-r from-transparent via-border/70 to-border/70" />
+                  <span className="size-1.5 rounded-full bg-border" />
+                  <span className="h-px flex-1 bg-gradient-to-r from-border/70 to-transparent" />
                 </div>
-              </article>
+                <div className="mb-2 ml-20 overflow-hidden rounded-lg bg-[#fbfdff] p-2 shadow-sm">
+                  {item.items?.length ? (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {item.items.map((packageItem) => (
+                        <div
+                          key={packageItem.id}
+                          className="rounded-md bg-white px-3 py-2 text-xs shadow-sm ring-1 ring-border/40"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <p className="min-w-0 truncate font-medium text-foreground">
+                              {packageItem.description}
+                            </p>
+                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                              {packageItem.included_quantity} {packageItem.unit_label}
+                            </span>
+                          </div>
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                            {packageItem.service_key ? (
+                              <span className="font-mono">{packageItem.service_key}</span>
+                            ) : null}
+                            {packageItem.overage_unit_price_net ? (
+                              <span>
+                                {t.finance_catalog_overage_net_price}: {" "}
+                                <span className="font-medium text-foreground">
+                                  {formatMoney(
+                                    packageItem.overage_unit_price_net,
+                                    item.currency,
+                                  )}
+                                </span>
+                              </span>
+                            ) : null}
+                            {packageItem.requires_patient_approval ? (
+                              <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700">
+                                {t.finance_catalog_approval_suffix}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3 px-3 py-2 text-xs text-muted-foreground">
+                      <span className="size-2 shrink-0 rounded-full bg-muted-foreground/35" />
+                      {t.finance_catalog_empty_included_items}
+                    </div>
+                  )}
+                </div>
+              </details>
             ))}
           </div>
         )}
