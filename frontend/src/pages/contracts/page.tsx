@@ -10,6 +10,7 @@ import {
 } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  ArrowUpRight,
   CalendarClock,
   FileBadge2,
   FileSpreadsheet,
@@ -2132,16 +2133,52 @@ export function ContractsPage() {
                         <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.providers_linked_patients)}</h2>
                       </div>
                     </div>
-                    <div className="mt-5 flex flex-wrap gap-2">
-                      <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={() => staffGo(`/patients?patient=${contractDetail.patient_id}`)}>
-                        {t.contracts_patient}
-                      </Button>
-                      <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={() => staffGo(`/orders?patient=${contractDetail.patient_id}`)}>
-                        {text.orders}
-                      </Button>
-                      <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={() => staffGo(`/documents?patient=${contractDetail.patient_id}`)}>
-                        {text.documents}
-                      </Button>
+                    <div className="mt-5 grid gap-3 md:grid-cols-3">
+                      <button
+                        type="button"
+                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                        onClick={() => window.open(`/patients?patient=${contractDetail.patient_id}`, "_blank", "noopener,noreferrer")}
+                      >
+                        <div className="relative z-10">
+                          <h3 className="text-sm font-semibold text-foreground">{t.contracts_patient}</h3>
+                          <p className="mt-2 text-xs leading-tight text-muted-foreground">
+                            Откройте карточку пациента, связанного с этим рамочным договором.
+                          </p>
+                        </div>
+                        <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
+                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                        onClick={() => window.open(`/orders?patient=${contractDetail.patient_id}`, "_blank", "noopener,noreferrer")}
+                      >
+                        <div className="relative z-10">
+                          <h3 className="text-sm font-semibold text-foreground">{text.orders}</h3>
+                          <p className="mt-2 text-xs leading-tight text-muted-foreground">
+                            Посмотрите заказы пациента, чтобы сверить услуги и контекст договора.
+                          </p>
+                        </div>
+                        <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
+                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                        onClick={() => window.open(`/documents?patient=${contractDetail.patient_id}`, "_blank", "noopener,noreferrer")}
+                      >
+                        <div className="relative z-10">
+                          <h3 className="text-sm font-semibold text-foreground">{text.documents}</h3>
+                          <p className="mt-2 text-xs leading-tight text-muted-foreground">
+                            Проверьте документы пациента, связанные с договором и услугами.
+                          </p>
+                        </div>
+                        <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
+                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                        </span>
+                      </button>
                     </div>
                   </section>
 
