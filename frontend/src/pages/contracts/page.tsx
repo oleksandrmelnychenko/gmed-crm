@@ -16,7 +16,6 @@ import {
   LoaderCircle,
   type LucideIcon,
   Plus,
-  RefreshCw,
   Search,
   ShieldCheck,
   Wallet,
@@ -48,7 +47,6 @@ import {
   Sheet,
   SheetContent,
 } from "@/components/ui/sheet";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { formatEnumLabelFromKeys, useLang, type TranslationKey } from "@/lib/i18n";
@@ -107,7 +105,6 @@ import type {
   ContractItem,
   ContractStatus,
   ContractStatusFormState,
-  ContractsTab,
   OrderOption,
   PatientOption,
   QuoteFilters,
@@ -180,6 +177,16 @@ function contractMetricCard(
         {label}
       </p>
     </article>
+  );
+}
+
+function ContractSummaryLine({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 rounded-lg py-2">
+      <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
+      <span className="h-px min-w-6 flex-1 bg-border/70" />
+      <span className="max-w-[48%] text-right text-sm font-semibold leading-tight text-foreground">{value}</span>
+    </div>
   );
 }
 
@@ -300,16 +307,11 @@ export function ContractsPage() {
     [t, text.snapshotFallback],
   );
 
-  const initialTab =
-    searchParams.get("tab") === "quotes" || searchParams.has("quote") || searchParams.has("order")
-      ? "quotes"
-      : "contracts";
   const initialPatientId = searchParams.get("patient") ?? "";
   const initialOrderId = searchParams.get("order") ?? "";
   const initialContractId = searchParams.get("contract") ?? "";
   const initialQuoteId = searchParams.get("quote") ?? "";
 
-  const [activeTab, setActiveTab] = useState<ContractsTab>(initialTab);
   const [contractFilters, setContractFilters] = useState<ContractFilters>({
     ...DEFAULT_CONTRACT_FILTERS,
     patientId: initialPatientId,
@@ -1271,17 +1273,15 @@ export function ContractsPage() {
   }
 
   function openContract(contractId: string) {
-    setActiveTab("contracts");
     setSelectedQuoteId("");
     setSelectedContractId(contractId);
-    syncQuery({ tab: "contracts", contract: contractId, quote: null });
+    syncQuery({ contract: contractId, quote: null });
   }
 
   function openQuote(quoteId: string) {
-    setActiveTab("quotes");
     setSelectedContractId("");
     setSelectedQuoteId(quoteId);
-    syncQuery({ tab: "quotes", quote: quoteId, contract: null });
+    syncQuery({ quote: quoteId, contract: null });
   }
 
   if (!permissions.canViewPage) {
@@ -1299,19 +1299,6 @@ export function ContractsPage() {
           title={text.workspaceTitle}
           actions={
             <>
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9 rounded-lg px-3.5"
-                onClick={() => {
-                  setContractsReloadToken((current) => current + 1);
-                  setQuotesReloadToken((current) => current + 1);
-                  setAgencyServicesReloadToken((current) => current + 1);
-                }}
-              >
-                <RefreshCw className="size-4" />
-                {text.refresh}
-              </Button>
               {permissions.canManageCatalog ? (
                 <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={openNewAgencyServiceSheet}>
                   <Plus className="size-4" />
@@ -1381,17 +1368,17 @@ export function ContractsPage() {
 
         {optionsError ? <ShellBanner tone="error">{optionsError}</ShellBanner> : null}
 
-        <AdminTableCard
-          title={titleWithDot(text.agencyServiceTitle)}
-          description={text.agencyServiceDescription}
-          count={agencyServices.length}
-          accessory={
+        <section className="rounded-xl border border-border bg-card p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.agencyServiceTitle)}</h2>
+            </div>
             <Badge variant="outline" className="rounded-full">
               {agencyServiceStats.active} / {agencyServiceStats.total}
             </Badge>
-          }
-        >
-          <div className="space-y-4 border-b border-border px-4 py-4">
+          </div>
+
+          <div className="mt-5 space-y-4 border-b border-border pb-4">
             <AdminToolbar className="rounded-none border-0 bg-transparent p-0 shadow-none">
               <div className="relative min-w-[260px] flex-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -1473,45 +1460,20 @@ export function ContractsPage() {
               />
             }
           />
-        </AdminTableCard>
+        </section>
 
-        <Tabs
-          value={activeTab}
-          onValueChange={(value) => {
-            const next = value as ContractsTab;
-            setActiveTab(next);
-            syncQuery({
-              tab: next,
-              contract: next === "contracts" ? selectedContractId : null,
-              quote: next === "quotes" ? selectedQuoteId : null,
-            });
-          }}
-          className="gap-4"
-        >
-          <TabsList className="h-auto rounded-xl border border-border bg-card p-1">
-            <TabsTrigger
-              value="contracts"
-              className="rounded-lg px-3 py-1.5 data-[state=active]:bg-background data-[state=active]:shadow-sm"
-            >
-              <span>{text.contractsTab}</span>
-              <Badge variant="outline" className="ml-2 rounded-full text-[11px]">
-                {contracts.length}
-              </Badge>
-            </TabsTrigger>
-            <TabsTrigger
-              value="quotes"
-              className="rounded-lg px-3 py-1.5 data-[state=active]:bg-background data-[state=active]:shadow-sm"
-            >
-              <span>{text.quotesTab}</span>
-              <Badge variant="outline" className="ml-2 rounded-full text-[11px]">
-                {quotes.length}
-              </Badge>
-            </TabsTrigger>
-          </TabsList>
+        <div className="space-y-4">
+            <section className="rounded-xl border border-border bg-card p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.contractsTab)}</h2>
+                </div>
+                <Badge variant="outline" className="rounded-full">
+                  {contracts.length}
+                </Badge>
+              </div>
 
-          <TabsContent value="contracts" className="space-y-4">
-            <AdminTableCard title={titleWithDot(text.contractsTab)} description={t.contracts_subtitle} count={contracts.length}>
-              <div className="space-y-4 border-b border-border px-4 py-4">
+              <div className="mt-5 space-y-4 border-b border-border pb-4">
                 <AdminToolbar className="rounded-none border-0 bg-transparent p-0 shadow-none">
                   <div className="relative min-w-[260px] flex-1">
                     <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -1612,14 +1574,21 @@ export function ContractsPage() {
                       ) : null
                     }
                   />
-                }
-              />
-            </AdminTableCard>
-          </TabsContent>
+                  }
+                />
+            </section>
+          
+            <section className="rounded-xl border border-border bg-card p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.quotesTab)}</h2>
+                </div>
+                <Badge variant="outline" className="rounded-full">
+                  {quotes.length}
+                </Badge>
+              </div>
 
-          <TabsContent value="quotes" className="space-y-4">
-            <AdminTableCard title={titleWithDot(text.quotesTab)} description={t.contracts_subtitle} count={quotes.length}>
-              <div className="space-y-4 border-b border-border px-4 py-4">
+              <div className="mt-5 space-y-4 border-b border-border pb-4">
                 <AdminToolbar className="rounded-none border-0 bg-transparent p-0 shadow-none">
                   <div className="relative min-w-[240px] flex-1">
                     <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -1752,9 +1721,8 @@ export function ContractsPage() {
                   />
                 }
               />
-            </AdminTableCard>
-          </TabsContent>
-        </Tabs>
+            </section>
+        </div>
       </div>
 
       <Sheet open={agencyServiceSheetOpen} onOpenChange={(open) => (!open ? closeAgencyServiceSheet() : setAgencyServiceSheetOpen(true))}>
@@ -1772,118 +1740,120 @@ export function ContractsPage() {
                 />
               }
             >
-              {agencyServiceFormError ? <ShellBanner tone="error">{agencyServiceFormError}</ShellBanner> : null}
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label={text.serviceKey}>
-                  <Input
-                    required
-                    className={shellInputClassName}
-                    value={agencyServiceForm.serviceKey}
-                    onChange={(event) =>
-                      setAgencyServiceForm((current) => ({ ...current, serviceKey: event.target.value }))
-                    }
-                  />
-                </Field>
-                <Field label={text.serviceName}>
-                  <Input
-                    required
-                    className={shellInputClassName}
-                    value={agencyServiceForm.serviceName}
-                    onChange={(event) =>
-                      setAgencyServiceForm((current) => ({ ...current, serviceName: event.target.value }))
-                    }
-                  />
-                </Field>
-                <Field label={text.unitLabel}>
-                  <Input
-                    className={shellInputClassName}
-                    value={agencyServiceForm.unitLabel}
-                    onChange={(event) =>
-                      setAgencyServiceForm((current) => ({ ...current, unitLabel: event.target.value }))
-                    }
-                  />
-                </Field>
-                <Field label={text.currency}>
-                  <Input
-                    className={shellInputClassName}
-                    value={agencyServiceForm.currency}
-                    onChange={(event) =>
-                      setAgencyServiceForm((current) => ({ ...current, currency: event.target.value }))
-                    }
-                  />
-                </Field>
-                <Field label={text.unitPrice}>
-                  <Input
-                    required
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    className={shellInputClassName}
-                    value={agencyServiceForm.unitPrice}
-                    onChange={(event) =>
-                      setAgencyServiceForm((current) => ({ ...current, unitPrice: event.target.value }))
-                    }
-                  />
-                </Field>
-                <Field label={text.vatPercent}>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max="100"
-                    className={shellInputClassName}
-                    value={agencyServiceForm.vatRate}
-                    onChange={(event) =>
-                      setAgencyServiceForm((current) => ({ ...current, vatRate: event.target.value }))
-                    }
-                  />
-                </Field>
-                <Field label={t.providers_service_valid_from}>
-                  <Input
-                    required
-                    type="date"
-                    className={shellInputClassName}
-                    value={agencyServiceForm.validFrom}
-                    onChange={(event) =>
-                      setAgencyServiceForm((current) => ({ ...current, validFrom: event.target.value }))
-                    }
-                  />
-                </Field>
-                <Field label={t.providers_service_valid_to}>
-                  <Input
-                    type="date"
-                    className={shellInputClassName}
-                    value={agencyServiceForm.validTo}
-                    onChange={(event) =>
-                      setAgencyServiceForm((current) => ({ ...current, validTo: event.target.value }))
-                    }
-                  />
-                </Field>
-                <Field label={text.description} className="sm:col-span-2">
-                  <textarea
-                    className={textareaClassName}
-                    value={agencyServiceForm.description}
-                    onChange={(event) =>
-                      setAgencyServiceForm((current) => ({ ...current, description: event.target.value }))
-                    }
-                  />
-                </Field>
-                <label
-                  className={cn(
-                    "sm:col-span-2 flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-foreground",
-                    tokens.surface.mutedCard,
-                  )}
-                >
-                  <input
-                    type="checkbox"
-                    checked={agencyServiceForm.isActive}
-                    onChange={(event) =>
-                      setAgencyServiceForm((current) => ({ ...current, isActive: event.target.checked }))
-                    }
-                    className={checkboxClass}
-                  />
-                  {text.itemIsActive}
-                </label>
+              <div className="space-y-4 rounded-xl p-4">
+                {agencyServiceFormError ? <ShellBanner tone="error">{agencyServiceFormError}</ShellBanner> : null}
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label={text.serviceKey}>
+                    <Input
+                      required
+                      className={shellInputClassName}
+                      value={agencyServiceForm.serviceKey}
+                      onChange={(event) =>
+                        setAgencyServiceForm((current) => ({ ...current, serviceKey: event.target.value }))
+                      }
+                    />
+                  </Field>
+                  <Field label={text.serviceName}>
+                    <Input
+                      required
+                      className={shellInputClassName}
+                      value={agencyServiceForm.serviceName}
+                      onChange={(event) =>
+                        setAgencyServiceForm((current) => ({ ...current, serviceName: event.target.value }))
+                      }
+                    />
+                  </Field>
+                  <Field label={text.unitLabel}>
+                    <Input
+                      className={shellInputClassName}
+                      value={agencyServiceForm.unitLabel}
+                      onChange={(event) =>
+                        setAgencyServiceForm((current) => ({ ...current, unitLabel: event.target.value }))
+                      }
+                    />
+                  </Field>
+                  <Field label={text.currency}>
+                    <Input
+                      className={shellInputClassName}
+                      value={agencyServiceForm.currency}
+                      onChange={(event) =>
+                        setAgencyServiceForm((current) => ({ ...current, currency: event.target.value }))
+                      }
+                    />
+                  </Field>
+                  <Field label={text.unitPrice}>
+                    <Input
+                      required
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      className={shellInputClassName}
+                      value={agencyServiceForm.unitPrice}
+                      onChange={(event) =>
+                        setAgencyServiceForm((current) => ({ ...current, unitPrice: event.target.value }))
+                      }
+                    />
+                  </Field>
+                  <Field label={text.vatPercent}>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      className={shellInputClassName}
+                      value={agencyServiceForm.vatRate}
+                      onChange={(event) =>
+                        setAgencyServiceForm((current) => ({ ...current, vatRate: event.target.value }))
+                      }
+                    />
+                  </Field>
+                  <Field label={t.providers_service_valid_from}>
+                    <Input
+                      required
+                      type="date"
+                      className={shellInputClassName}
+                      value={agencyServiceForm.validFrom}
+                      onChange={(event) =>
+                        setAgencyServiceForm((current) => ({ ...current, validFrom: event.target.value }))
+                      }
+                    />
+                  </Field>
+                  <Field label={t.providers_service_valid_to}>
+                    <Input
+                      type="date"
+                      className={shellInputClassName}
+                      value={agencyServiceForm.validTo}
+                      onChange={(event) =>
+                        setAgencyServiceForm((current) => ({ ...current, validTo: event.target.value }))
+                      }
+                    />
+                  </Field>
+                  <Field label={text.description} className="sm:col-span-2">
+                    <textarea
+                      className={textareaClassName}
+                      value={agencyServiceForm.description}
+                      onChange={(event) =>
+                        setAgencyServiceForm((current) => ({ ...current, description: event.target.value }))
+                      }
+                    />
+                  </Field>
+                  <label
+                    className={cn(
+                      "sm:col-span-2 flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-foreground",
+                      tokens.surface.mutedCard,
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={agencyServiceForm.isActive}
+                      onChange={(event) =>
+                        setAgencyServiceForm((current) => ({ ...current, isActive: event.target.checked }))
+                      }
+                      className={checkboxClass}
+                    />
+                    {text.itemIsActive}
+                  </label>
+                </div>
               </div>
             </AdminSheetScaffold>
           </form>
@@ -1905,91 +1875,93 @@ export function ContractsPage() {
                 />
               }
             >
-              {createContractError ? <ShellBanner tone="error">{createContractError}</ShellBanner> : null}
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label={t.contracts_patient}>
-                  <NativeComboboxSelect
-                    value={createContractForm.patientId || "__empty__"}
-                    onChange={(event) =>
-                      setCreateContractForm((current) => ({
-                        ...current,
-                        patientId:
-                          event.target.value && event.target.value !== "__empty__"
-                            ? event.target.value
-                            : "",
-                      }))
-                    }
-                    className={selectClassName}
-                  >
-                    <option value="__empty__">{text.selectPatient}</option>
-                    {patients.map((patient) => (
-                      <option key={patient.id} value={patient.id}>
-                        {patientOptionLabel(patient)}
-                      </option>
-                    ))}
-                  </NativeComboboxSelect>
-                </Field>
-                <Field label={t.users_status}>
-                  <NativeComboboxSelect
-                    value={createContractForm.status}
-                    onChange={(event) =>
-                      setCreateContractForm((current) => ({
-                        ...current,
-                        status: event.target.value as ContractStatus,
-                      }))
-                    }
-                    className={selectClassName}
-                  >
-                    {CONTRACT_STATUSES.map((status) => (
-                      <option key={status} value={status}>
-                        {contractStatusLabel(status)}
-                      </option>
-                    ))}
-                  </NativeComboboxSelect>
-                </Field>
-                <Field label={t.providers_service_valid_from}>
-                  <Input
-                    type="date"
-                    className={shellInputClassName}
-                    value={createContractForm.validFrom}
-                    onChange={(event) =>
-                      setCreateContractForm((current) => ({ ...current, validFrom: event.target.value }))
-                    }
-                  />
-                </Field>
-                <Field label={t.providers_service_valid_to}>
-                  <Input
-                    type="date"
-                    className={shellInputClassName}
-                    value={createContractForm.validTo}
-                    onChange={(event) =>
-                      setCreateContractForm((current) => ({ ...current, validTo: event.target.value }))
-                    }
-                  />
-                </Field>
-                <Field label={t.contracts_signed_at} className="sm:col-span-2">
-                  <Input
-                    type="datetime-local"
-                    className={shellInputClassName}
-                    value={createContractForm.signedAt}
-                    onChange={(event) =>
-                      setCreateContractForm((current) => ({ ...current, signedAt: event.target.value }))
-                    }
-                  />
-                </Field>
-                <Field label={t.contracts_notes} className="sm:col-span-2">
-                  <textarea
-                    className={textareaClassName}
-                    value={createContractForm.conditionsText}
-                    onChange={(event) =>
-                      setCreateContractForm((current) => ({
-                        ...current,
-                        conditionsText: event.target.value,
-                      }))
-                    }
-                    placeholder='{"language":"de","jurisdiction":"DE"}'
-                  />
-                </Field>
+              <div className="space-y-4 rounded-xl p-4">
+                {createContractError ? <ShellBanner tone="error">{createContractError}</ShellBanner> : null}
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label={t.contracts_patient}>
+                    <NativeComboboxSelect
+                      value={createContractForm.patientId || "__empty__"}
+                      onChange={(event) =>
+                        setCreateContractForm((current) => ({
+                          ...current,
+                          patientId:
+                            event.target.value && event.target.value !== "__empty__"
+                              ? event.target.value
+                              : "",
+                        }))
+                      }
+                      className={selectClassName}
+                    >
+                      <option value="__empty__">{text.selectPatient}</option>
+                      {patients.map((patient) => (
+                        <option key={patient.id} value={patient.id}>
+                          {patientOptionLabel(patient)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+                  <Field label={t.users_status}>
+                    <NativeComboboxSelect
+                      value={createContractForm.status}
+                      onChange={(event) =>
+                        setCreateContractForm((current) => ({
+                          ...current,
+                          status: event.target.value as ContractStatus,
+                        }))
+                      }
+                      className={selectClassName}
+                    >
+                      {CONTRACT_STATUSES.map((status) => (
+                        <option key={status} value={status}>
+                          {contractStatusLabel(status)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+                  <Field label={t.providers_service_valid_from}>
+                    <Input
+                      type="date"
+                      className={shellInputClassName}
+                      value={createContractForm.validFrom}
+                      onChange={(event) =>
+                        setCreateContractForm((current) => ({ ...current, validFrom: event.target.value }))
+                      }
+                    />
+                  </Field>
+                  <Field label={t.providers_service_valid_to}>
+                    <Input
+                      type="date"
+                      className={shellInputClassName}
+                      value={createContractForm.validTo}
+                      onChange={(event) =>
+                        setCreateContractForm((current) => ({ ...current, validTo: event.target.value }))
+                      }
+                    />
+                  </Field>
+                  <Field label={t.contracts_signed_at} className="sm:col-span-2">
+                    <Input
+                      type="datetime-local"
+                      className={shellInputClassName}
+                      value={createContractForm.signedAt}
+                      onChange={(event) =>
+                        setCreateContractForm((current) => ({ ...current, signedAt: event.target.value }))
+                      }
+                    />
+                  </Field>
+                  <Field label={t.contracts_notes} className="sm:col-span-2">
+                    <textarea
+                      className={textareaClassName}
+                      value={createContractForm.conditionsText}
+                      onChange={(event) =>
+                        setCreateContractForm((current) => ({
+                          ...current,
+                          conditionsText: event.target.value,
+                        }))
+                      }
+                      placeholder='{"language":"de","jurisdiction":"DE"}'
+                    />
+                  </Field>
+                </div>
               </div>
             </AdminSheetScaffold>
           </form>
@@ -2012,64 +1984,66 @@ export function ContractsPage() {
                 />
               }
             >
-              {createQuoteError ? <ShellBanner tone="error">{createQuoteError}</ShellBanner> : null}
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label={t.orders_title} className="sm:col-span-2">
-                  <NativeComboboxSelect
-                    value={createQuoteForm.orderId || "__empty__"}
-                    onChange={(event) =>
-                      setCreateQuoteForm((current) => ({
-                        ...current,
-                        orderId:
-                          event.target.value && event.target.value !== "__empty__"
-                            ? event.target.value
-                            : "",
-                      }))
-                    }
-                    disabled={optionsLoading}
-                    className={selectClassName}
-                  >
-                    <option value="__empty__">
-                      {optionsLoading ? text.loadingOrders : text.selectOrder}
-                    </option>
-                    {filteredOrderOptions.map((order) => (
-                      <option key={order.id} value={order.id}>
-                        {orderOptionLabel(order)}
+              <div className="space-y-4 rounded-xl p-4">
+                {createQuoteError ? <ShellBanner tone="error">{createQuoteError}</ShellBanner> : null}
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label={t.orders_title} className="sm:col-span-2">
+                    <NativeComboboxSelect
+                      value={createQuoteForm.orderId || "__empty__"}
+                      onChange={(event) =>
+                        setCreateQuoteForm((current) => ({
+                          ...current,
+                          orderId:
+                            event.target.value && event.target.value !== "__empty__"
+                              ? event.target.value
+                              : "",
+                        }))
+                      }
+                      disabled={optionsLoading}
+                      className={selectClassName}
+                    >
+                      <option value="__empty__">
+                        {optionsLoading ? text.loadingOrders : text.selectOrder}
                       </option>
-                    ))}
-                  </NativeComboboxSelect>
-                </Field>
-                <Field label={t.providers_service_valid_to}>
-                  <Input
-                    type="date"
-                    className={shellInputClassName}
-                    value={createQuoteForm.validUntil}
-                    onChange={(event) =>
-                      setCreateQuoteForm((current) => ({ ...current, validUntil: event.target.value }))
-                    }
-                  />
-                </Field>
-                <Field label={t.orders_title}>
-                  <Input
-                    readOnly
-                    className={cn(shellInputClassName, !selectedCreateOrder && "text-muted-foreground")}
-                    value={
-                      selectedCreateOrder
-                        ? `${selectedCreateOrder.order_number} - ${selectedCreateOrder.patient_pid} - ${formatCurrency(selectedCreateOrder.total_estimated)}`
-                        : text.chooseOrder
-                    }
-                  />
-                </Field>
-                <Field label={t.contracts_notes} className="sm:col-span-2">
-                  <textarea
-                    className={textareaClassName}
-                    value={createQuoteForm.notes}
-                    onChange={(event) =>
-                      setCreateQuoteForm((current) => ({ ...current, notes: event.target.value }))
-                    }
-                    placeholder={t.patients_notes}
-                  />
-                </Field>
+                      {filteredOrderOptions.map((order) => (
+                        <option key={order.id} value={order.id}>
+                          {orderOptionLabel(order)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+                  <Field label={t.providers_service_valid_to}>
+                    <Input
+                      type="date"
+                      className={shellInputClassName}
+                      value={createQuoteForm.validUntil}
+                      onChange={(event) =>
+                        setCreateQuoteForm((current) => ({ ...current, validUntil: event.target.value }))
+                      }
+                    />
+                  </Field>
+                  <Field label={t.orders_title}>
+                    <Input
+                      readOnly
+                      className={cn(shellInputClassName, !selectedCreateOrder && "text-muted-foreground")}
+                      value={
+                        selectedCreateOrder
+                          ? `${selectedCreateOrder.order_number} - ${selectedCreateOrder.patient_pid} - ${formatCurrency(selectedCreateOrder.total_estimated)}`
+                          : text.chooseOrder
+                      }
+                    />
+                  </Field>
+                  <Field label={t.contracts_notes} className="sm:col-span-2">
+                    <textarea
+                      className={textareaClassName}
+                      value={createQuoteForm.notes}
+                      onChange={(event) =>
+                        setCreateQuoteForm((current) => ({ ...current, notes: event.target.value }))
+                      }
+                      placeholder={t.patients_notes}
+                    />
+                  </Field>
+                </div>
               </div>
             </AdminSheetScaffold>
           </form>
@@ -2092,135 +2066,171 @@ export function ContractsPage() {
             title={contractDetail ? `${contractDetail.contract_number} / ${contractDetail.patient_name}` : t.contracts_framework}
             description={text.contractSheetDescription}
           >
-            {contractDetailLoading ? (
-              <LoadingState label={t.common_loading} />
-            ) : contractDetailError ? (
-              <ShellBanner tone="error">{contractDetailError}</ShellBanner>
-            ) : !contractDetail ? (
-              <EmptyState title={t.common_not_set} description={t.contracts_subtitle} />
-            ) : (
-              <>
-                <AdminTableCard
-                  title={titleWithDot(t.contracts_title)}
-                  description={text.contractOverviewDescription}
-                  accessory={
+            <div className="space-y-4 rounded-xl p-4">
+              {contractDetailLoading ? (
+                <LoadingState label={t.common_loading} />
+              ) : contractDetailError ? (
+                <ShellBanner tone="error">{contractDetailError}</ShellBanner>
+              ) : !contractDetail ? (
+                <EmptyState title={t.common_not_set} description={t.contracts_subtitle} />
+              ) : (
+                <>
+                  <section className="rounded-xl border border-border bg-card p-6">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.contracts_title)}</h2>
+                      </div>
                     <Badge variant="outline" className={cn("rounded-full", contractStatusClassName(contractDetail.status))}>
                       {contractStatusLabel(contractDetail.status)}
                     </Badge>
-                  }
-                >
-                  <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
-                    <DetailField label={t.contracts_patient} value={`${contractDetail.patient_name} (${contractDetail.patient_pid})`} />
-                    <DetailField label={t.patients_created} value={formatDateTime(contractDetail.created_at, locale, t.common_not_set)} />
-                    <DetailField label={text.updatedAt} value={formatDateTime(contractDetail.updated_at, locale, t.common_not_set)} />
-                    <DetailField label={t.contracts_signed_at} value={formatDateTime(contractDetail.signed_at, locale, t.common_not_set)} />
-                    <DetailField label={t.providers_service_valid_from} value={formatDate(contractDetail.valid_from, locale, t.common_not_set)} />
-                    <DetailField label={t.providers_service_valid_to} value={formatDate(contractDetail.valid_to, locale, t.common_not_set)} />
-                    <DetailField
-                      label={t.contracts_notes}
-                      value={
-                        contractDetail.conditions && Object.keys(contractDetail.conditions).length > 0
-                          ? JSON.stringify(contractDetail.conditions, null, 2)
-                          : t.common_not_set
-                      }
-                    />
-                  </div>
-                </AdminTableCard>
-
-                <AdminTableCard title={titleWithDot(t.providers_linked_patients)} description={text.linkedContractDescription}>
-                  <div className="flex flex-wrap gap-2 p-4">
-                    <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={() => staffGo(`/patients?patient=${contractDetail.patient_id}`)}>
-                      {t.contracts_patient}
-                    </Button>
-                    <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={() => staffGo(`/orders?patient=${contractDetail.patient_id}`)}>
-                      {text.orders}
-                    </Button>
-                    <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={() => staffGo(`/documents?patient=${contractDetail.patient_id}`)}>
-                      {text.documents}
-                    </Button>
-                  </div>
-                </AdminTableCard>
-
-                <AdminTableCard title={titleWithDot(t.contracts_status)} description={t.contracts_subtitle}>
-                  <div className="space-y-4 p-4">
-                    {contractStatusError ? <ShellBanner tone="error">{contractStatusError}</ShellBanner> : null}
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <Field label={t.users_status}>
-                        <NativeComboboxSelect
-                          value={contractStatusForm.status}
-                          onChange={(event) =>
-                            setContractStatusForm((current) => ({
-                              ...current,
-                              status: event.target.value as ContractStatus,
-                            }))
-                          }
-                          className={selectClassName}
-                        >
-                          {CONTRACT_STATUSES.map((status) => (
-                            <option key={status} value={status}>
-                              {contractStatusLabel(status)}
-                            </option>
-                          ))}
-                        </NativeComboboxSelect>
-                      </Field>
-                      <Field label={t.contracts_signed_at}>
-                        <Input
-                          type="datetime-local"
-                          className={shellInputClassName}
-                          value={contractStatusForm.signedAt}
-                          onChange={(event) =>
-                            setContractStatusForm((current) => ({ ...current, signedAt: event.target.value }))
-                          }
-                        />
-                      </Field>
-                      <Field label={t.providers_service_valid_from}>
-                        <Input
-                          type="date"
-                          className={shellInputClassName}
-                          value={contractStatusForm.validFrom}
-                          onChange={(event) =>
-                            setContractStatusForm((current) => ({ ...current, validFrom: event.target.value }))
-                          }
-                        />
-                      </Field>
-                      <Field label={t.providers_service_valid_to}>
-                        <Input
-                          type="date"
-                          className={shellInputClassName}
-                          value={contractStatusForm.validTo}
-                          onChange={(event) =>
-                            setContractStatusForm((current) => ({ ...current, validTo: event.target.value }))
-                          }
-                        />
-                      </Field>
-                      <Field label={t.contracts_notes} className="sm:col-span-2">
-                        <textarea
-                          className={textareaClassName}
-                          value={contractStatusForm.conditionsText}
-                          onChange={(event) =>
-                            setContractStatusForm((current) => ({
-                              ...current,
-                              conditionsText: event.target.value,
-                            }))
-                          }
-                        />
-                      </Field>
                     </div>
-                    <SheetActionsFooter>
-                      <Button
-                        type="button"
-                        className="h-9 rounded-lg px-3.5"
-                        onClick={() => void handleSaveContractStatus()}
-                        disabled={contractStatusBusy || !permissions.canManageContract}
-                      >
-                        {contractStatusBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                        {text.saveContract}
+                    <div className="mt-5 space-y-5">
+                      <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
+                        <ContractSummaryLine
+                          label={t.contracts_patient}
+                          value={`${contractDetail.patient_name} (${contractDetail.patient_pid})`}
+                        />
+                        <ContractSummaryLine
+                          label={t.patients_created}
+                          value={formatDateTime(contractDetail.created_at, locale, t.common_not_set)}
+                        />
+                        <ContractSummaryLine
+                          label={text.updatedAt}
+                          value={formatDateTime(contractDetail.updated_at, locale, t.common_not_set)}
+                        />
+                        <ContractSummaryLine
+                          label={t.contracts_signed_at}
+                          value={formatDateTime(contractDetail.signed_at, locale, t.common_not_set)}
+                        />
+                        <ContractSummaryLine
+                          label={t.providers_service_valid_from}
+                          value={formatDate(contractDetail.valid_from, locale, t.common_not_set)}
+                        />
+                        <ContractSummaryLine
+                          label={t.providers_service_valid_to}
+                          value={formatDate(contractDetail.valid_to, locale, t.common_not_set)}
+                        />
+                      </div>
+                      <div className="space-y-3">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.contracts_notes)}</h2>
+                          </div>
+                        </div>
+                        <pre className="rounded-xl border border-border bg-background/60 p-4 font-mono text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">
+                          {contractDetail.conditions && Object.keys(contractDetail.conditions).length > 0
+                            ? JSON.stringify(contractDetail.conditions, null, 2)
+                            : t.common_not_set}
+                        </pre>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="rounded-xl border border-border bg-card p-6">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.providers_linked_patients)}</h2>
+                      </div>
+                    </div>
+                    <div className="mt-5 flex flex-wrap gap-2">
+                      <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={() => staffGo(`/patients?patient=${contractDetail.patient_id}`)}>
+                        {t.contracts_patient}
                       </Button>
-                    </SheetActionsFooter>
-                  </div>
-                </AdminTableCard>
-              </>
-            )}
+                      <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={() => staffGo(`/orders?patient=${contractDetail.patient_id}`)}>
+                        {text.orders}
+                      </Button>
+                      <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={() => staffGo(`/documents?patient=${contractDetail.patient_id}`)}>
+                        {text.documents}
+                      </Button>
+                    </div>
+                  </section>
+
+                  <section className="rounded-xl border border-border bg-card p-6">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.contracts_status)}</h2>
+                      </div>
+                    </div>
+                    <div className="mt-5 space-y-4">
+                      {contractStatusError ? <ShellBanner tone="error">{contractStatusError}</ShellBanner> : null}
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <Field label={t.users_status}>
+                          <NativeComboboxSelect
+                            value={contractStatusForm.status}
+                            onChange={(event) =>
+                              setContractStatusForm((current) => ({
+                                ...current,
+                                status: event.target.value as ContractStatus,
+                              }))
+                            }
+                            className={selectClassName}
+                          >
+                            {CONTRACT_STATUSES.map((status) => (
+                              <option key={status} value={status}>
+                                {contractStatusLabel(status)}
+                              </option>
+                            ))}
+                          </NativeComboboxSelect>
+                        </Field>
+                        <Field label={t.contracts_signed_at}>
+                          <Input
+                            type="datetime-local"
+                            className={shellInputClassName}
+                            value={contractStatusForm.signedAt}
+                            onChange={(event) =>
+                              setContractStatusForm((current) => ({ ...current, signedAt: event.target.value }))
+                            }
+                          />
+                        </Field>
+                        <Field label={t.providers_service_valid_from}>
+                          <Input
+                            type="date"
+                            className={shellInputClassName}
+                            value={contractStatusForm.validFrom}
+                            onChange={(event) =>
+                              setContractStatusForm((current) => ({ ...current, validFrom: event.target.value }))
+                            }
+                          />
+                        </Field>
+                        <Field label={t.providers_service_valid_to}>
+                          <Input
+                            type="date"
+                            className={shellInputClassName}
+                            value={contractStatusForm.validTo}
+                            onChange={(event) =>
+                              setContractStatusForm((current) => ({ ...current, validTo: event.target.value }))
+                            }
+                          />
+                        </Field>
+                        <Field label={t.contracts_notes} className="sm:col-span-2">
+                          <textarea
+                            className={textareaClassName}
+                            value={contractStatusForm.conditionsText}
+                            onChange={(event) =>
+                              setContractStatusForm((current) => ({
+                                ...current,
+                                conditionsText: event.target.value,
+                              }))
+                            }
+                          />
+                        </Field>
+                      </div>
+                      <SheetActionsFooter>
+                        <Button
+                          type="button"
+                          className="h-9 rounded-lg px-3.5"
+                          onClick={() => void handleSaveContractStatus()}
+                          disabled={contractStatusBusy || !permissions.canManageContract}
+                        >
+                          {contractStatusBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                          {text.saveContract}
+                        </Button>
+                      </SheetActionsFooter>
+                    </div>
+                  </section>
+                </>
+              )}
+            </div>
           </AdminSheetScaffold>
         </SheetContent>
       </Sheet>
