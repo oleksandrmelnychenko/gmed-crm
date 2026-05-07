@@ -2037,7 +2037,7 @@ function StaffInvoicesPage() {
                           key={`${line.description}-${index}`}
                           className="overflow-hidden rounded-2xl border border-border bg-card"
                         >
-                          <div className="grid lg:grid-cols-[minmax(0,1fr)_180px]">
+                          <div className="grid lg:grid-cols-[minmax(0,1fr)_120px]">
                             <div className="p-4">
                               <div className="flex items-start gap-3">
                                 <div className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted/30 text-xs font-semibold text-muted-foreground">
@@ -2046,7 +2046,6 @@ function StaffInvoicesPage() {
                                 <div className="min-w-0">
                                   <h3 className="text-sm font-semibold leading-snug text-foreground">{line.description}</h3>
                                   <div className="mt-2 flex flex-wrap gap-1.5">
-                                    <StatusBadge tone="neutral">{`${t.invoices_vat} ${line.vat_rate}%`}</StatusBadge>
                                     <StatusBadge tone="neutral">
                                       {taxProfileLabel(
                                         line.tax_profile_name,
@@ -2058,7 +2057,7 @@ function StaffInvoicesPage() {
                                       <StatusBadge tone="warning">{t.orders_cost_pass_through_badge}</StatusBadge>
                                     ) : null}
                                   </div>
-                                  <p className="mt-3 max-w-2xl text-xs leading-snug text-muted-foreground">
+                                  <p className="mt-1.5 max-w-2xl text-xs leading-snug text-muted-foreground">
                                     {line.vat_source_explanation ??
                                       `${text.vatSource}: ${vatSourceLabel(line.vat_source ?? "legacy")}`}
                                   </p>
@@ -2066,9 +2065,10 @@ function StaffInvoicesPage() {
                               </div>
                             </div>
                             <div className="relative border-t border-border px-4 py-4 lg:border-t-0 lg:pl-5 lg:before:absolute lg:before:bottom-4 lg:before:left-0 lg:before:top-4 lg:before:border-l lg:before:border-dashed lg:before:border-border">
-                              <div className="text-xs text-muted-foreground">{text.gross}</div>
-                              <div className="mt-1 text-xl font-semibold leading-none text-foreground">
-                                {formatMoney(line.line_gross)}
+                              <div className="flex flex-wrap gap-1.5 lg:justify-end">
+                                <span className="rounded-full border border-border bg-background px-2.5 py-1 text-xs font-semibold leading-none text-foreground">
+                                  {`${t.invoices_vat} ${line.vat_rate}%`}
+                                </span>
                               </div>
                             </div>
                           </div>
