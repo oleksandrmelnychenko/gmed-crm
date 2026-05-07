@@ -13,6 +13,7 @@ import {
   ArrowUpRight,
   CalendarClock,
   Download,
+  FileText,
   Pencil,
   LoaderCircle,
   Plus,
@@ -1958,7 +1959,6 @@ function StaffInvoicesPage() {
 
                 <SectionCard
                   title={text.dunningTitle}
-                  description={text.dunningDescription}
                   action={
                     <Button
                       type="button"
@@ -2081,35 +2081,37 @@ function StaffInvoicesPage() {
                   ) : (
                     <div className="space-y-3">
                       {detail.supporting_documents.map((document) => (
-                        <div
+                        <button
+                          type="button"
                           key={document.id}
-                          className={cn("rounded-xl p-4", tokens.surface.mutedCard)}
+                          className="group relative w-full overflow-hidden rounded-xl border border-border bg-card p-4 text-left transition-colors hover:bg-muted/20"
+                          onClick={() =>
+                            window.open(
+                              `/documents?order=${detail.order_id}&patient=${detail.patient_id}`,
+                              "_blank",
+                              "noopener,noreferrer",
+                            )
+                          }
                         >
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <h3 className={tokens.text.sectionTitle}>
+                          <div className="flex items-start gap-3 pr-11">
+                            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-orange-50 text-orange-700">
+                              <FileText className="size-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <h3 className="truncate text-sm font-semibold text-foreground">
                                 {document.auto_name || document.original_filename || document.id}
                               </h3>
-                              <p className={cn("mt-1", tokens.text.muted)}>
+                              <p className="mt-1 line-clamp-2 text-xs leading-snug text-muted-foreground">
                                 {[document.art, document.category, document.original_filename]
                                   .filter(Boolean)
                                   .join(" | ") || text.linkedOrderDocument}
                               </p>
                             </div>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              className="rounded-lg"
-                              onClick={() =>
-                                staffGo(
-                                  `/documents?order=${detail.order_id}&patient=${detail.patient_id}`,
-                                )
-                              }
-                            >
-                              {text.openDocuments}
-                            </Button>
+                            <span className="absolute right-3 top-3 flex size-8 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground group-hover:border-orange-200 group-hover:bg-orange-50 group-hover:text-orange-700">
+                              <ArrowUpRight className="size-3.5" />
+                            </span>
                           </div>
-                        </div>
+                        </button>
                       ))}
                     </div>
                   )}
