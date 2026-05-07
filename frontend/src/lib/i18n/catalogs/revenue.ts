@@ -1,4 +1,4 @@
-export interface RevenueTranslations {
+﻿export interface RevenueTranslations {
   finance_catalog_title: string;
   finance_catalog_description: string;
   finance_catalog_refresh: string;
@@ -35,6 +35,7 @@ export interface RevenueTranslations {
   finance_catalog_package_pricing: string;
   finance_catalog_package_validity: string;
   finance_catalog_package_notes: string;
+  finance_catalog_package_total: string;
   finance_catalog_package_key: string;
   finance_catalog_base_net_price: string;
   finance_catalog_package_vat_profile: string;
@@ -276,6 +277,7 @@ export const revenueRu: RevenueTranslations = {
   finance_catalog_package_pricing: "Цена и НДС",
   finance_catalog_package_validity: "Период и статус",
   finance_catalog_package_notes: "Описание пакета",
+  finance_catalog_package_total: "Сумма пакета",
   finance_catalog_package_key: "Ключ пакета",
   finance_catalog_base_net_price: "Базовая цена нетто",
   finance_catalog_package_vat_profile: "Профиль НДС пакета",
@@ -541,6 +543,7 @@ export const revenueDe: RevenueTranslations = {
   finance_catalog_package_pricing: "Цена и НДС",
   finance_catalog_package_validity: "Период и статус",
   finance_catalog_package_notes: "Описание пакета",
+  finance_catalog_package_total: "Сумма пакета",
   finance_catalog_package_key: "Paketschlüssel",
   finance_catalog_base_net_price: "Basispreis netto",
   finance_catalog_package_vat_profile: "USt.-Profil des Pakets",

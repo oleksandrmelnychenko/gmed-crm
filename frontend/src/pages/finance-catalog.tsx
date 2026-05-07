@@ -768,25 +768,60 @@ export function FinanceCatalogPage() {
         ) : servicePackages.length === 0 ? (
           <EmptyCell>{t.finance_catalog_empty_packages}</EmptyCell>
         ) : (
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-2">
             {servicePackages.map((item) => (
               <article
                 key={item.id}
-                className="rounded-xl border border-border/50 bg-card px-4 py-3"
+                className="group relative grid gap-4 rounded-xl border border-border bg-card px-4 py-3 transition-colors duration-200 hover:border-orange-200 md:grid-cols-[minmax(0,1fr)_155px_110px_110px_125px]"
               >
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold text-foreground">
+                <div className="min-w-0">
+                  <div className="flex min-w-0 items-baseline gap-2">
+                    <p className="truncate text-sm font-semibold text-foreground">
                       {item.name}
                     </p>
-                    <p className="font-mono text-xs text-muted-foreground">
+                    <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
                       {item.package_key}
-                    </p>
+                    </span>
                   </div>
+                  <p className="mt-2 max-w-full truncate text-xs text-muted-foreground">
+                    {t.finance_catalog_tax_profile_prefix}
+                    <span className="mx-2 text-border">/</span>
+                    <span className="font-medium text-foreground">
+                      {taxProfileLabel(item.tax_profile_name, item.tax_profile_key)}
+                    </span>
+                  </p>
+                </div>
+
+                <div className="relative pl-4 before:absolute before:left-0 before:top-1 before:h-8 before:w-px before:bg-gradient-to-b before:from-transparent before:via-orange-300 before:to-transparent">
+                  <p className="text-[11px] text-muted-foreground">
+                    {t.finance_catalog_package_total}
+                  </p>
+                  <p className="mt-1 text-xl font-semibold leading-none text-foreground">
+                    {formatMoney(item.base_price_gross, item.currency)}
+                  </p>
+                </div>
+                <div className="relative pl-4 before:absolute before:left-0 before:top-1 before:h-8 before:w-px before:bg-border/80">
+                  <p className="text-[11px] text-muted-foreground">
+                    {t.finance_catalog_net_label}
+                  </p>
+                  <p className="mt-1 text-sm font-medium text-foreground">
+                    {formatMoney(item.base_price_net, item.currency)}
+                  </p>
+                </div>
+                <div className="relative pl-4 before:absolute before:left-0 before:top-1 before:h-8 before:w-px before:bg-border/80">
+                  <p className="text-[11px] text-muted-foreground">
+                    {t.finance_catalog_vat_label}
+                  </p>
+                  <p className="mt-1 text-sm font-medium text-foreground">
+                    {formatMoney(item.base_price_vat, item.currency)}
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 md:justify-end">
                   <Badge
                     variant="outline"
                     className={cn(
-                      "rounded-full",
+                      "h-7 rounded-full px-2.5",
                       item.is_active
                         ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                         : "border-slate-200 bg-slate-50 text-slate-600",
@@ -799,7 +834,7 @@ export function FinanceCatalogPage() {
                       type="button"
                       size="sm"
                       variant="ghost"
-                      className="h-7 rounded-lg px-2"
+                      className="h-7 rounded-lg px-2 text-xs text-muted-foreground transition-colors duration-200 hover:bg-orange-100 hover:text-orange-700"
                       onClick={() => openEditPackage(item)}
                     >
                       <Pencil className="size-3.5" />
@@ -807,46 +842,6 @@ export function FinanceCatalogPage() {
                     </Button>
                   ) : null}
                 </div>
-                <p className="mt-3 text-xl font-semibold text-foreground">
-                  {formatMoney(item.base_price_gross, item.currency)}
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {t.finance_catalog_net_label}{" "}
-                  {formatMoney(item.base_price_net, item.currency)} /{" "}
-                  {t.finance_catalog_vat_label}{" "}
-                  {formatMoney(item.base_price_vat, item.currency)}
-                </p>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {t.finance_catalog_tax_profile_prefix}:{" "}
-                  {taxProfileLabel(item.tax_profile_name, item.tax_profile_key)}
-                </p>
-                {item.items?.length ? (
-                  <div className="mt-3 space-y-1.5">
-                    {item.items.slice(0, 4).map((packageItem) => (
-                      <div
-                        key={packageItem.id}
-                        className="rounded-lg border border-border/50 bg-muted/25 px-2 py-1.5 text-xs text-muted-foreground"
-                      >
-                        <span className="font-medium text-foreground">
-                          {packageItem.description}
-                        </span>{" "}
-                        / {packageItem.included_quantity} {packageItem.unit_label}
-                        {packageItem.requires_patient_approval
-                          ? ` / ${t.finance_catalog_approval_suffix}`
-                          : ""}
-                      </div>
-                    ))}
-                    {item.items.length > 4 ? (
-                      <p className="text-xs text-muted-foreground">
-                        {moreItemsLabel(item.items.length - 4)}
-                      </p>
-                    ) : null}
-                  </div>
-                ) : (
-                  <p className="mt-3 text-xs text-muted-foreground">
-                    {t.finance_catalog_empty_included_items}
-                  </p>
-                )}
               </article>
             ))}
           </div>
