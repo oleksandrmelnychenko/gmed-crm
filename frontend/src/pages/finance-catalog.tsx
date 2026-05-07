@@ -10,7 +10,12 @@ import { LoaderCircle, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  AdminSheetScaffold,
+  SheetFormFooter,
+} from "@/components/admin-page-patterns";
 import { Input } from "@/components/ui/input";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import {
   Banner,
   CountBadge,
@@ -456,16 +461,58 @@ export function FinanceCatalogPage() {
     }
   }
 
+  function openCreateTaxProfile() {
+    setForm(BLANK_TAX_PROFILE_FORM);
+    setCreateError("");
+    setEditingTaxProfileId("");
+    setPackageFormOpen(false);
+    setCreateOpen(true);
+  }
+
+  function closeCreateTaxProfile() {
+    if (createBusy) return;
+    setCreateOpen(false);
+    setCreateError("");
+    setForm(BLANK_TAX_PROFILE_FORM);
+  }
+
+  function openEditTaxProfile(profile: TaxProfile) {
+    setCreateOpen(false);
+    setCreateError("");
+    setPackageFormOpen(false);
+    setPackageError("");
+    setEditingTaxProfileId(profile.id);
+    setTaxEditForm(taxProfileToForm(profile));
+    setTaxEditError("");
+  }
+
+  function closeEditTaxProfile() {
+    if (taxEditBusy) return;
+    setEditingTaxProfileId("");
+    setTaxEditError("");
+    setTaxEditForm(BLANK_TAX_PROFILE_FORM);
+  }
   function openCreatePackage() {
+    setCreateOpen(false);
+    setEditingTaxProfileId("");
     setPackageForm(blankPackageForm());
     setPackageError("");
     setPackageFormOpen(true);
   }
 
   function openEditPackage(item: ServicePackage) {
+    setCreateOpen(false);
+    setEditingTaxProfileId("");
     setPackageForm(packageToForm(item));
     setPackageError("");
     setPackageFormOpen(true);
+  }
+
+  function closePackageForm() {
+    if (packageBusy) return;
+    setPackageFormOpen(false);
+    setPackageError("");
+    setPackageForm(blankPackageForm());
   }
 
   function updatePackageItem(index: number, patch: Partial<ServicePackageItemForm>) {
@@ -648,9 +695,9 @@ export function FinanceCatalogPage() {
               <Button
                 type="button"
                 size="sm"
-                variant={createOpen ? "default" : "outline"}
+                variant="outline"
                 className="h-8 rounded-lg"
-                onClick={() => setCreateOpen((current) => !current)}
+                onClick={openCreateTaxProfile}
               >
                 <Plus className="size-4" />
                 {t.finance_catalog_new_tax_profile}
@@ -659,321 +706,6 @@ export function FinanceCatalogPage() {
           </div>
         }
       >
-        {createOpen && canManageTaxProfiles ? (
-          <form
-            className="rounded-xl border border-border/50 bg-card px-4 py-3"
-            onSubmit={handleCreateTaxProfile}
-          >
-            {createError ? (
-              <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                {createError}
-              </div>
-            ) : null}
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <Field label={t.finance_catalog_profile_key} htmlFor="tax-profile-key">
-                <Input
-                  id="tax-profile-key"
-                  value={form.profileKey}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      profileKey: event.target.value,
-                    }))
-                  }
-                  className={inputClass}
-                  placeholder="standard_19"
-                  disabled={createBusy}
-                />
-              </Field>
-              <Field label={t.finance_catalog_name} htmlFor="tax-profile-name">
-                <Input
-                  id="tax-profile-name"
-                  value={form.name}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, name: event.target.value }))
-                  }
-                  className={inputClass}
-                  disabled={createBusy}
-                />
-              </Field>
-              <Field label={t.finance_catalog_vat_rate} htmlFor="tax-profile-vat">
-                <Input
-                  id="tax-profile-vat"
-                  value={form.vatRate}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      vatRate: event.target.value,
-                    }))
-                  }
-                  className={inputClass}
-                  disabled={createBusy}
-                />
-              </Field>
-              <Field label={t.finance_catalog_vat_category} htmlFor="tax-profile-category">
-                <NativeComboboxSelect
-                  id="tax-profile-category"
-                  value={form.vatCategory}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      vatCategory: event.target.value,
-                    }))
-                  }
-                  className={selectClass}
-                  disabled={createBusy}
-                >
-                  {VAT_CATEGORIES.map((category) => (
-                    <option key={category} value={category}>
-                      {vatCategoryLabel(category)}
-                    </option>
-                  ))}
-                </NativeComboboxSelect>
-              </Field>
-            </div>
-            <Field label={t.finance_catalog_description_label} htmlFor="tax-profile-description" className="mt-3">
-              <textarea
-                id="tax-profile-description"
-                value={form.description}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    description: event.target.value,
-                  }))
-                }
-                className={textareaClass}
-                rows={2}
-                disabled={createBusy}
-              />
-            </Field>
-            <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <Field label={t.finance_catalog_valid_from} htmlFor="tax-profile-valid-from">
-                <Input
-                  id="tax-profile-valid-from"
-                  type="date"
-                  value={form.validFrom}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, validFrom: event.target.value }))
-                  }
-                  className={inputClass}
-                  disabled={createBusy}
-                />
-              </Field>
-              <Field label={t.finance_catalog_valid_to} htmlFor="tax-profile-valid-to">
-                <Input
-                  id="tax-profile-valid-to"
-                  type="date"
-                  value={form.validTo}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, validTo: event.target.value }))
-                  }
-                  className={inputClass}
-                  disabled={createBusy}
-                />
-              </Field>
-              <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={form.isDefault}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      isDefault: event.target.checked,
-                    }))
-                  }
-                  disabled={createBusy}
-                />
-                {t.finance_catalog_default_profile}
-              </label>
-              <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={form.isActive}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      isActive: event.target.checked,
-                    }))
-                  }
-                  disabled={createBusy}
-                />
-                {t.finance_catalog_active}
-              </label>
-            </div>
-            <div className="mt-3 flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9 rounded-lg"
-                onClick={() => setCreateOpen(false)}
-                disabled={createBusy}
-              >
-                {t.common_cancel}
-              </Button>
-              <Button type="submit" className="h-9 rounded-lg" disabled={createBusy}>
-                {createBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                {t.finance_catalog_create}
-              </Button>
-            </div>
-          </form>
-        ) : null}
-
-        {editingTaxProfileId && canManageTaxProfiles ? (
-          <form
-            className="rounded-xl border border-sky-200 bg-sky-50/70 px-4 py-3"
-            onSubmit={handleSaveTaxProfile}
-          >
-            {taxEditError ? (
-              <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                {taxEditError}
-              </div>
-            ) : null}
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <Field label={t.finance_catalog_profile_key} htmlFor="tax-edit-profile-key">
-                <Input
-                  id="tax-edit-profile-key"
-                  value={taxEditForm.profileKey}
-                  onChange={(event) =>
-                    setTaxEditForm((current) => ({
-                      ...current,
-                      profileKey: event.target.value,
-                    }))
-                  }
-                  className={inputClass}
-                  disabled={taxEditBusy}
-                />
-              </Field>
-              <Field label={t.finance_catalog_name} htmlFor="tax-edit-profile-name">
-                <Input
-                  id="tax-edit-profile-name"
-                  value={taxEditForm.name}
-                  onChange={(event) =>
-                    setTaxEditForm((current) => ({ ...current, name: event.target.value }))
-                  }
-                  className={inputClass}
-                  disabled={taxEditBusy}
-                />
-              </Field>
-              <Field label={t.finance_catalog_vat_rate} htmlFor="tax-edit-profile-vat">
-                <Input
-                  id="tax-edit-profile-vat"
-                  value={taxEditForm.vatRate}
-                  onChange={(event) =>
-                    setTaxEditForm((current) => ({
-                      ...current,
-                      vatRate: event.target.value,
-                    }))
-                  }
-                  className={inputClass}
-                  disabled={taxEditBusy}
-                />
-              </Field>
-              <Field label={t.finance_catalog_vat_category} htmlFor="tax-edit-profile-category">
-                <NativeComboboxSelect
-                  id="tax-edit-profile-category"
-                  value={taxEditForm.vatCategory}
-                  onChange={(event) =>
-                    setTaxEditForm((current) => ({
-                      ...current,
-                      vatCategory: event.target.value,
-                    }))
-                  }
-                  className={selectClass}
-                  disabled={taxEditBusy}
-                >
-                  {VAT_CATEGORIES.map((category) => (
-                    <option key={category} value={category}>
-                      {vatCategoryLabel(category)}
-                    </option>
-                  ))}
-                </NativeComboboxSelect>
-              </Field>
-              <Field label={t.finance_catalog_valid_from} htmlFor="tax-edit-valid-from">
-                <Input
-                  id="tax-edit-valid-from"
-                  type="date"
-                  value={taxEditForm.validFrom}
-                  onChange={(event) =>
-                    setTaxEditForm((current) => ({ ...current, validFrom: event.target.value }))
-                  }
-                  className={inputClass}
-                  disabled={taxEditBusy}
-                />
-              </Field>
-              <Field label={t.finance_catalog_valid_to} htmlFor="tax-edit-valid-to">
-                <Input
-                  id="tax-edit-valid-to"
-                  type="date"
-                  value={taxEditForm.validTo}
-                  onChange={(event) =>
-                    setTaxEditForm((current) => ({ ...current, validTo: event.target.value }))
-                  }
-                  className={inputClass}
-                  disabled={taxEditBusy}
-                />
-              </Field>
-              <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={taxEditForm.isDefault}
-                  onChange={(event) =>
-                    setTaxEditForm((current) => ({
-                      ...current,
-                      isDefault: event.target.checked,
-                    }))
-                  }
-                  disabled={taxEditBusy}
-                />
-                {t.finance_catalog_default_profile}
-              </label>
-              <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={taxEditForm.isActive}
-                  onChange={(event) =>
-                    setTaxEditForm((current) => ({
-                      ...current,
-                      isActive: event.target.checked,
-                    }))
-                  }
-                  disabled={taxEditBusy}
-                />
-                {t.finance_catalog_active}
-              </label>
-            </div>
-            <Field label={t.finance_catalog_description_label} htmlFor="tax-edit-profile-description" className="mt-3">
-              <textarea
-                id="tax-edit-profile-description"
-                value={taxEditForm.description}
-                onChange={(event) =>
-                  setTaxEditForm((current) => ({
-                    ...current,
-                    description: event.target.value,
-                  }))
-                }
-                className={textareaClass}
-                rows={2}
-                disabled={taxEditBusy}
-              />
-            </Field>
-            <div className="mt-3 flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9 rounded-lg"
-                onClick={() => setEditingTaxProfileId("")}
-                disabled={taxEditBusy}
-              >
-                {t.common_cancel}
-              </Button>
-              <Button type="submit" className="h-9 rounded-lg" disabled={taxEditBusy}>
-                {taxEditBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                {t.finance_catalog_save_vat_profile}
-              </Button>
-            </div>
-          </form>
-        ) : null}
-
         {loading ? (
           <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-8 text-center text-sm text-muted-foreground">
             {t.finance_catalog_loading_tax_profiles}
@@ -1019,11 +751,7 @@ export function FinanceCatalogPage() {
                         size="sm"
                         variant="ghost"
                         className="h-7 rounded-lg px-2"
-                        onClick={() => {
-                          setEditingTaxProfileId(profile.id);
-                          setTaxEditForm(taxProfileToForm(profile));
-                          setTaxEditError("");
-                        }}
+                        onClick={() => openEditTaxProfile(profile)}
                       >
                         <Pencil className="size-3.5" />
                         {t.finance_catalog_edit}
@@ -1064,315 +792,6 @@ export function FinanceCatalogPage() {
           </div>
         }
       >
-        {packageFormOpen && canManageTaxProfiles ? (
-          <form
-            className="rounded-xl border border-border/50 bg-card px-4 py-3"
-            onSubmit={handleSaveServicePackage}
-          >
-            {packageError ? (
-              <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                {packageError}
-              </div>
-            ) : null}
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <Field label={t.finance_catalog_package_key} htmlFor="package-key">
-                <Input
-                  id="package-key"
-                  value={packageForm.packageKey}
-                  onChange={(event) =>
-                    setPackageForm((current) => ({
-                      ...current,
-                      packageKey: event.target.value,
-                    }))
-                  }
-                  className={inputClass}
-                  disabled={packageBusy}
-                  placeholder="premium_care"
-                />
-              </Field>
-              <Field label={t.finance_catalog_name} htmlFor="package-name">
-                <Input
-                  id="package-name"
-                  value={packageForm.name}
-                  onChange={(event) =>
-                    setPackageForm((current) => ({ ...current, name: event.target.value }))
-                  }
-                  className={inputClass}
-                  disabled={packageBusy}
-                />
-              </Field>
-              <Field label={t.finance_catalog_base_net_price} htmlFor="package-base-price">
-                <Input
-                  id="package-base-price"
-                  value={packageForm.basePriceNet}
-                  onChange={(event) =>
-                    setPackageForm((current) => ({
-                      ...current,
-                      basePriceNet: event.target.value,
-                    }))
-                  }
-                  className={inputClass}
-                  disabled={packageBusy}
-                />
-              </Field>
-              <Field label={t.finance_catalog_package_vat_profile} htmlFor="package-tax-profile">
-                <NativeComboboxSelect
-                  id="package-tax-profile"
-                  value={packageForm.taxProfileId || "__none__"}
-                  onChange={(event) =>
-                    setPackageForm((current) => ({
-                      ...current,
-                      taxProfileId:
-                        event.target.value === "__none__" ? "" : event.target.value,
-                    }))
-                  }
-                  className={selectClass}
-                  disabled={packageBusy}
-                >
-                  <option value="__none__">{t.finance_catalog_no_vat_profile}</option>
-                  {taxProfiles.map((profile) => (
-                    <option key={profile.id} value={profile.id}>
-                      {profile.name} ({profile.vat_rate}%)
-                    </option>
-                  ))}
-                </NativeComboboxSelect>
-              </Field>
-              <Field label={t.finance_catalog_currency} htmlFor="package-currency">
-                <Input
-                  id="package-currency"
-                  value={packageForm.currency}
-                  onChange={(event) =>
-                    setPackageForm((current) => ({
-                      ...current,
-                      currency: event.target.value,
-                    }))
-                  }
-                  className={inputClass}
-                  disabled={packageBusy}
-                />
-              </Field>
-              <Field label={t.finance_catalog_valid_from} htmlFor="package-valid-from">
-                <Input
-                  id="package-valid-from"
-                  type="date"
-                  value={packageForm.validFrom}
-                  onChange={(event) =>
-                    setPackageForm((current) => ({
-                      ...current,
-                      validFrom: event.target.value,
-                    }))
-                  }
-                  className={inputClass}
-                  disabled={packageBusy}
-                />
-              </Field>
-              <Field label={t.finance_catalog_valid_to} htmlFor="package-valid-to">
-                <Input
-                  id="package-valid-to"
-                  type="date"
-                  value={packageForm.validTo}
-                  onChange={(event) =>
-                    setPackageForm((current) => ({
-                      ...current,
-                      validTo: event.target.value,
-                    }))
-                  }
-                  className={inputClass}
-                  disabled={packageBusy}
-                />
-              </Field>
-              <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={packageForm.isActive}
-                  onChange={(event) =>
-                    setPackageForm((current) => ({
-                      ...current,
-                      isActive: event.target.checked,
-                    }))
-                  }
-                  disabled={packageBusy}
-                />
-                {t.finance_catalog_active}
-              </label>
-            </div>
-            <Field label={t.finance_catalog_description_label} htmlFor="package-description" className="mt-3">
-              <textarea
-                id="package-description"
-                value={packageForm.description}
-                onChange={(event) =>
-                  setPackageForm((current) => ({
-                    ...current,
-                    description: event.target.value,
-                  }))
-                }
-                className={textareaClass}
-                rows={2}
-                disabled={packageBusy}
-              />
-            </Field>
-
-            <div className="mt-4 space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-foreground">
-                    {t.finance_catalog_included_items}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {t.finance_catalog_included_items_hint}
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 rounded-lg"
-                  onClick={() =>
-                    setPackageForm((current) => ({
-                      ...current,
-                      items: [...current.items, blankPackageItem()],
-                    }))
-                  }
-                  disabled={packageBusy}
-                >
-                  <Plus className="size-4" />
-                  {t.finance_catalog_add_item}
-                </Button>
-              </div>
-              {packageForm.items.map((item, index) => (
-                <div
-                  key={`package-item-${index}`}
-                  className="rounded-xl border border-border/50 bg-muted/20 px-3 py-3"
-                >
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                    <Field label={t.finance_catalog_description_label}>
-                      <Input
-                        value={item.description}
-                        onChange={(event) =>
-                          updatePackageItem(index, { description: event.target.value })
-                        }
-                        className={inputClass}
-                        disabled={packageBusy}
-                      />
-                    </Field>
-                    <Field label={t.finance_catalog_service_key}>
-                      <Input
-                        value={item.serviceKey}
-                        onChange={(event) =>
-                          updatePackageItem(index, { serviceKey: event.target.value })
-                        }
-                        className={inputClass}
-                        disabled={packageBusy}
-                        placeholder="interpreter_hours"
-                      />
-                    </Field>
-                    <Field label={t.finance_catalog_included_quantity}>
-                      <Input
-                        value={item.includedQuantity}
-                        onChange={(event) =>
-                          updatePackageItem(index, {
-                            includedQuantity: event.target.value,
-                          })
-                        }
-                        className={inputClass}
-                        disabled={packageBusy}
-                      />
-                    </Field>
-                    <Field label={t.finance_catalog_unit_label}>
-                      <Input
-                        value={item.unitLabel}
-                        onChange={(event) =>
-                          updatePackageItem(index, { unitLabel: event.target.value })
-                        }
-                        className={inputClass}
-                        disabled={packageBusy}
-                      />
-                    </Field>
-                    <Field label={t.finance_catalog_overage_net_price}>
-                      <Input
-                        value={item.overageUnitPriceNet}
-                        onChange={(event) =>
-                          updatePackageItem(index, {
-                            overageUnitPriceNet: event.target.value,
-                          })
-                        }
-                        className={inputClass}
-                        disabled={packageBusy}
-                      />
-                    </Field>
-                    <Field label={t.finance_catalog_item_vat_profile}>
-                      <NativeComboboxSelect
-                        value={item.taxProfileId || "__none__"}
-                        onChange={(event) =>
-                          updatePackageItem(index, {
-                            taxProfileId:
-                              event.target.value === "__none__" ? "" : event.target.value,
-                          })
-                        }
-                        className={selectClass}
-                        disabled={packageBusy}
-                      >
-                        <option value="__none__">
-                          {t.finance_catalog_use_package_default_vat}
-                        </option>
-                        {taxProfiles.map((profile) => (
-                          <option key={profile.id} value={profile.id}>
-                            {profile.name} ({profile.vat_rate}%)
-                          </option>
-                        ))}
-                      </NativeComboboxSelect>
-                    </Field>
-                    <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <input
-                        type="checkbox"
-                        checked={item.requiresPatientApproval}
-                        onChange={(event) =>
-                          updatePackageItem(index, {
-                            requiresPatientApproval: event.target.checked,
-                          })
-                        }
-                        disabled={packageBusy}
-                      />
-                      {t.finance_catalog_approval_required}
-                    </label>
-                    <div className="flex items-end justify-end">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 rounded-lg text-rose-700"
-                        onClick={() => removePackageItem(index)}
-                        disabled={packageBusy}
-                      >
-                        <Trash2 className="size-4" />
-                        {t.common_remove}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-4 flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9 rounded-lg"
-                onClick={() => setPackageFormOpen(false)}
-                disabled={packageBusy}
-              >
-                {t.common_cancel}
-              </Button>
-              <Button type="submit" className="h-9 rounded-lg" disabled={packageBusy}>
-                {packageBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                {packageForm.id
-                  ? t.finance_catalog_save_package
-                  : t.finance_catalog_create_package}
-              </Button>
-            </div>
-          </form>
-        ) : null}
-
         {loading ? (
           <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-8 text-center text-sm text-muted-foreground">
             {t.finance_catalog_loading_packages}
@@ -1506,6 +925,641 @@ export function FinanceCatalogPage() {
           </div>
         )}
       </Section>
+      <Sheet
+        open={createOpen && canManageTaxProfiles}
+        onOpenChange={(open) => {
+          if (open) {
+            setCreateOpen(true);
+          } else {
+            closeCreateTaxProfile();
+          }
+        }}
+      >
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
+          <form className="flex h-full min-h-0 flex-col" onSubmit={handleCreateTaxProfile}>
+            <AdminSheetScaffold
+              title={t.finance_catalog_new_tax_profile}
+              footer={
+                <SheetFormFooter
+                  cancelLabel={t.common_cancel}
+                  submitLabel={t.finance_catalog_create}
+                  submitting={createBusy}
+                  onCancel={closeCreateTaxProfile}
+                />
+              }
+            >
+              {createError ? (
+                <Banner tone="error" withIcon>
+                  {createError}
+                </Banner>
+              ) : null}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label={t.finance_catalog_profile_key} htmlFor="tax-profile-key">
+                  <Input
+                    id="tax-profile-key"
+                    value={form.profileKey}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        profileKey: event.target.value,
+                      }))
+                    }
+                    className={inputClass}
+                    placeholder="standard_19"
+                    disabled={createBusy}
+                  />
+                </Field>
+                <Field label={t.finance_catalog_name} htmlFor="tax-profile-name">
+                  <Input
+                    id="tax-profile-name"
+                    value={form.name}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, name: event.target.value }))
+                    }
+                    className={inputClass}
+                    disabled={createBusy}
+                  />
+                </Field>
+                <Field label={t.finance_catalog_vat_rate} htmlFor="tax-profile-vat">
+                  <Input
+                    id="tax-profile-vat"
+                    value={form.vatRate}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        vatRate: event.target.value,
+                      }))
+                    }
+                    className={inputClass}
+                    disabled={createBusy}
+                  />
+                </Field>
+                <Field label={t.finance_catalog_vat_category} htmlFor="tax-profile-category">
+                  <NativeComboboxSelect
+                    id="tax-profile-category"
+                    value={form.vatCategory}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        vatCategory: event.target.value,
+                      }))
+                    }
+                    className={selectClass}
+                    disabled={createBusy}
+                  >
+                    {VAT_CATEGORIES.map((category) => (
+                      <option key={category} value={category}>
+                        {vatCategoryLabel(category)}
+                      </option>
+                    ))}
+                  </NativeComboboxSelect>
+                </Field>
+              </div>
+              <Field label={t.finance_catalog_description_label} htmlFor="tax-profile-description">
+                <textarea
+                  id="tax-profile-description"
+                  value={form.description}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      description: event.target.value,
+                    }))
+                  }
+                  className={textareaClass}
+                  rows={3}
+                  disabled={createBusy}
+                />
+              </Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label={t.finance_catalog_valid_from} htmlFor="tax-profile-valid-from">
+                  <Input
+                    id="tax-profile-valid-from"
+                    type="date"
+                    value={form.validFrom}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, validFrom: event.target.value }))
+                    }
+                    className={inputClass}
+                    disabled={createBusy}
+                  />
+                </Field>
+                <Field label={t.finance_catalog_valid_to} htmlFor="tax-profile-valid-to">
+                  <Input
+                    id="tax-profile-valid-to"
+                    type="date"
+                    value={form.validTo}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, validTo: event.target.value }))
+                    }
+                    className={inputClass}
+                    disabled={createBusy}
+                  />
+                </Field>
+                <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={form.isDefault}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        isDefault: event.target.checked,
+                      }))
+                    }
+                    disabled={createBusy}
+                  />
+                  {t.finance_catalog_default_profile}
+                </label>
+                <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={form.isActive}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        isActive: event.target.checked,
+                      }))
+                    }
+                    disabled={createBusy}
+                  />
+                  {t.finance_catalog_active}
+                </label>
+              </div>
+            </AdminSheetScaffold>
+          </form>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet
+        open={Boolean(editingTaxProfileId) && canManageTaxProfiles}
+        onOpenChange={(open) => {
+          if (!open) closeEditTaxProfile();
+        }}
+      >
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
+          <form className="flex h-full min-h-0 flex-col" onSubmit={handleSaveTaxProfile}>
+            <AdminSheetScaffold
+              title={t.finance_catalog_save_vat_profile}
+              footer={
+                <SheetFormFooter
+                  cancelLabel={t.common_cancel}
+                  submitLabel={t.finance_catalog_save_vat_profile}
+                  submitting={taxEditBusy}
+                  onCancel={closeEditTaxProfile}
+                />
+              }
+            >
+              {taxEditError ? (
+                <Banner tone="error" withIcon>
+                  {taxEditError}
+                </Banner>
+              ) : null}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label={t.finance_catalog_profile_key} htmlFor="tax-edit-profile-key">
+                  <Input
+                    id="tax-edit-profile-key"
+                    value={taxEditForm.profileKey}
+                    onChange={(event) =>
+                      setTaxEditForm((current) => ({
+                        ...current,
+                        profileKey: event.target.value,
+                      }))
+                    }
+                    className={inputClass}
+                    disabled={taxEditBusy}
+                  />
+                </Field>
+                <Field label={t.finance_catalog_name} htmlFor="tax-edit-profile-name">
+                  <Input
+                    id="tax-edit-profile-name"
+                    value={taxEditForm.name}
+                    onChange={(event) =>
+                      setTaxEditForm((current) => ({ ...current, name: event.target.value }))
+                    }
+                    className={inputClass}
+                    disabled={taxEditBusy}
+                  />
+                </Field>
+                <Field label={t.finance_catalog_vat_rate} htmlFor="tax-edit-profile-vat">
+                  <Input
+                    id="tax-edit-profile-vat"
+                    value={taxEditForm.vatRate}
+                    onChange={(event) =>
+                      setTaxEditForm((current) => ({
+                        ...current,
+                        vatRate: event.target.value,
+                      }))
+                    }
+                    className={inputClass}
+                    disabled={taxEditBusy}
+                  />
+                </Field>
+                <Field label={t.finance_catalog_vat_category} htmlFor="tax-edit-profile-category">
+                  <NativeComboboxSelect
+                    id="tax-edit-profile-category"
+                    value={taxEditForm.vatCategory}
+                    onChange={(event) =>
+                      setTaxEditForm((current) => ({
+                        ...current,
+                        vatCategory: event.target.value,
+                      }))
+                    }
+                    className={selectClass}
+                    disabled={taxEditBusy}
+                  >
+                    {VAT_CATEGORIES.map((category) => (
+                      <option key={category} value={category}>
+                        {vatCategoryLabel(category)}
+                      </option>
+                    ))}
+                  </NativeComboboxSelect>
+                </Field>
+                <Field label={t.finance_catalog_valid_from} htmlFor="tax-edit-valid-from">
+                  <Input
+                    id="tax-edit-valid-from"
+                    type="date"
+                    value={taxEditForm.validFrom}
+                    onChange={(event) =>
+                      setTaxEditForm((current) => ({ ...current, validFrom: event.target.value }))
+                    }
+                    className={inputClass}
+                    disabled={taxEditBusy}
+                  />
+                </Field>
+                <Field label={t.finance_catalog_valid_to} htmlFor="tax-edit-valid-to">
+                  <Input
+                    id="tax-edit-valid-to"
+                    type="date"
+                    value={taxEditForm.validTo}
+                    onChange={(event) =>
+                      setTaxEditForm((current) => ({ ...current, validTo: event.target.value }))
+                    }
+                    className={inputClass}
+                    disabled={taxEditBusy}
+                  />
+                </Field>
+                <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={taxEditForm.isDefault}
+                    onChange={(event) =>
+                      setTaxEditForm((current) => ({
+                        ...current,
+                        isDefault: event.target.checked,
+                      }))
+                    }
+                    disabled={taxEditBusy}
+                  />
+                  {t.finance_catalog_default_profile}
+                </label>
+                <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={taxEditForm.isActive}
+                    onChange={(event) =>
+                      setTaxEditForm((current) => ({
+                        ...current,
+                        isActive: event.target.checked,
+                      }))
+                    }
+                    disabled={taxEditBusy}
+                  />
+                  {t.finance_catalog_active}
+                </label>
+              </div>
+              <Field label={t.finance_catalog_description_label} htmlFor="tax-edit-profile-description">
+                <textarea
+                  id="tax-edit-profile-description"
+                  value={taxEditForm.description}
+                  onChange={(event) =>
+                    setTaxEditForm((current) => ({
+                      ...current,
+                      description: event.target.value,
+                    }))
+                  }
+                  className={textareaClass}
+                  rows={3}
+                  disabled={taxEditBusy}
+                />
+              </Field>
+            </AdminSheetScaffold>
+          </form>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet
+        open={packageFormOpen && canManageTaxProfiles}
+        onOpenChange={(open) => {
+          if (!open) closePackageForm();
+        }}
+      >
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[840px]">
+          <form className="flex h-full min-h-0 flex-col" onSubmit={handleSaveServicePackage}>
+            <AdminSheetScaffold
+              title={
+                packageForm.id
+                  ? t.finance_catalog_save_package
+                  : t.finance_catalog_create_package
+              }
+              footer={
+                <SheetFormFooter
+                  cancelLabel={t.common_cancel}
+                  submitLabel={
+                    packageForm.id
+                      ? t.finance_catalog_save_package
+                      : t.finance_catalog_create_package
+                  }
+                  submitting={packageBusy}
+                  onCancel={closePackageForm}
+                />
+              }
+            >
+              {packageError ? (
+                <Banner tone="error" withIcon>
+                  {packageError}
+                </Banner>
+              ) : null}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label={t.finance_catalog_package_key} htmlFor="package-key">
+                  <Input
+                    id="package-key"
+                    value={packageForm.packageKey}
+                    onChange={(event) =>
+                      setPackageForm((current) => ({
+                        ...current,
+                        packageKey: event.target.value,
+                      }))
+                    }
+                    className={inputClass}
+                    disabled={packageBusy}
+                    placeholder="premium_care"
+                  />
+                </Field>
+                <Field label={t.finance_catalog_name} htmlFor="package-name">
+                  <Input
+                    id="package-name"
+                    value={packageForm.name}
+                    onChange={(event) =>
+                      setPackageForm((current) => ({ ...current, name: event.target.value }))
+                    }
+                    className={inputClass}
+                    disabled={packageBusy}
+                  />
+                </Field>
+                <Field label={t.finance_catalog_base_net_price} htmlFor="package-base-price">
+                  <Input
+                    id="package-base-price"
+                    value={packageForm.basePriceNet}
+                    onChange={(event) =>
+                      setPackageForm((current) => ({
+                        ...current,
+                        basePriceNet: event.target.value,
+                      }))
+                    }
+                    className={inputClass}
+                    disabled={packageBusy}
+                  />
+                </Field>
+                <Field label={t.finance_catalog_package_vat_profile} htmlFor="package-tax-profile">
+                  <NativeComboboxSelect
+                    id="package-tax-profile"
+                    value={packageForm.taxProfileId || "__none__"}
+                    onChange={(event) =>
+                      setPackageForm((current) => ({
+                        ...current,
+                        taxProfileId:
+                          event.target.value === "__none__" ? "" : event.target.value,
+                      }))
+                    }
+                    className={selectClass}
+                    disabled={packageBusy}
+                  >
+                    <option value="__none__">{t.finance_catalog_no_vat_profile}</option>
+                    {taxProfiles.map((profile) => (
+                      <option key={profile.id} value={profile.id}>
+                        {profile.name} ({profile.vat_rate}%)
+                      </option>
+                    ))}
+                  </NativeComboboxSelect>
+                </Field>
+                <Field label={t.finance_catalog_currency} htmlFor="package-currency">
+                  <Input
+                    id="package-currency"
+                    value={packageForm.currency}
+                    onChange={(event) =>
+                      setPackageForm((current) => ({
+                        ...current,
+                        currency: event.target.value,
+                      }))
+                    }
+                    className={inputClass}
+                    disabled={packageBusy}
+                  />
+                </Field>
+                <Field label={t.finance_catalog_valid_from} htmlFor="package-valid-from">
+                  <Input
+                    id="package-valid-from"
+                    type="date"
+                    value={packageForm.validFrom}
+                    onChange={(event) =>
+                      setPackageForm((current) => ({
+                        ...current,
+                        validFrom: event.target.value,
+                      }))
+                    }
+                    className={inputClass}
+                    disabled={packageBusy}
+                  />
+                </Field>
+                <Field label={t.finance_catalog_valid_to} htmlFor="package-valid-to">
+                  <Input
+                    id="package-valid-to"
+                    type="date"
+                    value={packageForm.validTo}
+                    onChange={(event) =>
+                      setPackageForm((current) => ({
+                        ...current,
+                        validTo: event.target.value,
+                      }))
+                    }
+                    className={inputClass}
+                    disabled={packageBusy}
+                  />
+                </Field>
+                <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={packageForm.isActive}
+                    onChange={(event) =>
+                      setPackageForm((current) => ({
+                        ...current,
+                        isActive: event.target.checked,
+                      }))
+                    }
+                    disabled={packageBusy}
+                  />
+                  {t.finance_catalog_active}
+                </label>
+              </div>
+              <Field label={t.finance_catalog_description_label} htmlFor="package-description">
+                <textarea
+                  id="package-description"
+                  value={packageForm.description}
+                  onChange={(event) =>
+                    setPackageForm((current) => ({
+                      ...current,
+                      description: event.target.value,
+                    }))
+                  }
+                  className={textareaClass}
+                  rows={3}
+                  disabled={packageBusy}
+                />
+              </Field>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">
+                      {t.finance_catalog_included_items}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {t.finance_catalog_included_items_hint}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 rounded-lg"
+                    onClick={() =>
+                      setPackageForm((current) => ({
+                        ...current,
+                        items: [...current.items, blankPackageItem()],
+                      }))
+                    }
+                    disabled={packageBusy}
+                  >
+                    <Plus className="size-4" />
+                    {t.finance_catalog_add_item}
+                  </Button>
+                </div>
+                {packageForm.items.map((item, index) => (
+                  <div
+                    key={`package-item-${index}`}
+                    className="rounded-xl border border-border/50 bg-muted/20 px-3 py-3"
+                  >
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Field label={t.finance_catalog_description_label}>
+                        <Input
+                          value={item.description}
+                          onChange={(event) =>
+                            updatePackageItem(index, { description: event.target.value })
+                          }
+                          className={inputClass}
+                          disabled={packageBusy}
+                        />
+                      </Field>
+                      <Field label={t.finance_catalog_service_key}>
+                        <Input
+                          value={item.serviceKey}
+                          onChange={(event) =>
+                            updatePackageItem(index, { serviceKey: event.target.value })
+                          }
+                          className={inputClass}
+                          disabled={packageBusy}
+                          placeholder="interpreter_hours"
+                        />
+                      </Field>
+                      <Field label={t.finance_catalog_included_quantity}>
+                        <Input
+                          value={item.includedQuantity}
+                          onChange={(event) =>
+                            updatePackageItem(index, {
+                              includedQuantity: event.target.value,
+                            })
+                          }
+                          className={inputClass}
+                          disabled={packageBusy}
+                        />
+                      </Field>
+                      <Field label={t.finance_catalog_unit_label}>
+                        <Input
+                          value={item.unitLabel}
+                          onChange={(event) =>
+                            updatePackageItem(index, { unitLabel: event.target.value })
+                          }
+                          className={inputClass}
+                          disabled={packageBusy}
+                        />
+                      </Field>
+                      <Field label={t.finance_catalog_overage_net_price}>
+                        <Input
+                          value={item.overageUnitPriceNet}
+                          onChange={(event) =>
+                            updatePackageItem(index, {
+                              overageUnitPriceNet: event.target.value,
+                            })
+                          }
+                          className={inputClass}
+                          disabled={packageBusy}
+                        />
+                      </Field>
+                      <Field label={t.finance_catalog_item_vat_profile}>
+                        <NativeComboboxSelect
+                          value={item.taxProfileId || "__none__"}
+                          onChange={(event) =>
+                            updatePackageItem(index, {
+                              taxProfileId:
+                                event.target.value === "__none__" ? "" : event.target.value,
+                            })
+                          }
+                          className={selectClass}
+                          disabled={packageBusy}
+                        >
+                          <option value="__none__">
+                            {t.finance_catalog_use_package_default_vat}
+                          </option>
+                          {taxProfiles.map((profile) => (
+                            <option key={profile.id} value={profile.id}>
+                              {profile.name} ({profile.vat_rate}%)
+                            </option>
+                          ))}
+                        </NativeComboboxSelect>
+                      </Field>
+                      <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          checked={item.requiresPatientApproval}
+                          onChange={(event) =>
+                            updatePackageItem(index, {
+                              requiresPatientApproval: event.target.checked,
+                            })
+                          }
+                          disabled={packageBusy}
+                        />
+                        {t.finance_catalog_approval_required}
+                      </label>
+                      <div className="flex items-end justify-end">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 rounded-lg text-rose-700"
+                          onClick={() => removePackageItem(index)}
+                          disabled={packageBusy}
+                        >
+                          <Trash2 className="size-4" />
+                          {t.common_remove}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </AdminSheetScaffold>
+          </form>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
