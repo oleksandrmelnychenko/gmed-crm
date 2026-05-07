@@ -1138,90 +1138,107 @@ function StaffInvoicesPage() {
         </div>
 
         {access.canAccounting ? (
-          <SectionCard
-            title={text.accountingTitle}
-            action={
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Input
-                  type="number"
-                  min="2020"
-                  max="2100"
-                  value={accountingYear}
-                  onChange={(event) => setAccountingYear(event.target.value || currentYear)}
-                  className={cn(shellInputClassName, "h-8 w-24 rounded-lg bg-background text-[13px]")}
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon-sm"
-                  title={text.refreshLedger}
-                  aria-label={text.refreshLedger}
-                  onClick={() => setReloadToken((current) => current + 1)}
-                >
-                  <RefreshCw className={cn("size-3.5", accountingBusy && "animate-spin")} />
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    void downloadAccountingLedgerExport(accountingYear).catch((error) =>
-                      setAccountingError(
-                        error instanceof Error ? error.message : t.common_error,
-                      ),
-                    )
-                  }
-                >
-                  <Download className="size-3.5" />
-                  {text.exportCsv}
-                </Button>
-              </div>
-            }
-          >
-            {accountingBusy ? (
-              <LoadingState label={t.common_loading} />
-            ) : accountingError ? (
-              <ShellBanner tone="error">{accountingError}</ShellBanner>
-            ) : accountingLedger ? (
-              <div className="space-y-4">
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  <MiniMetric
-                    label={text.cashIncome}
-                    value={formatMoney(accountingSummary.income_gross)}
+          <>
+            <SectionCard
+              title={text.accountingTitle}
+              action={
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Input
+                    type="number"
+                    min="2020"
+                    max="2100"
+                    value={accountingYear}
+                    onChange={(event) => setAccountingYear(event.target.value || currentYear)}
+                    className={cn(shellInputClassName, "h-8 w-24 rounded-lg bg-background text-[13px]")}
                   />
-                  <MiniMetric
-                    label={text.cashExpense}
-                    value={formatMoney(accountingSummary.expense_gross)}
-                  />
-                  <MiniMetric
-                    label={text.euerSurplus}
-                    value={formatMoney(accountingSummary.net_surplus)}
-                  />
-                  <MiniMetric
-                    label={text.costPassthroughRevenue}
-                    value={formatMoney(accountingSummary.cost_passthrough_revenue_gross)}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon-sm"
+                    title={text.refreshLedger}
+                    aria-label={text.refreshLedger}
+                    onClick={() => setReloadToken((current) => current + 1)}
+                  >
+                    <RefreshCw className={cn("size-3.5", accountingBusy && "animate-spin")} />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      void downloadAccountingLedgerExport(accountingYear).catch((error) =>
+                        setAccountingError(
+                          error instanceof Error ? error.message : t.common_error,
+                        ),
+                      )
+                    }
+                  >
+                    <Download className="size-3.5" />
+                    {text.exportCsv}
+                  </Button>
+                </div>
+              }
+            >
+              {accountingBusy ? (
+                <LoadingState label={t.common_loading} />
+              ) : accountingError ? (
+                <ShellBanner tone="error">{accountingError}</ShellBanner>
+              ) : accountingLedger ? (
+                <div className="space-y-4">
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <MiniMetric
+                      label={text.cashIncome}
+                      value={formatMoney(accountingSummary.income_gross)}
+                    />
+                    <MiniMetric
+                      label={text.cashExpense}
+                      value={formatMoney(accountingSummary.expense_gross)}
+                    />
+                    <MiniMetric
+                      label={text.euerSurplus}
+                      value={formatMoney(accountingSummary.net_surplus)}
+                    />
+                    <MiniMetric
+                      label={text.costPassthroughRevenue}
+                      value={formatMoney(accountingSummary.cost_passthrough_revenue_gross)}
+                    />
+                  </div>
+                  <div className="flex items-center gap-2" aria-hidden>
+                    <span className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-border" />
+                    <span className="h-1.5 w-1.5 rounded-full bg-orange-400" />
+                    <span className="h-1.5 w-1.5 rounded-full bg-orange-300" />
+                    <span className="h-1.5 w-1.5 rounded-full bg-orange-200" />
+                    <span className="h-px flex-1 bg-gradient-to-r from-border via-border to-transparent" />
+                  </div>
+                  <DataTableSurface
+                    rows={accountingEntries}
+                    columns={accountingTableColumns}
+                    rowId={(row) => row.id}
+                    defaultDensity="compact"
+                    defaultFrozenColumns={ACCOUNTING_DEFAULT_FROZEN_COLUMNS}
+                    dictionary={t as unknown as Record<string, string>}
+                    groupLabels={accountingColumnGroups}
+                    maxFrozenColumns={ACCOUNTING_MAX_FROZEN_COLUMNS}
+                    toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
+                    rowAccent={(row) => (row.direction === "income" ? "bg-emerald-500" : "bg-rose-500")}
+                    emptyState={
+                      <EmptyState
+                        title={text.noAccountingEntries}
+                        description={text.noAccountingEntriesDescription}
+                      />
+                    }
                   />
                 </div>
-                <DataTableSurface
-                  rows={accountingEntries}
-                  columns={accountingTableColumns}
-                  rowId={(row) => row.id}
-                  defaultDensity="compact"
-                  defaultFrozenColumns={ACCOUNTING_DEFAULT_FROZEN_COLUMNS}
-                  dictionary={t as unknown as Record<string, string>}
-                  groupLabels={accountingColumnGroups}
-                  maxFrozenColumns={ACCOUNTING_MAX_FROZEN_COLUMNS}
-                  toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
-                  rowAccent={(row) => (row.direction === "income" ? "bg-emerald-500" : "bg-rose-500")}
-                  emptyState={
-                    <EmptyState
-                      title={text.noAccountingEntries}
-                      description={text.noAccountingEntriesDescription}
-                    />
-                  }
-                />
-                <div className="space-y-3">
-                  <div className={tokens.text.eyebrow}>{text.monthlyEuer}</div>
+              ) : null}
+            </SectionCard>
+            {!accountingBusy && !accountingError && accountingLedger ? (
+              <section className="rounded-xl border border-border bg-card p-6">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.monthlyEuer)}</h2>
+                  </div>
+                </div>
+                <div className="mt-5">
                   <DataTableSurface
                     rows={accountingMonthly}
                     columns={accountingMonthlyTableColumns}
@@ -1246,15 +1263,20 @@ function StaffInvoicesPage() {
                     }
                   />
                 </div>
-              </div>
+              </section>
             ) : null}
-          </SectionCard>
+          </>
         ) : null}
 
         {optionsError ? <ShellBanner tone="error">{optionsError}</ShellBanner> : null}
 
-        <div className="overflow-hidden rounded-xl border border-border bg-card">
-          <div className="relative z-30 flex flex-wrap items-center gap-1.5 border-b border-border/70 bg-card px-3 py-2">
+        <div className="rounded-xl border border-border bg-card p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.invoices_title)}</h2>
+            </div>
+          </div>
+          <div className="relative z-30 mt-5 flex flex-wrap items-center gap-1.5">
             <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -1426,11 +1448,12 @@ function StaffInvoicesPage() {
           </div>
 
           {listError ? (
-            <div className="border-b border-border/70 px-3 py-2">
+            <div className="mt-4">
               <ShellBanner tone="error">{listError}</ShellBanner>
             </div>
           ) : null}
-          <DataTableSurface
+          <div className="mt-5">
+            <DataTableSurface
             rows={invoices}
             columns={invoiceTableColumns}
             rowId={(row) => row.id}
@@ -1470,8 +1493,9 @@ function StaffInvoicesPage() {
                   : `${filteredCount} / ${totalCount}`;
               return `${text.pageLabel} ${invoicePage} ${text.pageOf} ${invoiceTotalPages} | ${pageRowsLabel} / ${invoiceTotal} ${text.invoiceCount}`;
             }}
-          />
-          <div className="flex flex-col gap-3 border-t border-border/70 px-3 py-2 sm:flex-row sm:items-center sm:justify-end">
+            />
+          </div>
+          <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
             <div className="flex gap-2">
               <Button
                 type="button"
@@ -2114,18 +2138,15 @@ export function InvoicesPage() {
 
 function SectionCard({ title, description, action, children }: { title: string; description?: string; action?: ReactNode; children: ReactNode }) {
   return (
-    <section className="overflow-hidden rounded-xl border border-border bg-card">
-      <div className="flex flex-col gap-3 border-b border-border px-4 py-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="space-y-1">
-          <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-            <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
-            <span>{title}</span>
-          </h2>
+    <section className="rounded-xl border border-border bg-card p-6">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
           {description ? <p className={tokens.text.muted}>{description}</p> : null}
         </div>
         {action ? <div className="shrink-0">{action}</div> : null}
       </div>
-      <div className="px-4 py-4">{children}</div>
+      <div className="mt-5">{children}</div>
     </section>
   );
 }
@@ -2141,10 +2162,19 @@ function DetailField({ label, value }: { label: string; value: ReactNode }) {
 
 function MiniMetric({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className={cn("rounded-xl p-3", tokens.surface.mutedCard)}>
-      <div className={tokens.text.eyebrow}>{label}</div>
-      <div className="mt-2 text-sm text-foreground">{value}</div>
+    <div className="flex min-w-[210px] flex-1 items-center justify-between gap-3 rounded-full border border-border bg-muted/20 px-4 py-2">
+      <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">{label}</span>
+      <span className="shrink-0 text-sm font-semibold leading-none text-foreground">{value}</span>
     </div>
+  );
+}
+
+function titleWithDot(title: ReactNode) {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+      <span>{title}</span>
+    </span>
   );
 }
 
