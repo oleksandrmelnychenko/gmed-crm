@@ -32,6 +32,7 @@ import type {
 import {
   EmptyCell,
   PageHeader,
+  Section,
   checkboxClass,
   inputClass as shellInputClassName,
   selectClass as shellSelectClassName,
@@ -903,260 +904,271 @@ function StaffServicesPage() {
                 />
               }
             >
-              {createError ? (
-                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                  {createError}
-                </div>
-              ) : null}
+              <div className="space-y-3 rounded-xl p-4">
+                {createError ? (
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                    {createError}
+                  </div>
+                ) : null}
 
-              <section className="space-y-3">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="space-y-1.5 text-sm">
+                <Section title={t.staff_services_create_section_service}>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="space-y-1.5 text-sm">
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {t.staff_services_form_patient}
+                      </span>
+                      <NativeComboboxSelect
+                        required
+                        value={createForm.patientId}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({ ...current, patientId: event.target.value }))
+                        }
+                        className={formSelectClassName}
+                      >
+                        <option value="">{t.staff_services_select}</option>
+                        {patients.map((patient) => (
+                          <option key={patient.id} value={patient.id}>
+                            {patientOptionLabel(patient)}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                    </label>
+
+                    <label className="space-y-1.5 text-sm">
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {t.staff_services_form_kind}
+                      </span>
+                      <NativeComboboxSelect
+                        value={createForm.serviceKind}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({ ...current, serviceKind: event.target.value }))
+                        }
+                        className={formSelectClassName}
+                      >
+                        {SERVICE_KIND_OPTIONS.map((kind) => (
+                          <option key={kind} value={kind}>
+                            {serviceKindLabel(kind, t)}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                    </label>
+                  </div>
+
+                  <label className="block space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {t.staff_services_form_patient}
+                      {t.staff_services_form_title}
                     </span>
-                    <NativeComboboxSelect
+                    <Input
                       required
-                      value={createForm.patientId}
+                      value={createForm.title}
                       onChange={(event) =>
-                        setCreateForm((current) => ({ ...current, patientId: event.target.value }))
-                      }
-                      className={formSelectClassName}
-                    >
-                      <option value="">{t.staff_services_select}</option>
-                      {patients.map((patient) => (
-                        <option key={patient.id} value={patient.id}>
-                          {patientOptionLabel(patient)}
-                        </option>
-                      ))}
-                    </NativeComboboxSelect>
-                  </label>
-
-                  <label className="space-y-1.5 text-sm">
-                    <span className="text-xs font-medium text-muted-foreground">
-                      {t.staff_services_form_kind}
-                    </span>
-                    <NativeComboboxSelect
-                      value={createForm.serviceKind}
-                      onChange={(event) =>
-                        setCreateForm((current) => ({ ...current, serviceKind: event.target.value }))
-                      }
-                      className={formSelectClassName}
-                    >
-                      {SERVICE_KIND_OPTIONS.map((kind) => (
-                        <option key={kind} value={kind}>
-                          {serviceKindLabel(kind, t)}
-                        </option>
-                      ))}
-                    </NativeComboboxSelect>
-                  </label>
-                </div>
-
-                <label className="block space-y-1.5 text-sm">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {t.staff_services_form_title}
-                  </span>
-                  <Input
-                    required
-                    value={createForm.title}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({ ...current, title: event.target.value }))
-                    }
-                    className={formInputClassName}
-                  />
-                </label>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="space-y-1.5 text-sm">
-                    <span className="text-xs font-medium text-muted-foreground">
-                      {t.staff_services_form_provider}
-                    </span>
-                    <NativeComboboxSelect
-                      value={createForm.providerId}
-                      onChange={(event) =>
-                        setCreateForm((current) => ({ ...current, providerId: event.target.value }))
-                      }
-                      className={formSelectClassName}
-                    >
-                      <option value="">{t.staff_services_optional}</option>
-                      {providers.map((provider) => (
-                        <option key={provider.id} value={provider.id}>
-                          {provider.name}
-                        </option>
-                      ))}
-                    </NativeComboboxSelect>
-                  </label>
-
-                  <label className="space-y-1.5 text-sm">
-                    <span className="text-xs font-medium text-muted-foreground">
-                      {t.staff_services_form_concierge}
-                    </span>
-                    <NativeComboboxSelect
-                      value={createForm.assignedConciergeId}
-                      onChange={(event) =>
-                        setCreateForm((current) => ({
-                          ...current,
-                          assignedConciergeId: event.target.value,
-                        }))
-                      }
-                      className={formSelectClassName}
-                    >
-                      <option value="">{t.staff_services_unassigned}</option>
-                      {conciergeStaff.map((member) => (
-                        <option key={member.id} value={member.id}>
-                          {member.name}
-                        </option>
-                      ))}
-                    </NativeComboboxSelect>
-                  </label>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="space-y-1.5 text-sm">
-                    <span className="text-xs font-medium text-muted-foreground">
-                      {t.staff_services_form_start}
-                    </span>
-                    <Input
-                      type="datetime-local"
-                      value={createForm.startsAt}
-                      onChange={(event) =>
-                        setCreateForm((current) => ({ ...current, startsAt: event.target.value }))
+                        setCreateForm((current) => ({ ...current, title: event.target.value }))
                       }
                       className={formInputClassName}
                     />
                   </label>
-                  <label className="space-y-1.5 text-sm">
+                </Section>
+
+                <Section title={t.staff_services_create_section_assignment}>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="space-y-1.5 text-sm">
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {t.staff_services_form_provider}
+                      </span>
+                      <NativeComboboxSelect
+                        value={createForm.providerId}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({ ...current, providerId: event.target.value }))
+                        }
+                        className={formSelectClassName}
+                      >
+                        <option value="">{t.staff_services_optional}</option>
+                        {providers.map((provider) => (
+                          <option key={provider.id} value={provider.id}>
+                            {provider.name}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                    </label>
+
+                    <label className="space-y-1.5 text-sm">
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {t.staff_services_form_concierge}
+                      </span>
+                      <NativeComboboxSelect
+                        value={createForm.assignedConciergeId}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({
+                            ...current,
+                            assignedConciergeId: event.target.value,
+                          }))
+                        }
+                        className={formSelectClassName}
+                      >
+                        <option value="">{t.staff_services_unassigned}</option>
+                        {conciergeStaff.map((member) => (
+                          <option key={member.id} value={member.id}>
+                            {member.name}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                    </label>
+                  </div>
+                </Section>
+
+                <Section title={t.staff_services_create_section_schedule}>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="space-y-1.5 text-sm">
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {t.staff_services_form_start}
+                      </span>
+                      <Input
+                        type="datetime-local"
+                        value={createForm.startsAt}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({ ...current, startsAt: event.target.value }))
+                        }
+                        className={formInputClassName}
+                      />
+                    </label>
+                    <label className="space-y-1.5 text-sm">
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {t.staff_services_form_end}
+                      </span>
+                      <Input
+                        type="datetime-local"
+                        value={createForm.endsAt}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({ ...current, endsAt: event.target.value }))
+                        }
+                        className={formInputClassName}
+                      />
+                    </label>
+                  </div>
+                </Section>
+
+                <Section title={t.staff_services_create_section_finance}>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <label className="space-y-1.5 text-sm">
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {t.staff_services_form_cost_estimate}
+                      </span>
+                      <Input
+                        inputMode="decimal"
+                        value={createForm.costEstimate}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({
+                            ...current,
+                            costEstimate: event.target.value,
+                          }))
+                        }
+                        className={formInputClassName}
+                      />
+                    </label>
+                    <label className="space-y-1.5 text-sm">
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {t.staff_services_form_actual_cost}
+                      </span>
+                      <Input
+                        inputMode="decimal"
+                        value={createForm.actualCost}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({ ...current, actualCost: event.target.value }))
+                        }
+                        className={formInputClassName}
+                      />
+                    </label>
+                    <label className="space-y-1.5 text-sm">
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {t.staff_services_form_currency}
+                      </span>
+                      <Input
+                        value={createForm.currency}
+                        maxLength={3}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({ ...current, currency: event.target.value }))
+                        }
+                        className={cn(formInputClassName, "uppercase")}
+                      />
+                    </label>
+                  </div>
+                </Section>
+
+                <Section title={t.staff_services_create_section_vendor_notes}>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="space-y-1.5 text-sm">
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {t.staff_services_form_booking_reference}
+                      </span>
+                      <Input
+                        value={createForm.bookingReference}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({
+                            ...current,
+                            bookingReference: event.target.value,
+                          }))
+                        }
+                        className={formInputClassName}
+                      />
+                    </label>
+                    <label className="space-y-1.5 text-sm">
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {t.staff_services_form_vendor}
+                      </span>
+                      <Input
+                        value={createForm.vendorName}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({ ...current, vendorName: event.target.value }))
+                        }
+                        className={formInputClassName}
+                      />
+                    </label>
+                  </div>
+
+                  <label className="block space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {t.staff_services_form_end}
+                      {t.staff_services_form_vendor_contact}
                     </span>
                     <Input
-                      type="datetime-local"
-                      value={createForm.endsAt}
+                      value={createForm.vendorContact}
                       onChange={(event) =>
-                        setCreateForm((current) => ({ ...current, endsAt: event.target.value }))
+                        setCreateForm((current) => ({ ...current, vendorContact: event.target.value }))
                       }
                       className={formInputClassName}
                     />
                   </label>
-                </div>
 
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <label className="space-y-1.5 text-sm">
-                    <span className="text-xs font-medium text-muted-foreground">
-                      {t.staff_services_form_cost_estimate}
-                    </span>
-                    <Input
-                      inputMode="decimal"
-                      value={createForm.costEstimate}
-                      onChange={(event) =>
-                        setCreateForm((current) => ({
-                          ...current,
-                          costEstimate: event.target.value,
-                        }))
-                      }
-                      className={formInputClassName}
-                    />
-                  </label>
-                  <label className="space-y-1.5 text-sm">
-                    <span className="text-xs font-medium text-muted-foreground">
-                      {t.staff_services_form_actual_cost}
-                    </span>
-                    <Input
-                      inputMode="decimal"
-                      value={createForm.actualCost}
-                      onChange={(event) =>
-                        setCreateForm((current) => ({ ...current, actualCost: event.target.value }))
-                      }
-                      className={formInputClassName}
-                    />
-                  </label>
-                  <label className="space-y-1.5 text-sm">
-                    <span className="text-xs font-medium text-muted-foreground">
-                      {t.staff_services_form_currency}
-                    </span>
-                    <Input
-                      value={createForm.currency}
-                      maxLength={3}
-                      onChange={(event) =>
-                        setCreateForm((current) => ({ ...current, currency: event.target.value }))
-                      }
-                      className={cn(formInputClassName, "uppercase")}
-                    />
-                  </label>
-                </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="block space-y-1.5 text-sm">
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {t.staff_services_form_service_notes}
+                      </span>
+                      <textarea
+                        value={createForm.serviceNotes}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({ ...current, serviceNotes: event.target.value }))
+                        }
+                        className={formTextareaClassName}
+                        rows={4}
+                      />
+                    </label>
 
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="space-y-1.5 text-sm">
-                    <span className="text-xs font-medium text-muted-foreground">
-                      {t.staff_services_form_booking_reference}
-                    </span>
-                    <Input
-                      value={createForm.bookingReference}
-                      onChange={(event) =>
-                        setCreateForm((current) => ({
-                          ...current,
-                          bookingReference: event.target.value,
-                        }))
-                      }
-                      className={formInputClassName}
-                    />
-                  </label>
-                  <label className="space-y-1.5 text-sm">
-                    <span className="text-xs font-medium text-muted-foreground">
-                      {t.staff_services_form_vendor}
-                    </span>
-                    <Input
-                      value={createForm.vendorName}
-                      onChange={(event) =>
-                        setCreateForm((current) => ({ ...current, vendorName: event.target.value }))
-                      }
-                      className={formInputClassName}
-                    />
-                  </label>
-                </div>
-
-                <label className="block space-y-1.5 text-sm">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {t.staff_services_form_vendor_contact}
-                  </span>
-                  <Input
-                    value={createForm.vendorContact}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({ ...current, vendorContact: event.target.value }))
-                    }
-                    className={formInputClassName}
-                  />
-                </label>
-
-                <label className="block space-y-1.5 text-sm">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {t.staff_services_form_service_notes}
-                  </span>
-                  <textarea
-                    value={createForm.serviceNotes}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({ ...current, serviceNotes: event.target.value }))
-                    }
-                    className={formTextareaClassName}
-                    rows={4}
-                  />
-                </label>
-
-                <label className="block space-y-1.5 text-sm">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {t.staff_services_form_billing_notes}
-                  </span>
-                  <textarea
-                    value={createForm.billingNotes}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({ ...current, billingNotes: event.target.value }))
-                    }
-                    className={formTextareaClassName}
-                    rows={3}
-                  />
-                </label>
-              </section>
-            </AdminSheetScaffold>
+                    <label className="block space-y-1.5 text-sm">
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {t.staff_services_form_billing_notes}
+                      </span>
+                      <textarea
+                        value={createForm.billingNotes}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({ ...current, billingNotes: event.target.value }))
+                        }
+                        className={formTextareaClassName}
+                        rows={4}
+                      />
+                    </label>
+                  </div>
+                </Section>
+              </div>            </AdminSheetScaffold>
           </form>
         </SheetContent>
       </Sheet>

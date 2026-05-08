@@ -124,6 +124,11 @@ export interface OperationsTranslations {
   staff_services_empty: string;
   staff_services_create_title: string;
   staff_services_create_description: string;
+  staff_services_create_section_service: string;
+  staff_services_create_section_assignment: string;
+  staff_services_create_section_schedule: string;
+  staff_services_create_section_finance: string;
+  staff_services_create_section_vendor_notes: string;
   staff_services_form_patient: string;
   staff_services_form_kind: string;
   staff_services_form_title: string;
@@ -483,6 +488,11 @@ export const operationsRu: OperationsTranslations = {
   staff_services_create_title: "Добавить concierge-сервис",
   staff_services_create_description:
     "Выберите пациента, тип сервиса и временное окно.",
+  staff_services_create_section_service: "Услуга и пациент",
+  staff_services_create_section_assignment: "Ответственные",
+  staff_services_create_section_schedule: "График",
+  staff_services_create_section_finance: "Финансы",
+  staff_services_create_section_vendor_notes: "Поставщик и заметки",
   staff_services_form_patient: "Пациент",
   staff_services_form_kind: "Тип сервиса",
   staff_services_form_title: "Название",
@@ -869,6 +879,11 @@ export const operationsDe: OperationsTranslations = {
   staff_services_create_title: "Concierge-Service hinzufügen",
   staff_services_create_description:
     "Patient, Serviceart und Zeitfenster festlegen.",
+  staff_services_create_section_service: "Service und Patient",
+  staff_services_create_section_assignment: "Verantwortung",
+  staff_services_create_section_schedule: "Zeitplan",
+  staff_services_create_section_finance: "Finanzen",
+  staff_services_create_section_vendor_notes: "Anbieter und Notizen",
   staff_services_form_patient: "Patient",
   staff_services_form_kind: "Serviceart",
   staff_services_form_title: "Titel",
