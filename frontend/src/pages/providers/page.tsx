@@ -1131,8 +1131,8 @@ function ProvidersPage() {
 
                   <ProviderOverviewSection
                     detail={detail}
-                    onOpenPatients={() => staffGo(`/patients?provider=${detail.id}`)}
-                    onOpenAppointments={() => staffGo(`/appointments?provider=${detail.id}`)}
+                    onOpenPatients={() => window.open(`/patients?provider=${detail.id}`, "_blank", "noopener,noreferrer")}
+                    onOpenAppointments={() => window.open(`/appointments?provider=${detail.id}`, "_blank", "noopener,noreferrer")}
                   />
 
                 {permissions.canManageRegistry || permissions.canViewPage ? (
@@ -1620,7 +1620,7 @@ function DoctorSection({
               key={doctor.id}
               className="group overflow-hidden rounded-[1.4rem] border border-border bg-card"
             >
-              <summary className="grid cursor-pointer list-none gap-4 p-4 transition hover:bg-muted/20 md:grid-cols-[minmax(0,1fr)_190px] [&::-webkit-details-marker]:hidden">
+              <summary className="grid cursor-pointer list-none gap-4 p-4 transition hover:bg-muted/20 md:grid-cols-[minmax(0,1fr)_160px] [&::-webkit-details-marker]:hidden">
                 <div className="flex min-w-0 gap-3">
                   <div className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted/30 text-sm font-medium text-muted-foreground">
                     <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
@@ -1776,70 +1776,69 @@ function ServiceSection({
           />
         </div>
       ) : (
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="mt-4 space-y-3">
           {detail.services.map((service) => (
             <div
               key={service.id}
-              className="rounded-[1.4rem] border border-slate-200 bg-slate-50/80 p-4"
+              className="overflow-hidden rounded-[1.4rem] border border-border bg-card"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-base font-semibold text-slate-950">{service.service_name}</p>
-                  <p className="mt-1 text-sm text-slate-600">
+              <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_180px_160px]">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-foreground">{service.service_name}</p>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
                     {service.description || t.common_not_set}
                   </p>
+                  <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    <span>
+                      {t.providers_service_valid_from}:{" "}
+                      <span className="font-medium text-foreground">
+                        {compactDate(service.valid_from, t.common_not_set)}
+                      </span>
+                    </span>
+                    <span>
+                      {t.providers_service_valid_to}:{" "}
+                      <span className="font-medium text-foreground">
+                        {compactDate(service.valid_to, t.common_not_set)}
+                      </span>
+                    </span>
+                  </div>
                 </div>
+
+                <div className="flex flex-col justify-between gap-2 rounded-xl border border-border/70 px-3 py-2">
+                  <span className="text-xs text-muted-foreground">{l("Preis", "Цена", "Price")}</span>
+                  <span className="text-lg font-semibold leading-none text-foreground">
+                    {moneyLabel(service.price, service.currency)}
+                  </span>
+                </div>
+
                 {canManage ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-8 justify-center rounded-lg bg-muted/20"
-                    onClick={() => onEdit(service)}
-                  >
-                    {l("Bearbeiten", "Редактировать", "Edit")}
-                  </Button>
+                  <div className="flex flex-col justify-end gap-2 border-t border-dashed border-border pt-3 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 w-full justify-center rounded-lg bg-muted/20"
+                      onClick={() => onEdit(service)}
+                    >
+                      {l("Bearbeiten", "Редактировать", "Edit")}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 w-full justify-center rounded-lg gap-1.5 border-rose-200 bg-rose-50/40 text-rose-700 hover:bg-rose-50"
+                      disabled={busy}
+                      onClick={() => onDelete(service.id, service.service_name)}
+                    >
+                      <Trash2 className="size-3.5" />
+                      {l("Löschen", "Удалить", "Delete")}
+                    </Button>
+                  </div>
                 ) : null}
               </div>
-
-              <div className="mt-4 grid gap-3 md:grid-cols-2">
-                <div className="rounded-2xl bg-white px-3 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{l("Preis", "Цена", "Price")}</p>
-                  <p className="mt-2 text-lg font-semibold text-slate-950">
-                    {moneyLabel(service.price, service.currency)}
-                  </p>
-                </div>
-                <div className="rounded-2xl bg-white px-3 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                    {l("Gültigkeit", "Срок действия", "Validity")}
-                  </p>
-                  <p className="mt-2 text-sm font-medium text-slate-900">
-                    {compactDate(service.valid_from, t.common_not_set)}
-                    {" -> "}
-                    {compactDate(service.valid_to, t.common_not_set)}
-                  </p>
-                </div>
-              </div>
-
-              {canManage ? (
-                <div className="mt-4 flex justify-end">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-8 justify-center rounded-lg gap-1.5 border-rose-200 bg-rose-50/40 text-rose-700 hover:bg-rose-50"
-                    disabled={busy}
-                    onClick={() => onDelete(service.id, service.service_name)}
-                  >
-                    <Trash2 className="size-3.5" />
-                    {l("Löschen", "Удалить", "Delete")}
-                  </Button>
-                </div>
-              ) : null}
             </div>
           ))}
-        </div>
-      )}
+        </div>      )}
     </section>
   );
 }
@@ -1877,68 +1876,59 @@ export function LinkedPatientsSection({
           />
         </div>
       ) : (
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="mt-4 space-y-3">
           {detail.linked_patients.map((patient) => (
             <div
               key={patient.id}
-              className="rounded-[1.4rem] border border-slate-200 bg-slate-50/80 p-4"
+              className="overflow-hidden rounded-[1.4rem] border border-border bg-card"
             >
-              <p className="text-base font-semibold text-slate-950">{patientLabel(patient)}</p>
-              <p className="mt-1 text-sm text-slate-600">
-                {l("Letzte Aktivität", "Последнее взаимодействие", "Last interaction")} {compactDateTime(patient.last_interaction_at)}
-              </p>
+              <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_270px_160px]">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-foreground">{patientLabel(patient)}</p>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                    {l("Letzte Aktivität", "Последнее взаимодействие", "Last interaction")}: {compactDateTime(patient.last_interaction_at)}
+                  </p>
+                </div>
 
-              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <div className="rounded-2xl bg-white px-3 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
+                <div className="grid grid-cols-3 overflow-hidden rounded-xl border border-border/70">
+                  <div className="border-r border-border px-3 py-2">
+                    <p className="text-xs text-muted-foreground">{l("Termine", "Записи", "Appointments")}</p>
+                    <p className="mt-1 text-lg font-semibold leading-none text-foreground">{patient.appointment_count}</p>
+                  </div>
+                  <div className="border-r border-border px-3 py-2">
+                    <p className="text-xs text-muted-foreground">{l("Services", "Сервисы", "Services")}</p>
+                    <p className="mt-1 text-lg font-semibold leading-none text-foreground">{patient.leistung_count}</p>
+                  </div>
+                  <div className="px-3 py-2">
+                    <p className="text-xs text-muted-foreground">{l("Concierge", "Concierge", "Concierge")}</p>
+                    <p className="mt-1 text-lg font-semibold leading-none text-foreground">{patient.concierge_count}</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-col justify-end gap-2 border-t border-dashed border-border pt-3 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 w-full justify-center rounded-lg bg-muted/20"
+                    onClick={() => window.open(`/patients?patient=${patient.id}`, "_blank", "noopener,noreferrer")}
+                  >
+                    {l("Patient öffnen", "Открыть пациента", "Open patient")}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 w-full justify-center rounded-lg bg-muted/20"
+                    onClick={() => window.open(`/appointments?patient=${patient.id}`, "_blank", "noopener,noreferrer")}
+                  >
                     {l("Termine", "Записи", "Appointments")}
-                  </p>
-                  <p className="mt-2 text-xl font-semibold text-slate-950">
-                    {patient.appointment_count}
-                  </p>
+                  </Button>
                 </div>
-                <div className="rounded-2xl bg-white px-3 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                    {l("Services", "Сервисы", "Services")}
-                  </p>
-                  <p className="mt-2 text-xl font-semibold text-slate-950">
-                    {patient.leistung_count}
-                  </p>
-                </div>
-                <div className="rounded-2xl bg-white px-3 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                    {l("Concierge", "Concierge", "Concierge")}
-                  </p>
-                  <p className="mt-2 text-xl font-semibold text-slate-950">
-                    {patient.concierge_count}
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-4 flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="rounded-2xl"
-                  onClick={() => onOpenPatient(patient.id)}
-                >
-                  {l("Patient öffnen", "Открыть пациента", "Open patient")}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="rounded-2xl"
-                  onClick={() => onOpenAppointments(patient.id)}
-                >
-                  {l("Termine", "Записи", "Appointments")}
-                </Button>
               </div>
             </div>
           ))}
-        </div>
-      )}
+        </div>      )}
     </section>
   );
 }
@@ -1981,91 +1971,109 @@ export function InteractionHistorySection({
           />
         </div>
       ) : (
-        <div className="mt-4 space-y-3">
-          {detail.interactions.map((item) => (
+        <div className="mt-4 space-y-3 pl-6">
+          {detail.interactions.map((item, index) => (
             <div
               key={item.id}
-              className="rounded-[1.4rem] border border-slate-200 bg-slate-50/80 p-4"
+              className={cn(
+                "relative",
+                index < detail.interactions.length - 1 &&
+                  "before:absolute before:-bottom-5 before:-left-4 before:top-3 before:w-px before:bg-border",
+              )}
             >
-              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
-                      {humanizeCode(item.kind)}
-                    </Badge>
-                    <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
-                      {humanizeCode(item.status)}
-                    </Badge>
-                    {item.appointment_type ? (
-                      <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
-                        {humanizeCode(item.appointment_type)}
+              <span className="absolute -left-[1.125rem] top-1.5 z-10 size-2 rounded-full bg-muted-foreground ring-4 ring-background" />
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <div className="text-sm font-semibold text-foreground">
+                  {item.title}
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  {compactDateTime(item.occurred_at)}
+                </span>
+              </div>
+              <div className="rounded-[1.4rem] border border-slate-200 p-4">
+                <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_160px]">
+                  <div className="min-w-0 space-y-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline" className="rounded-full border-slate-200 text-slate-700">
+                        {humanizeCode(item.kind)}
                       </Badge>
+                      <Badge variant="outline" className="rounded-full border-slate-200 text-slate-700">
+                        {humanizeCode(item.status)}
+                      </Badge>
+                      {item.appointment_type ? (
+                        <Badge variant="outline" className="rounded-full border-slate-200 text-slate-700">
+                          {humanizeCode(item.appointment_type)}
+                        </Badge>
+                      ) : null}
+                    </div>
+
+                    <div className="grid gap-3 text-sm md:grid-cols-2">
+                      <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+                        <span className="text-xs text-muted-foreground">{l("Patient", "Пациент", "Patient")}</span>
+                        <span className="font-medium text-foreground">{item.patient_name}</span>
+                        <span className="text-xs text-muted-foreground">ID</span>
+                        <span className="font-medium text-foreground">{item.patient_id}</span>
+                      </div>
+                      <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+                        <span className="text-xs text-muted-foreground">{l("Arzt", "Врач", "Doctor")}</span>
+                        <span className="font-medium text-foreground">{item.doctor_name || t.common_not_set}</span>
+                        <span className="text-xs text-muted-foreground">{l("Ort", "Локация", "Location")}</span>
+                        <span className="font-medium text-foreground">{item.location || t.common_not_set}</span>
+                      </div>
+                    </div>
+
+                    {item.notes ? (
+                      <div className="rounded-xl border border-border/60 px-3 py-2 text-sm leading-6 text-slate-700">
+                        <span className="mb-1 block text-xs text-muted-foreground">{l("Notiz", "Заметка", "Note")}</span>
+                        {item.notes}
+                      </div>
                     ) : null}
                   </div>
-
-                  <p className="mt-3 text-base font-semibold text-slate-950">{item.title}</p>
-                  <p className="mt-1 text-sm text-slate-600">
-                    {item.patient_id} · {item.patient_name}
-                  </p>
+                  <div className="flex flex-col justify-end gap-2 border-t border-dashed border-border pt-3 md:border-l md:border-t-0 md:pl-4 md:pt-0">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 w-full justify-center rounded-lg bg-muted/20"
+                      onClick={() => window.open(`/patients?patient=${item.patient_id}`, "_blank", "noopener,noreferrer")}
+                    >
+                      {l("Patient", "Пациент", "Patient")}
+                    </Button>
+                    {item.kind === "appointment" ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 w-full justify-center rounded-lg bg-muted/20"
+                        onClick={() => window.open(`/appointments?appointment=${item.id}`, "_blank", "noopener,noreferrer")}
+                      >
+                        {l("Termin", "Запись", "Appointment")}
+                      </Button>
+                    ) : null}
+                    {item.kind !== "appointment" ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 w-full justify-center rounded-lg bg-muted/20"
+                        onClick={() => window.open(`/appointments?patient=${item.patient_id}`, "_blank", "noopener,noreferrer")}
+                      >
+                        {l("Termine", "Записи", "Appointments")}
+                      </Button>
+                    ) : null}
+                    {item.order_id ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 w-full justify-center rounded-lg bg-muted/20"
+                        onClick={() => window.open(`/orders?order=${item.order_id}`, "_blank", "noopener,noreferrer")}
+                      >
+                        {l("Auftrag", "Заказ", "Order")}
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
-
-                <div className="text-sm text-slate-600">{compactDateTime(item.occurred_at)}</div>
-              </div>
-
-              <div className="mt-4 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
-                <InlineInfo icon={Stethoscope}>{item.doctor_name || t.common_not_set}</InlineInfo>
-                <InlineInfo icon={MapPin}>{item.location || t.common_not_set}</InlineInfo>
-              </div>
-
-              {item.notes ? (
-                <div className="mt-4 rounded-2xl bg-white px-4 py-3 text-sm leading-6 text-slate-700">
-                  {item.notes}
-                </div>
-              ) : null}
-
-              <div className="mt-4 flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="rounded-2xl"
-                  onClick={() => onOpenPatient(item.patient_id)}
-                >
-                  {l("Patient", "Пациент", "Patient")}
-                </Button>
-                {item.kind === "appointment" ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="rounded-2xl"
-                    onClick={() => onOpenAppointment(item.id)}
-                  >
-                    {l("Termin", "Запись", "Appointment")}
-                  </Button>
-                ) : null}
-                {item.kind !== "appointment" ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="rounded-2xl"
-                    onClick={() => onOpenAppointments(item.patient_id)}
-                  >
-                    {l("Termine", "Записи", "Appointments")}
-                  </Button>
-                ) : null}
-                {item.order_id ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="rounded-2xl"
-                    onClick={() => onOpenOrder(item.order_id!)}
-                  >
-                    {l("Auftrag", "Заказ", "Order")}
-                  </Button>
-                ) : null}
               </div>
             </div>
           ))}
