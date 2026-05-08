@@ -10,6 +10,7 @@ import {
 } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  ArrowUpRight,
   Building2,
   CalendarClock,
   Download,
@@ -24,6 +25,7 @@ import {
   Trash2,
   X,
   UsersRound,
+  BadgeCheck,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -106,6 +108,7 @@ import {
 import { useProvidersListTableModel } from "./ui/hooks/use-providers-list-table-model";
 import {
   PageHeader,
+  Section,
   inputClass as shellInputClassName,
   selectClass as shellSelectClassName,
   textareaClass as shellTextareaClass,
@@ -1019,14 +1022,17 @@ function ProvidersPage() {
                 />
               )}
             >
-              {createError ? <Banner tone="error">{createError}</Banner> : null}
-              <ProviderFormFields
-                form={createForm}
-                onChange={(field, value) =>
-                  setCreateForm((current) => ({ ...current, [field]: value }))
-                }
-                forceNonMedical={permissions.forceNonMedical}
-              />
+              <div className="space-y-3 rounded-xl p-4">
+                {createError ? <Banner tone="error">{createError}</Banner> : null}
+                <ProviderFormFields
+                  form={createForm}
+                  onChange={(field, value) =>
+                    setCreateForm((current) => ({ ...current, [field]: value }))
+                  }
+                  forceNonMedical={permissions.forceNonMedical}
+                  grouped
+                />
+              </div>
             </AdminSheetScaffold>
           </form>
         </SheetContent>
@@ -1055,7 +1061,7 @@ function ProvidersPage() {
               {l("Anbieter wird geladen", "Загрузка провайдера", "Loading provider")}
             </div>
           ) : detail ? (
-            <form onSubmit={handleUpdateProvider} className="flex flex-1 min-h-0 flex-col">
+            <div className="flex flex-1 min-h-0 flex-col">
               <AdminSheetScaffold
                 title={detail.name || t.providers_detail}
                 description={t.providers_subtitle}
@@ -1072,6 +1078,7 @@ function ProvidersPage() {
                     {permissions.canManageRegistry ? (
                       <Button
                         type="submit"
+                        form="provider-profile-form"
                         className="h-9 rounded-lg gap-1.5"
                         disabled={providerBusy}
                       >
@@ -1082,25 +1089,31 @@ function ProvidersPage() {
                   </SheetActionsFooter>
                 )}
               >
-                {detailError ? <Banner tone="error">{detailError}</Banner> : null}
-                {providerError ? <Banner tone="error">{providerError}</Banner> : null}
+                <div className="space-y-3 rounded-xl p-4">
+                  {detailError ? <Banner tone="error">{detailError}</Banner> : null}
+                  {providerError ? <Banner tone="error">{providerError}</Banner> : null}
 
-                <ProviderOverviewSection
-                  detail={detail}
-                  providerActionBusy={providerActionBusy}
-                  permissions={permissions}
-                  onActivate={() => handleToggleProvider(true)}
-                  onDeactivate={() => handleToggleProvider(false)}
-                  onDelete={handleDeleteProvider}
-                  onOpenPatients={() => staffGo(`/patients?provider=${detail.id}`)}
-                  onOpenAppointments={() => staffGo(`/appointments?provider=${detail.id}`)}
-                />
+                  <ProviderSheetHero
+                    detail={detail}
+                    providerActionBusy={providerActionBusy}
+                    permissions={permissions}
+                    onActivate={() => handleToggleProvider(true)}
+                    onDeactivate={() => handleToggleProvider(false)}
+                    onDelete={handleDeleteProvider}
+                  />
+
+                  <ProviderOverviewSection
+                    detail={detail}
+                    onOpenPatients={() => staffGo(`/patients?provider=${detail.id}`)}
+                    onOpenAppointments={() => staffGo(`/appointments?provider=${detail.id}`)}
+                  />
 
                 {permissions.canManageRegistry || permissions.canViewPage ? (
-                  <section className="rounded-xl border border-border/50 bg-card/40 p-4 space-y-3">
-                    <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
-                      {titleWithDot(l("Anbieterprofil", "Профиль провайдера", "Provider profile"))}
-                    </h3>
+                  <form
+                    id="provider-profile-form"
+                    onSubmit={handleUpdateProvider}
+                    className="space-y-3"
+                  >
                     <ProviderFormFields
                       form={providerForm}
                       onChange={(field, value) =>
@@ -1108,13 +1121,14 @@ function ProvidersPage() {
                       }
                       forceNonMedical={permissions.forceNonMedical}
                       disabled={!permissions.canManageRegistry}
+                      grouped
                     />
                     {!permissions.canManageRegistry ? (
                       <p className="text-[12px] text-muted-foreground italic">
                         {t.providers_edit_restricted_note}
                       </p>
                     ) : null}
-                  </section>
+                  </form>
                 ) : null}
 
                 <DoctorSection
@@ -1171,8 +1185,9 @@ function ProvidersPage() {
                   }
                   onOpenOrder={(orderId) => staffGo(`/orders?order=${orderId}`)}
                 />
+                </div>
               </AdminSheetScaffold>
-            </form>
+            </div>
           ) : detailError ? (
             <div className="p-4">
               <Banner tone="error">{detailError}</Banner>
@@ -1190,13 +1205,119 @@ function ProvidersPage() {
 
 export function ProviderOverviewSection({
   detail,
+  onOpenPatients,
+  onOpenAppointments,
+}: {
+  detail: ProviderDetail;
+  onOpenPatients: () => void;
+  onOpenAppointments: () => void;
+}) {
+  const { t, lang } = useLang();
+  const l = (de: string, ru: string, en: string) =>
+    lang === "de" ? de : lang === "ru" ? ru : en;
+
+  const overviewRows = [
+    {
+      label:
+        detail.provider_type === "non_medical"
+          ? l("Kontakte", "Контакты", "Contacts")
+          : t.providers_doctors,
+      value: detail.doctors.length,
+    },
+    {
+      label: t.providers_services,
+      value: detail.services.length,
+    },
+    {
+      label: t.providers_linked_patients,
+      value: detail.linked_patients.length,
+    },
+    {
+      label: l("Aktivität", "Активность", "Activity items"),
+      value: detail.interactions.length,
+    },
+  ];
+
+  return (
+    <section className="space-y-5 rounded-xl border border-border/50 bg-card/40 p-4">
+      <h3 className="text-sm font-semibold text-foreground">
+        {titleWithDot(l("Providerübersicht", "Обзор провайдера", "Provider overview"))}
+      </h3>
+      <div className="grid items-stretch gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-8">
+        <div className="space-y-4">
+          {overviewRows.map((row) => (
+            <div key={row.label} className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
+              <span className="text-sm text-muted-foreground">{row.label}</span>
+              <span className="h-px bg-border/70" />
+              <span className="text-sm font-semibold text-foreground">{row.value}</span>
+            </div>
+          ))}
+        </div>
+        <div className="grid h-full gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            className="group relative h-full min-h-0 overflow-hidden rounded-xl border border-border/70 bg-muted/20 p-4 pr-14 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-orange-200 hover:bg-orange-50/30"
+            onClick={onOpenPatients}
+          >
+            <span className="block text-sm font-semibold text-foreground">
+              {l("Patientenlinks", "Связи с пациентами", "Patient links")}
+            </span>
+            <span className="mt-2 block text-xs leading-snug text-muted-foreground">
+              {l(
+                "Patienten dieses Providers öffnen.",
+                "Откройте пациентов этого провайдера.",
+                "Open patients linked to this provider.",
+              )}
+            </span>
+            <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
+              <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+            </span>
+          </button>
+          <button
+            type="button"
+            className="group relative h-full min-h-0 overflow-hidden rounded-xl border border-border/70 bg-muted/20 p-4 pr-14 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-orange-200 hover:bg-orange-50/30"
+            onClick={onOpenAppointments}
+          >
+            <span className="block text-sm font-semibold text-foreground">
+              {l("Termine", "Записи", "Appointments")}
+            </span>
+            <span className="mt-2 block text-xs leading-snug text-muted-foreground">
+              {l(
+                "Termine dieses Providers öffnen.",
+                "Откройте записи этого провайдера.",
+                "Open appointments for this provider.",
+              )}
+            </span>
+            <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
+              <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+            </span>
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}function HeroInfoLine({
+  icon: Icon,
+  children,
+}: {
+  icon: typeof MapPin;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex min-w-0 items-center gap-2">
+      <Icon className="size-3.5 shrink-0 text-muted-foreground/65" />
+      <span className="min-w-0 truncate">{children}</span>
+    </div>
+  );
+}
+
+function ProviderSheetHero({
+  detail,
   providerActionBusy,
   permissions,
   onActivate,
   onDeactivate,
   onDelete,
-  onOpenPatients,
-  onOpenAppointments,
 }: {
   detail: ProviderDetail;
   providerActionBusy: string | null;
@@ -1204,169 +1325,132 @@ export function ProviderOverviewSection({
   onActivate: () => void;
   onDeactivate: () => void;
   onDelete: () => void;
-  onOpenPatients: () => void;
-  onOpenAppointments: () => void;
 }) {
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const l = (de: string, ru: string, en: string) =>
     lang === "de" ? de : lang === "ru" ? ru : en;
+  const isMedical = detail.provider_type === "medical";
+  const metaLine = [
+    detail.legal_name && detail.legal_name !== detail.name ? detail.legal_name : null,
+    providerMeta(detail),
+  ].filter(Boolean).join(" - ");
 
   return (
-    <section className="rounded-xl border border-border/50 bg-card/40 p-4 space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <section className="relative overflow-hidden rounded-xl border border-border bg-card px-7 py-4">
+      <span
+        className={cn(
+          "absolute left-0 top-4 h-12 w-1 rounded-r-full",
+          detail.is_active ? "bg-emerald-500" : "bg-slate-300",
+        )}
+      />
+      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_240px] md:items-stretch">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="mb-2 flex items-center gap-3">
+            <span className="h-px w-8 bg-border" />
             <Badge
               variant="outline"
               className={cn(
-                "rounded-full text-[10px]",
-                detail.provider_type === "medical"
+                "rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.08em]",
+                detail.is_active
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : "border-slate-200 bg-slate-50 text-slate-600",
+              )}
+            >
+              {detail.is_active ? t.common_active : t.common_inactive}
+            </Badge>
+          </div>
+          <h2 className="truncate text-xl font-semibold leading-tight text-foreground">
+            {detail.name}
+          </h2>
+          <p className="mt-2 line-clamp-1 text-sm text-muted-foreground">
+            {metaLine || t.common_not_set}
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Badge
+              variant="outline"
+              className={cn(
+                "rounded-full px-2 py-0.5 text-xs font-medium",
+                isMedical
                   ? "border-sky-200 bg-sky-50 text-sky-700"
                   : "border-violet-200 bg-violet-50 text-violet-700",
               )}
             >
               {providerTypeLabel(detail.provider_type, tr)}
             </Badge>
-            <Badge
-              variant="outline"
-              className={cn(
-                "rounded-full text-[10px]",
-                detail.is_active
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                  : "border-border/60 bg-muted/25 text-muted-foreground",
-              )}
-            >
-              {detail.is_active ? t.common_active : t.common_inactive}
-            </Badge>
-            {detail.kooperationsvertrag ? (
-              <Badge variant="outline" className="rounded-full text-[10px] border-border/60 bg-muted/25 text-foreground">
-                {l("Vertrag verknüpft", "Договор привязан", "Contract linked")}
-              </Badge>
-            ) : null}
           </div>
-          <h2 className="mt-3 text-xl font-semibold text-foreground">{detail.name}</h2>
-          {detail.legal_name && detail.legal_name !== detail.name ? (
-            <p className="mt-1 text-sm text-muted-foreground">{detail.legal_name}</p>
+          <div className="mt-4 grid gap-x-6 gap-y-2 text-xs text-muted-foreground sm:grid-cols-2">
+            <HeroInfoLine icon={MapPin}>
+              {providerMeta(detail) || t.common_not_set}
+            </HeroInfoLine>
+            <HeroInfoLine icon={Phone}>
+              {detail.phone || t.common_not_set}
+            </HeroInfoLine>
+            <HeroInfoLine icon={Mail}>
+              {detail.email || t.common_not_set}
+            </HeroInfoLine>
+            <HeroInfoLine icon={BadgeCheck}>
+              {detail.tax_id || t.common_not_set}
+            </HeroInfoLine>
+            <HeroInfoLine icon={Stethoscope}>
+              {detail.fachbereich || t.common_not_set}
+            </HeroInfoLine>
+          </div>
+        </div>
+        <div className="flex flex-col justify-start gap-4 border-t border-dashed border-border/70 pt-3 text-left md:border-l md:border-t-0 md:pl-5 md:pt-0">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+            {l("Aktionen", "Действия", "Actions")}
+          </p>
+          {permissions.canManageRegistry ? (
+            <div className="flex flex-col gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 w-full justify-center rounded-lg bg-muted/20"
+                disabled={providerActionBusy === "activate" || detail.is_active}
+                onClick={onActivate}
+              >
+                {providerActionBusy === "activate" ? (
+                  <LoaderCircle className="size-3.5 animate-spin" />
+                ) : null}
+                {l("Aktivieren", "Активировать", "Activate")}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 w-full justify-center rounded-lg bg-muted/20"
+                disabled={providerActionBusy === "deactivate" || !detail.is_active}
+                onClick={onDeactivate}
+              >
+                {providerActionBusy === "deactivate" ? (
+                  <LoaderCircle className="size-3.5 animate-spin" />
+                ) : null}
+                {l("Deaktivieren", "Деактивировать", "Deactivate")}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 w-full justify-center rounded-lg gap-1.5 border-rose-200 bg-rose-50/40 text-rose-700 hover:bg-rose-50"
+                disabled={providerActionBusy === "delete"}
+                onClick={onDelete}
+              >
+                {providerActionBusy === "delete" ? (
+                  <LoaderCircle className="size-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="size-3.5" />
+                )}
+                {l("Löschen", "Удалить", "Delete")}
+              </Button>
+            </div>
           ) : null}
+          <p className="text-right text-sm font-semibold tabular-nums text-foreground">
+            {compactDateTime(detail.updated_at, t.common_not_set)}
+          </p>
         </div>
       </div>
-
-      <div className="grid gap-2 text-sm text-muted-foreground">
-        <InlineInfo icon={MapPin}>{providerMeta(detail) || t.common_not_set}</InlineInfo>
-        <InlineInfo icon={Phone}>{detail.phone || t.common_not_set}</InlineInfo>
-        <InlineInfo icon={Mail}>{detail.email || t.common_not_set}</InlineInfo>
-        {detail.tax_id ? (
-          <p className="text-xs text-muted-foreground/80">
-            {l("Steuer-ID", "Налоговый ID", "Tax ID")} · {detail.tax_id}
-          </p>
-        ) : null}
-        {detail.fachbereich ? (
-          <p className="text-xs text-muted-foreground/80">
-            {tr.providers_fachbereich} · {detail.fachbereich}
-          </p>
-        ) : null}
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-4">
-        <div className="rounded-xl border border-border/50 bg-card px-4 py-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
-            {detail.provider_type === "non_medical"
-              ? l("Kontakte", "Контакты", "Contacts")
-              : t.providers_doctors}
-          </p>
-          <p className="mt-2 text-2xl font-semibold text-foreground">{detail.doctors.length}</p>
-        </div>
-        <div className="rounded-xl border border-border/50 bg-card px-4 py-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
-            {l("Services", "Сервисы", "Services")}
-          </p>
-          <p className="mt-2 text-2xl font-semibold text-foreground">{detail.services.length}</p>
-        </div>
-        <div className="rounded-xl border border-border/50 bg-card px-4 py-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
-            {l("Verknüpfte Patienten", "Связанные пациенты", "Linked patients")}
-          </p>
-          <p className="mt-2 text-2xl font-semibold text-foreground">{detail.linked_patients.length}</p>
-        </div>
-        <div className="rounded-xl border border-border/50 bg-card px-4 py-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
-            {l("Aktivität", "Активность", "Activity items")}
-          </p>
-          <p className="mt-2 text-2xl font-semibold text-foreground">{detail.interactions.length}</p>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-8 rounded-lg"
-          onClick={onOpenPatients}
-        >
-          {l("Patientenlinks", "Связи с пациентами", "Patient links")}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-8 rounded-lg"
-          onClick={onOpenAppointments}
-        >
-          {l("Termine", "Записи", "Appointments")}
-        </Button>
-        {permissions.canManageRegistry ? (
-          <>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-lg gap-1.5"
-              disabled={providerActionBusy === "activate" || detail.is_active}
-              onClick={onActivate}
-            >
-              {providerActionBusy === "activate" ? (
-                <LoaderCircle className="size-3.5 animate-spin" />
-              ) : null}
-              {l("Aktivieren", "Активировать", "Activate")}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-lg gap-1.5"
-              disabled={providerActionBusy === "deactivate" || !detail.is_active}
-              onClick={onDeactivate}
-            >
-              {providerActionBusy === "deactivate" ? (
-                <LoaderCircle className="size-3.5 animate-spin" />
-              ) : null}
-              {l("Deaktivieren", "Деактивировать", "Deactivate")}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-lg gap-1.5 border-rose-200 text-rose-700 hover:bg-rose-50"
-              disabled={providerActionBusy === "delete"}
-              onClick={onDelete}
-            >
-              {providerActionBusy === "delete" ? (
-                <LoaderCircle className="size-3.5 animate-spin" />
-              ) : (
-                <Trash2 className="size-3.5" />
-              )}
-              {l("Löschen", "Удалить", "Delete")}
-            </Button>
-          </>
-        ) : null}
-      </div>
-
-      <p className="text-xs text-muted-foreground/80">
-        {l("Aktualisiert", "Обновлено", "Updated")}{" "}
-        {compactDateTime(detail.updated_at, t.common_not_set)}
-      </p>
     </section>
   );
 }
@@ -1972,16 +2056,19 @@ function ProviderFormFields({
   onChange,
   forceNonMedical,
   disabled = false,
+  grouped = false,
 }: {
   form: ProviderFormState;
   onChange: (field: keyof ProviderFormState, value: string) => void;
   forceNonMedical: boolean;
   disabled?: boolean;
+  grouped?: boolean;
 }) {
   const { t, lang } = useLang();
   const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
-  return (
-    <div className="space-y-4">
+
+  const profileFields = (
+    <>
       <div className="grid gap-4 md:grid-cols-3">
         <Field label={l("Anzeigename", "Отображаемое имя", "Display name")}>
           <Input
@@ -2048,7 +2135,11 @@ function ProviderFormFields({
           />
         </Field>
       </div>
+    </>
+  );
 
+  const addressFields = (
+    <>
       <Field label={t.providers_street}>
         <Input
           value={form.addressStreet}
@@ -2084,7 +2175,11 @@ function ProviderFormFields({
           />
         </Field>
       </div>
+    </>
+  );
 
+  const contactFields = (
+    <>
       <div className="grid gap-4 md:grid-cols-2">
         <Field label={t.field_phone}>
           <Input
@@ -2104,7 +2199,11 @@ function ProviderFormFields({
           />
         </Field>
       </div>
+    </>
+  );
 
+  const contractFields = (
+    <>
       <Field label={t.providers_contract}>
         <textarea
           value={form.contractText}
@@ -2126,6 +2225,34 @@ function ProviderFormFields({
           disabled={disabled}
         />
       </Field>
+    </>
+  );
+
+  if (grouped) {
+    return (
+      <div className="space-y-3">
+        <Section title={l("Profil", "Профиль провайдера", "Provider profile")}>
+          {profileFields}
+        </Section>
+        <Section title={l("Adresse", "Адрес", "Address")}>
+          {addressFields}
+        </Section>
+        <Section title={l("Kontakt", "Контакты", "Contact")}>
+          {contactFields}
+        </Section>
+        <Section title={l("Vertrag und Notizen", "Договор и заметки", "Contract and notes")}>
+          {contractFields}
+        </Section>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {profileFields}
+      {addressFields}
+      {contactFields}
+      {contractFields}
     </div>
   );
 }
