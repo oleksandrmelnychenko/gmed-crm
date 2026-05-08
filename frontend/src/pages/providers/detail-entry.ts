@@ -1,1 +1,1 @@
-export { ProviderDetailPage } from "./detail-page";
+export { ProviderDetailPage } from "./page";

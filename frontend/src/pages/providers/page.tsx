@@ -8,7 +8,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowUpRight,
   Building2,
@@ -215,11 +215,16 @@ function EmptyPanel({
   );
 }
 
-function ProvidersPage() {
+type ProvidersPageProps = {
+  detailRouteId?: string;
+};
+
+function ProvidersPage({ detailRouteId = "" }: ProvidersPageProps = {}) {
   const { user } = useAuth();
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
+  const detailPageMode = Boolean(detailRouteId);
   const providerColumnGroupLabels = useMemo(
     () => ({
       identity: t.operations_column_group_identity,
@@ -338,10 +343,10 @@ function ProvidersPage() {
     blankProviderForm(permissions.forceNonMedical ? "non_medical" : "medical")
   );
 
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [selectedId, setSelectedId] = useState("");
+  const [detailOpen, setDetailOpen] = useState(detailPageMode);
+  const [selectedId, setSelectedId] = useState(detailRouteId);
   const [detail, setDetail] = useState<ProviderDetail | null>(null);
-  const [detailBusy, setDetailBusy] = useState(false);
+  const [detailBusy, setDetailBusy] = useState(detailPageMode);
   const [detailError, setDetailError] = useState("");
   const [detailVersion, setDetailVersion] = useState(0);
 
@@ -440,15 +445,23 @@ function ProvidersPage() {
   }
 
   useEffect(() => {
+    if (!detailPageMode) return;
+    setSelectedId(detailRouteId);
+    setDetailOpen(Boolean(detailRouteId));
+    setDetail(null);
+  }, [detailPageMode, detailRouteId]);
+
+  useEffect(() => {
+    if (detailPageMode) return;
     const providerParam = searchParams.get("provider") ?? "";
     if (providerParam && providerParam !== selectedId) {
       setSelectedId(providerParam);
       setDetailOpen(true);
     }
-  }, [searchParams, selectedId]);
+  }, [detailPageMode, searchParams, selectedId]);
 
   useEffect(() => {
-    if (!permissions.canViewPage) {
+    if (!permissions.canViewPage || detailPageMode) {
       startTransition(() => setProviders([]));
       return;
     }
@@ -475,10 +488,11 @@ function ProvidersPage() {
     return () => {
       cancelled = true;
     };
-  }, [permissions.canViewPage, providersPath, listVersion, t.common_failed_load]);
+  }, [detailPageMode, permissions.canViewPage, providersPath, listVersion, t.common_failed_load]);
 
   useEffect(() => {
-    if (!detailOpen || !selectedId) return;
+    const shouldLoadDetail = detailOpen || detailPageMode;
+    if (!shouldLoadDetail || !selectedId) return;
 
     let cancelled = false;
     setDetailBusy(true);
@@ -508,7 +522,7 @@ function ProvidersPage() {
     return () => {
       cancelled = true;
     };
-  }, [detailOpen, selectedId, detailVersion, t.common_failed_load]);
+  }, [detailOpen, detailPageMode, selectedId, detailVersion, t.common_failed_load]);
 
   useEffect(() => {
     setCreateForm(blankProviderForm(permissions.forceNonMedical ? "non_medical" : "medical"));
@@ -557,7 +571,6 @@ function ProvidersPage() {
 
   function openProvider(id: string) {
     staffGo(`/providers/${id}`);
-    syncQuery({ provider: id });
   }
 
   function resetFilters() {
@@ -653,7 +666,11 @@ function ProvidersPage() {
       setDetailOpen(false);
       setSelectedId("");
       setDetail(null);
-      refreshList();
+      if (detailPageMode) {
+        staffGo("/providers");
+      } else {
+        refreshList();
+      }
     } catch (error) {
       setProviderError(error instanceof Error ? error.message : t.common_failed_update);
     } finally {
@@ -769,6 +786,236 @@ function ProvidersPage() {
           </p>
         </section>
       </div>
+    );
+  }
+
+  if (detailPageMode) {
+    return (
+      <>
+        <div className="w-full space-y-4">
+          {detailBusy ? (
+            <div className="flex min-h-[520px] items-center justify-center text-sm text-muted-foreground">
+              <LoaderCircle className="mr-2 size-4 animate-spin" />
+              {l("Anbieter wird geladen", "Загрузка провайдера", "Loading provider")}
+            </div>
+          ) : detail ? (
+            <div className="flex min-h-0 flex-col">
+              <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
+                <div className="min-w-0">
+                  <h1 className="truncate text-xl font-semibold text-foreground">
+                    {detail.name || t.providers_detail}
+                  </h1>
+                  <p className="mt-1 text-sm text-muted-foreground">{t.providers_subtitle}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-9 rounded-lg"
+                    onClick={() => staffGo("/providers")}
+                  >
+                    {l("Zur Liste", "К списку", "Back to list")}
+                  </Button>
+                  {permissions.canManageRegistry ? (
+                    <Button
+                      type="submit"
+                      form="provider-profile-form"
+                      className="h-9 rounded-lg gap-1.5"
+                      disabled={providerBusy}
+                    >
+                      {providerBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                      {providerBusy ? t.patients_saving : t.common_save}
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+              <div className="space-y-3 rounded-xl p-4">
+                  {detailError ? <Banner tone="error">{detailError}</Banner> : null}
+                  {providerError ? <Banner tone="error">{providerError}</Banner> : null}
+
+                  <ProviderSheetHero
+                    detail={detail}
+                    providerActionBusy={providerActionBusy}
+                    permissions={permissions}
+                    onActivate={() => handleToggleProvider(true)}
+                    onDeactivate={() => handleToggleProvider(false)}
+                    onDelete={handleDeleteProvider}
+                  />
+
+                  <ProviderOverviewSection
+                    detail={detail}
+                    onOpenPatients={() => window.open(`/patients?provider=${detail.id}`, "_blank", "noopener,noreferrer")}
+                    onOpenAppointments={() => window.open(`/appointments?provider=${detail.id}`, "_blank", "noopener,noreferrer")}
+                  />
+
+                  {permissions.canManageRegistry || permissions.canViewPage ? (
+                    <form
+                      id="provider-profile-form"
+                      onSubmit={handleUpdateProvider}
+                      className="space-y-3"
+                    >
+                      <ProviderFormFields
+                        form={providerForm}
+                        onChange={(field, value) =>
+                          setProviderForm((current) => ({ ...current, [field]: value }))
+                        }
+                        forceNonMedical={permissions.forceNonMedical}
+                        disabled={!permissions.canManageRegistry}
+                        grouped
+                      />
+                      {!permissions.canManageRegistry ? (
+                        <p className="text-[12px] text-muted-foreground italic">
+                          {t.providers_edit_restricted_note}
+                        </p>
+                      ) : null}
+                    </form>
+                  ) : null}
+
+                  <DoctorSection
+                    detail={detail}
+                    busy={doctorBusy}
+                    canManage={permissions.canManageRegistry}
+                    onNew={() => {
+                      setDoctorError("");
+                      setDoctorForm(blankDoctorForm());
+                      setDoctorDialogOpen(true);
+                    }}
+                    onEdit={(doctor) => {
+                      setDoctorError("");
+                      setDoctorForm(doctorToForm(doctor));
+                      setDoctorDialogOpen(true);
+                    }}
+                    onDelete={handleDeleteDoctor}
+                  />
+
+                  <ServiceSection
+                    detail={detail}
+                    busy={serviceBusy}
+                    canManage={permissions.canManageRegistry}
+                    onNew={() => {
+                      setServiceError("");
+                      setServiceForm(blankServiceForm());
+                      setServiceDialogOpen(true);
+                    }}
+                    onEdit={(service) => {
+                      setServiceError("");
+                      setServiceForm(serviceToForm(service));
+                      setServiceDialogOpen(true);
+                    }}
+                    onDelete={handleDeleteService}
+                  />
+
+                  <LinkedPatientsSection
+                    detail={detail}
+                    onOpenPatient={(patientId) => staffGo(`/patients?patient=${patientId}`)}
+                    onOpenAppointments={(patientId) =>
+                      staffGo(`/appointments?patient=${patientId}&provider=${detail.id}`)
+                    }
+                  />
+                  <InteractionHistorySection
+                    detail={detail}
+                    onOpenPatient={(patientId) => staffGo(`/patients?patient=${patientId}`)}
+                    onOpenAppointments={(patientId) =>
+                      staffGo(`/appointments?patient=${patientId}&provider=${detail.id}`)
+                    }
+                    onOpenAppointment={(appointmentId) =>
+                      staffGo(`/appointments?appointment=${appointmentId}`)
+                    }
+                    onOpenOrder={(orderId) => staffGo(`/orders?order=${orderId}`)}
+                  />
+              </div>
+            </div>
+          ) : detailError ? (
+            <div className="p-4">
+              <Banner tone="error">{detailError}</Banner>
+            </div>
+          ) : (
+            <div className="flex min-h-[520px] items-center justify-center text-sm text-muted-foreground">
+              {t.providers_select_to_open_workspace}
+            </div>
+          )}
+        </div>
+
+        {detail ? (
+          <Dialog open={doctorDialogOpen} onOpenChange={handleDoctorDialogOpenChange}>
+            <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+              <DialogHeader className="pr-8">
+                <DialogTitle>{doctorForm.id ? t.providers_doctor_detail : t.providers_doctor_new}</DialogTitle>
+              </DialogHeader>
+              <form onSubmit={handleDoctorSubmit} className="space-y-4">
+                <div className="space-y-3 rounded-xl p-4">
+                  {doctorError ? <Banner tone="error">{doctorError}</Banner> : null}
+                  <DoctorFormFields
+                    form={doctorForm}
+                    onChange={(field, value) =>
+                      setDoctorForm((current) => ({ ...current, [field]: value }))
+                    }
+                  />
+                  <div className="flex justify-end gap-2 pt-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9 rounded-lg"
+                      onClick={() => handleDoctorDialogOpenChange(false)}
+                      disabled={doctorBusy}
+                    >
+                      {l("Abbrechen", "Отмена", "Cancel")}
+                    </Button>
+                    <Button
+                      type="submit"
+                      className="h-9 rounded-lg"
+                      disabled={doctorBusy}
+                    >
+                      {doctorBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                      {doctorForm.id ? t.common_save : t.providers_doctor_new}
+                    </Button>
+                  </div>
+                </div>
+              </form>
+            </DialogContent>
+          </Dialog>
+        ) : null}
+
+        {detail ? (
+          <Dialog open={serviceDialogOpen} onOpenChange={handleServiceDialogOpenChange}>
+            <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+              <DialogHeader className="pr-8">
+                <DialogTitle>{serviceForm.id ? t.providers_service_detail : t.providers_service_new}</DialogTitle>
+              </DialogHeader>
+              <form onSubmit={handleServiceSubmit} className="space-y-4">
+                <div className="space-y-3 rounded-xl p-4">
+                  {serviceError ? <Banner tone="error">{serviceError}</Banner> : null}
+                  <ServiceFormFields
+                    form={serviceForm}
+                    onChange={(field, value) =>
+                      setServiceForm((current) => ({ ...current, [field]: value }))
+                    }
+                  />
+                  <div className="flex justify-end gap-2 pt-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9 rounded-lg"
+                      onClick={() => handleServiceDialogOpenChange(false)}
+                      disabled={serviceBusy}
+                    >
+                      {l("Abbrechen", "Отмена", "Cancel")}
+                    </Button>
+                    <Button
+                      type="submit"
+                      className="h-9 rounded-lg"
+                      disabled={serviceBusy}
+                    >
+                      {serviceBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                      {serviceForm.id ? t.common_save : t.providers_service_new}
+                    </Button>
+                  </div>
+                </div>
+              </form>
+            </DialogContent>
+          </Dialog>
+        ) : null}
+      </>
     );
   }
 
@@ -2475,4 +2722,9 @@ function ServiceFormFields({
     </div>
   );
 }
-export { ProvidersPage };
+function ProviderDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  return <ProvidersPage detailRouteId={id ?? ""} />;
+}
+
+export { ProviderDetailPage, ProvidersPage };
