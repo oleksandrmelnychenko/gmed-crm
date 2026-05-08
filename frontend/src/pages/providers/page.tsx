@@ -13,6 +13,7 @@ import {
   ArrowUpRight,
   Building2,
   CalendarClock,
+  ChevronDown,
   Download,
   LoaderCircle,
   Mail,
@@ -30,6 +31,12 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import {
@@ -138,7 +145,7 @@ const PROVIDER_REALTIME_EVENTS = [
 
 function cardClass(extra?: string) {
   return cn(
-    "rounded-[1.75rem] border border-border/70 bg-card shadow-[0_20px_60px_rgba(15,23,42,0.05)]",
+    "rounded-[1.75rem] border border-border/70 bg-card",
     extra
   );
 }
@@ -344,10 +351,12 @@ function ProvidersPage() {
   const [providerActionBusy, setProviderActionBusy] = useState<string | null>(null);
 
   const [doctorForm, setDoctorForm] = useState<DoctorFormState>(blankDoctorForm());
+  const [doctorDialogOpen, setDoctorDialogOpen] = useState(false);
   const [doctorBusy, setDoctorBusy] = useState(false);
   const [doctorError, setDoctorError] = useState("");
 
   const [serviceForm, setServiceForm] = useState<ServiceFormState>(blankServiceForm());
+  const [serviceDialogOpen, setServiceDialogOpen] = useState(false);
   const [serviceBusy, setServiceBusy] = useState(false);
   const [serviceError, setServiceError] = useState("");
 
@@ -661,6 +670,7 @@ function ProvidersPage() {
 
     try {
       await saveProviderDoctor(detail.id, doctorForm.id, toDoctorPayload(doctorForm));
+      setDoctorDialogOpen(false);
       setDoctorForm(blankDoctorForm());
       refreshList();
       refreshDetail();
@@ -668,6 +678,14 @@ function ProvidersPage() {
       setDoctorError(error instanceof Error ? error.message : t.common_failed_update);
     } finally {
       setDoctorBusy(false);
+    }
+  }
+
+  function handleDoctorDialogOpenChange(open: boolean) {
+    setDoctorDialogOpen(open);
+    if (!open) {
+      setDoctorError("");
+      setDoctorForm(blankDoctorForm());
     }
   }
 
@@ -701,12 +719,21 @@ function ProvidersPage() {
 
     try {
       await saveProviderService(detail.id, serviceForm.id, toServicePayload(serviceForm));
+      setServiceDialogOpen(false);
       setServiceForm(blankServiceForm());
       refreshDetail();
     } catch (error) {
       setServiceError(error instanceof Error ? error.message : t.common_failed_update);
     } finally {
       setServiceBusy(false);
+    }
+  }
+
+  function handleServiceDialogOpenChange(open: boolean) {
+    setServiceDialogOpen(open);
+    if (!open) {
+      setServiceError("");
+      setServiceForm(blankServiceForm());
     }
   }
 
@@ -1133,38 +1160,36 @@ function ProvidersPage() {
 
                 <DoctorSection
                   detail={detail}
-                  form={doctorForm}
                   busy={doctorBusy}
-                  error={doctorError}
                   canManage={permissions.canManageRegistry}
-                  onChange={(field, value) =>
-                    setDoctorForm((current) => ({ ...current, [field]: value }))
-                  }
+                  onNew={() => {
+                    setDoctorError("");
+                    setDoctorForm(blankDoctorForm());
+                    setDoctorDialogOpen(true);
+                  }}
                   onEdit={(doctor) => {
                     setDoctorError("");
                     setDoctorForm(doctorToForm(doctor));
+                    setDoctorDialogOpen(true);
                   }}
-                  onCancelEdit={() => setDoctorForm(blankDoctorForm())}
                   onDelete={handleDeleteDoctor}
-                  onSubmit={handleDoctorSubmit}
                 />
 
                 <ServiceSection
                   detail={detail}
-                  form={serviceForm}
                   busy={serviceBusy}
-                  error={serviceError}
                   canManage={permissions.canManageRegistry}
-                  onChange={(field, value) =>
-                    setServiceForm((current) => ({ ...current, [field]: value }))
-                  }
+                  onNew={() => {
+                    setServiceError("");
+                    setServiceForm(blankServiceForm());
+                    setServiceDialogOpen(true);
+                  }}
                   onEdit={(service) => {
                     setServiceError("");
                     setServiceForm(serviceToForm(service));
+                    setServiceDialogOpen(true);
                   }}
-                  onCancelEdit={() => setServiceForm(blankServiceForm())}
                   onDelete={handleDeleteService}
-                  onSubmit={handleServiceSubmit}
                 />
 
                 <LinkedPatientsSection
@@ -1199,6 +1224,86 @@ function ProvidersPage() {
           )}
         </SheetContent>
       </Sheet>
+
+      {detail ? (
+        <Dialog open={doctorDialogOpen} onOpenChange={handleDoctorDialogOpenChange}>
+          <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+            <DialogHeader className="pr-8">
+              <DialogTitle>{doctorForm.id ? t.providers_doctor_detail : t.providers_doctor_new}</DialogTitle>
+            </DialogHeader>
+            <form onSubmit={handleDoctorSubmit} className="space-y-4">
+              <div className="space-y-3 rounded-xl p-4">
+                {doctorError ? <Banner tone="error">{doctorError}</Banner> : null}
+                <DoctorFormFields
+                  form={doctorForm}
+                  onChange={(field, value) =>
+                    setDoctorForm((current) => ({ ...current, [field]: value }))
+                  }
+                />
+                  <div className="flex justify-end gap-2 pt-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-9 rounded-lg"
+                    onClick={() => handleDoctorDialogOpenChange(false)}
+                    disabled={doctorBusy}
+                  >
+                    {l("Abbrechen", "Отмена", "Cancel")}
+                  </Button>
+                  <Button
+                    type="submit"
+                    className="h-9 rounded-lg"
+                    disabled={doctorBusy}
+                  >
+                    {doctorBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                    {doctorForm.id ? t.common_save : t.providers_doctor_new}
+                  </Button>
+                </div>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      ) : null}
+
+      {detail ? (
+        <Dialog open={serviceDialogOpen} onOpenChange={handleServiceDialogOpenChange}>
+          <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+            <DialogHeader className="pr-8">
+              <DialogTitle>{serviceForm.id ? t.providers_service_detail : t.providers_service_new}</DialogTitle>
+            </DialogHeader>
+            <form onSubmit={handleServiceSubmit} className="space-y-4">
+              <div className="space-y-3 rounded-xl p-4">
+                {serviceError ? <Banner tone="error">{serviceError}</Banner> : null}
+                <ServiceFormFields
+                  form={serviceForm}
+                  onChange={(field, value) =>
+                    setServiceForm((current) => ({ ...current, [field]: value }))
+                  }
+                />
+                <div className="flex justify-end gap-2 pt-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-9 rounded-lg"
+                    onClick={() => handleServiceDialogOpenChange(false)}
+                    disabled={serviceBusy}
+                  >
+                    {l("Abbrechen", "Отмена", "Cancel")}
+                  </Button>
+                  <Button
+                    type="submit"
+                    className="h-9 rounded-lg"
+                    disabled={serviceBusy}
+                  >
+                    {serviceBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                    {serviceForm.id ? t.common_save : t.providers_service_new}
+                  </Button>
+                </div>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </>
   );
 }
@@ -1457,50 +1562,49 @@ function ProviderSheetHero({
 
 function DoctorSection({
   detail,
-  form,
   busy,
-  error,
   canManage,
-  onChange,
+  onNew,
   onEdit,
-  onCancelEdit,
   onDelete,
-  onSubmit,
 }: {
   detail: ProviderDetail;
-  form: DoctorFormState;
   busy: boolean;
-  error: string;
   canManage: boolean;
-  onChange: (field: keyof DoctorFormState, value: string) => void;
+  onNew: () => void;
   onEdit: (doctor: DoctorSummary) => void;
-  onCancelEdit: () => void;
   onDelete: (doctorId: string, doctorName: string) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const { t, lang } = useLang();
   const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
+
   return (
-    <section className={cardClass("p-5")}>
-      <div className="flex items-center justify-between gap-3">
-        <div>
-            <h3 className="text-sm font-semibold text-slate-950">
-              {titleWithDot(
-                detail.provider_type === "non_medical"
-                  ? l("Kontakte", "Контакты", "Contacts")
-                  : t.providers_doctors,
-              )}
-            </h3>
-            <p className="mt-1 text-sm text-slate-600">
-              {detail.provider_type === "non_medical"
-                ? t.providers_doctors_description_non_medical
-                : t.providers_doctors_description_medical}
-            </p>
-          </div>
-          <div className="text-xs uppercase tracking-[0.12em] text-slate-500">
-            {detail.doctors.length} {detail.provider_type === "non_medical" ? l("Kontakte", "контактов", "contacts") : l("Kliniker", "врачей", "clinicians")}
-          </div>
+    <section className="space-y-3 rounded-xl border border-border/70 bg-card p-3.5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="h-2 w-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <h3 className="truncate text-sm font-semibold text-foreground">
+            {detail.provider_type === "non_medical"
+              ? l("Kontakte", "Контакты", "Contacts")
+              : t.providers_doctors}
+          </h3>
+          <span className="shrink-0 text-xs font-medium text-muted-foreground">
+            {detail.doctors.length}
+          </span>
         </div>
+        {canManage ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 justify-center rounded-lg bg-muted/20"
+            onClick={onNew}
+          >
+            <Plus className="size-3.5" />
+            {t.providers_doctor_new}
+          </Button>
+        ) : null}
+      </div>
 
       {detail.doctors.length === 0 ? (
         <div className="mt-4">
@@ -1510,195 +1614,158 @@ function DoctorSection({
           />
         </div>
       ) : (
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="mt-4 space-y-3">
           {detail.doctors.map((doctor) => (
-            <div
+            <details
               key={doctor.id}
-              className="rounded-[1.4rem] border border-slate-200 bg-slate-50/80 p-4"
+              className="group overflow-hidden rounded-[1.4rem] border border-border bg-card"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-base font-semibold text-slate-950">
-                    {doctor.title ? `${doctor.title} ` : ""}
-                    {doctor.name}
-                  </p>
-                  <p className="mt-1 text-sm text-slate-600">
-                    {doctor.fachbereich || t.common_not_set}
-                  </p>
+              <summary className="grid cursor-pointer list-none gap-4 p-4 transition hover:bg-muted/20 md:grid-cols-[minmax(0,1fr)_190px] [&::-webkit-details-marker]:hidden">
+                <div className="flex min-w-0 gap-3">
+                  <div className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted/30 text-sm font-medium text-muted-foreground">
+                    <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-foreground">
+                      {doctor.title ? `${doctor.title} ` : ""}
+                      {doctor.name}
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      <Badge
+                        variant="outline"
+                        className="rounded-full border-border bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                      >
+                        {doctor.fachbereich || t.common_not_set}
+                      </Badge>
+                      {doctor.languages.map((language) => (
+                        <Badge
+                          key={`${doctor.id}-${language}`}
+                          variant="outline"
+                          className="rounded-full border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"
+                        >
+                          {language}
+                        </Badge>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-xs leading-snug text-muted-foreground">
+                      {doctor.phone || t.common_not_set} · {doctor.email || t.common_not_set}
+                    </p>
+                  </div>
                 </div>
-                {canManage ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="rounded-xl"
-                    onClick={() => onEdit(doctor)}
-                  >
-                    {l("Bearbeiten", "Редактировать", "Edit")}
-                  </Button>
-                ) : null}
-              </div>
+                <div className="flex flex-col items-stretch justify-end gap-2 border-t border-dashed border-border pt-3 md:border-l md:border-t-0 md:pl-4 md:pt-0">
+                  {canManage ? (
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 w-full justify-center rounded-lg bg-muted/20"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onEdit(doctor);
+                        }}
+                      >
+                        {l("Bearbeiten", "Редактировать", "Edit")}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 w-full justify-center rounded-lg gap-1.5 border-rose-200 bg-rose-50/40 text-rose-700 hover:bg-rose-50"
+                        disabled={busy}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onDelete(doctor.id, doctor.name);
+                        }}
+                      >
+                        <Trash2 className="size-3.5" />
+                        {l("Löschen", "Удалить", "Delete")}
+                      </Button>
+                    </>
+                  ) : null}
+                </div>
+              </summary>
 
-              <div className="mt-3 space-y-2">
-                <InlineInfo icon={Phone}>{doctor.phone || t.common_not_set}</InlineInfo>
-                <InlineInfo icon={Mail}>{doctor.email || t.common_not_set}</InlineInfo>
-              </div>
-
-              {doctor.languages.length > 0 ? (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {doctor.languages.map((language) => (
+              <div className="grid border-t border-border bg-muted/10 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_0.5fr_0.5fr]">
+                <div className="border-b border-border px-4 py-3 sm:border-r lg:border-b-0">
+                  <p className="text-xs text-muted-foreground">{l("Lizenz", "Лицензия", "License")}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold text-foreground">
+                      {doctor.license_number || t.common_not_set}
+                    </span>
                     <Badge
-                      key={`${doctor.id}-${language}`}
                       variant="outline"
-                      className="rounded-full border-slate-200 bg-white text-slate-700"
+                      className="rounded-full border-border bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
                     >
-                      {language}
+                      {doctor.licensing_country || t.common_not_set}
                     </Badge>
-                  ))}
+                  </div>
                 </div>
-              ) : null}
-
-              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl bg-white px-3 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                    {l("Lizenz", "Лицензия", "License")}
-                  </p>
-                  <p className="mt-2 text-sm font-medium text-slate-900">
-                    {doctor.license_number || t.common_not_set}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {doctor.licensing_country || t.common_not_set}
-                  </p>
-                </div>
-                <div className="rounded-2xl bg-white px-3 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                    {l("Lizenz gültig bis", "Лицензия действительна до", "License valid until")}
-                  </p>
-                  <p className="mt-2 text-sm font-medium text-slate-900">
+                <div className="border-b border-border px-4 py-3 lg:border-b-0 lg:border-r">
+                  <p className="text-xs text-muted-foreground">{l("Gültig bis", "Действует до", "Valid until")}</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">
                     {compactDate(doctor.licensing_valid_until, t.common_not_set)}
                   </p>
                 </div>
-              </div>
-
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                <div className="rounded-2xl bg-white px-3 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                    {l("Patienten", "Пациенты", "Patients")}
-                  </p>
-                  <p className="mt-2 text-xl font-semibold text-slate-950">
-                    {doctor.patient_count}
-                  </p>
+                <div className="border-b border-border px-4 py-3 sm:border-b-0 sm:border-r">
+                  <p className="text-xs text-muted-foreground">{l("Patienten", "Пациенты", "Patients")}</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">{doctor.patient_count}</p>
                 </div>
-                <div className="rounded-2xl bg-white px-3 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{l("Slots", "Слоты", "Slots")}</p>
-                  <p className="mt-2 text-xl font-semibold text-slate-950">
-                    {doctor.appointment_count}
-                  </p>
+                <div className="px-4 py-3">
+                  <p className="text-xs text-muted-foreground">{l("Slots", "Слоты", "Slots")}</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">{doctor.appointment_count}</p>
                 </div>
               </div>
-
-              {canManage ? (
-                <div className="mt-4 flex justify-end">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="rounded-2xl border-rose-200 text-rose-700 hover:bg-rose-50"
-                    disabled={busy}
-                    onClick={() => onDelete(doctor.id, doctor.name)}
-                  >
-                    {l("Löschen", "Удалить", "Delete")}
-                  </Button>
-                </div>
-              ) : null}
-            </div>
+            </details>
           ))}
         </div>
       )}
-
-      {canManage ? (
-        <form onSubmit={onSubmit} className="mt-5 space-y-4 border-t border-border/70 pt-5">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h4 className="text-sm font-semibold text-slate-950">
-                {titleWithDot(form.id ? t.providers_doctor_detail : t.providers_doctor_new)}
-              </h4>
-              <p className="mt-1 text-sm text-slate-600">
-                {t.providers_doctors_hint}
-              </p>
-            </div>
-            {form.id ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="rounded-xl"
-                onClick={onCancelEdit}
-              >
-                {l("Bearbeitung abbrechen", "Отменить редактирование", "Cancel edit")}
-              </Button>
-            ) : null}
-          </div>
-
-          {error ? <Banner tone="error">{error}</Banner> : null}
-
-          <DoctorFormFields form={form} onChange={onChange} />
-
-          <div className="flex justify-end">
-            <Button
-              type="submit"
-              className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-              disabled={busy}
-            >
-              {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-              {form.id ? t.common_save : t.providers_doctor_new}
-            </Button>
-          </div>
-        </form>
-      ) : null}
     </section>
   );
 }
-
 function ServiceSection({
   detail,
-  form,
   busy,
-  error,
   canManage,
-  onChange,
+  onNew,
   onEdit,
-  onCancelEdit,
   onDelete,
-  onSubmit,
 }: {
   detail: ProviderDetail;
-  form: ServiceFormState;
   busy: boolean;
-  error: string;
   canManage: boolean;
-  onChange: (field: keyof ServiceFormState, value: string) => void;
+  onNew: () => void;
   onEdit: (service: ServiceItem) => void;
-  onCancelEdit: () => void;
   onDelete: (serviceId: string, serviceName: string) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const { t, lang } = useLang();
   const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
   return (
-    <section className={cardClass("p-5")}>
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-950">
-            {titleWithDot(l("Servicekatalog", "Каталог сервисов", "Service catalog"))}
+    <section className="space-y-3 rounded-xl border border-border/70 bg-card p-3.5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="h-2 w-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <h3 className="truncate text-sm font-semibold text-foreground">
+            {l("Servicekatalog", "Каталог сервисов", "Service catalog")}
           </h3>
-          <p className="mt-1 text-sm text-slate-600">
-            {t.providers_services_description}
-          </p>
+          <span className="shrink-0 text-xs font-medium text-muted-foreground">
+            {detail.services.length}
+          </span>
         </div>
-        <div className="text-xs uppercase tracking-[0.12em] text-slate-500">
-          {detail.services.length} {l("Services", "сервисов", "services")}
-        </div>
+        {canManage ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 justify-center rounded-lg bg-muted/20"
+            onClick={onNew}
+          >
+            <Plus className="size-3.5" />
+            {t.providers_service_new}
+          </Button>
+        ) : null}
       </div>
 
       {detail.services.length === 0 ? (
@@ -1725,9 +1792,9 @@ function ServiceSection({
                 {canManage ? (
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="outline"
                     size="sm"
-                    className="rounded-xl"
+                    className="h-8 justify-center rounded-lg bg-muted/20"
                     onClick={() => onEdit(service)}
                   >
                     {l("Bearbeiten", "Редактировать", "Edit")}
@@ -1760,10 +1827,11 @@ function ServiceSection({
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="rounded-2xl border-rose-200 text-rose-700 hover:bg-rose-50"
+                    className="h-8 justify-center rounded-lg gap-1.5 border-rose-200 bg-rose-50/40 text-rose-700 hover:bg-rose-50"
                     disabled={busy}
                     onClick={() => onDelete(service.id, service.service_name)}
                   >
+                    <Trash2 className="size-3.5" />
                     {l("Löschen", "Удалить", "Delete")}
                   </Button>
                 </div>
@@ -1772,51 +1840,9 @@ function ServiceSection({
           ))}
         </div>
       )}
-
-      {canManage ? (
-        <form onSubmit={onSubmit} className="mt-5 space-y-4 border-t border-border/70 pt-5">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h4 className="text-sm font-semibold text-slate-950">
-                {titleWithDot(form.id ? t.providers_service_detail : t.providers_service_new)}
-              </h4>
-              <p className="mt-1 text-sm text-slate-600">
-                {t.providers_services_hint}
-              </p>
-            </div>
-            {form.id ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="rounded-xl"
-                onClick={onCancelEdit}
-              >
-                {l("Bearbeitung abbrechen", "Отменить редактирование", "Cancel edit")}
-              </Button>
-            ) : null}
-          </div>
-
-          {error ? <Banner tone="error">{error}</Banner> : null}
-
-          <ServiceFormFields form={form} onChange={onChange} />
-
-          <div className="flex justify-end">
-            <Button
-              type="submit"
-              className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-              disabled={busy}
-            >
-              {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-              {form.id ? t.common_save : t.providers_service_new}
-            </Button>
-          </div>
-        </form>
-      ) : null}
     </section>
   );
 }
-
 export function LinkedPatientsSection({
   detail,
   onOpenPatient,
@@ -1829,19 +1855,18 @@ export function LinkedPatientsSection({
   const { t, lang } = useLang();
   const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
   return (
-    <section className={cardClass("p-5")}>
+    <section className="space-y-3 rounded-xl border border-border/70 bg-card p-3.5">
       <div className="flex items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-950">
-            {titleWithDot(l("Verknüpfte Patienten", "Связанные пациенты", "Linked patients"))}
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="h-2 w-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <h3 className="truncate text-sm font-semibold text-foreground">
+            {l("Verknüpfte Patienten", "Связанные пациенты", "Linked patients")}
           </h3>
-          <p className="mt-1 text-sm text-slate-600">
-            {t.providers_linked_patients_description}
-          </p>
+          <span className="shrink-0 text-xs font-medium text-muted-foreground">
+            {detail.linked_patients.length}
+          </span>
         </div>
-        <div className="text-xs uppercase tracking-[0.12em] text-slate-500">
-          {detail.linked_patients.length} {l("Patienten", "пациентов", "patients")}
-        </div>
+
       </div>
 
       {detail.linked_patients.length === 0 ? (
@@ -1934,19 +1959,18 @@ export function InteractionHistorySection({
   const { t, lang } = useLang();
   const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
   return (
-    <section className={cardClass("p-5")}>
+    <section className="space-y-3 rounded-xl border border-border/70 bg-card p-3.5">
       <div className="flex items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-950">
-            {titleWithDot(l("Interaktionsverlauf", "История взаимодействий", "Interaction history"))}
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="h-2 w-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <h3 className="truncate text-sm font-semibold text-foreground">
+            {l("Interaktionsverlauf", "История взаимодействий", "Interaction history")}
           </h3>
-          <p className="mt-1 text-sm text-slate-600">
-            {t.providers_interactions_description}
-          </p>
+          <span className="shrink-0 text-xs font-medium text-muted-foreground">
+            {detail.interactions.length}
+          </span>
         </div>
-        <div className="text-xs uppercase tracking-[0.12em] text-slate-500">
-          {detail.interactions.length} {l("Einträge", "записей", "items")}
-        </div>
+
       </div>
 
       {detail.interactions.length === 0 ? (
@@ -2266,86 +2290,93 @@ function DoctorFormFields({
 }) {
   const { t, lang } = useLang();
   const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
+
   return (
-    <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-2">
-        <Field label={t.providers_doctors}>
-          <Input
-            value={form.name}
-            onChange={(event) => onChange("name", event.target.value)}
-            className={shellInputClassName}
-            required
-          />
-        </Field>
-        <Field label={t.providers_doctor_title}>
-          <Input
-            value={form.title}
-            onChange={(event) => onChange("title", event.target.value)}
-            className={shellInputClassName}
-            placeholder={t.providers_doctor_title}
-          />
-        </Field>
-      </div>
+    <div className="space-y-3">
+      <Section title={l("Arztprofil", "Профиль врача", "Doctor profile")}>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label={t.providers_doctors}>
+            <Input
+              value={form.name}
+              onChange={(event) => onChange("name", event.target.value)}
+              className={shellInputClassName}
+              required
+            />
+          </Field>
+          <Field label={t.providers_doctor_title}>
+            <Input
+              value={form.title}
+              onChange={(event) => onChange("title", event.target.value)}
+              className={shellInputClassName}
+              placeholder={t.providers_doctor_title}
+            />
+          </Field>
+          <Field label={t.providers_fachbereich}>
+            <Input
+              value={form.fachbereich}
+              onChange={(event) => onChange("fachbereich", event.target.value)}
+              className={shellInputClassName}
+            />
+          </Field>
+          <Field label={l("Sprachen", "Языки", "Languages")}>
+            <Input
+              value={form.languages}
+              onChange={(event) => onChange("languages", event.target.value)}
+              className={shellInputClassName}
+              placeholder={l("de, en, uk", "de, en, uk", "de, en, uk")}
+            />
+          </Field>
+        </div>
+      </Section>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <Field label={t.providers_fachbereich}>
-          <Input
-            value={form.fachbereich}
-            onChange={(event) => onChange("fachbereich", event.target.value)}
-            className={shellInputClassName}
-          />
-        </Field>
-        <Field label={l("Sprachen", "Языки", "Languages")}>
-          <Input
-            value={form.languages}
-            onChange={(event) => onChange("languages", event.target.value)}
-            className={shellInputClassName}
-            placeholder={l("de, en, uk", "de, en, uk", "de, en, uk")}
-          />
-        </Field>
-        <Field label={t.field_phone}>
-          <Input
-            value={form.phone}
-            onChange={(event) => onChange("phone", event.target.value)}
-            className={shellInputClassName}
-          />
-        </Field>
-      </div>
+      <Section title={l("Kontakte", "Контакты", "Contacts")}>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label={t.field_phone}>
+            <Input
+              value={form.phone}
+              onChange={(event) => onChange("phone", event.target.value)}
+              className={shellInputClassName}
+            />
+          </Field>
+          <Field label={t.field_email}>
+            <Input
+              type="email"
+              value={form.email}
+              onChange={(event) => onChange("email", event.target.value)}
+              className={shellInputClassName}
+            />
+          </Field>
+        </div>
+      </Section>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <Field label={t.field_email}>
-          <Input
-            type="email"
-            value={form.email}
-            onChange={(event) => onChange("email", event.target.value)}
-            className={shellInputClassName}
-          />
-        </Field>
-        <Field label={l("Lizenznummer", "Номер лицензии", "License number")}>
-          <Input
-            value={form.licenseNumber}
-            onChange={(event) => onChange("licenseNumber", event.target.value)}
-            className={shellInputClassName}
-          />
-        </Field>
-        <Field label={l("Lizenzland", "Страна лицензии", "Licensing country")}>
-          <Input
-            value={form.licensingCountry}
-            onChange={(event) => onChange("licensingCountry", event.target.value)}
-            className={shellInputClassName}
-          />
-        </Field>
-      </div>
+      <Section title={l("Lizenz", "Лицензия", "License")}>
+        <div className="grid gap-4 md:grid-cols-3">
+          <Field label={l("Lizenznummer", "Номер лицензии", "License number")}>
+            <Input
+              value={form.licenseNumber}
+              onChange={(event) => onChange("licenseNumber", event.target.value)}
+              className={shellInputClassName}
+            />
+          </Field>
+          <Field label={l("Lizenzland", "Страна лицензии", "Licensing country")}>
+            <Input
+              value={form.licensingCountry}
+              onChange={(event) => onChange("licensingCountry", event.target.value)}
+              className={shellInputClassName}
+            />
+          </Field>
+          <Field label={l("Lizenz gültig bis", "Лицензия действительна до", "License valid until")}>
+            <Input
+              type="date"
+              value={form.licensingValidUntil}
+              onChange={(event) => onChange("licensingValidUntil", event.target.value)}
+              className={shellInputClassName}
+            />
+          </Field>
+        </div>
+      </Section>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Field label={l("Lizenz gültig bis", "Лицензия действительна до", "License valid until")}>
-          <Input
-            type="date"
-            value={form.licensingValidUntil}
-            onChange={(event) => onChange("licensingValidUntil", event.target.value)}
-            className={shellInputClassName}
-          />
-        </Field>
+      <Section title={l("Notizen", "Заметки", "Notes")}>
         <Field label={t.providers_notes}>
           <textarea
             value={form.notes}
@@ -2354,11 +2385,10 @@ function DoctorFormFields({
             rows={3}
           />
         </Field>
-      </div>
+      </Section>
     </div>
   );
 }
-
 function ServiceFormFields({
   form,
   onChange,
@@ -2366,67 +2396,75 @@ function ServiceFormFields({
   form: ServiceFormState;
   onChange: (field: keyof ServiceFormState, value: string) => void;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
   return (
-    <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-2">
-        <Field label={t.providers_service_name}>
-          <Input
-            value={form.serviceName}
-            onChange={(event) => onChange("serviceName", event.target.value)}
-            className={shellInputClassName}
-            required
-          />
-        </Field>
-        <Field label={t.providers_service_price}>
-          <Input
-            type="number"
-            min="0"
-            step="0.01"
-            value={form.price}
-            onChange={(event) => onChange("price", event.target.value)}
-            className={shellInputClassName}
-            required
-          />
-        </Field>
-      </div>
+    <div className="space-y-3">
+      <Section title={l("Service", "Сервис", "Service")}>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label={t.providers_service_name}>
+            <Input
+              value={form.serviceName}
+              onChange={(event) => onChange("serviceName", event.target.value)}
+              className={shellInputClassName}
+              required
+            />
+          </Field>
+          <Field label={t.providers_service_desc}>
+            <textarea
+              value={form.description}
+              onChange={(event) => onChange("description", event.target.value)}
+              className={textareaClassName}
+              rows={3}
+            />
+          </Field>
+        </div>
+      </Section>
 
-      <Field label={t.providers_service_desc}>
-        <textarea
-          value={form.description}
-          onChange={(event) => onChange("description", event.target.value)}
-          className={textareaClassName}
-          rows={3}
-        />
-      </Field>
+      <Section title={l("Kosten", "Стоимость", "Cost")}>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label={t.providers_service_price}>
+            <Input
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.price}
+              onChange={(event) => onChange("price", event.target.value)}
+              className={shellInputClassName}
+              required
+            />
+          </Field>
+          <Field label={t.providers_service_currency}>
+            <Input
+              value={form.currency}
+              onChange={(event) => onChange("currency", event.target.value.toUpperCase())}
+              className={shellInputClassName}
+            />
+          </Field>
+        </div>
+      </Section>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <Field label={t.providers_service_currency}>
-          <Input
-            value={form.currency}
-            onChange={(event) => onChange("currency", event.target.value.toUpperCase())}
-            className={shellInputClassName}
-          />
-        </Field>
-        <Field label={t.providers_service_valid_from}>
-          <Input
-            type="date"
-            value={form.validFrom}
-            onChange={(event) => onChange("validFrom", event.target.value)}
-            className={shellInputClassName}
-          />
-        </Field>
-        <Field label={t.providers_service_valid_to}>
-          <Input
-            type="date"
-            value={form.validTo}
-            onChange={(event) => onChange("validTo", event.target.value)}
-            className={shellInputClassName}
-          />
-        </Field>
-      </div>
+      <Section title={l("Gültigkeit", "Срок действия", "Validity")}>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label={t.providers_service_valid_from}>
+            <Input
+              type="date"
+              value={form.validFrom}
+              onChange={(event) => onChange("validFrom", event.target.value)}
+              className={shellInputClassName}
+            />
+          </Field>
+          <Field label={t.providers_service_valid_to}>
+            <Input
+              type="date"
+              value={form.validTo}
+              onChange={(event) => onChange("validTo", event.target.value)}
+              className={shellInputClassName}
+            />
+          </Field>
+        </div>
+      </Section>
     </div>
   );
 }
-
 export { ProvidersPage };
