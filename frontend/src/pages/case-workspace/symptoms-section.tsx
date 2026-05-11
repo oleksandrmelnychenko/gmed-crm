@@ -69,7 +69,7 @@ export function SymptomsSection() {
         "Введите описание.",
         "Please enter a description.",
       )}
-      renderCard={(item) => (
+      cardContent={(item) => (
         <>
           <div className="flex items-center gap-2">
             <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
@@ -88,7 +88,7 @@ export function SymptomsSection() {
           ) : null}
         </>
       )}
-      renderForm={({ form, updateField, disabled }) => (
+      formContent={({ form, updateField, disabled }) => (
         <>
           <Field
             label={tri(lang, "Beschreibung", "Описание", "Description")}
@@ -96,7 +96,6 @@ export function SymptomsSection() {
           >
             <Input
               value={form.beschreibung}
-              autoFocus
               onChange={(event) => updateField("beschreibung", event.target.value)}
               className={inputBaseClassName}
               disabled={disabled}

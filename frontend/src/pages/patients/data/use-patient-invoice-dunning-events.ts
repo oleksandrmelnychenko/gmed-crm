@@ -1,18 +1,45 @@
-import { startTransition, useCallback, useEffect, useState } from "react";
+import { startTransition, useCallback, useEffect, useReducer } from "react";
 
 import { apiFetch } from "@/lib/api";
 
 import type { DunningEvent } from "../model/detail-tab-types";
 
+type DunningState = {
+  dunningEvents: DunningEvent[];
+  settledKey: string;
+};
+
+type DunningAction =
+  | { type: "replace"; state: DunningState }
+  | { type: "append"; event: DunningEvent };
+
+const EMPTY_DUNNING_STATE: DunningState = {
+  dunningEvents: [],
+  settledKey: "",
+};
+
+function dunningReducer(state: DunningState, action: DunningAction) {
+  switch (action.type) {
+    case "append":
+      return {
+        ...state,
+        dunningEvents: [...state.dunningEvents, action.event],
+      };
+    case "replace":
+      return action.state;
+  }
+}
+
 export function usePatientInvoiceDunningEvents(invoiceId: string) {
-  const [dunningEvents, setDunningEvents] = useState<DunningEvent[]>([]);
-  const [settledKey, setSettledKey] = useState("");
+  const [dunningState, dispatchDunningState] = useReducer(
+    dunningReducer,
+    EMPTY_DUNNING_STATE,
+  );
 
   useEffect(() => {
     if (!invoiceId) {
       startTransition(() => {
-        setDunningEvents([]);
-        setSettledKey("");
+        dispatchDunningState({ type: "replace", state: EMPTY_DUNNING_STATE });
       });
       return;
     }
@@ -24,15 +51,19 @@ export function usePatientInvoiceDunningEvents(invoiceId: string) {
       .then((items) => {
         if (signal.aborted) return;
         startTransition(() => {
-          setDunningEvents(items);
-          setSettledKey(invoiceId);
+          dispatchDunningState({
+            type: "replace",
+            state: { dunningEvents: items, settledKey: invoiceId },
+          });
         });
       })
       .catch(() => {
         if (signal.aborted) return;
         startTransition(() => {
-          setDunningEvents([]);
-          setSettledKey(invoiceId);
+          dispatchDunningState({
+            type: "replace",
+            state: { dunningEvents: [], settledKey: invoiceId },
+          });
         });
       });
 
@@ -42,14 +73,14 @@ export function usePatientInvoiceDunningEvents(invoiceId: string) {
   }, [invoiceId]);
 
   const appendDunningEvent = useCallback((event: DunningEvent) => {
-    setDunningEvents((current) => [...current, event]);
+    dispatchDunningState({ type: "append", event });
   }, []);
 
-  const ready = settledKey === invoiceId;
+  const ready = dunningState.settledKey === invoiceId;
 
   return {
     appendDunningEvent,
-    dunningEvents: ready ? dunningEvents : [],
+    dunningEvents: ready ? dunningState.dunningEvents : [],
     dunningEventsLoading: Boolean(invoiceId) && !ready,
   };
 }

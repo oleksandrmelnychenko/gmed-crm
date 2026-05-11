@@ -178,16 +178,18 @@ export function Topbar() {
 
     let cancelled = false;
 
-    async function load() {
-      const presence = await fetchTopbarPresence();
+    function load() {
       if (cancelled) return;
-      setUnread(presence.unreadCount);
-      setOnlineUsers(presence.onlineUsers);
+      void fetchTopbarPresence().then((presence) => {
+        if (cancelled) return;
+        setUnread(presence.unreadCount);
+        setOnlineUsers(presence.onlineUsers);
+      });
     }
 
-    void load();
+    load();
     const timer = window.setInterval(() => {
-      void load();
+      load();
     }, 20_000);
 
     return () => {
@@ -344,7 +346,7 @@ function OnlineAvatars({
   return (
     <button
       type="button"
-      className="flex items-center cursor-pointer -space-x-1.5"
+      className="flex items-center cursor-pointer [&>*+*]:-ml-1.5"
       onClick={onToggle}
       title={t.topbar_online_users}
       aria-label={t.topbar_online_users}
@@ -435,11 +437,17 @@ function NotificationPanel({
 
   return (
     <>
-      <div className="fixed inset-0 z-40" onClick={onClose} />
+      <button
+        type="button"
+        aria-label={t.common_close}
+        className="fixed inset-0 z-40 cursor-default border-0 bg-transparent p-0"
+        onClick={onClose}
+      />
       <div className="fixed right-4 top-16 z-50 w-96 rounded-2xl border border-border bg-background shadow-xl animate-in fade-in slide-in-from-top-2 duration-200">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <h3 className="text-sm font-semibold">{t.topbar_notifications}</h3>
           <button
+            type="button"
             onClick={markAll}
             className="text-xs text-primary hover:underline"
           >
@@ -449,7 +457,7 @@ function NotificationPanel({
         <div className="max-h-96 overflow-y-auto">
           {announcements.length > 0 && (
             <div className="border-b border-border">
-              {announcements.map((a, i) => {
+              {announcements.map((a) => {
                 const colors =
                   a.variant === "warning"
                     ? "bg-amber-500/10 text-amber-800 dark:text-amber-300"
@@ -460,10 +468,10 @@ function NotificationPanel({
                         : "bg-blue-500/10 text-blue-800 dark:text-blue-300";
                 return (
                   <div
-                    key={i}
+                    key={`${a.title}:${a.message}`}
                     className={`px-4 py-2 text-xs ${colors}`}
                   >
-                    <strong>{a.title}</strong> — {a.message}
+                    <strong>{a.title}</strong>: {a.message}
                   </div>
                 );
               })}
@@ -475,10 +483,11 @@ function NotificationPanel({
             </div>
           ) : (
             notifs.map((n) => (
-              <div
+              <button
                 key={n.id}
+                type="button"
                 onClick={() => handleOpen(n)}
-                className={`flex gap-3 px-4 py-3 border-b border-border last:border-0 cursor-pointer transition-colors ${
+                className={`flex w-full gap-3 px-4 py-3 text-left border-b border-border last:border-0 cursor-pointer transition-colors ${
                   n.is_read
                     ? "opacity-60"
                     : "bg-primary/5 hover:bg-primary/10"
@@ -496,7 +505,7 @@ function NotificationPanel({
                     {compactDt(n.created_at)}
                   </p>
                 </div>
-              </div>
+              </button>
             ))
           )}
         </div>
@@ -565,7 +574,12 @@ function UsersPanel({
   if (chatUser) {
     return (
       <>
-        <div className="fixed inset-0 z-40" onClick={onClose} />
+        <button
+          type="button"
+          aria-label={t.common_cancel}
+          className="fixed inset-0 z-40 cursor-default"
+          onClick={onClose}
+        />
         <div className="fixed right-4 top-16 z-50 w-96 rounded-2xl border border-border bg-background shadow-xl flex flex-col max-h-[480px] animate-in fade-in slide-in-from-top-2 duration-200">
           {/* Chat header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border">
@@ -581,6 +595,7 @@ function UsersPanel({
               </div>
             </div>
             <button
+              type="button"
               onClick={() => setChatUser(null)}
               title={t.common_close}
               aria-label={t.common_close}
@@ -595,11 +610,11 @@ function UsersPanel({
             {chatMsgs
               .slice()
               .reverse()
-              .map((m, i) => {
+              .map((m) => {
                 const mine = m.from_user === currentUserId;
                 return (
                   <div
-                    key={i}
+                    key={`${m.from_user}:${m.created_at}:${m.message}`}
                     className={`flex flex-col ${mine ? "items-end" : "items-start"}`}
                   >
                     <div
@@ -647,7 +662,12 @@ function UsersPanel({
 
   return (
     <>
-      <div className="fixed inset-0 z-40" onClick={onClose} />
+      <button
+        type="button"
+        aria-label={t.common_close}
+        className="fixed inset-0 z-40 cursor-default border-0 bg-transparent p-0"
+        onClick={onClose}
+      />
       <div className="fixed right-4 top-16 z-50 w-80 rounded-2xl border border-border bg-background shadow-xl animate-in fade-in slide-in-from-top-2 duration-200">
         <div className="px-4 py-3 border-b border-border">
           <h3 className="text-sm font-semibold">
@@ -656,10 +676,11 @@ function UsersPanel({
         </div>
         <div className="max-h-80 overflow-y-auto">
           {users.map((u) => (
-            <div
+            <button
               key={u.user_id}
+              type="button"
               onClick={() => openChat(u)}
-              className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-muted transition-colors"
+              className="flex w-full items-center gap-3 px-4 py-2.5 text-left cursor-pointer hover:bg-muted transition-colors"
             >
               <div className="flex items-center justify-center size-8 rounded-full bg-muted text-xs font-medium shrink-0">
                 {initials(u.user_name)}
@@ -671,7 +692,7 @@ function UsersPanel({
                 </p>
               </div>
               <MessageSquare className="size-4 text-primary shrink-0" />
-            </div>
+            </button>
           ))}
         </div>
       </div>

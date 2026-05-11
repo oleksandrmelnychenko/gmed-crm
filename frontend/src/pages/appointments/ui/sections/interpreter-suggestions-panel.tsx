@@ -1,4 +1,4 @@
-﻿import { Badge } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Banner, CountBadge, Section, tokens } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
@@ -35,13 +35,14 @@ const PREFERENCE_OPTIONS: InterpreterPreference[] = [
   "neutral",
   "avoid",
 ];
+const EMPTY_INTERPRETER_HISTORY: InterpreterHistoryItem[] = [];
 
 export function InterpreterSuggestionsPanel({
   suggestions,
   selectedInterpreterId,
   loading = false,
   error,
-  history = [],
+  history = EMPTY_INTERPRETER_HISTORY,
   historyLoading = false,
   historyError,
   preferenceSavingId = null,
@@ -201,7 +202,7 @@ export function InterpreterSuggestionsPanel({
           </div>
         ) : null}
         {historyLoading ? (
-          <div className="mt-3 rounded-xl border border-border/50 bg-muted/25 px-4 py-4 text-sm text-muted-foreground">
+          <div className="mt-3 rounded-xl border border-border/50 bg-muted/25 p-4 text-sm text-muted-foreground">
             {t.appointments_interpreter_loading_history}
           </div>
         ) : history.length === 0 ? (

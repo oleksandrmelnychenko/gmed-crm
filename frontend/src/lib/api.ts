@@ -136,18 +136,19 @@ function parseRetryAfterMs(header: string | null) {
   return null;
 }
 
-async function fetchWithRateLimitRetry(url: string, init: RequestInit) {
-  let attempt = 0;
-  while (true) {
-    const res = await fetch(url, init);
-    if (res.status !== 429 || attempt >= RATE_LIMIT_MAX_RETRIES) {
-      return res;
-    }
-    const retryAfterMs = parseRetryAfterMs(res.headers.get("retry-after"));
-    const backoffMs = retryAfterMs ?? RATE_LIMIT_DEFAULT_BACKOFF_MS * 2 ** attempt;
-    await new Promise((resolve) => setTimeout(resolve, backoffMs));
-    attempt += 1;
+async function fetchWithRateLimitRetry(
+  url: string,
+  init: RequestInit,
+  attempt = 0,
+): Promise<Response> {
+  const res = await fetch(url, init);
+  if (res.status !== 429 || attempt >= RATE_LIMIT_MAX_RETRIES) {
+    return res;
   }
+  const retryAfterMs = parseRetryAfterMs(res.headers.get("retry-after"));
+  const backoffMs = retryAfterMs ?? RATE_LIMIT_DEFAULT_BACKOFF_MS * 2 ** attempt;
+  await new Promise((resolve) => setTimeout(resolve, backoffMs));
+  return fetchWithRateLimitRetry(url, init, attempt + 1);
 }
 
 const JSON_CACHE_MAX_ENTRIES = 160;

@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -82,15 +82,33 @@ export function PatientCardEntrySheet({
   onOpenChange: (value: boolean) => void;
   onSaved: () => void;
 }) {
+  return (
+    <PatientCardEntrySheetContent
+      key={`${patientId}:${open ? "open" : "closed"}`}
+      patientId={patientId}
+      open={open}
+      onOpenChange={onOpenChange}
+      onSaved={onSaved}
+    />
+  );
+}
+
+function PatientCardEntrySheetContent({
+  patientId,
+  open,
+  onOpenChange,
+  onSaved,
+}: {
+  patientId: string;
+  open: boolean;
+  onOpenChange: (value: boolean) => void;
+  onSaved: () => void;
+}) {
   const { t, lang } = useLang();
   const l = (de: string, ru: string, en: string) =>
     lang === "de" ? de : lang === "ru" ? ru : en;
   const [form, setForm] = useState<FormState>(blankForm);
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    if (open) setForm(blankForm());
-  }, [open]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

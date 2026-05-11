@@ -318,24 +318,30 @@ export async function bootstrapFullSmokeScenario(
 }
 
 export async function loginViaUi(page: Page, email: string, password: string) {
-  let lastError: unknown;
-
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    await ensureBackendHealthy();
-    await ensureFrontendHealthy();
-    await page.goto("/login");
-    await page.locator("#email").fill(email);
-    await page.locator("#password").fill(password);
-    await page.getByRole("button", { name: /Anmelden|Войти/i }).click();
+  async function attemptLogin(attempt: number): Promise<void> {
+    await Promise.all([
+      ensureBackendHealthy(),
+      ensureFrontendHealthy(),
+      page.goto("/login"),
+    ]);
+    await Promise.all([
+      page.locator("#email").fill(email),
+      page.locator("#password").fill(password),
+    ]);
     try {
-      await page.waitForURL(/\/$/, { timeout: 30_000 });
-      return;
+      await Promise.all([
+        page.waitForURL(/\/$/, { timeout: 30_000 }),
+        page.getByRole("button", { name: /Anmelden|Войти/i }).click(),
+      ]);
     } catch (error) {
-      lastError = error;
+      if (attempt >= 2) {
+        throw error instanceof Error ? error : new Error(String(error));
+      }
+      return attemptLogin(attempt + 1);
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  await attemptLogin(0);
 }
 
 export async function loginViaApi(
@@ -344,9 +350,7 @@ export async function loginViaApi(
   email: string,
   password: string,
 ) {
-  let lastError: Error | null = null;
-
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  async function attemptLogin(attempt: number): Promise<void> {
     try {
       const state = await ensureBackendHealthy();
       const response = await request.post(`${state.backendUrl}/api/v1/auth/login`, {
@@ -373,8 +377,7 @@ export async function loginViaApi(
         throw new Error(result.message ?? `Unexpected login status: ${result.status}`);
       }
 
-      await page.goto("/login");
-      await page.evaluate(
+      await page.addInitScript(
         ({ accessToken, refreshToken }) => {
           window.localStorage.setItem("gmed_access_token", accessToken);
           window.localStorage.setItem("gmed_refresh_token", refreshToken);
@@ -384,16 +387,20 @@ export async function loginViaApi(
           refreshToken: result.refresh_token,
         },
       );
-      await page.goto("/");
-      await page.waitForURL(/\/$/, { timeout: 30_000 });
-      return;
+      await Promise.all([
+        page.waitForURL(/\/$/, { timeout: 30_000 }),
+        page.goto("/"),
+      ]);
     } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
+      if (attempt >= 2) {
+        throw error instanceof Error ? error : new Error(String(error));
+      }
       await page.waitForTimeout(1_000);
+      return attemptLogin(attempt + 1);
     }
   }
 
-  throw lastError ?? new Error("API login failed.");
+  await attemptLogin(0);
 }
 
 export async function bootstrapAndLogin(

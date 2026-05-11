@@ -133,9 +133,10 @@ export function resolveTemplateLanguage(
 ) {
   if (!template) return "de";
   const patient = patients.find((item) => item.id === patientId);
+  const supportedLanguages = new Set(template.supported_languages);
   for (const language of patient?.languages ?? []) {
     const normalized = normalizeTemplateLanguage(language);
-    if (normalized && template.supported_languages.includes(normalized)) {
+    if (normalized && supportedLanguages.has(normalized)) {
       return normalized;
     }
   }

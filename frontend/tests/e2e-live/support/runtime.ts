@@ -16,29 +16,38 @@ export function commandFor(command: string) {
 
 export async function waitForHttp(url: string, timeoutMs: number) {
   const startedAt = Date.now();
-  let lastError: unknown;
 
-  while (Date.now() - startedAt < timeoutMs) {
+  async function poll(lastError: unknown = undefined): Promise<void> {
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new Error(`Timed out waiting for ${url}: ${String(lastError)}`);
+    }
+
     try {
       const response = await fetch(url);
       if (response.ok) {
         return;
       }
-      lastError = new Error(`${url} returned ${response.status}`);
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      return poll(new Error(`${url} returned ${response.status}`));
     } catch (error) {
-      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      return poll(error);
     }
-    await new Promise((resolve) => setTimeout(resolve, 1_000));
   }
 
-  throw new Error(`Timed out waiting for ${url}: ${String(lastError)}`);
+  return poll();
 }
 
 export async function waitForTcp(host: string, port: number, timeoutMs: number) {
   const startedAt = Date.now();
-  let lastError: unknown;
 
-  while (Date.now() - startedAt < timeoutMs) {
+  async function poll(lastError: unknown = undefined): Promise<void> {
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new Error(
+        `Timed out waiting for TCP ${host}:${port}: ${String(lastError)}`,
+      );
+    }
+
     const socket = new net.Socket();
     try {
       await new Promise<void>((resolve, reject) => {
@@ -48,22 +57,25 @@ export async function waitForTcp(host: string, port: number, timeoutMs: number) 
       socket.destroy();
       return;
     } catch (error) {
-      lastError = error;
       socket.destroy();
       await new Promise((resolve) => setTimeout(resolve, 1_000));
+      return poll(error);
     }
   }
 
-  throw new Error(
-    `Timed out waiting for TCP ${host}:${port}: ${String(lastError)}`,
-  );
+  return poll();
 }
 
 export async function waitForPostgres(containerName: string, timeoutMs: number) {
   const startedAt = Date.now();
-  let lastError: unknown;
 
-  while (Date.now() - startedAt < timeoutMs) {
+  async function poll(lastError: unknown = undefined): Promise<void> {
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new Error(
+        `Timed out waiting for postgres in ${containerName}: ${String(lastError)}`,
+      );
+    }
+
     try {
       execFileSync(
         "docker",
@@ -75,21 +87,19 @@ export async function waitForPostgres(containerName: string, timeoutMs: number) 
       );
       return;
     } catch (error) {
-      lastError = error;
       await new Promise((resolve) => setTimeout(resolve, 1_000));
+      return poll(error);
     }
   }
 
-  throw new Error(
-    `Timed out waiting for postgres in ${containerName}: ${String(lastError)}`,
-  );
+  return poll();
 }
 
 export function dockerStdout(args: string[]) {
   return execFileSync("docker", args, { encoding: "utf8" }).trim();
 }
 
-export function parseDockerPort(output: string) {
+function parseDockerPort(output: string) {
   const port = output.trim().split(":").at(-1);
   if (!port) {
     throw new Error(`Unexpected docker port output: ${output}`);
@@ -137,7 +147,7 @@ export function stopProcessTree(pid: number) {
   }
 }
 
-export function stopContainer(containerName: string) {
+function stopContainer(containerName: string) {
   if (!containerName) return;
   try {
     execFileSync("docker", ["rm", "-f", containerName], {

@@ -1,6 +1,6 @@
 import type { SortDir, SortKey, SortStack } from "./types";
 
-export type FieldAccessor<T> = (row: T) => unknown;
+type FieldAccessor<T> = (row: T) => unknown;
 
 export type SortContext<T> = {
   accessors: Record<string, FieldAccessor<T>>;

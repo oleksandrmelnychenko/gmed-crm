@@ -63,7 +63,7 @@ export function PainSection() {
       emptyTitle={t.cases_pain_empty_title}
       addFirstLabel={t.cases_pain_add_first}
       missingPrimaryMessage={t.cases_pain_missing_location}
-      renderCard={(item) => (
+      cardContent={(item) => (
         <>
           <div className="flex items-center gap-2">
             <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
@@ -107,13 +107,12 @@ export function PainSection() {
           ) : null}
         </>
       )}
-      renderForm={({ form, updateField, disabled }) => (
+      formContent={({ form, updateField, disabled }) => (
         <>
           <div className="grid gap-4 md:grid-cols-2">
             <Field label={t.cases_pain_location} required>
               <Input
                 value={form.lokalisierung}
-                autoFocus
                 onChange={(event) => updateField("lokalisierung", event.target.value)}
                 className={inputBaseClassName}
                 disabled={disabled}

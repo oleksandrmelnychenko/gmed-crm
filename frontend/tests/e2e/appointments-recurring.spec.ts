@@ -62,15 +62,27 @@ test.describe("appointments recurring flows", () => {
       }));
 
     const buildScopePreview = () =>
-      appointmentIds
-        .map((id, index) => ({
+      appointmentIds.reduce<Array<{
+        id: string;
+        date: string;
+        status: string | undefined;
+        recurrence_index: number;
+        open_checklist_count: number;
+      }>>((items, id, index) => {
+        const status = statuses[index];
+        if (status === "cancelled") {
+          return items;
+        }
+
+        items.push({
           id,
           date: `2026-04-${14 + index}`,
-          status: statuses[index],
+          status,
           recurrence_index: index,
           open_checklist_count: 0,
-        }))
-        .filter((item) => item.status !== "cancelled");
+        });
+        return items;
+      }, []);
 
     const buildDetail = (id: string) => {
       const index = appointmentIds.indexOf(id);

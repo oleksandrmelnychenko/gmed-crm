@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useReducer, type FormEvent } from "react";
 import { Download, LoaderCircle, RefreshCw, Upload } from "lucide-react";
 
 import { AdminSheetScaffold } from "@/components/admin-page-patterns";
@@ -66,23 +66,80 @@ const PORTAL_INVOICE_REALTIME_EVENTS = [
   "document.payment_proof_uploaded",
 ] as const;
 
-export function PatientInvoicesPage() {
+interface PatientInvoicesState {
+  invoices: PortalInvoiceItem[];
+  loading: boolean;
+  refreshing: boolean;
+  error: string;
+  notice: string;
+  version: number;
+  selectedInvoiceId: string;
+  detail: PortalInvoiceItem | null;
+  detailBusy: boolean;
+  detailError: string;
+  uploadOpen: boolean;
+  uploadBusy: boolean;
+  uploadError: string;
+  uploadNote: string;
+  uploadFile: File | null;
+}
+
+type PatientInvoicesAction =
+  | Partial<PatientInvoicesState>
+  | ((current: PatientInvoicesState) => Partial<PatientInvoicesState>);
+
+const INITIAL_PATIENT_INVOICES_STATE: PatientInvoicesState = {
+  invoices: [],
+  loading: true,
+  refreshing: false,
+  error: "",
+  notice: "",
+  version: 0,
+  selectedInvoiceId: "",
+  detail: null,
+  detailBusy: false,
+  detailError: "",
+  uploadOpen: false,
+  uploadBusy: false,
+  uploadError: "",
+  uploadNote: "",
+  uploadFile: null,
+};
+
+function patientInvoicesReducer(
+  current: PatientInvoicesState,
+  action: PatientInvoicesAction,
+): PatientInvoicesState {
+  const patch = typeof action === "function" ? action(current) : action;
+  return {
+    ...current,
+    ...patch,
+  };
+}
+
+function usePatientInvoicesPageContent() {
   const { t, lang } = useLang();
-  const [invoices, setInvoices] = useState<PortalInvoiceItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [version, setVersion] = useState(0);
-  const [selectedInvoiceId, setSelectedInvoiceId] = useState("");
-  const [detail, setDetail] = useState<PortalInvoiceItem | null>(null);
-  const [detailBusy, setDetailBusy] = useState(false);
-  const [detailError, setDetailError] = useState("");
-  const [uploadOpen, setUploadOpen] = useState(false);
-  const [uploadBusy, setUploadBusy] = useState(false);
-  const [uploadError, setUploadError] = useState("");
-  const [uploadNote, setUploadNote] = useState("");
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [invoicesState, dispatchInvoicesState] = useReducer(
+    patientInvoicesReducer,
+    INITIAL_PATIENT_INVOICES_STATE,
+  );
+  const {
+    detail,
+    detailBusy,
+    detailError,
+    error,
+    invoices,
+    loading,
+    notice,
+    refreshing,
+    selectedInvoiceId,
+    uploadBusy,
+    uploadError,
+    uploadFile,
+    uploadNote,
+    uploadOpen,
+    version,
+  } = invoicesState;
   const l = useCallback(
     (de: string, ru: string, en: string) =>
       lang === "de" ? de : lang === "ru" ? ru : en,
@@ -97,37 +154,41 @@ export function PatientInvoicesPage() {
     if (selectedInvoiceId) {
       clearApiCache(`/me/invoices/${selectedInvoiceId}`);
     }
-    setVersion((value) => value + 1);
+    dispatchInvoicesState((current) => ({ version: current.version + 1 }));
   });
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
-      if (loading) {
-        setRefreshing(false);
-      } else {
-        setRefreshing(true);
-      }
+      dispatchInvoicesState((current) => ({
+        refreshing: !current.loading,
+        error: "",
+      }));
 
       try {
         const rows = await fetchPortalInvoices();
         if (cancelled) return;
-        startTransition(() => {
-          setInvoices(rows);
-          setError("");
-          setSelectedInvoiceId((current) =>
-            current && rows.some((item) => item.id === current) ? current : "",
-          );
-        });
+        startTransition(() =>
+          dispatchInvoicesState((current) => ({
+            invoices: rows,
+            error: "",
+            selectedInvoiceId:
+              current.selectedInvoiceId &&
+              rows.some((item) => item.id === current.selectedInvoiceId)
+                ? current.selectedInvoiceId
+                : "",
+            loading: false,
+            refreshing: false,
+          })),
+        );
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : t.portal_invoices_failed_to_load_invoices);
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-          setRefreshing(false);
-        }
+        dispatchInvoicesState({
+          error: err instanceof Error ? err.message : t.portal_invoices_failed_to_load_invoices,
+          loading: false,
+          refreshing: false,
+        });
       }
     }
 
@@ -135,31 +196,32 @@ export function PatientInvoicesPage() {
     return () => {
       cancelled = true;
     };
-  }, [loading, t.portal_invoices_failed_to_load_invoices, version, l]);
+  }, [t.portal_invoices_failed_to_load_invoices, version]);
 
   useEffect(() => {
     if (!selectedInvoiceId) {
-      setDetail(null);
-      setDetailError("");
+      dispatchInvoicesState({ detail: null, detailError: "" });
       return;
     }
 
     let cancelled = false;
 
     async function loadDetail() {
-      setDetailBusy(true);
+      dispatchInvoicesState({ detailBusy: true });
       try {
         const invoice = await fetchPortalInvoiceDetail(selectedInvoiceId);
         if (cancelled) return;
-        setDetail(invoice);
-        setDetailError("");
+        dispatchInvoicesState({
+          detail: invoice,
+          detailError: "",
+          detailBusy: false,
+        });
       } catch (err) {
         if (cancelled) return;
-        setDetailError(err instanceof Error ? err.message : t.portal_invoices_failed_to_load_invoice_detail);
-      } finally {
-        if (!cancelled) {
-          setDetailBusy(false);
-        }
+        dispatchInvoicesState({
+          detailError: err instanceof Error ? err.message : t.portal_invoices_failed_to_load_invoice_detail,
+          detailBusy: false,
+        });
       }
     }
 
@@ -167,7 +229,7 @@ export function PatientInvoicesPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedInvoiceId, t.portal_invoices_failed_to_load_invoice_detail, version, l]);
+  }, [selectedInvoiceId, t.portal_invoices_failed_to_load_invoice_detail, version]);
 
   const totalBalance = useMemo(
     () =>
@@ -200,13 +262,11 @@ export function PatientInvoicesPage() {
     event.preventDefault();
     if (!detail) return;
     if (!uploadFile) {
-      setUploadError(t.portal_invoices_choose_a_file_first);
+      dispatchInvoicesState({ uploadError: t.portal_invoices_choose_a_file_first });
       return;
     }
 
-    setUploadBusy(true);
-    setUploadError("");
-    setNotice("");
+    dispatchInvoicesState({ uploadBusy: true, uploadError: "", notice: "" });
 
     try {
       const formData = new FormData();
@@ -219,15 +279,19 @@ export function PatientInvoicesPage() {
       }
 
       await uploadPortalPaymentProof(formData);
-      setNotice(t.portal_invoices_payment_proof_uploaded_for_the_billing_team);
-      setUploadOpen(false);
-      setUploadFile(null);
-      setUploadNote("");
-      setVersion((value) => value + 1);
+      dispatchInvoicesState((current) => ({
+        notice: t.portal_invoices_payment_proof_uploaded_for_the_billing_team,
+        uploadOpen: false,
+        uploadFile: null,
+        uploadNote: "",
+        uploadBusy: false,
+        version: current.version + 1,
+      }));
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : t.portal_invoices_failed_to_upload_payment_proof);
-    } finally {
-      setUploadBusy(false);
+      dispatchInvoicesState({
+        uploadError: err instanceof Error ? err.message : t.portal_invoices_failed_to_upload_payment_proof,
+        uploadBusy: false,
+      });
     }
   }
 
@@ -256,7 +320,7 @@ export function PatientInvoicesPage() {
             <Button
               variant="outline"
               className={tokens.control.primaryButton}
-              onClick={() => setVersion((value) => value + 1)}
+              onClick={() => dispatchInvoicesState((current) => ({ version: current.version + 1 }))}
             >
               {refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
               {t.portal_invoices_refresh}
@@ -290,7 +354,7 @@ export function PatientInvoicesPage() {
               return (
                 <ListItem
                   key={invoice.id}
-                  onClick={() => setSelectedInvoiceId(invoice.id)}
+                  onClick={() => dispatchInvoicesState({ selectedInvoiceId: invoice.id })}
                   className={cn(
                     "space-y-4",
                     selectedInvoiceId === invoice.id && "border-primary/60 bg-primary/5 ring-2 ring-primary/15",
@@ -337,7 +401,7 @@ export function PatientInvoicesPage() {
         )}
       </Section>
 
-      <Sheet open={Boolean(selectedInvoiceId)} onOpenChange={(open) => { if (!open) setSelectedInvoiceId(""); }}>
+      <Sheet open={Boolean(selectedInvoiceId)} onOpenChange={(open) => { if (!open) dispatchInvoicesState({ selectedInvoiceId: "" }); }}>
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
           <AdminSheetScaffold
             title={detail ? detail.invoice_number : t.portal_invoices_invoice_detail}
@@ -377,7 +441,9 @@ export function PatientInvoicesPage() {
                         className={cn(tokens.control.primaryButton, !invoicePdfVisible(detail) && "hidden")}
                         onClick={() =>
                           void openPortalInvoicePdf(detail.id).catch((err) => {
-                            setDetailError(err instanceof Error ? err.message : t.portal_invoices_failed_to_open_invoice_pdf);
+                            dispatchInvoicesState({
+                              detailError: err instanceof Error ? err.message : t.portal_invoices_failed_to_open_invoice_pdf,
+                            });
                           })
                         }
                       >
@@ -389,7 +455,9 @@ export function PatientInvoicesPage() {
                         className={cn(tokens.control.primaryButton, !invoicePdfVisible(detail) && "hidden")}
                         onClick={() =>
                           void downloadPortalInvoicePdf(detail.id, `${detail.invoice_number}.pdf`).catch((err) => {
-                            setDetailError(err instanceof Error ? err.message : t.portal_invoices_failed_to_download_invoice_pdf);
+                            dispatchInvoicesState({
+                              detailError: err instanceof Error ? err.message : t.portal_invoices_failed_to_download_invoice_pdf,
+                            });
                           })
                         }
                       >
@@ -435,8 +503,7 @@ export function PatientInvoicesPage() {
                       className={tokens.control.primaryButton}
                       disabled={uploadBusy || ["paid", "cancelled"].includes(detail.status)}
                       onClick={() => {
-                        setUploadError("");
-                        setUploadOpen(true);
+                        dispatchInvoicesState({ uploadError: "", uploadOpen: true });
                       }}
                     >
                       <Upload className="size-4" />
@@ -464,8 +531,17 @@ export function PatientInvoicesPage() {
                         {t.portal_invoices_no_line_items_available}
                       </div>
                     ) : (
-                      detail.line_items.map((line, index) => (
-                        <InvoiceLineCard key={`${detail.id}-${index}`} line={line} />
+                      detail.line_items.map((line) => (
+                        <InvoiceLineCard
+                          key={[
+                            detail.id,
+                            line.description,
+                            line.quantity,
+                            line.unit_price,
+                            line.line_gross,
+                          ].join("|")}
+                          line={line}
+                        />
                       ))
                     )}
                   </div>
@@ -480,11 +556,11 @@ export function PatientInvoicesPage() {
       <Dialog
         open={uploadOpen}
         onOpenChange={(open) => {
-          setUploadOpen(open);
-          if (!open) {
-            setUploadBusy(false);
-            setUploadError("");
-          }
+          dispatchInvoicesState({
+            uploadOpen: open,
+            uploadBusy: open ? uploadBusy : false,
+            uploadError: open ? uploadError : "",
+          });
         }}
       >
         <DialogContent className="sm:max-w-xl">
@@ -503,7 +579,7 @@ export function PatientInvoicesPage() {
                   inputClass,
                   "block w-full py-1.5 file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-foreground",
                 )}
-                onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
+                onChange={(event) => dispatchInvoicesState({ uploadFile: event.target.files?.[0] ?? null })}
               />
             </Field>
             <Field label={t.portal_invoices_note} htmlFor="invoice-payment-proof-note">
@@ -512,12 +588,12 @@ export function PatientInvoicesPage() {
                 className={cn(textareaClass, "min-h-[110px]")}
                 placeholder={t.portal_invoices_optional_transfer_reference_payment_date_or_clarification}
                 value={uploadNote}
-                onChange={(event) => setUploadNote(event.target.value)}
+                onChange={(event) => dispatchInvoicesState({ uploadNote: event.target.value })}
               />
             </Field>
             {uploadError ? <Banner tone="error">{uploadError}</Banner> : null}
             <DialogFooter>
-              <Button type="button" variant="outline" className={tokens.control.primaryButton} onClick={() => setUploadOpen(false)}>
+              <Button type="button" variant="outline" className={tokens.control.primaryButton} onClick={() => dispatchInvoicesState({ uploadOpen: false })}>
                 {t.portal_invoices_cancel}
               </Button>
               <Button type="submit" className={tokens.control.primaryButton} disabled={uploadBusy}>
@@ -530,6 +606,10 @@ export function PatientInvoicesPage() {
       </Dialog>
     </div>
   );
+}
+
+export function PatientInvoicesPage(...args: Parameters<typeof usePatientInvoicesPageContent>) {
+  return usePatientInvoicesPageContent(...args);
 }
 
 function InvoiceLineCard({ line }: { line: PortalInvoiceLineItem }) {

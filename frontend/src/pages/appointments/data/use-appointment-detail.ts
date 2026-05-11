@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  type SetStateAction,
+} from "react";
 
 import { apiFetch } from "@/lib/api";
 import { fetchAppointmentDetailResourceGroup } from "@/pages/appointments/data/detail-resource-groups";
@@ -50,6 +57,50 @@ type UseAppointmentDetailOptions = {
   permissions: AppointmentPermissions;
 };
 
+type AppointmentDetailState = {
+  detailLoading: boolean;
+  detailError: string;
+  detail: AppointmentDetail | null;
+  detailAssignments: PatientAssignment[];
+  detailResourceKeys: Record<AppointmentDetailResourceGroup, string>;
+  detailChecklist: ChecklistItem[];
+  detailReminders: ReminderEntry[];
+  detailReport: ReportSummary | null;
+  detailTasks: TaskEntry[];
+  detailServices: ConciergeServiceEntry[];
+  detailCommunications: AppointmentCommunicationEntry[];
+};
+
+type AppointmentDetailPatch =
+  | Partial<AppointmentDetailState>
+  | ((current: AppointmentDetailState) => Partial<AppointmentDetailState>);
+
+function createAppointmentDetailState(): AppointmentDetailState {
+  return {
+    detailLoading: false,
+    detailError: "",
+    detail: null,
+    detailAssignments: [],
+    detailResourceKeys: createDetailResourceKeyState(),
+    detailChecklist: [],
+    detailReminders: [],
+    detailReport: null,
+    detailTasks: [],
+    detailServices: [],
+    detailCommunications: [],
+  };
+}
+
+function appointmentDetailReducer(
+  state: AppointmentDetailState,
+  patch: AppointmentDetailPatch,
+): AppointmentDetailState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
 export function useAppointmentDetail({
   detailOpen,
   selectedId,
@@ -58,31 +109,38 @@ export function useAppointmentDetail({
   isMobile,
   permissions,
 }: UseAppointmentDetailOptions) {
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState("");
-  const [detail, setDetail] = useState<AppointmentDetail | null>(null);
-  const [detailAssignments, setDetailAssignments] = useState<
-    PatientAssignment[]
-  >([]);
-  const [detailResourceKeys, setDetailResourceKeys] = useState(() =>
-    createDetailResourceKeyState(),
+  const [detailState, dispatchDetailState] = useReducer(
+    appointmentDetailReducer,
+    undefined,
+    createAppointmentDetailState,
   );
+  const {
+    detailLoading,
+    detailError,
+    detail,
+    detailAssignments,
+    detailResourceKeys,
+    detailChecklist,
+    detailReminders,
+    detailReport,
+    detailTasks,
+    detailServices,
+    detailCommunications,
+  } = detailState;
   const detailResourceRequestKeysRef = useRef(createDetailResourceKeyState());
-  const [detailChecklist, setDetailChecklist] = useState<ChecklistItem[]>([]);
-  const [detailReminders, setDetailReminders] = useState<ReminderEntry[]>([]);
-  const [detailReport, setDetailReport] = useState<ReportSummary | null>(null);
-  const [detailTasks, setDetailTasks] = useState<TaskEntry[]>([]);
-  const [detailServices, setDetailServices] = useState<ConciergeServiceEntry[]>(
+  const setDetailError = useCallback(
+    (nextValue: SetStateAction<string>) => {
+      dispatchDetailState((current) => ({
+        detailError:
+          typeof nextValue === "function"
+            ? nextValue(current.detailError)
+            : nextValue,
+      }));
+    },
     [],
   );
-  const [detailCommunications, setDetailCommunications] = useState<
-    AppointmentCommunicationEntry[]
-  >([]);
 
-  const currentDetailResourceKey = useMemo(
-    () => (selectedId ? `${selectedId}:${detailVersion}` : ""),
-    [detailVersion, selectedId],
-  );
+  const currentDetailResourceKey = selectedId ? `${selectedId}:${detailVersion}` : "";
   const requiredDetailResourceGroups = getRequiredAppointmentDetailResourceGroups(
     detailTab,
     isMobile,
@@ -109,17 +167,7 @@ export function useAppointmentDetail({
 
   const resetAppointmentDetailState = useCallback(() => {
     detailResourceRequestKeysRef.current = createDetailResourceKeyState();
-    setDetailLoading(false);
-    setDetailError("");
-    setDetail(null);
-    setDetailAssignments([]);
-    setDetailResourceKeys(createDetailResourceKeyState());
-    setDetailChecklist([]);
-    setDetailReminders([]);
-    setDetailReport(null);
-    setDetailTasks([]);
-    setDetailServices([]);
-    setDetailCommunications([]);
+    dispatchDetailState(createAppointmentDetailState());
   }, []);
 
   useEffect(() => {
@@ -127,10 +175,12 @@ export function useAppointmentDetail({
     let active = true;
 
     async function loadDetail() {
-      setDetailLoading(true);
       detailResourceRequestKeysRef.current = createDetailResourceKeyState();
-      setDetailResourceKeys(createDetailResourceKeyState());
-      setDetailError("");
+      dispatchDetailState({
+        detailLoading: true,
+        detailResourceKeys: createDetailResourceKeyState(),
+        detailError: "",
+      });
       try {
         const appointmentDetail = await apiFetch<AppointmentDetail>(
           `/appointments/${selectedId}`,
@@ -143,35 +193,38 @@ export function useAppointmentDetail({
               ).catch(() => []);
 
         if (!active) return;
-        setDetail(appointmentDetail);
-        setDetailAssignments(assignments);
-        setDetailChecklist([]);
-        setDetailReminders([]);
-        setDetailReport(null);
-        setDetailTasks([]);
-        setDetailServices([]);
-        setDetailCommunications([]);
+        dispatchDetailState({
+          detail: appointmentDetail,
+          detailAssignments: assignments,
+          detailChecklist: [],
+          detailReminders: [],
+          detailReport: null,
+          detailTasks: [],
+          detailServices: [],
+          detailCommunications: [],
+          detailLoading: false,
+        });
       } catch (error) {
         if (!active) return;
-        setDetail(null);
-        setDetailAssignments([]);
-        setDetailChecklist([]);
-        setDetailReminders([]);
-        setDetailReport(null);
-        setDetailTasks([]);
-        setDetailServices([]);
-        setDetailCommunications([]);
-        setDetailError(
-          error instanceof Error
-            ? error.message
-            : appointmentText(
+        dispatchDetailState({
+          detail: null,
+          detailAssignments: [],
+          detailChecklist: [],
+          detailReminders: [],
+          detailReport: null,
+          detailTasks: [],
+          detailServices: [],
+          detailCommunications: [],
+          detailError:
+            error instanceof Error
+              ? error.message
+              : appointmentText(
                 "Termin konnte nicht geladen werden.",
                 "Не удалось загрузить приём.",
                 "Failed to load appointment",
               ),
-        );
-      } finally {
-        if (active) setDetailLoading(false);
+          detailLoading: false,
+        });
       }
     }
 
@@ -209,12 +262,12 @@ export function useAppointmentDetail({
 
     let active = true;
 
-    async function loadExtendedDetailResources() {
+    function loadExtendedDetailResources() {
       for (const group of pendingGroups) {
         detailResourceRequestKeysRef.current[group] = currentDetailResourceKey;
       }
 
-      const results = await Promise.allSettled(
+      const detailResourceRequest = Promise.allSettled(
         pendingGroups.map((group) =>
           fetchAppointmentDetailResourceGroup(group, selectedId),
         ),
@@ -224,31 +277,38 @@ export function useAppointmentDetail({
         return;
       }
 
-      const loadedGroups: AppointmentDetailResourceGroup[] = [];
+      void detailResourceRequest.then((results) => {
+        if (!active) {
+          return;
+        }
+
+        const loadedGroups: AppointmentDetailResourceGroup[] = [];
+      const detailPatch: Partial<AppointmentDetailState> = {};
       let firstErrorMessage = "";
 
       for (const [index, result] of results.entries()) {
         const group = pendingGroups[index];
         if (result.status === "fulfilled") {
+          const resource = result.value;
           loadedGroups.push(group);
-          switch (result.value.group) {
+          switch (resource.group) {
             case "checklist":
-              setDetailChecklist(result.value.value);
+              detailPatch.detailChecklist = resource.value;
               break;
             case "reminders":
-              setDetailReminders(result.value.value);
+              detailPatch.detailReminders = resource.value;
               break;
             case "report":
-              setDetailReport(result.value.value);
+              detailPatch.detailReport = resource.value;
               break;
             case "tasks":
-              setDetailTasks(result.value.value);
+              detailPatch.detailTasks = resource.value;
               break;
             case "services":
-              setDetailServices(result.value.value);
+              detailPatch.detailServices = resource.value;
               break;
             case "communications":
-              setDetailCommunications(result.value.value);
+              detailPatch.detailCommunications = resource.value;
               break;
           }
           continue;
@@ -267,44 +327,52 @@ export function useAppointmentDetail({
 
         switch (group) {
           case "checklist":
-            setDetailChecklist([]);
+            detailPatch.detailChecklist = [];
             break;
           case "reminders":
-            setDetailReminders([]);
+            detailPatch.detailReminders = [];
             break;
           case "report":
-            setDetailReport(null);
+            detailPatch.detailReport = null;
             break;
           case "tasks":
-            setDetailTasks([]);
+            detailPatch.detailTasks = [];
             break;
           case "services":
-            setDetailServices([]);
+            detailPatch.detailServices = [];
             break;
           case "communications":
-            setDetailCommunications([]);
+            detailPatch.detailCommunications = [];
             break;
         }
       }
 
-      if (loadedGroups.length > 0) {
-        setDetailResourceKeys((current) => {
-          const next = { ...current };
-          for (const group of loadedGroups) {
-            next[group] = currentDetailResourceKey;
-          }
-          return next;
-        });
-      }
       for (const group of pendingGroups) {
         detailResourceRequestKeysRef.current[group] = "";
       }
-      if (firstErrorMessage) {
-        setDetailError(firstErrorMessage);
-      }
+        if (
+          loadedGroups.length > 0 ||
+          firstErrorMessage ||
+          Object.keys(detailPatch).length > 0
+        ) {
+          dispatchDetailState((current) => {
+            if (loadedGroups.length > 0) {
+              const detailResourceKeys = { ...current.detailResourceKeys };
+              for (const group of loadedGroups) {
+                detailResourceKeys[group] = currentDetailResourceKey;
+              }
+              detailPatch.detailResourceKeys = detailResourceKeys;
+            }
+            if (firstErrorMessage) {
+              detailPatch.detailError = firstErrorMessage;
+            }
+            return detailPatch;
+          });
+        }
+      });
     }
 
-    void loadExtendedDetailResources();
+    loadExtendedDetailResources();
     return () => {
       active = false;
       for (const group of pendingGroups) {

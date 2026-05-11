@@ -15,9 +15,9 @@ export const ALL_STAFF_ROLES = [
   "it_admin",
 ] as const;
 
-export type StaffRole = (typeof ALL_STAFF_ROLES)[number];
+type StaffRole = (typeof ALL_STAFF_ROLES)[number];
 
-export const ROLES_CHAT = [
+const ROLES_CHAT = [
   "ceo",
   "ceo_assistant",
   "patient_manager",
@@ -28,7 +28,7 @@ export const ROLES_CHAT = [
   "it_admin",
 ] as const satisfies readonly StaffRole[];
 
-export const ROLES_FEEDBACK = [
+const ROLES_FEEDBACK = [
   "ceo",
   "ceo_assistant",
   "patient_manager",
@@ -36,7 +36,7 @@ export const ROLES_FEEDBACK = [
   "concierge",
 ] as const satisfies readonly StaffRole[];
 
-export const ROLES_REPORTS = [
+const ROLES_REPORTS = [
   "ceo",
   "ceo_assistant",
   "patient_manager",
@@ -44,21 +44,21 @@ export const ROLES_REPORTS = [
   "sales",
 ] as const satisfies readonly StaffRole[];
 
-export const ROLES_CONTRACTS_INVOICES = [
+const ROLES_CONTRACTS_INVOICES = [
   "ceo",
   "ceo_assistant",
   "patient_manager",
   "billing",
 ] as const satisfies readonly StaffRole[];
 
-export const ROLES_FINANCE_CATALOG = [
+const ROLES_FINANCE_CATALOG = [
   "ceo",
   "ceo_assistant",
   "patient_manager",
   "billing",
 ] as const satisfies readonly StaffRole[];
 
-export const ROLES_DOCUMENTS = [
+const ROLES_DOCUMENTS = [
   "ceo",
   "ceo_assistant",
   "patient_manager",
@@ -68,7 +68,7 @@ export const ROLES_DOCUMENTS = [
   "billing",
 ] as const satisfies readonly StaffRole[];
 
-export const ROLES_APPOINTMENTS = [
+const ROLES_APPOINTMENTS = [
   "ceo",
   "patient_manager",
   "teamlead_interpreter",
@@ -79,19 +79,19 @@ export const ROLES_APPOINTMENTS = [
 // CEO has full access by policy — `AuthUser::require_any_role` in
 // `crates/server/src/auth/middleware.rs` short-circuits to Ok for Ceo,
 // so the frontend guard mirrors that by including "ceo" everywhere.
-export const ROLES_ADMIN = ["ceo", "it_admin"] as const satisfies readonly StaffRole[];
+const ROLES_ADMIN = ["ceo", "it_admin"] as const satisfies readonly StaffRole[];
 
-export const ROLES_COMPLIANCE = [
+const ROLES_COMPLIANCE = [
   "ceo",
   "patient_manager",
 ] as const satisfies readonly StaffRole[];
 
-export const ROLES_ADMIN_USERS = [
+const ROLES_ADMIN_USERS = [
   "ceo",
   "it_admin",
 ] as const satisfies readonly StaffRole[];
 
-export const ROLES_ADMIN_CUSTOM_FIELDS = [
+const ROLES_ADMIN_CUSTOM_FIELDS = [
   "ceo",
   "it_admin",
   "patient_manager",
@@ -103,27 +103,27 @@ export const ROLES_ADMIN_CUSTOM_FIELDS = [
 // `docs/testing/phase-f-ssot-drift-audit.md` for the cross-reference table.
 
 /** `crates/server/src/routes/leads.rs:114` (`list_leads`) — CEO passes via `require_any_role` bypass. */
-export const ROLES_LEADS = [
+const ROLES_LEADS = [
   "ceo",
   "patient_manager",
   "sales",
 ] as const satisfies readonly StaffRole[];
 
 /** `crates/server/src/routes/cases.rs:275` (`list_cases`) */
-export const ROLES_CASES = [
+const ROLES_CASES = [
   "ceo",
   "patient_manager",
 ] as const satisfies readonly StaffRole[];
 
 /** `crates/server/src/routes/orders.rs:157` (`list_orders`) */
-export const ROLES_ORDERS = [
+const ROLES_ORDERS = [
   "ceo",
   "patient_manager",
   "billing",
 ] as const satisfies readonly StaffRole[];
 
 /** `crates/server/src/routes/patients.rs:445` (`list_patients`) */
-export const ROLES_PATIENTS = [
+const ROLES_PATIENTS = [
   "ceo",
   "ceo_assistant",
   "patient_manager",
@@ -134,7 +134,7 @@ export const ROLES_PATIENTS = [
 ] as const satisfies readonly StaffRole[];
 
 /** `crates/server/src/routes/providers.rs:132` (`list_providers`) */
-export const ROLES_PROVIDERS = [
+const ROLES_PROVIDERS = [
   "ceo",
   "patient_manager",
   "concierge",
@@ -143,7 +143,7 @@ export const ROLES_PROVIDERS = [
 ] as const satisfies readonly StaffRole[];
 
 /** `crates/server/src/routes/concierge_services.rs:564` (`list_concierge_services`) */
-export const ROLES_SERVICES = [
+const ROLES_SERVICES = [
   "ceo",
   "patient_manager",
   "concierge",
@@ -394,6 +394,10 @@ const PATIENT_PORTAL_NAV_ITEMS: readonly PatientPortalNavItem[] = [
   { id: "privacy", to: "/privacy", labelKey: "nav_my_privacy" },
 ] as const;
 
+const STAFF_ROUTE_ROLE_SETS = new Map(
+  STAFF_ROUTE_RULES.map((rule) => [rule.id, new Set(rule.roles)]),
+);
+
 function normalizePathname(pathname: string): string {
   const base = pathname.split("?")[0] ?? "/";
   if (base === "") {
@@ -427,7 +431,7 @@ export function canAccessStaffRoute(role: string, pathname: string): boolean {
     if (!pathMatches(p, rule)) {
       continue;
     }
-    return rule.roles.includes(role);
+    return STAFF_ROUTE_ROLE_SETS.get(rule.id)?.has(role) ?? false;
   }
   return false;
 }
@@ -469,17 +473,17 @@ export function listStaffNavItems(role: string): StaffNavItem[] {
   if (role === "patient") {
     return [];
   }
-  return STAFF_ROUTE_RULES.flatMap((rule) => {
-    if (!rule.nav || !rule.roles.includes(role)) {
-      return [];
+  const items: StaffNavItem[] = [];
+  for (const rule of STAFF_ROUTE_RULES) {
+    if (!rule.nav || !STAFF_ROUTE_ROLE_SETS.get(rule.id)?.has(role)) {
+      continue;
     }
-    return [
-      {
-        id: rule.id,
-        to: rule.path,
-        labelKey: rule.nav.labelKey,
-        section: rule.nav.section,
-      } satisfies StaffNavItem,
-    ];
-  });
+    items.push({
+      id: rule.id,
+      to: rule.path,
+      labelKey: rule.nav.labelKey,
+      section: rule.nav.section,
+    });
+  }
+  return items;
 }

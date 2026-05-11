@@ -96,7 +96,7 @@ export type CreateOrderServiceGroupInput = {
   participants?: ServiceGroupParticipantInput[];
 };
 
-export type OrderServiceGroupLinePreviewItem = {
+type OrderServiceGroupLinePreviewItem = {
   participant_id: string;
   provider_id: string;
   provider_name: string;
@@ -230,15 +230,6 @@ export function createOrderServiceGroup(
   body: CreateOrderServiceGroupInput,
 ): Promise<{ id: string }> {
   return post(`/orders/${orderId}/service-groups`, body);
-}
-
-export function replaceOrderServiceGroupParticipants(
-  serviceGroupId: string,
-  participants: ServiceGroupParticipantInput[],
-): Promise<unknown> {
-  return post(`/order-service-groups/${serviceGroupId}/participants`, {
-    participants,
-  });
 }
 
 export function fetchOrderServiceGroupLinePreview(

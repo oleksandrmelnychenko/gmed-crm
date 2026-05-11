@@ -1,12 +1,15 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   startTransition,
+  useCallback,
   useDeferredValue,
   useEffect,
   useMemo,
+  useReducer,
   useState,
   type FormEvent,
   type ReactNode,
+  type SetStateAction,
 } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
@@ -26,7 +29,6 @@ import {
 import {
   AdminInlineMetric,
   AdminSheetScaffold,
-  SheetActionsFooter,
   SheetFormFooter,
 } from "@/components/admin-page-patterns";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
@@ -59,7 +61,6 @@ import {
   type TranslationKey,
 } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
-import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { PatientInvoicesPage } from "@/pages/patients/portal-invoices-page";
 import { cn } from "@/lib/utils";
 import {
@@ -121,6 +122,43 @@ const INVOICE_DEFAULT_FROZEN_COLUMNS = ["invoice_number", "patient_name"];
 const INVOICE_MAX_FROZEN_COLUMNS = 3;
 const ACCOUNTING_DEFAULT_FROZEN_COLUMNS = ["entry_date", "description"];
 const ACCOUNTING_MAX_FROZEN_COLUMNS = 3;
+
+type InvoiceWorkspaceState = {
+  invoices: InvoiceItem[];
+  invoicePage: number;
+  invoiceTotal: number;
+  invoiceTotalPages: number;
+  patients: PatientOption[];
+  orders: OrderOption[];
+  quotes: QuoteOption[];
+  listBusy: boolean;
+  listError: string | null;
+  optionsError: string | null;
+  selectedInvoiceId: string;
+  detail: InvoiceItem | null;
+  dunningEvents: DunningEvent[];
+  detailBusy: boolean;
+  detailError: string | null;
+  reloadToken: number;
+  accountingYear: string;
+  accountingLedger: AccountingLedgerPayload | null;
+  accountingBusy: boolean;
+  accountingError: string | null;
+};
+
+type InvoiceWorkspacePatch =
+  | Partial<InvoiceWorkspaceState>
+  | ((current: InvoiceWorkspaceState) => Partial<InvoiceWorkspaceState>);
+
+function invoiceWorkspaceReducer(
+  state: InvoiceWorkspaceState,
+  patch: InvoiceWorkspacePatch,
+): InvoiceWorkspaceState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
 
 const INVOICE_STATUS_LABEL_KEYS = {
   draft: "revenue_invoice_status_draft",
@@ -209,9 +247,103 @@ async function downloadAccountingLedgerExport(year: string) {
   URL.revokeObjectURL(url);
 }
 
-function StaffInvoicesPage() {
+type InvoiceUiState = {
+  createOpen: boolean;
+  createForm: CreateForm;
+  createBusy: boolean;
+  createError: string | null;
+  statusForm: StatusForm;
+  statusBusy: boolean;
+  statusError: string | null;
+  statusDialogOpen: boolean;
+  visibilityForm: VisibilityForm;
+  visibilityBusy: boolean;
+  visibilityError: string | null;
+  visibilityDialogOpen: boolean;
+  payerForm: PayerForm;
+  payerBusy: boolean;
+  payerError: string | null;
+  payerDialogOpen: boolean;
+  dunningBusy: boolean;
+  dunningError: string | null;
+  dunningForm: DunningForm;
+  dunningDialogOpen: boolean;
+};
+
+type InvoiceUiAction =
+  | { type: "patch"; value: Partial<InvoiceUiState> }
+  | { type: "update"; updater: (state: InvoiceUiState) => InvoiceUiState };
+
+function createInvoiceUiState(initialQuoteId = ""): InvoiceUiState {
+  return {
+    createOpen: false,
+    createForm: blankCreateForm(initialQuoteId),
+    createBusy: false,
+    createError: null,
+    statusForm: { status: "draft", dueDate: "", paidAmount: "", notes: "" },
+    statusBusy: false,
+    statusError: null,
+    statusDialogOpen: false,
+    visibilityForm: {
+      portalVisible: true,
+      hideAmountsFromPatient: false,
+      lineItemsVisibleToPatient: true,
+      pdfVisibleToPatient: true,
+      visibilityNote: "",
+    },
+    visibilityBusy: false,
+    visibilityError: null,
+    visibilityDialogOpen: false,
+    payerForm: {
+      payerPatientRelationId: "",
+      contactName: "",
+      contactEmail: "",
+      contactPhone: "",
+      contactRelationship: "",
+      notes: "",
+    },
+    payerBusy: false,
+    payerError: null,
+    payerDialogOpen: false,
+    dunningBusy: false,
+    dunningError: null,
+    dunningForm: { note: "" },
+    dunningDialogOpen: false,
+  };
+}
+
+function invoiceUiReducer(state: InvoiceUiState, action: InvoiceUiAction): InvoiceUiState {
+  switch (action.type) {
+    case "patch":
+      return { ...state, ...action.value };
+    case "update":
+      return action.updater(state);
+    default:
+      return state;
+  }
+}
+
+function createInvoiceUiFieldAction<K extends keyof InvoiceUiState>(
+  field: K,
+  value: SetStateAction<InvoiceUiState[K]>,
+): InvoiceUiAction {
+  return {
+    type: "update",
+    updater: (state) => {
+      const currentValue = state[field];
+      const nextValue =
+        typeof value === "function"
+          ? (value as (current: InvoiceUiState[K]) => InvoiceUiState[K])(currentValue)
+          : value;
+
+      if (Object.is(currentValue, nextValue)) return state;
+      return { ...state, [field]: nextValue };
+    },
+  };
+}
+
+function useStaffInvoicesPageContent() {
   const { t, lang } = useLang();
-  const { staffGo } = useStaffNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const access = invoicesPermissions(user?.role);
@@ -368,60 +500,187 @@ function StaffInvoicesPage() {
   const initialPage = Math.max(1, Number(searchParams.get("page") ?? "1") || 1);
 
   const [filters, setFilters] = useState<Filters>({ ...DEFAULT_FILTERS, patientId: initialPatientId, orderId: initialOrderId, quoteId: initialQuoteId });
-  const [invoices, setInvoices] = useState<InvoiceItem[]>([]);
-  const [invoicePage, setInvoicePage] = useState(initialPage);
-  const [invoiceTotal, setInvoiceTotal] = useState(0);
-  const [invoiceTotalPages, setInvoiceTotalPages] = useState(1);
-  const [patients, setPatients] = useState<PatientOption[]>([]);
-  const [orders, setOrders] = useState<OrderOption[]>([]);
-  const [quotes, setQuotes] = useState<QuoteOption[]>([]);
-  const [listBusy, setListBusy] = useState(false);
-  const [listError, setListError] = useState<string | null>(null);
-  const [optionsError, setOptionsError] = useState<string | null>(null);
-  const [selectedInvoiceId, setSelectedInvoiceId] = useState(initialInvoiceId);
-  const [detail, setDetail] = useState<InvoiceItem | null>(null);
-  const [dunningEvents, setDunningEvents] = useState<DunningEvent[]>([]);
-  const [detailBusy, setDetailBusy] = useState(false);
-  const [detailError, setDetailError] = useState<string | null>(null);
-  const [reloadToken, setReloadToken] = useState(0);
-  const [createOpen, setCreateOpen] = useState(false);
-  const [createForm, setCreateForm] = useState<CreateForm>(blankCreateForm(initialQuoteId));
-  const [createBusy, setCreateBusy] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [statusForm, setStatusForm] = useState<StatusForm>({ status: "draft", dueDate: "", paidAmount: "", notes: "" });
-  const [statusBusy, setStatusBusy] = useState(false);
-  const [statusError, setStatusError] = useState<string | null>(null);
-  const [statusDialogOpen, setStatusDialogOpen] = useState(false);
-  const [visibilityForm, setVisibilityForm] = useState<VisibilityForm>({
-    portalVisible: true,
-    hideAmountsFromPatient: false,
-    lineItemsVisibleToPatient: true,
-    pdfVisibleToPatient: true,
-    visibilityNote: "",
-  });
-  const [visibilityBusy, setVisibilityBusy] = useState(false);
-  const [visibilityError, setVisibilityError] = useState<string | null>(null);
-  const [visibilityDialogOpen, setVisibilityDialogOpen] = useState(false);
-  const [payerForm, setPayerForm] = useState<PayerForm>({
-    payerPatientRelationId: "",
-    contactName: "",
-    contactEmail: "",
-    contactPhone: "",
-    contactRelationship: "",
-    notes: "",
-  });
-  const [payerBusy, setPayerBusy] = useState(false);
-  const [payerError, setPayerError] = useState<string | null>(null);
-  const [payerDialogOpen, setPayerDialogOpen] = useState(false);
-  const [dunningBusy, setDunningBusy] = useState(false);
-  const [dunningError, setDunningError] = useState<string | null>(null);
-  const [dunningForm, setDunningForm] = useState<DunningForm>({ note: "" });
-  const [dunningDialogOpen, setDunningDialogOpen] = useState(false);
-  const [accountingYear, setAccountingYear] = useState(currentYear);
-  const [accountingLedger, setAccountingLedger] = useState<AccountingLedgerPayload | null>(null);
-  const [accountingBusy, setAccountingBusy] = useState(false);
-  const [accountingError, setAccountingError] = useState<string | null>(null);
-
+  const [workspaceState, dispatchWorkspaceState] = useReducer(
+    invoiceWorkspaceReducer,
+    undefined,
+    () => ({
+      invoices: [],
+      invoicePage: initialPage,
+      invoiceTotal: 0,
+      invoiceTotalPages: 1,
+      patients: [],
+      orders: [],
+      quotes: [],
+      listBusy: false,
+      listError: null,
+      optionsError: null,
+      selectedInvoiceId: initialInvoiceId,
+      detail: null,
+      dunningEvents: [],
+      detailBusy: false,
+      detailError: null,
+      reloadToken: 0,
+      accountingYear: currentYear,
+      accountingLedger: null,
+      accountingBusy: false,
+      accountingError: null,
+    }),
+  );
+  const {
+    invoices,
+    invoicePage,
+    invoiceTotal,
+    invoiceTotalPages,
+    patients,
+    orders,
+    quotes,
+    listBusy,
+    listError,
+    optionsError,
+    selectedInvoiceId,
+    detail,
+    dunningEvents,
+    detailBusy,
+    detailError,
+    reloadToken,
+    accountingYear,
+    accountingLedger,
+    accountingBusy,
+    accountingError,
+  } = workspaceState;
+  const setInvoicePage = (nextValue: SetStateAction<number>) => {
+    dispatchWorkspaceState((current) => ({
+      invoicePage:
+        typeof nextValue === "function"
+          ? nextValue(current.invoicePage)
+          : nextValue,
+    }));
+  };
+  const setReloadToken = (nextValue: SetStateAction<number>) => {
+    dispatchWorkspaceState((current) => ({
+      reloadToken:
+        typeof nextValue === "function"
+          ? nextValue(current.reloadToken)
+          : nextValue,
+    }));
+  };
+  const setSelectedInvoiceId = (nextValue: SetStateAction<string>) => {
+    dispatchWorkspaceState((current) => ({
+      selectedInvoiceId:
+        typeof nextValue === "function"
+          ? nextValue(current.selectedInvoiceId)
+          : nextValue,
+    }));
+  };
+  const setDetail = (nextValue: SetStateAction<InvoiceItem | null>) => {
+    dispatchWorkspaceState((current) => ({
+      detail:
+        typeof nextValue === "function"
+          ? nextValue(current.detail)
+          : nextValue,
+    }));
+  };
+  const setDunningEvents = (nextValue: SetStateAction<DunningEvent[]>) => {
+    dispatchWorkspaceState((current) => ({
+      dunningEvents:
+        typeof nextValue === "function"
+          ? nextValue(current.dunningEvents)
+          : nextValue,
+    }));
+  };
+  const setDetailError = (nextValue: SetStateAction<string | null>) => {
+    dispatchWorkspaceState((current) => ({
+      detailError:
+        typeof nextValue === "function"
+          ? nextValue(current.detailError)
+          : nextValue,
+    }));
+  };
+  const setAccountingYear = (nextValue: SetStateAction<string>) => {
+    dispatchWorkspaceState((current) => ({
+      accountingYear:
+        typeof nextValue === "function"
+          ? nextValue(current.accountingYear)
+          : nextValue,
+    }));
+  };
+  const setAccountingError = (nextValue: SetStateAction<string | null>) => {
+    dispatchWorkspaceState((current) => ({
+      accountingError:
+        typeof nextValue === "function"
+          ? nextValue(current.accountingError)
+          : nextValue,
+    }));
+  };
+  const [
+    {
+      createOpen,
+      createForm,
+      createBusy,
+      createError,
+      statusForm,
+      statusBusy,
+      statusError,
+      statusDialogOpen,
+      visibilityForm,
+      visibilityBusy,
+      visibilityError,
+      visibilityDialogOpen,
+      payerForm,
+      payerBusy,
+      payerError,
+      payerDialogOpen,
+      dunningBusy,
+      dunningError,
+      dunningForm,
+      dunningDialogOpen,
+    },
+    dispatchInvoiceUiState,
+  ] = useReducer(invoiceUiReducer, initialQuoteId, createInvoiceUiState);
+  const setInvoiceUiField = <K extends keyof InvoiceUiState>(
+    field: K,
+    value: SetStateAction<InvoiceUiState[K]>,
+  ) => dispatchInvoiceUiState(createInvoiceUiFieldAction(field, value));
+  const setCreateOpen = (value: SetStateAction<boolean>) =>
+    setInvoiceUiField("createOpen", value);
+  const setCreateForm = (value: SetStateAction<CreateForm>) =>
+    setInvoiceUiField("createForm", value);
+  const setCreateBusy = (value: SetStateAction<boolean>) =>
+    setInvoiceUiField("createBusy", value);
+  const setCreateError = (value: SetStateAction<string | null>) =>
+    setInvoiceUiField("createError", value);
+  const setStatusForm = (value: SetStateAction<StatusForm>) =>
+    setInvoiceUiField("statusForm", value);
+  const setStatusBusy = (value: SetStateAction<boolean>) =>
+    setInvoiceUiField("statusBusy", value);
+  const setStatusError = (value: SetStateAction<string | null>) =>
+    setInvoiceUiField("statusError", value);
+  const setStatusDialogOpen = (value: SetStateAction<boolean>) =>
+    setInvoiceUiField("statusDialogOpen", value);
+  const setVisibilityForm = (value: SetStateAction<VisibilityForm>) =>
+    setInvoiceUiField("visibilityForm", value);
+  const setVisibilityBusy = (value: SetStateAction<boolean>) =>
+    setInvoiceUiField("visibilityBusy", value);
+  const setVisibilityError = (value: SetStateAction<string | null>) =>
+    setInvoiceUiField("visibilityError", value);
+  const setVisibilityDialogOpen = (value: SetStateAction<boolean>) =>
+    setInvoiceUiField("visibilityDialogOpen", value);
+  const setPayerForm = (value: SetStateAction<PayerForm>) =>
+    setInvoiceUiField("payerForm", value);
+  const setPayerBusy = (value: SetStateAction<boolean>) =>
+    setInvoiceUiField("payerBusy", value);
+  const setPayerError = (value: SetStateAction<string | null>) =>
+    setInvoiceUiField("payerError", value);
+  const setPayerDialogOpen = (value: SetStateAction<boolean>) =>
+    setInvoiceUiField("payerDialogOpen", value);
+  const setDunningBusy = (value: SetStateAction<boolean>) =>
+    setInvoiceUiField("dunningBusy", value);
+  const setDunningError = (value: SetStateAction<string | null>) =>
+    setInvoiceUiField("dunningError", value);
+  const setDunningForm = (value: SetStateAction<DunningForm>) =>
+    setInvoiceUiField("dunningForm", value);
+  const setDunningDialogOpen = (value: SetStateAction<boolean>) =>
+    setInvoiceUiField("dunningDialogOpen", value);
   const deferredSearch = useDeferredValue(filters.search);
   const effectiveFilters = useMemo(() => ({ ...filters, search: deferredSearch }), [filters, deferredSearch]);
 
@@ -844,6 +1103,21 @@ function StaffInvoicesPage() {
   const accountingSummary = accountingLedger?.summary ?? EMPTY_ACCOUNTING_SUMMARY;
   const accountingEntries = Array.isArray(accountingLedger?.entries) ? accountingLedger.entries : [];
   const accountingMonthly = Array.isArray(accountingLedger?.monthly) ? accountingLedger.monthly : [];
+  const applyLoadedInvoiceDetail = useCallback((data: NonNullable<typeof detail>, dunning: typeof dunningEvents) => {
+    setStatusForm(invoiceToStatusForm(data));
+    setVisibilityForm(invoiceToVisibilityForm(data));
+    setPayerForm(invoiceToPayerForm(data));
+    setDunningForm({ note: "" });
+    setDunningError(null);
+    setVisibilityError(null);
+    setPayerError(null);
+    dispatchWorkspaceState({
+      detail: data,
+      dunningEvents: dunning,
+      detailError: null,
+      detailBusy: false,
+    });
+  }, []);
 
   useEffect(() => {
     let ignore = false;
@@ -855,12 +1129,18 @@ function StaffInvoicesPage() {
           quotes: quotesResult,
         } = await fetchInvoiceLookups(canLoadOrderOptions, canLoadQuoteOptions);
         if (ignore) return;
-        setPatients(patientsResult);
-        setOrders(ordersResult);
-        setQuotes(quotesResult);
-        setOptionsError(null);
+        dispatchWorkspaceState({
+          patients: patientsResult,
+          orders: ordersResult,
+          quotes: quotesResult,
+          optionsError: null,
+        });
       } catch (error) {
-        if (!ignore) setOptionsError(error instanceof Error ? error.message : t.common_error);
+        if (!ignore) {
+          dispatchWorkspaceState({
+            optionsError: error instanceof Error ? error.message : t.common_error,
+          });
+        }
       }
     }
     void loadOptions();
@@ -872,26 +1152,32 @@ function StaffInvoicesPage() {
   useEffect(() => {
     let ignore = false;
     async function loadInvoices() {
-      setListBusy(true);
+      dispatchWorkspaceState({ listBusy: true });
       try {
         const data = await fetchInvoices(buildInvoicesPath(effectiveFilters, invoicePage));
         if (!ignore) {
-          setInvoices(Array.isArray(data.items) ? data.items : []);
-          setInvoiceTotal(typeof data.total === "number" ? data.total : 0);
-          setInvoiceTotalPages(
-            typeof data.total_pages === "number" && data.total_pages > 0
-              ? data.total_pages
-              : 1,
-          );
-          if (typeof data.page === "number" && data.page > 0) {
-            setInvoicePage(data.page);
-          }
-          setListError(null);
+          dispatchWorkspaceState({
+            invoices: Array.isArray(data.items) ? data.items : [],
+            invoiceTotal: typeof data.total === "number" ? data.total : 0,
+            invoiceTotalPages:
+              typeof data.total_pages === "number" && data.total_pages > 0
+                ? data.total_pages
+                : 1,
+            invoicePage:
+              typeof data.page === "number" && data.page > 0
+                ? data.page
+                : invoicePage,
+            listError: null,
+            listBusy: false,
+          });
         }
       } catch (error) {
-        if (!ignore) setListError(error instanceof Error ? error.message : t.common_error);
-      } finally {
-        if (!ignore) setListBusy(false);
+        if (!ignore) {
+          dispatchWorkspaceState({
+            listError: error instanceof Error ? error.message : t.common_error,
+            listBusy: false,
+          });
+        }
       }
     }
     void loadInvoices();
@@ -912,65 +1198,66 @@ function StaffInvoicesPage() {
 
   useEffect(() => {
     if (!selectedInvoiceId) {
-      setDetail(null);
-      setDunningEvents([]);
-      setDetailError(null);
+      dispatchWorkspaceState({
+        detail: null,
+        dunningEvents: [],
+        detailError: null,
+      });
       return;
     }
     let ignore = false;
     async function loadDetail() {
-      setDetailBusy(true);
+      dispatchWorkspaceState({ detailBusy: true });
       try {
         const { invoice: data, dunning } =
           await fetchInvoiceWorkspace(selectedInvoiceId);
         if (!ignore) {
-          setDetail(data);
-          setDunningEvents(dunning);
-          setStatusForm(invoiceToStatusForm(data));
-          setVisibilityForm(invoiceToVisibilityForm(data));
-          setPayerForm(invoiceToPayerForm(data));
-          setDunningForm({ note: "" });
-          setDunningError(null);
-          setVisibilityError(null);
-          setPayerError(null);
-          setDetailError(null);
+          applyLoadedInvoiceDetail(data, dunning);
         }
       } catch (error) {
-        if (!ignore) setDetailError(error instanceof Error ? error.message : t.common_error);
-      } finally {
-        if (!ignore) setDetailBusy(false);
+        if (!ignore) {
+          dispatchWorkspaceState({
+            detailError: error instanceof Error ? error.message : t.common_error,
+            detailBusy: false,
+          });
+        }
       }
     }
     void loadDetail();
     return () => {
       ignore = true;
     };
-  }, [selectedInvoiceId, reloadToken, t.common_error]);
+  }, [applyLoadedInvoiceDetail, selectedInvoiceId, reloadToken, t.common_error]);
 
   useEffect(() => {
     if (!access.canAccounting) {
-      setAccountingLedger(null);
-      setAccountingError(null);
-      setAccountingBusy(false);
+      dispatchWorkspaceState({
+        accountingLedger: null,
+        accountingError: null,
+        accountingBusy: false,
+      });
       return;
     }
     let ignore = false;
     async function loadAccountingLedger() {
-      setAccountingBusy(true);
+      dispatchWorkspaceState({ accountingBusy: true });
       try {
         const data = await fetchAccountingLedger(accountingYear);
         if (!ignore) {
-          setAccountingLedger(data);
-          setAccountingError(null);
+          dispatchWorkspaceState({
+            accountingLedger: data,
+            accountingError: null,
+            accountingBusy: false,
+          });
         }
       } catch (error) {
         if (!ignore) {
-          setAccountingError(
-            error instanceof Error ? error.message : t.common_error,
-          );
+          dispatchWorkspaceState({
+            accountingError:
+              error instanceof Error ? error.message : t.common_error,
+            accountingBusy: false,
+          });
         }
-      } finally {
-        if (!ignore) setAccountingBusy(false);
       }
     }
     void loadAccountingLedger();
@@ -1229,9 +1516,9 @@ function StaffInvoicesPage() {
                   </div>
                   <div className="flex items-center gap-2" aria-hidden>
                     <span className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-border" />
-                    <span className="h-1.5 w-1.5 rounded-full bg-orange-400" />
-                    <span className="h-1.5 w-1.5 rounded-full bg-orange-300" />
-                    <span className="h-1.5 w-1.5 rounded-full bg-orange-200" />
+                    <span className="size-1.5 rounded-full bg-orange-400" />
+                    <span className="size-1.5 rounded-full bg-orange-300" />
+                    <span className="size-1.5 rounded-full bg-orange-200" />
                     <span className="h-px flex-1 bg-gradient-to-r from-border via-border to-transparent" />
                   </div>
                   <DataTableSurface
@@ -1277,7 +1564,7 @@ function StaffInvoicesPage() {
                       const value = Number(row.net_surplus ?? 0);
                       if (value > 0) return "bg-emerald-500";
                       if (value < 0) return "bg-rose-500";
-                      return "bg-slate-300";
+                      return "bg-zinc-300";
                     }}
                     emptyState={
                       <EmptyState
@@ -1302,7 +1589,7 @@ function StaffInvoicesPage() {
           </div>
           <div className="relative z-30 mt-5 flex flex-wrap items-center gap-1.5">
             <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -tranzinc-y-1/2 text-muted-foreground" />
               <Input
                 value={filters.search}
                 onChange={(event) => startTransition(() => {
@@ -1672,7 +1959,7 @@ function StaffInvoicesPage() {
             {detailBusy ? <LoadingState label={t.common_loading} /> : detailError ? <ShellBanner tone="error">{detailError}</ShellBanner> : !detail ? <EmptyState title={text.noInvoiceSelected} description={text.noInvoiceSelectedDescription} /> : (
               <div className="space-y-4 rounded-xl p-4">
                 <section className="rounded-xl border border-border bg-card">
-                  <div className="relative overflow-hidden px-4 py-4">
+                  <div className="relative overflow-hidden p-4">
                     <span
                       className={cn(
                         "absolute left-0 top-4 h-12 w-1 rounded-r-full",
@@ -1681,7 +1968,7 @@ function StaffInvoicesPage() {
                           : detail.status === "overdue"
                             ? "bg-rose-500"
                             : detail.status === "cancelled"
-                              ? "bg-slate-400"
+                              ? "bg-zinc-400"
                               : "bg-sky-500",
                       )}
                     />
@@ -1790,7 +2077,7 @@ function StaffInvoicesPage() {
                   <div className="grid gap-3 md:grid-cols-4">
                     <button
                       type="button"
-                      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                       onClick={() => window.open(`/patients?patient=${detail.patient_id}`, "_blank", "noopener,noreferrer")}
                     >
                       <div className="relative z-10">
@@ -1800,12 +2087,12 @@ function StaffInvoicesPage() {
                         </p>
                       </div>
                       <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-                        <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                        <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-tranzinc-y-0.5 group-hover:tranzinc-x-0.5" />
                       </span>
                     </button>
                     <button
                       type="button"
-                      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                       onClick={() => window.open(`/orders?order=${detail.order_id}&patient=${detail.patient_id}`, "_blank", "noopener,noreferrer")}
                     >
                       <div className="relative z-10">
@@ -1815,12 +2102,12 @@ function StaffInvoicesPage() {
                         </p>
                       </div>
                       <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-                        <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                        <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-tranzinc-y-0.5 group-hover:tranzinc-x-0.5" />
                       </span>
                     </button>
                     <button
                       type="button"
-                      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                       onClick={() => window.open(`/contracts?quote=${detail.quote_id ?? ""}&order=${detail.order_id}&patient=${detail.patient_id}&tab=quotes`, "_blank", "noopener,noreferrer")}
                     >
                       <div className="relative z-10">
@@ -1830,12 +2117,12 @@ function StaffInvoicesPage() {
                         </p>
                       </div>
                       <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-                        <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                        <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-tranzinc-y-0.5 group-hover:tranzinc-x-0.5" />
                       </span>
                     </button>
                     <button
                       type="button"
-                      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                       onClick={() => window.open(`/documents?order=${detail.order_id}&patient=${detail.patient_id}`, "_blank", "noopener,noreferrer")}
                     >
                       <div className="relative z-10">
@@ -1845,7 +2132,7 @@ function StaffInvoicesPage() {
                         </p>
                       </div>
                       <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-                        <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                        <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-tranzinc-y-0.5 group-hover:tranzinc-x-0.5" />
                       </span>
                     </button>
                   </div>
@@ -2034,7 +2321,15 @@ function StaffInvoicesPage() {
                     <div className="space-y-3">
                       {detail.line_items.map((line, index) => (
                         <article
-                          key={`${line.description}-${index}`}
+                          key={[
+                            line.description,
+                            line.quantity,
+                            line.unit_price,
+                            line.line_net,
+                            line.line_vat,
+                            line.line_gross,
+                            line.tax_profile_key ?? "",
+                          ].join("|")}
                           className="overflow-hidden rounded-2xl border border-border bg-card"
                         >
                           <div className="grid lg:grid-cols-[minmax(0,1fr)_120px]">
@@ -2064,7 +2359,7 @@ function StaffInvoicesPage() {
                                 </div>
                               </div>
                             </div>
-                            <div className="relative border-t border-border px-4 py-4 lg:border-t-0 lg:pl-5 lg:before:absolute lg:before:bottom-4 lg:before:left-0 lg:before:top-4 lg:before:border-l lg:before:border-dashed lg:before:border-border">
+                            <div className="relative border-t border-border p-4 lg:border-t-0 lg:pl-5 lg:before:absolute lg:before:bottom-4 lg:before:left-0 lg:before:top-4 lg:before:border-l lg:before:border-dashed lg:before:border-border">
                               <div className="flex flex-wrap gap-1.5 lg:justify-end">
                                 <span className="rounded-full border border-border bg-background px-2.5 py-1 text-xs font-semibold leading-none text-foreground">
                                   {`${t.invoices_vat} ${line.vat_rate}%`}
@@ -2152,13 +2447,7 @@ function StaffInvoicesPage() {
 
       <Dialog open={dunningDialogOpen} onOpenChange={setDunningDialogOpen}>
         <DialogContent className="sm:max-w-xl">
-          <form
-            className="space-y-5"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void handleCreateDunning();
-            }}
-          >
+          <div className="space-y-5">
             <DialogHeader>
               <DialogTitle>{text.nextEscalation}</DialogTitle>
             </DialogHeader>
@@ -2191,27 +2480,22 @@ function StaffInvoicesPage() {
               </Field>
               <div className="flex justify-end">
                 <Button
-                  type="submit"
+                  type="button"
                   disabled={dunningBusy || !access.canManage || !nextDunning}
+                  onClick={() => void handleCreateDunning()}
                 >
                   {dunningBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
                   {nextDunning ? text.createDunning : text.noFurtherEscalation}
                 </Button>
               </div>
             </div>
-          </form>
+          </div>
         </DialogContent>
       </Dialog>
 
       <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
         <DialogContent className="sm:max-w-2xl">
-          <form
-            className="space-y-5"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void handleSaveStatus();
-            }}
-          >
+          <div className="space-y-5">
             <DialogHeader>
               <DialogTitle>{t.invoices_status}</DialogTitle>
             </DialogHeader>
@@ -2273,25 +2557,23 @@ function StaffInvoicesPage() {
                 </Field>
               </div>
               <div className="flex justify-end">
-                <Button type="submit" disabled={statusBusy || !access.canManage}>
+                <Button
+                  type="button"
+                  disabled={statusBusy || !access.canManage}
+                  onClick={() => void handleSaveStatus()}
+                >
                   {statusBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
                   {text.saveInvoice}
                 </Button>
               </div>
             </div>
-          </form>
+          </div>
         </DialogContent>
       </Dialog>
 
       <Dialog open={visibilityDialogOpen} onOpenChange={setVisibilityDialogOpen}>
         <DialogContent className="sm:max-w-2xl">
-          <form
-            className="space-y-5"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void handleSaveVisibility();
-            }}
-          >
+          <div className="space-y-5">
             <DialogHeader>
               <DialogTitle>{t.revenue_invoices_patient_preview}</DialogTitle>
             </DialogHeader>
@@ -2385,25 +2667,23 @@ function StaffInvoicesPage() {
                 </Field>
               </div>
               <div className="flex justify-end">
-                <Button type="submit" disabled={visibilityBusy || !access.canManage}>
+                <Button
+                  type="button"
+                  disabled={visibilityBusy || !access.canManage}
+                  onClick={() => void handleSaveVisibility()}
+                >
                   {visibilityBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
                   {t.revenue_invoices_save_visibility}
                 </Button>
               </div>
             </div>
-          </form>
+          </div>
         </DialogContent>
       </Dialog>
 
       <Dialog open={payerDialogOpen} onOpenChange={setPayerDialogOpen}>
         <DialogContent className="sm:max-w-2xl">
-          <form
-            className="space-y-5"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void handleSavePayer();
-            }}
-          >
+          <div className="space-y-5">
             <DialogHeader>
               <DialogTitle>{t.revenue_invoices_current_payer}</DialogTitle>
             </DialogHeader>
@@ -2491,17 +2771,25 @@ function StaffInvoicesPage() {
                 </Field>
               </div>
               <div className="flex justify-end">
-                <Button type="submit" disabled={payerBusy || !access.canManage}>
+                <Button
+                  type="button"
+                  disabled={payerBusy || !access.canManage}
+                  onClick={() => void handleSavePayer()}
+                >
                   {payerBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
                   {t.revenue_invoices_save_payer}
                 </Button>
               </div>
             </div>
-          </form>
+          </div>
         </DialogContent>
       </Dialog>
     </>
   );
+}
+
+function StaffInvoicesPage(...args: Parameters<typeof useStaffInvoicesPageContent>) {
+  return useStaffInvoicesPageContent(...args);
 }
 
 export function InvoicesPage() {
@@ -2526,15 +2814,6 @@ function SectionCard({ title, description, action, children }: { title: string; 
       </div>
       <div className="mt-5">{children}</div>
     </section>
-  );
-}
-
-function DetailField({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className={cn("rounded-xl p-4", tokens.surface.mutedCard)}>
-      <div className={tokens.text.eyebrow}>{label}</div>
-      <div className="mt-2 text-sm text-foreground">{value}</div>
-    </div>
   );
 }
 

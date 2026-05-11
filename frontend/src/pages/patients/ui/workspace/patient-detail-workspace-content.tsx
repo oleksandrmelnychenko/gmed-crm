@@ -389,7 +389,7 @@ type PatientDetailWorkspaceContentProps = {
   workspaceTabs: WorkspaceTab[];
 };
 
-export function PatientDetailWorkspaceContent(props: PatientDetailWorkspaceContentProps) {
+function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceContentProps) {
   const {
     activeTab,
     activeWorkflowAssignees,
@@ -642,7 +642,7 @@ export function PatientDetailWorkspaceContent(props: PatientDetailWorkspaceConte
       </div>
 
       <Tabs value={activeTab} onValueChange={handleWorkspaceTabChange}>
-        <div className="border-b border-slate-200 lg:hidden overflow-x-auto">
+        <div className="border-b border-zinc-200 lg:hidden overflow-x-auto">
           <TabsList variant="line" className="min-w-max">
             {workspaceTabs.map((tab) => (
               <TabsTrigger key={tab.key} value={tab.key} className="px-4 py-2">
@@ -661,16 +661,19 @@ export function PatientDetailWorkspaceContent(props: PatientDetailWorkspaceConte
         <Suspense fallback={<TabLoader />}>
           {activeTab === "profile" ? (
             <LazyPatientProfileTab
-              canEditPatientProfile={canEditPatientProfile}
-              canExportPatientCompliance={canExportPatientCompliance}
-              canManagePatientCardEntries={canManagePatientCardEntries}
-              canManagePatientMedicalOrders={canManagePatientMedicalOrders}
-              canManagePatientRiskScores={canManagePatientRiskScores}
-              canManagePatientVitals={canManagePatientVitals}
-              canOpenComplianceWorkspace={canOpenComplianceWorkspace}
-              canViewContracts={canViewContracts}
-              canViewDocuments={canViewDocuments}
-              canViewInvoices={canViewInvoices}
+              profileControls={{
+                canEditPatientProfile,
+                canExportPatientCompliance,
+                canManagePatientCardEntries,
+                canManagePatientMedicalOrders,
+                canManagePatientRiskScores,
+                canManagePatientVitals,
+                canOpenComplianceWorkspace,
+                canViewContracts,
+                canViewDocuments,
+                canViewInvoices,
+                hasClinicalSurface,
+              }}
               cardEntries={cardEntries}
               cardEntrySheetOpen={cardEntrySheetOpen}
               caveSheetOpen={caveSheetOpen}
@@ -686,7 +689,6 @@ export function PatientDetailWorkspaceContent(props: PatientDetailWorkspaceConte
               genderLabel={genderLabel}
               handleExportPatientCompliance={handleExportPatientCompliance}
               handleUpdatePatientMedicalOrderStatus={handleUpdatePatientMedicalOrderStatus}
-              hasClinicalSurface={hasClinicalSurface}
               id={id}
               insuranceLabel={insuranceLabel}
               invoicesPreviewOpen={invoicesPreviewOpen}
@@ -935,16 +937,18 @@ export function PatientDetailWorkspaceContent(props: PatientDetailWorkspaceConte
               localizedTimelineRangeOptions={localizedTimelineRangeOptions}
               timelineCategoryOptions={timelineCategoryOptions}
               timelineSourceOptions={timelineSourceOptions}
-              hasTimelineFilters={hasTimelineFilters}
               statusColors={statusColors}
               statusLabel={patientDetailStatusLabel}
               formatDateTime={formatDateTime}
               timelineEntityDotClass={timelineEntityDotClass}
               timelineItemSurfaceClass={timelineItemSurfaceClass}
-              canOpenDocumentsWorkspace={canOpenDocumentsWorkspace}
-              canViewContracts={canViewContracts}
-              canViewInvoices={canViewInvoices}
-              canOpenComplianceWorkspace={canOpenComplianceWorkspace}
+              timelineAccess={{
+                hasTimelineFilters,
+                canOpenDocumentsWorkspace,
+                canViewContracts,
+                canViewInvoices,
+                canOpenComplianceWorkspace,
+              }}
               patientId={id}
               onTimelineEntityFilterChange={onTimelineEntityFilterChange}
               onTimelineCategoryFilterChange={onTimelineCategoryFilterChange}
@@ -960,4 +964,8 @@ export function PatientDetailWorkspaceContent(props: PatientDetailWorkspaceConte
       </Tabs>
     </div>
   );
+}
+
+export function PatientDetailWorkspaceContent(...args: Parameters<typeof usePatientDetailWorkspaceContentContent>) {
+  return usePatientDetailWorkspaceContentContent(...args);
 }

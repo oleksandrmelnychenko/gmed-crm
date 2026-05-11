@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useReducer } from "react";
 
 import type { CaseRosterItem } from "@/components/cases-roster-section";
 import { apiFetch } from "@/lib/api";
@@ -24,6 +24,52 @@ type UseAppointmentLinkedRecordsOptions = {
   failedLoadMessage: string;
 };
 
+type LinkedRecordsState = {
+  linkedPreviewLoading: boolean;
+  linkedPreviewError: string;
+  linkedPreviewPayload: LinkedPreviewPayload | null;
+  linkedProviderDetailLoading: boolean;
+  linkedProviderDetailError: string;
+  linkedProviderDetail: ProviderSheetDetail | null;
+  linkedCasesLoading: boolean;
+  linkedCasesError: string;
+  linkedCasesItems: CaseRosterItem[];
+  linkedDocumentsLoading: boolean;
+  linkedDocumentsError: string;
+  linkedDocumentsItems: LinkedDocumentItem[];
+};
+
+type LinkedRecordsPatch =
+  | Partial<LinkedRecordsState>
+  | ((current: LinkedRecordsState) => Partial<LinkedRecordsState>);
+
+function createLinkedRecordsState(): LinkedRecordsState {
+  return {
+    linkedPreviewLoading: false,
+    linkedPreviewError: "",
+    linkedPreviewPayload: null,
+    linkedProviderDetailLoading: false,
+    linkedProviderDetailError: "",
+    linkedProviderDetail: null,
+    linkedCasesLoading: false,
+    linkedCasesError: "",
+    linkedCasesItems: [],
+    linkedDocumentsLoading: false,
+    linkedDocumentsError: "",
+    linkedDocumentsItems: [],
+  };
+}
+
+function linkedRecordsReducer(
+  state: LinkedRecordsState,
+  patch: LinkedRecordsPatch,
+): LinkedRecordsState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
 export function useAppointmentLinkedRecords({
   detail,
   linkedPreviewOpen,
@@ -34,32 +80,33 @@ export function useAppointmentLinkedRecords({
   linkedDocumentsOpen,
   failedLoadMessage,
 }: UseAppointmentLinkedRecordsOptions) {
-  const [linkedPreviewLoading, setLinkedPreviewLoading] = useState(false);
-  const [linkedPreviewError, setLinkedPreviewError] = useState("");
-  const [linkedPreviewPayload, setLinkedPreviewPayload] =
-    useState<LinkedPreviewPayload | null>(null);
-  const [linkedProviderDetailLoading, setLinkedProviderDetailLoading] =
-    useState(false);
-  const [linkedProviderDetailError, setLinkedProviderDetailError] =
-    useState("");
-  const [linkedProviderDetail, setLinkedProviderDetail] =
-    useState<ProviderSheetDetail | null>(null);
-  const [linkedCasesLoading, setLinkedCasesLoading] = useState(false);
-  const [linkedCasesError, setLinkedCasesError] = useState("");
-  const [linkedCasesItems, setLinkedCasesItems] = useState<CaseRosterItem[]>(
-    [],
+  const [linkedRecordsState, dispatchLinkedRecordsState] = useReducer(
+    linkedRecordsReducer,
+    undefined,
+    createLinkedRecordsState,
   );
-  const [linkedDocumentsLoading, setLinkedDocumentsLoading] = useState(false);
-  const [linkedDocumentsError, setLinkedDocumentsError] = useState("");
-  const [linkedDocumentsItems, setLinkedDocumentsItems] = useState<
-    LinkedDocumentItem[]
-  >([]);
+  const {
+    linkedPreviewLoading,
+    linkedPreviewError,
+    linkedPreviewPayload,
+    linkedProviderDetailLoading,
+    linkedProviderDetailError,
+    linkedProviderDetail,
+    linkedCasesLoading,
+    linkedCasesError,
+    linkedCasesItems,
+    linkedDocumentsLoading,
+    linkedDocumentsError,
+    linkedDocumentsItems,
+  } = linkedRecordsState;
 
   useEffect(() => {
     if (!linkedPreviewOpen || !linkedPreviewKind || !detail) {
-      setLinkedPreviewLoading(false);
-      setLinkedPreviewError("");
-      setLinkedPreviewPayload(null);
+      dispatchLinkedRecordsState({
+        linkedPreviewLoading: false,
+        linkedPreviewError: "",
+        linkedPreviewPayload: null,
+      });
       return;
     }
 
@@ -67,9 +114,11 @@ export function useAppointmentLinkedRecords({
     let active = true;
 
     async function loadLinkedPreview() {
-      setLinkedPreviewLoading(true);
-      setLinkedPreviewError("");
-      setLinkedPreviewPayload(null);
+      dispatchLinkedRecordsState({
+        linkedPreviewLoading: true,
+        linkedPreviewError: "",
+        linkedPreviewPayload: null,
+      });
 
       try {
         let endpoint = "";
@@ -103,22 +152,23 @@ export function useAppointmentLinkedRecords({
 
         const payload = await apiFetch<unknown>(endpoint);
         if (!active) return;
-        setLinkedPreviewPayload(normalizeLinkedPreviewPayload(payload));
+        dispatchLinkedRecordsState({
+          linkedPreviewPayload: normalizeLinkedPreviewPayload(payload),
+          linkedPreviewLoading: false,
+        });
       } catch (error) {
         if (!active) return;
-        setLinkedPreviewError(
-          error instanceof Error
-            ? error.message
-            : appointmentText(
+        dispatchLinkedRecordsState({
+          linkedPreviewError:
+            error instanceof Error
+              ? error.message
+              : appointmentText(
                 "Verknupfte Daten konnten nicht geladen werden.",
                 "Не удалось загрузить связанные данные.",
                 "Failed to load linked records",
               ),
-        );
-      } finally {
-        if (active) {
-          setLinkedPreviewLoading(false);
-        }
+          linkedPreviewLoading: false,
+        });
       }
     }
 
@@ -130,32 +180,36 @@ export function useAppointmentLinkedRecords({
 
   useEffect(() => {
     if (!linkedProviderOpen || !linkedProviderId) {
-      setLinkedProviderDetailLoading(false);
-      setLinkedProviderDetailError("");
-      setLinkedProviderDetail(null);
+      dispatchLinkedRecordsState({
+        linkedProviderDetailLoading: false,
+        linkedProviderDetailError: "",
+        linkedProviderDetail: null,
+      });
       return;
     }
 
     let active = true;
-    setLinkedProviderDetailLoading(true);
-    setLinkedProviderDetailError("");
+    dispatchLinkedRecordsState({
+      linkedProviderDetailLoading: true,
+      linkedProviderDetailError: "",
+    });
 
     void apiFetch<ProviderSheetDetail>(`/providers/${linkedProviderId}`)
       .then((providerDetail) => {
         if (!active) return;
-        setLinkedProviderDetail(providerDetail);
+        dispatchLinkedRecordsState({
+          linkedProviderDetail: providerDetail,
+          linkedProviderDetailLoading: false,
+        });
       })
       .catch((error) => {
         if (!active) return;
-        setLinkedProviderDetail(null);
-        setLinkedProviderDetailError(
-          error instanceof Error ? error.message : failedLoadMessage,
-        );
-      })
-      .finally(() => {
-        if (active) {
-          setLinkedProviderDetailLoading(false);
-        }
+        dispatchLinkedRecordsState({
+          linkedProviderDetail: null,
+          linkedProviderDetailError:
+            error instanceof Error ? error.message : failedLoadMessage,
+          linkedProviderDetailLoading: false,
+        });
       });
 
     return () => {
@@ -165,32 +219,36 @@ export function useAppointmentLinkedRecords({
 
   useEffect(() => {
     if (!linkedCasesOpen || !detail?.patient_id) {
-      setLinkedCasesLoading(false);
-      setLinkedCasesError("");
-      setLinkedCasesItems([]);
+      dispatchLinkedRecordsState({
+        linkedCasesLoading: false,
+        linkedCasesError: "",
+        linkedCasesItems: [],
+      });
       return;
     }
 
     let active = true;
-    setLinkedCasesLoading(true);
-    setLinkedCasesError("");
+    dispatchLinkedRecordsState({
+      linkedCasesLoading: true,
+      linkedCasesError: "",
+    });
 
     void apiFetch<CaseRosterItem[]>(`/cases?patient_id=${detail.patient_id}`)
       .then((items) => {
         if (!active) return;
-        setLinkedCasesItems(items);
+        dispatchLinkedRecordsState({
+          linkedCasesItems: items,
+          linkedCasesLoading: false,
+        });
       })
       .catch((error) => {
         if (!active) return;
-        setLinkedCasesItems([]);
-        setLinkedCasesError(
-          error instanceof Error ? error.message : failedLoadMessage,
-        );
-      })
-      .finally(() => {
-        if (active) {
-          setLinkedCasesLoading(false);
-        }
+        dispatchLinkedRecordsState({
+          linkedCasesItems: [],
+          linkedCasesError:
+            error instanceof Error ? error.message : failedLoadMessage,
+          linkedCasesLoading: false,
+        });
       });
 
     return () => {
@@ -200,15 +258,19 @@ export function useAppointmentLinkedRecords({
 
   useEffect(() => {
     if (!linkedDocumentsOpen || !detail?.id || !detail.patient_id) {
-      setLinkedDocumentsLoading(false);
-      setLinkedDocumentsError("");
-      setLinkedDocumentsItems([]);
+      dispatchLinkedRecordsState({
+        linkedDocumentsLoading: false,
+        linkedDocumentsError: "",
+        linkedDocumentsItems: [],
+      });
       return;
     }
 
     let active = true;
-    setLinkedDocumentsLoading(true);
-    setLinkedDocumentsError("");
+    dispatchLinkedRecordsState({
+      linkedDocumentsLoading: true,
+      linkedDocumentsError: "",
+    });
 
     void apiFetch<LinkedDocumentItem[]>(
       `/documents?appointment_id=${detail.id}&patient_id=${detail.patient_id}`,
@@ -218,19 +280,19 @@ export function useAppointmentLinkedRecords({
         const patientScoped = items.filter(
           (item) => item.patient_id === detail.patient_id,
         );
-        setLinkedDocumentsItems(sortLinkedDocuments(patientScoped));
+        dispatchLinkedRecordsState({
+          linkedDocumentsItems: sortLinkedDocuments(patientScoped),
+          linkedDocumentsLoading: false,
+        });
       })
       .catch((error) => {
         if (!active) return;
-        setLinkedDocumentsItems([]);
-        setLinkedDocumentsError(
-          error instanceof Error ? error.message : failedLoadMessage,
-        );
-      })
-      .finally(() => {
-        if (active) {
-          setLinkedDocumentsLoading(false);
-        }
+        dispatchLinkedRecordsState({
+          linkedDocumentsItems: [],
+          linkedDocumentsError:
+            error instanceof Error ? error.message : failedLoadMessage,
+          linkedDocumentsLoading: false,
+        });
       });
 
     return () => {

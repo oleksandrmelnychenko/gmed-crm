@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, type SetStateAction } from "react";
 import {
   Activity,
   BarChart3,
@@ -38,6 +38,7 @@ import {
   formatMoneyMetric,
   formatPercent,
   formatRating,
+  formatReportDate,
   roleCanOpenReports,
   serviceTypeLabel,
 } from "./model/report-model";
@@ -491,7 +492,100 @@ function capsuleMetric(label: string, value: string | number) {
   );
 }
 
-export function ReportsPage() {
+type ReportsPageState = {
+  data: ReportsWorkspacePayload | null;
+  forecasting: ForecastingPayload | null;
+  loading: boolean;
+  refreshing: boolean;
+  error: string;
+  version: number;
+  selectedClinicId: string;
+  exportingSection: string;
+  detail: ReportDetailState;
+};
+
+type ReportsPageAction =
+  | { type: "patch"; value: Partial<ReportsPageState> }
+  | { type: "update"; updater: (state: ReportsPageState) => ReportsPageState }
+  | { type: "bump-version" }
+  | { type: "restricted" }
+  | { type: "load-start" }
+  | {
+      type: "load-success";
+      payload: ReportsWorkspacePayload;
+      forecastPayload: ForecastingPayload | null;
+    }
+  | { type: "load-error"; message: string };
+
+const REPORTS_PAGE_INITIAL_STATE: ReportsPageState = {
+  data: null,
+  forecasting: null,
+  loading: true,
+  refreshing: false,
+  error: "",
+  version: 0,
+  selectedClinicId: "",
+  exportingSection: "",
+  detail: null,
+};
+
+function reportsPageReducer(
+  state: ReportsPageState,
+  action: ReportsPageAction,
+): ReportsPageState {
+  switch (action.type) {
+    case "patch":
+      return { ...state, ...action.value };
+    case "update":
+      return action.updater(state);
+    case "bump-version":
+      return { ...state, version: state.version + 1 };
+    case "restricted":
+      return { ...state, loading: false, refreshing: false };
+    case "load-start":
+      return { ...state, refreshing: !state.loading };
+    case "load-success":
+      return {
+        ...state,
+        data: action.payload,
+        forecasting: action.forecastPayload,
+        error: "",
+        loading: false,
+        refreshing: false,
+      };
+    case "load-error":
+      return {
+        ...state,
+        error: action.message,
+        forecasting: null,
+        loading: false,
+        refreshing: false,
+      };
+    default:
+      return state;
+  }
+}
+
+function createReportsFieldAction<K extends keyof ReportsPageState>(
+  field: K,
+  value: SetStateAction<ReportsPageState[K]>,
+): ReportsPageAction {
+  return {
+    type: "update",
+    updater: (state) => {
+      const currentValue = state[field];
+      const nextValue =
+        typeof value === "function"
+          ? (value as (current: ReportsPageState[K]) => ReportsPageState[K])(currentValue)
+          : value;
+
+      if (Object.is(currentValue, nextValue)) return state;
+      return { ...state, [field]: nextValue };
+    },
+  };
+}
+
+function useReportsPageContent() {
   const { user } = useAuth();
   const { lang, t } = useLang();
   const locale = lang === "de" ? "de-DE" : "ru-RU";
@@ -977,51 +1071,64 @@ export function ReportsPage() {
       formatEnumLabelFromKeys(providerType, REPORT_PROVIDER_TYPE_LABEL_KEYS, t),
     [t],
   );
-  const [data, setData] = useState<ReportsWorkspacePayload | null>(null);
-  const [forecasting, setForecasting] = useState<ForecastingPayload | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState("");
-  const [version, setVersion] = useState(0);
-  const [selectedClinicId, setSelectedClinicId] = useState<string>("");
-  const [exportingSection, setExportingSection] = useState<string>("");
-  const [detail, setDetail] = useState<ReportDetailState>(null);
+  const [
+    {
+      data,
+      forecasting,
+      loading,
+      refreshing,
+      error,
+      version,
+      selectedClinicId,
+      exportingSection,
+      detail,
+    },
+    dispatchReportsState,
+  ] = useReducer(reportsPageReducer, REPORTS_PAGE_INITIAL_STATE);
+  const setSelectedClinicId = useCallback(
+    (value: SetStateAction<string>) =>
+      dispatchReportsState(createReportsFieldAction("selectedClinicId", value)),
+    [],
+  );
+  const setDetail = useCallback(
+    (value: SetStateAction<ReportDetailState>) =>
+      dispatchReportsState(createReportsFieldAction("detail", value)),
+    [],
+  );
 
   useDebouncedRealtimeSubscription(REPORTS_REALTIME_EVENTS, () => {
     if (!roleCanOpenReports(user?.role)) return;
     clearReportsStatsCache();
-    setVersion((value) => value + 1);
+    dispatchReportsState({ type: "bump-version" });
   }, 300);
 
   useEffect(() => {
     if (!roleCanOpenReports(user?.role)) {
-      setLoading(false);
+      dispatchReportsState({ type: "restricted" });
       return;
     }
 
     let cancelled = false;
 
     async function load() {
-      if (loading) setRefreshing(false);
-      else setRefreshing(true);
+      dispatchReportsState({ type: "load-start" });
 
       try {
         const { payload, forecastPayload } =
           await fetchReportsWorkspace<ReportsWorkspacePayload, ForecastingPayload>();
         if (!cancelled) {
-          setData(payload);
-          setForecasting(forecastPayload);
-          setError("");
+          dispatchReportsState({
+            type: "load-success",
+            payload,
+            forecastPayload,
+          });
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : text.loadError);
-          setForecasting(null);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-          setRefreshing(false);
+          dispatchReportsState({
+            type: "load-error",
+            message: err instanceof Error ? err.message : text.loadError,
+          });
         }
       }
     }
@@ -1030,7 +1137,7 @@ export function ReportsPage() {
     return () => {
       cancelled = true;
     };
-  }, [loading, text.loadError, user?.role, version]);
+  }, [text.loadError, user?.role, version]);
 
   const allowedSections = useMemo(
     () => new Set(data?.allowed_sections ?? []),
@@ -1255,9 +1362,7 @@ export function ReportsPage() {
         width: 140,
         render: (row) => (
           <span className="text-xs text-foreground">
-            {row.last_activity_at
-              ? new Date(row.last_activity_at).toLocaleDateString(locale)
-              : text.noRecentActivity}
+            {formatReportDate(row.last_activity_at, locale, text.noRecentActivity)}
           </span>
         ),
       },
@@ -1318,7 +1423,7 @@ export function ReportsPage() {
         width: 130,
         render: (row) => (
           <span className="text-xs text-foreground">
-            {row.first_recorded_at ? new Date(row.first_recorded_at).toLocaleDateString(locale) : text.unknown}
+            {formatReportDate(row.first_recorded_at, locale, text.unknown)}
           </span>
         ),
       },
@@ -1329,7 +1434,7 @@ export function ReportsPage() {
         width: 130,
         render: (row) => (
           <span className="text-xs text-foreground">
-            {row.last_recorded_at ? new Date(row.last_recorded_at).toLocaleDateString(locale) : text.unknown}
+            {formatReportDate(row.last_recorded_at, locale, text.unknown)}
           </span>
         ),
       },
@@ -1727,8 +1832,10 @@ export function ReportsPage() {
       | "doctors"
       | "non_medical_providers",
   ) {
-    setExportingSection(section);
-    setError("");
+      dispatchReportsState({
+        type: "patch",
+        value: { exportingSection: section, error: "" },
+      });
 
     try {
       const { blob, filename } = await fetchReportsExport(
@@ -1745,9 +1852,12 @@ export function ReportsPage() {
       anchor.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
-      setError(err instanceof Error ? err.message : text.exportError);
+      dispatchReportsState({
+        type: "patch",
+        value: { error: err instanceof Error ? err.message : text.exportError },
+      });
     } finally {
-      setExportingSection("");
+      dispatchReportsState({ type: "patch", value: { exportingSection: "" } });
     }
   }
 
@@ -1789,7 +1899,7 @@ export function ReportsPage() {
           <Button
             variant="outline"
             className="h-9 rounded-lg"
-            onClick={() => setVersion((value) => value + 1)}
+                onClick={() => dispatchReportsState({ type: "bump-version" })}
           >
             {refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
             {text.refresh}
@@ -1940,7 +2050,7 @@ export function ReportsPage() {
                     return (
                       <div className="relative mt-3">
                         <div className="grid min-h-[148px] grid-cols-[repeat(auto-fit,minmax(34px,1fr))] items-end gap-2 pb-2">
-                          {data.sales_kpis.top_countries.map((item, index) => (
+                          {data.sales_kpis.top_countries.map((item) => (
                             <div
                               key={item.country}
                               className="flex min-w-0 flex-col items-center gap-1.5"
@@ -2519,13 +2629,13 @@ export function ReportsPage() {
                           <div className={card("p-3")}>
                             <p className="text-xs text-muted-foreground">{text.common.min}</p>
                             <p className="mt-1 text-sm font-medium text-foreground">
-                              {detail.row.first_recorded_at ? new Date(detail.row.first_recorded_at).toLocaleDateString(locale) : text.unknown}
+                              {formatReportDate(detail.row.first_recorded_at, locale, text.unknown)}
                             </p>
                           </div>
                           <div className={card("p-3")}>
                             <p className="text-xs text-muted-foreground">{text.common.latest}</p>
                             <p className="mt-1 text-sm font-medium text-foreground">
-                              {detail.row.last_recorded_at ? new Date(detail.row.last_recorded_at).toLocaleDateString(locale) : text.unknown}
+                              {formatReportDate(detail.row.last_recorded_at, locale, text.unknown)}
                             </p>
                           </div>
                         </div>
@@ -2554,4 +2664,8 @@ export function ReportsPage() {
       ) : null}
     </div>
   );
+}
+
+export function ReportsPage(...args: Parameters<typeof useReportsPageContent>) {
+  return useReportsPageContent(...args);
 }

@@ -1,4 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useReducer,
+  type SetStateAction,
+} from "react";
 
 import { assignLinkedPatient } from "@/pages/appointments/data/appointment-mutations";
 
@@ -8,22 +13,64 @@ type UseAppointmentLinkedPatientAssignmentOptions = {
   onAssigned: () => void;
 };
 
+type LinkedPatientAssignmentState = {
+  linkedPatientSelectedAssignee: string;
+  linkedPatientAssignmentBusy: boolean;
+  linkedPatientAssignmentError: string;
+};
+
+type LinkedPatientAssignmentPatch =
+  | Partial<LinkedPatientAssignmentState>
+  | ((current: LinkedPatientAssignmentState) => Partial<LinkedPatientAssignmentState>);
+
+function createLinkedPatientAssignmentState(): LinkedPatientAssignmentState {
+  return {
+    linkedPatientSelectedAssignee: "",
+    linkedPatientAssignmentBusy: false,
+    linkedPatientAssignmentError: "",
+  };
+}
+
+function linkedPatientAssignmentReducer(
+  state: LinkedPatientAssignmentState,
+  patch: LinkedPatientAssignmentPatch,
+): LinkedPatientAssignmentState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
 export function useAppointmentLinkedPatientAssignment({
   linkedPatientDetailId,
   failedAssignMessage,
   onAssigned,
 }: UseAppointmentLinkedPatientAssignmentOptions) {
-  const [linkedPatientSelectedAssignee, setLinkedPatientSelectedAssignee] =
-    useState("");
-  const [linkedPatientAssignmentBusy, setLinkedPatientAssignmentBusy] =
-    useState(false);
-  const [linkedPatientAssignmentError, setLinkedPatientAssignmentError] =
-    useState("");
+  const [assignmentState, dispatchAssignmentState] = useReducer(
+    linkedPatientAssignmentReducer,
+    undefined,
+    createLinkedPatientAssignmentState,
+  );
+  const {
+    linkedPatientSelectedAssignee,
+    linkedPatientAssignmentBusy,
+    linkedPatientAssignmentError,
+  } = assignmentState;
+
+  const setLinkedPatientSelectedAssignee = useCallback(
+    (nextValue: SetStateAction<string>) => {
+      dispatchAssignmentState((current) => ({
+        linkedPatientSelectedAssignee:
+          typeof nextValue === "function"
+            ? nextValue(current.linkedPatientSelectedAssignee)
+            : nextValue,
+      }));
+    },
+    [],
+  );
 
   const resetLinkedPatientAssignmentState = useCallback(() => {
-    setLinkedPatientSelectedAssignee("");
-    setLinkedPatientAssignmentBusy(false);
-    setLinkedPatientAssignmentError("");
+    dispatchAssignmentState(createLinkedPatientAssignmentState());
   }, []);
 
   useEffect(() => {
@@ -34,22 +81,25 @@ export function useAppointmentLinkedPatientAssignment({
   const handleAssignLinkedPatient = useCallback(async () => {
     if (!linkedPatientDetailId || !linkedPatientSelectedAssignee) return;
 
-    setLinkedPatientAssignmentBusy(true);
-    setLinkedPatientAssignmentError("");
+    dispatchAssignmentState({
+      linkedPatientAssignmentBusy: true,
+      linkedPatientAssignmentError: "",
+    });
 
     try {
       await assignLinkedPatient(
         linkedPatientDetailId,
         linkedPatientSelectedAssignee,
       );
-      setLinkedPatientSelectedAssignee("");
+      dispatchAssignmentState({ linkedPatientSelectedAssignee: "" });
       onAssigned();
     } catch (error) {
-      setLinkedPatientAssignmentError(
-        error instanceof Error ? error.message : failedAssignMessage,
-      );
+      dispatchAssignmentState({
+        linkedPatientAssignmentError:
+          error instanceof Error ? error.message : failedAssignMessage,
+      });
     } finally {
-      setLinkedPatientAssignmentBusy(false);
+      dispatchAssignmentState({ linkedPatientAssignmentBusy: false });
     }
   }, [
     failedAssignMessage,

@@ -180,8 +180,10 @@ async function deriveMessageKey(
   salt: Uint8Array,
   usage: KeyUsage,
 ) {
-  const privateKey = await importPrivateKey(privateKeyJwk);
-  const peerPublicKey = await importPublicKey(peerPublicKeyBase64);
+  const [privateKey, peerPublicKey] = await Promise.all([
+    importPrivateKey(privateKeyJwk),
+    importPublicKey(peerPublicKeyBase64),
+  ]);
   const sharedBits = await crypto.subtle.deriveBits(
     {
       name: "ECDH",

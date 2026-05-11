@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useReducer, useState, type FormEvent } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -25,15 +25,36 @@ export function PatientNotesSheet({
   onOpenChange: (v: boolean) => void;
   onSaved: () => void;
 }) {
+  return (
+    <PatientNotesSheetContent
+      key={`${patientId}:${open ? "open" : "closed"}:${initial}`}
+      patientId={patientId}
+      initial={initial}
+      open={open}
+      onOpenChange={onOpenChange}
+      onSaved={onSaved}
+    />
+  );
+}
+
+function PatientNotesSheetContent({
+  patientId,
+  initial,
+  open,
+  onOpenChange,
+  onSaved,
+}: {
+  patientId: string;
+  initial: string;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onSaved: () => void;
+}) {
   const { t, lang } = useLang();
   const l = (de: string, ru: string, en: string) =>
     lang === "de" ? de : lang === "ru" ? ru : en;
-  const [value, setValue] = useState(initial);
+  const [value, setValue] = useReducer((_current: string, next: string) => next, initial);
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    if (open) setValue(initial);
-  }, [open, initial]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

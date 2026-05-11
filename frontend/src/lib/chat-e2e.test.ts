@@ -143,8 +143,10 @@ describe("secure chat server key setup", () => {
 
 describe("chat E2E attachments", () => {
   it("encrypts and decrypts attachment payloads for a peer", async () => {
-    const sender = await makeKeyRecord(new Uint8Array([1]));
-    const recipient = await makeKeyRecord(new Uint8Array([2]));
+    const [sender, recipient] = await Promise.all([
+      makeKeyRecord(new Uint8Array([1])),
+      makeKeyRecord(new Uint8Array([2])),
+    ]);
     const plaintext = new TextEncoder().encode("secure attachment bytes");
 
     const encrypted = await encryptAttachmentForPeer(
@@ -172,8 +174,10 @@ describe("chat E2E attachments", () => {
 
 describe("secure chat key backups", () => {
   it("exports and restores the local keyring with a passphrase", async () => {
-    const first = await makeKeyRecord(new Uint8Array([3]));
-    const second = await makeKeyRecord(new Uint8Array([4]));
+    const [first, second] = await Promise.all([
+      makeKeyRecord(new Uint8Array([3])),
+      makeKeyRecord(new Uint8Array([4])),
+    ]);
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({

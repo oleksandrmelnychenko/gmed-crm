@@ -1376,7 +1376,7 @@ export function getLang(): Lang {
   return stored === "de" ? "de" : "ru";
 }
 
-export function setLang(lang: Lang): void {
+function setLang(lang: Lang): void {
   localStorage.setItem(LANG_KEY, lang);
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event(LANG_EVENT));

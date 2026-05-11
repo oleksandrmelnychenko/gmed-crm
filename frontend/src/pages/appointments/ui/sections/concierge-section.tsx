@@ -3,8 +3,9 @@ import {
   memo,
   useCallback,
   useEffect,
-  useState,
+  useReducer,
   type FormEvent,
+  type SetStateAction,
 } from "react";
 
 import { LoaderCircle } from "lucide-react";
@@ -72,7 +73,53 @@ const sectionCardClass = appointmentElevatedSectionCardClassName;
 const selectClassName = appointmentWhiteSelectControlClassName;
 const textareaClassName = appointmentWhiteTextareaControlClassName;
 
-function AppointmentConciergeSection({
+type ConciergeSectionState = {
+  form: ConciergeServiceFormState;
+  drafts: Record<string, ConciergeServiceDraftState>;
+  submitBusy: boolean;
+  actionBusy: string;
+};
+
+type ConciergeSectionAction =
+  | { type: "patch"; value: Partial<ConciergeSectionState> }
+  | { type: "update"; updater: (state: ConciergeSectionState) => ConciergeSectionState };
+
+function conciergeSectionReducer(
+  state: ConciergeSectionState,
+  action: ConciergeSectionAction,
+): ConciergeSectionState {
+  switch (action.type) {
+    case "patch":
+      return { ...state, ...action.value };
+    case "update":
+      return action.updater(state);
+    default:
+      return state;
+  }
+}
+
+function createConciergeFieldAction<K extends keyof ConciergeSectionState>(
+  field: K,
+  value: SetStateAction<ConciergeSectionState[K]>,
+): ConciergeSectionAction {
+  return {
+    type: "update",
+    updater: (state) => {
+      const currentValue = state[field];
+      const nextValue =
+        typeof value === "function"
+          ? (value as (current: ConciergeSectionState[K]) => ConciergeSectionState[K])(
+              currentValue,
+            )
+          : value;
+
+      if (Object.is(currentValue, nextValue)) return state;
+      return { ...state, [field]: nextValue };
+    },
+  };
+}
+
+function useAppointmentConciergeSectionContent({
   detail,
   services,
   nonMedicalProviders,
@@ -116,27 +163,41 @@ function AppointmentConciergeSection({
     [conciergeStaff, detail, nonMedicalProviders],
   );
 
-  const [form, setForm] = useState<ConciergeServiceFormState>(() =>
-    buildCreateForm(),
-  );
-  const [drafts, setDrafts] = useState<Record<string, ConciergeServiceDraftState>>(
-    () =>
-      Object.fromEntries(
-        services.map((service) => [service.id, buildServiceDraft(service)]),
-      ),
-  );
-  const [submitBusy, setSubmitBusy] = useState(false);
-  const [actionBusy, setActionBusy] = useState("");
+  const [{ form, drafts, submitBusy, actionBusy }, dispatchConciergeState] =
+    useReducer(
+      conciergeSectionReducer,
+      undefined,
+      () => ({
+        form: buildCreateForm(),
+        drafts: Object.fromEntries(
+          services.map((service) => [service.id, buildServiceDraft(service)]),
+        ),
+        submitBusy: false,
+        actionBusy: "",
+      }),
+    );
+  const setForm = (value: SetStateAction<ConciergeServiceFormState>) =>
+    dispatchConciergeState(createConciergeFieldAction("form", value));
+  const setDrafts = (
+    value: SetStateAction<Record<string, ConciergeServiceDraftState>>,
+  ) => dispatchConciergeState(createConciergeFieldAction("drafts", value));
+  const setSubmitBusy = (value: SetStateAction<boolean>) =>
+    dispatchConciergeState(createConciergeFieldAction("submitBusy", value));
+  const setActionBusy = (value: SetStateAction<string>) =>
+    dispatchConciergeState(createConciergeFieldAction("actionBusy", value));
 
   useEffect(() => {
-    setForm(buildCreateForm());
-    setDrafts(
-      Object.fromEntries(
-        services.map((service) => [service.id, buildServiceDraft(service)]),
-      ),
-    );
-    setSubmitBusy(false);
-    setActionBusy("");
+    dispatchConciergeState({
+      type: "patch",
+      value: {
+        form: buildCreateForm(),
+        drafts: Object.fromEntries(
+          services.map((service) => [service.id, buildServiceDraft(service)]),
+        ),
+        submitBusy: false,
+        actionBusy: "",
+      },
+    });
   }, [buildCreateForm, services]);
 
   function updateDraft(
@@ -264,7 +325,7 @@ function AppointmentConciergeSection({
                   <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-sm font-semibold text-slate-950">
+                        <p className="text-sm font-semibold text-zinc-950">
                           {service.title}
                         </p>
                         <span className={appointmentMiniPillClassName}>
@@ -277,7 +338,7 @@ function AppointmentConciergeSection({
                           {billingStatusLabel(service.billing_status)}
                         </span>
                       </div>
-                      <p className="mt-1 text-xs text-slate-500">
+                      <p className="mt-1 text-xs text-zinc-500">
                         {service.assigned_concierge_name || tr.common_not_set}
                         {service.provider_name ? ` · ${service.provider_name}` : ""}
                         {service.starts_at
@@ -285,7 +346,7 @@ function AppointmentConciergeSection({
                           : ""}
                       </p>
                     </div>
-                    <div className="text-xs text-slate-500 xl:text-right">
+                    <div className="text-xs text-zinc-500 xl:text-right">
                       <div>
                         {t.appointments_concierge_estimate}{" "}
                         {formatMoneyLabel(
@@ -707,6 +768,10 @@ function AppointmentConciergeSection({
       ) : null}
     </section>
   );
+}
+
+function AppointmentConciergeSection(...args: Parameters<typeof useAppointmentConciergeSectionContent>) {
+  return useAppointmentConciergeSectionContent(...args);
 }
 
 export const MemoizedAppointmentConciergeSection = memo(

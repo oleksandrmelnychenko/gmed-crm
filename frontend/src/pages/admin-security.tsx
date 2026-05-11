@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  type FormEvent,
+  type SetStateAction,
+} from "react";
 import {
   Globe,
   LoaderCircle,
@@ -111,6 +118,57 @@ type FlashState =
   | { tone: "error"; text: string }
   | null;
 
+type AdminSecurityState = {
+  ips: IpEntry[];
+  geo: GeoLogin[];
+  auditAnalytics: AuditAnalyticsPayload | null;
+  loading: boolean;
+  error: string;
+  flash: FlashState;
+  deleteBusyId: string;
+  maintEnabled: boolean;
+  maintMsg: string;
+  maintDraftMsg: string;
+  maintOpen: boolean;
+  maintBusy: boolean;
+  maintError: string;
+  ipOpen: boolean;
+  ipBusy: boolean;
+  ipError: string;
+  newCidr: string;
+  newDesc: string;
+};
+
+type AdminSecurityPatch =
+  | Partial<AdminSecurityState>
+  | ((current: AdminSecurityState) => Partial<AdminSecurityState>);
+
+function adminSecurityReducer(
+  state: AdminSecurityState,
+  patch: AdminSecurityPatch,
+): AdminSecurityState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
+function createAdminSecurityFieldPatch<K extends keyof AdminSecurityState>(
+  field: K,
+  value: SetStateAction<AdminSecurityState[K]>,
+): AdminSecurityPatch {
+  return (current) => {
+    const nextValue =
+      typeof value === "function"
+        ? (value as (previous: AdminSecurityState[K]) => AdminSecurityState[K])(
+            current[field],
+          )
+        : value;
+
+    return { [field]: nextValue } as Partial<AdminSecurityState>;
+  };
+}
+
 const ADMIN_SECURITY_REALTIME_EVENTS = [
   "security.ip_whitelist_added",
   "security.ip_whitelist_deleted",
@@ -166,29 +224,93 @@ const SECURITY_ENTITY_LABEL_KEYS = {
   user: "activity_entity_user",
 } as const satisfies Partial<Record<string, TranslationKey>>;
 
-export function AdminSecurityPage() {
+function useAdminSecurityPageContent() {
   const { t, lang } = useLang();
-  const [ips, setIps] = useState<IpEntry[]>([]);
-  const [geo, setGeo] = useState<GeoLogin[]>([]);
-  const [auditAnalytics, setAuditAnalytics] =
-    useState<AuditAnalyticsPayload | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [flash, setFlash] = useState<FlashState>(null);
-  const [deleteBusyId, setDeleteBusyId] = useState("");
-
-  const [maintEnabled, setMaintEnabled] = useState(false);
-  const [maintMsg, setMaintMsg] = useState("");
-  const [maintDraftMsg, setMaintDraftMsg] = useState("");
-  const [maintOpen, setMaintOpen] = useState(false);
-  const [maintBusy, setMaintBusy] = useState(false);
-  const [maintError, setMaintError] = useState("");
-
-  const [ipOpen, setIpOpen] = useState(false);
-  const [ipBusy, setIpBusy] = useState(false);
-  const [ipError, setIpError] = useState("");
-  const [newCidr, setNewCidr] = useState("");
-  const [newDesc, setNewDesc] = useState("");
+  const [securityState, dispatchSecurityState] = useReducer(
+    adminSecurityReducer,
+    undefined,
+    (): AdminSecurityState => ({
+      ips: [],
+      geo: [],
+      auditAnalytics: null,
+      loading: true,
+      error: "",
+      flash: null,
+      deleteBusyId: "",
+      maintEnabled: false,
+      maintMsg: "",
+      maintDraftMsg: "",
+      maintOpen: false,
+      maintBusy: false,
+      maintError: "",
+      ipOpen: false,
+      ipBusy: false,
+      ipError: "",
+      newCidr: "",
+      newDesc: "",
+    }),
+  );
+  const {
+    ips,
+    geo,
+    auditAnalytics,
+    loading,
+    error,
+    flash,
+    deleteBusyId,
+    maintEnabled,
+    maintMsg,
+    maintDraftMsg,
+    maintOpen,
+    maintBusy,
+    maintError,
+    ipOpen,
+    ipBusy,
+    ipError,
+    newCidr,
+    newDesc,
+  } = securityState;
+  const setSecurityField = <K extends keyof AdminSecurityState>(
+    field: K,
+    value: SetStateAction<AdminSecurityState[K]>,
+  ) => dispatchSecurityState(createAdminSecurityFieldPatch(field, value));
+  const setIps = (value: SetStateAction<IpEntry[]>) =>
+    setSecurityField("ips", value);
+  const setGeo = (value: SetStateAction<GeoLogin[]>) =>
+    setSecurityField("geo", value);
+  const setAuditAnalytics = (
+    value: SetStateAction<AuditAnalyticsPayload | null>,
+  ) => setSecurityField("auditAnalytics", value);
+  const setLoading = (value: SetStateAction<boolean>) =>
+    setSecurityField("loading", value);
+  const setError = (value: SetStateAction<string>) =>
+    setSecurityField("error", value);
+  const setFlash = (value: SetStateAction<FlashState>) =>
+    setSecurityField("flash", value);
+  const setDeleteBusyId = (value: SetStateAction<string>) =>
+    setSecurityField("deleteBusyId", value);
+  const setMaintEnabled = (value: SetStateAction<boolean>) =>
+    setSecurityField("maintEnabled", value);
+  const setMaintMsg = (value: SetStateAction<string>) =>
+    setSecurityField("maintMsg", value);
+  const setMaintDraftMsg = (value: SetStateAction<string>) =>
+    setSecurityField("maintDraftMsg", value);
+  const setMaintOpen = (value: SetStateAction<boolean>) =>
+    setSecurityField("maintOpen", value);
+  const setMaintBusy = (value: SetStateAction<boolean>) =>
+    setSecurityField("maintBusy", value);
+  const setMaintError = (value: SetStateAction<string>) =>
+    setSecurityField("maintError", value);
+  const setIpOpen = (value: SetStateAction<boolean>) =>
+    setSecurityField("ipOpen", value);
+  const setIpBusy = (value: SetStateAction<boolean>) =>
+    setSecurityField("ipBusy", value);
+  const setIpError = (value: SetStateAction<string>) =>
+    setSecurityField("ipError", value);
+  const setNewCidr = (value: SetStateAction<string>) =>
+    setSecurityField("newCidr", value);
+  const setNewDesc = (value: SetStateAction<string>) =>
+    setSecurityField("newDesc", value);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -990,4 +1112,8 @@ export function AdminSecurityPage() {
       </Sheet>
     </>
   );
+}
+
+export function AdminSecurityPage(...args: Parameters<typeof useAdminSecurityPageContent>) {
+  return useAdminSecurityPageContent(...args);
 }

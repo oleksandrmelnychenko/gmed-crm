@@ -1,5 +1,4 @@
 import {
-  startTransition,
   useCallback,
   useEffect,
   type Dispatch,
@@ -32,8 +31,7 @@ type UseAppointmentRouteHydrationOptions = {
   canCreate: boolean;
   closeDetailWorkspace: (clearQuery?: boolean) => void;
   setFilters: Dispatch<SetStateAction<FiltersState>>;
-  setSelectedId: Dispatch<SetStateAction<string>>;
-  setDetailOpen: Dispatch<SetStateAction<boolean>>;
+  openDetailWorkspace: (appointmentId: string) => void;
   onOpenCreateFromPatient: (patientId: string) => void;
 };
 
@@ -119,8 +117,7 @@ export function useAppointmentRouteHydration({
   canCreate,
   closeDetailWorkspace,
   setFilters,
-  setSelectedId,
-  setDetailOpen,
+  openDetailWorkspace,
   onOpenCreateFromPatient,
 }: UseAppointmentRouteHydrationOptions) {
   useEffect(() => {
@@ -147,10 +144,7 @@ export function useAppointmentRouteHydration({
     });
 
     if (appointmentParam && appointmentParam !== selectedId) {
-      startTransition(() => {
-        setSelectedId(appointmentParam);
-        setDetailOpen(true);
-      });
+      openDetailWorkspace(appointmentParam);
     }
 
     if (!appointmentParam && (selectedId || detailOpen)) {
@@ -168,11 +162,10 @@ export function useAppointmentRouteHydration({
     closeDetailWorkspace,
     detailOpen,
     onOpenCreateFromPatient,
+    openDetailWorkspace,
     searchParams,
     selectedId,
-    setDetailOpen,
     setFilters,
     setSearchParams,
-    setSelectedId,
   ]);
 }

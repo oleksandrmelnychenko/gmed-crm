@@ -1,6 +1,6 @@
 import type { AppointmentWorkspaceTab } from "./types";
 
-export const APPOINTMENT_WORKSPACE_TABS = [
+const APPOINTMENT_WORKSPACE_TABS = [
   "overview",
   "timeline",
   "coordination",
@@ -10,7 +10,7 @@ export const APPOINTMENT_WORKSPACE_TABS = [
   "notes",
 ] as const satisfies readonly AppointmentWorkspaceTab[];
 
-export const DEFAULT_APPOINTMENT_WORKSPACE_TAB: AppointmentWorkspaceTab =
+const DEFAULT_APPOINTMENT_WORKSPACE_TAB: AppointmentWorkspaceTab =
   "overview";
 
 export function normalizeAppointmentWorkspaceTab(

@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useEffect, useReducer } from "react";
 
 import { apiFetch } from "@/lib/api";
 
@@ -23,6 +23,72 @@ type UsePatientDetailCoreDataArgs = {
   version: number;
 };
 
+type PatientDetailCoreDataState = {
+  detail: PatientDetail | null;
+  assignments: PatientAssignment[];
+  staff: StaffOption[];
+  vitalsHistory: PatientVitalMeasurement[];
+  cardEntries: PatientCardEntry[];
+  medicalOrders: PatientMedicalOrder[];
+  riskScores: PatientRiskScore[];
+  coreError: string;
+  settledKey: string;
+};
+
+type PatientDetailCoreDataAction =
+  | {
+      type: "success";
+      requestKey: string;
+      detail: PatientDetail;
+      assignments: PatientAssignment[];
+      staff: StaffOption[];
+      vitalsHistory: PatientVitalMeasurement[];
+      cardEntries: PatientCardEntry[];
+      medicalOrders: PatientMedicalOrder[];
+      riskScores: PatientRiskScore[];
+    }
+  | { type: "error"; requestKey: string; message: string };
+
+const EMPTY_PATIENT_DETAIL_CORE_DATA_STATE: PatientDetailCoreDataState = {
+  detail: null,
+  assignments: [],
+  staff: [],
+  vitalsHistory: [],
+  cardEntries: [],
+  medicalOrders: [],
+  riskScores: [],
+  coreError: "",
+  settledKey: "",
+};
+
+function patientDetailCoreDataReducer(
+  state: PatientDetailCoreDataState,
+  action: PatientDetailCoreDataAction,
+): PatientDetailCoreDataState {
+  switch (action.type) {
+    case "success":
+      return {
+        detail: action.detail,
+        assignments: action.assignments,
+        staff: action.staff,
+        vitalsHistory: action.vitalsHistory,
+        cardEntries: action.cardEntries,
+        medicalOrders: action.medicalOrders,
+        riskScores: action.riskScores,
+        coreError: "",
+        settledKey: action.requestKey,
+      };
+    case "error":
+      return {
+        ...EMPTY_PATIENT_DETAIL_CORE_DATA_STATE,
+        coreError: action.message,
+        settledKey: action.requestKey,
+      };
+    default:
+      return state;
+  }
+}
+
 export function usePatientDetailCoreData({
   canManagePatientCardEntries,
   canManagePatientMedicalOrders,
@@ -31,15 +97,23 @@ export function usePatientDetailCoreData({
   id,
   version,
 }: UsePatientDetailCoreDataArgs) {
-  const [detail, setDetail] = useState<PatientDetail | null>(null);
-  const [assignments, setAssignments] = useState<PatientAssignment[]>([]);
-  const [staff, setStaff] = useState<StaffOption[]>([]);
-  const [vitalsHistory, setVitalsHistory] = useState<PatientVitalMeasurement[]>([]);
-  const [cardEntries, setCardEntries] = useState<PatientCardEntry[]>([]);
-  const [medicalOrders, setMedicalOrders] = useState<PatientMedicalOrder[]>([]);
-  const [riskScores, setRiskScores] = useState<PatientRiskScore[]>([]);
-  const [coreError, setCoreError] = useState("");
-  const [settledKey, setSettledKey] = useState("");
+  const [
+    {
+      detail,
+      assignments,
+      staff,
+      vitalsHistory,
+      cardEntries,
+      medicalOrders,
+      riskScores,
+      coreError,
+      settledKey,
+    },
+    dispatchCoreData,
+  ] = useReducer(
+    patientDetailCoreDataReducer,
+    EMPTY_PATIENT_DETAIL_CORE_DATA_STATE,
+  );
 
   const requestKey = id
     ? `${id}:${version}:${Number(canManagePatientVitals)}:${Number(
@@ -81,29 +155,27 @@ export function usePatientDetailCoreData({
       .then(([nextDetail, nextAssignments, nextStaff, vitals, entries, nextMedicalOrders, nextRiskScores]) => {
         if (signal.aborted) return;
         startTransition(() => {
-          setAssignments(nextAssignments);
-          setCardEntries(entries.items ?? []);
-          setCoreError("");
-          setDetail(nextDetail);
-          setMedicalOrders(nextMedicalOrders.items ?? []);
-          setRiskScores(nextRiskScores.items ?? []);
-          setSettledKey(requestKey);
-          setStaff(nextStaff);
-          setVitalsHistory(vitals.items ?? []);
+          dispatchCoreData({
+            type: "success",
+            requestKey,
+            detail: nextDetail,
+            assignments: nextAssignments,
+            staff: nextStaff,
+            vitalsHistory: vitals.items ?? [],
+            cardEntries: entries.items ?? [],
+            medicalOrders: nextMedicalOrders.items ?? [],
+            riskScores: nextRiskScores.items ?? [],
+          });
         });
       })
       .catch((error: unknown) => {
         if (signal.aborted) return;
         startTransition(() => {
-          setAssignments([]);
-          setCardEntries([]);
-          setCoreError(error instanceof Error ? error.message : String(error));
-          setDetail(null);
-          setMedicalOrders([]);
-          setRiskScores([]);
-          setSettledKey(requestKey);
-          setStaff([]);
-          setVitalsHistory([]);
+          dispatchCoreData({
+            type: "error",
+            requestKey,
+            message: error instanceof Error ? error.message : String(error),
+          });
         });
       });
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useReducer, type FormEvent, type SetStateAction } from "react";
 import { Plus, RefreshCcw } from "lucide-react";
 
 import { AdminGuideButton } from "@/components/admin-guide";
@@ -77,21 +77,282 @@ function toDateTimeLocalInput(value: Date): string {
   return new Date(value.getTime() - tzOffsetMs).toISOString().slice(0, 16);
 }
 
+type AdminAnnouncementsState = {
+  items: Announcement[];
+  loading: boolean;
+  error: string;
+  showCreate: boolean;
+  creating: boolean;
+  createError: string;
+  fTitle: string;
+  fMsg: string;
+  fVariant: string;
+  fEnds: string;
+  minAnnouncementEndsAt: string;
+};
+
+type AdminAnnouncementsPatch =
+  | Partial<AdminAnnouncementsState>
+  | ((current: AdminAnnouncementsState) => Partial<AdminAnnouncementsState>);
+
+function adminAnnouncementsReducer(
+  state: AdminAnnouncementsState,
+  patch: AdminAnnouncementsPatch,
+): AdminAnnouncementsState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
+function createAdminAnnouncementsFieldPatch<K extends keyof AdminAnnouncementsState>(
+  field: K,
+  value: SetStateAction<AdminAnnouncementsState[K]>,
+): AdminAnnouncementsPatch {
+  return (current) => {
+    const nextValue =
+      typeof value === "function"
+        ? (value as (previous: AdminAnnouncementsState[K]) => AdminAnnouncementsState[K])(current[field])
+        : value;
+    return { [field]: nextValue } as Partial<AdminAnnouncementsState>;
+  };
+}
+
+type AdminAnnouncementCreateSheetProps = {
+  createError: string;
+  creating: boolean;
+  fEnds: string;
+  fMsg: string;
+  fTitle: string;
+  fVariant: string;
+  minAnnouncementEndsAt: string;
+  showCreate: boolean;
+  t: Record<string, string>;
+  onCreate: (event: FormEvent) => void;
+  onEndsChange: (value: string) => void;
+  onMessageChange: (value: string) => void;
+  onOpenChange: (open: boolean) => void;
+  onTitleChange: (value: string) => void;
+  onVariantChange: (value: string) => void;
+};
+
+function AdminAnnouncementCreateSheet({
+  createError,
+  creating,
+  fEnds,
+  fMsg,
+  fTitle,
+  fVariant,
+  minAnnouncementEndsAt,
+  showCreate,
+  t,
+  onCreate,
+  onEndsChange,
+  onMessageChange,
+  onOpenChange,
+  onTitleChange,
+  onVariantChange,
+}: AdminAnnouncementCreateSheetProps) {
+  return (
+    <Sheet open={showCreate} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
+        <form onSubmit={onCreate} className="flex flex-1 min-h-0 flex-col">
+          <AdminSheetScaffold
+            title={t.ann_new}
+            description={t.ann_subtitle}
+            footer={(
+              <SheetFormFooter
+                cancelLabel={t.common_cancel}
+                submitLabel={t.common_save}
+                submitting={creating}
+                onCancel={() => onOpenChange(false)}
+              />
+            )}
+          >
+            {createError ? <Banner tone="error">{createError}</Banner> : null}
+
+            <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field label={`${t.field_name} *`} htmlFor="announcement-title">
+                  <Input
+                    id="announcement-title"
+                    required
+                    value={fTitle}
+                    onChange={(event) => onTitleChange(event.target.value)}
+                    className="h-9 rounded-lg bg-card"
+                  />
+                </Field>
+                <Field label={t.ann_variant} htmlFor="announcement-variant">
+                  <NativeComboboxSelect value={fVariant}
+                    onChange={(event) => onVariantChange(event.target.value ?? "info")} id="announcement-variant" className="!h-9 w-full rounded-lg bg-card">
+                      <option value="info">{t.ann_info}</option>
+                      <option value="warning">{t.ann_warning}</option>
+                      <option value="error">{t.common_error}</option>
+                      <option value="success">{t.ann_success}</option>
+                    </NativeComboboxSelect>
+                </Field>
+              </div>
+              <Field label={`${t.ann_message} *`} htmlFor="announcement-message">
+                <Input
+                  id="announcement-message"
+                  required
+                  value={fMsg}
+                  onChange={(event) => onMessageChange(event.target.value)}
+                  className="h-9 rounded-lg bg-card"
+                />
+              </Field>
+              <Field label={t.ann_ends} htmlFor="announcement-ends">
+                <Input
+                  id="announcement-ends"
+                  type="datetime-local"
+                  value={fEnds}
+                  onChange={(event) => onEndsChange(event.target.value)}
+                  min={minAnnouncementEndsAt}
+                  className="h-9 rounded-lg bg-card"
+                />
+              </Field>
+            </section>
+          </AdminSheetScaffold>
+        </form>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+type AdminAnnouncementsHeaderActionsProps = {
+  t: Record<string, string>;
+  onCreate: () => void;
+  onRefresh: () => void;
+};
+
+function AdminAnnouncementsHeaderActions({
+  t,
+  onCreate,
+  onRefresh,
+}: AdminAnnouncementsHeaderActionsProps) {
+  return (
+    <>
+      <AdminGuideButton title={t.ann_title} description={t.ann_subtitle} />
+      <Button
+        type="button"
+        variant="outline"
+        className="h-9 rounded-lg gap-1.5 bg-card px-3.5"
+        onClick={onRefresh}
+      >
+        <RefreshCcw className="size-3.5" />
+        {t.common_refresh}
+      </Button>
+      <Button
+        type="button"
+        className="h-9 rounded-lg gap-1.5 px-3.5"
+        onClick={onCreate}
+      >
+        <Plus className="size-3.5" />
+        {t.ann_new}
+      </Button>
+    </>
+  );
+}
+
+type AdminAnnouncementsTableProps = {
+  columns: ColumnDef<Announcement>[];
+  items: Announcement[];
+  t: Record<string, string>;
+};
+
+function AdminAnnouncementsTable({
+  columns,
+  items,
+  t,
+}: AdminAnnouncementsTableProps) {
+  return (
+    <AdminTableCard
+      title={t.ann_title}
+      description={t.ann_subtitle}
+      count={items.length}
+    >
+      <DataTableSurface
+        rows={items}
+        columns={columns}
+        defaultDensity="compact"
+        dictionary={t}
+        rowId={(announcement) => announcement.id}
+        emptyState={<EmptyCell>{t.ann_no_announcements}</EmptyCell>}
+        tableClassName="min-h-[320px]"
+      />
+    </AdminTableCard>
+  );
+}
+
 export function AdminAnnouncementsPage() {
   const { t } = useLang();
 
-  const [items, setItems] = useState<Announcement[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-
-  const [showCreate, setShowCreate] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState("");
-  const [fTitle, setFTitle] = useState("");
-  const [fMsg, setFMsg] = useState("");
-  const [fVariant, setFVariant] = useState("info");
-  const [fEnds, setFEnds] = useState("");
-  const [minAnnouncementEndsAt, setMinAnnouncementEndsAt] = useState(() => toDateTimeLocalInput(new Date()));
+  const [announcementState, dispatchAnnouncementState] = useReducer(
+    adminAnnouncementsReducer,
+    undefined,
+    (): AdminAnnouncementsState => ({
+      items: [],
+      loading: true,
+      error: "",
+      showCreate: false,
+      creating: false,
+      createError: "",
+      fTitle: "",
+      fMsg: "",
+      fVariant: "info",
+      fEnds: "",
+      minAnnouncementEndsAt: toDateTimeLocalInput(new Date()),
+    }),
+  );
+  const {
+    items,
+    loading,
+    error,
+    showCreate,
+    creating,
+    createError,
+    fTitle,
+    fMsg,
+    fVariant,
+    fEnds,
+    minAnnouncementEndsAt,
+  } = announcementState;
+  const setAnnouncementField = <K extends keyof AdminAnnouncementsState>(
+    field: K,
+    value: SetStateAction<AdminAnnouncementsState[K]>,
+  ) => dispatchAnnouncementState(createAdminAnnouncementsFieldPatch(field, value));
+  const setItems = (value: SetStateAction<Announcement[]>) =>
+    setAnnouncementField("items", value);
+  const setLoading = (value: SetStateAction<boolean>) =>
+    setAnnouncementField("loading", value);
+  const setError = (value: SetStateAction<string>) =>
+    setAnnouncementField("error", value);
+  const setShowCreate = (value: SetStateAction<boolean>) => {
+    dispatchAnnouncementState((current) => {
+      const showCreate =
+        typeof value === "function"
+          ? (value as (previous: boolean) => boolean)(current.showCreate)
+          : value;
+      return {
+        showCreate,
+        ...(showCreate
+          ? { minAnnouncementEndsAt: toDateTimeLocalInput(new Date()) }
+          : {}),
+      };
+    });
+  };
+  const setCreating = (value: SetStateAction<boolean>) =>
+    setAnnouncementField("creating", value);
+  const setCreateError = (value: SetStateAction<string>) =>
+    setAnnouncementField("createError", value);
+  const setFTitle = (value: SetStateAction<string>) =>
+    setAnnouncementField("fTitle", value);
+  const setFMsg = (value: SetStateAction<string>) =>
+    setAnnouncementField("fMsg", value);
+  const setFVariant = (value: SetStateAction<string>) =>
+    setAnnouncementField("fVariant", value);
+  const setFEnds = (value: SetStateAction<string>) =>
+    setAnnouncementField("fEnds", value);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -115,13 +376,6 @@ export function AdminAnnouncementsPage() {
     clearApiCache("/announcements/active");
     void load();
   });
-
-  useEffect(() => {
-    if (!showCreate) {
-      return;
-    }
-    setMinAnnouncementEndsAt(toDateTimeLocalInput(new Date()));
-  }, [showCreate]);
 
   const onCreate = async (ev: FormEvent) => {
     ev.preventDefault();
@@ -289,26 +543,11 @@ export function AdminAnnouncementsPage() {
           title={t.ann_title}
           description={t.ann_subtitle}
           actions={(
-            <>
-              <AdminGuideButton title={t.ann_title} description={t.ann_subtitle} />
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9 rounded-lg gap-1.5 bg-card px-3.5"
-                onClick={() => void load()}
-              >
-                <RefreshCcw className="size-3.5" />
-                {t.common_refresh}
-              </Button>
-              <Button
-                type="button"
-                className="h-9 rounded-lg gap-1.5 px-3.5"
-                onClick={() => setShowCreate(true)}
-              >
-                <Plus className="size-3.5" />
-                {t.ann_new}
-              </Button>
-            </>
+            <AdminAnnouncementsHeaderActions
+              t={t as unknown as Record<string, string>}
+              onCreate={() => setShowCreate(true)}
+              onRefresh={() => void load()}
+            />
           )}
         />
 
@@ -316,86 +555,31 @@ export function AdminAnnouncementsPage() {
         {!loading && error ? <Banner tone="error">{error}</Banner> : null}
 
         {!loading && !error ? (
-          <AdminTableCard
-            title={t.ann_title}
-            description={t.ann_subtitle}
-            count={items.length}
-          >
-            <DataTableSurface
-              rows={items}
-              columns={columns}
-              defaultDensity="compact"
-              dictionary={t as unknown as Record<string, string>}
-              rowId={(announcement) => announcement.id}
-              emptyState={<EmptyCell>{t.ann_no_announcements}</EmptyCell>}
-              tableClassName="min-h-[320px]"
-            />
-          </AdminTableCard>
+          <AdminAnnouncementsTable
+            columns={columns}
+            items={items}
+            t={t as unknown as Record<string, string>}
+          />
         ) : null}
       </div>
 
-      <Sheet open={showCreate} onOpenChange={setShowCreate}>
-        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
-          <form onSubmit={onCreate} className="flex flex-1 min-h-0 flex-col">
-            <AdminSheetScaffold
-              title={t.ann_new}
-              description={t.ann_subtitle}
-              footer={(
-                <SheetFormFooter
-                  cancelLabel={t.common_cancel}
-                  submitLabel={t.common_save}
-                  submitting={creating}
-                  onCancel={() => setShowCreate(false)}
-                />
-              )}
-            >
-              {createError ? <Banner tone="error">{createError}</Banner> : null}
-
-              <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <Field label={`${t.field_name} *`} htmlFor="announcement-title">
-                    <Input
-                      id="announcement-title"
-                      required
-                      value={fTitle}
-                      onChange={(e) => setFTitle(e.target.value)}
-                      className="h-9 rounded-lg bg-card"
-                    />
-                  </Field>
-                  <Field label={t.ann_variant} htmlFor="announcement-variant">
-                    <NativeComboboxSelect value={fVariant}
-                      onChange={(event) => setFVariant(event.target.value ?? "info")} id="announcement-variant" className="!h-9 w-full rounded-lg bg-card">
-                        <option value="info">{t.ann_info}</option>
-                        <option value="warning">{t.ann_warning}</option>
-                        <option value="error">{t.common_error}</option>
-                        <option value="success">{t.ann_success}</option>
-                      </NativeComboboxSelect>
-                  </Field>
-                </div>
-                <Field label={`${t.ann_message} *`} htmlFor="announcement-message">
-                  <Input
-                    id="announcement-message"
-                    required
-                    value={fMsg}
-                    onChange={(e) => setFMsg(e.target.value)}
-                    className="h-9 rounded-lg bg-card"
-                  />
-                </Field>
-                <Field label={t.ann_ends} htmlFor="announcement-ends">
-                  <Input
-                    id="announcement-ends"
-                    type="datetime-local"
-                    value={fEnds}
-                    onChange={(e) => setFEnds(e.target.value)}
-                    min={minAnnouncementEndsAt}
-                    className="h-9 rounded-lg bg-card"
-                  />
-                </Field>
-              </section>
-            </AdminSheetScaffold>
-          </form>
-        </SheetContent>
-      </Sheet>
+      <AdminAnnouncementCreateSheet
+        createError={createError}
+        creating={creating}
+        fEnds={fEnds}
+        fMsg={fMsg}
+        fTitle={fTitle}
+        fVariant={fVariant}
+        minAnnouncementEndsAt={minAnnouncementEndsAt}
+        showCreate={showCreate}
+        t={t as unknown as Record<string, string>}
+        onCreate={onCreate}
+        onEndsChange={setFEnds}
+        onMessageChange={setFMsg}
+        onOpenChange={setShowCreate}
+        onTitleChange={setFTitle}
+        onVariantChange={setFVariant}
+      />
     </>
   );
 }

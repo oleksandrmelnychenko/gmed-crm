@@ -1,5 +1,5 @@
 ﻿import { LoaderCircle, Trash2 } from "lucide-react";
-import type { FormEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 
 import { AdminSheetScaffold } from "@/components/admin-page-patterns";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,7 @@ type CaseItemEditSheetProps = {
   error?: string;
   canSubmit?: boolean;
   canDelete?: boolean;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
+  onSubmit: () => void | Promise<void>;
   onDelete?: () => void | Promise<void>;
   children: ReactNode;
   width?: "default" | "wide";
@@ -57,16 +57,7 @@ export function CaseItemEditSheet({
           width === "wide" ? "sm:max-w-[720px]" : "sm:max-w-[520px]",
         )}
       >
-        <form
-          onSubmit={(event) => {
-            if (!canSubmit || busy) {
-              event.preventDefault();
-              return;
-            }
-            void onSubmit(event);
-          }}
-          className="flex h-full min-h-0 flex-col"
-        >
+        <div className="flex h-full min-h-0 flex-col">
           <AdminSheetScaffold
             title={title}
             description={description}
@@ -101,9 +92,10 @@ export function CaseItemEditSheet({
                       {t.common_cancel}
                     </Button>
                     <Button
-                      type="submit"
+                      type="button"
                       className="h-9 rounded-lg"
                       disabled={busy || !canSubmit}
+                      onClick={() => void onSubmit()}
                     >
                       {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
                       {submitLabel ?? defaultSubmit}
@@ -116,7 +108,7 @@ export function CaseItemEditSheet({
             {error ? <Banner tone="error">{error}</Banner> : null}
             {children}
           </AdminSheetScaffold>
-        </form>
+        </div>
       </SheetContent>
     </Sheet>
   );

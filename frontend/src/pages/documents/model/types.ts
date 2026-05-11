@@ -5,7 +5,7 @@ export type DocumentVisibility =
   | "released_external"
   | "patient_visible";
 
-export type DocumentClassificationSuggestion = {
+type DocumentClassificationSuggestion = {
   art: string;
   category: string;
   is_medical: boolean;

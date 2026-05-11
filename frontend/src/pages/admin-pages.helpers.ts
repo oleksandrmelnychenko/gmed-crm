@@ -4,15 +4,31 @@ export function adminLocale(lang: Lang) {
   return lang === "ru" ? "ru-RU" : "de-DE";
 }
 
-export function formatAdminDateTime(value: string | Date, lang: Lang) {
-  const date = value instanceof Date ? value : new Date(value);
-  return new Intl.DateTimeFormat(adminLocale(lang), {
+const ADMIN_DATE_TIME_FORMATTERS: Record<string, Intl.DateTimeFormat> = {
+  "de-DE": new Intl.DateTimeFormat("de-DE", {
     day: "2-digit",
     month: "short",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-  }).format(date);
+  }),
+  "ru-RU": new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }),
+};
+
+function adminDateTimeFormatter(lang: Lang) {
+  const locale = adminLocale(lang);
+  return ADMIN_DATE_TIME_FORMATTERS[locale] ?? ADMIN_DATE_TIME_FORMATTERS["de-DE"];
+}
+
+export function formatAdminDateTime(value: string | Date, lang: Lang) {
+  const date = value instanceof Date ? value : new Date(value);
+  return adminDateTimeFormatter(lang).format(date);
 }
 
 export function compactNotificationConfig(cfg: Record<string, unknown>): string {
@@ -55,10 +71,9 @@ export function summarizeAdminSettingValue(fieldKey: string, value: string): str
   const normalized = normalizeAdminSettingValue(value).trim();
   if (!normalized) return "—";
   if (fieldKey === "required_patient_documents") {
-    const count = normalized
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean).length;
+    const count = normalized.split(/\r?\n/).reduce((total, line) => {
+      return line.trim() ? total + 1 : total;
+    }, 0);
     return count > 0 ? `${count}` : "—";
   }
   if (normalized.length > 56) return `${normalized.slice(0, 56)}…`;

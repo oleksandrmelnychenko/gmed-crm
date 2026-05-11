@@ -1,15 +1,4 @@
-import { useMemo } from "react";
-import {
-  Bar,
-  BarChart,
-  Cell,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip as ChartTooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { lazy, Suspense, useMemo } from "react";
 
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
@@ -27,6 +16,115 @@ import {
 } from "./staff-dashboard-surface-primitives";
 
 const PALETTE = ["#f97316", "#fb923c", "#fdba74", "#fed7aa", "#fff4ed", "#a3a3a3"];
+
+const HorizontalBarsChart = lazy(async () => {
+  const {
+    Bar,
+    BarChart,
+    ResponsiveContainer,
+    Tooltip: ChartTooltip,
+    XAxis,
+    YAxis,
+  } = await import("recharts");
+
+  return {
+    default: function HorizontalBarsChart({
+      data,
+      height,
+      labelWidth,
+    }: {
+      data: Array<{ label: string; value: number }>;
+      height: number;
+      labelWidth: number;
+    }) {
+      return (
+        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={height}>
+          <BarChart
+            data={data}
+            layout="vertical"
+            margin={{ top: 0, right: 16, left: 0, bottom: 0 }}
+          >
+            <XAxis
+              type="number"
+              fontSize={11}
+              tickLine={false}
+              axisLine={false}
+              stroke="#9ca3af"
+              allowDecimals={false}
+            />
+            <YAxis
+              type="category"
+              dataKey="label"
+              fontSize={11}
+              tickLine={false}
+              axisLine={false}
+              stroke="#6b7280"
+              width={labelWidth}
+            />
+            <ChartTooltip
+              contentStyle={{
+                borderRadius: 8,
+                border: "1px solid var(--color-border)",
+                fontSize: 12,
+              }}
+              cursor={{ fill: "#fafafa" }}
+            />
+            <Bar dataKey="value" fill="#f97316" radius={[0, 4, 4, 0]} barSize={12} />
+          </BarChart>
+        </ResponsiveContainer>
+      );
+    },
+  };
+});
+
+const MiniDonutChart = lazy(async () => {
+  const {
+    Cell,
+    Pie,
+    PieChart,
+    ResponsiveContainer,
+    Tooltip: ChartTooltip,
+  } = await import("recharts");
+
+  return {
+    default: function MiniDonutChart({
+      data,
+      height,
+      palette,
+    }: {
+      data: Array<{ name: string; value: number }>;
+      height: number;
+      palette: string[];
+    }) {
+      return (
+        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={height}>
+          <PieChart>
+            <Pie
+              data={data}
+              dataKey="value"
+              nameKey="name"
+              innerRadius={45}
+              outerRadius={75}
+              paddingAngle={2}
+              stroke="none"
+            >
+              {data.map((item, index) => (
+                <Cell key={item.name} fill={palette[index % palette.length]} />
+              ))}
+            </Pie>
+            <ChartTooltip
+              contentStyle={{
+                borderRadius: 8,
+                border: "1px solid var(--color-border)",
+                fontSize: 12,
+              }}
+            />
+          </PieChart>
+        </ResponsiveContainer>
+      );
+    },
+  };
+});
 
 const ORDER_PHASE_LABEL_KEYS = {
   closure: "dash_order_phase_closure",
@@ -84,40 +182,9 @@ export function HorizontalBars({
 
   return (
     <div className="min-w-0" style={{ width: "100%", height }}>
-      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={height}>
-        <BarChart
-          data={displayData}
-          layout="vertical"
-          margin={{ top: 0, right: 16, left: 0, bottom: 0 }}
-        >
-          <XAxis
-            type="number"
-            fontSize={11}
-            tickLine={false}
-            axisLine={false}
-            stroke="#9ca3af"
-            allowDecimals={false}
-          />
-          <YAxis
-            type="category"
-            dataKey="label"
-            fontSize={11}
-            tickLine={false}
-            axisLine={false}
-            stroke="#6b7280"
-            width={labelWidth}
-          />
-          <ChartTooltip
-            contentStyle={{
-              borderRadius: 8,
-              border: "1px solid var(--color-border)",
-              fontSize: 12,
-            }}
-            cursor={{ fill: "#fafafa" }}
-          />
-          <Bar dataKey="value" fill="#f97316" radius={[0, 4, 4, 0]} barSize={12} />
-        </BarChart>
-      </ResponsiveContainer>
+      <Suspense fallback={<ChartSkeleton />}>
+        <HorizontalBarsChart data={displayData} height={height} labelWidth={labelWidth} />
+      </Suspense>
     </div>
   );
 }
@@ -140,30 +207,9 @@ export function MiniDonut({
   return (
     <div className="grid min-w-0 grid-cols-[1fr_auto] items-center gap-3">
       <div className="min-w-0" style={{ width: "100%", height }}>
-        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={height}>
-          <PieChart>
-            <Pie
-              data={visible}
-              dataKey="value"
-              nameKey="name"
-              innerRadius={45}
-              outerRadius={75}
-              paddingAngle={2}
-              stroke="none"
-            >
-              {visible.map((item, index) => (
-                <Cell key={`${item.name}-${index}`} fill={PALETTE[index % PALETTE.length]} />
-              ))}
-            </Pie>
-            <ChartTooltip
-              contentStyle={{
-                borderRadius: 8,
-                border: "1px solid var(--color-border)",
-                fontSize: 12,
-              }}
-            />
-          </PieChart>
-        </ResponsiveContainer>
+        <Suspense fallback={<ChartSkeleton />}>
+          <MiniDonutChart data={visible} height={height} palette={PALETTE} />
+        </Suspense>
       </div>
       <div className="flex flex-col gap-1 text-[11.5px]">
         {visible.map((entry, index) => (

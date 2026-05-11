@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  type SetStateAction,
+} from "react";
 import {
   Building2,
   KeyRound,
@@ -202,23 +208,119 @@ const ROLE_LABEL_KEYS = {
   patient: "role_patient",
 } as const satisfies Partial<Record<string, TranslationKey>>;
 
-export function AdminSettingsPage() {
+type AdminSettingsSheetState = {
+  saving: boolean;
+  error: string;
+  warning: string;
+};
+
+type AdminSettingsState = {
+  settings: SettingRow[];
+  sessions: SessionRow[];
+  pending: PendingLogin[];
+  loading: boolean;
+  error: string;
+  flash: FlashState;
+  editValues: Record<string, string>;
+  selectedGroupId: SettingsGroupId | null;
+  sheetState: AdminSettingsSheetState;
+  actionBusyKey: string;
+};
+
+type AdminSettingsPatch =
+  | Partial<AdminSettingsState>
+  | ((current: AdminSettingsState) => Partial<AdminSettingsState>);
+
+function adminSettingsReducer(
+  current: AdminSettingsState,
+  patch: AdminSettingsPatch,
+): AdminSettingsState {
+  return {
+    ...current,
+    ...(typeof patch === "function" ? patch(current) : patch),
+  };
+}
+
+function resolveAdminSettingsStateAction<T>(
+  action: SetStateAction<T>,
+  current: T,
+): T {
+  return typeof action === "function"
+    ? (action as (value: T) => T)(current)
+    : action;
+}
+
+function createAdminSettingsFieldPatch<K extends keyof AdminSettingsState>(
+  field: K,
+  nextValue: SetStateAction<AdminSettingsState[K]>,
+): AdminSettingsPatch {
+  return (current) => ({
+    [field]: resolveAdminSettingsStateAction(nextValue, current[field]),
+  } as Partial<AdminSettingsState>);
+}
+
+function useAdminSettingsPageContent() {
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const [settings, setSettings] = useState<SettingRow[]>([]);
-  const [sessions, setSessions] = useState<SessionRow[]>([]);
-  const [pending, setPending] = useState<PendingLogin[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [flash, setFlash] = useState<FlashState>(null);
-  const [editValues, setEditValues] = useState<Record<string, string>>({});
-  const [selectedGroupId, setSelectedGroupId] = useState<SettingsGroupId | null>(null);
-  const [sheetState, setSheetState] = useState<{ saving: boolean; error: string; warning: string }>({
-    saving: false,
-    error: "",
-    warning: "",
-  });
-  const [actionBusyKey, setActionBusyKey] = useState("");
+  const [settingsState, dispatchSettingsState] = useReducer(
+    adminSettingsReducer,
+    undefined,
+    (): AdminSettingsState => ({
+      settings: [],
+      sessions: [],
+      pending: [],
+      loading: true,
+      error: "",
+      flash: null,
+      editValues: {},
+      selectedGroupId: null,
+      sheetState: {
+        saving: false,
+        error: "",
+        warning: "",
+      },
+      actionBusyKey: "",
+    }),
+  );
+  const {
+    actionBusyKey,
+    editValues,
+    error,
+    flash,
+    loading,
+    pending,
+    selectedGroupId,
+    sessions,
+    settings,
+    sheetState,
+  } = settingsState;
+  const setSettingsField = <K extends keyof AdminSettingsState>(
+    field: K,
+    nextValue: SetStateAction<AdminSettingsState[K]>,
+  ) => dispatchSettingsState(createAdminSettingsFieldPatch(field, nextValue));
+  const setSettings = (nextValue: SetStateAction<SettingRow[]>) =>
+    setSettingsField("settings", nextValue);
+  const setSessions = (nextValue: SetStateAction<SessionRow[]>) =>
+    setSettingsField("sessions", nextValue);
+  const setPending = (nextValue: SetStateAction<PendingLogin[]>) =>
+    setSettingsField("pending", nextValue);
+  const setLoading = (nextValue: SetStateAction<boolean>) =>
+    setSettingsField("loading", nextValue);
+  const setError = (nextValue: SetStateAction<string>) =>
+    setSettingsField("error", nextValue);
+  const setFlash = (nextValue: SetStateAction<FlashState>) =>
+    setSettingsField("flash", nextValue);
+  const setEditValues = (
+    nextValue: SetStateAction<Record<string, string>>,
+  ) => setSettingsField("editValues", nextValue);
+  const setSelectedGroupId = (
+    nextValue: SetStateAction<SettingsGroupId | null>,
+  ) => setSettingsField("selectedGroupId", nextValue);
+  const setSheetState = (
+    nextValue: SetStateAction<AdminSettingsSheetState>,
+  ) => setSettingsField("sheetState", nextValue);
+  const setActionBusyKey = (nextValue: SetStateAction<string>) =>
+    setSettingsField("actionBusyKey", nextValue);
 
   const settingsMap = useMemo(() => {
     const map: Record<string, SettingRow> = {};
@@ -305,13 +407,15 @@ export function AdminSettingsPage() {
     if (!selectedGroup) {
       return [];
     }
-    return selectedGroup.fields
-      .filter(
-        (field) =>
-          normalizeAdminSettingValue(settingsMap[field.key]?.value) !==
-          (editValues[field.key] ?? ""),
-      )
-      .map((field) => tr[field.labelKey] ?? field.key);
+    return selectedGroup.fields.reduce<string[]>((labels, field) => {
+      if (
+        normalizeAdminSettingValue(settingsMap[field.key]?.value) !==
+        (editValues[field.key] ?? "")
+      ) {
+        labels.push(tr[field.labelKey] ?? field.key);
+      }
+      return labels;
+    }, []);
   }, [selectedGroup, tr, editValues, settingsMap]);
 
   function openGroupSheet(groupId: SettingsGroupId) {
@@ -343,9 +447,11 @@ export function AdminSettingsPage() {
     setSheetState({ saving: true, error: "", warning: "" });
     setFlash(null);
     try {
-      for (const field of changedFields) {
-        await saveAdminSetting(field.key, editValues[field.key] ?? "");
-      }
+      await Promise.all(
+        changedFields.map((field) =>
+          saveAdminSetting(field.key, editValues[field.key] ?? ""),
+        ),
+      );
       setFlash({ tone: "success", text: t.settings_updated });
       setSelectedGroupId(null);
       await load();
@@ -969,4 +1075,8 @@ export function AdminSettingsPage() {
       </Sheet>
     </>
   );
+}
+
+export function AdminSettingsPage(...args: Parameters<typeof useAdminSettingsPageContent>) {
+  return useAdminSettingsPageContent(...args);
 }

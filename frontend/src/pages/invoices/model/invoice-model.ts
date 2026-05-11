@@ -11,12 +11,6 @@ import type {
   StatusForm,
   VisibilityForm,
 } from "./types";
-import { formatEnumLabel, type Translations } from "@/lib/i18n";
-
-type EnumLabelTranslations = Pick<
-  Translations,
-  "common_not_set" | "common_unknown" | "common_unknown_value"
->;
 
 export const INVOICE_TYPES: InvoiceType[] = ["advance", "interim", "final"];
 
@@ -38,7 +32,52 @@ export const DEFAULT_FILTERS: Filters = {
   invoiceType: "",
 };
 
-export const DEFAULT_INVOICE_PAGE_SIZE = 12;
+const DEFAULT_INVOICE_PAGE_SIZE = 12;
+
+const INVOICE_DATE_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+};
+const INVOICE_DATE_TIME_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
+  ...INVOICE_DATE_FORMAT_OPTIONS,
+  hour: "2-digit",
+  minute: "2-digit",
+};
+const INVOICE_CURRENCY_FORMAT_OPTIONS: Intl.NumberFormatOptions = {
+  style: "currency",
+  currency: "EUR",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+};
+
+const dateFormatters = new Map<string, Intl.DateTimeFormat>([
+  ["de-DE", new Intl.DateTimeFormat("de-DE", INVOICE_DATE_FORMAT_OPTIONS)],
+  ["ru-RU", new Intl.DateTimeFormat("ru-RU", INVOICE_DATE_FORMAT_OPTIONS)],
+  ["en-GB", new Intl.DateTimeFormat("en-GB", INVOICE_DATE_FORMAT_OPTIONS)],
+]);
+const dateTimeFormatters = new Map<string, Intl.DateTimeFormat>([
+  ["de-DE", new Intl.DateTimeFormat("de-DE", INVOICE_DATE_TIME_FORMAT_OPTIONS)],
+  ["ru-RU", new Intl.DateTimeFormat("ru-RU", INVOICE_DATE_TIME_FORMAT_OPTIONS)],
+  ["en-GB", new Intl.DateTimeFormat("en-GB", INVOICE_DATE_TIME_FORMAT_OPTIONS)],
+]);
+const currencyFormatters = new Map<string, Intl.NumberFormat>([
+  ["de-DE", new Intl.NumberFormat("de-DE", INVOICE_CURRENCY_FORMAT_OPTIONS)],
+  ["ru-RU", new Intl.NumberFormat("ru-RU", INVOICE_CURRENCY_FORMAT_OPTIONS)],
+  ["en-GB", new Intl.NumberFormat("en-GB", INVOICE_CURRENCY_FORMAT_OPTIONS)],
+]);
+
+function invoiceDateFormatter(locale: string) {
+  return dateFormatters.get(locale) ?? dateFormatters.get("en-GB")!;
+}
+
+function invoiceDateTimeFormatter(locale: string) {
+  return dateTimeFormatters.get(locale) ?? dateTimeFormatters.get("en-GB")!;
+}
+
+function invoiceCurrencyFormatter(locale: string) {
+  return currencyFormatters.get(locale) ?? currencyFormatters.get("en-GB")!;
+}
 
 export const EMPTY_ACCOUNTING_SUMMARY: AccountingLedgerPayload["summary"] = {
   income_gross: "0.00",
@@ -135,11 +174,7 @@ export function formatDate(
 ) {
   if (!value) return emptyLabel;
   try {
-    return new Intl.DateTimeFormat(locale, {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }).format(new Date(`${value}T00:00:00`));
+    return invoiceDateFormatter(locale).format(new Date(`${value}T00:00:00`));
   } catch {
     return value;
   }
@@ -152,13 +187,7 @@ export function formatDateTime(
 ) {
   if (!value) return emptyLabel;
   try {
-    return new Intl.DateTimeFormat(locale, {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(value));
+    return invoiceDateTimeFormatter(locale).format(new Date(value));
   } catch {
     return value;
   }
@@ -166,20 +195,7 @@ export function formatDateTime(
 
 export function formatCurrency(value: unknown, locale = "de-DE") {
   const numeric = typeof value === "number" ? value : Number(value ?? 0);
-  if (!Number.isFinite(numeric)) {
-    return new Intl.NumberFormat(locale, {
-      style: "currency",
-      currency: "EUR",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(0);
-  }
-  return new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency: "EUR",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(numeric);
+  return invoiceCurrencyFormatter(locale).format(Number.isFinite(numeric) ? numeric : 0);
 }
 
 export function nextDunningLevel(events: DunningEvent[]) {
@@ -188,12 +204,4 @@ export function nextDunningLevel(events: DunningEvent[]) {
   if (!levels.has("second")) return "second";
   if (!levels.has("collections")) return "collections";
   return null;
-}
-
-export function enumLabel(
-  value: string | null | undefined,
-  labels: Partial<Record<string, string>>,
-  translations: EnumLabelTranslations,
-) {
-  return formatEnumLabel(value, labels, translations);
 }

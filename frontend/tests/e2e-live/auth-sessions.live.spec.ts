@@ -9,8 +9,10 @@ test.describe("auth sessions live API", () => {
   test("login rejects wrong password against live backend", async ({
     request,
   }) => {
-    const scenario = await bootstrapFullSmokeScenario(request);
-    const state = await ensureLiveBackendHealthy();
+    const [scenario, state] = await Promise.all([
+      bootstrapFullSmokeScenario(request),
+      ensureLiveBackendHealthy(),
+    ]);
     const response = await request.post(
       `${state.backendUrl}/api/v1/auth/login`,
       {
@@ -28,8 +30,10 @@ test.describe("auth sessions live API", () => {
   test("login succeeds and refresh rotates tokens on live backend", async ({
     request,
   }) => {
-    const scenario = await bootstrapFullSmokeScenario(request);
-    const state = await ensureLiveBackendHealthy();
+    const [scenario, state] = await Promise.all([
+      bootstrapFullSmokeScenario(request),
+      ensureLiveBackendHealthy(),
+    ]);
     const loginResponse = await request.post(
       `${state.backendUrl}/api/v1/auth/login`,
       {

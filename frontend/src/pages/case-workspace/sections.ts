@@ -134,7 +134,7 @@ const CASE_SECTION_KEYS = new Set<CaseSectionKey>(
   CASE_WORKSPACE_SECTIONS.map((item) => item.key),
 );
 
-export const DEFAULT_CASE_SECTION: CaseSectionKey = "overview";
+const DEFAULT_CASE_SECTION: CaseSectionKey = "overview";
 
 function normalizeLang(lang: string): Lang {
   return lang === "de" ? "de" : "ru";

@@ -1,5 +1,5 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { startTransition, useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useReducer, type FormEvent } from "react";
 import { LoaderCircle, RefreshCw, Shield } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -51,6 +51,45 @@ const PORTAL_PRIVACY_REALTIME_EVENTS = [
   "privacy_request.executed",
 ] as const;
 
+interface PatientPrivacyState {
+  requests: PortalPrivacyRequest[];
+  requestType: RequestType;
+  reason: string;
+  loading: boolean;
+  refreshing: boolean;
+  submitting: boolean;
+  notice: string;
+  error: string;
+  version: number;
+}
+
+type PatientPrivacyAction =
+  | Partial<PatientPrivacyState>
+  | ((current: PatientPrivacyState) => Partial<PatientPrivacyState>);
+
+const INITIAL_PATIENT_PRIVACY_STATE: PatientPrivacyState = {
+  requests: [],
+  requestType: "restriction",
+  reason: "",
+  loading: true,
+  refreshing: false,
+  submitting: false,
+  notice: "",
+  error: "",
+  version: 0,
+};
+
+function patientPrivacyReducer(
+  current: PatientPrivacyState,
+  action: PatientPrivacyAction,
+): PatientPrivacyState {
+  const patch = typeof action === "function" ? action(current) : action;
+  return {
+    ...current,
+    ...patch,
+  };
+}
+
 function privacyRequestSourceLabel(
   value: string | null | undefined,
   l: (de: string, ru: string, en: string) => string,
@@ -69,15 +108,21 @@ function privacyRequestSourceLabel(
 
 export function PatientPrivacyPage() {
   const { t, lang } = useLang();
-  const [requests, setRequests] = useState<PortalPrivacyRequest[]>([]);
-  const [requestType, setRequestType] = useState<RequestType>("restriction");
-  const [reason, setReason] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [notice, setNotice] = useState("");
-  const [error, setError] = useState("");
-  const [version, setVersion] = useState(0);
+  const [privacyState, dispatchPrivacyState] = useReducer(
+    patientPrivacyReducer,
+    INITIAL_PATIENT_PRIVACY_STATE,
+  );
+  const {
+    error,
+    loading,
+    notice,
+    reason,
+    refreshing,
+    requestType,
+    requests,
+    submitting,
+    version,
+  } = privacyState;
   const l = useCallback(
     (de: string, ru: string, en: string) =>
       lang === "de" ? de : lang === "ru" ? ru : en,
@@ -86,34 +131,36 @@ export function PatientPrivacyPage() {
 
   useRealtimeSubscription(PORTAL_PRIVACY_REALTIME_EVENTS, () => {
     clearApiCache("/me/privacy-requests");
-    setVersion((value) => value + 1);
+    dispatchPrivacyState((current) => ({ version: current.version + 1 }));
   });
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
-      if (loading) {
-        setRefreshing(false);
-      } else {
-        setRefreshing(true);
-      }
+      dispatchPrivacyState((current) => ({
+        refreshing: !current.loading,
+        error: "",
+      }));
 
       try {
         const rows = await fetchPortalPrivacyRequests();
         if (cancelled) return;
-        startTransition(() => {
-          setRequests(rows);
-          setError("");
-        });
+        startTransition(() =>
+          dispatchPrivacyState({
+            requests: rows,
+            error: "",
+            loading: false,
+            refreshing: false,
+          }),
+        );
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : l("Datenschutzanfragen konnten nicht geladen werden.", "Не удалось загрузить запросы по приватности.", "Failed to load privacy requests."));
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-          setRefreshing(false);
-        }
+        dispatchPrivacyState({
+          error: err instanceof Error ? err.message : l("Datenschutzanfragen konnten nicht geladen werden.", "Не удалось загрузить запросы по приватности.", "Failed to load privacy requests."),
+          loading: false,
+          refreshing: false,
+        });
       }
     }
 
@@ -121,7 +168,7 @@ export function PatientPrivacyPage() {
     return () => {
       cancelled = true;
     };
-  }, [loading, version, l]);
+  }, [version, l]);
 
   const openRequests = useMemo(
     () => requests.filter((item) => !["rejected", "completed", "executed"].includes(item.status)),
@@ -130,22 +177,24 @@ export function PatientPrivacyPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setSubmitting(true);
-    setNotice("");
-    setError("");
+    dispatchPrivacyState({ submitting: true, notice: "", error: "" });
 
     try {
       await createPortalPrivacyRequest({
         request_type: requestType,
         reason: reason.trim() || null,
       });
-      setReason("");
-      setNotice(l("Datenschutzanfrage wurde eingereicht.", "Запрос по приватности отправлен.", "Privacy request submitted."));
-      setVersion((value) => value + 1);
+      dispatchPrivacyState((current) => ({
+        reason: "",
+        notice: l("Datenschutzanfrage wurde eingereicht.", "Запрос по приватности отправлен.", "Privacy request submitted."),
+        submitting: false,
+        version: current.version + 1,
+      }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : l("Datenschutzanfrage konnte nicht gesendet werden.", "Не удалось отправить запрос по приватности.", "Failed to submit privacy request."));
-    } finally {
-      setSubmitting(false);
+      dispatchPrivacyState({
+        error: err instanceof Error ? err.message : l("Datenschutzanfrage konnte nicht gesendet werden.", "Не удалось отправить запрос по приватности.", "Failed to submit privacy request."),
+        submitting: false,
+      });
     }
   }
 
@@ -171,7 +220,7 @@ export function PatientPrivacyPage() {
             <Button
               variant="outline"
               className={tokens.control.primaryButton}
-              onClick={() => setVersion((value) => value + 1)}
+              onClick={() => dispatchPrivacyState((current) => ({ version: current.version + 1 }))}
             >
               <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
               {l("Aktualisieren", "Обновить", "Refresh")}
@@ -196,7 +245,7 @@ export function PatientPrivacyPage() {
               <NativeComboboxSelect
                 id="privacy-type"
                 value={requestType}
-                onChange={(event) => setRequestType(event.target.value as RequestType)}
+                onChange={(event) => dispatchPrivacyState({ requestType: event.target.value as RequestType })}
                 className={selectClass}
               >
                 <option value="restriction">{l("Verarbeitung einschränken", "Ограничить обработку", "Restrict processing")}</option>
@@ -208,7 +257,7 @@ export function PatientPrivacyPage() {
               <textarea
                 id="privacy-reason"
                 value={reason}
-                onChange={(event) => setReason(event.target.value)}
+                onChange={(event) => dispatchPrivacyState({ reason: event.target.value })}
                 placeholder={l("Optionaler Kontext für das Betreuungsteam", "Необязательный контекст для команды сопровождения", "Optional context for the care team")}
                 className={cn(textareaClass, "min-h-[120px]")}
               />

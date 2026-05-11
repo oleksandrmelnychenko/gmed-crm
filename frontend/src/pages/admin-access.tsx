@@ -3,7 +3,8 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useState,
+  useReducer,
+  type SetStateAction,
 } from "react";
 import {
   Check,
@@ -185,18 +186,87 @@ function accessTone(level: string, locked: boolean) {
   }
 }
 
-export function AdminAccessPage() {
+interface AdminAccessState {
+  policies: Policy[];
+  loading: boolean;
+  error: string;
+  saveBusyToken: string;
+  resetBusy: boolean;
+  selectedField: AccessFieldKey | null;
+}
+
+type AdminAccessAction =
+  | Partial<AdminAccessState>
+  | ((current: AdminAccessState) => Partial<AdminAccessState>);
+
+const INITIAL_ADMIN_ACCESS_STATE: AdminAccessState = {
+  policies: [],
+  loading: true,
+  error: "",
+  saveBusyToken: "",
+  resetBusy: false,
+  selectedField: null,
+};
+
+function adminAccessReducer(
+  current: AdminAccessState,
+  action: AdminAccessAction,
+): AdminAccessState {
+  const patch = typeof action === "function" ? action(current) : action;
+  return {
+    ...current,
+    ...patch,
+  };
+}
+
+function resolveAdminAccessStateAction<T>(action: SetStateAction<T>, current: T): T {
+  return typeof action === "function"
+    ? (action as (value: T) => T)(current)
+    : action;
+}
+
+function useAdminAccessPageContent() {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
   const closeUnsavedConfirmMessage =
     t.common_discard_unsaved_confirm;
 
-  const [policies, setPolicies] = useState<Policy[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [saveBusyToken, setSaveBusyToken] = useState("");
-  const [resetBusy, setResetBusy] = useState(false);
-  const [selectedField, setSelectedField] = useState<AccessFieldKey | null>(null);
+  const [accessState, dispatchAccessState] = useReducer(
+    adminAccessReducer,
+    INITIAL_ADMIN_ACCESS_STATE,
+  );
+  const {
+    error,
+    loading,
+    policies,
+    resetBusy,
+    saveBusyToken,
+    selectedField,
+  } = accessState;
+  const setPolicies = (nextValue: SetStateAction<Policy[]>) =>
+    dispatchAccessState((current) => ({
+      policies: resolveAdminAccessStateAction(nextValue, current.policies),
+    }));
+  const setLoading = (nextValue: SetStateAction<boolean>) =>
+    dispatchAccessState((current) => ({
+      loading: resolveAdminAccessStateAction(nextValue, current.loading),
+    }));
+  const setError = (nextValue: SetStateAction<string>) =>
+    dispatchAccessState((current) => ({
+      error: resolveAdminAccessStateAction(nextValue, current.error),
+    }));
+  const setSaveBusyToken = (nextValue: SetStateAction<string>) =>
+    dispatchAccessState((current) => ({
+      saveBusyToken: resolveAdminAccessStateAction(nextValue, current.saveBusyToken),
+    }));
+  const setResetBusy = (nextValue: SetStateAction<boolean>) =>
+    dispatchAccessState((current) => ({
+      resetBusy: resolveAdminAccessStateAction(nextValue, current.resetBusy),
+    }));
+  const setSelectedField = (nextValue: SetStateAction<AccessFieldKey | null>) =>
+    dispatchAccessState((current) => ({
+      selectedField: resolveAdminAccessStateAction(nextValue, current.selectedField),
+    }));
 
   const loadPolicies = useCallback(async () => {
     setLoading(true);
@@ -669,7 +739,7 @@ export function AdminAccessPage() {
                     return (
                       <div
                         key={role}
-                        className="rounded-lg border border-border/50 bg-card/60 px-3 py-3"
+                        className="rounded-lg border border-border/50 bg-card/60 p-3"
                       >
                         <div className="flex items-center justify-between gap-3">
                           <p className="text-[13px] font-semibold text-foreground">
@@ -714,4 +784,8 @@ export function AdminAccessPage() {
       </Sheet>
     </>
   );
+}
+
+export function AdminAccessPage(...args: Parameters<typeof useAdminAccessPageContent>) {
+  return useAdminAccessPageContent(...args);
 }

@@ -185,6 +185,10 @@ async function loginAsCeo(page: Page) {
   await page.waitForURL(/\/$/, { timeout: 15_000 });
 }
 
+async function openPatientsAsCeo(page: Page) {
+  await loginAsCeo(page).then(() => page.goto("/patients"));
+}
+
 test.describe("patients data-table", () => {
   test.beforeEach(async ({ page }) => {
     await mockAuth(page);
@@ -192,8 +196,7 @@ test.describe("patients data-table", () => {
   });
 
   test("renders active patients by default", async ({ page }) => {
-    await loginAsCeo(page);
-    await page.goto("/patients");
+    await openPatientsAsCeo(page);
     await expect(page.getByText("PT-0001")).toBeVisible();
     await expect(page.getByText("PT-0002")).toBeVisible();
     await expect(page.getByText("PT-0003")).not.toBeVisible();
@@ -201,8 +204,7 @@ test.describe("patients data-table", () => {
   });
 
   test("global search filters rows", async ({ page }) => {
-    await loginAsCeo(page);
-    await page.goto("/patients");
+    await openPatientsAsCeo(page);
     await expect(page.getByText("PT-0002")).toBeVisible();
     const searchInput = page.getByPlaceholder(/search|Suchen|Поиск/i).first();
     await searchInput.fill("Petrov");
@@ -212,8 +214,7 @@ test.describe("patients data-table", () => {
   });
 
   test("slash key focuses global search", async ({ page }) => {
-    await loginAsCeo(page);
-    await page.goto("/patients");
+    await openPatientsAsCeo(page);
     await expect(page.getByText("PT-0001")).toBeVisible();
     await page.keyboard.press("/");
     const searchInput = page.getByPlaceholder(/search|Suchen|Поиск/i).first();
@@ -221,30 +222,29 @@ test.describe("patients data-table", () => {
   });
 
   test("row click opens the patient edit page", async ({ page }) => {
-    await loginAsCeo(page);
-    await page.goto("/patients");
+    await openPatientsAsCeo(page);
     await expect(page.getByText("PT-0001")).toBeVisible();
     await page.getByText("Anna Müller").first().click();
     await expect(page).toHaveURL(/\/patients\/00000000-0000-0000-0000-000000000301$/);
   });
 
   test("patient grid does not reserve an empty trailing actions column", async ({ page }) => {
-    await loginAsCeo(page);
-    await page.goto("/patients");
+    await openPatientsAsCeo(page);
     await expect(page.getByText("PT-0001")).toBeVisible();
 
     const header = page.locator('[role="row"][aria-rowindex="1"]');
-    const headerColumnCount = await page.locator('[role="columnheader"]').count();
-    const gridTrackCount = await header.evaluate((element) =>
-      getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean).length,
-    );
+    const [headerColumnCount, gridTrackCount] = await Promise.all([
+      page.locator('[role="columnheader"]').count(),
+      header.evaluate((element) =>
+        getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean).length,
+      ),
+    ]);
 
     expect(gridTrackCount).toBe(headerColumnCount);
   });
 
   test("patient rows have a visible hover state", async ({ page }) => {
-    await loginAsCeo(page);
-    await page.goto("/patients");
+    await openPatientsAsCeo(page);
     await expect(page.getByText("PT-0001")).toBeVisible();
 
     const firstRow = page.locator('[role="row"][aria-rowindex="2"]');
@@ -270,8 +270,7 @@ test.describe("patients data-table", () => {
   });
 
   test("patient functional labels render as translated color chips", async ({ page }) => {
-    await loginAsCeo(page);
-    await page.goto("/patients");
+    await openPatientsAsCeo(page);
     await expect(page.getByText("PT-0001")).toBeVisible();
 
     const annaRow = page.locator('[role="row"]').filter({ hasText: "Anna Müller" }).first();
@@ -331,8 +330,7 @@ test.describe("patients data-table", () => {
   });
 
   test("columns menu can freeze an extra visible column", async ({ page }) => {
-    await loginAsCeo(page);
-    await page.goto("/patients");
+    await openPatientsAsCeo(page);
     await expect(page.getByText("PT-0001")).toBeVisible();
 
     await page.getByRole("button", { name: /Columns|Колонки|Spalten/i }).click();
@@ -362,8 +360,7 @@ test.describe("patients data-table", () => {
   });
 
   test("default frozen columns render as one left block", async ({ page }) => {
-    await loginAsCeo(page);
-    await page.goto("/patients");
+    await openPatientsAsCeo(page);
     await expect(page.getByText("PT-0001")).toBeVisible();
 
     const noHeader = page.locator('[role="columnheader"][data-column-id="no"]');
@@ -452,8 +449,7 @@ test.describe("patients data-table", () => {
   });
 
   test("sort menu opens under its trigger above the grid", async ({ page }) => {
-    await loginAsCeo(page);
-    await page.goto("/patients");
+    await openPatientsAsCeo(page);
     await expect(page.getByText("PT-0001")).toBeVisible();
 
     const sortButton = page.getByRole("button", { name: /Created|Создан|Erstellt/i }).first();
@@ -466,16 +462,17 @@ test.describe("patients data-table", () => {
     expect(menuBox).not.toBeNull();
     expect(menuBox!.x).toBeGreaterThanOrEqual(buttonBox!.x - 1);
 
-    const menuZ = await menu.evaluate((element) => Number(getComputedStyle(element).zIndex));
-    const headerZ = await page
-      .locator('[role="row"][aria-rowindex="1"]')
-      .evaluate((element) => Number(getComputedStyle(element).zIndex));
+    const [menuZ, headerZ] = await Promise.all([
+      menu.evaluate((element) => Number(getComputedStyle(element).zIndex)),
+      page
+        .locator('[role="row"][aria-rowindex="1"]')
+        .evaluate((element) => Number(getComputedStyle(element).zIndex)),
+    ]);
     expect(menuZ).toBeGreaterThan(headerZ);
   });
 
   test("density icon controls update row height", async ({ page }) => {
-    await loginAsCeo(page);
-    await page.goto("/patients");
+    await openPatientsAsCeo(page);
     await expect(page.getByText("PT-0001")).toBeVisible();
 
     const firstBodyRow = page.locator('[role="row"][aria-rowindex="2"]');
@@ -495,8 +492,7 @@ test.describe("patients data-table", () => {
   });
 
   test("column header context menu toggles frozen state", async ({ page }) => {
-    await loginAsCeo(page);
-    await page.goto("/patients");
+    await openPatientsAsCeo(page);
     await expect(page.getByText("PT-0001")).toBeVisible();
 
     const statusHeader = page.locator('[role="columnheader"][data-column-id="status"]');
@@ -520,8 +516,7 @@ test.describe("patients data-table", () => {
   });
 
   test("newly shown columns keep row styling", async ({ page }) => {
-    await loginAsCeo(page);
-    await page.goto("/patients");
+    await openPatientsAsCeo(page);
     await expect(page.getByText("PT-0001")).toBeVisible();
 
     await page.getByRole("button", { name: /Columns|Колонки|Spalten/i }).click();
@@ -541,12 +536,10 @@ test.describe("patients data-table", () => {
     expect(className ?? "").toContain("data-table-cell");
     await expect(emailCell.locator('[data-patient-cell-render="email"]')).toBeVisible();
 
-    const emailBackground = await emailCell.evaluate((element) =>
-      getComputedStyle(element).backgroundColor,
-    );
-    const patientBackground = await patientCell.evaluate((element) =>
-      getComputedStyle(element).backgroundColor,
-    );
+    const [emailBackground, patientBackground] = await Promise.all([
+      emailCell.evaluate((element) => getComputedStyle(element).backgroundColor),
+      patientCell.evaluate((element) => getComputedStyle(element).backgroundColor),
+    ]);
     expect(emailBackground).toBe(patientBackground);
 
     const topCellColumn = await emailCell.evaluate((element) => {
@@ -556,22 +549,21 @@ test.describe("patients data-table", () => {
     });
     expect(topCellColumn).toBe("email");
 
-    for (const [columnId, renderId] of [
+    await Promise.all([
       ["nationality", "nationality"],
       ["residence_country", "residence_country"],
       ["languages", "languages"],
-    ] as const) {
+    ].map(async ([columnId, renderId]) => {
       const cell = page.locator(`[role="cell"][data-column-id="${columnId}"]`).nth(1);
       await cell.scrollIntoViewIfNeeded();
       await expect(cell.locator(`[data-patient-cell-render="${renderId}"]`)).toBeVisible();
       const styledToken = cell.locator(".rounded-md").first();
       await expect(styledToken).toBeVisible();
-    }
+    }));
   });
 
   test("newly shown column headers keep the same flat surface", async ({ page }) => {
-    await loginAsCeo(page);
-    await page.goto("/patients");
+    await openPatientsAsCeo(page);
     await expect(page.getByText("PT-0001")).toBeVisible();
 
     await page.getByRole("button", { name: /Columns|Колонки|Spalten/i }).click();
@@ -602,8 +594,7 @@ test.describe("patients data-table", () => {
   });
 
   test("created filter editor opens above grid menus", async ({ page }) => {
-    await loginAsCeo(page);
-    await page.goto("/patients");
+    await openPatientsAsCeo(page);
     await expect(page.getByText("PT-0001")).toBeVisible();
 
     await page.getByRole("button", { name: /Filter|Фильтр/i }).click();

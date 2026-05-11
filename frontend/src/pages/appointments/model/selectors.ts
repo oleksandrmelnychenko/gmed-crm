@@ -15,7 +15,6 @@ export type {
   AppointmentTimelineKind,
   AppointmentTimelineTone,
   AppointmentWorkflowSummary,
-  AppointmentWorkspaceTab,
   InterpreterMobileAgendaItem,
   InterpreterMobileAgendaSection,
 } from "@/pages/appointments/model/types";
@@ -353,6 +352,12 @@ function localizeKnownTimelineText(
   return value;
 }
 
+const INTERPRETER_MOBILE_AGENDA_DATE_FORMATTER = new Intl.DateTimeFormat("en-GB", {
+  weekday: "long",
+  day: "2-digit",
+  month: "short",
+});
+
 function formatInterpreterMobileAgendaDateLabel(
   date: string,
   todayDate: string,
@@ -360,11 +365,9 @@ function formatInterpreterMobileAgendaDateLabel(
 ) {
   if (date === todayDate) return todayLabel;
   try {
-    return new Intl.DateTimeFormat("en-GB", {
-      weekday: "long",
-      day: "2-digit",
-      month: "short",
-    }).format(new Date(`${date}T00:00:00`));
+    return INTERPRETER_MOBILE_AGENDA_DATE_FORMATTER.format(
+      new Date(`${date}T00:00:00`),
+    );
   } catch {
     return date;
   }

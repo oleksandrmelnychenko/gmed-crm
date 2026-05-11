@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils"
 
 type PrimitiveValue = string | number
 
-export type ComboboxSelectOption = {
+type ComboboxSelectOption = {
   value: string
   label: React.ReactNode
   disabled?: boolean
@@ -260,7 +260,7 @@ function ComboboxSelect({
               />
             </div>
             <ComboboxPrimitive.List className="max-h-[min(18rem,var(--available-height))] overflow-y-auto p-1">
-              {(itemValue: string, index: number) => {
+              {(itemValue: string) => {
                 const option = optionsByValue.get(String(itemValue))
 
                 if (!option) {
@@ -269,7 +269,7 @@ function ComboboxSelect({
 
                 return (
                   <ComboboxPrimitive.Item
-                    key={`${option.value}-${index}`}
+                    key={option.value}
                     value={option.value}
                     disabled={option.disabled}
                     className="relative flex min-h-8 w-full cursor-default select-none items-center gap-2 rounded-md py-1.5 pr-8 pl-2 text-sm outline-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground"
@@ -343,4 +343,4 @@ function NativeComboboxSelect({
   )
 }
 
-export { ComboboxSelect, NativeComboboxSelect }
+export { NativeComboboxSelect }

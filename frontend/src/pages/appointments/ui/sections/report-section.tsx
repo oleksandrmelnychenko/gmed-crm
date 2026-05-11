@@ -1,7 +1,7 @@
 import {
   memo,
   useEffect,
-  useState,
+  useReducer,
   type FormEvent,
 } from "react";
 
@@ -54,55 +54,95 @@ function withEllipsis(value: string) {
   return value.endsWith("...") || value.endsWith("…") ? value : `${value}…`;
 }
 
-type AppointmentReportSectionProps = {
-  detail: AppointmentDetail;
-  detailReport: ReportSummary | null;
-  reportReviewMeta: string;
+type AppointmentReportActions = {
   canSubmitInterpreterReport: boolean;
   canResubmitRejectedReport: boolean;
   showReportReviewActions: boolean;
   canApproveReport: boolean;
   canRejectReport: boolean;
+};
+
+type AppointmentReportSectionProps = {
+  detail: AppointmentDetail;
+  detailReport: ReportSummary | null;
+  reportReviewMeta: string;
+  reportActions: AppointmentReportActions;
   onRefresh: () => void;
   onError: (message: string) => void;
 };
 
-function AppointmentReportSection({
+type ReportSectionState = {
+  form: ReportFormState;
+  rejectReason: string;
+  busyAction: string;
+  editorOpen: boolean;
+};
+
+type ReportSectionPatch =
+  | Partial<ReportSectionState>
+  | ((current: ReportSectionState) => Partial<ReportSectionState>);
+
+function createReportSectionState(): ReportSectionState {
+  return {
+    form: blankReportForm(),
+    rejectReason: "",
+    busyAction: "",
+    editorOpen: false,
+  };
+}
+
+function reportSectionReducer(
+  state: ReportSectionState,
+  patch: ReportSectionPatch,
+): ReportSectionState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
+function useAppointmentReportSectionContent({
   detail,
   detailReport,
   reportReviewMeta,
-  canSubmitInterpreterReport,
-  canResubmitRejectedReport,
-  showReportReviewActions,
-  canApproveReport,
-  canRejectReport,
+  reportActions,
   onRefresh,
   onError,
 }: AppointmentReportSectionProps) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const [form, setForm] = useState<ReportFormState>(() => blankReportForm());
-  const [rejectReason, setRejectReason] = useState("");
-  const [busyAction, setBusyAction] = useState("");
-  const [editorOpen, setEditorOpen] = useState(false);
+  const [reportState, dispatchReportState] = useReducer(
+    reportSectionReducer,
+    undefined,
+    createReportSectionState,
+  );
+  const { form, rejectReason, busyAction, editorOpen } = reportState;
+  const {
+    canSubmitInterpreterReport,
+    canResubmitRejectedReport,
+    showReportReviewActions,
+    canApproveReport,
+    canRejectReport,
+  } = reportActions;
 
   useEffect(() => {
-    setForm(
-      detailReport && detailReport.approval_status === "rejected"
-        ? {
-            hours: detailReport.hours,
-            reportText: detailReport.report_text ?? "",
-          }
-        : blankReportForm(),
-    );
-    setRejectReason("");
-    setBusyAction("");
-    setEditorOpen(false);
+    dispatchReportState({
+      form:
+        detailReport && detailReport.approval_status === "rejected"
+          ? {
+              hours: detailReport.hours,
+              reportText: detailReport.report_text ?? "",
+            }
+          : blankReportForm(),
+      rejectReason: "",
+      busyAction: "",
+      editorOpen: false,
+    });
   }, [detail.id, detailReport]);
 
   async function handleReportSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setBusyAction("report-submit");
+    dispatchReportState({ busyAction: "report-submit" });
     try {
       await apiFetch<{ id: string }>(`/appointments/${detail.id}/report`, {
         method: "POST",
@@ -111,8 +151,10 @@ function AppointmentReportSection({
           report_text: form.reportText.trim() || null,
         }),
       });
-      setForm(blankReportForm());
-      setEditorOpen(false);
+      dispatchReportState({
+        form: blankReportForm(),
+        editorOpen: false,
+      });
       onRefresh();
     } catch (error) {
       onError(
@@ -125,17 +167,17 @@ function AppointmentReportSection({
             ),
       );
     } finally {
-      setBusyAction("");
+      dispatchReportState({ busyAction: "" });
     }
   }
 
   async function handleApproveReport() {
-    setBusyAction("report-approve");
+    dispatchReportState({ busyAction: "report-approve" });
     try {
       await apiFetch<{ ok: boolean }>(`/appointments/${detail.id}/report/approve`, {
         method: "POST",
       });
-      setEditorOpen(false);
+      dispatchReportState({ editorOpen: false });
       onRefresh();
     } catch (error) {
       onError(
@@ -148,19 +190,21 @@ function AppointmentReportSection({
             ),
       );
     } finally {
-      setBusyAction("");
+      dispatchReportState({ busyAction: "" });
     }
   }
 
   async function handleRejectReport() {
-    setBusyAction("report-reject");
+    dispatchReportState({ busyAction: "report-reject" });
     try {
       await apiFetch<{ ok: boolean }>(`/appointments/${detail.id}/report/reject`, {
         method: "POST",
         body: JSON.stringify({ notes: rejectReason.trim() || null }),
       });
-      setRejectReason("");
-      setEditorOpen(false);
+      dispatchReportState({
+        rejectReason: "",
+        editorOpen: false,
+      });
       onRefresh();
     } catch (error) {
       onError(
@@ -173,7 +217,7 @@ function AppointmentReportSection({
             ),
       );
     } finally {
-      setBusyAction("");
+      dispatchReportState({ busyAction: "" });
     }
   }
 
@@ -225,7 +269,7 @@ function AppointmentReportSection({
                 type="button"
                 size="sm"
                 className="h-8 gap-1.5 rounded-lg"
-                onClick={() => setEditorOpen(true)}
+                onClick={() => dispatchReportState({ editorOpen: true })}
               >
                 {reportOpenButtonLabel}
               </Button>
@@ -367,7 +411,7 @@ function AppointmentReportSection({
       {canOpenReportEditor ? (
         <AppointmentEditorSheet
           open={editorOpen}
-          onOpenChange={setEditorOpen}
+          onOpenChange={(open) => dispatchReportState({ editorOpen: open })}
           title={reportEditorTitle}
           description={
             showReportReviewActions
@@ -392,7 +436,7 @@ function AppointmentReportSection({
                 variant="outline"
                 size="sm"
                 className="h-8 rounded-lg"
-                onClick={() => setEditorOpen(false)}
+                onClick={() => dispatchReportState({ editorOpen: false })}
               >
                 {t.common_cancel}
               </Button>
@@ -474,9 +518,11 @@ function AppointmentReportSection({
                   step="0.25"
                   value={form.hours}
                   onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      hours: event.target.value,
+                    dispatchReportState((current) => ({
+                      form: {
+                        ...current.form,
+                        hours: event.target.value,
+                      },
                     }))
                   }
                   className={appointmentFilterControlClassName}
@@ -487,9 +533,11 @@ function AppointmentReportSection({
                 <textarea
                   value={form.reportText}
                   onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      reportText: event.target.value,
+                    dispatchReportState((current) => ({
+                      form: {
+                        ...current.form,
+                        reportText: event.target.value,
+                      },
                     }))
                   }
                   className={appointmentTextareaControlClassName}
@@ -518,7 +566,9 @@ function AppointmentReportSection({
               <Field label={tr.patients_notes}>
                 <textarea
                   value={rejectReason}
-                  onChange={(event) => setRejectReason(event.target.value)}
+                  onChange={(event) =>
+                    dispatchReportState({ rejectReason: event.target.value })
+                  }
                   className={appointmentTextareaControlClassName}
                   rows={4}
                   placeholder={withEllipsis(tr.patients_notes)}
@@ -530,6 +580,10 @@ function AppointmentReportSection({
       ) : null}
     </div>
   );
+}
+
+function AppointmentReportSection(...args: Parameters<typeof useAppointmentReportSectionContent>) {
+  return useAppointmentReportSectionContent(...args);
 }
 
 export const MemoizedAppointmentReportSection = memo(AppointmentReportSection);

@@ -49,6 +49,36 @@ const PROVIDER_CODE_LABEL_KEYS = {
   other: "services_type_other",
 } satisfies Partial<Record<string, TranslationKey>>;
 
+const COMPACT_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+const COMPACT_DATE_FORMATTER = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+});
+
+const moneyFormatters = new Map<string, Intl.NumberFormat>();
+
+function moneyFormatter(currency: string) {
+  const normalizedCurrency = currency || "EUR";
+  const cached = moneyFormatters.get(normalizedCurrency);
+  if (cached) return cached;
+  const formatter = Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency: normalizedCurrency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  moneyFormatters.set(normalizedCurrency, formatter);
+  return formatter;
+}
+
 export const DEFAULT_FILTERS: ProviderFilters = {
   search: "",
   providerType: "",
@@ -62,158 +92,6 @@ export const DEFAULT_FILTERS: ProviderFilters = {
   hasContract: "",
   ratingGte: "",
 };
-
-export type ProviderColumnKey =
-  | "status"
-  | "no"
-  | "provider"
-  | "type"
-  | "location"
-  | "fachbereich"
-  | "doctors"
-  | "patients"
-  | "contract";
-
-export type ProviderColumnFilterKind = "text" | "select" | "daterange" | "none";
-
-export const PROVIDER_COLUMN_META: Record<
-  ProviderColumnKey,
-  {
-    labelKey: string;
-    widthClass?: string;
-    sortable?: boolean;
-    filter: ProviderColumnFilterKind;
-  }
-> = {
-  status: {
-    labelKey: "patients_col_status",
-    widthClass: "w-[110px]",
-    sortable: true,
-    filter: "select",
-  },
-  no: {
-    labelKey: "patients_col_no",
-    widthClass: "w-[56px]",
-    sortable: true,
-    filter: "text",
-  },
-  provider: { labelKey: "providers_title", sortable: true, filter: "text" },
-  type: {
-    labelKey: "providers_type",
-    widthClass: "w-[120px]",
-    sortable: true,
-    filter: "select",
-  },
-  location: {
-    labelKey: "providers_city",
-    widthClass: "w-[160px]",
-    sortable: true,
-    filter: "text",
-  },
-  fachbereich: {
-    labelKey: "providers_fachbereich",
-    widthClass: "w-[160px]",
-    sortable: true,
-    filter: "text",
-  },
-  doctors: {
-    labelKey: "providers_doctors",
-    widthClass: "w-[90px]",
-    sortable: true,
-    filter: "text",
-  },
-  patients: {
-    labelKey: "providers_linked_patients",
-    widthClass: "w-[90px]",
-    sortable: true,
-    filter: "text",
-  },
-  contract: {
-    labelKey: "providers_contract",
-    widthClass: "w-[110px]",
-    sortable: true,
-    filter: "select",
-  },
-};
-
-export const DEFAULT_PROVIDER_COLUMN_ORDER: ProviderColumnKey[] = [
-  "status",
-  "no",
-  "provider",
-  "type",
-  "location",
-  "fachbereich",
-  "doctors",
-  "patients",
-  "contract",
-];
-
-export function providerColumnText(
-  provider: ProviderSummary,
-  key: ProviderColumnKey,
-  tr: Record<string, string>,
-): string {
-  switch (key) {
-    case "status":
-      return provider.is_active
-        ? (tr.common_active ?? "active")
-        : (tr.common_inactive ?? "inactive");
-    case "no":
-      return "";
-    case "provider":
-      return [provider.name, provider.legal_name, provider.tax_id]
-        .filter(Boolean)
-        .join(" ");
-    case "type":
-      return provider.provider_type;
-    case "location":
-      return [provider.address_city, provider.address_country]
-        .filter(Boolean)
-        .join(" ");
-    case "fachbereich":
-      return provider.fachbereich ?? "";
-    case "doctors":
-      return String(provider.doctor_count);
-    case "patients":
-      return String(provider.patient_count);
-    case "contract":
-      return provider.has_contract ? "with" : "without";
-  }
-}
-
-export function compareProvidersByColumn(
-  a: ProviderSummary,
-  b: ProviderSummary,
-  key: ProviderColumnKey,
-): number {
-  switch (key) {
-    case "status":
-      return Number(b.is_active) - Number(a.is_active);
-    case "no":
-      return 0;
-    case "provider":
-      return (a.name ?? "").localeCompare(b.name ?? "");
-    case "type":
-      return (a.provider_type ?? "").localeCompare(b.provider_type ?? "");
-    case "location": {
-      const al = `${a.address_city ?? ""} ${a.address_country ?? ""}`
-        .trim()
-        .toLowerCase();
-      const bl = `${b.address_city ?? ""} ${b.address_country ?? ""}`
-        .trim()
-        .toLowerCase();
-      return al.localeCompare(bl);
-    }
-    case "fachbereich":
-      return (a.fachbereich ?? "").localeCompare(b.fachbereich ?? "");
-    case "doctors":
-      return a.doctor_count - b.doctor_count;
-    case "patients":
-      return a.patient_count - b.patient_count;
-    case "contract":
-      return Number(b.has_contract) - Number(a.has_contract);
-  }
-}
 
 export function providerPermissions(role?: string): ProviderPermissions {
   switch (role) {
@@ -277,16 +155,16 @@ export function blankServiceForm(): ServiceFormState {
   };
 }
 
-export function toOptional(value: string) {
+function toOptional(value: string) {
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
 }
 
-export function parseCommaList(value: string) {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
+function parseCommaList(value: string) {
+  return value.split(",").flatMap((item) => {
+    const trimmed = item.trim();
+    return trimmed ? [trimmed] : [];
+  });
 }
 
 export function providerTypeLabel(value: string, tr: Record<string, string>) {
@@ -303,13 +181,7 @@ export function providerTypeLabel(value: string, tr: Record<string, string>) {
 export function compactDateTime(value?: string | null, fallback = "Not set") {
   if (!value) return fallback;
   try {
-    return new Intl.DateTimeFormat("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(value));
+    return COMPACT_DATE_TIME_FORMATTER.format(new Date(value));
   } catch {
     return value;
   }
@@ -318,17 +190,13 @@ export function compactDateTime(value?: string | null, fallback = "Not set") {
 export function compactDate(value?: string | null, fallback = "Not set") {
   if (!value) return fallback;
   try {
-    return new Intl.DateTimeFormat("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }).format(new Date(`${value}T00:00:00`));
+    return COMPACT_DATE_FORMATTER.format(new Date(`${value}T00:00:00`));
   } catch {
     return value;
   }
 }
 
-export function stringifyContract(value: unknown) {
+function stringifyContract(value: unknown) {
   if (value === null || value === undefined || value === "") return "";
   if (typeof value === "string") return value;
   if (typeof value === "object" && value && "summary" in value) {
@@ -342,7 +210,7 @@ export function stringifyContract(value: unknown) {
   }
 }
 
-export function parseContract(value: string) {
+function parseContract(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return null;
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
@@ -472,12 +340,7 @@ export function moneyLabel(price: string, currency: string) {
   const numeric = Number.parseFloat(price);
   if (!Number.isFinite(numeric)) return `${price} ${currency}`.trim();
   try {
-    return new Intl.NumberFormat("en-GB", {
-      style: "currency",
-      currency: currency || "EUR",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(numeric);
+    return moneyFormatter(currency).format(numeric);
   } catch {
     return `${numeric.toFixed(2)} ${currency}`.trim();
   }

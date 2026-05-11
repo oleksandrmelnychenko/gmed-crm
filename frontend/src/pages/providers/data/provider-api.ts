@@ -1,10 +1,8 @@
 import { apiFetch } from "@/lib/api";
 
 import type {
-  AppointmentItem,
   CreateResponse,
   ProviderDetail,
-  ProviderRouteDetail,
   ProviderSummary,
 } from "../model/types";
 
@@ -73,26 +71,4 @@ export function saveProviderService(
 
 export function deleteProviderService(providerId: string, serviceId: string) {
   return post(`/providers/${providerId}/services/${serviceId}/delete`);
-}
-
-export function fetchProviderRouteDetail(id: string) {
-  return apiFetch<ProviderRouteDetail>(`/providers/${id}`);
-}
-
-export function fetchProviderAppointments(providerId: string) {
-  return apiFetch<AppointmentItem[]>(
-    `/appointments?provider_id=${encodeURIComponent(providerId)}`,
-  );
-}
-
-export function createProviderTemplate(providerId: string, payload: JsonPayload) {
-  return postJson<{ id: string }>(`/providers/${providerId}/templates`, payload);
-}
-
-export function updateProviderTemplate(
-  providerId: string,
-  templateId: string,
-  payload: JsonPayload,
-) {
-  return postJson<void>(`/providers/${providerId}/templates/${templateId}/update`, payload);
 }

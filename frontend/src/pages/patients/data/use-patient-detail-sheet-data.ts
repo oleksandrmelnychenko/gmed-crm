@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useEffect, useReducer } from "react";
 
 import { apiFetch } from "@/lib/api";
 
@@ -21,6 +21,58 @@ type UsePatientDetailSheetDataArgs = {
 
 const PATIENT_DETAIL_SHEET_META_CACHE_TTL_MS = 60_000;
 
+type PatientDetailSheetDataState = {
+  detail: PatientDetail | null;
+  detailError: string;
+  assignments: PatientAssignment[];
+  settledKey: string;
+  staff: StaffOption[];
+};
+
+type PatientDetailSheetDataAction =
+  | {
+      type: "success";
+      detail: PatientDetail;
+      assignments: PatientAssignment[];
+      requestKey: string;
+      staff: StaffOption[];
+    }
+  | { type: "error"; message: string; requestKey: string };
+
+const EMPTY_PATIENT_DETAIL_SHEET_DATA_STATE: PatientDetailSheetDataState = {
+  detail: null,
+  detailError: "",
+  assignments: [],
+  settledKey: "",
+  staff: [],
+};
+
+function patientDetailSheetDataReducer(
+  state: PatientDetailSheetDataState,
+  action: PatientDetailSheetDataAction,
+): PatientDetailSheetDataState {
+  switch (action.type) {
+    case "success":
+      return {
+        detail: action.detail,
+        detailError: "",
+        assignments: action.assignments,
+        settledKey: action.requestKey,
+        staff: action.staff,
+      };
+    case "error":
+      return {
+        detail: null,
+        detailError: action.message,
+        assignments: [],
+        settledKey: action.requestKey,
+        staff: [],
+      };
+    default:
+      return state;
+  }
+}
+
 export function usePatientDetailSheetData({
   commonFailedLoad,
   detailOpen,
@@ -28,11 +80,11 @@ export function usePatientDetailSheetData({
   permissions,
   selectedId,
 }: UsePatientDetailSheetDataArgs) {
-  const [detail, setDetail] = useState<PatientDetail | null>(null);
-  const [detailError, setDetailError] = useState("");
-  const [assignments, setAssignments] = useState<PatientAssignment[]>([]);
-  const [settledKey, setSettledKey] = useState("");
-  const [staff, setStaff] = useState<StaffOption[]>([]);
+  const [{ detail, detailError, assignments, settledKey, staff }, dispatchSheetData] =
+    useReducer(
+      patientDetailSheetDataReducer,
+      EMPTY_PATIENT_DETAIL_SHEET_DATA_STATE,
+    );
   const requestKey =
     detailOpen && selectedId
       ? `${selectedId}:${detailVersion}:${Number(permissions.canViewAssignments)}:${Number(
@@ -59,21 +111,23 @@ export function usePatientDetailSheetData({
       .then(([patientDetail, assignmentItems, staffItems]) => {
         if (cancelled) return;
         startTransition(() => {
-          setDetail(patientDetail);
-          setAssignments(assignmentItems);
-          setDetailError("");
-          setSettledKey(requestKey);
-          setStaff(staffItems);
+          dispatchSheetData({
+            type: "success",
+            detail: patientDetail,
+            assignments: assignmentItems,
+            requestKey,
+            staff: staffItems,
+          });
         });
       })
       .catch((error: unknown) => {
         if (!cancelled) {
           startTransition(() => {
-            setAssignments([]);
-            setDetail(null);
-            setDetailError(error instanceof Error ? error.message : commonFailedLoad);
-            setSettledKey(requestKey);
-            setStaff([]);
+            dispatchSheetData({
+              type: "error",
+              message: error instanceof Error ? error.message : commonFailedLoad,
+              requestKey,
+            });
           });
         }
       });

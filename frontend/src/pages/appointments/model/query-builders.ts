@@ -57,7 +57,7 @@ function toTimestamp(value: string | null | undefined): number {
 export function sortLinkedDocuments(
   items: LinkedDocumentItem[],
 ): LinkedDocumentItem[] {
-  return [...items].sort((left, right) => {
+  return items.toSorted((left, right) => {
     const updatedDiff =
       toTimestamp(right.updated_at) - toTimestamp(left.updated_at);
     if (updatedDiff !== 0) return updatedDiff;

@@ -42,10 +42,16 @@ export function OrderWorkspaceNav() {
   const backHref = patientContext ? `/patients/${patientContext}?tab=orders` : "/orders";
   const backLabel = patientContext ? t.patients_col_patient : t.orders_title;
 
-  const groupedSections = GROUP_ORDER.map((group) => ({
-    group,
-    items: ORDER_WORKSPACE_SECTIONS.filter((item) => item.group === group),
-  })).filter((entry) => entry.items.length > 0);
+  const groupedSections = GROUP_ORDER.reduce<Array<{
+    group: OrderSectionGroup;
+    items: Array<(typeof ORDER_WORKSPACE_SECTIONS)[number]>;
+  }>>((acc, group) => {
+    const items = ORDER_WORKSPACE_SECTIONS.filter((item) => item.group === group);
+    if (items.length > 0) {
+      acc.push({ group, items });
+    }
+    return acc;
+  }, []);
 
   return (
     <aside

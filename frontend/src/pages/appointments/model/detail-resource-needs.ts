@@ -59,14 +59,3 @@ export function getRequiredAppointmentDetailResourceGroups(
     DETAIL_RESOURCE_GROUP_PERMISSIONS[group](permissions),
   );
 }
-
-export function requiresExtendedAppointmentDetailResources(
-  detailTab: AppointmentWorkspaceTab,
-  isMobile: boolean,
-  permissions: AppointmentPermissions,
-) {
-  return (
-    getRequiredAppointmentDetailResourceGroups(detailTab, isMobile, permissions)
-      .length > 0
-  );
-}

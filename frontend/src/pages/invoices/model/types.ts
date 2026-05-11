@@ -7,7 +7,7 @@ export type InvoiceStatus =
   | "overdue"
   | "cancelled";
 
-export type InvoiceLineItem = {
+type InvoiceLineItem = {
   description: string;
   quantity: string;
   unit_price: string;
@@ -26,7 +26,7 @@ export type InvoiceLineItem = {
   notes?: string | null;
 };
 
-export type SupportingDocument = {
+type SupportingDocument = {
   id: string;
   auto_name: string;
   original_filename?: string | null;
@@ -34,7 +34,7 @@ export type SupportingDocument = {
   category?: string | null;
 };
 
-export type InvoicePortalVisibility = {
+type InvoicePortalVisibility = {
   visible_to_patient: boolean;
   amounts_visible_to_patient: boolean;
   line_items_visible_to_patient: boolean;
@@ -42,7 +42,7 @@ export type InvoicePortalVisibility = {
   redaction_reason: string | null;
 };
 
-export type InvoicePayer = {
+type InvoicePayer = {
   patient_relation_id?: string | null;
   contact_name?: string | null;
   contact_email?: string | null;

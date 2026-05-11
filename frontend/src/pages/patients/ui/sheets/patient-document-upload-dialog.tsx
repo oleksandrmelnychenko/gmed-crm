@@ -333,7 +333,7 @@ function PatientDocumentUploadDialog({
             </Button>
             <Button
               type="submit"
-              className="rounded-xl bg-slate-950 text-white hover:bg-slate-800"
+              className="rounded-xl bg-zinc-950 text-white hover:bg-zinc-800"
               disabled={busy}
             >
               {busy ? <span className="mr-2 size-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : null}

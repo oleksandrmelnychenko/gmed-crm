@@ -6,8 +6,9 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useState,
   type FormEvent,
+  useReducer,
+  type SetStateAction,
 } from "react";
 import { Activity, ClipboardList, LoaderCircle, Plus, RefreshCw, Search, Wallet } from "lucide-react";
 
@@ -233,7 +234,7 @@ function billingStatusTone(status: string) {
   if (status === "billed" || status === "ready") {
     return "border-sky-200 bg-sky-50 text-sky-700";
   }
-  return "border-slate-200 bg-slate-100 text-slate-700";
+  return "border-neutral-200 bg-neutral-100 text-neutral-700";
 }
 
 function serviceStatusLabel(value: string, t: Translations) {
@@ -426,33 +427,212 @@ function buildServiceColumns(t: Translations): ColumnDef<StaffConciergeService>[
   ];
 }
 
-function StaffServicesPage() {
+type StaffServicesPageState = {
+  items: StaffConciergeService[];
+  loading: boolean;
+  refreshing: boolean;
+  error: string;
+  version: number;
+  search: string;
+  mineOnly: boolean;
+  filterPredicates: FilterPredicate[];
+  sortStack: SortStack;
+  density: DensityLevel;
+  hiddenColumns: string[];
+  frozenColumns: string[];
+  patients: PatientOption[];
+  providers: ProviderOption[];
+  conciergeStaff: StaffOption[];
+  lookupError: string;
+  lookupsLoading: boolean;
+  createOpen: boolean;
+  createBusy: boolean;
+  createError: string;
+  createForm: CreateServiceFormState;
+};
+
+type StaffServicesPageAction =
+  | { type: "patch"; value: Partial<StaffServicesPageState> }
+  | { type: "update"; updater: (state: StaffServicesPageState) => StaffServicesPageState }
+  | { type: "bump-version" }
+  | { type: "lookups-start" }
+  | {
+      type: "lookups-success";
+      patients: PatientOption[];
+      providers: ProviderOption[];
+      conciergeStaff: StaffOption[];
+    }
+  | { type: "lookups-error"; message: string }
+  | { type: "services-load-start" }
+  | { type: "services-load-success"; items: StaffConciergeService[] }
+  | { type: "services-load-error"; message: string }
+  | {
+      type: "create-success";
+      created: StaffConciergeService;
+      defaultConciergeId: string;
+    };
+
+const STAFF_SERVICES_INITIAL_STATE: StaffServicesPageState = {
+  items: [],
+  loading: true,
+  refreshing: false,
+  error: "",
+  version: 0,
+  search: "",
+  mineOnly: false,
+  filterPredicates: [],
+  sortStack: [{ field: "schedule", dir: "desc" }],
+  density: "compact",
+  hiddenColumns: [],
+  frozenColumns: DEFAULT_FROZEN_COLUMNS,
+  patients: [],
+  providers: [],
+  conciergeStaff: [],
+  lookupError: "",
+  lookupsLoading: false,
+  createOpen: false,
+  createBusy: false,
+  createError: "",
+  createForm: blankCreateServiceForm(),
+};
+
+function staffServicesPageReducer(
+  state: StaffServicesPageState,
+  action: StaffServicesPageAction,
+): StaffServicesPageState {
+  switch (action.type) {
+    case "patch":
+      return { ...state, ...action.value };
+    case "update":
+      return action.updater(state);
+    case "bump-version":
+      return { ...state, version: state.version + 1 };
+    case "lookups-start":
+      return { ...state, lookupsLoading: true };
+    case "lookups-success":
+      return {
+        ...state,
+        patients: action.patients,
+        providers: action.providers,
+        conciergeStaff: action.conciergeStaff,
+        lookupError: "",
+        lookupsLoading: false,
+      };
+    case "lookups-error":
+      return {
+        ...state,
+        lookupError: action.message,
+        lookupsLoading: false,
+      };
+    case "services-load-start":
+      return { ...state, refreshing: !state.loading };
+    case "services-load-success":
+      return {
+        ...state,
+        items: action.items,
+        error: "",
+        loading: false,
+        refreshing: false,
+      };
+    case "services-load-error":
+      return {
+        ...state,
+        error: action.message,
+        loading: false,
+        refreshing: false,
+      };
+    case "create-success":
+      return {
+        ...state,
+        items: [
+          action.created,
+          ...state.items.filter((item) => item.id !== action.created.id),
+        ],
+        createForm: blankCreateServiceForm(action.defaultConciergeId),
+        createOpen: false,
+        version: state.version + 1,
+      };
+    default:
+      return state;
+  }
+}
+
+function createStaffServicesFieldAction<K extends keyof StaffServicesPageState>(
+  field: K,
+  value: SetStateAction<StaffServicesPageState[K]>,
+): StaffServicesPageAction {
+  return {
+    type: "update",
+    updater: (state) => {
+      const currentValue = state[field];
+      const nextValue =
+        typeof value === "function"
+          ? (value as (current: StaffServicesPageState[K]) => StaffServicesPageState[K])(
+              currentValue,
+            )
+          : value;
+
+      if (Object.is(currentValue, nextValue)) return state;
+      return { ...state, [field]: nextValue };
+    },
+  };
+}
+
+function useStaffServicesPageContent() {
   const { t } = useLang();
   const { user } = useAuth();
-  const [items, setItems] = useState<StaffConciergeService[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState("");
-  const [version, setVersion] = useState(0);
-  const [search, setSearch] = useState("");
-  const [mineOnly, setMineOnly] = useState(false);
-
-  const [filterPredicates, setFilterPredicates] = useState<FilterPredicate[]>([]);
-  const [sortStack, setSortStack] = useState<SortStack>([{ field: "schedule", dir: "desc" }]);
-  const [density, setDensity] = useState<DensityLevel>("compact");
-  const [hiddenColumns, setHiddenColumns] = useState<string[]>([]);
-  const [frozenColumns, setFrozenColumns] = useState<string[]>(DEFAULT_FROZEN_COLUMNS);
-  const [patients, setPatients] = useState<PatientOption[]>([]);
-  const [providers, setProviders] = useState<ProviderOption[]>([]);
-  const [conciergeStaff, setConciergeStaff] = useState<StaffOption[]>([]);
-  const [lookupError, setLookupError] = useState("");
-  const [lookupsLoading, setLookupsLoading] = useState(false);
-  const [createOpen, setCreateOpen] = useState(false);
-  const [createBusy, setCreateBusy] = useState(false);
-  const [createError, setCreateError] = useState("");
-  const [createForm, setCreateForm] = useState<CreateServiceFormState>(() =>
-    blankCreateServiceForm(),
-  );
+  const [
+    {
+      items,
+      loading,
+      refreshing,
+      error,
+      version,
+      search,
+      mineOnly,
+      filterPredicates,
+      sortStack,
+      density,
+      hiddenColumns,
+      frozenColumns,
+      patients,
+      providers,
+      conciergeStaff,
+      lookupError,
+      lookupsLoading,
+      createOpen,
+      createBusy,
+      createError,
+      createForm,
+    },
+    dispatchStaffServicesState,
+  ] = useReducer(staffServicesPageReducer, STAFF_SERVICES_INITIAL_STATE);
+  const setStaffServicesField = <K extends keyof StaffServicesPageState>(
+    field: K,
+    value: SetStateAction<StaffServicesPageState[K]>,
+  ) => dispatchStaffServicesState(createStaffServicesFieldAction(field, value));
+  const setSearch = (value: SetStateAction<string>) =>
+    setStaffServicesField("search", value);
+  const setMineOnly = (value: SetStateAction<boolean>) =>
+    setStaffServicesField("mineOnly", value);
+  const setFilterPredicates = (value: SetStateAction<FilterPredicate[]>) =>
+    setStaffServicesField("filterPredicates", value);
+  const setSortStack = (value: SetStateAction<SortStack>) =>
+    setStaffServicesField("sortStack", value);
+  const setDensity = (value: SetStateAction<DensityLevel>) =>
+    setStaffServicesField("density", value);
+  const setHiddenColumns = (value: SetStateAction<string[]>) =>
+    setStaffServicesField("hiddenColumns", value);
+  const setFrozenColumns = (value: SetStateAction<string[]>) =>
+    setStaffServicesField("frozenColumns", value);
+  const setCreateOpen = (value: SetStateAction<boolean>) =>
+    setStaffServicesField("createOpen", value);
+  const setCreateBusy = (value: SetStateAction<boolean>) =>
+    setStaffServicesField("createBusy", value);
+  const setCreateError = (value: SetStateAction<string>) =>
+    setStaffServicesField("createError", value);
+  const setCreateForm = (value: SetStateAction<CreateServiceFormState>) =>
+    setStaffServicesField("createForm", value);
 
   const canCreateService =
     user?.role === "ceo" ||
@@ -461,7 +641,7 @@ function StaffServicesPage() {
 
   useDebouncedRealtimeSubscription(STAFF_SERVICES_REALTIME_EVENTS, () => {
     clearApiCache("/concierge-services");
-    setVersion((value) => value + 1);
+    dispatchStaffServicesState({ type: "bump-version" });
   }, 250);
 
   const baseColumns = useMemo(() => buildServiceColumns(t), [t]);
@@ -524,7 +704,7 @@ function StaffServicesPage() {
     let cancelled = false;
 
     async function loadLookups() {
-      setLookupsLoading(true);
+      dispatchStaffServicesState({ type: "lookups-start" });
       try {
         const [patientRows, providerRows, staffRows] = await Promise.all([
           apiFetch<PatientOption[]>("/patients?active_only=true", {
@@ -538,19 +718,21 @@ function StaffServicesPage() {
           }),
         ]);
         if (cancelled) return;
-        setPatients(patientRows);
-        setProviders(providerRows.filter((provider) => provider.provider_type === "non_medical"));
-        setConciergeStaff(staffRows.filter((member) => member.role === "concierge"));
-        setLookupError("");
+        dispatchStaffServicesState({
+          type: "lookups-success",
+          patients: patientRows,
+          providers: providerRows.filter((provider) => provider.provider_type === "non_medical"),
+          conciergeStaff: staffRows.filter((member) => member.role === "concierge"),
+        });
       } catch (err) {
         if (cancelled) return;
-        setLookupError(
-          err instanceof Error
-            ? err.message
-            : t.staff_services_lookup_failed,
-        );
-      } finally {
-        if (!cancelled) setLookupsLoading(false);
+        dispatchStaffServicesState({
+          type: "lookups-error",
+          message:
+            err instanceof Error
+              ? err.message
+              : t.staff_services_lookup_failed,
+        });
       }
     }
 
@@ -564,11 +746,7 @@ function StaffServicesPage() {
     let cancelled = false;
 
     async function load() {
-      if (loading) {
-        setRefreshing(false);
-      } else {
-        setRefreshing(true);
-      }
+      dispatchStaffServicesState({ type: "services-load-start" });
 
       try {
         const rows = await apiFetch<StaffConciergeService[]>(
@@ -577,21 +755,17 @@ function StaffServicesPage() {
         );
         if (cancelled) return;
         startTransition(() => {
-          setItems(rows);
-          setError("");
+          dispatchStaffServicesState({ type: "services-load-success", items: rows });
         });
       } catch (err) {
         if (cancelled) return;
-        setError(
-          err instanceof Error
-            ? err.message
-            : t.staff_services_load_failed,
-        );
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-          setRefreshing(false);
-        }
+        dispatchStaffServicesState({
+          type: "services-load-error",
+          message:
+            err instanceof Error
+              ? err.message
+              : t.staff_services_load_failed,
+        });
       }
     }
 
@@ -599,7 +773,7 @@ function StaffServicesPage() {
     return () => {
       cancelled = true;
     };
-  }, [loading, mineOnly, search, t, version]);
+  }, [mineOnly, search, t, version]);
 
   async function handleCreateService(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -651,10 +825,11 @@ function StaffServicesPage() {
         }),
       });
       clearApiCache("/concierge-services");
-      setItems((current) => [created, ...current.filter((item) => item.id !== created.id)]);
-      setCreateForm(blankCreateServiceForm(defaultConciergeId));
-      setCreateOpen(false);
-      setVersion((value) => value + 1);
+      dispatchStaffServicesState({
+        type: "create-success",
+        created,
+        defaultConciergeId,
+      });
     } catch (err) {
       setCreateError(
         err instanceof Error
@@ -704,7 +879,7 @@ function StaffServicesPage() {
   if (loading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
-        <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm text-slate-500 shadow-sm">
+        <div className="flex items-center gap-3 rounded-full border border-zinc-200 bg-white px-5 py-3 text-sm text-zinc-500 shadow-sm">
           <LoaderCircle className="size-4 animate-spin" />
           {t.staff_services_loading}
         </div>
@@ -751,7 +926,7 @@ function StaffServicesPage() {
       <div className="relative z-30 flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-1.5">
           <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -tranzinc-y-1/2 text-muted-foreground" />
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -782,7 +957,7 @@ function StaffServicesPage() {
               size="icon-sm"
               title={t.common_refresh}
               aria-label={t.common_refresh}
-              onClick={() => setVersion((value) => value + 1)}
+                onClick={() => dispatchStaffServicesState({ type: "bump-version" })}
             >
               <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
             </Button>
@@ -1174,6 +1349,10 @@ function StaffServicesPage() {
       </Sheet>
     </div>
   );
+}
+
+function StaffServicesPage(...args: Parameters<typeof useStaffServicesPageContent>) {
+  return useStaffServicesPageContent(...args);
 }
 
 export function ServicesPage() {

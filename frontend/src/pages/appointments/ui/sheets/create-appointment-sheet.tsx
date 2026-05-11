@@ -2,8 +2,9 @@ import {
   memo,
   useEffect,
   useMemo,
-  useState,
+  useReducer,
   type FormEvent,
+  type SetStateAction,
 } from "react";
 
 import { Plus, LoaderCircle } from "lucide-react";
@@ -82,7 +83,29 @@ export type CreateAppointmentSheetProps = {
   onCreated: (result: { id: string; notice: string }) => void;
 };
 
-function CreateAppointmentSheet({
+type CreateAppointmentSheetState = {
+  form: AppointmentFormState;
+  doctors: DoctorOption[];
+  conflicts: ConflictSummary | null;
+  error: string;
+  busy: boolean;
+};
+
+type CreateAppointmentSheetPatch =
+  | Partial<CreateAppointmentSheetState>
+  | ((current: CreateAppointmentSheetState) => Partial<CreateAppointmentSheetState>);
+
+function createAppointmentSheetReducer(
+  state: CreateAppointmentSheetState,
+  patch: CreateAppointmentSheetPatch,
+): CreateAppointmentSheetState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
+function useCreateAppointmentSheetContent({
   open,
   title,
   seed,
@@ -100,19 +123,36 @@ function CreateAppointmentSheet({
   const interpreterFieldLabel =
     tr.role_interpreter ??
     appointmentText("Dolmetscher", "Переводчик", "Interpreter");
-  const [form, setForm] = useState<AppointmentFormState>(seed);
-  const [doctors, setDoctors] = useState<DoctorOption[]>([]);
-  const [conflicts, setConflicts] = useState<ConflictSummary | null>(null);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [sheetState, dispatchSheetState] = useReducer(
+    createAppointmentSheetReducer,
+    undefined,
+    () => ({
+      form: seed,
+      doctors: [],
+      conflicts: null,
+      error: "",
+      busy: false,
+    }),
+  );
+  const { form, doctors, conflicts, error, busy } = sheetState;
+  const setForm = (nextValue: SetStateAction<AppointmentFormState>) => {
+    dispatchSheetState((current) => ({
+      form:
+        typeof nextValue === "function"
+          ? nextValue(current.form)
+          : nextValue,
+    }));
+  };
 
   useEffect(() => {
     if (!open) return;
-    setForm(seed);
-    setDoctors([]);
-    setConflicts(null);
-    setError("");
-    setBusy(false);
+    dispatchSheetState({
+      form: seed,
+      doctors: [],
+      conflicts: null,
+      error: "",
+      busy: false,
+    });
   }, [open, seed]);
 
   const scheduleWarningLabels = useMemo(
@@ -171,19 +211,21 @@ function CreateAppointmentSheet({
 
   useEffect(() => {
     if (!form.providerId) {
-      setDoctors([]);
-      setForm((current) =>
-        current.doctorId ? { ...current, doctorId: "" } : current,
-      );
+      dispatchSheetState((current) => ({
+        doctors: [],
+        form: current.form.doctorId
+          ? { ...current.form, doctorId: "" }
+          : current.form,
+      }));
       return;
     }
     let active = true;
     getProviderDoctors(form.providerId)
       .then((rows) => {
-        if (active) setDoctors(rows);
+        if (active) dispatchSheetState({ doctors: rows });
       })
       .catch(() => {
-        if (active) setDoctors([]);
+        if (active) dispatchSheetState({ doctors: [] });
       });
     return () => {
       active = false;
@@ -192,16 +234,16 @@ function CreateAppointmentSheet({
 
   useEffect(() => {
     if (!debouncedConflictQuery) {
-      setConflicts(null);
+      dispatchSheetState({ conflicts: null });
       return;
     }
     let active = true;
     apiFetch<ConflictSummary>(debouncedConflictQuery)
       .then((value) => {
-        if (active) setConflicts(value);
+        if (active) dispatchSheetState({ conflicts: value });
       })
       .catch(() => {
-        if (active) setConflicts(null);
+        if (active) dispatchSheetState({ conflicts: null });
       });
     return () => {
       active = false;
@@ -210,22 +252,33 @@ function CreateAppointmentSheet({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setBusy(true);
-    setError("");
+    dispatchSheetState({
+      busy: true,
+      error: "",
+    });
     try {
       if (!form.patientId) {
-        setError(`${t.orders_patient}: ${t.cf_required}`);
+        dispatchSheetState({
+          error: `${t.orders_patient}: ${t.cf_required}`,
+          busy: false,
+        });
         return;
       }
       const repeatInterval = parsePositiveIntegerInput(form.repeatInterval);
       const repeatCount = parsePositiveIntegerInput(form.repeatCount);
       if (form.repeatEnabled) {
         if (!repeatInterval) {
-          setError(t.appointments_repeat_interval_error);
+          dispatchSheetState({
+            error: t.appointments_repeat_interval_error,
+            busy: false,
+          });
           return;
         }
         if (!repeatCount && !form.repeatUntil) {
-          setError(t.appointments_repeat_require_end_error);
+          dispatchSheetState({
+            error: t.appointments_repeat_require_end_error,
+            busy: false,
+          });
           return;
         }
       }
@@ -266,17 +319,17 @@ function CreateAppointmentSheet({
       onOpenChange(false);
       onCreated({ id: result.id, notice });
     } catch (submitError) {
-      setError(
-        submitError instanceof Error
-          ? submitError.message
-          : appointmentText(
+      dispatchSheetState({
+        error:
+          submitError instanceof Error
+            ? submitError.message
+            : appointmentText(
               "Termin konnte nicht erstellt werden.",
               "Не удалось создать приём.",
               "Failed to create appointment",
             ),
-      );
-    } finally {
-      setBusy(false);
+        busy: false,
+      });
     }
   }
 
@@ -454,8 +507,13 @@ function CreateAppointmentSheet({
                   </Field>
                 </div>
                 <div className="space-y-3 rounded-lg border border-border/60 bg-card p-3">
-                  <label className="flex items-start gap-3 text-sm text-foreground">
+                  <label
+                    htmlFor="appointment-repeat-enabled"
+                    aria-label={t.appointments_repeat_this}
+                    className="flex items-start gap-3 text-sm text-foreground"
+                  >
                     <input
+                      id="appointment-repeat-enabled"
                       type="checkbox"
                       checked={form.repeatEnabled}
                       onChange={(event) =>
@@ -695,6 +753,10 @@ function CreateAppointmentSheet({
       </div>
     </AppointmentEditorSheet>
   );
+}
+
+function CreateAppointmentSheet(...args: Parameters<typeof useCreateAppointmentSheetContent>) {
+  return useCreateAppointmentSheetContent(...args);
 }
 
 export const MemoizedCreateAppointmentSheet = memo(

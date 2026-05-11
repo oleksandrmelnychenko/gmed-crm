@@ -190,7 +190,7 @@ function preferredWindowLabel(item: AppointmentRequestItem) {
   return time ? `${dateLabel} · ${time}` : dateLabel;
 }
 
-function QueueSheet({
+function useQueueSheetContent({
   open,
   onOpenChange,
   appointmentsLoading,
@@ -729,6 +729,10 @@ function QueueSheet({
       ) : null}
     </AppointmentPreviewSheet>
   );
+}
+
+function QueueSheet(...args: Parameters<typeof useQueueSheetContent>) {
+  return useQueueSheetContent(...args);
 }
 
 export const MemoizedQueueSheet = memo(QueueSheet);

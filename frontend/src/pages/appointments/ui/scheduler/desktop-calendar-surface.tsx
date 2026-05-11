@@ -160,10 +160,6 @@ export function DesktopCalendarSurface({
   );
 
   useEffect(() => {
-    setSlotHeightPx(computeBaseSlotHeight(calendarView));
-  }, [calendarView]);
-
-  useEffect(() => {
     if (!isTimeGridView || typeof window === "undefined") return;
 
     const maxSlotHeight = resolveSlotHeightCeiling(calendarView);

@@ -84,6 +84,76 @@ type PatientFinancialDialogsProps = {
   textareaClassName: string;
 };
 
+type ContractCreateFooterProps = {
+  busy: boolean;
+  cancelLabel: string;
+  l: LocalizeFn;
+  onCancel: () => void;
+};
+
+function ContractCreateFooter({
+  busy,
+  cancelLabel,
+  l,
+  onCancel,
+}: ContractCreateFooterProps) {
+  return (
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-8 rounded-lg"
+        onClick={onCancel}
+      >
+        {cancelLabel}
+      </Button>
+      <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={busy}>
+        {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+        {l("Vertrag erstellen", "Sozdat dogovor", "Create contract")}
+      </Button>
+    </>
+  );
+}
+
+type DunningEventsListProps = {
+  dunningEvents: DunningEvent[];
+  formatDateTime: DateTimeFormatter;
+  formatMoney: MoneyFormatter;
+  l: LocalizeFn;
+};
+
+function DunningEventsList({
+  dunningEvents,
+  formatDateTime,
+  formatMoney,
+  l,
+}: DunningEventsListProps) {
+  return (
+    <div className="mt-4 space-y-3">
+      {dunningEvents.length === 0 ? (
+        <p className="text-sm text-zinc-500">{l("Noch nicht erfasst.", "РќРµ Р·Р°С„РёРєСЃРёСЂРѕРІР°РЅРѕ.", "Not recorded yet.")}</p>
+      ) : (
+        dunningEvents.map((event) => (
+          <div key={event.id} className="rounded-xl border border-zinc-200 bg-white px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <Badge variant="outline" className="rounded-full text-[10px]">
+                {event.level}
+              </Badge>
+              <span className="text-xs text-zinc-400">{formatDateTime(event.sent_at)}</span>
+            </div>
+            <div className="mt-2 space-y-1 text-sm text-zinc-600">
+              <p>{l("Offener Betrag", "РЎСѓРјРјР° Рє РѕРїР»Р°С‚Рµ", "Balance due")}: {formatMoney(event.balance_due)}</p>
+              <p>{l("Erstellt von", "РЎРѕР·РґР°РЅРѕ", "Created by")}: {event.created_by_name}</p>
+              {event.note ? <p>{event.note}</p> : null}
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
 export function PatientFinancialDialogs({
   canManageInvoices,
   cancelLabel,
@@ -134,21 +204,12 @@ export function PatientFinancialDialogs({
         title={l("Rahmenvertrag erstellen", "Sozdat ramochnyy dogovor", "Create framework contract")}
         bodyClassName="px-4 py-4 space-y-4"
         footer={
-          <>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-lg"
-              onClick={() => onContractCreateOpenChange(false)}
-            >
-              {cancelLabel}
-            </Button>
-            <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={contractBusy}>
-              {contractBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-              {l("Vertrag erstellen", "Sozdat dogovor", "Create contract")}
-            </Button>
-          </>
+          <ContractCreateFooter
+            busy={contractBusy}
+            cancelLabel={cancelLabel}
+            l={l}
+            onCancel={() => onContractCreateOpenChange(false)}
+          />
         }
       >
         <div className="grid gap-4 md:grid-cols-2">
@@ -263,7 +324,7 @@ export function PatientFinancialDialogs({
               <Button type="button" variant="outline" className="rounded-xl" onClick={onCloseContractStatus}>
                 {l("Abbrechen", "Отмена", "Cancel")}
               </Button>
-              <Button type="submit" className="rounded-xl bg-slate-950 text-white hover:bg-slate-800" disabled={contractBusy}>
+              <Button type="submit" className="rounded-xl bg-zinc-950 text-white hover:bg-zinc-800" disabled={contractBusy}>
                 {contractBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
                 {l("Status speichern", "Сохранить статус", "Save status")}
               </Button>
@@ -329,25 +390,25 @@ export function PatientFinancialDialogs({
                 />
               </div>
               <div className="flex justify-end">
-                <Button type="submit" className="rounded-xl bg-slate-950 text-white hover:bg-slate-800" disabled={invoiceBusy}>
+                <Button type="submit" className="rounded-xl bg-zinc-950 text-white hover:bg-zinc-800" disabled={invoiceBusy}>
                   {invoiceBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
                   {l("Rechnung speichern", "Сохранить счёт", "Save invoice")}
                 </Button>
               </div>
             </form>
 
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold text-slate-950">Mahnwesen</p>
-                  <p className="mt-1 text-xs text-slate-500">
+                  <p className="text-sm font-semibold text-zinc-950">Mahnwesen</p>
+                  <p className="mt-1 text-xs text-zinc-500">
                     {l("Verfolgen Sie versendete Mahnungen und eskalieren Sie überfällige Rechnungen.", "Отслеживайте отправленные напоминания и эскалируйте просроченные счета.", "Track sent reminders and escalate overdue invoices.")}
                   </p>
                 </div>
                 {canManageInvoices && nextDunningLevel(dunningEvents) ? (
                   <Button
                     type="button"
-                    className="rounded-xl bg-slate-950 text-white hover:bg-slate-800"
+                    className="rounded-xl bg-zinc-950 text-white hover:bg-zinc-800"
                     onClick={() => void onCreateDunning()}
                     disabled={dunningBusy}
                   >
@@ -366,27 +427,12 @@ export function PatientFinancialDialogs({
                   placeholder={l("Optionale Notiz für den Billing-Verlauf", "Необязательная заметка для trail биллинга", "Optional note for billing trail")}
                 />
               </div>
-              <div className="mt-4 space-y-3">
-                {dunningEvents.length === 0 ? (
-                  <p className="text-sm text-slate-500">{l("Noch nicht erfasst.", "Не зафиксировано.", "Not recorded yet.")}</p>
-                ) : (
-                  dunningEvents.map((event) => (
-                    <div key={event.id} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <Badge variant="outline" className="rounded-full text-[10px]">
-                          {event.level}
-                        </Badge>
-                        <span className="text-xs text-slate-400">{formatDateTime(event.sent_at)}</span>
-                      </div>
-                      <div className="mt-2 space-y-1 text-sm text-slate-600">
-                        <p>{l("Offener Betrag", "Сумма к оплате", "Balance due")}: {formatMoney(event.balance_due)}</p>
-                        <p>{l("Erstellt von", "Создано", "Created by")}: {event.created_by_name}</p>
-                        {event.note ? <p>{event.note}</p> : null}
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
+              <DunningEventsList
+                dunningEvents={dunningEvents}
+                formatDateTime={formatDateTime}
+                formatMoney={formatMoney}
+                l={l}
+              />
             </div>
 
             <DialogFooter>
@@ -400,4 +446,3 @@ export function PatientFinancialDialogs({
     </>
   );
 }
-

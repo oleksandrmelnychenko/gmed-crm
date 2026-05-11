@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  type FormEvent,
+  type SetStateAction,
+} from "react";
 import { Plus, RefreshCcw, X } from "lucide-react";
 
 import { AdminGuideButton } from "@/components/admin-guide";
@@ -68,23 +75,394 @@ const ADMIN_CUSTOM_FIELD_REALTIME_EVENTS = [
   "custom_field.deleted",
 ] as const;
 
+type AdminCustomFieldsState = {
+  fields: CustomField[];
+  loading: boolean;
+  filterEntity: string;
+  msg: string | null;
+  showCreate: boolean;
+  creating: boolean;
+  fEntity: string;
+  fKey: string;
+  fLabel: string;
+  fType: string;
+  fSort: string;
+  fOptions: string;
+  createError: string | null;
+};
+
+type AdminCustomFieldsPatch =
+  | Partial<AdminCustomFieldsState>
+  | ((current: AdminCustomFieldsState) => Partial<AdminCustomFieldsState>);
+
+function adminCustomFieldsReducer(
+  current: AdminCustomFieldsState,
+  patch: AdminCustomFieldsPatch,
+): AdminCustomFieldsState {
+  return {
+    ...current,
+    ...(typeof patch === "function" ? patch(current) : patch),
+  };
+}
+
+function resolveAdminCustomFieldsStateAction<T>(
+  action: SetStateAction<T>,
+  current: T,
+): T {
+  return typeof action === "function"
+    ? (action as (value: T) => T)(current)
+    : action;
+}
+
+function createAdminCustomFieldsPatch<K extends keyof AdminCustomFieldsState>(
+  field: K,
+  nextValue: SetStateAction<AdminCustomFieldsState[K]>,
+): AdminCustomFieldsPatch {
+  return (current) => ({
+    [field]: resolveAdminCustomFieldsStateAction(nextValue, current[field]),
+  } as Partial<AdminCustomFieldsState>);
+}
+
+type AdminCustomFieldsHeaderActionsProps = {
+  t: Record<string, string>;
+  onCreate: () => void;
+  onRefresh: () => void;
+};
+
+function AdminCustomFieldsHeaderActions({
+  t,
+  onCreate,
+  onRefresh,
+}: AdminCustomFieldsHeaderActionsProps) {
+  return (
+    <>
+      <AdminGuideButton title={t.cf_title} description={t.cf_subtitle} />
+      <Button
+        type="button"
+        variant="outline"
+        className="h-9 rounded-lg gap-1.5 bg-card px-3.5"
+        onClick={onRefresh}
+      >
+        <RefreshCcw className="size-3.5" />
+        {t.common_refresh}
+      </Button>
+      <Button
+        type="button"
+        className="h-9 rounded-lg gap-1.5 px-3.5"
+        onClick={onCreate}
+      >
+        <Plus className="size-3.5" />
+        {t.cf_new}
+      </Button>
+    </>
+  );
+}
+
+type AdminCustomFieldsPageHeaderProps = {
+  t: Record<string, string>;
+  onCreate: () => void;
+  onRefresh: () => void;
+};
+
+function AdminCustomFieldsPageHeader({
+  t,
+  onCreate,
+  onRefresh,
+}: AdminCustomFieldsPageHeaderProps) {
+  return (
+    <PageHeader
+      title={t.cf_title}
+      description={t.cf_subtitle}
+      actions={(
+        <AdminCustomFieldsHeaderActions
+          t={t}
+          onCreate={onCreate}
+          onRefresh={onRefresh}
+        />
+      )}
+    />
+  );
+}
+
+type AdminCustomFieldCreateSheetProps = {
+  createError: string | null;
+  creating: boolean;
+  entityTypeLabel: (value: string | null | undefined) => string;
+  fieldTypeLabel: (value: string | null | undefined) => string;
+  fEntity: string;
+  fKey: string;
+  fLabel: string;
+  fOptions: string;
+  fSort: string;
+  fType: string;
+  showCreate: boolean;
+  t: Record<string, string>;
+  onClose: () => void;
+  onCreate: (event: FormEvent) => void;
+  onEntityChange: (value: string) => void;
+  onKeyChange: (value: string) => void;
+  onLabelChange: (value: string) => void;
+  onOpenChange: (open: boolean) => void;
+  onOptionsChange: (value: string) => void;
+  onSortChange: (value: string) => void;
+  onTypeChange: (value: string) => void;
+};
+
+function AdminCustomFieldCreateSheet({
+  createError,
+  creating,
+  entityTypeLabel,
+  fieldTypeLabel,
+  fEntity,
+  fKey,
+  fLabel,
+  fOptions,
+  fSort,
+  fType,
+  showCreate,
+  t,
+  onClose,
+  onCreate,
+  onEntityChange,
+  onKeyChange,
+  onLabelChange,
+  onOpenChange,
+  onOptionsChange,
+  onSortChange,
+  onTypeChange,
+}: AdminCustomFieldCreateSheetProps) {
+  return (
+    <Sheet open={showCreate} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
+        <form onSubmit={onCreate} className="flex min-h-0 flex-1 flex-col">
+          <AdminSheetScaffold
+            title={t.cf_new}
+            description={t.cf_subtitle}
+            footer={(
+              <SheetFormFooter
+                cancelLabel={t.common_cancel}
+                submitLabel={t.common_save}
+                submitting={creating}
+                onCancel={onClose}
+              />
+            )}
+          >
+            {createError ? <Banner tone="error">{createError}</Banner> : null}
+            <section className="space-y-4 rounded-xl border border-border/60 bg-card p-3.5">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_entity_type}</Label>
+                  <NativeComboboxSelect value={fEntity}
+                    onChange={(event) => onEntityChange(event.target.value ?? ENTITY_TYPES[0] ?? "patient")} className="h-9 w-full rounded-lg bg-card">
+                      {ENTITY_TYPES.map((et) => (
+                        <option key={et} value={et}>
+                          {entityTypeLabel(et)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_field_key} *</Label>
+                  <Input
+                    required
+                    placeholder="my_field"
+                    value={fKey}
+                    onChange={(event) => onKeyChange(event.target.value)}
+                    className="h-9 rounded-lg bg-card"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_field_label} *</Label>
+                  <Input
+                    required
+                    value={fLabel}
+                    onChange={(event) => onLabelChange(event.target.value)}
+                    className="h-9 rounded-lg bg-card"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_field_type}</Label>
+                  <NativeComboboxSelect value={fType}
+                    onChange={(event) => onTypeChange(event.target.value ?? FIELD_TYPES[0] ?? "text")} className="h-9 w-full rounded-lg bg-card">
+                      {FIELD_TYPES.map((ft) => (
+                        <option key={ft} value={ft}>
+                          {fieldTypeLabel(ft)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_sort}</Label>
+                  <Input
+                    type="number"
+                    value={fSort}
+                    onChange={(event) => onSortChange(event.target.value)}
+                    className="h-9 rounded-lg bg-card"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_options}</Label>
+                  <Input
+                    placeholder='["opt1","opt2"]'
+                    value={fOptions}
+                    onChange={(event) => onOptionsChange(event.target.value)}
+                    className="h-9 rounded-lg bg-card"
+                  />
+                </div>
+              </div>
+            </section>
+          </AdminSheetScaffold>
+        </form>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+type AdminCustomFieldsToolbarSectionProps = {
+  entityTypeLabel: (value: string | null | undefined) => string;
+  filterEntity: string;
+  t: Record<string, string>;
+  onFilterEntityChange: (value: string) => void;
+};
+
+function AdminCustomFieldsToolbarSection({
+  entityTypeLabel,
+  filterEntity,
+  t,
+  onFilterEntityChange,
+}: AdminCustomFieldsToolbarSectionProps) {
+  return (
+    <AdminToolbar className="rounded-none border-0 bg-transparent p-0 shadow-none">
+      <NativeComboboxSelect value={filterEntity}
+        onChange={(event) => onFilterEntityChange(event.target.value ?? "")} className="h-8 w-[240px] rounded-lg bg-card text-[13px]">
+          <option value="">{t.providers_all}</option>
+          {ENTITY_TYPES.map((et) => (
+            <option key={et} value={et}>
+              {entityTypeLabel(et)}
+            </option>
+          ))}
+        </NativeComboboxSelect>
+
+      {filterEntity ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-8 rounded-lg gap-1 text-[12.5px] text-muted-foreground"
+          onClick={() => onFilterEntityChange("")}
+        >
+          <X className="size-3.5" />
+          {t.common_reset}
+        </Button>
+      ) : null}
+    </AdminToolbar>
+  );
+}
+
+type AdminCustomFieldsTableProps = {
+  activeFields: CustomField[];
+  columns: ColumnDef<CustomField>[];
+  t: Record<string, string>;
+};
+
+function AdminCustomFieldsTable({
+  activeFields,
+  columns,
+  t,
+}: AdminCustomFieldsTableProps) {
+  return (
+    <AdminTableCard
+      title={t.common_registry}
+      description={t.cf_title}
+      count={activeFields.length}
+    >
+      <DataTableSurface
+        rows={activeFields}
+        columns={columns}
+        defaultDensity="compact"
+        dictionary={t}
+        rowId={(field) => field.id}
+        emptyState={<EmptyCell>{t.cf_no_fields}</EmptyCell>}
+        tableClassName="min-h-[320px]"
+      />
+    </AdminTableCard>
+  );
+}
+
 export function AdminCustomFieldsPage() {
   const { t } = useLang();
 
-  const [fields, setFields] = useState<CustomField[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [filterEntity, setFilterEntity] = useState("");
-  const [msg, setMsg] = useState<string | null>(null);
-
-  const [showCreate, setShowCreate] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [fEntity, setFEntity] = useState("lead");
-  const [fKey, setFKey] = useState("");
-  const [fLabel, setFLabel] = useState("");
-  const [fType, setFType] = useState("text");
-  const [fSort, setFSort] = useState("0");
-  const [fOptions, setFOptions] = useState("");
-  const [createError, setCreateError] = useState<string | null>(null);
+  const [customFieldsState, dispatchCustomFieldsState] = useReducer(
+    adminCustomFieldsReducer,
+    undefined,
+    (): AdminCustomFieldsState => ({
+      fields: [],
+      loading: true,
+      filterEntity: "",
+      msg: null,
+      showCreate: false,
+      creating: false,
+      fEntity: "lead",
+      fKey: "",
+      fLabel: "",
+      fType: "text",
+      fSort: "0",
+      fOptions: "",
+      createError: null,
+    }),
+  );
+  const {
+    createError,
+    creating,
+    fields,
+    filterEntity,
+    fEntity,
+    fKey,
+    fLabel,
+    fOptions,
+    fSort,
+    fType,
+    loading,
+    msg,
+    showCreate,
+  } = customFieldsState;
+  const setCustomFieldsField = <K extends keyof AdminCustomFieldsState>(
+    field: K,
+    nextValue: SetStateAction<AdminCustomFieldsState[K]>,
+  ) =>
+    dispatchCustomFieldsState(
+      createAdminCustomFieldsPatch(field, nextValue),
+    );
+  const setFields = (nextValue: SetStateAction<CustomField[]>) =>
+    setCustomFieldsField("fields", nextValue);
+  const setLoading = (nextValue: SetStateAction<boolean>) =>
+    setCustomFieldsField("loading", nextValue);
+  const setFilterEntity = (nextValue: SetStateAction<string>) =>
+    setCustomFieldsField("filterEntity", nextValue);
+  const setMsg = (nextValue: SetStateAction<string | null>) =>
+    setCustomFieldsField("msg", nextValue);
+  const setShowCreate = (nextValue: SetStateAction<boolean>) =>
+    setCustomFieldsField("showCreate", nextValue);
+  const setCreating = (nextValue: SetStateAction<boolean>) =>
+    setCustomFieldsField("creating", nextValue);
+  const setFEntity = (nextValue: SetStateAction<string>) =>
+    setCustomFieldsField("fEntity", nextValue);
+  const setFKey = (nextValue: SetStateAction<string>) =>
+    setCustomFieldsField("fKey", nextValue);
+  const setFLabel = (nextValue: SetStateAction<string>) =>
+    setCustomFieldsField("fLabel", nextValue);
+  const setFType = (nextValue: SetStateAction<string>) =>
+    setCustomFieldsField("fType", nextValue);
+  const setFSort = (nextValue: SetStateAction<string>) =>
+    setCustomFieldsField("fSort", nextValue);
+  const setFOptions = (nextValue: SetStateAction<string>) =>
+    setCustomFieldsField("fOptions", nextValue);
+  const setCreateError = (nextValue: SetStateAction<string | null>) =>
+    setCustomFieldsField("createError", nextValue);
 
   const closeUnsavedConfirmMessage = t.common_discard_unsaved_confirm;
 
@@ -266,168 +644,43 @@ export function AdminCustomFieldsPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        title={t.cf_title}
-        description={t.cf_subtitle}
-        actions={(
-          <>
-            <AdminGuideButton title={t.cf_title} description={t.cf_subtitle} />
-            <Button
-              type="button"
-              variant="outline"
-              className="h-9 rounded-lg gap-1.5 bg-card px-3.5"
-              onClick={() => void load()}
-            >
-              <RefreshCcw className="size-3.5" />
-              {t.common_refresh}
-            </Button>
-            <Button
-              type="button"
-              className="h-9 rounded-lg gap-1.5 px-3.5"
-              onClick={() => setShowCreate(true)}
-            >
-              <Plus className="size-3.5" />
-              {t.cf_new}
-            </Button>
-          </>
-        )}
+      <AdminCustomFieldsPageHeader
+        t={t as unknown as Record<string, string>}
+        onCreate={() => setShowCreate(true)}
+        onRefresh={() => void load()}
       />
 
       {msg ? <Banner tone="error">{msg}</Banner> : null}
 
-      <Sheet open={showCreate} onOpenChange={handleCreateSheetOpenChange}>
-        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
-          <form onSubmit={onCreate} className="flex min-h-0 flex-1 flex-col">
-            <AdminSheetScaffold
-              title={t.cf_new}
-              description={t.cf_subtitle}
-              footer={(
-                <SheetFormFooter
-                  cancelLabel={t.common_cancel}
-                  submitLabel={t.common_save}
-                  submitting={creating}
-                  onCancel={closeCreateSheet}
-                />
-              )}
-            >
-              {createError ? <Banner tone="error">{createError}</Banner> : null}
-              <section className="space-y-4 rounded-xl border border-border/60 bg-card p-3.5">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_entity_type}</Label>
-                    <NativeComboboxSelect value={fEntity}
-                      onChange={(event) => setFEntity(event.target.value ?? ENTITY_TYPES[0] ?? "patient")} className="h-9 w-full rounded-lg bg-card">
-                        {ENTITY_TYPES.map((et) => (
-                          <option key={et} value={et}>
-                            {entityTypeLabel(et)}
-                          </option>
-                        ))}
-                      </NativeComboboxSelect>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_field_key} *</Label>
-                    <Input
-                      required
-                      placeholder="my_field"
-                      value={fKey}
-                      onChange={(e) => setFKey(e.target.value)}
-                      className="h-9 rounded-lg bg-card"
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_field_label} *</Label>
-                    <Input
-                      required
-                      value={fLabel}
-                      onChange={(e) => setFLabel(e.target.value)}
-                      className="h-9 rounded-lg bg-card"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_field_type}</Label>
-                    <NativeComboboxSelect value={fType}
-                      onChange={(event) => setFType(event.target.value ?? FIELD_TYPES[0] ?? "text")} className="h-9 w-full rounded-lg bg-card">
-                        {FIELD_TYPES.map((ft) => (
-                          <option key={ft} value={ft}>
-                            {fieldTypeLabel(ft)}
-                          </option>
-                        ))}
-                      </NativeComboboxSelect>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_sort}</Label>
-                    <Input
-                      type="number"
-                      value={fSort}
-                      onChange={(e) => setFSort(e.target.value)}
-                      className="h-9 rounded-lg bg-card"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_options}</Label>
-                    <Input
-                      placeholder='["opt1","opt2"]'
-                      value={fOptions}
-                      onChange={(e) => setFOptions(e.target.value)}
-                      className="h-9 rounded-lg bg-card"
-                    />
-                  </div>
-                </div>
-              </section>
-            </AdminSheetScaffold>
-          </form>
-        </SheetContent>
-      </Sheet>
+      <AdminCustomFieldCreateSheet
+        createError={createError} creating={creating}
+        entityTypeLabel={entityTypeLabel} fieldTypeLabel={fieldTypeLabel}
+        fEntity={fEntity} fKey={fKey} fLabel={fLabel}
+        fOptions={fOptions} fSort={fSort} fType={fType} showCreate={showCreate}
+        t={t as unknown as Record<string, string>}
+        onClose={closeCreateSheet} onCreate={onCreate}
+        onEntityChange={setFEntity} onKeyChange={setFKey} onLabelChange={setFLabel}
+        onOpenChange={handleCreateSheetOpenChange}
+        onOptionsChange={setFOptions} onSortChange={setFSort} onTypeChange={setFType}
+      />
 
       {loading ? <TabLoader /> : null}
 
       {!loading ? (
-        <AdminToolbar className="rounded-none border-0 bg-transparent p-0 shadow-none">
-          <NativeComboboxSelect value={filterEntity}
-            onChange={(event) => setFilterEntity(event.target.value ?? "")} className="h-8 w-[240px] rounded-lg bg-card text-[13px]">
-              <option value="">{t.providers_all}</option>
-              {ENTITY_TYPES.map((et) => (
-                <option key={et} value={et}>
-                  {entityTypeLabel(et)}
-                </option>
-              ))}
-            </NativeComboboxSelect>
-
-          {filterEntity ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-8 rounded-lg gap-1 text-[12.5px] text-muted-foreground"
-              onClick={() => setFilterEntity("")}
-            >
-              <X className="size-3.5" />
-              {t.common_reset}
-            </Button>
-          ) : null}
-        </AdminToolbar>
+        <AdminCustomFieldsToolbarSection
+          entityTypeLabel={entityTypeLabel}
+          filterEntity={filterEntity}
+          t={t as unknown as Record<string, string>}
+          onFilterEntityChange={setFilterEntity}
+        />
       ) : null}
 
       {!loading ? (
-        <AdminTableCard
-          title={t.common_registry}
-          description={t.cf_title}
-          count={activeFields.length}
-        >
-          <DataTableSurface
-            rows={activeFields}
-            columns={columns}
-            defaultDensity="compact"
-            dictionary={t as unknown as Record<string, string>}
-            rowId={(field) => field.id}
-            emptyState={<EmptyCell>{t.cf_no_fields}</EmptyCell>}
-            tableClassName="min-h-[320px]"
-          />
-        </AdminTableCard>
+        <AdminCustomFieldsTable
+          activeFields={activeFields}
+          columns={columns}
+          t={t as unknown as Record<string, string>}
+        />
       ) : null}
     </div>
   );

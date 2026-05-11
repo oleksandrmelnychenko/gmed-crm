@@ -14,14 +14,17 @@ function localeCode(lang: string) {
   return "en-GB";
 }
 
+const HISTORY_DATE_TIME_FORMATTERS: Record<string, Intl.DateTimeFormat> = {
+  "de-DE": new Intl.DateTimeFormat("de-DE", { dateStyle: "medium", timeStyle: "short" }),
+  "ru-RU": new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }),
+  "en-GB": new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }),
+};
+
 function formatDateTime(lang: string, value: string | null | undefined) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(localeCode(lang), {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
+  return (HISTORY_DATE_TIME_FORMATTERS[localeCode(lang)] ?? HISTORY_DATE_TIME_FORMATTERS["en-GB"]).format(date);
 }
 
 export function HistorySection() {

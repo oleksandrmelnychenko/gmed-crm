@@ -22,7 +22,7 @@ export function buildCsv<T>(
 
 const UTF8_BOM = "﻿";
 
-export function downloadCsv(filename: string, csv: string): void {
+function downloadCsv(filename: string, csv: string): void {
   if (typeof document === "undefined") return;
   const blob = new Blob([UTF8_BOM + csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);

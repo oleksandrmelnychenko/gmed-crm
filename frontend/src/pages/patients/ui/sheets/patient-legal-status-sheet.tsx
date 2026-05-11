@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useReducer, useState, type FormEvent, type SetStateAction } from "react";
 import { Check, LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,15 @@ type ChecklistKey =
   | "documentPackComplete"
   | "complianceCompleted";
 
+function legalStatusFormReducer(
+  state: PatientLegalStatus,
+  action: SetStateAction<PatientLegalStatus>,
+): PatientLegalStatus {
+  return typeof action === "function"
+    ? (action as (previous: PatientLegalStatus) => PatientLegalStatus)(state)
+    : action;
+}
+
 export function PatientLegalStatusSheet({
   patientId,
   initial,
@@ -39,13 +48,34 @@ export function PatientLegalStatusSheet({
   onOpenChange: (v: boolean) => void;
   onSaved: () => void;
 }) {
-  const { t } = useLang();
-  const [form, setForm] = useState<PatientLegalStatus>(initial);
-  const [busy, setBusy] = useState(false);
+  return (
+    <PatientLegalStatusSheetContent
+      key={`${patientId}:${open ? "open" : "closed"}:${serializePatientLegalStatus(initial)}`}
+      patientId={patientId}
+      initial={initial}
+      open={open}
+      onOpenChange={onOpenChange}
+      onSaved={onSaved}
+    />
+  );
+}
 
-  useEffect(() => {
-    if (open) setForm(initial);
-  }, [open, initial]);
+function PatientLegalStatusSheetContent({
+  patientId,
+  initial,
+  open,
+  onOpenChange,
+  onSaved,
+}: {
+  patientId: string;
+  initial: PatientLegalStatus;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onSaved: () => void;
+}) {
+  const { t } = useLang();
+  const [form, setForm] = useReducer(legalStatusFormReducer, initial);
+  const [busy, setBusy] = useState(false);
 
   function toggle(key: ChecklistKey) {
     setForm((current) => ({ ...current, [key]: !current[key] }));

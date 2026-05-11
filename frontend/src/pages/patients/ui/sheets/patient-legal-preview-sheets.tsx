@@ -14,14 +14,23 @@ import {
 } from "../../model/portal-shared";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
+const PREVIEW_DATE_FORMATTERS = {
+  de: new Intl.DateTimeFormat("de-DE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }),
+  ru: new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }),
+};
+
 function formatDate(value?: string | null, lang = "ru") {
   if (!value) return "-";
   try {
-    return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    }).format(new Date(value));
+    return PREVIEW_DATE_FORMATTERS[lang === "de" ? "de" : "ru"].format(new Date(value));
   } catch {
     return value;
   }
@@ -101,29 +110,31 @@ export function PatientDocumentsPreviewSheet({
       ) : (
         <ul className="space-y-2">
           {items.map((item) => (
-            <li
-              key={item.id}
-              className="cursor-pointer rounded-lg border border-border bg-card px-3 py-2.5 transition-colors hover:bg-muted/40"
-              onClick={() => {
-                onOpenChange(false);
-                staffGo(`/documents?patient=${patientId}&document=${item.id}`);
-              }}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <p className="truncate text-[13px] font-medium text-foreground">
-                  {item.filename}
+            <li key={item.id}>
+              <button
+                type="button"
+                className="w-full cursor-pointer rounded-lg border border-border bg-card px-3 py-2.5 text-left transition-colors hover:bg-muted/40"
+                onClick={() => {
+                  onOpenChange(false);
+                  staffGo(`/documents?patient=${patientId}&document=${item.id}`);
+                }}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <p className="truncate text-[13px] font-medium text-foreground">
+                    {item.filename}
+                  </p>
+                  {item.status ? (
+                    <Badge variant="outline" className="shrink-0 rounded-full text-[10px]">
+                      {portalStatusLabel(item.status)}
+                    </Badge>
+                  ) : null}
+                </div>
+                <p className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
+                  {formatDate(item.created_at, lang)}
+                  {item.category ? ` | ${documentCategoryLabel(item.category)}` : ""}
+                  {item.uploaded_by_name ? ` | ${item.uploaded_by_name}` : ""}
                 </p>
-                {item.status ? (
-                  <Badge variant="outline" className="shrink-0 rounded-full text-[10px]">
-                    {portalStatusLabel(item.status)}
-                  </Badge>
-                ) : null}
-              </div>
-              <p className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
-                {formatDate(item.created_at, lang)}
-                {item.category ? ` | ${documentCategoryLabel(item.category)}` : ""}
-                {item.uploaded_by_name ? ` | ${item.uploaded_by_name}` : ""}
-              </p>
+              </button>
             </li>
           ))}
         </ul>
@@ -207,28 +218,30 @@ export function PatientContractsPreviewSheet({
       ) : (
         <ul className="space-y-2">
           {items.map((item) => (
-            <li
-              key={item.id}
-              className="cursor-pointer rounded-lg border border-border bg-card px-3 py-2.5 transition-colors hover:bg-muted/40"
-              onClick={() => {
-                onOpenChange(false);
-                staffGo(`/contracts?patient=${patientId}&contract=${item.id}`);
-              }}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <p className="truncate font-mono text-[13px] font-medium text-foreground">
-                  {item.contract_number}
+            <li key={item.id}>
+              <button
+                type="button"
+                className="w-full cursor-pointer rounded-lg border border-border bg-card px-3 py-2.5 text-left transition-colors hover:bg-muted/40"
+                onClick={() => {
+                  onOpenChange(false);
+                  staffGo(`/contracts?patient=${patientId}&contract=${item.id}`);
+                }}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <p className="truncate font-mono text-[13px] font-medium text-foreground">
+                    {item.contract_number}
+                  </p>
+                  <Badge variant="outline" className="shrink-0 rounded-full text-[10px]">
+                    {portalStatusLabel(item.status)}
+                  </Badge>
+                </div>
+                <p className="mt-0.5 text-[11.5px] text-muted-foreground">
+                  {item.signed_at
+                    ? `${t.patient_preview_signed} ${formatDate(item.signed_at, lang)}`
+                    : formatDate(item.created_at, lang)}
+                  {item.valid_from ? ` | ${formatDate(item.valid_from, lang)}-${formatDate(item.valid_to, lang)}` : ""}
                 </p>
-                <Badge variant="outline" className="shrink-0 rounded-full text-[10px]">
-                  {portalStatusLabel(item.status)}
-                </Badge>
-              </div>
-              <p className="mt-0.5 text-[11.5px] text-muted-foreground">
-                {item.signed_at
-                  ? `${t.patient_preview_signed} ${formatDate(item.signed_at, lang)}`
-                  : formatDate(item.created_at, lang)}
-                {item.valid_from ? ` | ${formatDate(item.valid_from, lang)}-${formatDate(item.valid_to, lang)}` : ""}
-              </p>
+              </button>
             </li>
           ))}
         </ul>
@@ -313,30 +326,32 @@ export function PatientInvoicesPreviewSheet({
       ) : (
         <ul className="space-y-2">
           {items.map((item) => (
-            <li
-              key={item.id}
-              className="cursor-pointer rounded-lg border border-border bg-card px-3 py-2.5 transition-colors hover:bg-muted/40"
-              onClick={() => {
-                onOpenChange(false);
-                staffGo(`/invoices?patient=${patientId}&invoice=${item.id}`);
-              }}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <p className="font-mono text-[13px] font-medium text-foreground">
-                  {item.invoice_number}
+            <li key={item.id}>
+              <button
+                type="button"
+                className="w-full cursor-pointer rounded-lg border border-border bg-card px-3 py-2.5 text-left transition-colors hover:bg-muted/40"
+                onClick={() => {
+                  onOpenChange(false);
+                  staffGo(`/invoices?patient=${patientId}&invoice=${item.id}`);
+                }}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <p className="font-mono text-[13px] font-medium text-foreground">
+                    {item.invoice_number}
+                  </p>
+                  <Badge variant="outline" className="shrink-0 rounded-full text-[10px]">
+                    {portalStatusLabel(item.status)}
+                  </Badge>
+                </div>
+                <p className="mt-0.5 text-[11.5px] text-muted-foreground">
+                  {formatDate(item.issued_at, lang)}
+                  {item.invoice_type ? ` | ${invoiceTypeLabel(item.invoice_type)}` : ""}
+                  {item.total_gross ? ` | ${formatPortalCurrency(item.total_gross)}` : ""}
+                  {item.balance_due && item.balance_due !== "0.00"
+                    ? ` | ${t.patient_preview_due} ${formatPortalCurrency(item.balance_due)}`
+                    : ""}
                 </p>
-                <Badge variant="outline" className="shrink-0 rounded-full text-[10px]">
-                  {portalStatusLabel(item.status)}
-                </Badge>
-              </div>
-              <p className="mt-0.5 text-[11.5px] text-muted-foreground">
-                {formatDate(item.issued_at, lang)}
-                {item.invoice_type ? ` | ${invoiceTypeLabel(item.invoice_type)}` : ""}
-                {item.total_gross ? ` | ${formatPortalCurrency(item.total_gross)}` : ""}
-                {item.balance_due && item.balance_due !== "0.00"
-                  ? ` | ${t.patient_preview_due} ${formatPortalCurrency(item.balance_due)}`
-                  : ""}
-              </p>
+              </button>
             </li>
           ))}
         </ul>

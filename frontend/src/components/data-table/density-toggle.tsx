@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 
 import type { DensityLevel } from "./types";
 
-export type DensityOption = {
+type DensityOption = {
   value: DensityLevel;
   label?: string;
   icon: typeof Rows3;

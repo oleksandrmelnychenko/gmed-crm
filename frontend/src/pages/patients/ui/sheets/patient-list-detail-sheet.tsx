@@ -1,8 +1,9 @@
 import {
   memo,
   useEffect,
-  useState,
+  useReducer,
   type FormEvent,
+  type SetStateAction,
 } from "react";
 import {
   CalendarClock,
@@ -56,9 +57,13 @@ export type PatientDetailSheetProps = {
   detailBusy: boolean;
   detailError: string;
   dictionary: PatientsDictionary;
-  canCreateEdit: boolean;
-  canViewAssignments: boolean;
-  canManageAssignments: boolean;
+  detailControls: {
+    canCreateEdit: boolean;
+    canViewAssignments: boolean;
+    canManageAssignments: boolean;
+    hideFooterActions?: boolean;
+    hideWorkspaceActions?: boolean;
+  };
   assignments: PatientAssignment[];
   assignableStaff: StaffOption[];
   selectedAssignee: string;
@@ -73,8 +78,6 @@ export type PatientDetailSheetProps = {
   onOpenAppointments: () => void;
   onOpenContracts: () => void;
   onOpenDocuments: () => void;
-  hideFooterActions?: boolean;
-  hideWorkspaceActions?: boolean;
 };
 
 type PatientOverviewSectionProps = {
@@ -331,9 +334,7 @@ function PatientDetailSheet({
   detailBusy,
   detailError,
   dictionary,
-  canCreateEdit,
-  canViewAssignments,
-  canManageAssignments,
+  detailControls,
   assignments,
   assignableStaff,
   selectedAssignee,
@@ -348,24 +349,62 @@ function PatientDetailSheet({
   onOpenAppointments,
   onOpenContracts,
   onOpenDocuments,
-  hideFooterActions = false,
-  hideWorkspaceActions = false,
 }: PatientDetailSheetProps) {
-  const [form, setForm] = useState<PatientFormState>(blankPatientForm);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const {
+    canCreateEdit,
+    canViewAssignments,
+    canManageAssignments,
+    hideFooterActions = false,
+    hideWorkspaceActions = false,
+  } = detailControls;
+  type PatientDetailSheetState = {
+    form: PatientFormState;
+    busy: boolean;
+    error: string;
+  };
+  type PatientDetailSheetPatch =
+    | Partial<PatientDetailSheetState>
+    | ((current: PatientDetailSheetState) => Partial<PatientDetailSheetState>);
+  const [detailSheetState, dispatchDetailSheetState] = useReducer(
+    (
+      state: PatientDetailSheetState,
+      patch: PatientDetailSheetPatch,
+    ): PatientDetailSheetState => ({
+      ...state,
+      ...(typeof patch === "function" ? patch(state) : patch),
+    }),
+    undefined,
+    () => ({
+      form: blankPatientForm(),
+      busy: false,
+      error: "",
+    }),
+  );
+  const { form, busy, error } = detailSheetState;
+  const setForm = (nextValue: SetStateAction<PatientFormState>) => {
+    dispatchDetailSheetState((current) => ({
+      form:
+        typeof nextValue === "function"
+          ? nextValue(current.form)
+          : nextValue,
+    }));
+  };
 
   useEffect(() => {
     if (!open) {
-      setForm(blankPatientForm());
-      setBusy(false);
-      setError("");
+      dispatchDetailSheetState({
+        form: blankPatientForm(),
+        busy: false,
+        error: "",
+      });
       return;
     }
 
     if (detail) {
-      setForm(patientToForm(detail));
-      setError("");
+      dispatchDetailSheetState({
+        form: patientToForm(detail),
+        error: "",
+      });
     }
   }, [detail, open]);
 
@@ -373,8 +412,10 @@ function PatientDetailSheet({
     event.preventDefault();
     if (!detail) return;
 
-    setBusy(true);
-    setError("");
+    dispatchDetailSheetState({
+      busy: true,
+      error: "",
+    });
 
     try {
       await updatePatient(detail.id, {
@@ -402,13 +443,14 @@ function PatientDetailSheet({
       });
       onRefresh();
     } catch (submitError) {
-      setError(
-        submitError instanceof Error
-          ? submitError.message
-          : dictionary.common_failed_update,
-      );
+      dispatchDetailSheetState({
+        error:
+          submitError instanceof Error
+            ? submitError.message
+            : dictionary.common_failed_update,
+      });
     } finally {
-      setBusy(false);
+      dispatchDetailSheetState({ busy: false });
     }
   }
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useReducer } from "react";
 
 import { apiFetch } from "@/lib/api";
 import {
@@ -16,6 +16,38 @@ type UseAppointmentLinkedPatientOptions = {
   failedLoadMessage: string;
 };
 
+type LinkedPatientState = {
+  linkedPatientDetailLoading: boolean;
+  linkedPatientDetailError: string;
+  linkedPatientDetail: PatientSheetDetail | null;
+  linkedPatientAssignments: PatientSheetAssignment[];
+  linkedPatientAssignableStaff: PatientSheetStaffOption[];
+};
+
+type LinkedPatientPatch =
+  | Partial<LinkedPatientState>
+  | ((current: LinkedPatientState) => Partial<LinkedPatientState>);
+
+function createLinkedPatientState(): LinkedPatientState {
+  return {
+    linkedPatientDetailLoading: false,
+    linkedPatientDetailError: "",
+    linkedPatientDetail: null,
+    linkedPatientAssignments: [],
+    linkedPatientAssignableStaff: [],
+  };
+}
+
+function linkedPatientReducer(
+  state: LinkedPatientState,
+  patch: LinkedPatientPatch,
+): LinkedPatientState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
 export function useAppointmentLinkedPatient({
   linkedPatientOpen,
   linkedPatientId,
@@ -24,22 +56,21 @@ export function useAppointmentLinkedPatient({
   canManageAssignments,
   failedLoadMessage,
 }: UseAppointmentLinkedPatientOptions) {
-  const [linkedPatientDetailLoading, setLinkedPatientDetailLoading] =
-    useState(false);
-  const [linkedPatientDetailError, setLinkedPatientDetailError] = useState("");
-  const [linkedPatientDetail, setLinkedPatientDetail] =
-    useState<PatientSheetDetail | null>(null);
-  const [linkedPatientAssignments, setLinkedPatientAssignments] = useState<
-    PatientSheetAssignment[]
-  >([]);
-  const [linkedPatientAssignableStaff, setLinkedPatientAssignableStaff] =
-    useState<PatientSheetStaffOption[]>([]);
+  const [linkedPatientState, dispatchLinkedPatientState] = useReducer(
+    linkedPatientReducer,
+    undefined,
+    createLinkedPatientState,
+  );
+  const {
+    linkedPatientDetailLoading,
+    linkedPatientDetailError,
+    linkedPatientDetail,
+    linkedPatientAssignments,
+    linkedPatientAssignableStaff,
+  } = linkedPatientState;
+
   const resetLinkedPatientState = useCallback(() => {
-    setLinkedPatientDetailLoading(false);
-    setLinkedPatientDetailError("");
-    setLinkedPatientDetail(null);
-    setLinkedPatientAssignments([]);
-    setLinkedPatientAssignableStaff([]);
+    dispatchLinkedPatientState(createLinkedPatientState());
   }, []);
 
   useEffect(() => {
@@ -52,8 +83,10 @@ export function useAppointmentLinkedPatient({
 
     let active = true;
     void (async () => {
-      setLinkedPatientDetailLoading(true);
-      setLinkedPatientDetailError("");
+      dispatchLinkedPatientState({
+        linkedPatientDetailLoading: true,
+        linkedPatientDetailError: "",
+      });
 
       const detailRequest = apiFetch<PatientSheetDetail>(
         `/patients/${linkedPatientId}`,
@@ -76,21 +109,22 @@ export function useAppointmentLinkedPatient({
           staffRequest,
         ]);
         if (!active) return;
-        setLinkedPatientDetail(patientDetail);
-        setLinkedPatientAssignments(assignments);
-        setLinkedPatientAssignableStaff(assignableStaff);
+        dispatchLinkedPatientState({
+          linkedPatientDetail: patientDetail,
+          linkedPatientAssignments: assignments,
+          linkedPatientAssignableStaff: assignableStaff,
+          linkedPatientDetailLoading: false,
+        });
       } catch (error) {
         if (!active) return;
-        setLinkedPatientDetail(null);
-        setLinkedPatientAssignments([]);
-        setLinkedPatientAssignableStaff([]);
-        setLinkedPatientDetailError(
-          error instanceof Error ? error.message : failedLoadMessage,
-        );
-      } finally {
-        if (active) {
-          setLinkedPatientDetailLoading(false);
-        }
+        dispatchLinkedPatientState({
+          linkedPatientDetail: null,
+          linkedPatientAssignments: [],
+          linkedPatientAssignableStaff: [],
+          linkedPatientDetailError:
+            error instanceof Error ? error.message : failedLoadMessage,
+          linkedPatientDetailLoading: false,
+        });
       }
     })();
 

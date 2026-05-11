@@ -4,9 +4,10 @@ import {
   useDeferredValue,
   useEffect,
   useMemo,
-  useState,
+  useReducer,
   type FormEvent,
   type ReactNode,
+  type SetStateAction,
 } from "react";
 import {
   CalendarClock,
@@ -569,6 +570,49 @@ function blankSymptom(): SymptomItem {
   return { beschreibung: "", fachrichtung: "" };
 }
 
+function vorerkrankungItemKey(item: VorerkrankungItem) {
+  return [item.erkrankung, item.erstdiagnose ?? "", item.notiz ?? ""].join("|");
+}
+
+function allergieItemKey(item: AllergieItem) {
+  return [item.allergie, item.reaktion ?? ""].join("|");
+}
+
+function operationItemKey(item: OperationItem) {
+  return [
+    item.datum ?? "",
+    item.grund,
+    item.arzt_id ?? "",
+    item.arzt ?? "",
+    item.notiz ?? "",
+  ].join("|");
+}
+
+function medikamentItemKey(item: MedikamentItem) {
+  return [
+    item.id ?? "",
+    item.handelsname,
+    item.wirkstoff ?? "",
+    item.dosis ?? "",
+    item.seit ?? "",
+    item.verordnender_arzt_id ?? "",
+  ].join("|");
+}
+
+function painItemKey(item: PainItem) {
+  return [
+    item.lokalisierung,
+    item.seit_wann ?? "",
+    item.ursache ?? "",
+    item.qualitaet ?? "",
+    item.nrs_aktuell ?? "",
+  ].join("|");
+}
+
+function symptomItemKey(item: SymptomItem) {
+  return [item.beschreibung, item.fachrichtung ?? ""].join("|");
+}
+
 function blankVegetative(): VegetativeState {
   return {
     appetit_durst: "",
@@ -735,21 +779,39 @@ function doctorOptionLabel(doctor: DoctorOption) {
   return `${doctor.provider_name} | ${titlePrefix}${doctor.name}${specialty}`;
 }
 
+const CASE_DATE_FORMATTERS: Record<string, Intl.DateTimeFormat> = {
+  "de-DE": new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }),
+  "ru-RU": new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium" }),
+  "en-GB": new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }),
+};
+
+const CASE_DATE_TIME_FORMATTERS: Record<string, Intl.DateTimeFormat> = {
+  "de-DE": new Intl.DateTimeFormat("de-DE", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }),
+  "ru-RU": new Intl.DateTimeFormat("ru-RU", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }),
+  "en-GB": new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }),
+};
+
 function formatDate(value: string | null | undefined) {
   if (!value) return runtimeTranslations().common_not_set;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(runtimeLocale(), { dateStyle: "medium" }).format(date);
+  return (CASE_DATE_FORMATTERS[runtimeLocale()] ?? CASE_DATE_FORMATTERS["en-GB"]).format(date);
 }
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return runtimeTranslations().common_not_set;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(runtimeLocale(), {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
+  return (CASE_DATE_TIME_FORMATTERS[runtimeLocale()] ?? CASE_DATE_TIME_FORMATTERS["en-GB"]).format(date);
 }
 
 function historyValuePreview(value: unknown) {
@@ -842,41 +904,48 @@ function bannerText(error: unknown, fallback: string) {
 }
 
 function sanitizeVorerkrankungen(items: VorerkrankungItem[]) {
-  return items
-    .filter((item) => item.erkrankung.trim())
-    .map((item) => ({
-      erkrankung: item.erkrankung.trim(),
+  return items.flatMap((item) => {
+    const erkrankung = item.erkrankung.trim();
+    if (!erkrankung) return [];
+    return [{
+      erkrankung,
       erstdiagnose: toOptionalText(item.erstdiagnose ?? ""),
       notiz: toOptionalText(item.notiz ?? ""),
-    }));
+    }];
+  });
 }
 
 function sanitizeAllergien(items: AllergieItem[]) {
-  return items
-    .filter((item) => item.allergie.trim())
-    .map((item) => ({
-      allergie: item.allergie.trim(),
+  return items.flatMap((item) => {
+    const allergie = item.allergie.trim();
+    if (!allergie) return [];
+    return [{
+      allergie,
       reaktion: toOptionalText(item.reaktion ?? ""),
-    }));
+    }];
+  });
 }
 
 function sanitizeOperationen(items: OperationItem[]) {
-  return items
-    .filter((item) => item.grund.trim())
-    .map((item) => ({
+  return items.flatMap((item) => {
+    const grund = item.grund.trim();
+    if (!grund) return [];
+    return [{
       datum: toOptionalText(item.datum ?? ""),
-      grund: item.grund.trim(),
+      grund,
       arzt_id: toOptionalText(item.arzt_id ?? ""),
       arzt: toOptionalText(item.arzt ?? ""),
       notiz: toOptionalText(item.notiz ?? ""),
-    }));
+    }];
+  });
 }
 
 function sanitizeMedikamente(items: MedikamentItem[]) {
-  return items
-    .filter((item) => item.handelsname.trim())
-    .map((item) => ({
-      handelsname: item.handelsname.trim(),
+  return items.flatMap((item) => {
+    const handelsname = item.handelsname.trim();
+    if (!handelsname) return [];
+    return [{
+      handelsname,
       wirkstoff: toOptionalText(item.wirkstoff ?? ""),
       dosis: toOptionalText(item.dosis ?? ""),
       dosis_einheit: toOptionalText(item.dosis_einheit ?? ""),
@@ -890,14 +959,16 @@ function sanitizeMedikamente(items: MedikamentItem[]) {
       verordnender_arzt: toOptionalText(item.verordnender_arzt ?? ""),
       med_typ: toOptionalText(item.med_typ ?? "") ?? "permanent",
       expiry_date: toOptionalText(item.expiry_date ?? ""),
-    }));
+    }];
+  });
 }
 
 function sanitizePainRecords(items: PainItem[]) {
-  return items
-    .filter((item) => item.lokalisierung.trim())
-    .map((item) => ({
-      lokalisierung: item.lokalisierung.trim(),
+  return items.flatMap((item) => {
+    const lokalisierung = item.lokalisierung.trim();
+    if (!lokalisierung) return [];
+    return [{
+      lokalisierung,
       seit_wann: toOptionalText(item.seit_wann ?? ""),
       ursache: toOptionalText(item.ursache ?? ""),
       qualitaet: toOptionalText(item.qualitaet ?? ""),
@@ -909,16 +980,19 @@ function sanitizePainRecords(items: PainItem[]) {
       dauer_aktuell: toOptionalText(item.dauer_aktuell ?? ""),
       ausstrahlung: toOptionalText(item.ausstrahlung ?? ""),
       auftreten: toOptionalText(item.auftreten ?? ""),
-    }));
+    }];
+  });
 }
 
 function sanitizeSymptome(items: SymptomItem[]) {
-  return items
-    .filter((item) => item.beschreibung.trim())
-    .map((item) => ({
-      beschreibung: item.beschreibung.trim(),
+  return items.flatMap((item) => {
+    const beschreibung = item.beschreibung.trim();
+    if (!beschreibung) return [];
+    return [{
+      beschreibung,
       fachrichtung: toOptionalText(item.fachrichtung ?? ""),
-    }));
+    }];
+  });
 }
 
 function cardiologyToPayload(cardiology: CardiologyAssessment) {
@@ -1024,7 +1098,84 @@ function urologyToPayload(urology: UrologyAssessment) {
   };
 }
 
-export function CasesPage({
+type CasesPageState = {
+  filters: CaseFilters;
+  patients: PatientOption[];
+  doctors: DoctorOption[];
+  cases: CaseRosterItem[];
+  listBusy: boolean;
+  listError: string;
+  listVersion: number;
+  createOpen: boolean;
+  createBusy: boolean;
+  createError: string;
+  createForm: CaseCreateFormState;
+  detailOpen: boolean;
+  selectedId: string;
+  detail: CaseDetail | null;
+  detailBusy: boolean;
+  detailError: string;
+  detailVersion: number;
+  overviewForm: CaseOverviewFormState;
+  vorerkrankungen: VorerkrankungItem[];
+  allergien: AllergieItem[];
+  operationen: OperationItem[];
+  medikamente: MedikamentItem[];
+  painRecords: PainItem[];
+  symptome: SymptomItem[];
+  cardiology: CardiologyAssessment;
+  gastroenterology: GastroenterologyAssessment;
+  orthopedics: OrthopedicsAssessment;
+  neurology: NeurologyAssessment;
+  pulmonology: PulmonologyAssessment;
+  urology: UrologyAssessment;
+  vegetative: VegetativeState;
+  impfstatus: string;
+  sectionBusy: SectionStatusKey | "";
+  sectionErrors: Record<string, string>;
+  snippets: CaseTextSnippet[];
+  snippetsBusy: boolean;
+  snippetsError: string;
+  snippetVersion: number;
+  snippetDialogOpen: boolean;
+  snippetSaveBusy: boolean;
+  snippetSaveError: string;
+  snippetForm: CaseTextSnippetFormState;
+};
+
+type CasesPagePatch =
+  | Partial<CasesPageState>
+  | ((current: CasesPageState) => Partial<CasesPageState>);
+
+function casesPageReducer(
+  current: CasesPageState,
+  patch: CasesPagePatch,
+): CasesPageState {
+  return {
+    ...current,
+    ...(typeof patch === "function" ? patch(current) : patch),
+  };
+}
+
+function resolveCasesPageStateAction<T>(
+  action: SetStateAction<T>,
+  current: T,
+): T {
+  return typeof action === "function"
+    ? (action as (value: T) => T)(current)
+    : action;
+}
+
+function createCasesPageFieldPatch<K extends keyof CasesPageState>(
+  field: K,
+  nextValue: SetStateAction<CasesPageState[K]>,
+): CasesPagePatch {
+  return (current) => ({
+    [field]: resolveCasesPageStateAction(nextValue, current[field]),
+  } as Partial<CasesPageState>);
+}
+
+function useCasesPageContent({
   embedded = false,
   embeddedPatientId = null,
   embeddedCaseId = null,
@@ -1053,78 +1204,210 @@ export function CasesPage({
         typeof (value as Record<string, unknown>).patientId === "string",
     },
   );
-  const [filters, setFiltersState] = useState<CaseFilters>(() => ({
-    ...DEFAULT_FILTERS,
-    status: persistedCaseFilters.status,
-    patientId: persistedCaseFilters.patientId,
-  }));
-  const setFilters: typeof setFiltersState = useCallback(
-    (value) => {
-      setFiltersState((prev) => {
-        const next = typeof value === "function" ? (value as (p: CaseFilters) => CaseFilters)(prev) : value;
+  const [casesPageState, dispatchCasesPageState] = useReducer(
+    casesPageReducer,
+    undefined,
+    (): CasesPageState => ({
+      filters: {
+        ...DEFAULT_FILTERS,
+        status: persistedCaseFilters.status,
+        patientId: persistedCaseFilters.patientId,
+      },
+      patients: [],
+      doctors: [],
+      cases: [],
+      listBusy: false,
+      listError: "",
+      listVersion: 0,
+      createOpen: false,
+      createBusy: false,
+      createError: "",
+      createForm: DEFAULT_CREATE_FORM,
+      detailOpen: false,
+      selectedId: "",
+      detail: null,
+      detailBusy: false,
+      detailError: "",
+      detailVersion: 0,
+      overviewForm: DEFAULT_OVERVIEW_FORM,
+      vorerkrankungen: [],
+      allergien: [],
+      operationen: [],
+      medikamente: [],
+      painRecords: [],
+      symptome: [],
+      cardiology: blankCardiology(),
+      gastroenterology: blankGastroenterology(),
+      orthopedics: blankOrthopedics(),
+      neurology: blankNeurology(),
+      pulmonology: blankPulmonology(),
+      urology: blankUrology(),
+      vegetative: blankVegetative(),
+      impfstatus: "",
+      sectionBusy: "",
+      sectionErrors: {},
+      snippets: [],
+      snippetsBusy: false,
+      snippetsError: "",
+      snippetVersion: 0,
+      snippetDialogOpen: false,
+      snippetSaveBusy: false,
+      snippetSaveError: "",
+      snippetForm: DEFAULT_CASE_TEXT_SNIPPET_FORM,
+    }),
+  );
+  const {
+    allergien,
+    cardiology,
+    cases,
+    createBusy,
+    createError,
+    createForm,
+    createOpen,
+    detail,
+    detailBusy,
+    detailError,
+    detailOpen,
+    detailVersion,
+    doctors,
+    filters,
+    gastroenterology,
+    impfstatus,
+    listBusy,
+    listError,
+    listVersion,
+    medikamente,
+    neurology,
+    operationen,
+    orthopedics,
+    painRecords,
+    patients,
+    pulmonology,
+    sectionBusy,
+    sectionErrors,
+    selectedId,
+    snippetDialogOpen,
+    snippetForm,
+    snippetSaveBusy,
+    snippetSaveError,
+    snippets,
+    snippetsBusy,
+    snippetsError,
+    snippetVersion,
+    symptome,
+    urology,
+    vegetative,
+    vorerkrankungen,
+    overviewForm,
+  } = casesPageState;
+  const setCasesPageField = <K extends keyof CasesPageState>(
+    field: K,
+    nextValue: SetStateAction<CasesPageState[K]>,
+  ) => dispatchCasesPageState(createCasesPageFieldPatch(field, nextValue));
+  const setFilters = useCallback(
+    (value: SetStateAction<CaseFilters>) => {
+      dispatchCasesPageState((current) => {
+        const next = resolveCasesPageStateAction(value, current.filters);
         setPersistedCaseFilters({
           status: next.status,
           patientId: next.patientId,
         });
-        return next;
+        return { filters: next };
       });
     },
     [setPersistedCaseFilters],
   );
   const deferredSearch = useDeferredValue(filters.search);
-  const [patients, setPatients] = useState<PatientOption[]>([]);
-  const [doctors, setDoctors] = useState<DoctorOption[]>([]);
-  const [cases, setCases] = useState<CaseRosterItem[]>([]);
-  const [listBusy, setListBusy] = useState(false);
-  const [listError, setListError] = useState("");
-  const [listVersion, setListVersion] = useState(0);
-
-  const [createOpen, setCreateOpen] = useState(false);
-  const [createBusy, setCreateBusy] = useState(false);
-  const [createError, setCreateError] = useState("");
-  const [createForm, setCreateForm] = useState<CaseCreateFormState>(DEFAULT_CREATE_FORM);
-
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [selectedId, setSelectedId] = useState("");
-  const [detail, setDetail] = useState<CaseDetail | null>(null);
-  const [detailBusy, setDetailBusy] = useState(false);
-  const [detailError, setDetailError] = useState("");
-  const [detailVersion, setDetailVersion] = useState(0);
-
-  const [overviewForm, setOverviewForm] =
-    useState<CaseOverviewFormState>(DEFAULT_OVERVIEW_FORM);
-  const [vorerkrankungen, setVorerkrankungen] = useState<VorerkrankungItem[]>([]);
-  const [allergien, setAllergien] = useState<AllergieItem[]>([]);
-  const [operationen, setOperationen] = useState<OperationItem[]>([]);
-  const [medikamente, setMedikamente] = useState<MedikamentItem[]>([]);
-  const [painRecords, setPainRecords] = useState<PainItem[]>([]);
-  const [symptome, setSymptome] = useState<SymptomItem[]>([]);
-  const [cardiology, setCardiology] = useState<CardiologyAssessment>(blankCardiology());
-  const [gastroenterology, setGastroenterology] = useState<GastroenterologyAssessment>(
-    blankGastroenterology(),
-  );
-  const [orthopedics, setOrthopedics] = useState<OrthopedicsAssessment>(
-    blankOrthopedics(),
-  );
-  const [neurology, setNeurology] = useState<NeurologyAssessment>(blankNeurology());
-  const [pulmonology, setPulmonology] = useState<PulmonologyAssessment>(
-    blankPulmonology(),
-  );
-  const [urology, setUrology] = useState<UrologyAssessment>(blankUrology());
-  const [vegetative, setVegetative] = useState<VegetativeState>(blankVegetative());
-  const [impfstatus, setImpfstatus] = useState("");
-  const [sectionBusy, setSectionBusy] = useState<SectionStatusKey | "">("");
-  const [sectionErrors, setSectionErrors] = useState<Record<string, string>>({});
-  const [snippets, setSnippets] = useState<CaseTextSnippet[]>([]);
-  const [snippetsBusy, setSnippetsBusy] = useState(false);
-  const [snippetsError, setSnippetsError] = useState("");
-  const [snippetVersion, setSnippetVersion] = useState(0);
-  const [snippetDialogOpen, setSnippetDialogOpen] = useState(false);
-  const [snippetSaveBusy, setSnippetSaveBusy] = useState(false);
-  const [snippetSaveError, setSnippetSaveError] = useState("");
-  const [snippetForm, setSnippetForm] = useState<CaseTextSnippetFormState>(
-    DEFAULT_CASE_TEXT_SNIPPET_FORM,
-  );
+  const setPatients = (nextValue: SetStateAction<PatientOption[]>) =>
+    setCasesPageField("patients", nextValue);
+  const setDoctors = (nextValue: SetStateAction<DoctorOption[]>) =>
+    setCasesPageField("doctors", nextValue);
+  const setCases = (nextValue: SetStateAction<CaseRosterItem[]>) =>
+    setCasesPageField("cases", nextValue);
+  const setListBusy = (nextValue: SetStateAction<boolean>) =>
+    setCasesPageField("listBusy", nextValue);
+  const setListError = (nextValue: SetStateAction<string>) =>
+    setCasesPageField("listError", nextValue);
+  const setListVersion = (nextValue: SetStateAction<number>) =>
+    setCasesPageField("listVersion", nextValue);
+  const setCreateOpen = (nextValue: SetStateAction<boolean>) =>
+    setCasesPageField("createOpen", nextValue);
+  const setCreateBusy = (nextValue: SetStateAction<boolean>) =>
+    setCasesPageField("createBusy", nextValue);
+  const setCreateError = (nextValue: SetStateAction<string>) =>
+    setCasesPageField("createError", nextValue);
+  const setCreateForm = (nextValue: SetStateAction<CaseCreateFormState>) =>
+    setCasesPageField("createForm", nextValue);
+  const setDetailOpen = (nextValue: SetStateAction<boolean>) =>
+    setCasesPageField("detailOpen", nextValue);
+  const setSelectedId = (nextValue: SetStateAction<string>) =>
+    setCasesPageField("selectedId", nextValue);
+  const setDetail = (nextValue: SetStateAction<CaseDetail | null>) =>
+    setCasesPageField("detail", nextValue);
+  const setDetailBusy = (nextValue: SetStateAction<boolean>) =>
+    setCasesPageField("detailBusy", nextValue);
+  const setDetailError = (nextValue: SetStateAction<string>) =>
+    setCasesPageField("detailError", nextValue);
+  const setDetailVersion = (nextValue: SetStateAction<number>) =>
+    setCasesPageField("detailVersion", nextValue);
+  const setOverviewForm = (
+    nextValue: SetStateAction<CaseOverviewFormState>,
+  ) => setCasesPageField("overviewForm", nextValue);
+  const setVorerkrankungen = (
+    nextValue: SetStateAction<VorerkrankungItem[]>,
+  ) => setCasesPageField("vorerkrankungen", nextValue);
+  const setAllergien = (nextValue: SetStateAction<AllergieItem[]>) =>
+    setCasesPageField("allergien", nextValue);
+  const setOperationen = (nextValue: SetStateAction<OperationItem[]>) =>
+    setCasesPageField("operationen", nextValue);
+  const setMedikamente = (nextValue: SetStateAction<MedikamentItem[]>) =>
+    setCasesPageField("medikamente", nextValue);
+  const setPainRecords = (nextValue: SetStateAction<PainItem[]>) =>
+    setCasesPageField("painRecords", nextValue);
+  const setSymptome = (nextValue: SetStateAction<SymptomItem[]>) =>
+    setCasesPageField("symptome", nextValue);
+  const setCardiology = (nextValue: SetStateAction<CardiologyAssessment>) =>
+    setCasesPageField("cardiology", nextValue);
+  const setGastroenterology = (
+    nextValue: SetStateAction<GastroenterologyAssessment>,
+  ) => setCasesPageField("gastroenterology", nextValue);
+  const setOrthopedics = (
+    nextValue: SetStateAction<OrthopedicsAssessment>,
+  ) => setCasesPageField("orthopedics", nextValue);
+  const setNeurology = (nextValue: SetStateAction<NeurologyAssessment>) =>
+    setCasesPageField("neurology", nextValue);
+  const setPulmonology = (
+    nextValue: SetStateAction<PulmonologyAssessment>,
+  ) => setCasesPageField("pulmonology", nextValue);
+  const setUrology = (nextValue: SetStateAction<UrologyAssessment>) =>
+    setCasesPageField("urology", nextValue);
+  const setVegetative = (nextValue: SetStateAction<VegetativeState>) =>
+    setCasesPageField("vegetative", nextValue);
+  const setImpfstatus = (nextValue: SetStateAction<string>) =>
+    setCasesPageField("impfstatus", nextValue);
+  const setSectionBusy = (
+    nextValue: SetStateAction<SectionStatusKey | "">,
+  ) => setCasesPageField("sectionBusy", nextValue);
+  const setSectionErrors = (
+    nextValue: SetStateAction<Record<string, string>>,
+  ) => setCasesPageField("sectionErrors", nextValue);
+  const setSnippets = (nextValue: SetStateAction<CaseTextSnippet[]>) =>
+    setCasesPageField("snippets", nextValue);
+  const setSnippetsBusy = (nextValue: SetStateAction<boolean>) =>
+    setCasesPageField("snippetsBusy", nextValue);
+  const setSnippetsError = (nextValue: SetStateAction<string>) =>
+    setCasesPageField("snippetsError", nextValue);
+  const setSnippetVersion = (nextValue: SetStateAction<number>) =>
+    setCasesPageField("snippetVersion", nextValue);
+  const setSnippetDialogOpen = (nextValue: SetStateAction<boolean>) =>
+    setCasesPageField("snippetDialogOpen", nextValue);
+  const setSnippetSaveBusy = (nextValue: SetStateAction<boolean>) =>
+    setCasesPageField("snippetSaveBusy", nextValue);
+  const setSnippetSaveError = (nextValue: SetStateAction<string>) =>
+    setCasesPageField("snippetSaveError", nextValue);
+  const setSnippetForm = (
+    nextValue: SetStateAction<CaseTextSnippetFormState>,
+  ) => setCasesPageField("snippetForm", nextValue);
 
   const effectiveFilters = useMemo(
     () => ({ ...filters, search: deferredSearch || filters.search }),
@@ -1336,6 +1619,57 @@ export function CasesPage({
     [detail?.urology_recommended, symptome, urology.is_relevant],
   );
 
+  const applyCaseLookups = useCallback(
+    (patientItems: PatientOption[], doctorItems: DoctorOption[]) => {
+      setPatients(patientItems);
+      setDoctors(doctorItems);
+    },
+    [],
+  );
+
+  const hydratePatientFilterFromRoute = useCallback(
+    (patientParam: string) => {
+      setFilters((current) =>
+        current.patientId === patientParam
+          ? current
+          : { ...current, patientId: patientParam },
+      );
+    },
+    [setFilters],
+  );
+
+  const openCaseFromRoute = useCallback((caseId: string) => {
+    setSelectedId(caseId);
+    setDetailOpen(true);
+  }, []);
+
+  const openCreateCaseFromRoute = useCallback(
+    (patientParam: string, currentSearchParams: URLSearchParams) => {
+      setCreateError("");
+      setCreateForm({
+        ...DEFAULT_CREATE_FORM,
+        patientId: patientParam,
+      });
+      setCreateOpen(true);
+      const params = new URLSearchParams(currentSearchParams);
+      params.delete("create");
+      setSearchParams(params, { replace: true });
+    },
+    [setSearchParams],
+  );
+
+  const startSnippetLoad = useCallback(() => {
+    startSnippetLoad();
+  }, []);
+
+  const finishSnippetLoad = useCallback(() => {
+    setSnippetsBusy(false);
+  }, []);
+
+  const applySnippets = useCallback((items: CaseTextSnippet[]) => {
+    setSnippets(items);
+  }, []);
+
   useEffect(() => {
     if (!permissions.canViewPage) return;
     let cancelled = false;
@@ -1343,15 +1677,13 @@ export function CasesPage({
     void fetchCaseLookups().then(({ patients: patientItems, doctors: doctorItems }) => {
       if (!cancelled) {
         startTransition(() => {
-          setPatients(patientItems);
-          setDoctors(doctorItems);
+          applyCaseLookups(patientItems, doctorItems);
         });
       }
     }).catch(() => {
       if (!cancelled) {
         startTransition(() => {
-          setPatients([]);
-          setDoctors([]);
+          applyCaseLookups([], []);
         });
       }
     });
@@ -1359,18 +1691,17 @@ export function CasesPage({
     return () => {
       cancelled = true;
     };
-  }, [permissions.canViewPage]);
+  }, [applyCaseLookups, permissions.canViewPage]);
 
   useEffect(() => {
     if (!permissions.canViewPage) return;
     let cancelled = false;
-    setSnippetsBusy(true);
-    setSnippetsError("");
+    startSnippetLoad();
 
     void fetchCaseTextSnippets()
       .then((items) => {
         if (!cancelled) {
-          startTransition(() => setSnippets(items));
+          startTransition(() => applySnippets(items));
         }
       })
       .catch((error: unknown) => {
@@ -1389,14 +1720,20 @@ export function CasesPage({
       })
       .finally(() => {
         if (!cancelled) {
-          setSnippetsBusy(false);
+          finishSnippetLoad();
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [permissions.canViewPage, snippetVersion]);
+  }, [
+    applySnippets,
+    finishSnippetLoad,
+    permissions.canViewPage,
+    snippetVersion,
+    startSnippetLoad,
+  ]);
 
   useEffect(() => {
     const patientParam = embedded
@@ -1407,48 +1744,49 @@ export function CasesPage({
       : searchParams.get("case") ?? "";
     const createParam = embedded ? "" : searchParams.get("create") ?? "";
 
-    if (patientParam !== filters.patientId) {
-      setFilters((current) => ({ ...current, patientId: patientParam }));
-    }
+    hydratePatientFilterFromRoute(patientParam);
 
     if (caseParam && caseParam !== selectedId) {
-      setSelectedId(caseParam);
-      setDetailOpen(true);
+      openCaseFromRoute(caseParam);
     }
 
     if (createParam && permissions.canCreate && !embedded) {
-      setCreateError("");
-      setCreateForm({
-        ...DEFAULT_CREATE_FORM,
-        patientId: patientParam,
-      });
-      setCreateOpen(true);
-      const params = new URLSearchParams(searchParams);
-      params.delete("create");
-      setSearchParams(params, { replace: true });
+      openCreateCaseFromRoute(patientParam, searchParams);
     }
   }, [
     embedded,
     embeddedPatientId,
     embeddedCaseId,
-    filters.patientId,
+    hydratePatientFilterFromRoute,
+    openCaseFromRoute,
+    openCreateCaseFromRoute,
     permissions.canCreate,
     searchParams,
     selectedId,
-    setFilters,
-    setSearchParams,
   ]);
+
+  const startCaseListLoad = useCallback(() => {
+    setListBusy(true);
+    setListError("");
+  }, []);
+
+  const applyCases = useCallback((items: CaseRosterItem[]) => {
+    setCases(items);
+  }, []);
+
+  const finishCaseListLoad = useCallback(() => {
+    setListBusy(false);
+  }, []);
 
   useEffect(() => {
     if (!permissions.canViewPage) return;
     let cancelled = false;
-    setListBusy(true);
-    setListError("");
+    startCaseListLoad();
 
     void fetchCases(casesPath)
       .then((items) => {
         if (!cancelled) {
-          startTransition(() => setCases(items));
+          startTransition(() => applyCases(items));
         }
       })
       .catch((error: unknown) => {
@@ -1467,147 +1805,159 @@ export function CasesPage({
       })
       .finally(() => {
         if (!cancelled) {
-          setListBusy(false);
+          finishCaseListLoad();
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [casesPath, permissions.canViewPage, listVersion]);
+  }, [applyCases, casesPath, finishCaseListLoad, permissions.canViewPage, listVersion, startCaseListLoad]);
+
+  const startCaseDetailLoad = useCallback(() => {
+    setDetailBusy(true);
+    setDetailError("");
+  }, []);
+
+  const applyCaseDetail = useCallback((item: Awaited<ReturnType<typeof fetchCaseDetail>>) => {
+    setDetail(item);
+    setOverviewForm({
+      hauptanfragegrund: item.hauptanfragegrund ?? "",
+      aktuelle_anamnese: item.aktuelle_anamnese ?? "",
+      zuweiser_doctor_id: item.zuweiser_doctor_id ?? "",
+      zuweiser: item.zuweiser ?? "",
+    });
+    setVorerkrankungen(item.vorerkrankungen);
+    setAllergien(item.allergien);
+    setOperationen(item.operationen);
+    setMedikamente(item.medikamente);
+    setPainRecords(item.pain_records);
+    setSymptome(item.symptome);
+    setCardiology({
+      ...blankCardiology(),
+      is_relevant: item.cardiology?.is_relevant ?? item.cardiology_recommended ?? false,
+      chest_pain: item.cardiology?.chest_pain ?? false,
+      dyspnea: item.cardiology?.dyspnea ?? false,
+      palpitations: item.cardiology?.palpitations ?? false,
+      syncope: item.cardiology?.syncope ?? false,
+      edema: item.cardiology?.edema ?? false,
+      known_diagnosis: item.cardiology?.known_diagnosis ?? "",
+      prior_cardiac_workup: item.cardiology?.prior_cardiac_workup ?? "",
+      cardiovascular_risk_factors: item.cardiology?.cardiovascular_risk_factors ?? "",
+      anticoagulation: item.cardiology?.anticoagulation ?? "",
+      family_history: item.cardiology?.family_history ?? "",
+      red_flags: item.cardiology?.red_flags ?? "",
+      notes: item.cardiology?.notes ?? "",
+    });
+    setGastroenterology({
+      ...blankGastroenterology(),
+      is_relevant:
+        item.gastroenterology?.is_relevant ??
+        item.gastroenterology_recommended ??
+        false,
+      abdominal_pain: item.gastroenterology?.abdominal_pain ?? false,
+      reflux: item.gastroenterology?.reflux ?? false,
+      nausea: item.gastroenterology?.nausea ?? false,
+      diarrhea: item.gastroenterology?.diarrhea ?? false,
+      constipation: item.gastroenterology?.constipation ?? false,
+      gi_bleeding: item.gastroenterology?.gi_bleeding ?? false,
+      prior_endoscopy: item.gastroenterology?.prior_endoscopy ?? "",
+      bowel_habits: item.gastroenterology?.bowel_habits ?? "",
+      liver_history: item.gastroenterology?.liver_history ?? "",
+      food_intolerance: item.gastroenterology?.food_intolerance ?? "",
+      red_flags: item.gastroenterology?.red_flags ?? "",
+      notes: item.gastroenterology?.notes ?? "",
+    });
+    setOrthopedics({
+      ...blankOrthopedics(),
+      is_relevant: item.orthopedics?.is_relevant ?? item.orthopedics_recommended ?? false,
+      joint_pain: item.orthopedics?.joint_pain ?? false,
+      back_pain: item.orthopedics?.back_pain ?? false,
+      mobility_limitation: item.orthopedics?.mobility_limitation ?? false,
+      trauma_history: item.orthopedics?.trauma_history ?? false,
+      prior_imaging: item.orthopedics?.prior_imaging ?? "",
+      assistive_devices: item.orthopedics?.assistive_devices ?? "",
+      physiotherapy_history: item.orthopedics?.physiotherapy_history ?? "",
+      pain_triggers: item.orthopedics?.pain_triggers ?? "",
+      red_flags: item.orthopedics?.red_flags ?? "",
+      notes: item.orthopedics?.notes ?? "",
+    });
+    setNeurology({
+      ...blankNeurology(),
+      is_relevant: item.neurology?.is_relevant ?? item.neurology_recommended ?? false,
+      headache: item.neurology?.headache ?? false,
+      dizziness: item.neurology?.dizziness ?? false,
+      sensory_changes: item.neurology?.sensory_changes ?? false,
+      weakness: item.neurology?.weakness ?? false,
+      seizure_history: item.neurology?.seizure_history ?? false,
+      gait_balance_issues: item.neurology?.gait_balance_issues ?? false,
+      prior_neuro_imaging: item.neurology?.prior_neuro_imaging ?? "",
+      prior_neurology_workup: item.neurology?.prior_neurology_workup ?? "",
+      cognitive_changes: item.neurology?.cognitive_changes ?? "",
+      red_flags: item.neurology?.red_flags ?? "",
+      notes: item.neurology?.notes ?? "",
+    });
+    setPulmonology({
+      ...blankPulmonology(),
+      is_relevant: item.pulmonology?.is_relevant ?? item.pulmonology_recommended ?? false,
+      chronic_cough: item.pulmonology?.chronic_cough ?? false,
+      dyspnea: item.pulmonology?.dyspnea ?? false,
+      wheezing: item.pulmonology?.wheezing ?? false,
+      chest_tightness: item.pulmonology?.chest_tightness ?? false,
+      hemoptysis: item.pulmonology?.hemoptysis ?? false,
+      smoking_history: item.pulmonology?.smoking_history ?? "",
+      prior_chest_imaging: item.pulmonology?.prior_chest_imaging ?? "",
+      inhaler_therapy: item.pulmonology?.inhaler_therapy ?? "",
+      sleep_apnea_history: item.pulmonology?.sleep_apnea_history ?? "",
+      red_flags: item.pulmonology?.red_flags ?? "",
+      notes: item.pulmonology?.notes ?? "",
+    });
+    setUrology({
+      ...blankUrology(),
+      is_relevant: item.urology?.is_relevant ?? item.urology_recommended ?? false,
+      dysuria: item.urology?.dysuria ?? false,
+      hematuria: item.urology?.hematuria ?? false,
+      flank_pain: item.urology?.flank_pain ?? false,
+      urinary_frequency: item.urology?.urinary_frequency ?? false,
+      urinary_retention: item.urology?.urinary_retention ?? false,
+      incontinence: item.urology?.incontinence ?? false,
+      prior_urology_workup: item.urology?.prior_urology_workup ?? "",
+      catheter_history: item.urology?.catheter_history ?? "",
+      stone_history: item.urology?.stone_history ?? "",
+      red_flags: item.urology?.red_flags ?? "",
+      notes: item.urology?.notes ?? "",
+    });
+    setVegetative({
+      appetit_durst: item.vegetative_anamnese?.appetit_durst ?? "",
+      koerpergroesse:
+        item.vegetative_anamnese?.koerpergroesse != null
+          ? String(item.vegetative_anamnese.koerpergroesse)
+          : "",
+      gewicht:
+        item.vegetative_anamnese?.gewicht != null
+          ? String(item.vegetative_anamnese.gewicht)
+          : "",
+      gewichtsveraenderung:
+        item.vegetative_anamnese?.gewichtsveraenderung ?? "",
+      grund: item.vegetative_anamnese?.grund ?? "",
+    });
+    setImpfstatus(item.impfstatus ?? "");
+  }, []);
+
+  const finishCaseDetailLoad = useCallback(() => {
+    setDetailBusy(false);
+  }, []);
 
   useEffect(() => {
     if (!detailOpen || !selectedId) return;
     let cancelled = false;
-    setDetailBusy(true);
-    setDetailError("");
+    startCaseDetailLoad();
 
     void fetchCaseDetail(selectedId)
       .then((item) => {
         if (cancelled) return;
         startTransition(() => {
-          setDetail(item);
-          setOverviewForm({
-            hauptanfragegrund: item.hauptanfragegrund ?? "",
-            aktuelle_anamnese: item.aktuelle_anamnese ?? "",
-            zuweiser_doctor_id: item.zuweiser_doctor_id ?? "",
-            zuweiser: item.zuweiser ?? "",
-          });
-          setVorerkrankungen(item.vorerkrankungen);
-          setAllergien(item.allergien);
-          setOperationen(item.operationen);
-          setMedikamente(item.medikamente);
-          setPainRecords(item.pain_records);
-          setSymptome(item.symptome);
-          setCardiology({
-            ...blankCardiology(),
-            is_relevant: item.cardiology?.is_relevant ?? item.cardiology_recommended ?? false,
-            chest_pain: item.cardiology?.chest_pain ?? false,
-            dyspnea: item.cardiology?.dyspnea ?? false,
-            palpitations: item.cardiology?.palpitations ?? false,
-            syncope: item.cardiology?.syncope ?? false,
-            edema: item.cardiology?.edema ?? false,
-            known_diagnosis: item.cardiology?.known_diagnosis ?? "",
-            prior_cardiac_workup: item.cardiology?.prior_cardiac_workup ?? "",
-            cardiovascular_risk_factors: item.cardiology?.cardiovascular_risk_factors ?? "",
-            anticoagulation: item.cardiology?.anticoagulation ?? "",
-            family_history: item.cardiology?.family_history ?? "",
-            red_flags: item.cardiology?.red_flags ?? "",
-            notes: item.cardiology?.notes ?? "",
-          });
-          setGastroenterology({
-            ...blankGastroenterology(),
-            is_relevant:
-              item.gastroenterology?.is_relevant ??
-              item.gastroenterology_recommended ??
-              false,
-            abdominal_pain: item.gastroenterology?.abdominal_pain ?? false,
-            reflux: item.gastroenterology?.reflux ?? false,
-            nausea: item.gastroenterology?.nausea ?? false,
-            diarrhea: item.gastroenterology?.diarrhea ?? false,
-            constipation: item.gastroenterology?.constipation ?? false,
-            gi_bleeding: item.gastroenterology?.gi_bleeding ?? false,
-            prior_endoscopy: item.gastroenterology?.prior_endoscopy ?? "",
-            bowel_habits: item.gastroenterology?.bowel_habits ?? "",
-            liver_history: item.gastroenterology?.liver_history ?? "",
-            food_intolerance: item.gastroenterology?.food_intolerance ?? "",
-            red_flags: item.gastroenterology?.red_flags ?? "",
-            notes: item.gastroenterology?.notes ?? "",
-          });
-          setOrthopedics({
-            ...blankOrthopedics(),
-            is_relevant: item.orthopedics?.is_relevant ?? item.orthopedics_recommended ?? false,
-            joint_pain: item.orthopedics?.joint_pain ?? false,
-            back_pain: item.orthopedics?.back_pain ?? false,
-            mobility_limitation: item.orthopedics?.mobility_limitation ?? false,
-            trauma_history: item.orthopedics?.trauma_history ?? false,
-            prior_imaging: item.orthopedics?.prior_imaging ?? "",
-            assistive_devices: item.orthopedics?.assistive_devices ?? "",
-            physiotherapy_history: item.orthopedics?.physiotherapy_history ?? "",
-            pain_triggers: item.orthopedics?.pain_triggers ?? "",
-            red_flags: item.orthopedics?.red_flags ?? "",
-            notes: item.orthopedics?.notes ?? "",
-          });
-          setNeurology({
-            ...blankNeurology(),
-            is_relevant: item.neurology?.is_relevant ?? item.neurology_recommended ?? false,
-            headache: item.neurology?.headache ?? false,
-            dizziness: item.neurology?.dizziness ?? false,
-            sensory_changes: item.neurology?.sensory_changes ?? false,
-            weakness: item.neurology?.weakness ?? false,
-            seizure_history: item.neurology?.seizure_history ?? false,
-            gait_balance_issues: item.neurology?.gait_balance_issues ?? false,
-            prior_neuro_imaging: item.neurology?.prior_neuro_imaging ?? "",
-            prior_neurology_workup: item.neurology?.prior_neurology_workup ?? "",
-            cognitive_changes: item.neurology?.cognitive_changes ?? "",
-            red_flags: item.neurology?.red_flags ?? "",
-            notes: item.neurology?.notes ?? "",
-          });
-          setPulmonology({
-            ...blankPulmonology(),
-            is_relevant: item.pulmonology?.is_relevant ?? item.pulmonology_recommended ?? false,
-            chronic_cough: item.pulmonology?.chronic_cough ?? false,
-            dyspnea: item.pulmonology?.dyspnea ?? false,
-            wheezing: item.pulmonology?.wheezing ?? false,
-            chest_tightness: item.pulmonology?.chest_tightness ?? false,
-            hemoptysis: item.pulmonology?.hemoptysis ?? false,
-            smoking_history: item.pulmonology?.smoking_history ?? "",
-            prior_chest_imaging: item.pulmonology?.prior_chest_imaging ?? "",
-            inhaler_therapy: item.pulmonology?.inhaler_therapy ?? "",
-            sleep_apnea_history: item.pulmonology?.sleep_apnea_history ?? "",
-            red_flags: item.pulmonology?.red_flags ?? "",
-            notes: item.pulmonology?.notes ?? "",
-          });
-          setUrology({
-            ...blankUrology(),
-            is_relevant: item.urology?.is_relevant ?? item.urology_recommended ?? false,
-            dysuria: item.urology?.dysuria ?? false,
-            hematuria: item.urology?.hematuria ?? false,
-            flank_pain: item.urology?.flank_pain ?? false,
-            urinary_frequency: item.urology?.urinary_frequency ?? false,
-            urinary_retention: item.urology?.urinary_retention ?? false,
-            incontinence: item.urology?.incontinence ?? false,
-            prior_urology_workup: item.urology?.prior_urology_workup ?? "",
-            catheter_history: item.urology?.catheter_history ?? "",
-            stone_history: item.urology?.stone_history ?? "",
-            red_flags: item.urology?.red_flags ?? "",
-            notes: item.urology?.notes ?? "",
-          });
-          setVegetative({
-            appetit_durst: item.vegetative_anamnese?.appetit_durst ?? "",
-            koerpergroesse:
-              item.vegetative_anamnese?.koerpergroesse != null
-                ? String(item.vegetative_anamnese.koerpergroesse)
-                : "",
-            gewicht:
-              item.vegetative_anamnese?.gewicht != null
-                ? String(item.vegetative_anamnese.gewicht)
-                : "",
-            gewichtsveraenderung:
-              item.vegetative_anamnese?.gewichtsveraenderung ?? "",
-            grund: item.vegetative_anamnese?.grund ?? "",
-          });
-          setImpfstatus(item.impfstatus ?? "");
+          applyCaseDetail(item);
         });
       })
       .catch((error: unknown) => {
@@ -1626,14 +1976,14 @@ export function CasesPage({
       })
       .finally(() => {
         if (!cancelled) {
-          setDetailBusy(false);
+          finishCaseDetailLoad();
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [detailOpen, detailVersion, selectedId]);
+  }, [applyCaseDetail, detailOpen, detailVersion, finishCaseDetailLoad, selectedId, startCaseDetailLoad]);
 
   function refreshList() {
     setListVersion((current) => current + 1);
@@ -2144,7 +2494,7 @@ export function CasesPage({
             className="min-h-[440px]"
           >
             {listError ? (
-              <div className="px-4 py-4">
+              <div className="p-4">
                 <Banner tone="error">{listError}</Banner>
               </div>
             ) : (
@@ -2732,7 +3082,7 @@ export function CasesPage({
                             />
                             {t.cases_snippets_active}
                           </label>
-                          <div className="rounded-xl border border-dashed border-border bg-white px-3 py-3">
+                          <div className="rounded-xl border border-dashed border-border bg-white p-3">
                             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                               {t.cases_snippets_preview}
                             </p>
@@ -2775,7 +3125,7 @@ export function CasesPage({
 
                 <ItemEditorSection title={t.cases_preconditions} description={t.cases_subtitle} count={countFilled(vorerkrankungen, "erkrankung")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "vorerkrankungen"} error={sectionErrors.vorerkrankungen ?? ""} canEdit={permissions.canEdit} onAdd={() => setVorerkrankungen((current) => [...current, blankVorerkrankung()])} onSave={handleSaveVorerkrankungen}>
                   {vorerkrankungen.map((item, index) => (
-                    <div key={`vor-${index}`} className="rounded-xl border border-border bg-muted/20 p-4">
+                    <div key={vorerkrankungItemKey(item)} className="rounded-xl border border-border bg-muted/20 p-4">
                       <div className="grid gap-4 md:grid-cols-2">
                         <Field label={t.cases_preconditions} required><Input value={item.erkrankung} onChange={(event) => setVorerkrankungen((current) => updateItemAtIndex(current, index, { erkrankung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_preconditions}><Input value={item.erstdiagnose ?? ""} onChange={(event) => setVorerkrankungen((current) => updateItemAtIndex(current, index, { erstdiagnose: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
@@ -2790,7 +3140,7 @@ export function CasesPage({
 
                 <ItemEditorSection title={t.cases_allergies} description={t.cases_subtitle} count={countFilled(allergien, "allergie")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "allergien"} error={sectionErrors.allergien ?? ""} canEdit={permissions.canEdit} onAdd={() => setAllergien((current) => [...current, blankAllergie()])} onSave={handleSaveAllergien}>
                   {allergien.map((item, index) => (
-                    <div key={`alg-${index}`} className="rounded-xl border border-border bg-muted/20 p-4">
+                    <div key={allergieItemKey(item)} className="rounded-xl border border-border bg-muted/20 p-4">
                       <div className="grid gap-4 md:grid-cols-2">
                         <Field label={t.cases_allergies} required><Input value={item.allergie} onChange={(event) => setAllergien((current) => updateItemAtIndex(current, index, { allergie: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_subtitle}><Input value={item.reaktion ?? ""} onChange={(event) => setAllergien((current) => updateItemAtIndex(current, index, { reaktion: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
@@ -2802,7 +3152,7 @@ export function CasesPage({
 
                 <ItemEditorSection title={t.cases_operations} description={t.cases_subtitle} count={countFilled(operationen, "grund")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "operationen"} error={sectionErrors.operationen ?? ""} canEdit={permissions.canEdit} onAdd={() => setOperationen((current) => [...current, blankOperation()])} onSave={handleSaveOperationen}>
                   {operationen.map((item, index) => (
-                    <div key={`op-${index}`} className="rounded-xl border border-border bg-muted/20 p-4">
+                    <div key={operationItemKey(item)} className="rounded-xl border border-border bg-muted/20 p-4">
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                         <Field label={t.appointments_date}><Input type="date" value={item.datum ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { datum: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_reason} required><Input value={item.grund} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { grund: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
@@ -2841,7 +3191,7 @@ export function CasesPage({
 
                 <ItemEditorSection title={t.cases_medication} description={t.cases_subtitle} count={countFilled(medikamente, "handelsname")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "medikamente"} error={sectionErrors.medikamente ?? ""} canEdit={permissions.canEdit} onAdd={() => setMedikamente((current) => [...current, blankMedikament()])} onSave={handleSaveMedikamente}>
                   {medikamente.map((item, index) => (
-                    <div key={`med-${index}`} className="rounded-xl border border-border bg-muted/20 p-4">
+                    <div key={medikamentItemKey(item)} className="rounded-xl border border-border bg-muted/20 p-4">
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                         <Field label={t.cases_medications} required><Input value={item.handelsname} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { handelsname: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_medications}><Input value={item.wirkstoff ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { wirkstoff: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
@@ -2976,7 +3326,7 @@ export function CasesPage({
 
                 <ItemEditorSection title={t.cases_pain} description={t.cases_subtitle} count={countFilled(painRecords, "lokalisierung")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "pain"} error={sectionErrors.pain ?? ""} canEdit={permissions.canEdit} onAdd={() => setPainRecords((current) => [...current, blankPainItem()])} onSave={handleSavePain}>
                   {painRecords.map((item, index) => (
-                    <div key={`pain-${index}`} className="rounded-xl border border-border bg-muted/20 p-4">
+                    <div key={painItemKey(item)} className="rounded-xl border border-border bg-muted/20 p-4">
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                         <Field label={t.appointments_location} required><Input value={item.lokalisierung} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { lokalisierung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.providers_service_valid_from}><Input value={item.seit_wann ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { seit_wann: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
@@ -2998,7 +3348,7 @@ export function CasesPage({
 
                 <ItemEditorSection title={t.cases_symptoms} description={t.cases_subtitle} count={countFilled(symptome, "beschreibung")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "symptome"} error={sectionErrors.symptome ?? ""} canEdit={permissions.canEdit} onAdd={() => setSymptome((current) => [...current, blankSymptom()])} onSave={handleSaveSymptome}>
                   {symptome.map((item, index) => (
-                    <div key={`sym-${index}`} className="rounded-xl border border-border bg-muted/20 p-4">
+                    <div key={symptomItemKey(item)} className="rounded-xl border border-border bg-muted/20 p-4">
                       <div className="grid gap-4 md:grid-cols-2">
                         <Field label={t.patients_notes} required><Input value={item.beschreibung} onChange={(event) => setSymptome((current) => updateItemAtIndex(current, index, { beschreibung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_title}><Input value={item.fachrichtung ?? ""} onChange={(event) => setSymptome((current) => updateItemAtIndex(current, index, { fachrichtung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
@@ -3952,6 +4302,10 @@ export function CasesPage({
       </Sheet>
     </>
   );
+}
+
+export function CasesPage(...args: Parameters<typeof useCasesPageContent>) {
+  return useCasesPageContent(...args);
 }
 
 function MetricCard({ label, value, description, icon }: MetricCardProps) {

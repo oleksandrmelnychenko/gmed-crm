@@ -318,7 +318,7 @@ export function formatDate(
   if (!value) return emptyLabel;
   const date = new Date(`${value}T00:00:00`);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(date);
+  return date.toLocaleDateString(locale, { dateStyle: "medium" });
 }
 
 export function numberFromUnknown(value: unknown) {
@@ -336,9 +336,9 @@ export function formatNumber(value: unknown, locale = "de-DE") {
     if (typeof value === "string") return value;
     return "0";
   }
-  return new Intl.NumberFormat(locale, {
+  return parsed.toLocaleString(locale, {
     maximumFractionDigits: 2,
-  }).format(parsed);
+  });
 }
 
 export function formatCurrency(value: unknown, currency = "EUR", locale = "de-DE") {
@@ -347,11 +347,11 @@ export function formatCurrency(value: unknown, currency = "EUR", locale = "de-DE
     const fallback = typeof value === "string" && value.trim() ? value : "0";
     return `${fallback} ${currency}`;
   }
-  return new Intl.NumberFormat(locale, {
+  return parsed.toLocaleString(locale, {
     style: "currency",
     currency,
     maximumFractionDigits: 2,
-  }).format(parsed);
+  });
 }
 
 export function formatDateTime(
@@ -362,10 +362,10 @@ export function formatDateTime(
   if (!value) return emptyLabel;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(locale, {
+  return date.toLocaleString(locale, {
     dateStyle: "medium",
     timeStyle: "short",
-  }).format(date);
+  });
 }
 
 export function formatDateOnly(
@@ -376,10 +376,10 @@ export function formatDateOnly(
   if (!value) return emptyLabel;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(date);
+  return date.toLocaleDateString(locale, { dateStyle: "medium" });
 }
 
-export function toDateTimeInputValue(value: string | null | undefined) {
+function toDateTimeInputValue(value: string | null | undefined) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";

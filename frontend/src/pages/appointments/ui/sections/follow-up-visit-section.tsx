@@ -3,8 +3,9 @@ import {
   memo,
   useEffect,
   useMemo,
-  useState,
+  useReducer,
   type FormEvent,
+  type SetStateAction,
 } from "react";
 
 import { LoaderCircle } from "lucide-react";
@@ -87,7 +88,29 @@ function withEllipsis(text: string) {
   return text.trim().endsWith("...") ? text : `${text.trim()}...`;
 }
 
-function AppointmentFollowUpVisitSection({
+type FollowUpVisitSectionState = {
+  form: FollowUpVisitFormState;
+  doctors: DoctorOption[];
+  conflicts: ConflictSummary | null;
+  error: string;
+  busy: boolean;
+};
+
+type FollowUpVisitSectionPatch =
+  | Partial<FollowUpVisitSectionState>
+  | ((current: FollowUpVisitSectionState) => Partial<FollowUpVisitSectionState>);
+
+function followUpVisitSectionReducer(
+  state: FollowUpVisitSectionState,
+  patch: FollowUpVisitSectionPatch,
+): FollowUpVisitSectionState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
+function useAppointmentFollowUpVisitSectionContent({
   detail,
   appointments,
   providers,
@@ -113,34 +136,49 @@ function AppointmentFollowUpVisitSection({
     }),
     [tr.common_doctor, tr.common_provider, tr.patients_assign_owner],
   );
-  const [form, setForm] = useState<FollowUpVisitFormState>(() =>
-    buildFollowUpVisitForm(detail, defaultReminderUserId, tr.phase_followup),
+  const [sectionState, dispatchSectionState] = useReducer(
+    followUpVisitSectionReducer,
+    undefined,
+    () => ({
+      form: buildFollowUpVisitForm(detail, defaultReminderUserId, tr.phase_followup),
+      doctors: [],
+      conflicts: null,
+      error: "",
+      busy: false,
+    }),
   );
-  const [doctors, setDoctors] = useState<DoctorOption[]>([]);
-  const [conflicts, setConflicts] = useState<ConflictSummary | null>(null);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const { form, doctors, conflicts, error, busy } = sectionState;
+  const setForm = (nextValue: SetStateAction<FollowUpVisitFormState>) => {
+    dispatchSectionState((current) => ({
+      form:
+        typeof nextValue === "function"
+          ? nextValue(current.form)
+          : nextValue,
+    }));
+  };
 
   useEffect(() => {
-    setForm(buildFollowUpVisitForm(detail, defaultReminderUserId, tr.phase_followup));
-    setDoctors([]);
-    setConflicts(null);
-    setError("");
-    setBusy(false);
+    dispatchSectionState({
+      form: buildFollowUpVisitForm(detail, defaultReminderUserId, tr.phase_followup),
+      doctors: [],
+      conflicts: null,
+      error: "",
+      busy: false,
+    });
   }, [defaultReminderUserId, detail, tr.phase_followup]);
 
   useEffect(() => {
     if (!form.providerId) {
-      setDoctors([]);
+      dispatchSectionState({ doctors: [] });
       return;
     }
     let active = true;
     getProviderDoctors(form.providerId)
       .then((rows) => {
-        if (active) setDoctors(rows);
+        if (active) dispatchSectionState({ doctors: rows });
       })
       .catch(() => {
-        if (active) setDoctors([]);
+        if (active) dispatchSectionState({ doctors: [] });
       });
     return () => {
       active = false;
@@ -168,16 +206,16 @@ function AppointmentFollowUpVisitSection({
 
   useEffect(() => {
     if (!debouncedConflictQuery) {
-      setConflicts(null);
+      dispatchSectionState({ conflicts: null });
       return;
     }
     let active = true;
     apiFetch<ConflictSummary>(debouncedConflictQuery)
       .then((value) => {
-        if (active) setConflicts(value);
+        if (active) dispatchSectionState({ conflicts: value });
       })
       .catch(() => {
-        if (active) setConflicts(null);
+        if (active) dispatchSectionState({ conflicts: null });
       });
     return () => {
       active = false;
@@ -243,8 +281,10 @@ function AppointmentFollowUpVisitSection({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setBusy(true);
-    setError("");
+    dispatchSectionState({
+      busy: true,
+      error: "",
+    });
     try {
       const result = await apiFetch<{
         id: string;
@@ -288,16 +328,19 @@ function AppointmentFollowUpVisitSection({
       const notice = result.conflicts
         ? `${buildScheduleNotice(result.conflicts, localWarnings)} ${t.appointments_follow_up_visit_created}`
         : tr.common_active;
-      setForm(buildFollowUpVisitForm(detail, form.reminderUserId, tr.phase_followup));
+      dispatchSectionState({
+        form: buildFollowUpVisitForm(detail, form.reminderUserId, tr.phase_followup),
+        busy: false,
+      });
       onCreated({ id: result.id, notice });
     } catch (submitError) {
-      setError(
-        submitError instanceof Error
-          ? submitError.message
-          : tr.common_failed_create,
-      );
-    } finally {
-      setBusy(false);
+      dispatchSectionState({
+        error:
+          submitError instanceof Error
+            ? submitError.message
+            : tr.common_failed_create,
+        busy: false,
+      });
     }
   }
 
@@ -607,6 +650,10 @@ function AppointmentFollowUpVisitSection({
       </form>
     </section>
   );
+}
+
+function AppointmentFollowUpVisitSection(...args: Parameters<typeof useAppointmentFollowUpVisitSectionContent>) {
+  return useAppointmentFollowUpVisitSectionContent(...args);
 }
 
 const MemoizedAppointmentFollowUpVisitSection = memo(

@@ -32,7 +32,7 @@ function AppointmentNotesSection({
 
   return (
     <section className={appointmentSectionCardClassName("p-5")}>
-      <h3 className="text-sm font-semibold text-slate-950">
+      <h3 className="text-sm font-semibold text-zinc-950">
         {t.patients_notes}
       </h3>
       <div className="mt-4 grid gap-4 md:grid-cols-3">

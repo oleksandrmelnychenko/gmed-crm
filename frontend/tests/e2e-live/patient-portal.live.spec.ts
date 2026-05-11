@@ -262,14 +262,18 @@ test.describe("patient portal live workflows", () => {
     );
     expect(createTemplateResponse.ok()).toBe(true);
 
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const response = await request.post(
-        `${pmApi.backendUrl}/api/v1/appointments/${scenario.appointment.id}/status`,
-        {
-          headers: pmApi.headers,
-          data: { status: "confirmed" },
-        },
-      );
+    const statusResponses = await Promise.all(
+      Array.from({ length: 2 }, () =>
+        request.post(
+          `${pmApi.backendUrl}/api/v1/appointments/${scenario.appointment.id}/status`,
+          {
+            headers: pmApi.headers,
+            data: { status: "confirmed" },
+          },
+        ),
+      ),
+    );
+    for (const response of statusResponses) {
       expect(response.ok()).toBe(true);
     }
 

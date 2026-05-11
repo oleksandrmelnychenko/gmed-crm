@@ -6,8 +6,9 @@ import {
   useDeferredValue,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
-  useState,
+  type SetStateAction,
 } from "react";
 import { useSearchParams } from "react-router-dom";
 import type FullCalendar from "@fullcalendar/react";
@@ -43,6 +44,8 @@ import {
 import {
   formatAppointmentDateTimeLabel as formatDateTimeLabel,
 } from "@/pages/appointments/model/runtime-formatters";
+
+const ACTIVE_APPOINTMENT_STATUSES = new Set(["planned", "confirmed", "in_progress"]);
 import {
   blankAppointmentForm,
 } from "@/pages/appointments/model/form-factories";
@@ -225,7 +228,42 @@ const LazyPatientAppointmentsPage = lazy(async () => {
 
 const createSheetInputClassName = appointmentFilterControlClassName;
 
-function StaffAppointmentsPage() {
+type StaffAppointmentsPageState = {
+  calendarView: CalendarView;
+  calendarDate: string;
+  filters: FiltersState;
+  operationalScope: OperationalScope;
+  requestActionBusy: string;
+};
+
+type StaffAppointmentsPagePatch =
+  | Partial<StaffAppointmentsPageState>
+  | ((current: StaffAppointmentsPageState) => Partial<StaffAppointmentsPageState>);
+
+function staffAppointmentsPageReducer(
+  state: StaffAppointmentsPageState,
+  patch: StaffAppointmentsPagePatch,
+): StaffAppointmentsPageState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
+function createStaffAppointmentsPageFieldPatch<K extends keyof StaffAppointmentsPageState>(
+  field: K,
+  value: SetStateAction<StaffAppointmentsPageState[K]>,
+): StaffAppointmentsPagePatch {
+  return (current) => {
+    const nextValue =
+      typeof value === "function"
+        ? (value as (previous: StaffAppointmentsPageState[K]) => StaffAppointmentsPageState[K])(current[field])
+        : value;
+    return { [field]: nextValue } as Partial<StaffAppointmentsPageState>;
+  };
+}
+
+function useStaffAppointmentsPageContent() {
   const { user } = useAuth();
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
@@ -239,16 +277,38 @@ function StaffAppointmentsPage() {
     user?.role === "ceo" || user?.role === "patient_manager";
   const isMobile = useIsMobile();
   const calendarRef = useRef<FullCalendar | null>(null);
-  const [calendarView, setCalendarView] = useState<CalendarView>(() =>
-    readStoredCalendarView(),
+  const [pageState, dispatchPageState] = useReducer(
+    staffAppointmentsPageReducer,
+    undefined,
+    (): StaffAppointmentsPageState => ({
+      calendarView: readStoredCalendarView(),
+      calendarDate: readStoredCalendarDate(),
+      filters: DEFAULT_FILTERS,
+      operationalScope: "all",
+      requestActionBusy: "",
+    }),
   );
-  const [calendarDate, setCalendarDate] = useState(() =>
-    readStoredCalendarDate(),
-  );
-  const [filters, setFilters] = useState<FiltersState>(DEFAULT_FILTERS);
-  const [operationalScope, setOperationalScope] =
-    useState<OperationalScope>("all");
-  const [requestActionBusy, setRequestActionBusy] = useState("");
+  const {
+    calendarView,
+    calendarDate,
+    filters,
+    operationalScope,
+    requestActionBusy,
+  } = pageState;
+  const setPageField = <K extends keyof StaffAppointmentsPageState>(
+    field: K,
+    value: SetStateAction<StaffAppointmentsPageState[K]>,
+  ) => dispatchPageState(createStaffAppointmentsPageFieldPatch(field, value));
+  const setCalendarView = (value: SetStateAction<CalendarView>) =>
+    setPageField("calendarView", value);
+  const setCalendarDate = (value: SetStateAction<string>) =>
+    setPageField("calendarDate", value);
+  const setFilters = (value: SetStateAction<FiltersState>) =>
+    setPageField("filters", value);
+  const setOperationalScope = (value: SetStateAction<OperationalScope>) =>
+    setPageField("operationalScope", value);
+  const setRequestActionBusy = (value: SetStateAction<string>) =>
+    setPageField("requestActionBusy", value);
   const deferredSearch = useDeferredValue(filters.search);
   const {
     appointmentsNotice,
@@ -658,54 +718,56 @@ function StaffAppointmentsPage() {
     }
 
     for (const item of detailReminders) {
+      const { title } = item;
       if (!item.is_completed) {
         pendingReminderCount += 1;
       }
-      if (item.title.startsWith(DOCTOR_FOLLOW_UP_PREFIX)) {
+      if (title.startsWith(DOCTOR_FOLLOW_UP_PREFIX)) {
         doctorDirectedReminders.push(item);
       }
-      if (item.title.startsWith(PACKAGE_END_FOLLOW_UP_PREFIX)) {
+      if (title.startsWith(PACKAGE_END_FOLLOW_UP_PREFIX)) {
         packageEndReminders.push(item);
       }
-      if (item.title.startsWith(EXTERNAL_HANDOFF_PREFIX)) {
+      if (title.startsWith(EXTERNAL_HANDOFF_PREFIX)) {
         externalHandoffReminders.push(item);
       }
-      if (item.title.startsWith(BILLING_HANDOFF_PREFIX)) {
+      if (title.startsWith(BILLING_HANDOFF_PREFIX)) {
         billingHandoffReminders.push(item);
       }
-      if (item.title.startsWith(FINDINGS_FOLLOW_UP_PREFIX)) {
+      if (title.startsWith(FINDINGS_FOLLOW_UP_PREFIX)) {
         findingsReminders.push(item);
       }
-      if (item.title.startsWith(INCOMING_DATA_PREFIX)) {
+      if (title.startsWith(INCOMING_DATA_PREFIX)) {
         incomingDataReminders.push(item);
       }
     }
 
     for (const item of detailTasks) {
+      const { title } = item;
       const isOpenTask =
         item.status !== "completed" && item.status !== "cancelled";
       if (isOpenTask) {
         openTaskCount += 1;
       }
-      if (item.title.startsWith(DOCTOR_FOLLOW_UP_PREFIX)) {
+      if (title.startsWith(DOCTOR_FOLLOW_UP_PREFIX)) {
         doctorDirectedTasks.push(item);
       }
-      if (item.title.startsWith(PACKAGE_END_FOLLOW_UP_PREFIX)) {
+      if (title.startsWith(PACKAGE_END_FOLLOW_UP_PREFIX)) {
         packageEndTasks.push(item);
       }
-      if (item.title.startsWith(EXTERNAL_HANDOFF_PREFIX)) {
+      if (title.startsWith(EXTERNAL_HANDOFF_PREFIX)) {
         externalHandoffTasks.push(item);
       }
-      if (item.title.startsWith(BILLING_HANDOFF_PREFIX)) {
+      if (title.startsWith(BILLING_HANDOFF_PREFIX)) {
         billingHandoffTasks.push(item);
         if (isOpenTask) {
           openBillingHandoffTasks.push(item);
         }
       }
-      if (item.title.startsWith(FINDINGS_FOLLOW_UP_PREFIX)) {
+      if (title.startsWith(FINDINGS_FOLLOW_UP_PREFIX)) {
         findingsTasks.push(item);
       }
-      if (item.title.startsWith(INCOMING_DATA_PREFIX)) {
+      if (title.startsWith(INCOMING_DATA_PREFIX)) {
         incomingDataTasks.push(item);
       }
     }
@@ -1058,6 +1120,16 @@ function StaffAppointmentsPage() {
     ],
   );
 
+  const openDetailWorkspaceFromRoute = useCallback(
+    (appointmentId: string) => {
+      startTransition(() => {
+        setSelectedId(appointmentId);
+        setDetailOpen(true);
+      });
+    },
+    [setDetailOpen, setSelectedId],
+  );
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(CALENDAR_STORAGE_VIEW_KEY, calendarView);
@@ -1072,8 +1144,7 @@ function StaffAppointmentsPage() {
     canCreate: permissions.canCreate,
     closeDetailWorkspace,
     setFilters,
-    setSelectedId,
-    setDetailOpen,
+    openDetailWorkspace: openDetailWorkspaceFromRoute,
     onOpenCreateFromPatient: (patientId) => {
       const next = blankAppointmentForm();
       next.patientId = patientId;
@@ -1112,7 +1183,7 @@ function StaffAppointmentsPage() {
 
     for (const item of scopedAppointments) {
       if (item.date === todayDate) todayCount += 1;
-      if (["planned", "confirmed", "in_progress"].includes(item.status)) {
+      if (ACTIVE_APPOINTMENT_STATUSES.has(item.status)) {
         activeCount += 1;
       }
       if (item.interpreter_response === "pending") pendingCount += 1;
@@ -1514,11 +1585,13 @@ function StaffAppointmentsPage() {
             interpreterReportReady={interpreterReportReady}
             completionWarnings={completionWarnings}
             reportReviewMeta={reportReviewMeta}
-            canSubmitInterpreterReport={canSubmitInterpreterReport}
-            canResubmitRejectedReport={canResubmitRejectedReport}
-            showReportReviewActions={showReportReviewActions}
-            canShowConciergeSection={canShowConciergeSection}
-            canShowBillingHandoffSection={canShowBillingHandoffSection}
+            detailDisplay={{
+              canSubmitInterpreterReport,
+              canResubmitRejectedReport,
+              showReportReviewActions,
+              canShowConciergeSection,
+              canShowBillingHandoffSection,
+            }}
             nonMedicalProviders={nonMedicalProviders}
             conciergeStaff={conciergeStaff}
             billingStaff={billingStaff}
@@ -1754,11 +1827,14 @@ function StaffAppointmentsPage() {
         detail={linkedPatientDetail}
         detailBusy={linkedPatientDetailLoading}
         detailError={linkedPatientDetailError}
-        hideFooterActions
         dictionary={tr as unknown as PatientsDictionary}
-        canCreateEdit={patientSheetPermissions.canCreateEdit}
-        canViewAssignments={patientSheetPermissions.canViewAssignments}
-        canManageAssignments={patientSheetPermissions.canManageAssignments}
+        detailControls={{
+          canCreateEdit: patientSheetPermissions.canCreateEdit,
+          canViewAssignments: patientSheetPermissions.canViewAssignments,
+          canManageAssignments: patientSheetPermissions.canManageAssignments,
+          hideFooterActions: true,
+          hideWorkspaceActions: true,
+        }}
         assignments={linkedPatientAssignments}
         assignableStaff={linkedPatientAssignableStaff}
         selectedAssignee={linkedPatientSelectedAssignee}
@@ -1767,7 +1843,6 @@ function StaffAppointmentsPage() {
         onAssigneeChange={setLinkedPatientSelectedAssignee}
         onAssign={handleAssignLinkedPatient}
         onRefresh={refreshLinkedPatient}
-        hideWorkspaceActions
         onOpenCases={() => undefined}
         onOpenOrders={() => undefined}
         onOpenAppointments={() => undefined}
@@ -1888,13 +1963,15 @@ function StaffAppointmentsPage() {
           completionWarnings={completionWarnings}
           taskAssignableStaff={taskAssignableStaff}
           reportReviewMeta={reportReviewMeta}
-          canSubmitInterpreterReport={canSubmitInterpreterReport}
-          canResubmitRejectedReport={canResubmitRejectedReport}
-          showReportReviewActions={showReportReviewActions}
-          canShowConciergeSection={canShowConciergeSection}
+          detailDisplay={{
+            canSubmitInterpreterReport,
+            canResubmitRejectedReport,
+            showReportReviewActions,
+            canShowConciergeSection,
+            canShowBillingHandoffSection,
+          }}
           nonMedicalProviders={nonMedicalProviders}
           conciergeStaff={conciergeStaff}
-          canShowBillingHandoffSection={canShowBillingHandoffSection}
           billingStaff={billingStaff}
           billingHandoffReminders={billingHandoffReminders}
           billingHandoffTasks={billingHandoffTasks}
@@ -1913,6 +1990,10 @@ function StaffAppointmentsPage() {
       ) : null}
     </>
   );
+}
+
+function StaffAppointmentsPage(...args: Parameters<typeof useStaffAppointmentsPageContent>) {
+  return useStaffAppointmentsPageContent(...args);
 }
 
 export function AppointmentsPage() {

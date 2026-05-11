@@ -3,8 +3,9 @@ import {
   memo,
   useCallback,
   useEffect,
-  useState,
+  useReducer,
   type FormEvent,
+  type SetStateAction,
 } from "react";
 
 import { LoaderCircle } from "lucide-react";
@@ -109,7 +110,58 @@ type AppointmentIncomingDataSectionProps = {
   onError: (message: string) => void;
 };
 
-function AppointmentIncomingDataSection({
+type SectionStateAction<TState> =
+  | { type: "patch"; value: Partial<TState> }
+  | { type: "update"; updater: (state: TState) => TState };
+
+function sectionStateReducer<TState>(
+  state: TState,
+  action: SectionStateAction<TState>,
+): TState {
+  switch (action.type) {
+    case "patch":
+      return { ...state, ...action.value };
+    case "update":
+      return action.updater(state);
+    default:
+      return state;
+  }
+}
+
+function createSectionFieldAction<TState, K extends keyof TState>(
+  field: K,
+  value: SetStateAction<TState[K]>,
+): SectionStateAction<TState> {
+  return {
+    type: "update",
+    updater: (state) => {
+      const currentValue = state[field];
+      const nextValue =
+        typeof value === "function"
+          ? (value as (current: TState[K]) => TState[K])(currentValue)
+          : value;
+
+      if (Object.is(currentValue, nextValue)) return state;
+      return { ...state, [field]: nextValue };
+    },
+  };
+}
+
+type IncomingDataSectionState = {
+  form: IncomingDataFormState;
+  submitBusy: boolean;
+  actionBusy: string;
+  composerOpen: boolean;
+};
+
+type FindingsFollowUpSectionState = {
+  form: FindingsFollowUpFormState;
+  submitBusy: boolean;
+  actionBusy: string;
+  composerOpen: boolean;
+};
+
+function useAppointmentIncomingDataSectionContent({
   detail,
   checklist,
   reminders,
@@ -133,12 +185,42 @@ function AppointmentIncomingDataSection({
     ) => blankIncomingDataForm(assigneeId, dueAt, source),
     [defaultAssigneeId, detail],
   );
-  const [form, setForm] = useState<IncomingDataFormState>(() =>
-    buildDefaultForm(),
-  );
-  const [submitBusy, setSubmitBusy] = useState(false);
-  const [actionBusy, setActionBusy] = useState("");
-  const [composerOpen, setComposerOpen] = useState(false);
+  const [{ form, submitBusy, actionBusy, composerOpen }, dispatchIncomingState] =
+    useReducer(
+      sectionStateReducer<IncomingDataSectionState>,
+      undefined,
+      () => ({
+        form: buildDefaultForm(),
+        submitBusy: false,
+        actionBusy: "",
+        composerOpen: false,
+      }),
+    );
+  const setForm = (value: SetStateAction<IncomingDataFormState>) =>
+    dispatchIncomingState(
+      createSectionFieldAction<IncomingDataSectionState, "form">("form", value),
+    );
+  const setSubmitBusy = (value: SetStateAction<boolean>) =>
+    dispatchIncomingState(
+      createSectionFieldAction<IncomingDataSectionState, "submitBusy">(
+        "submitBusy",
+        value,
+      ),
+    );
+  const setActionBusy = (value: SetStateAction<string>) =>
+    dispatchIncomingState(
+      createSectionFieldAction<IncomingDataSectionState, "actionBusy">(
+        "actionBusy",
+        value,
+      ),
+    );
+  const setComposerOpen = (value: SetStateAction<boolean>) =>
+    dispatchIncomingState(
+      createSectionFieldAction<IncomingDataSectionState, "composerOpen">(
+        "composerOpen",
+        value,
+      ),
+    );
   const openChecklistCount = checklist.filter((item) => !item.is_completed).length;
   const intakeStateLabel =
     openChecklistCount === 0 && checklist.length > 0
@@ -166,10 +248,15 @@ function AppointmentIncomingDataSection({
   );
 
   useEffect(() => {
-    setForm(buildDefaultForm());
-    setSubmitBusy(false);
-    setActionBusy("");
-    setComposerOpen(false);
+    dispatchIncomingState({
+      type: "patch",
+      value: {
+        form: buildDefaultForm(),
+        submitBusy: false,
+        actionBusy: "",
+        composerOpen: false,
+      },
+    });
   }, [buildDefaultForm]);
 
   async function completeChecklistItem(itemId: string) {
@@ -779,6 +866,10 @@ function AppointmentIncomingDataSection({
   );
 }
 
+function AppointmentIncomingDataSection(...args: Parameters<typeof useAppointmentIncomingDataSectionContent>) {
+  return useAppointmentIncomingDataSectionContent(...args);
+}
+
 type AppointmentFindingsSectionProps = {
   detail: AppointmentDetail;
   checklist: ChecklistItem[];
@@ -791,7 +882,7 @@ type AppointmentFindingsSectionProps = {
   onError: (message: string) => void;
 };
 
-function AppointmentFindingsSection({
+function useAppointmentFindingsSectionContent({
   detail,
   checklist,
   reminders,
@@ -817,12 +908,42 @@ function AppointmentFindingsSection({
     ) => blankFindingsFollowUpForm(assigneeId, dueAt, artifact),
     [defaultAssigneeId, detail],
   );
-  const [form, setForm] = useState<FindingsFollowUpFormState>(() =>
-    buildDefaultForm(),
-  );
-  const [submitBusy, setSubmitBusy] = useState(false);
-  const [actionBusy, setActionBusy] = useState("");
-  const [composerOpen, setComposerOpen] = useState(false);
+  const [{ form, submitBusy, actionBusy, composerOpen }, dispatchFindingsState] =
+    useReducer(
+      sectionStateReducer<FindingsFollowUpSectionState>,
+      undefined,
+      () => ({
+        form: buildDefaultForm(),
+        submitBusy: false,
+        actionBusy: "",
+        composerOpen: false,
+      }),
+    );
+  const setForm = (value: SetStateAction<FindingsFollowUpFormState>) =>
+    dispatchFindingsState(
+      createSectionFieldAction<FindingsFollowUpSectionState, "form">("form", value),
+    );
+  const setSubmitBusy = (value: SetStateAction<boolean>) =>
+    dispatchFindingsState(
+      createSectionFieldAction<FindingsFollowUpSectionState, "submitBusy">(
+        "submitBusy",
+        value,
+      ),
+    );
+  const setActionBusy = (value: SetStateAction<string>) =>
+    dispatchFindingsState(
+      createSectionFieldAction<FindingsFollowUpSectionState, "actionBusy">(
+        "actionBusy",
+        value,
+      ),
+    );
+  const setComposerOpen = (value: SetStateAction<boolean>) =>
+    dispatchFindingsState(
+      createSectionFieldAction<FindingsFollowUpSectionState, "composerOpen">(
+        "composerOpen",
+        value,
+      ),
+    );
   const openChecklistCount = checklist.filter((item) => !item.is_completed).length;
   const findingsStateLabel =
     openChecklistCount === 0 && checklist.length > 0
@@ -854,10 +975,15 @@ function AppointmentFindingsSection({
   );
 
   useEffect(() => {
-    setForm(buildDefaultForm());
-    setSubmitBusy(false);
-    setActionBusy("");
-    setComposerOpen(false);
+    dispatchFindingsState({
+      type: "patch",
+      value: {
+        form: buildDefaultForm(),
+        submitBusy: false,
+        actionBusy: "",
+        composerOpen: false,
+      },
+    });
   }, [buildDefaultForm]);
 
   async function completeChecklistItem(itemId: string) {
@@ -1430,6 +1556,10 @@ function AppointmentFindingsSection({
       </AppointmentEditorSheet>
     </div>
   );
+}
+
+function AppointmentFindingsSection(...args: Parameters<typeof useAppointmentFindingsSectionContent>) {
+  return useAppointmentFindingsSectionContent(...args);
 }
 
 export const MemoizedAppointmentIncomingDataSection = memo(

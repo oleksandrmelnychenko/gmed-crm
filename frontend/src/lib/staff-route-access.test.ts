@@ -66,8 +66,9 @@ describe("canAccessStaffRoute", () => {
   it("matches peekStaffRouteRule for every sample path × staff role", () => {
     for (const path of SAMPLE_PATHS) {
       const rule = peekStaffRouteRule(path);
+      const allowedRoles = new Set(rule?.roles ?? []);
       for (const role of ALL_STAFF_ROLES) {
-        const expected = rule !== null && rule.roles.includes(role);
+        const expected = allowedRoles.has(role);
         expect(canAccessStaffRoute(role, path)).toBe(expected);
       }
     }
@@ -261,7 +262,15 @@ describe("listStaffNavItems", () => {
     expect(listStaffNavItems("sales").map((item) => item.to)).toContain("/admin/custom-fields");
     expect(listStaffNavItems("sales").map((item) => item.to)).not.toContain("/admin/users");
 
-    expect(listStaffNavItems("ceo_assistant").map((item) => item.to).filter((to) => to.startsWith("/admin"))).toEqual([]);
+    const ceoAssistantAdminItems = listStaffNavItems("ceo_assistant").reduce<
+      string[]
+    >((items, item) => {
+      if (item.to.startsWith("/admin")) {
+        items.push(item.to);
+      }
+      return items;
+    }, []);
+    expect(ceoAssistantAdminItems).toEqual([]);
   });
 });
 

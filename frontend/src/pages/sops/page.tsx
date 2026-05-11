@@ -2,9 +2,10 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useState,
+  useReducer,
   type FormEvent,
   type ReactNode,
+  type SetStateAction,
 } from "react";
 import {
   BookOpen,
@@ -171,7 +172,84 @@ function Field({
   );
 }
 
-export function SopsPage() {
+interface SopsPageState {
+  items: SopItem[];
+  reviewQueue: SopItem[];
+  eligibleUsers: EligibleUser[];
+  allowedTargetRoles: string[];
+  loading: boolean;
+  refreshing: boolean;
+  error: string;
+  notice: string;
+  version: number;
+  formOpen: boolean;
+  reviewOpen: boolean;
+  saving: boolean;
+  reviewBusy: boolean;
+  formError: string;
+  reviewError: string;
+  editing: SopItem | null;
+  reviewItem: SopItem | null;
+  selectedItemId: string;
+  reviewDecision: string;
+  reviewNote: string;
+  actionBusyId: string | null;
+  form: SopFormState;
+  librarySearch: string;
+  queueSearch: string;
+}
+
+type SopsPageAction =
+  | Partial<SopsPageState>
+  | ((current: SopsPageState) => Partial<SopsPageState>);
+
+function createSopsPageState(): SopsPageState {
+  return {
+    items: [],
+    reviewQueue: [],
+    eligibleUsers: [],
+    allowedTargetRoles: [],
+    loading: true,
+    refreshing: false,
+    error: "",
+    notice: "",
+    version: 0,
+    formOpen: false,
+    reviewOpen: false,
+    saving: false,
+    reviewBusy: false,
+    formError: "",
+    reviewError: "",
+    editing: null,
+    reviewItem: null,
+    selectedItemId: "",
+    reviewDecision: "approve",
+    reviewNote: "",
+    actionBusyId: null,
+    form: emptyForm(),
+    librarySearch: "",
+    queueSearch: "",
+  };
+}
+
+function sopsPageReducer(
+  current: SopsPageState,
+  action: SopsPageAction,
+): SopsPageState {
+  const patch = typeof action === "function" ? action(current) : action;
+  return {
+    ...current,
+    ...patch,
+  };
+}
+
+function resolveSopsStateAction<T>(action: SetStateAction<T>, current: T): T {
+  return typeof action === "function"
+    ? (action as (value: T) => T)(current)
+    : action;
+}
+
+function useSopsPageContent() {
   const { user } = useAuth();
   const { t, lang } = useLang();
   const text = useMemo(
@@ -258,30 +336,73 @@ export function SopsPage() {
     }),
     [t],
   );
-  const [items, setItems] = useState<SopItem[]>([]);
-  const [reviewQueue, setReviewQueue] = useState<SopItem[]>([]);
-  const [eligibleUsers, setEligibleUsers] = useState<EligibleUser[]>([]);
-  const [allowedTargetRoles, setAllowedTargetRoles] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [version, setVersion] = useState(0);
-  const [formOpen, setFormOpen] = useState(false);
-  const [reviewOpen, setReviewOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [reviewBusy, setReviewBusy] = useState(false);
-  const [formError, setFormError] = useState("");
-  const [reviewError, setReviewError] = useState("");
-  const [editing, setEditing] = useState<SopItem | null>(null);
-  const [reviewItem, setReviewItem] = useState<SopItem | null>(null);
-  const [selectedItemId, setSelectedItemId] = useState("");
-  const [reviewDecision, setReviewDecision] = useState("approve");
-  const [reviewNote, setReviewNote] = useState("");
-  const [actionBusyId, setActionBusyId] = useState<string | null>(null);
-  const [form, setForm] = useState<SopFormState>(emptyForm());
-  const [librarySearch, setLibrarySearch] = useState("");
-  const [queueSearch, setQueueSearch] = useState("");
+  const [sopsState, dispatchSopsState] = useReducer(
+    sopsPageReducer,
+    undefined,
+    createSopsPageState,
+  );
+  const {
+    actionBusyId,
+    allowedTargetRoles,
+    editing,
+    eligibleUsers,
+    error,
+    form,
+    formError,
+    formOpen,
+    items,
+    librarySearch,
+    loading,
+    notice,
+    queueSearch,
+    refreshing,
+    reviewBusy,
+    reviewDecision,
+    reviewError,
+    reviewItem,
+    reviewOpen,
+    reviewNote,
+    reviewQueue,
+    saving,
+    selectedItemId,
+    version,
+  } = sopsState;
+  const setError = (nextValue: SetStateAction<string>) =>
+    dispatchSopsState((current) => ({ error: resolveSopsStateAction(nextValue, current.error) }));
+  const setNotice = (nextValue: SetStateAction<string>) =>
+    dispatchSopsState((current) => ({ notice: resolveSopsStateAction(nextValue, current.notice) }));
+  const setVersion = (nextValue: SetStateAction<number>) =>
+    dispatchSopsState((current) => ({ version: resolveSopsStateAction(nextValue, current.version) }));
+  const setFormOpen = (nextValue: SetStateAction<boolean>) =>
+    dispatchSopsState((current) => ({ formOpen: resolveSopsStateAction(nextValue, current.formOpen) }));
+  const setReviewOpen = (nextValue: SetStateAction<boolean>) =>
+    dispatchSopsState((current) => ({ reviewOpen: resolveSopsStateAction(nextValue, current.reviewOpen) }));
+  const setSaving = (nextValue: SetStateAction<boolean>) =>
+    dispatchSopsState((current) => ({ saving: resolveSopsStateAction(nextValue, current.saving) }));
+  const setReviewBusy = (nextValue: SetStateAction<boolean>) =>
+    dispatchSopsState((current) => ({ reviewBusy: resolveSopsStateAction(nextValue, current.reviewBusy) }));
+  const setFormError = (nextValue: SetStateAction<string>) =>
+    dispatchSopsState((current) => ({ formError: resolveSopsStateAction(nextValue, current.formError) }));
+  const setReviewError = (nextValue: SetStateAction<string>) =>
+    dispatchSopsState((current) => ({ reviewError: resolveSopsStateAction(nextValue, current.reviewError) }));
+  const setEditing = (nextValue: SetStateAction<SopItem | null>) =>
+    dispatchSopsState((current) => ({ editing: resolveSopsStateAction(nextValue, current.editing) }));
+  const setReviewItem = (nextValue: SetStateAction<SopItem | null>) =>
+    dispatchSopsState((current) => ({ reviewItem: resolveSopsStateAction(nextValue, current.reviewItem) }));
+  const setSelectedItemId = (nextValue: SetStateAction<string>) =>
+    dispatchSopsState((current) => ({ selectedItemId: resolveSopsStateAction(nextValue, current.selectedItemId) }));
+  const setReviewDecision = (nextValue: SetStateAction<string>) =>
+    dispatchSopsState((current) => ({ reviewDecision: resolveSopsStateAction(nextValue, current.reviewDecision) }));
+  const setReviewNote = (nextValue: SetStateAction<string>) =>
+    dispatchSopsState((current) => ({ reviewNote: resolveSopsStateAction(nextValue, current.reviewNote) }));
+  const setActionBusyId = (nextValue: SetStateAction<string | null>) =>
+    dispatchSopsState((current) => ({ actionBusyId: resolveSopsStateAction(nextValue, current.actionBusyId) }));
+  const setForm = (nextValue: SetStateAction<SopFormState>) =>
+    dispatchSopsState((current) => ({ form: resolveSopsStateAction(nextValue, current.form) }));
+  const setLibrarySearch = (nextValue: SetStateAction<string>) =>
+    dispatchSopsState((current) => ({ librarySearch: resolveSopsStateAction(nextValue, current.librarySearch) }));
+  const setQueueSearch = (nextValue: SetStateAction<string>) =>
+    dispatchSopsState((current) => ({ queueSearch: resolveSopsStateAction(nextValue, current.queueSearch) }));
 
   const canCreate = roleCanCreate(user?.role);
   const canReviewQueue = roleCanReview(user?.role);
@@ -315,12 +436,12 @@ export function SopsPage() {
 
   useEffect(() => {
     if (!canOpenPage) {
-      setLoading(false);
+      dispatchSopsState({ loading: false, refreshing: false });
       return;
     }
 
     let cancelled = false;
-    setRefreshing(!loading);
+    dispatchSopsState((current) => ({ refreshing: !current.loading }));
 
     async function load() {
       try {
@@ -331,19 +452,22 @@ export function SopsPage() {
 
         if (cancelled) return;
 
-        setItems(library);
-        setReviewQueue(queue);
-        setEligibleUsers(eligible?.eligible_users ?? []);
-        setAllowedTargetRoles(eligible?.allowed_target_roles ?? []);
-        setError("");
+        dispatchSopsState({
+          items: library,
+          reviewQueue: queue,
+          eligibleUsers: eligible?.eligible_users ?? [],
+          allowedTargetRoles: eligible?.allowed_target_roles ?? [],
+          error: "",
+          loading: false,
+          refreshing: false,
+        });
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : text.failLoad);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-          setRefreshing(false);
+          dispatchSopsState({
+            error: err instanceof Error ? err.message : text.failLoad,
+            loading: false,
+            refreshing: false,
+          });
         }
       }
     }
@@ -353,7 +477,7 @@ export function SopsPage() {
     return () => {
       cancelled = true;
     };
-  }, [canCreate, canOpenPage, canReviewQueue, loading, text.failLoad, version]);
+  }, [canCreate, canOpenPage, canReviewQueue, text.failLoad, version]);
 
   const visibleMetrics = useMemo(() => {
     const approved = items.filter((item) => item.status === "approved").length;
@@ -1156,6 +1280,7 @@ export function SopsPage() {
                     {(filteredUsers.length > 0 ? filteredUsers : eligibleUsers).map((item) => (
                       <label
                         key={item.id}
+                        aria-label={item.name}
                         className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground"
                       >
                         <input
@@ -1182,6 +1307,7 @@ export function SopsPage() {
               </div>
 
               <label
+                aria-label={text.formRequiresAck}
                 className={cn(
                   "flex items-center gap-3 rounded-xl px-3 py-3 text-sm text-foreground",
                   tokens.surface.mutedCard,
@@ -1257,4 +1383,8 @@ export function SopsPage() {
       </Sheet>
     </>
   );
+}
+
+export function SopsPage(...args: Parameters<typeof useSopsPageContent>) {
+  return useSopsPageContent(...args);
 }

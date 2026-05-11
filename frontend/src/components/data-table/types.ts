@@ -43,7 +43,7 @@ export type FilterPredicate = {
   value: FilterValue;
 };
 
-export type FilterState = FilterPredicate[];
+type FilterState = FilterPredicate[];
 
 export type SortDir = "asc" | "desc";
 
@@ -88,10 +88,4 @@ export type DataTableState = {
   hiddenColumns: string[];
   density: DensityLevel;
   selectedIds: string[];
-};
-
-export type DataTableStateSchemaV = 1;
-
-export type PersistedDataTableState = DataTableState & {
-  schemaVersion: DataTableStateSchemaV;
 };

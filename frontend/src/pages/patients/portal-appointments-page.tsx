@@ -1,5 +1,14 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { startTransition, useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  type Dispatch,
+  type FormEvent,
+  type SetStateAction,
+} from "react";
 import { CalendarClock, LoaderCircle, RefreshCw, Send, Stethoscope } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -75,6 +84,50 @@ function blankRequestForm(): RequestFormState {
   };
 }
 
+type PatientAppointmentsState = {
+  appointments: PortalAppointmentItem[];
+  requests: PortalAppointmentRequestItem[];
+  followupMilestones: PortalFollowupMilestoneItem[];
+  loading: boolean;
+  refreshing: boolean;
+  error: string;
+  notice: string;
+  requestBusy: boolean;
+  requestError: string;
+  requestForm: RequestFormState;
+  version: number;
+};
+
+type PatientAppointmentsPatch =
+  | Partial<PatientAppointmentsState>
+  | ((current: PatientAppointmentsState) => Partial<PatientAppointmentsState>);
+
+function patientAppointmentsReducer(
+  state: PatientAppointmentsState,
+  patch: PatientAppointmentsPatch,
+): PatientAppointmentsState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
+function createPatientAppointmentsState(): PatientAppointmentsState {
+  return {
+    appointments: [],
+    requests: [],
+    followupMilestones: [],
+    loading: true,
+    refreshing: false,
+    error: "",
+    notice: "",
+    requestBusy: false,
+    requestError: "",
+    requestForm: blankRequestForm(),
+    version: 0,
+  };
+}
+
 const PORTAL_APPOINTMENT_REALTIME_EVENTS = [
   "appointment.created",
   "appointment.updated",
@@ -93,19 +146,42 @@ function portalOrderPhaseLabel(
   return sharedPortalOrderPhaseLabel(value);
 }
 
-export function PatientAppointmentsPage() {
+function usePatientAppointmentsPageContent() {
   const { t, lang } = useLang();
-  const [appointments, setAppointments] = useState<PortalAppointmentItem[]>([]);
-  const [requests, setRequests] = useState<PortalAppointmentRequestItem[]>([]);
-  const [followupMilestones, setFollowupMilestones] = useState<PortalFollowupMilestoneItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [requestBusy, setRequestBusy] = useState(false);
-  const [requestError, setRequestError] = useState("");
-  const [requestForm, setRequestForm] = useState<RequestFormState>(blankRequestForm());
-  const [version, setVersion] = useState(0);
+  const [pageState, dispatchPageState] = useReducer(
+    patientAppointmentsReducer,
+    undefined,
+    createPatientAppointmentsState,
+  );
+  const {
+    appointments,
+    requests,
+    followupMilestones,
+    loading,
+    refreshing,
+    error,
+    notice,
+    requestBusy,
+    requestError,
+    requestForm,
+    version,
+  } = pageState;
+  const setVersion: Dispatch<SetStateAction<number>> = (nextValue) => {
+    dispatchPageState((current) => ({
+      version:
+        typeof nextValue === "function"
+          ? nextValue(current.version)
+          : nextValue,
+    }));
+  };
+  const setRequestForm: Dispatch<SetStateAction<RequestFormState>> = (nextValue) => {
+    dispatchPageState((current) => ({
+      requestForm:
+        typeof nextValue === "function"
+          ? nextValue(current.requestForm)
+          : nextValue,
+    }));
+  };
   const l = useCallback(
     (de: string, ru: string, en: string) =>
       lang === "de" ? de : lang === "ru" ? ru : en,
@@ -121,32 +197,35 @@ export function PatientAppointmentsPage() {
 
   useEffect(() => {
     let cancelled = false;
+    const initialLoad = loading;
 
     async function load() {
-      if (loading) {
-        setRefreshing(false);
-      } else {
-        setRefreshing(true);
-      }
+      dispatchPageState({ refreshing: !initialLoad });
 
       try {
         const workspace = await fetchPortalAppointmentsWorkspace();
 
         if (cancelled) return;
         startTransition(() => {
-          setAppointments(workspace.appointments);
-          setRequests(workspace.requests);
-          setFollowupMilestones(workspace.followupMilestones);
-          setError("");
+          dispatchPageState({
+            appointments: workspace.appointments,
+            requests: workspace.requests,
+            followupMilestones: workspace.followupMilestones,
+            error: "",
+            loading: false,
+            refreshing: false,
+          });
         });
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : t.portal_appointments_failed_to_load_appointment_workspace);
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-          setRefreshing(false);
-        }
+        dispatchPageState({
+          error:
+            err instanceof Error
+              ? err.message
+              : t.portal_appointments_failed_to_load_appointment_workspace,
+          loading: false,
+          refreshing: false,
+        });
       }
     }
 
@@ -154,7 +233,7 @@ export function PatientAppointmentsPage() {
     return () => {
       cancelled = true;
     };
-  }, [loading, t.portal_appointments_failed_to_load_appointment_workspace, version, l]);
+  }, [t.portal_appointments_failed_to_load_appointment_workspace, version, l]);
 
   const upcomingAppointments = useMemo(
     () => appointments.filter((item) => item.date >= new Date().toISOString().slice(0, 10)),
@@ -165,18 +244,30 @@ export function PatientAppointmentsPage() {
     [requests],
   );
   const nextAppointment = useMemo(
-    () =>
-      upcomingAppointments
-        .slice()
-        .sort((left, right) => `${left.date}${left.time_start ?? ""}`.localeCompare(`${right.date}${right.time_start ?? ""}`))[0] ?? null,
+    () => {
+      let next: PortalAppointmentItem | null = null;
+      for (const appointment of upcomingAppointments) {
+        if (
+          !next ||
+          `${appointment.date}${appointment.time_start ?? ""}`.localeCompare(
+            `${next.date}${next.time_start ?? ""}`,
+          ) < 0
+        ) {
+          next = appointment;
+        }
+      }
+      return next;
+    },
     [upcomingAppointments],
   );
 
   async function handleSubmitRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setRequestBusy(true);
-    setRequestError("");
-    setNotice("");
+    dispatchPageState({
+      requestBusy: true,
+      requestError: "",
+      notice: "",
+    });
 
     try {
       await createPortalAppointmentRequest({
@@ -193,13 +284,20 @@ export function PatientAppointmentsPage() {
         reason: requestForm.reason || undefined,
         notes: requestForm.notes || undefined,
       });
-      setNotice(t.portal_appointments_appointment_request_sent_to_the_care_team);
-      setRequestForm(blankRequestForm());
-      setVersion((value) => value + 1);
+      dispatchPageState((current) => ({
+        notice: t.portal_appointments_appointment_request_sent_to_the_care_team,
+        requestForm: blankRequestForm(),
+        version: current.version + 1,
+        requestBusy: false,
+      }));
     } catch (err) {
-      setRequestError(err instanceof Error ? err.message : t.portal_appointments_failed_to_send_appointment_request);
-    } finally {
-      setRequestBusy(false);
+      dispatchPageState({
+        requestError:
+          err instanceof Error
+            ? err.message
+            : t.portal_appointments_failed_to_send_appointment_request,
+        requestBusy: false,
+      });
     }
   }
 
@@ -591,4 +689,8 @@ export function PatientAppointmentsPage() {
       </section>
     </TabShell>
   );
+}
+
+export function PatientAppointmentsPage(...args: Parameters<typeof usePatientAppointmentsPageContent>) {
+  return usePatientAppointmentsPageContent(...args);
 }

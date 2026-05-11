@@ -5,7 +5,7 @@ import {
   useDeferredValue,
   useEffect,
   useMemo,
-  useState,
+  useReducer,
   type FormEvent,
 } from "react";
 
@@ -62,6 +62,69 @@ function toOptional(value: string) {
   return trimmed ? trimmed : null;
 }
 
+type RelationEditorState = {
+  form: RelationFormState;
+  busy: boolean;
+  patientSearch: string;
+};
+
+type RelationEditorPatch =
+  | Partial<RelationEditorState>
+  | ((current: RelationEditorState) => Partial<RelationEditorState>);
+
+function createRelationEditorState(): RelationEditorState {
+  return {
+    form: blankRelationForm(),
+    busy: false,
+    patientSearch: "",
+  };
+}
+
+function relationEditorReducer(
+  state: RelationEditorState,
+  patch: RelationEditorPatch,
+): RelationEditorState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
+type PatientRelationEditorFooterProps = {
+  busy: boolean;
+  dictionary: Record<string, string>;
+  onCancel: () => void;
+};
+
+function PatientRelationEditorFooter({
+  busy,
+  dictionary,
+  onCancel,
+}: PatientRelationEditorFooterProps) {
+  return (
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-8 rounded-lg"
+        onClick={onCancel}
+      >
+        {dictionary.common_cancel}
+      </Button>
+      <Button
+        type="submit"
+        size="sm"
+        className="h-8 rounded-lg gap-1.5"
+        disabled={busy}
+      >
+        {busy ? <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" /> : null}
+        {dictionary.common_save}
+      </Button>
+    </>
+  );
+}
+
 function PatientRelationEditorSheet({
   open,
   patientId,
@@ -75,25 +138,31 @@ function PatientRelationEditorSheet({
   onError,
 }: PatientRelationEditorSheetProps) {
   const { t } = useLang();
-  const [form, setForm] = useState<RelationFormState>(blankRelationForm);
-  const [busy, setBusy] = useState(false);
-  const [patientSearch, setPatientSearch] = useState("");
+  const [relationState, dispatchRelationState] = useReducer(
+    relationEditorReducer,
+    undefined,
+    createRelationEditorState,
+  );
+  const { form, busy, patientSearch } = relationState;
   const deferredPatientSearch = useDeferredValue(patientSearch);
   const { patientOptions, patientOptionsLoading } = usePatientLookupOptions({
     enabled: open && canManageRelations,
   });
   useEffect(() => {
     if (!open) {
-      setForm(blankRelationForm());
-      setBusy(false);
-      setPatientSearch("");
+      dispatchRelationState({
+        form: blankRelationForm(),
+        busy: false,
+        patientSearch: "",
+      });
       return;
     }
 
-    setForm(editingRelation ? relationToForm(editingRelation) : blankRelationForm());
-    setPatientSearch(
-      editingRelation?.related_display_name || editingRelation?.related_name || "",
-    );
+    dispatchRelationState({
+      form: editingRelation ? relationToForm(editingRelation) : blankRelationForm(),
+      patientSearch:
+        editingRelation?.related_display_name || editingRelation?.related_name || "",
+    });
   }, [editingRelation, open]);
 
   const filteredPatientOptions = useMemo(() => {
@@ -125,7 +194,7 @@ function PatientRelationEditorSheet({
         return;
       }
 
-      setBusy(true);
+      dispatchRelationState({ busy: true });
       onError("");
       try {
         const selectedPatientName = selectedRelatedPatient
@@ -148,7 +217,7 @@ function PatientRelationEditorSheet({
           error instanceof Error ? error.message : dictionary.common_failed_update,
         );
       } finally {
-        setBusy(false);
+        dispatchRelationState({ busy: false });
       }
     },
     [
@@ -178,26 +247,11 @@ function PatientRelationEditorSheet({
       }
       bodyClassName="px-4 py-4 space-y-4"
       footer={
-        <>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-8 rounded-lg"
-            onClick={() => onOpenChange(false)}
-          >
-            {dictionary.common_cancel}
-          </Button>
-          <Button
-            type="submit"
-            size="sm"
-            className="h-8 rounded-lg gap-1.5"
-            disabled={busy}
-          >
-            {busy ? <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" /> : null}
-            {dictionary.common_save}
-          </Button>
-        </>
+        <PatientRelationEditorFooter
+          busy={busy}
+          dictionary={dictionary}
+          onCancel={() => onOpenChange(false)}
+        />
       }
     >
       <div className="flex flex-col gap-1.5">
@@ -210,7 +264,9 @@ function PatientRelationEditorSheet({
         <Input
           id="relation-patient-search"
           value={patientSearch}
-          onChange={(event) => setPatientSearch(event.target.value)}
+          onChange={(event) =>
+            dispatchRelationState({ patientSearch: event.target.value })
+          }
           className={inputClass}
           placeholder={t.patient_relation_search_placeholder}
         />
@@ -231,15 +287,17 @@ function PatientRelationEditorSheet({
             const nextPatientId = event.target.value;
             const selectedPatient =
               patientOptions.find((option) => option.id === nextPatientId) ?? null;
-            setPatientSearch(
-              selectedPatient ? formatRelatedPatientOption(selectedPatient) : "",
-            );
-            setForm((current) => ({
-              ...current,
-              relatedPatientId: nextPatientId,
-              relatedName: selectedPatient
-                ? formatRelatedPatientName(selectedPatient)
-                : current.relatedName,
+            dispatchRelationState((current) => ({
+              patientSearch: selectedPatient
+                ? formatRelatedPatientOption(selectedPatient)
+                : "",
+              form: {
+                ...current.form,
+                relatedPatientId: nextPatientId,
+                relatedName: selectedPatient
+                  ? formatRelatedPatientName(selectedPatient)
+                  : current.form.relatedName,
+              },
             }));
           }}
           disabled={patientOptionsLoading}
@@ -274,7 +332,9 @@ function PatientRelationEditorSheet({
             id="relation-name"
             value={form.relatedName}
             onChange={(event) =>
-              setForm((current) => ({ ...current, relatedName: event.target.value }))
+              dispatchRelationState((current) => ({
+                form: { ...current.form, relatedName: event.target.value },
+              }))
             }
             className={inputClass}
             placeholder={t.patient_relation_name_placeholder}
@@ -293,7 +353,9 @@ function PatientRelationEditorSheet({
             className={selectClass}
             value={form.relationType}
             onChange={(event) =>
-              setForm((current) => ({ ...current, relationType: event.target.value }))
+              dispatchRelationState((current) => ({
+                form: { ...current.form, relationType: event.target.value },
+              }))
             }
           >
             {RELATION_TYPE_OPTIONS.map((option) => (
@@ -314,7 +376,9 @@ function PatientRelationEditorSheet({
             id="relation-phone"
             value={form.phone}
             onChange={(event) =>
-              setForm((current) => ({ ...current, phone: event.target.value }))
+              dispatchRelationState((current) => ({
+                form: { ...current.form, phone: event.target.value },
+              }))
             }
             className={inputClass}
             placeholder="+49 ..."
@@ -326,9 +390,11 @@ function PatientRelationEditorSheet({
             className={checkboxClass}
             checked={form.isEmergencyContact}
             onChange={(event) =>
-              setForm((current) => ({
-                ...current,
-                isEmergencyContact: event.target.checked,
+              dispatchRelationState((current) => ({
+                form: {
+                  ...current.form,
+                  isEmergencyContact: event.target.checked,
+                },
               }))
             }
           />
@@ -348,7 +414,9 @@ function PatientRelationEditorSheet({
           className={textareaClassName}
           value={form.notes}
           onChange={(event) =>
-            setForm((current) => ({ ...current, notes: event.target.value }))
+            dispatchRelationState((current) => ({
+              form: { ...current.form, notes: event.target.value },
+            }))
           }
           placeholder={t.patient_relation_notes_placeholder}
         />

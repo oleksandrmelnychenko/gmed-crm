@@ -73,24 +73,22 @@ export function CasesRosterSection({
   interactiveItemClassName,
 }: CasesRosterSectionProps) {
   const { t } = useLang();
-  const renderStatus = (status: string) =>
-    caseStatusLabel ? caseStatusLabel(status) : formatUnknownValue(status, t);
 
   return (
     <section className={className}>
       {showHeader ? (
         <div className={cn("flex items-center justify-between gap-3", headerClassName)}>
           <div>
-            <h2 className={cn("text-sm font-semibold text-slate-950", titleClassName)}>
+            <h2 className={cn("text-sm font-semibold text-zinc-950", titleClassName)}>
               {title}
             </h2>
-            <p className={cn("mt-1 text-sm text-slate-600", subtitleClassName)}>
+            <p className={cn("mt-1 text-sm text-zinc-600", subtitleClassName)}>
               {subtitle}
             </p>
           </div>
           <div
             className={cn(
-              "text-xs uppercase tracking-[0.12em] text-slate-500",
+              "text-xs uppercase tracking-[0.12em] text-zinc-500",
               counterClassName,
             )}
           >
@@ -110,7 +108,7 @@ export function CasesRosterSection({
         : null}
 
       {loading ? (
-        <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
+        <div className="flex min-h-[320px] items-center justify-center text-sm text-zinc-500">
           <LoaderCircle className="mr-2 size-4 animate-spin" />
           {loadingLabel}
         </div>
@@ -120,7 +118,7 @@ export function CasesRosterSection({
         <div className={cn("mt-5 grid gap-4 xl:grid-cols-2", listClassName)}>
           {items.map((item) => {
             const cardClassName = cn(
-              "rounded-[1.6rem] border border-slate-200 bg-white p-5 text-left",
+              "rounded-[1.6rem] border border-zinc-200 bg-white p-5 text-left",
               itemClassName,
               onCaseClick
                 ? cn(
@@ -140,7 +138,11 @@ export function CasesRosterSection({
                 >
                   <CaseCardContent
                     item={item}
-                    statusLabel={renderStatus(item.status)}
+                    statusLabel={
+                      caseStatusLabel
+                        ? caseStatusLabel(item.status)
+                        : formatUnknownValue(item.status, t)
+                    }
                     statusClassName={
                       caseStatusBadgeClassName ? caseStatusBadgeClassName(item.status) : ""
                     }
@@ -157,7 +159,11 @@ export function CasesRosterSection({
               <div key={item.id} className={cardClassName}>
                 <CaseCardContent
                   item={item}
-                  statusLabel={renderStatus(item.status)}
+                  statusLabel={
+                    caseStatusLabel
+                      ? caseStatusLabel(item.status)
+                      : formatUnknownValue(item.status, t)
+                  }
                   statusClassName={
                     caseStatusBadgeClassName ? caseStatusBadgeClassName(item.status) : ""
                   }
@@ -196,13 +202,13 @@ function CaseCardContent({
     <div>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="font-mono text-xs font-semibold tracking-[0.16em] text-slate-500">
+          <div className="font-mono text-xs font-semibold tracking-[0.16em] text-zinc-500">
             {item.case_id}
           </div>
-          <h3 className="mt-2 text-lg font-semibold text-slate-950">
+          <h3 className="mt-2 text-lg font-semibold text-zinc-950">
             {item.patient_name}
           </h3>
-          <p className="mt-1 text-sm text-slate-600">{item.patient_pid}</p>
+          <p className="mt-1 text-sm text-zinc-600">{item.patient_pid}</p>
         </div>
         <Badge variant="outline" className={cn("rounded-full", statusClassName)}>
           {statusLabel}
@@ -210,19 +216,19 @@ function CaseCardContent({
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
             {reasonLabel}
           </div>
-          <div className="mt-2 text-sm text-slate-900">
+          <div className="mt-2 text-sm text-zinc-900">
             {item.hauptanfragegrund?.trim() || notSetLabel}
           </div>
         </div>
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
             {createdLabel}
           </div>
-          <div className="mt-2 text-sm text-slate-900">{createdAtLabel}</div>
+          <div className="mt-2 text-sm text-zinc-900">{createdAtLabel}</div>
         </div>
       </div>
     </div>

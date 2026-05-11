@@ -3,9 +3,11 @@ import {
   memo,
   useEffect,
   useMemo,
+  useReducer,
   useState,
   type FormEvent,
   type ReactNode,
+  type SetStateAction,
 } from "react";
 import { LoaderCircle } from "lucide-react";
 
@@ -151,6 +153,101 @@ type AppointmentWorkflowTabProps = {
   onNotice: (message: string) => void;
 };
 
+type AppointmentWorkflowOverviewSectionProps = {
+  checklistProgressValue: string;
+  completionWarnings: string[];
+  interpreterGateDescription: string;
+  interpreterGateValue: string;
+  workflowSummary: ReturnType<typeof buildAppointmentWorkflowSummary>;
+};
+
+function AppointmentWorkflowOverviewSection({
+  checklistProgressValue,
+  completionWarnings,
+  interpreterGateDescription,
+  interpreterGateValue,
+  workflowSummary,
+}: AppointmentWorkflowOverviewSectionProps) {
+  return (
+    <Section
+      title={appointmentText(
+        "Operativer Гњberblick",
+        "РћРїРµСЂР°С†РёРѕРЅРЅС‹Р№ РѕР±Р·РѕСЂ",
+        "Operational overview",
+      )}
+      accessory={<CountBadge>{workflowSummary.openIssueCount}</CountBadge>}
+    >
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          label={appointmentText(
+            "Offene Punkte",
+            "РћС‚РєСЂС‹С‚С‹Рµ РїСѓРЅРєС‚С‹",
+            "Open issues",
+          )}
+          value={workflowSummary.openIssueCount}
+          description={appointmentText(
+            "Checklisten, Reminder und Aufgaben mit offener Nachverfolgung.",
+            "Р§РµРє-Р»РёСЃС‚С‹, РЅР°РїРѕРјРёРЅР°РЅРёСЏ Рё Р·Р°РґР°С‡Рё СЃ РѕС‚РєСЂС‹С‚С‹Рј follow-up.",
+            "Checklist, reminder and task items still requiring follow-up.",
+          )}
+        />
+        <StatCard
+          label={appointmentText(
+            "Checklisten-Fortschritt",
+            "РџСЂРѕРіСЂРµСЃСЃ С‡РµРє-Р»РёСЃС‚Р°",
+            "Checklist progress",
+          )}
+          value={checklistProgressValue}
+          description={appointmentText(
+            "Abgeschlossene gegen alle appointment-gebundenen Schritte.",
+            "Р—Р°РІРµСЂС€С‘РЅРЅС‹Рµ РїСЂРѕС‚РёРІ РІСЃРµС… С€Р°РіРѕРІ, РїСЂРёРІСЏР·Р°РЅРЅС‹С… Рє РїСЂРёС‘РјСѓ.",
+            "Completed versus total appointment-bound workflow steps.",
+          )}
+        />
+        <StatCard
+          label={appointmentText(
+            "Follow-up-Warteschlange",
+            "РћС‡РµСЂРµРґСЊ follow-up",
+            "Follow-up queue",
+          )}
+          value={workflowSummary.followUpQueueCount}
+          description={appointmentText(
+            "Offene Aufgaben plus ausstehende Erinnerungen.",
+            "РћС‚РєСЂС‹С‚С‹Рµ Р·Р°РґР°С‡Рё РїР»СЋСЃ РѕР¶РёРґР°СЋС‰РёРµ РЅР°РїРѕРјРёРЅР°РЅРёСЏ.",
+            "Open tasks plus pending reminders.",
+          )}
+        />
+        <StatCard
+          label={appointmentText(
+            "Dolmetscher-Gate",
+            "Р“РµР№С‚ РїРµСЂРµРІРѕРґС‡РёРєР°",
+            "Interpreter gate",
+          )}
+          value={interpreterGateValue}
+          description={interpreterGateDescription}
+        />
+      </div>
+
+      {completionWarnings.length > 0 ? (
+        <Banner tone="warning" withIcon>
+          <div className="space-y-1">
+            <p className="font-medium">
+              {appointmentText(
+                "Vor dem Abschluss bleiben noch operative Blocker offen.",
+                "РџРµСЂРµРґ Р·Р°РєСЂС‹С‚РёРµРј РѕСЃС‚Р°СЋС‚СЃСЏ РѕС‚РєСЂС‹С‚С‹Рµ РѕРїРµСЂР°С†РёРѕРЅРЅС‹Рµ Р±Р»РѕРєРµСЂС‹.",
+                "Operational blockers remain before closure.",
+              )}
+            </p>
+            {completionWarnings.map((warning) => (
+              <p key={warning}>{warning}</p>
+            ))}
+          </div>
+        </Banner>
+      ) : null}
+    </Section>
+  );
+}
+
 function AppointmentWorkflowTab({
   detail,
   detailReport,
@@ -263,83 +360,13 @@ function AppointmentWorkflowTab({
         accessory={<CountBadge>{workflowSummary.visibleSurfaceCount}</CountBadge>}
       />
 
-      <Section
-        title={appointmentText(
-          "Operativer Überblick",
-          "Операционный обзор",
-          "Operational overview",
-        )}
-        accessory={<CountBadge>{workflowSummary.openIssueCount}</CountBadge>}
-      >
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <StatCard
-            label={appointmentText(
-              "Offene Punkte",
-              "Открытые пункты",
-              "Open issues",
-            )}
-            value={workflowSummary.openIssueCount}
-            description={appointmentText(
-              "Checklisten, Reminder und Aufgaben mit offener Nachverfolgung.",
-              "Чек-листы, напоминания и задачи с открытым follow-up.",
-              "Checklist, reminder and task items still requiring follow-up.",
-            )}
-          />
-          <StatCard
-            label={appointmentText(
-              "Checklisten-Fortschritt",
-              "Прогресс чек-листа",
-              "Checklist progress",
-            )}
-            value={checklistProgressValue}
-            description={appointmentText(
-              "Abgeschlossene gegen alle appointment-gebundenen Schritte.",
-              "Завершённые против всех шагов, привязанных к приёму.",
-              "Completed versus total appointment-bound workflow steps.",
-            )}
-          />
-          <StatCard
-            label={appointmentText(
-              "Follow-up-Warteschlange",
-              "Очередь follow-up",
-              "Follow-up queue",
-            )}
-            value={workflowSummary.followUpQueueCount}
-            description={appointmentText(
-              "Offene Aufgaben plus ausstehende Erinnerungen.",
-              "Открытые задачи плюс ожидающие напоминания.",
-              "Open tasks plus pending reminders.",
-            )}
-          />
-          <StatCard
-            label={appointmentText(
-              "Dolmetscher-Gate",
-              "Гейт переводчика",
-              "Interpreter gate",
-            )}
-            value={interpreterGateValue}
-            description={interpreterGateDescription}
-          />
-        </div>
-
-        {completionWarnings.length > 0 ? (
-          <Banner tone="warning" withIcon>
-            <div className="space-y-1">
-              <p className="font-medium">
-                {appointmentText(
-                  "Vor dem Abschluss bleiben noch operative Blocker offen.",
-                  "Перед закрытием остаются открытые операционные блокеры.",
-                  "Operational blockers remain before closure.",
-                )}
-              </p>
-              {completionWarnings.map((warning) => (
-                <p key={warning}>{warning}</p>
-              ))}
-            </div>
-          </Banner>
-        ) : null}
-      </Section>
-
+      <AppointmentWorkflowOverviewSection
+        checklistProgressValue={checklistProgressValue}
+        completionWarnings={completionWarnings}
+        interpreterGateDescription={interpreterGateDescription}
+        interpreterGateValue={interpreterGateValue}
+        workflowSummary={workflowSummary}
+      />
       {showTransitionLane ? (
         <Section
           title={appointmentText(
@@ -481,6 +508,89 @@ function AppointmentWorkflowTab({
   );
 }
 
+type InterpreterSectionState = {
+  assignInterpreterId: string;
+  busyAction: string;
+  suggestions: InterpreterSuggestion[];
+  suggestionsLoading: boolean;
+  suggestionsError: string | null;
+  history: InterpreterHistoryItem[];
+  historyLoading: boolean;
+  historyError: string | null;
+  preferenceSavingId: string | null;
+  interpreterContextNonce: number;
+};
+
+type InterpreterSectionAction =
+  | { type: "patch"; value: Partial<InterpreterSectionState> }
+  | { type: "suggestions-start" }
+  | { type: "suggestions-disabled" }
+  | { type: "suggestions-success"; items: InterpreterSuggestion[] }
+  | { type: "suggestions-error"; message: string }
+  | { type: "history-start" }
+  | { type: "history-disabled" }
+  | { type: "history-success"; items: InterpreterHistoryItem[] }
+  | { type: "history-error"; message: string }
+  | { type: "interpreter-context-bump" };
+
+function createInterpreterSectionState(detail: AppointmentDetail): InterpreterSectionState {
+  return {
+    assignInterpreterId: detail.interpreter_id ?? "",
+    busyAction: "",
+    suggestions: [],
+    suggestionsLoading: false,
+    suggestionsError: null,
+    history: [],
+    historyLoading: false,
+    historyError: null,
+    preferenceSavingId: null,
+    interpreterContextNonce: 0,
+  };
+}
+
+function interpreterSectionReducer(
+  state: InterpreterSectionState,
+  action: InterpreterSectionAction,
+): InterpreterSectionState {
+  switch (action.type) {
+    case "patch":
+      return { ...state, ...action.value };
+    case "suggestions-start":
+      return { ...state, suggestionsLoading: true, suggestionsError: null };
+    case "suggestions-disabled":
+      return { ...state, suggestions: [], suggestionsLoading: false, suggestionsError: null };
+    case "suggestions-success":
+      return { ...state, suggestions: action.items, suggestionsLoading: false };
+    case "suggestions-error":
+      return {
+        ...state,
+        suggestions: [],
+        suggestionsError: action.message,
+        suggestionsLoading: false,
+      };
+    case "history-start":
+      return { ...state, historyLoading: true, historyError: null };
+    case "history-disabled":
+      return { ...state, history: [], historyLoading: false, historyError: null };
+    case "history-success":
+      return { ...state, history: action.items, historyLoading: false };
+    case "history-error":
+      return {
+        ...state,
+        history: [],
+        historyError: action.message,
+        historyLoading: false,
+      };
+    case "interpreter-context-bump":
+      return {
+        ...state,
+        interpreterContextNonce: state.interpreterContextNonce + 1,
+      };
+    default:
+      return state;
+  }
+}
+
 function AppointmentInterpreterSection({
   detail,
   interpreters,
@@ -499,56 +609,56 @@ function AppointmentInterpreterSection({
   onError: (message: string) => void;
 }) {
   const { t } = useLang();
-  const [assignInterpreterId, setAssignInterpreterId] = useState(
-    detail.interpreter_id ?? "",
-  );
-  const [busyAction, setBusyAction] = useState<string>("");
-  const [suggestions, setSuggestions] = useState<InterpreterSuggestion[]>([]);
-  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
-  const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
-  const [history, setHistory] = useState<InterpreterHistoryItem[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyError, setHistoryError] = useState<string | null>(null);
-  const [preferenceSavingId, setPreferenceSavingId] = useState<string | null>(null);
-  const [interpreterContextNonce, setInterpreterContextNonce] = useState(0);
+  const [
+    {
+      assignInterpreterId,
+      busyAction,
+      suggestions,
+      suggestionsLoading,
+      suggestionsError,
+      history,
+      historyLoading,
+      historyError,
+      preferenceSavingId,
+      interpreterContextNonce,
+    },
+    dispatchInterpreterState,
+  ] = useReducer(interpreterSectionReducer, detail, createInterpreterSectionState);
 
   useEffect(() => {
-    setAssignInterpreterId(detail.interpreter_id ?? "");
-    setBusyAction("");
+    dispatchInterpreterState({
+      type: "patch",
+      value: { assignInterpreterId: detail.interpreter_id ?? "", busyAction: "" },
+    });
   }, [detail.id, detail.interpreter_id]);
 
   useEffect(() => {
     if (!canAssign || detail.is_blocked) {
-      setSuggestions([]);
-      setSuggestionsLoading(false);
-      setSuggestionsError(null);
+      dispatchInterpreterState({ type: "suggestions-disabled" });
       return;
     }
 
     let cancelled = false;
-    setSuggestionsLoading(true);
-    setSuggestionsError(null);
+    dispatchInterpreterState({ type: "suggestions-start" });
 
     fetchInterpreterSuggestions(detail.id)
       .then((items) => {
         if (cancelled) return;
-        setSuggestions(items);
+        dispatchInterpreterState({ type: "suggestions-success", items });
       })
       .catch((error: unknown) => {
         if (cancelled) return;
-        setSuggestions([]);
-        setSuggestionsError(
-          error instanceof Error
-            ? error.message
-            : appointmentText(
-                "Failed to load interpreter suggestions.",
-                "Failed to load interpreter suggestions.",
-                "Failed to load interpreter suggestions.",
-              ),
-        );
-      })
-      .finally(() => {
-        if (!cancelled) setSuggestionsLoading(false);
+        dispatchInterpreterState({
+          type: "suggestions-error",
+          message:
+            error instanceof Error
+              ? error.message
+              : appointmentText(
+                  "Failed to load interpreter suggestions.",
+                  "Failed to load interpreter suggestions.",
+                  "Failed to load interpreter suggestions.",
+                ),
+        });
       });
 
     return () => {
@@ -558,32 +668,27 @@ function AppointmentInterpreterSection({
 
   useEffect(() => {
     if (!canAssign || detail.is_blocked || !detail.patient_id) {
-      setHistory([]);
-      setHistoryLoading(false);
-      setHistoryError(null);
+      dispatchInterpreterState({ type: "history-disabled" });
       return;
     }
 
     let cancelled = false;
-    setHistoryLoading(true);
-    setHistoryError(null);
+    dispatchInterpreterState({ type: "history-start" });
 
     fetchPatientInterpreterHistory(detail.patient_id)
       .then((items) => {
         if (cancelled) return;
-        setHistory(items);
+        dispatchInterpreterState({ type: "history-success", items });
       })
       .catch((error: unknown) => {
         if (cancelled) return;
-        setHistory([]);
-        setHistoryError(
-          error instanceof Error
-            ? error.message
-            : "Failed to load interpreter history.",
-        );
-      })
-      .finally(() => {
-        if (!cancelled) setHistoryLoading(false);
+        dispatchInterpreterState({
+          type: "history-error",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Failed to load interpreter history.",
+        });
       });
 
     return () => {
@@ -596,13 +701,16 @@ function AppointmentInterpreterSection({
     preference: InterpreterPreference,
   ) {
     if (!detail.patient_id) return;
-    setPreferenceSavingId(interpreterId);
+    dispatchInterpreterState({
+      type: "patch",
+      value: { preferenceSavingId: interpreterId },
+    });
     try {
       await setInterpreterPreference(detail.patient_id, {
         interpreter_id: interpreterId,
         preference,
       });
-      setInterpreterContextNonce((current) => current + 1);
+      dispatchInterpreterState({ type: "interpreter-context-bump" });
     } catch (error) {
       onError(
         error instanceof Error
@@ -610,14 +718,17 @@ function AppointmentInterpreterSection({
           : "Failed to save interpreter preference.",
       );
     } finally {
-      setPreferenceSavingId(null);
+      dispatchInterpreterState({
+        type: "patch",
+        value: { preferenceSavingId: null },
+      });
     }
   }
 
   async function handleAssignInterpreter(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!assignInterpreterId) return;
-    setBusyAction("assign");
+    dispatchInterpreterState({ type: "patch", value: { busyAction: "assign" } });
     try {
       await apiFetch<{ ok: boolean }>(
         `/appointments/${detail.id}/assign-interpreter`,
@@ -638,12 +749,15 @@ function AppointmentInterpreterSection({
             ),
       );
     } finally {
-      setBusyAction("");
+      dispatchInterpreterState({ type: "patch", value: { busyAction: "" } });
     }
   }
 
   async function handleInterpreterResponse(response: InterpreterResponse) {
-    setBusyAction(`response:${response}`);
+    dispatchInterpreterState({
+      type: "patch",
+      value: { busyAction: `response:${response}` },
+    });
     try {
       await apiFetch<{ ok: boolean }>(
         `/appointments/${detail.id}/interpreter-response`,
@@ -664,7 +778,7 @@ function AppointmentInterpreterSection({
             ),
       );
     } finally {
-      setBusyAction("");
+      dispatchInterpreterState({ type: "patch", value: { busyAction: "" } });
     }
   }
 
@@ -672,7 +786,7 @@ function AppointmentInterpreterSection({
     <>
       {canAssign && !detail.is_blocked ? (
         <section className={appointmentSectionCardClassName("p-5")}>
-          <h3 className="text-sm font-semibold text-slate-950">
+          <h3 className="text-sm font-semibold text-zinc-950">
             {appointmentText(
               "Dolmetscherbesetzung",
               "Назначение переводчика",
@@ -686,7 +800,12 @@ function AppointmentInterpreterSection({
             <Field label={t.role_interpreter}>
               <NativeComboboxSelect
                 value={assignInterpreterId}
-                onChange={(event) => setAssignInterpreterId(event.target.value)}
+                  onChange={(event) =>
+                    dispatchInterpreterState({
+                      type: "patch",
+                      value: { assignInterpreterId: event.target.value },
+                    })
+                  }
                 className={selectClassName}
               >
                 <option value="">{t.common_not_set}</option>
@@ -723,7 +842,12 @@ function AppointmentInterpreterSection({
               historyLoading={historyLoading}
               historyError={historyError ?? undefined}
               preferenceSavingId={preferenceSavingId}
-              onSelect={setAssignInterpreterId}
+              onSelect={(value) =>
+                dispatchInterpreterState({
+                  type: "patch",
+                  value: { assignInterpreterId: value },
+                })
+              }
               onSetPreference={(interpreterId, preference) =>
                 void handleSetInterpreterPreference(interpreterId, preference)
               }
@@ -733,7 +857,7 @@ function AppointmentInterpreterSection({
       ) : null}
       {canRespond && detail.interpreter_id === currentUserId ? (
         <section className={appointmentSectionCardClassName("p-5")}>
-          <h3 className="text-sm font-semibold text-slate-950">
+          <h3 className="text-sm font-semibold text-zinc-950">
             {appointmentText(
               "Dolmetscherantwort",
               "Ответ переводчика",
@@ -763,6 +887,57 @@ function AppointmentInterpreterSection({
   );
 }
 
+type ChecklistSectionState = {
+  form: ChecklistFormState;
+  submitBusy: boolean;
+  completingId: string;
+};
+
+type ChecklistSectionAction =
+  | { type: "patch"; value: Partial<ChecklistSectionState> }
+  | { type: "update"; updater: (state: ChecklistSectionState) => ChecklistSectionState };
+
+const CHECKLIST_SECTION_INITIAL_STATE: ChecklistSectionState = {
+  form: blankChecklistForm(),
+  submitBusy: false,
+  completingId: "",
+};
+
+function checklistSectionReducer(
+  state: ChecklistSectionState,
+  action: ChecklistSectionAction,
+): ChecklistSectionState {
+  switch (action.type) {
+    case "patch":
+      return { ...state, ...action.value };
+    case "update":
+      return action.updater(state);
+    default:
+      return state;
+  }
+}
+
+function createChecklistFieldAction<K extends keyof ChecklistSectionState>(
+  field: K,
+  value: SetStateAction<ChecklistSectionState[K]>,
+): ChecklistSectionAction {
+  return {
+    type: "update",
+    updater: (state) => {
+      const currentValue = state[field];
+      const nextValue =
+        typeof value === "function"
+          ? (value as (current: ChecklistSectionState[K]) => ChecklistSectionState[K])(
+              currentValue,
+            )
+          : value;
+
+      if (Object.is(currentValue, nextValue)) return state;
+      return { ...state, [field]: nextValue };
+    },
+  };
+}
+
 function AppointmentChecklistSection({
   detail,
   items,
@@ -776,14 +951,24 @@ function AppointmentChecklistSection({
 }) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const [form, setForm] = useState<ChecklistFormState>(blankChecklistForm());
-  const [submitBusy, setSubmitBusy] = useState(false);
-  const [completingId, setCompletingId] = useState("");
+  const [{ form, submitBusy, completingId }, dispatchChecklistState] =
+    useReducer(checklistSectionReducer, CHECKLIST_SECTION_INITIAL_STATE);
+  const setForm = (value: SetStateAction<ChecklistFormState>) =>
+    dispatchChecklistState(createChecklistFieldAction("form", value));
+  const setSubmitBusy = (value: SetStateAction<boolean>) =>
+    dispatchChecklistState(createChecklistFieldAction("submitBusy", value));
+  const setCompletingId = (value: SetStateAction<string>) =>
+    dispatchChecklistState(createChecklistFieldAction("completingId", value));
 
   useEffect(() => {
-    setForm(blankChecklistForm());
-    setSubmitBusy(false);
-    setCompletingId("");
+    dispatchChecklistState({
+      type: "patch",
+      value: {
+        form: blankChecklistForm(),
+        submitBusy: false,
+        completingId: "",
+      },
+    });
   }, [detail.id]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -839,7 +1024,7 @@ function AppointmentChecklistSection({
 
   return (
     <section className={appointmentSectionCardClassName("p-5")}>
-      <h3 className="text-sm font-semibold text-slate-950">
+      <h3 className="text-sm font-semibold text-zinc-950">
         {appointmentText("Checkliste", "Чек-лист", "Checklist")}
       </h3>
       <div className="mt-4 space-y-3">
@@ -858,10 +1043,10 @@ function AppointmentChecklistSection({
               className={appointmentSoftSplitRowClassName}
             >
               <div>
-                <p className="text-sm font-medium text-slate-900">
+                <p className="text-sm font-medium text-zinc-900">
                   {item.item_text}
                 </p>
-                <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">
+                <p className="mt-1 text-xs uppercase tracking-[0.12em] text-zinc-500">
                   {checklistPhaseLabel(item.phase)}
                 </p>
               </div>
@@ -960,14 +1145,18 @@ function AppointmentRemindersSection({
   onError: (message: string) => void;
 }) {
   const { t } = useLang();
-  const [form, setForm] = useState<ReminderFormState>(blankReminderForm());
+  const [form, setForm] = useState<ReminderFormState>(() => blankReminderForm());
   const [submitBusy, setSubmitBusy] = useState(false);
   const [completingId, setCompletingId] = useState("");
 
-  useEffect(() => {
+  const resetReminderState = () => {
     setForm(blankReminderForm());
     setSubmitBusy(false);
     setCompletingId("");
+  };
+
+  useEffect(() => {
+    resetReminderState();
   }, [detail.id]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -1025,7 +1214,7 @@ function AppointmentRemindersSection({
 
   return (
     <section className={appointmentSectionCardClassName("p-5")}>
-      <h3 className="text-sm font-semibold text-slate-950">
+      <h3 className="text-sm font-semibold text-zinc-950">
         {appointmentText("Erinnerungen", "Напоминания", "Reminders")}
       </h3>
       <div className="mt-4 space-y-3">
@@ -1044,14 +1233,14 @@ function AppointmentRemindersSection({
               className={appointmentSoftSplitRowClassName}
             >
               <div>
-                <p className="text-sm font-medium text-slate-900">
+                <p className="text-sm font-medium text-zinc-900">
                   {item.title}
                 </p>
-                <p className="mt-1 text-xs text-slate-500">
+                <p className="mt-1 text-xs text-zinc-500">
                   {item.user_name} · {formatDateTimeLabel(item.remind_at)}
                 </p>
                 {item.description ? (
-                  <p className="mt-2 text-sm text-slate-600">
+                  <p className="mt-2 text-sm text-zinc-600">
                     {item.description}
                   </p>
                 ) : null}
@@ -1167,6 +1356,129 @@ function AppointmentRemindersSection({
         </form>
       ) : null}
     </section>
+  );
+}
+
+type AppointmentCompletionReadinessGridProps = {
+  casesStatusLabel: string;
+  detail: AppointmentDetail;
+  detailReport: ReportSummary | null;
+  interpreterLabel: string;
+  interpreterReportReady: boolean;
+  openChecklistCount: number;
+  openTaskCount: number;
+  pendingReminderCount: number;
+};
+
+function AppointmentCompletionReadinessGrid({
+  casesStatusLabel,
+  detail,
+  detailReport,
+  interpreterLabel,
+  interpreterReportReady,
+  openChecklistCount,
+  openTaskCount,
+  pendingReminderCount,
+}: AppointmentCompletionReadinessGridProps) {
+  return (
+    <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <ContextCard
+        label={casesStatusLabel}
+        value={
+          openChecklistCount === 0
+            ? appointmentText("Bereit", "Р“РѕС‚РѕРІРѕ", "Ready")
+            : appointmentText(
+                `${openChecklistCount} offen`,
+                `${openChecklistCount} РѕС‚РєСЂС‹С‚Рѕ`,
+                `${openChecklistCount} open`,
+              )
+        }
+        meta={
+          openChecklistCount === 0
+            ? appointmentText(
+                "Keine offenen Checklistenpunkte.",
+                "РќРµС‚ РѕС‚РєСЂС‹С‚С‹С… РїСѓРЅРєС‚РѕРІ С‡РµРє-Р»РёСЃС‚Р°.",
+                "No pending checklist items.",
+              )
+            : appointmentText(
+                "Offene Vorbereitungs- oder Follow-up-Schritte zuerst abschlieГџen.",
+                "РЎРЅР°С‡Р°Р»Р° Р·Р°РєСЂРѕР№С‚Рµ РѕС‚РєСЂС‹С‚С‹Рµ РїРѕРґРіРѕС‚РѕРІРёС‚РµР»СЊРЅС‹Рµ РёР»Рё follow-up С€Р°РіРё.",
+                "Finish outstanding preparation or follow-up steps.",
+              )
+        }
+      />
+      <ContextCard
+        label={appointmentText("Aufgaben", "Р—Р°РґР°С‡Рё", "Tasks")}
+        value={
+          openTaskCount === 0
+            ? appointmentText("Bereit", "Р“РѕС‚РѕРІРѕ", "Ready")
+            : appointmentText(
+                `${openTaskCount} offen`,
+                `${openTaskCount} РѕС‚РєСЂС‹С‚Рѕ`,
+                `${openTaskCount} open`,
+              )
+        }
+        meta={
+          openTaskCount === 0
+            ? appointmentText(
+                "Keine offenen operativen Aufgaben.",
+                "РќРµС‚ РѕС‚РєСЂС‹С‚С‹С… РѕРїРµСЂР°С†РёРѕРЅРЅС‹С… Р·Р°РґР°С‡.",
+                "No open operational tasks.",
+              )
+            : appointmentText(
+                "Aktive PM-, Dolmetscher- oder Concierge-Aufgaben noch abschlieГџen.",
+                "РќСѓР¶РЅРѕ Р·Р°РєСЂС‹С‚СЊ Р°РєС‚РёРІРЅС‹Рµ Р·Р°РґР°С‡Рё PM, РїРµСЂРµРІРѕРґС‡РёРєР° РёР»Рё concierge.",
+                "Resolve active PM, interpreter or concierge tasks.",
+              )
+        }
+      />
+      <ContextCard
+        label={appointmentText("Erinnerungen", "РќР°РїРѕРјРёРЅР°РЅРёСЏ", "Reminders")}
+        value={appointmentText(
+          `${pendingReminderCount} ausstehend`,
+          `${pendingReminderCount} РѕР¶РёРґР°РµС‚`,
+          `${pendingReminderCount} pending`,
+        )}
+        meta={
+          pendingReminderCount === 0
+            ? appointmentText(
+                "Keine offenen Erinnerungen.",
+                "РќРµС‚ РѕС‚РєСЂС‹С‚С‹С… РЅР°РїРѕРјРёРЅР°РЅРёР№.",
+                "No outstanding reminders.",
+              )
+            : appointmentText(
+                "Offene Erinnerungen bleiben auch nach dem Abschluss aktiv.",
+                "РћР¶РёРґР°СЋС‰РёРµ РЅР°РїРѕРјРёРЅР°РЅРёСЏ РѕСЃС‚Р°СЋС‚СЃСЏ Р°РєС‚РёРІРЅС‹РјРё Рё РїРѕСЃР»Рµ Р·Р°РєСЂС‹С‚РёСЏ.",
+                "Pending reminders stay active after closure.",
+              )
+        }
+      />
+      <ContextCard
+        label={interpreterLabel}
+        value={
+          !detail.interpreter_id
+            ? appointmentText("Nicht erforderlich", "РќРµ С‚СЂРµР±СѓРµС‚СЃСЏ", "Not required")
+            : interpreterReportReady
+              ? appointmentText("Freigegeben", "РЎРѕРіР»Р°СЃРѕРІР°РЅРѕ", "Approved")
+              : appointmentText("Ausstehend", "РћР¶РёРґР°РµС‚СЃСЏ", "Pending")
+        }
+        meta={
+          !detail.interpreter_id
+            ? appointmentText(
+                "Kein Dolmetscher verknupft.",
+                "РџРµСЂРµРІРѕРґС‡РёРє РЅРµ РїСЂРёРІСЏР·Р°РЅ.",
+                "No interpreter linked.",
+              )
+            : detailReport
+              ? detailReport.approval_status
+              : appointmentText(
+                  "Bericht noch nicht eingereicht.",
+                  "РћС‚С‡С‘С‚ РµС‰С‘ РЅРµ РѕС‚РїСЂР°РІР»РµРЅ.",
+                  "No report submitted yet.",
+                )
+        }
+      />
+    </div>
   );
 }
 
@@ -1310,14 +1622,14 @@ function AppointmentCompletionSection({
     <section className={appointmentSectionCardClassName("p-5")}>
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-slate-950">
+          <h3 className="text-sm font-semibold text-zinc-950">
             {appointmentText(
               "Abschlussbereitschaft",
               "Готовность к закрытию",
               "Completion readiness",
             )}
           </h3>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-zinc-500">
             {appointmentText(
               "Prüfen Sie operative Blocker, bevor Sie den Termin schließen und das Standard-Follow-up starten.",
               "Проверьте операционные блокеры перед закрытием приёма и запуском стандартного follow-up.",
@@ -1331,105 +1643,16 @@ function AppointmentCompletionSection({
             : statusLabel(detail.status)}
         </span>
       </div>
-      <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <ContextCard
-          label={t.cases_status}
-          value={
-            openChecklistCount === 0
-              ? appointmentText("Bereit", "Готово", "Ready")
-              : appointmentText(
-                  `${openChecklistCount} offen`,
-                  `${openChecklistCount} открыто`,
-                  `${openChecklistCount} open`,
-                )
-          }
-          meta={
-            openChecklistCount === 0
-              ? appointmentText(
-                  "Keine offenen Checklistenpunkte.",
-                  "Нет открытых пунктов чек-листа.",
-                  "No pending checklist items.",
-                )
-              : appointmentText(
-                  "Offene Vorbereitungs- oder Follow-up-Schritte zuerst abschließen.",
-                  "Сначала закройте открытые подготовительные или follow-up шаги.",
-                  "Finish outstanding preparation or follow-up steps.",
-                )
-          }
-        />
-        <ContextCard
-          label={appointmentText("Aufgaben", "Задачи", "Tasks")}
-          value={
-            openTaskCount === 0
-              ? appointmentText("Bereit", "Готово", "Ready")
-              : appointmentText(
-                  `${openTaskCount} offen`,
-                  `${openTaskCount} открыто`,
-                  `${openTaskCount} open`,
-                )
-          }
-          meta={
-            openTaskCount === 0
-              ? appointmentText(
-                  "Keine offenen operativen Aufgaben.",
-                  "Нет открытых операционных задач.",
-                  "No open operational tasks.",
-                )
-              : appointmentText(
-                  "Aktive PM-, Dolmetscher- oder Concierge-Aufgaben noch abschließen.",
-                  "Нужно закрыть активные задачи PM, переводчика или concierge.",
-                  "Resolve active PM, interpreter or concierge tasks.",
-                )
-          }
-        />
-        <ContextCard
-          label={appointmentText("Erinnerungen", "Напоминания", "Reminders")}
-          value={appointmentText(
-            `${pendingReminderCount} ausstehend`,
-            `${pendingReminderCount} ожидает`,
-            `${pendingReminderCount} pending`,
-          )}
-          meta={
-            pendingReminderCount === 0
-              ? appointmentText(
-                  "Keine offenen Erinnerungen.",
-                  "Нет открытых напоминаний.",
-                  "No outstanding reminders.",
-                )
-              : appointmentText(
-                  "Offene Erinnerungen bleiben auch nach dem Abschluss aktiv.",
-                  "Ожидающие напоминания остаются активными и после закрытия.",
-                  "Pending reminders stay active after closure.",
-                )
-          }
-        />
-        <ContextCard
-          label={tr.role_interpreter}
-          value={
-            !detail.interpreter_id
-              ? appointmentText("Nicht erforderlich", "Не требуется", "Not required")
-              : interpreterReportReady
-                ? appointmentText("Freigegeben", "Согласовано", "Approved")
-                : appointmentText("Ausstehend", "Ожидается", "Pending")
-          }
-          meta={
-            !detail.interpreter_id
-              ? appointmentText(
-                  "Kein Dolmetscher verknupft.",
-                  "Переводчик не привязан.",
-                  "No interpreter linked.",
-                )
-              : detailReport
-                ? detailReport.approval_status
-                : appointmentText(
-                    "Bericht noch nicht eingereicht.",
-                    "Отчёт ещё не отправлен.",
-                    "No report submitted yet.",
-                  )
-          }
-        />
-      </div>
-      {completionWarnings.length > 0 ? (
+      <AppointmentCompletionReadinessGrid
+        casesStatusLabel={t.cases_status}
+        detail={detail}
+        detailReport={detailReport}
+        interpreterLabel={tr.role_interpreter}
+        interpreterReportReady={interpreterReportReady}
+        openChecklistCount={openChecklistCount}
+        openTaskCount={openTaskCount}
+        pendingReminderCount={pendingReminderCount}
+      />      {completionWarnings.length > 0 ? (
         <div className="mt-4">
           <Banner tone="warning" withIcon>
             <div className="space-y-1">
@@ -1466,7 +1689,7 @@ function AppointmentCompletionSection({
                 className={cn(
                   "rounded-2xl",
                   completionPlan[preset.id]
-                    ? "bg-slate-950 text-white hover:bg-slate-800"
+                    ? "bg-zinc-950 text-white hover:bg-zinc-800"
                     : "",
                 )}
                 onClick={() =>
@@ -1588,11 +1811,11 @@ function AppointmentStatusSection({
     <section className={appointmentSectionCardClassName("p-5")}>
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-slate-950">
+          <h3 className="text-sm font-semibold text-zinc-950">
             {t.users_status}
           </h3>
           {detail.recurrence_frequency ? (
-            <p className="mt-1 text-xs text-slate-500">
+            <p className="mt-1 text-xs text-zinc-500">
               {t.appointments_scope_bulk_status_hint}
             </p>
           ) : null}
@@ -1630,7 +1853,7 @@ function AppointmentStatusSection({
               className={cn(
                 "rounded-2xl",
                 detail.status === status
-                  ? "bg-slate-950 text-white hover:bg-slate-800"
+                  ? "bg-zinc-950 text-white hover:bg-zinc-800"
                   : "",
               )}
               disabled={Boolean(busyAction)}
@@ -1656,9 +1879,9 @@ function AppointmentStatusSection({
       </div>
       {detail.recurrence_frequency ? (
         <div className="mt-4 space-y-3">
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-zinc-500">
             {t.appointments_scope_targets}{" "}
-            <span className="font-semibold text-slate-700">
+            <span className="font-semibold text-zinc-700">
               {selectedRecurringStatusTargets.length}
             </span>{" "}
             {selectedRecurringStatusTargets.length === 1
@@ -1685,21 +1908,35 @@ function AppointmentStatusSection({
   );
 }
 
-function AppointmentTasksSection({
-  detail,
-  tasks,
-  assignableStaff,
-  canCreateTasks,
-  onRefresh,
-  onError,
-}: {
+type AppointmentTasksSectionProps = {
   detail: AppointmentDetail;
   tasks: TaskEntry[];
   assignableStaff: StaffOption[];
   canCreateTasks: boolean;
   onRefresh: () => void;
   onError: (message: string) => void;
-}) {
+};
+
+function AppointmentTasksSection(props: AppointmentTasksSectionProps) {
+  const resetKey = [
+    props.detail.id,
+    props.detail.interpreter_id ?? "",
+    props.detail.owner_user_id ?? "",
+    props.assignableStaff[0]?.id ?? "",
+    buildTaskDefaultDueDate(props.detail),
+  ].join("|");
+
+  return <AppointmentTasksSectionContent key={resetKey} {...props} />;
+}
+
+function AppointmentTasksSectionContent({
+  detail,
+  tasks,
+  assignableStaff,
+  canCreateTasks,
+  onRefresh,
+  onError,
+}: AppointmentTasksSectionProps) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
   const [form, setForm] = useState<TaskFormState>(() =>
@@ -1710,20 +1947,6 @@ function AppointmentTasksSection({
   );
   const [submitBusy, setSubmitBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState("");
-
-  useEffect(() => {
-    setForm(
-      blankTaskForm(
-        detail.interpreter_id ??
-          detail.owner_user_id ??
-          assignableStaff[0]?.id ??
-          "",
-        buildTaskDefaultDueDate(detail),
-      ),
-    );
-    setSubmitBusy(false);
-    setActionBusy("");
-  }, [assignableStaff, detail]);
 
   async function handleTaskSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1794,14 +2017,14 @@ function AppointmentTasksSection({
     <section className={appointmentSectionCardClassName("p-5")}>
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-slate-950">
+          <h3 className="text-sm font-semibold text-zinc-950">
             {appointmentText(
               "Operative Aufgaben",
               "Операционные задачи",
               "Operational tasks",
             )}
           </h3>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-zinc-500">
             {appointmentText(
               "Appointment-gebundenes Follow-up für PM, Teamlead, Dolmetscher und Concierge.",
               "Привязанный к приёму follow-up для PM, teamlead, переводчика и concierge.",
@@ -1835,7 +2058,7 @@ function AppointmentTasksSection({
               <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-semibold text-slate-950">
+                    <p className="text-sm font-semibold text-zinc-950">
                       {task.title}
                     </p>
                     <span className={appointmentMiniPillClassName}>
@@ -1845,7 +2068,7 @@ function AppointmentTasksSection({
                       {taskPriorityLabel(task.priority)}
                     </span>
                   </div>
-                  <p className="mt-1 text-xs text-slate-500">
+                  <p className="mt-1 text-xs text-zinc-500">
                     {task.assigned_to_name} · {roleLabel(task.assigned_to_role)}
                     {task.due_date
                       ? appointmentText(
@@ -1856,7 +2079,7 @@ function AppointmentTasksSection({
                       : ""}
                   </p>
                   {task.description ? (
-                    <p className="mt-3 text-sm leading-6 text-slate-600">
+                    <p className="mt-3 text-sm leading-6 text-zinc-600">
                       {task.description}
                     </p>
                   ) : null}
@@ -1871,7 +2094,7 @@ function AppointmentTasksSection({
                       className={cn(
                         "rounded-2xl",
                         task.status === status
-                          ? "bg-slate-950 text-white hover:bg-slate-800"
+                          ? "bg-zinc-950 text-white hover:bg-zinc-800"
                           : "",
                       )}
                       disabled={Boolean(actionBusy) || task.status === status}

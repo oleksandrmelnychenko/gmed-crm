@@ -1,5 +1,30 @@
 import { getLang } from "@/lib/i18n";
 
+const MONTH_FORMATTERS = {
+  "de-DE": new Intl.DateTimeFormat("de-DE", { month: "short" }),
+  "ru-RU": new Intl.DateTimeFormat("ru-RU", { month: "short" }),
+} as const;
+
+const DAY_FORMATTERS = {
+  "de-DE": new Intl.DateTimeFormat("de-DE", { day: "2-digit" }),
+  "ru-RU": new Intl.DateTimeFormat("ru-RU", { day: "2-digit" }),
+} as const;
+
+const SHORT_DATE_FORMATTERS = {
+  "de-DE": new Intl.DateTimeFormat("de-DE", {
+    day: "2-digit",
+    month: "2-digit",
+  }),
+  "ru-RU": new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+  }),
+} as const;
+
+function dashboardLocale() {
+  return getLang() === "de" ? "de-DE" : "ru-RU";
+}
+
 export function greetingFor(name: string, tr: Record<string, string>) {
   const hour = new Date().getHours();
   const prefix =
@@ -17,9 +42,7 @@ export function numberOrDash(value: number | null | undefined) {
 
 export function formatMonth(iso: string) {
   try {
-    return new Intl.DateTimeFormat(getLang() === "de" ? "de-DE" : "ru-RU", {
-      month: "short",
-    }).format(new Date(iso));
+    return MONTH_FORMATTERS[dashboardLocale()].format(new Date(iso));
   } catch {
     return iso.slice(5, 7);
   }
@@ -27,9 +50,7 @@ export function formatMonth(iso: string) {
 
 export function formatDay(iso: string) {
   try {
-    return new Intl.DateTimeFormat(getLang() === "de" ? "de-DE" : "ru-RU", {
-      day: "2-digit",
-    }).format(new Date(iso));
+    return DAY_FORMATTERS[dashboardLocale()].format(new Date(iso));
   } catch {
     return iso.slice(8, 10);
   }
@@ -37,10 +58,7 @@ export function formatDay(iso: string) {
 
 export function formatShortDate(iso: string) {
   try {
-    return new Intl.DateTimeFormat(getLang() === "de" ? "de-DE" : "ru-RU", {
-      day: "2-digit",
-      month: "2-digit",
-    }).format(new Date(iso));
+    return SHORT_DATE_FORMATTERS[dashboardLocale()].format(new Date(iso));
   } catch {
     return iso.slice(0, 10);
   }

@@ -1,4 +1,4 @@
-import { BadgeCheck, CalendarClock, Mail, Phone, UserRound, UsersRound } from "lucide-react";
+import { Mail } from "lucide-react";
 import type { ReactNode } from "react";
 
 import {
@@ -11,14 +11,16 @@ import { cn } from "@/lib/utils";
 
 import { computeAge, patientDisplayName, type PatientSummary } from "../model/list-model";
 
+const SHORT_DATE_FORMATTER = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+});
+
 function formatShortDate(value?: string | null): string {
   if (!value) return "";
   try {
-    return new Intl.DateTimeFormat("en-GB", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    }).format(new Date(`${value}T00:00:00`));
+    return SHORT_DATE_FORMATTER.format(new Date(`${value}T00:00:00`));
   } catch {
     return value;
   }
@@ -411,27 +413,6 @@ export function buildPatientColumns(
   return cols;
 }
 
-export function iconForColumn(id: string): ReactNode {
-  switch (id) {
-    case "phone_primary":
-      return <Phone className="size-3" />;
-    case "email":
-      return <Mail className="size-3" />;
-    case "birth_date":
-    case "created_at":
-      return <CalendarClock className="size-3" />;
-    case "status":
-      return <BadgeCheck className="size-3" />;
-    case "patient":
-      return <UserRound className="size-3" />;
-    case "insurance":
-    case "insurance_provider":
-      return <UsersRound className="size-3" />;
-    default:
-      return null;
-  }
-}
-
 type TextCellProps = {
   emptyLabel?: string;
   icon?: ReactNode;
@@ -539,8 +520,9 @@ function FunctionalLabelSummary({
   labels: readonly string[];
   maxVisible?: number;
 }) {
-  const visible = labels.filter(Boolean).slice(0, maxVisible);
-  const hiddenCount = labels.filter(Boolean).length - visible.length;
+  const normalized = labels.filter(Boolean);
+  const visible = normalized.slice(0, maxVisible);
+  const hiddenCount = normalized.length - visible.length;
 
   return (
     <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1 overflow-hidden">

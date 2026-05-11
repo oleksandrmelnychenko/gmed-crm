@@ -6,18 +6,15 @@ import {
 } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
-  CountBadge,
-  EmptyCell,
   Field,
   Section as FormSection,
-  TabLoader,
   inputClass,
   textareaClass,
 } from "@/components/ui-shell";
 
 // Re-export shell primitives so existing screens keep working.
 // New code should import from "@/components/ui-shell" directly.
-export { CountBadge, EmptyCell, Field, FormSection, TabLoader };
+export { Field, FormSection };
 
 export const formInputClassName = inputClass;
 export const textareaClassName = textareaClass;
@@ -26,10 +23,10 @@ export const textareaClassName = textareaClass;
 // Kept here because the label dictionary is patient-domain.
 
 export function parseFunctionalLabels(value: string): string[] {
-  return value
-    .split(",")
-    .map(normalizeFunctionalLabel)
-    .filter(Boolean);
+  return value.split(",").flatMap((item) => {
+    const normalized = normalizeFunctionalLabel(item);
+    return normalized ? [normalized] : [];
+  });
 }
 
 type FunctionalLabelLang = "de" | "ru" | "en";
@@ -99,7 +96,7 @@ export function functionalLabelChipClass(value: string): string {
   );
 }
 
-export function functionalLabelOptions(lang: FunctionalLabelLang): { value: string; label: string }[] {
+function functionalLabelOptions(lang: FunctionalLabelLang): { value: string; label: string }[] {
   return Object.keys(FUNCTIONAL_LABEL_META).map((value) => ({
     value,
     label: humanizeFunctionalLabel(value, lang),

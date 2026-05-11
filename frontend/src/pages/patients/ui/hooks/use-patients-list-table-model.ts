@@ -68,10 +68,15 @@ export function usePatientsListTableModel({
     return map;
   }, [columns]);
 
-  const searchAccessors = useMemo(
-    () => columns.filter((column) => column.searchable).map((column) => column.accessor),
-    [columns],
-  );
+  const searchAccessors = useMemo(() => {
+    const searchableAccessors: Array<ColumnDef<PatientSummary>["accessor"]> = [];
+    for (const column of columns) {
+      if (column.searchable) {
+        searchableAccessors.push(column.accessor);
+      }
+    }
+    return searchableAccessors;
+  }, [columns]);
 
   const sortedAndFilteredPatients = useMemo(() => {
     const filtered = applyFilters(patients, filterPredicates, { accessors });

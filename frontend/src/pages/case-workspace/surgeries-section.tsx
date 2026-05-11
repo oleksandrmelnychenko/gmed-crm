@@ -95,7 +95,7 @@ export function SurgeriesSection() {
         "Укажите причину.",
         "Please enter the reason.",
       )}
-      renderCard={(item) => (
+      cardContent={(item) => (
         <>
           <div className="flex items-center gap-2">
             <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
@@ -128,7 +128,7 @@ export function SurgeriesSection() {
           ) : null}
         </>
       )}
-      renderForm={({ form, setForm, updateField, disabled }) => (
+      formContent={({ form, setForm, updateField, disabled }) => (
         <>
           <div className="grid gap-4 md:grid-cols-2">
             <Field label={tri(lang, "Datum", "Дата", "Date")}>
@@ -146,7 +146,6 @@ export function SurgeriesSection() {
             >
               <Input
                 value={form.grund}
-                autoFocus
                 onChange={(event) => updateField("grund", event.target.value)}
                 className={inputBaseClassName}
                 disabled={disabled}
@@ -167,11 +166,11 @@ export function SurgeriesSection() {
               onChange={(event) => {
                 const doctorId = event.target.value;
                 const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
-                setForm({
-                  ...form,
+                setForm((current) => ({
+                  ...current,
                   arzt_id: doctorId,
-                  arzt: selectedDoctor ? selectedDoctor.name : form.arzt ?? "",
-                });
+                  arzt: selectedDoctor ? selectedDoctor.name : current.arzt ?? "",
+                }));
               }}
               className={nativeSelectClassName}
               disabled={disabled}

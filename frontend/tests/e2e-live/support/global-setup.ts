@@ -96,15 +96,14 @@ export default async function globalSetup() {
     path.join(LOG_DIR, "backend.log"),
   );
 
-  let backendReady = false;
-  let backendStartError: unknown;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  async function waitForBackend(attempt: number): Promise<void> {
     try {
       await waitForHttp(`${BACKEND_URL}/health`, 90_000);
-      backendReady = true;
-      break;
+      return;
     } catch (error) {
-      backendStartError = error;
+      if (attempt >= 2) {
+        throw error;
+      }
       stopProcessTree(backend.pid ?? 0);
       await new Promise((resolve) => setTimeout(resolve, 2_000));
       backend = spawnLoggedProcess(
@@ -126,10 +125,13 @@ export default async function globalSetup() {
         },
         path.join(LOG_DIR, "backend.log"),
       );
+      return waitForBackend(attempt + 1);
     }
   }
 
-  if (!backendReady) {
+  try {
+    await waitForBackend(0);
+  } catch (backendStartError) {
     stopProcessTree(backend.pid ?? 0);
     throw backendStartError instanceof Error
       ? backendStartError

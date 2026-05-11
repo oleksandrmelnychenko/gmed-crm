@@ -1,4 +1,4 @@
-import type { Translations } from "./index";
+import type { TranslationShape as Translations } from "./translations-shape";
 import { adminSystemDe } from "./catalogs/admin-system";
 import { casesClinicalDe } from "./catalogs/cases-clinical";
 import { clinicalDe } from "./catalogs/clinical";
@@ -7,7 +7,7 @@ import { patientsPortalDe } from "./catalogs/patients-portal";
 import { revenueDe } from "./catalogs/revenue";
 import { sharedCoreDe } from "./catalogs/shared";
 
-export const de: Translations = {
+export const de = {
   app_name: "GMED CONSOLE",
   app_subtitle: "Medizintourismus-Management",
 
@@ -1462,4 +1462,4 @@ export const de: Translations = {
   ...patientsPortalDe,
   ...revenueDe,
   ...sharedCoreDe,
-};
+} satisfies Translations;

@@ -1,4 +1,9 @@
-import { useState, useEffect, type FormEvent } from "react";
+import {
+  useEffect,
+  useReducer,
+  type FormEvent,
+  type SetStateAction,
+} from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { ArrowRight, Globe, AlertCircle, Clock } from "lucide-react";
 
@@ -11,26 +16,82 @@ function LogoMark() {
     <svg
       aria-hidden="true"
       viewBox="0 0 76 65"
-      className="h-8 w-8 text-primary"
+      className="size-8 text-primary"
       fill="none"
     >
-      <path d="M37.5274 0L75.0548 65H0L37.5274 0Z" fill="currentColor" />
+      <path d="M37.53 0 75.05 65H0L37.53 0Z" fill="currentColor" />
     </svg>
   );
+}
+
+type LoginFieldErrors = {
+  email?: string;
+  password?: string;
+};
+
+type PendingLoginState = {
+  id: string;
+  status: "pending" | "rejected";
+} | null;
+
+type LoginState = {
+  email: string;
+  password: string;
+  error: string;
+  loading: boolean;
+  fieldErrors: LoginFieldErrors;
+  pendingLogin: PendingLoginState;
+};
+
+type LoginStatePatch =
+  | Partial<LoginState>
+  | ((current: LoginState) => Partial<LoginState>);
+
+function createLoginState(): LoginState {
+  return {
+    email: "admin@gmed.de",
+    password: "admin123",
+    error: "",
+    loading: false,
+    fieldErrors: {},
+    pendingLogin: null,
+  };
+}
+
+function loginReducer(state: LoginState, patch: LoginStatePatch): LoginState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
 }
 
 export function LoginPage() {
   const { user, login, checkPending } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [email, setEmail] = useState("admin@gmed.de");
-  const [password, setPassword] = useState("admin123");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
-  const [pendingId, setPendingId] = useState<string | null>(null);
-  const [pendingStatus, setPendingStatus] = useState<"pending" | "rejected" | null>(null);
+  const [loginState, dispatchLoginState] = useReducer(
+    loginReducer,
+    undefined,
+    createLoginState,
+  );
+  const {
+    email,
+    password,
+    error,
+    loading,
+    fieldErrors,
+    pendingLogin,
+  } = loginState;
   const { lang, setLang: switchLang, t: tr } = useLang();
+
+  const setPendingLogin = (nextValue: SetStateAction<PendingLoginState>) => {
+    dispatchLoginState((current) => ({
+      pendingLogin:
+        typeof nextValue === "function"
+          ? nextValue(current.pendingLogin)
+          : nextValue,
+    }));
+  };
 
   const redirectTo =
     typeof location.state === "object" &&
@@ -45,7 +106,7 @@ export function LoginPage() {
   };
 
   const validate = (): boolean => {
-    const errors: { email?: string; password?: string } = {};
+    const errors: LoginFieldErrors = {};
     const trimmed = email.trim();
 
     if (!trimmed) {
@@ -66,51 +127,58 @@ export function LoginPage() {
       errors.password = tr.login_error_password_long;
     }
 
-    setFieldErrors(errors);
+    dispatchLoginState({ fieldErrors: errors });
     return Object.keys(errors).length === 0;
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setError("");
-    setPendingId(null);
-    setPendingStatus(null);
+    dispatchLoginState({
+      error: "",
+      pendingLogin: null,
+    });
 
     if (!validate()) return;
 
-    setLoading(true);
+    dispatchLoginState({ loading: true });
     try {
       await login(email.trim(), password);
       navigate(redirectTo, { replace: true });
     } catch (err) {
       if (err instanceof PendingLoginError) {
-        setPendingId(err.pendingId);
-        setPendingStatus("pending");
+        dispatchLoginState({
+          pendingLogin: { id: err.pendingId, status: "pending" },
+        });
       } else {
-        setError(err instanceof Error ? err.message : tr.login_error_unknown);
+        dispatchLoginState({
+          error: err instanceof Error ? err.message : tr.login_error_unknown,
+        });
       }
     } finally {
-      setLoading(false);
+      dispatchLoginState({ loading: false });
     }
   };
 
   // Poll pending login status
   useEffect(() => {
-    if (!pendingId || pendingStatus !== "pending") return;
+    if (!pendingLogin || pendingLogin.status !== "pending") return;
 
     const interval = setInterval(async () => {
-      const status = await checkPending(pendingId);
+      const status = await checkPending(pendingLogin.id);
       if (status === "approved") {
-        setPendingId(null);
-        setPendingStatus(null);
+        dispatchLoginState({ pendingLogin: null });
         navigate(redirectTo, { replace: true });
       } else if (status === "rejected") {
-        setPendingStatus("rejected");
+        dispatchLoginState((current) => ({
+          pendingLogin: current.pendingLogin
+            ? { ...current.pendingLogin, status: "rejected" }
+            : current.pendingLogin,
+        }));
       }
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [pendingId, pendingStatus, checkPending, navigate, redirectTo]);
+  }, [pendingLogin, checkPending, navigate, redirectTo]);
 
   if (user) {
     return <Navigate to={redirectTo} replace />;
@@ -121,19 +189,19 @@ export function LoginPage() {
       <div className="relative w-full max-w-lg rounded-3xl bg-white p-10 xl:p-12">
         <div className="mb-8 flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-3xl font-semibold text-slate-950">{tr.login_title}</h2>
-            <p className="mt-2 text-sm leading-6 text-slate-600">
+            <h2 className="text-3xl font-semibold text-zinc-950">{tr.login_title}</h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-600">
               {tr.login_sign_in_subtitle}
             </p>
           </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-slate-700">
+          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-zinc-700">
             <LogoMark />
           </div>
         </div>
 
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="space-y-2.5">
-                <label htmlFor="email" className="text-sm font-medium text-slate-700">
+                <label htmlFor="email" className="text-sm font-medium text-zinc-700">
                   {tr.login_email}
                 </label>
                 <input
@@ -142,18 +210,23 @@ export function LoginPage() {
                   autoComplete="email"
                   placeholder="name@gmed.de"
                   value={email}
-                  onChange={(e) => { setEmail(e.target.value); setFieldErrors((p) => ({ ...p, email: undefined })); }}
-                  className={`h-12 w-full rounded-xl border bg-white px-4 text-sm text-slate-950 outline-none transition-all duration-200 ${
+                  onChange={(e) =>
+                    dispatchLoginState((current) => ({
+                      email: e.target.value,
+                      fieldErrors: { ...current.fieldErrors, email: undefined },
+                    }))
+                  }
+                  className={`h-12 w-full rounded-xl border bg-white px-4 text-sm text-zinc-950 outline-none transition-all duration-200 ${
                     fieldErrors.email
                       ? "border-red-400 ring-4 ring-red-100"
-                      : "border-slate-300 focus:border-ring focus:ring-2 focus:ring-ring/30"
+                      : "border-zinc-300 focus:border-ring focus:ring-2 focus:ring-ring/30"
                   }`}
                 />
                 <FieldError message={fieldErrors.email} />
               </div>
 
               <div className="space-y-2.5">
-                <label htmlFor="password" className="text-sm font-medium text-slate-700">
+                <label htmlFor="password" className="text-sm font-medium text-zinc-700">
                   {tr.login_password}
                 </label>
                 <input
@@ -162,11 +235,16 @@ export function LoginPage() {
                   autoComplete="current-password"
                   placeholder="••••••••"
                   value={password}
-                  onChange={(e) => { setPassword(e.target.value); setFieldErrors((p) => ({ ...p, password: undefined })); }}
-                  className={`h-12 w-full rounded-xl border bg-white px-4 text-sm text-slate-950 outline-none transition-all duration-200 ${
+                  onChange={(e) =>
+                    dispatchLoginState((current) => ({
+                      password: e.target.value,
+                      fieldErrors: { ...current.fieldErrors, password: undefined },
+                    }))
+                  }
+                  className={`h-12 w-full rounded-xl border bg-white px-4 text-sm text-zinc-950 outline-none transition-all duration-200 ${
                     fieldErrors.password
                       ? "border-red-400 ring-4 ring-red-100"
-                      : "border-slate-300 focus:border-ring focus:ring-2 focus:ring-ring/30"
+                      : "border-zinc-300 focus:border-ring focus:ring-2 focus:ring-ring/30"
                   }`}
                 />
                 <FieldError message={fieldErrors.password} />
@@ -182,7 +260,7 @@ export function LoginPage() {
               <Button
                 type="submit"
                 size="lg"
-                className="h-12 w-full rounded-xl bg-slate-950 text-white hover:bg-slate-800"
+                className="h-12 w-full rounded-xl bg-zinc-950 text-white hover:bg-zinc-800"
                 disabled={loading}
               >
                 <span>{loading ? tr.login_loading : tr.login_submit}</span>
@@ -201,23 +279,23 @@ export function LoginPage() {
             </div>
 
             {/* Pending MFA overlay */}
-            {pendingId && (
+            {pendingLogin && (
               <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-[2rem] bg-white/95 backdrop-blur animate-in fade-in duration-300">
-                {pendingStatus === "rejected" ? (
+                {pendingLogin.status === "rejected" ? (
                   <div className="flex flex-col items-center gap-4 px-8 text-center">
                     <div className="flex items-center justify-center size-16 rounded-2xl bg-red-50">
                       <AlertCircle className="size-8 text-red-500" />
                     </div>
-                    <h3 className="text-lg font-semibold text-slate-950">
+                    <h3 className="text-lg font-semibold text-zinc-950">
                       {tr.login_mfa_rejected_title}
                     </h3>
-                    <p className="text-sm text-slate-500 max-w-xs">
+                    <p className="text-sm text-zinc-500 max-w-xs">
                       {tr.login_mfa_rejected_msg}
                     </p>
                     <Button
                       variant="outline"
                       className="mt-2 rounded-xl"
-                      onClick={() => { setPendingId(null); setPendingStatus(null); }}
+                      onClick={() => setPendingLogin(null)}
                     >
                       {tr.common_back}
                     </Button>
@@ -227,23 +305,23 @@ export function LoginPage() {
                     <div className="flex items-center justify-center size-16 rounded-2xl bg-sky-50">
                       <Clock className="size-8 text-sky-500 animate-pulse" />
                     </div>
-                    <h3 className="text-lg font-semibold text-slate-950">
+                    <h3 className="text-lg font-semibold text-zinc-950">
                       {tr.mfa_pending}
                     </h3>
-                    <p className="text-sm text-slate-500 max-w-xs">
+                    <p className="text-sm text-zinc-500 max-w-xs">
                       {tr.login_mfa_pending_msg}
                     </p>
                     <div className="flex items-center gap-2 mt-2">
                       <div className="size-2 rounded-full bg-sky-400 animate-pulse" />
-                      <span className="text-xs text-slate-400">
+                      <span className="text-xs text-zinc-400">
                         {tr.login_mfa_checking}
                       </span>
                     </div>
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="mt-2 text-slate-400"
-                      onClick={() => { setPendingId(null); setPendingStatus(null); }}
+                      className="mt-2 text-zinc-400"
+                      onClick={() => setPendingLogin(null)}
                     >
                       {tr.common_cancel}
                     </Button>

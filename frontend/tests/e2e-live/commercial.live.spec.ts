@@ -451,14 +451,16 @@ test.describe("commercial live workflows", () => {
     const baseUrl = new URL(page.url()).origin;
     const billingContext = await browser.newContext({ baseURL: baseUrl });
     const billingPage = await billingContext.newPage();
-    await setGermanLanguage(billingPage);
+    const [, billingApi] = await Promise.all([
+      setGermanLanguage(billingPage),
+      authenticateApiClient(
+        request,
+        scenario.credentials.billing.email,
+        scenario.credentials.password,
+      ),
+    ]);
     await loginViaApi(
       billingPage,
-      request,
-      scenario.credentials.billing.email,
-      scenario.credentials.password,
-    );
-    const billingApi = await authenticateApiClient(
       request,
       scenario.credentials.billing.email,
       scenario.credentials.password,

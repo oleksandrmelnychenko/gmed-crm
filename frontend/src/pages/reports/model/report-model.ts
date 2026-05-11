@@ -1,19 +1,48 @@
-export function formatMoney(value?: string | null, locale = "de-DE") {
-  const numeric = Number(value ?? 0);
-  return new Intl.NumberFormat(locale, {
+const EUR_MONEY_FORMATTERS = {
+  "de-DE": new Intl.NumberFormat("de-DE", {
     style: "currency",
     currency: "EUR",
     maximumFractionDigits: 0,
-  }).format(Number.isFinite(numeric) ? numeric : 0);
+  }),
+  "ru-RU": new Intl.NumberFormat("ru-RU", {
+    style: "currency",
+    currency: "EUR",
+    maximumFractionDigits: 0,
+  }),
+} as const;
+
+const DATE_FORMATTERS = {
+  "de-DE": new Intl.DateTimeFormat("de-DE"),
+  "ru-RU": new Intl.DateTimeFormat("ru-RU"),
+} as const;
+
+function reportLocale(locale: string) {
+  return locale === "ru-RU" ? "ru-RU" : "de-DE";
+}
+
+export function formatMoney(value?: string | null, locale = "de-DE") {
+  const numeric = Number(value ?? 0);
+  return EUR_MONEY_FORMATTERS[reportLocale(locale)].format(
+    Number.isFinite(numeric) ? numeric : 0,
+  );
 }
 
 export function formatMoneyMetric(value?: string | number | null, locale = "de-DE") {
   const numeric = typeof value === "number" ? value : Number(value ?? 0);
-  return new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency: "EUR",
-    maximumFractionDigits: 0,
-  }).format(Number.isFinite(numeric) ? numeric : 0);
+  return EUR_MONEY_FORMATTERS[reportLocale(locale)].format(
+    Number.isFinite(numeric) ? numeric : 0,
+  );
+}
+
+export function formatReportDate(
+  value: string | null | undefined,
+  locale = "de-DE",
+  emptyLabel = "-",
+) {
+  if (!value) return emptyLabel;
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return emptyLabel;
+  return DATE_FORMATTERS[reportLocale(locale)].format(timestamp);
 }
 
 export function formatRating(value?: number | null, emptyLabel = "-") {

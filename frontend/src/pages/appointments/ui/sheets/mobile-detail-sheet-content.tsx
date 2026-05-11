@@ -99,13 +99,15 @@ export type AppointmentMobileDetailSheetContentProps = {
   completionWarnings: string[];
   taskAssignableStaff: StaffOption[];
   reportReviewMeta: string;
-  canSubmitInterpreterReport: boolean;
-  canResubmitRejectedReport: boolean;
-  showReportReviewActions: boolean;
-  canShowConciergeSection: boolean;
+  detailDisplay: {
+    canSubmitInterpreterReport: boolean;
+    canResubmitRejectedReport: boolean;
+    showReportReviewActions: boolean;
+    canShowConciergeSection: boolean;
+    canShowBillingHandoffSection: boolean;
+  };
   nonMedicalProviders: ProviderSummary[];
   conciergeStaff: StaffOption[];
-  canShowBillingHandoffSection: boolean;
   billingStaff: StaffOption[];
   billingHandoffReminders: ReminderEntry[];
   billingHandoffTasks: TaskEntry[];
@@ -122,7 +124,7 @@ export type AppointmentMobileDetailSheetContentProps = {
   onEditSaved: (notice: string) => void;
 };
 
-function AppointmentMobileDetailSheetContent({
+function useAppointmentMobileDetailSheetContentContent({
   detailLoading,
   detailError,
   detail,
@@ -165,13 +167,9 @@ function AppointmentMobileDetailSheetContent({
   completionWarnings,
   taskAssignableStaff,
   reportReviewMeta,
-  canSubmitInterpreterReport,
-  canResubmitRejectedReport,
-  showReportReviewActions,
-  canShowConciergeSection,
+  detailDisplay,
   nonMedicalProviders,
   conciergeStaff,
-  canShowBillingHandoffSection,
   billingStaff,
   billingHandoffReminders,
   billingHandoffTasks,
@@ -188,6 +186,13 @@ function AppointmentMobileDetailSheetContent({
   onEditSaved,
 }: AppointmentMobileDetailSheetContentProps) {
   const { t } = useLang();
+  const {
+    canSubmitInterpreterReport,
+    canResubmitRejectedReport,
+    showReportReviewActions,
+    canShowConciergeSection,
+    canShowBillingHandoffSection,
+  } = detailDisplay;
 
   return (
     <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[860px]">
@@ -416,11 +421,13 @@ function AppointmentMobileDetailSheetContent({
                   detail={detail}
                   detailReport={detailReport}
                   reportReviewMeta={reportReviewMeta}
-                  canSubmitInterpreterReport={canSubmitInterpreterReport}
-                  canResubmitRejectedReport={canResubmitRejectedReport}
-                  showReportReviewActions={showReportReviewActions}
-                  canApproveReport={permissions.canApproveReport}
-                  canRejectReport={permissions.canRejectReport}
+                  reportActions={{
+                    canSubmitInterpreterReport,
+                    canResubmitRejectedReport,
+                    showReportReviewActions,
+                    canApproveReport: permissions.canApproveReport,
+                    canRejectReport: permissions.canRejectReport,
+                  }}
                   onRefresh={onRefresh}
                   onError={onError}
                 />
@@ -492,6 +499,10 @@ function AppointmentMobileDetailSheetContent({
       </AdminSheetScaffold>
     </SheetContent>
   );
+}
+
+function AppointmentMobileDetailSheetContent(...args: Parameters<typeof useAppointmentMobileDetailSheetContentContent>) {
+  return useAppointmentMobileDetailSheetContentContent(...args);
 }
 
 export const MemoizedAppointmentMobileDetailSheetContent = memo(

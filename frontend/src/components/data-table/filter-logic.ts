@@ -1,6 +1,6 @@
 import type { FilterPredicate, FilterValue } from "./types";
 
-export type FieldAccessor<T> = (row: T) => unknown;
+type FieldAccessor<T> = (row: T) => unknown;
 
 export type FilterContext<T> = {
   accessors: Record<string, FieldAccessor<T>>;

@@ -90,11 +90,9 @@ export function buildLocalScheduleWarnings(
     },
   ];
 
-  return scopes
-    .map((scope) => ({
-      scope: scope.scope,
-      label: scope.label,
-      items: items.filter((item) => {
+  const warnings: LocalScheduleWarning[] = [];
+  for (const scope of scopes) {
+    const scopeItems = items.filter((item) => {
         if (item.id === payload.appointmentId || item.status === "cancelled") {
           return false;
         }
@@ -103,9 +101,16 @@ export function buildLocalScheduleWarnings(
           slotWindow(item.date, item.time_start, item.time_end),
           targetWindow,
         );
-      }),
-    }))
-    .filter((warning) => warning.items.length > 0);
+      });
+    if (scopeItems.length > 0) {
+      warnings.push({
+        scope: scope.scope,
+        label: scope.label,
+        items: scopeItems,
+      });
+    }
+  }
+  return warnings;
 }
 
 export function buildScheduleNotice(
@@ -132,11 +137,12 @@ export function buildScheduleNotice(
     );
   }
   for (const warning of warnings) {
+    const itemCount = warning.items.length;
     parts.push(
       appointmentText(
-        `${warning.items.length} Konflikt bei ${warning.label.toLowerCase()}`,
-        `${warning.items.length} конфликт по ${warning.label.toLowerCase()}`,
-        `${warning.items.length} ${warning.scope} overlap`,
+        `${itemCount} Konflikt bei ${warning.label.toLowerCase()}`,
+        `${itemCount} конфликт по ${warning.label.toLowerCase()}`,
+        `${itemCount} ${warning.scope} overlap`,
       ),
     );
   }

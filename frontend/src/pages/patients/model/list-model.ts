@@ -169,10 +169,10 @@ export function toOptional(value: string) {
 }
 
 export function parseLanguages(value: string) {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
+  return value.split(",").flatMap((item) => {
+    const trimmed = item.trim();
+    return trimmed ? [trimmed] : [];
+  });
 }
 
 export function patientToForm(detail: PatientDetail): PatientFormState {
@@ -216,9 +216,10 @@ export function computeAge(birthDate: string | null | undefined, now: Date = new
 }
 
 export function patientDisplayName(patient: Pick<PatientSummary, "first_name" | "last_name" | "title">): string {
-  const parts = [patient.title, patient.first_name, patient.last_name]
-    .map((p) => p?.trim())
-    .filter(Boolean);
+  const parts = [patient.title, patient.first_name, patient.last_name].flatMap((part) => {
+    const trimmed = part?.trim();
+    return trimmed ? [trimmed] : [];
+  });
   return parts.join(" ").trim();
 }
 

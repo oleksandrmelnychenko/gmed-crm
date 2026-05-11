@@ -37,8 +37,7 @@ async function openAppointmentWorkflow(
   appointmentId: string,
   title: string,
 ) {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  async function attemptOpen(attempt: number): Promise<void> {
     await page.goto(appointmentWorkflowUrl(appointmentId));
     try {
       await expect(page).toHaveURL(/\/appointments\?/, { timeout: 5_000 });
@@ -47,11 +46,15 @@ async function openAppointmentWorkflow(
       });
       return;
     } catch (error) {
-      lastError = error;
+      if (attempt >= 2) {
+        throw error instanceof Error ? error : new Error(String(error));
+      }
       await page.waitForTimeout(500);
+      return attemptOpen(attempt + 1);
     }
   }
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+
+  await attemptOpen(0);
 }
 
 async function fillRepeatUntil(editForm: Locator, value: string) {

@@ -2538,10 +2538,13 @@ function StaffDocumentsPage({
                     );
                     return (
                       <label
+                        htmlFor={`template-block-${block.key}`}
                         key={block.key}
+                        aria-label={block.label}
                         className="flex gap-3 rounded-lg border border-border/60 bg-card px-4 py-3 text-sm text-foreground"
                       >
                         <input
+                          id={`template-block-${block.key}`}
                           type="checkbox"
                           checked={checked}
                           onChange={(event) =>
@@ -3975,6 +3978,7 @@ function StaffDocumentsPage({
                                 {canShowTranslationActionMenu ? (
                                   <div
                                     data-translation-action-menu
+                                    role="presentation"
                                     className="absolute right-3 top-3 z-20"
                                     onClick={(event) => {
                                       event.preventDefault();

@@ -2,7 +2,6 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
   useCallback,
-  useEffect,
   useState,
   type FormEvent,
 } from "react";
@@ -93,7 +92,23 @@ function withEllipsis(text: string) {
   return text.trim().endsWith("...") ? text : `${text.trim()}...`;
 }
 
-function AppointmentBillingHandoffSection({
+function AppointmentBillingHandoffSection(props: AppointmentBillingHandoffSectionProps) {
+  const defaultDueAtKey = appointmentAnchorDateTime(props.detail);
+  return (
+    <AppointmentBillingHandoffSectionContent
+      key={[
+        props.detail.id,
+        props.detail.type,
+        props.detail.interpreter_id ?? "",
+        props.billingStaff[0]?.id ?? "",
+        defaultDueAtKey,
+      ].join(":")}
+      {...props}
+    />
+  );
+}
+
+function useAppointmentBillingHandoffSectionContentContent({
   detail,
   detailReport,
   reportReviewMeta,
@@ -147,11 +162,6 @@ function AppointmentBillingHandoffSection({
     buildDefaultForm(),
   );
   const [submitBusy, setSubmitBusy] = useState(false);
-
-  useEffect(() => {
-    setForm(buildDefaultForm());
-    setSubmitBusy(false);
-  }, [buildDefaultForm]);
 
   function openBillingChatDraft() {
     if (!form.assigneeId) return;
@@ -363,7 +373,7 @@ function AppointmentBillingHandoffSection({
                 "Billing reminders",
               )}
             </AppointmentDotLabel>
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-zinc-500">
               {reminders.length} {appointmentText("verknupft", "связано", "linked")}
             </span>
           </div>
@@ -376,12 +386,12 @@ function AppointmentBillingHandoffSection({
                   key={item.id}
                   className={appointmentWhiteRowClassName}
                 >
-                  <p className="text-sm font-medium text-slate-900">{item.title}</p>
-                  <p className="mt-1 text-xs text-slate-500">
+                  <p className="text-sm font-medium text-zinc-900">{item.title}</p>
+                  <p className="mt-1 text-xs text-zinc-500">
                     {item.user_name} · {formatDateTimeLabel(item.remind_at)}
                   </p>
                   {item.description ? (
-                    <p className="mt-2 text-sm text-slate-600">{item.description}</p>
+                    <p className="mt-2 text-sm text-zinc-600">{item.description}</p>
                   ) : null}
                 </div>
               ))
@@ -398,7 +408,7 @@ function AppointmentBillingHandoffSection({
                 "Billing tasks",
               )}
             </AppointmentDotLabel>
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-zinc-500">
               {tasks.length} {appointmentText("verknupft", "связано", "linked")}
             </span>
           </div>
@@ -412,7 +422,7 @@ function AppointmentBillingHandoffSection({
                   className={appointmentWhiteRowClassName}
                 >
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-medium text-slate-900">{task.title}</p>
+                    <p className="text-sm font-medium text-zinc-900">{task.title}</p>
                     <span className={appointmentMiniPillClassName}>
                       {taskStatusLabel(task.status)}
                     </span>
@@ -420,7 +430,7 @@ function AppointmentBillingHandoffSection({
                       {taskPriorityLabel(task.priority)}
                     </span>
                   </div>
-                  <p className="mt-1 text-xs text-slate-500">
+                  <p className="mt-1 text-xs text-zinc-500">
                     {task.assigned_to_name} · {roleLabel(task.assigned_to_role)}
                     {task.due_date
                       ? appointmentText(
@@ -431,7 +441,7 @@ function AppointmentBillingHandoffSection({
                       : ""}
                   </p>
                   {task.description ? (
-                    <p className="mt-2 text-sm text-slate-600">{task.description}</p>
+                    <p className="mt-2 text-sm text-zinc-600">{task.description}</p>
                   ) : null}
                 </div>
               ))
@@ -604,6 +614,10 @@ function AppointmentBillingHandoffSection({
       ) : null}
     </section>
   );
+}
+
+function AppointmentBillingHandoffSectionContent(...args: Parameters<typeof useAppointmentBillingHandoffSectionContentContent>) {
+  return useAppointmentBillingHandoffSectionContentContent(...args);
 }
 
 const MemoizedAppointmentBillingHandoffSection = memo(

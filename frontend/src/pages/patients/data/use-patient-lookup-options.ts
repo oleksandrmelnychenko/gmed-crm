@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useEffect, useReducer } from "react";
 
 import { apiFetch } from "@/lib/api";
 
@@ -10,19 +10,34 @@ type UsePatientLookupOptionsArgs = {
 
 const PATIENT_LOOKUP_CACHE_TTL_MS = 60_000;
 
+type LookupState = {
+  patientOptions: PatientLookupItem[];
+  settledKey: string;
+};
+
+const EMPTY_LOOKUP_STATE: LookupState = {
+  patientOptions: [],
+  settledKey: "",
+};
+
+function lookupReducer(_state: LookupState, nextState: LookupState) {
+  return nextState;
+}
+
 export function usePatientLookupOptions({
   enabled,
 }: UsePatientLookupOptionsArgs) {
-  const [patientOptions, setPatientOptions] = useState<PatientLookupItem[]>([]);
-  const [settledKey, setSettledKey] = useState("");
+  const [lookupState, dispatchLookupState] = useReducer(
+    lookupReducer,
+    EMPTY_LOOKUP_STATE,
+  );
 
   const requestKey = enabled ? "active-patient-lookup" : "";
 
   useEffect(() => {
     if (!requestKey) {
       startTransition(() => {
-        setPatientOptions([]);
-        setSettledKey("");
+        dispatchLookupState(EMPTY_LOOKUP_STATE);
       });
       return;
     }
@@ -35,15 +50,13 @@ export function usePatientLookupOptions({
       .then((items) => {
         if (cancelled) return;
         startTransition(() => {
-          setPatientOptions(items);
-          setSettledKey(requestKey);
+          dispatchLookupState({ patientOptions: items, settledKey: requestKey });
         });
       })
       .catch(() => {
         if (cancelled) return;
         startTransition(() => {
-          setPatientOptions([]);
-          setSettledKey(requestKey);
+          dispatchLookupState({ patientOptions: [], settledKey: requestKey });
         });
       });
 
@@ -52,10 +65,10 @@ export function usePatientLookupOptions({
     };
   }, [requestKey]);
 
-  const ready = settledKey === requestKey;
+  const ready = lookupState.settledKey === requestKey;
 
   return {
-    patientOptions: ready ? patientOptions : [],
+    patientOptions: ready ? lookupState.patientOptions : [],
     patientOptionsLoading: Boolean(requestKey) && !ready,
   };
 }

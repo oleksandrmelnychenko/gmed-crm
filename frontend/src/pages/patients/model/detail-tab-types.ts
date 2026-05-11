@@ -65,7 +65,7 @@ export type DocumentVisibility =
   | "released_external"
   | "patient_visible";
 
-export type DocumentAlertRule = {
+type DocumentAlertRule = {
   key: string;
   label: string;
   fulfilled: boolean;
@@ -128,7 +128,7 @@ export type InvoiceItem = {
   };
 };
 
-export type PatientFinancialBreakdownByOrder = {
+type PatientFinancialBreakdownByOrder = {
   order_id: string | null;
   package_id: string | null;
   invoice_id: string;
@@ -141,7 +141,7 @@ export type PatientFinancialBreakdownByOrder = {
   open_balance: string;
 };
 
-export type PatientFinancialBreakdownByService = {
+type PatientFinancialBreakdownByService = {
   service_type: string;
   revenue_net: string;
   revenue_gross: string;
@@ -174,7 +174,7 @@ export type PatientFinancialSummary = {
   issues: string[];
 };
 
-export type PatientFinancialLedgerEntry = {
+type PatientFinancialLedgerEntry = {
   id: string;
   entry_date: string;
   direction: string;

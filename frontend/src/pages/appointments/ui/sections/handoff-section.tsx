@@ -1,7 +1,6 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
-  useEffect,
   useState,
 } from "react";
 
@@ -51,7 +50,16 @@ type AppointmentHandoffSectionProps = {
 const sectionCardClass = appointmentElevatedSectionCardClassName;
 const selectClassName = appointmentSelectControlClassName;
 
-function AppointmentHandoffSection({
+function AppointmentHandoffSection(props: AppointmentHandoffSectionProps) {
+  return (
+    <AppointmentHandoffSectionContent
+      key={`${props.detail.id}:${props.followUpAssigneeId}`}
+      {...props}
+    />
+  );
+}
+
+function AppointmentHandoffSectionContent({
   detail,
   handoffStakeholders,
   followUpAssigneeId,
@@ -64,10 +72,6 @@ function AppointmentHandoffSection({
   const tr = t as unknown as Record<string, string>;
   const { staffGo } = useStaffNavigate();
   const [followUpBusy, setFollowUpBusy] = useState(false);
-
-  useEffect(() => {
-    setFollowUpBusy(false);
-  }, [detail.id, followUpAssigneeId]);
 
   function openChat(peer: HandoffStakeholder) {
     const params = new URLSearchParams({
@@ -136,7 +140,7 @@ function AppointmentHandoffSection({
             >
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-sm font-semibold text-slate-950">
+                  <p className="text-sm font-semibold text-zinc-950">
                     {peer.name}
                   </p>
                   <span className={appointmentMiniPillClassName}>
@@ -151,7 +155,7 @@ function AppointmentHandoffSection({
                     </span>
                   ))}
                 </div>
-                <p className="mt-1 text-xs text-slate-500">
+                <p className="mt-1 text-xs text-zinc-500">
                   {detail.patient_pid} · {slotLabel(detail)}
                 </p>
               </div>

@@ -1,4 +1,12 @@
-import { startTransition, useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  startTransition,
+  useEffect,
+  useMemo,
+  useReducer,
+  type Dispatch,
+  type FormEvent,
+  type SetStateAction,
+} from "react";
 import { Building2, LoaderCircle, RefreshCw, Send } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -65,6 +73,48 @@ function blankServiceRequestForm(): ServiceRequestFormState {
   };
 }
 
+type PatientServicesState = {
+  services: PortalConciergeServiceItem[];
+  loading: boolean;
+  refreshing: boolean;
+  error: string;
+  notice: string;
+  requestBusy: boolean;
+  requestError: string;
+  cancelBusyId: string;
+  form: ServiceRequestFormState;
+  version: number;
+};
+
+type PatientServicesPatch =
+  | Partial<PatientServicesState>
+  | ((current: PatientServicesState) => Partial<PatientServicesState>);
+
+function patientServicesReducer(
+  state: PatientServicesState,
+  patch: PatientServicesPatch,
+): PatientServicesState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
+function createPatientServicesState(): PatientServicesState {
+  return {
+    services: [],
+    loading: true,
+    refreshing: false,
+    error: "",
+    notice: "",
+    requestBusy: false,
+    requestError: "",
+    cancelBusyId: "",
+    form: blankServiceRequestForm(),
+    version: 0,
+  };
+}
+
 function toIsoDateTime(value: string) {
   if (!value) return undefined;
   const parsed = new Date(value);
@@ -88,18 +138,178 @@ const PORTAL_SERVICE_REALTIME_EVENTS = [
   "concierge_service.billing_ready",
 ] as const;
 
+type PatientServicesRequestSectionProps = {
+  form: ServiceRequestFormState;
+  requestBusy: boolean;
+  requestError: string;
+  t: Record<string, string>;
+  onFormChange: Dispatch<SetStateAction<ServiceRequestFormState>>;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
+};
+
+function PatientServicesRequestSection({
+  form,
+  requestBusy,
+  requestError,
+  t,
+  onFormChange,
+  onSubmit,
+}: PatientServicesRequestSectionProps) {
+  return (
+    <Section
+      title={t.services_request_title}
+      accessory={<Send className="size-4 text-muted-foreground" />}
+    >
+      <p className="text-sm text-muted-foreground">{t.services_request_description}</p>
+
+      <form className="space-y-4" onSubmit={(event) => void onSubmit(event)}>
+        <Field label={t.services_form_service_type}>
+          <NativeComboboxSelect
+            value={form.serviceKind}
+            onChange={(event) =>
+              onFormChange((current) => ({
+                ...current,
+                serviceKind: event.target.value ?? "hotel",
+              }))
+            }
+            className={selectClass}
+          >
+            <option value="hotel">{t.services_type_hotel}</option>
+            <option value="transfer">{t.services_type_transfer}</option>
+            <option value="vip_terminal">{t.services_type_vip_terminal}</option>
+            <option value="flight">{t.services_type_flight}</option>
+            <option value="chauffeur">{t.services_type_chauffeur}</option>
+            <option value="translation_support">{t.services_type_translation_support}</option>
+            <option value="other">{t.services_type_other}</option>
+          </NativeComboboxSelect>
+        </Field>
+
+        <Field label={t.services_form_title} htmlFor="portal-service-title">
+          <Input
+            id="portal-service-title"
+            value={form.title}
+            onChange={(event) => onFormChange((current) => ({ ...current, title: event.target.value }))}
+            placeholder={t.services_form_title_placeholder}
+            className={inputClass}
+            required
+          />
+        </Field>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field
+            label={t.services_form_preferred_vendor}
+            htmlFor="portal-service-vendor"
+          >
+            <Input
+              id="portal-service-vendor"
+              value={form.vendorName}
+              onChange={(event) => onFormChange((current) => ({ ...current, vendorName: event.target.value }))}
+              placeholder={t.services_form_preferred_vendor_placeholder}
+              className={inputClass}
+            />
+          </Field>
+          <Field
+            label={t.services_form_vendor_contact}
+            htmlFor="portal-service-vendor-contact"
+          >
+            <Input
+              id="portal-service-vendor-contact"
+              value={form.vendorContact}
+              onChange={(event) => onFormChange((current) => ({ ...current, vendorContact: event.target.value }))}
+              placeholder={t.services_form_vendor_contact_placeholder}
+              className={inputClass}
+            />
+          </Field>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label={t.services_preferred_start}>
+            <Input
+              type="datetime-local"
+              value={form.startsAt}
+              onChange={(event) => onFormChange((current) => ({ ...current, startsAt: event.target.value }))}
+              className={inputClass}
+            />
+          </Field>
+          <Field label={t.services_preferred_end}>
+            <Input
+              type="datetime-local"
+              value={form.endsAt}
+              onChange={(event) => onFormChange((current) => ({ ...current, endsAt: event.target.value }))}
+              className={inputClass}
+            />
+          </Field>
+        </div>
+
+        <Field label={t.services_form_budget} htmlFor="portal-service-budget">
+          <Input
+            id="portal-service-budget"
+            type="number"
+            min="0"
+            step="0.01"
+            value={form.costEstimate}
+            onChange={(event) => onFormChange((current) => ({ ...current, costEstimate: event.target.value }))}
+            placeholder="250.00"
+            className={inputClass}
+          />
+        </Field>
+
+        <Field label={t.services_form_notes} htmlFor="portal-service-notes">
+          <textarea
+            id="portal-service-notes"
+            value={form.serviceNotes}
+            onChange={(event) => onFormChange((current) => ({ ...current, serviceNotes: event.target.value }))}
+            placeholder={t.services_form_notes_placeholder}
+            className={cn(textareaClass, "min-h-[132px]")}
+          />
+        </Field>
+
+        {requestError ? <Banner tone="error">{requestError}</Banner> : null}
+
+        <Button type="submit" className={cn("w-full", tokens.control.primaryButton)} disabled={requestBusy}>
+          {requestBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
+          {t.services_submit}
+        </Button>
+      </form>
+    </Section>
+  );
+}
+
 export function PatientServicesPage() {
   const { t } = useLang();
-  const [services, setServices] = useState<PortalConciergeServiceItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [requestBusy, setRequestBusy] = useState(false);
-  const [requestError, setRequestError] = useState("");
-  const [cancelBusyId, setCancelBusyId] = useState("");
-  const [form, setForm] = useState<ServiceRequestFormState>(blankServiceRequestForm());
-  const [version, setVersion] = useState(0);
+  const [pageState, dispatchPageState] = useReducer(
+    patientServicesReducer,
+    undefined,
+    createPatientServicesState,
+  );
+  const {
+    services,
+    loading,
+    refreshing,
+    error,
+    notice,
+    requestBusy,
+    requestError,
+    cancelBusyId,
+    form,
+    version,
+  } = pageState;
+  const setVersion: Dispatch<SetStateAction<number>> = (nextValue) => {
+    dispatchPageState((current) => ({
+      version:
+        typeof nextValue === "function"
+          ? nextValue(current.version)
+          : nextValue,
+    }));
+  };
+  const setForm: Dispatch<SetStateAction<ServiceRequestFormState>> = (nextValue) => {
+    dispatchPageState((current) => ({
+      form:
+        typeof nextValue === "function"
+          ? nextValue(current.form)
+          : nextValue,
+    }));
+  };
 
   useRealtimeSubscription(PORTAL_SERVICE_REALTIME_EVENTS, () => {
     clearApiCache("/me/concierge-services");
@@ -108,29 +318,29 @@ export function PatientServicesPage() {
 
   useEffect(() => {
     let cancelled = false;
+    const initialLoad = loading;
 
     async function load() {
-      if (loading) {
-        setRefreshing(false);
-      } else {
-        setRefreshing(true);
-      }
+      dispatchPageState({ refreshing: !initialLoad });
 
       try {
         const rows = await fetchPortalServices();
         if (cancelled) return;
         startTransition(() => {
-          setServices(rows);
-          setError("");
+          dispatchPageState({
+            services: rows,
+            error: "",
+            loading: false,
+            refreshing: false,
+          });
         });
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : t.services_failed_load);
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-          setRefreshing(false);
-        }
+        dispatchPageState({
+          error: err instanceof Error ? err.message : t.services_failed_load,
+          loading: false,
+          refreshing: false,
+        });
       }
     }
 
@@ -138,7 +348,7 @@ export function PatientServicesPage() {
     return () => {
       cancelled = true;
     };
-  }, [loading, version, t.services_failed_load]);
+  }, [version, t.services_failed_load]);
 
   const openItems = useMemo(
     () => services.filter((item) => !["completed", "cancelled"].includes(item.status)),
@@ -154,9 +364,11 @@ export function PatientServicesPage() {
   );
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setRequestBusy(true);
-    setRequestError("");
-    setNotice("");
+    dispatchPageState({
+      requestBusy: true,
+      requestError: "",
+      notice: "",
+    });
 
     try {
       await createPortalServiceRequest({
@@ -169,29 +381,39 @@ export function PatientServicesPage() {
         cost_estimate: form.costEstimate ? Number(form.costEstimate) : undefined,
         service_notes: form.serviceNotes || undefined,
       });
-      setNotice(t.services_notice_created);
-      setForm(blankServiceRequestForm());
-      setVersion((value) => value + 1);
+      dispatchPageState((current) => ({
+        notice: t.services_notice_created,
+        form: blankServiceRequestForm(),
+        version: current.version + 1,
+        requestBusy: false,
+      }));
     } catch (err) {
-      setRequestError(err instanceof Error ? err.message : t.services_error_create);
-    } finally {
-      setRequestBusy(false);
+      dispatchPageState({
+        requestError: err instanceof Error ? err.message : t.services_error_create,
+        requestBusy: false,
+      });
     }
   }
 
   async function handleCancel(serviceId: string) {
-    setCancelBusyId(serviceId);
-    setError("");
-    setNotice("");
+    dispatchPageState({
+      cancelBusyId: serviceId,
+      error: "",
+      notice: "",
+    });
 
     try {
       await cancelPortalService(serviceId);
-      setNotice(t.services_notice_cancelled);
-      setVersion((value) => value + 1);
+      dispatchPageState((current) => ({
+        notice: t.services_notice_cancelled,
+        version: current.version + 1,
+        cancelBusyId: "",
+      }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t.services_error_cancel);
-    } finally {
-      setCancelBusyId("");
+      dispatchPageState({
+        error: err instanceof Error ? err.message : t.services_error_cancel,
+        cancelBusyId: "",
+      });
     }
   }
 
@@ -304,122 +526,14 @@ export function PatientServicesPage() {
           </Section>
         </section>
 
-        <Section
-          title={t.services_request_title}
-          accessory={<Send className="size-4 text-muted-foreground" />}
-        >
-          <p className="text-sm text-muted-foreground">{t.services_request_description}</p>
-
-          <form className="space-y-4" onSubmit={(event) => void handleSubmit(event)}>
-            <Field label={t.services_form_service_type}>
-              <NativeComboboxSelect
-                value={form.serviceKind}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    serviceKind: event.target.value ?? "hotel",
-                  }))
-                }
-                className={selectClass}
-              >
-                <option value="hotel">{t.services_type_hotel}</option>
-                <option value="transfer">{t.services_type_transfer}</option>
-                <option value="vip_terminal">{t.services_type_vip_terminal}</option>
-                <option value="flight">{t.services_type_flight}</option>
-                <option value="chauffeur">{t.services_type_chauffeur}</option>
-                <option value="translation_support">{t.services_type_translation_support}</option>
-                <option value="other">{t.services_type_other}</option>
-              </NativeComboboxSelect>
-            </Field>
-
-            <Field label={t.services_form_title} htmlFor="portal-service-title">
-              <Input
-                id="portal-service-title"
-                value={form.title}
-                onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))}
-                placeholder={t.services_form_title_placeholder}
-                className={inputClass}
-                required
-              />
-            </Field>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field
-                label={t.services_form_preferred_vendor}
-                htmlFor="portal-service-vendor"
-              >
-                <Input
-                  id="portal-service-vendor"
-                  value={form.vendorName}
-                  onChange={(event) => setForm((current) => ({ ...current, vendorName: event.target.value }))}
-                  placeholder={t.services_form_preferred_vendor_placeholder}
-                  className={inputClass}
-                />
-              </Field>
-              <Field
-                label={t.services_form_vendor_contact}
-                htmlFor="portal-service-vendor-contact"
-              >
-                <Input
-                  id="portal-service-vendor-contact"
-                  value={form.vendorContact}
-                  onChange={(event) => setForm((current) => ({ ...current, vendorContact: event.target.value }))}
-                  placeholder={t.services_form_vendor_contact_placeholder}
-                  className={inputClass}
-                />
-              </Field>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label={t.services_preferred_start}>
-                <Input
-                  type="datetime-local"
-                  value={form.startsAt}
-                  onChange={(event) => setForm((current) => ({ ...current, startsAt: event.target.value }))}
-                  className={inputClass}
-                />
-              </Field>
-              <Field label={t.services_preferred_end}>
-                <Input
-                  type="datetime-local"
-                  value={form.endsAt}
-                  onChange={(event) => setForm((current) => ({ ...current, endsAt: event.target.value }))}
-                  className={inputClass}
-                />
-              </Field>
-            </div>
-
-            <Field label={t.services_form_budget} htmlFor="portal-service-budget">
-              <Input
-                id="portal-service-budget"
-                type="number"
-                min="0"
-                step="0.01"
-                value={form.costEstimate}
-                onChange={(event) => setForm((current) => ({ ...current, costEstimate: event.target.value }))}
-                placeholder="250.00"
-                className={inputClass}
-              />
-            </Field>
-
-            <Field label={t.services_form_notes} htmlFor="portal-service-notes">
-              <textarea
-                id="portal-service-notes"
-                value={form.serviceNotes}
-                onChange={(event) => setForm((current) => ({ ...current, serviceNotes: event.target.value }))}
-                placeholder={t.services_form_notes_placeholder}
-                className={cn(textareaClass, "min-h-[132px]")}
-              />
-            </Field>
-
-            {requestError ? <Banner tone="error">{requestError}</Banner> : null}
-
-            <Button type="submit" className={cn("w-full", tokens.control.primaryButton)} disabled={requestBusy}>
-              {requestBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
-              {t.services_submit}
-            </Button>
-          </form>
-        </Section>
+        <PatientServicesRequestSection
+          form={form}
+          requestBusy={requestBusy}
+          requestError={requestError}
+          t={t as unknown as Record<string, string>}
+          onFormChange={setForm}
+          onSubmit={handleSubmit}
+        />
       </section>
     </div>
   );

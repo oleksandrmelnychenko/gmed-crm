@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useId, useMemo, useState, type FormEvent } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -17,12 +17,12 @@ function tri(lang: string, de: string, ru: string, en: string) {
 type TextFieldLabels = { de: string; ru: string; en: string };
 type TextFieldHint = { de: string; ru: string; en: string };
 
-export type SpecialtyBooleanFlag<T> = {
+type SpecialtyBooleanFlag<T> = {
   key: keyof T & string;
   labels: TextFieldLabels;
 };
 
-export type SpecialtyTextField<T> = {
+type SpecialtyTextField<T> = {
   key: keyof T & string;
   labels: TextFieldLabels;
   hint?: TextFieldHint;
@@ -91,6 +91,13 @@ function SpecialtySectionContent<T extends Record<string, unknown>>({
   }
 
   const isRelevant = Boolean((form as { is_relevant?: boolean }).is_relevant);
+  const relevantInputId = useId();
+  const relevantLabel = tri(
+    lang,
+    "Fachrelevant",
+    "РћС‚РЅРѕСЃРёС‚СЃСЏ Рє СЃРїРµС†РёР°Р»СЊРЅРѕСЃС‚Рё",
+    "Specialty relevant",
+  );
 
   return (
     <Panel title={title} description={description}>
@@ -98,6 +105,8 @@ function SpecialtySectionContent<T extends Record<string, unknown>>({
         {sectionError ? <Banner tone="error">{sectionError}</Banner> : null}
 
         <label
+          htmlFor={relevantInputId}
+          aria-label={relevantLabel}
           className={cn(
             "flex cursor-pointer items-center justify-between gap-3 rounded-xl px-4 py-3 transition-colors",
             isRelevant
@@ -119,6 +128,7 @@ function SpecialtySectionContent<T extends Record<string, unknown>>({
             </p>
           </div>
           <input
+            id={relevantInputId}
             type="checkbox"
             className={checkboxClass}
             checked={isRelevant}

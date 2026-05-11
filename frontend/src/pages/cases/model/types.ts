@@ -1,17 +1,17 @@
-export type CaseStatus = "open" | "in_progress" | "closed";
+type CaseStatus = "open" | "in_progress" | "closed";
 
-export type VorerkrankungItem = {
+type VorerkrankungItem = {
   erkrankung: string;
   erstdiagnose?: string | null;
   notiz?: string | null;
 };
 
-export type AllergieItem = {
+type AllergieItem = {
   allergie: string;
   reaktion?: string | null;
 };
 
-export type OperationItem = {
+type OperationItem = {
   datum?: string | null;
   grund: string;
   arzt_id?: string | null;
@@ -21,7 +21,7 @@ export type OperationItem = {
   notiz?: string | null;
 };
 
-export type CaseHistoryEntry = {
+type CaseHistoryEntry = {
   id: number;
   section: string;
   old_value?: unknown;
@@ -44,15 +44,7 @@ export type CaseTextSnippet = {
   updated_by_name?: string | null;
 };
 
-export type CaseTextSnippetFormState = {
-  id: string;
-  label: string;
-  category: string;
-  body: string;
-  is_active: boolean;
-};
-
-export type MedikamentItem = {
+type MedikamentItem = {
   id?: string | null;
   handelsname: string;
   wirkstoff?: string | null;
@@ -75,7 +67,7 @@ export type MedikamentItem = {
   pending_expiry_notification_sent_at?: string | null;
 };
 
-export type PainItem = {
+type PainItem = {
   lokalisierung: string;
   seit_wann?: string | null;
   ursache?: string | null;
@@ -90,20 +82,12 @@ export type PainItem = {
   auftreten?: string | null;
 };
 
-export type SymptomItem = {
+type SymptomItem = {
   beschreibung: string;
   fachrichtung?: string | null;
 };
 
-export type VegetativeState = {
-  appetit_durst: string;
-  koerpergroesse: string;
-  gewicht: string;
-  gewichtsveraenderung: string;
-  grund: string;
-};
-
-export type CardiologyAssessment = {
+type CardiologyAssessment = {
   is_relevant: boolean;
   chest_pain: boolean;
   dyspnea: boolean;
@@ -119,7 +103,7 @@ export type CardiologyAssessment = {
   notes: string;
 };
 
-export type GastroenterologyAssessment = {
+type GastroenterologyAssessment = {
   is_relevant: boolean;
   abdominal_pain: boolean;
   reflux: boolean;
@@ -135,7 +119,7 @@ export type GastroenterologyAssessment = {
   notes: string;
 };
 
-export type OrthopedicsAssessment = {
+type OrthopedicsAssessment = {
   is_relevant: boolean;
   joint_pain: boolean;
   back_pain: boolean;
@@ -149,7 +133,7 @@ export type OrthopedicsAssessment = {
   notes: string;
 };
 
-export type NeurologyAssessment = {
+type NeurologyAssessment = {
   is_relevant: boolean;
   headache: boolean;
   dizziness: boolean;
@@ -164,7 +148,7 @@ export type NeurologyAssessment = {
   notes: string;
 };
 
-export type PulmonologyAssessment = {
+type PulmonologyAssessment = {
   is_relevant: boolean;
   chronic_cough: boolean;
   dyspnea: boolean;
@@ -179,7 +163,7 @@ export type PulmonologyAssessment = {
   notes: string;
 };
 
-export type UrologyAssessment = {
+type UrologyAssessment = {
   is_relevant: boolean;
   dysuria: boolean;
   hematuria: boolean;
@@ -257,47 +241,3 @@ export type DoctorOption = {
   title?: string | null;
   fachbereich?: string | null;
 };
-
-export type CaseFilters = {
-  search: string;
-  status: string;
-  patientId: string;
-};
-
-export type CaseCreateFormState = {
-  patientId: string;
-  hauptanfragegrund: string;
-  aktuelleAnamnese: string;
-  zuweiserDoctorId: string;
-  zuweiser: string;
-};
-
-export type CaseOverviewFormState = {
-  hauptanfragegrund: string;
-  aktuelle_anamnese: string;
-  zuweiser_doctor_id: string;
-  zuweiser: string;
-};
-
-export type CasePermissions = {
-  canViewPage: boolean;
-  canCreate: boolean;
-  canEdit: boolean;
-};
-
-export type SectionStatusKey =
-  | "overview"
-  | "vorerkrankungen"
-  | "allergien"
-  | "operationen"
-  | "medikamente"
-  | "pain"
-  | "symptome"
-  | "cardiology"
-  | "gastroenterology"
-  | "orthopedics"
-  | "neurology"
-  | "pulmonology"
-  | "urology"
-  | "vegetative"
-  | "impfstatus";

@@ -71,16 +71,18 @@ type PatientTimelineTabProps = {
   localizedTimelineRangeOptions: TimelineRangeOption[];
   timelineCategoryOptions: string[];
   timelineSourceOptions: string[];
-  hasTimelineFilters: boolean;
   statusColors: Record<string, string>;
   statusLabel: StatusLabelFn;
   formatDateTime: DateTimeFormatter;
   timelineEntityDotClass: (entityType: string) => string;
   timelineItemSurfaceClass: (status: string) => string;
-  canOpenDocumentsWorkspace: boolean;
-  canViewContracts: boolean;
-  canViewInvoices: boolean;
-  canOpenComplianceWorkspace: boolean;
+  timelineAccess: {
+    hasTimelineFilters: boolean;
+    canOpenDocumentsWorkspace: boolean;
+    canViewContracts: boolean;
+    canViewInvoices: boolean;
+    canOpenComplianceWorkspace: boolean;
+  };
   patientId?: string | null;
   onTimelineEntityFilterChange: (value: string) => void;
   onTimelineCategoryFilterChange: (value: string) => void;
@@ -91,6 +93,41 @@ type PatientTimelineTabProps = {
   onResetTimelineFilters: () => void;
   onOpenRoute: (route: string) => void;
 };
+
+type TimelineStatsOverviewProps = {
+  l: LocalizeFn;
+  timelineSummary: TimelineSummary;
+};
+
+function TimelineStatsOverview({
+  l,
+  timelineSummary,
+}: TimelineStatsOverviewProps) {
+  return (
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <StatCard
+        label={l("Ereignisse gesamt", "Р’СЃРµРіРѕ СЃРѕР±С‹С‚РёР№", "Total events")}
+        value={timelineSummary.total}
+        description={l("Alle erfassten Touchpoints im Patienten-Workflow.", "Р’СЃРµ Р·Р°С„РёРєСЃРёСЂРѕРІР°РЅРЅС‹Рµ С‚РѕС‡РєРё РєР°СЃР°РЅРёСЏ РІ РїСЂРѕС†РµСЃСЃРµ РІРµРґРµРЅРёСЏ РїР°С†РёРµРЅС‚Р°.", "All recorded patient workflow touchpoints.")}
+      />
+      <StatCard
+        label={l("Offene Punkte", "РћС‚РєСЂС‹С‚С‹Рµ РїСѓРЅРєС‚С‹", "Open items")}
+        value={timelineSummary.open}
+        description={l("Ereignisse, die noch operative Nachverfolgung erfordern.", "РЎРѕР±С‹С‚РёСЏ, РєРѕС‚РѕСЂС‹Рµ РµС‰С‘ С‚СЂРµР±СѓСЋС‚ РѕРїРµСЂР°С†РёРѕРЅРЅРѕРіРѕ СЃРѕРїСЂРѕРІРѕР¶РґРµРЅРёСЏ.", "Events that still require operational follow-through.")}
+      />
+      <StatCard
+        label={l("Letzte 30 Tage", "РџРѕСЃР»РµРґРЅРёРµ 30 РґРЅРµР№", "Last 30 days")}
+        value={timelineSummary.recent}
+        description={l("Aktuelle Bewegung Гјber Behandlung, Billing und Dokumente.", "РќРµРґР°РІРЅСЏСЏ Р°РєС‚РёРІРЅРѕСЃС‚СЊ РїРѕ Р»РµС‡РµРЅРёСЋ, СЃС‡РµС‚Р°Рј Рё РґРѕРєСѓРјРµРЅС‚Р°Рј.", "Recent movement across care, billing and documents.")}
+      />
+      <StatCard
+        label={l("Aktive Bereiche", "РђРєС‚РёРІРЅС‹Рµ РЅР°РїСЂР°РІР»РµРЅРёСЏ", "Domains active")}
+        value={timelineSummary.entityCounts.length}
+        description={l("Eindeutige Workstreams, die diesen Patienten bereits berГјhren.", "РЈРЅРёРєР°Р»СЊРЅС‹Рµ РЅР°РїСЂР°РІР»РµРЅРёСЏ СЂР°Р±РѕС‚С‹, СѓР¶Рµ Р·Р°С‚СЂР°РіРёРІР°СЋС‰РёРµ СЌС‚РѕРіРѕ РїР°С†РёРµРЅС‚Р°.", "Unique workstreams already touching this patient.")}
+      />
+    </div>
+  );
+}
 
 export function PatientTimelineTab({
   l,
@@ -112,16 +149,12 @@ export function PatientTimelineTab({
   localizedTimelineRangeOptions,
   timelineCategoryOptions,
   timelineSourceOptions,
-  hasTimelineFilters,
   statusColors,
   statusLabel,
   formatDateTime,
   timelineEntityDotClass,
   timelineItemSurfaceClass,
-  canOpenDocumentsWorkspace,
-  canViewContracts,
-  canViewInvoices,
-  canOpenComplianceWorkspace,
+  timelineAccess,
   patientId,
   onTimelineEntityFilterChange,
   onTimelineCategoryFilterChange,
@@ -132,6 +165,14 @@ export function PatientTimelineTab({
   onResetTimelineFilters,
   onOpenRoute,
 }: PatientTimelineTabProps) {
+  const {
+    hasTimelineFilters,
+    canOpenDocumentsWorkspace,
+    canViewContracts,
+    canViewInvoices,
+    canOpenComplianceWorkspace,
+  } = timelineAccess;
+
   return (
     <TabsContent value="timeline" className="space-y-4 mt-4 min-h-[400px]">
       {tabLoading ? (
@@ -152,28 +193,7 @@ export function PatientTimelineTab({
             accessory={<CountBadge>{filteredTimeline.length}</CountBadge>}
           />
 
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <StatCard
-              label={l("Ereignisse gesamt", "Всего событий", "Total events")}
-              value={timelineSummary.total}
-              description={l("Alle erfassten Touchpoints im Patienten-Workflow.", "Все зафиксированные точки касания в процессе ведения пациента.", "All recorded patient workflow touchpoints.")}
-            />
-            <StatCard
-              label={l("Offene Punkte", "Открытые пункты", "Open items")}
-              value={timelineSummary.open}
-              description={l("Ereignisse, die noch operative Nachverfolgung erfordern.", "События, которые ещё требуют операционного сопровождения.", "Events that still require operational follow-through.")}
-            />
-            <StatCard
-              label={l("Letzte 30 Tage", "Последние 30 дней", "Last 30 days")}
-              value={timelineSummary.recent}
-              description={l("Aktuelle Bewegung über Behandlung, Billing und Dokumente.", "Недавняя активность по лечению, счетам и документам.", "Recent movement across care, billing and documents.")}
-            />
-            <StatCard
-              label={l("Aktive Bereiche", "Активные направления", "Domains active")}
-              value={timelineSummary.entityCounts.length}
-              description={l("Eindeutige Workstreams, die diesen Patienten bereits berühren.", "Уникальные направления работы, уже затрагивающие этого пациента.", "Unique workstreams already touching this patient.")}
-            />
-          </div>
+          <TimelineStatsOverview l={l} timelineSummary={timelineSummary} />
 
           <FormSection
             title={l("Timeline-Filter", "Фильтры таймлайна", "Timeline filters")}

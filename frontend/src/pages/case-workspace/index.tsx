@@ -138,7 +138,7 @@ function CaseWorkspaceContent() {
 
   return (
     <div className="flex flex-col gap-6">
-      <header className="rounded-xl border border-border/60 bg-muted/20 px-4 py-4">
+      <header className="rounded-xl border border-border/60 bg-muted/20 p-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2.5">
             <span

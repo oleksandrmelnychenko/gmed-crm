@@ -178,11 +178,52 @@ export function valueToInput(value: unknown) {
   return String(value);
 }
 
-export function toDateTimeLocal(value: string) {
+function toDateTimeLocal(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   const pad = (part: number) => String(part).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+const CONTRACT_DATE_TIME_FORMAT_OPTIONS = {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+} satisfies Intl.DateTimeFormatOptions;
+
+const CONTRACT_DATE_FORMAT_OPTIONS = {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+} satisfies Intl.DateTimeFormatOptions;
+
+const contractDateTimeFormatters: Record<string, Intl.DateTimeFormat> = {
+  "de-DE": new Intl.DateTimeFormat("de-DE", CONTRACT_DATE_TIME_FORMAT_OPTIONS),
+  "ru-RU": new Intl.DateTimeFormat("ru-RU", CONTRACT_DATE_TIME_FORMAT_OPTIONS),
+  "en-GB": new Intl.DateTimeFormat("en-GB", CONTRACT_DATE_TIME_FORMAT_OPTIONS),
+};
+
+const contractDateFormatters: Record<string, Intl.DateTimeFormat> = {
+  "de-DE": new Intl.DateTimeFormat("de-DE", CONTRACT_DATE_FORMAT_OPTIONS),
+  "ru-RU": new Intl.DateTimeFormat("ru-RU", CONTRACT_DATE_FORMAT_OPTIONS),
+  "en-GB": new Intl.DateTimeFormat("en-GB", CONTRACT_DATE_FORMAT_OPTIONS),
+};
+
+const contractCurrencyFormatter = new Intl.NumberFormat("de-DE", {
+  style: "currency",
+  currency: "EUR",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+function contractDateTimeFormatter(locale: string) {
+  return contractDateTimeFormatters[locale] ?? contractDateTimeFormatters["en-GB"];
+}
+
+function contractDateFormatter(locale: string) {
+  return contractDateFormatters[locale] ?? contractDateFormatters["en-GB"];
 }
 
 export function formatDateTime(
@@ -192,13 +233,7 @@ export function formatDateTime(
 ) {
   if (!value) return emptyLabel;
   try {
-    return new Intl.DateTimeFormat(locale, {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(value));
+    return contractDateTimeFormatter(locale).format(new Date(value));
   } catch {
     return value;
   }
@@ -211,11 +246,7 @@ export function formatDate(
 ) {
   if (!value) return emptyLabel;
   try {
-    return new Intl.DateTimeFormat(locale, {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }).format(new Date(`${value}T00:00:00`));
+    return contractDateFormatter(locale).format(new Date(`${value}T00:00:00`));
   } catch {
     return value;
   }
@@ -232,12 +263,7 @@ export function enumLabel(
 export function formatCurrency(value: unknown) {
   const numeric = typeof value === "number" ? value : Number(value ?? 0);
   if (!Number.isFinite(numeric)) return "EUR 0.00";
-  return new Intl.NumberFormat("de-DE", {
-    style: "currency",
-    currency: "EUR",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(numeric);
+  return contractCurrencyFormatter.format(numeric);
 }
 
 export function patientOptionLabel(patient: PatientOption) {

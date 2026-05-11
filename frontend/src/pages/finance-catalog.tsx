@@ -2,15 +2,15 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useState,
+  useReducer,
   type FormEvent,
+  type SetStateAction,
 } from "react";
 import {
   BadgePercent,
   Boxes,
   ChevronDown,
   ClipboardList,
-  LoaderCircle,
   Pencil,
   Plus,
   Trash2,
@@ -134,6 +134,7 @@ const BLANK_TAX_PROFILE_FORM: TaxProfileForm = {
 };
 
 type ServicePackageItemForm = {
+  formKey: string;
   description: string;
   serviceKey: string;
   includedQuantity: string;
@@ -157,7 +158,15 @@ type ServicePackageForm = {
   items: ServicePackageItemForm[];
 };
 
+let packageItemFormKeySeed = 0;
+
+function nextPackageItemFormKey() {
+  packageItemFormKeySeed += 1;
+  return `package-item-form-${packageItemFormKeySeed}`;
+}
+
 const BLANK_PACKAGE_ITEM_FORM: ServicePackageItemForm = {
+  formKey: "package-item-form-template",
   description: "",
   serviceKey: "",
   includedQuantity: "1",
@@ -178,11 +187,11 @@ const BLANK_PACKAGE_FORM: ServicePackageForm = {
   isActive: true,
   validFrom: "",
   validTo: "",
-  items: [{ ...BLANK_PACKAGE_ITEM_FORM }],
+  items: [createBlankPackageItem("unit")],
 };
 
 function createBlankPackageItem(unitLabel: string): ServicePackageItemForm {
-  return { ...BLANK_PACKAGE_ITEM_FORM, unitLabel };
+  return { ...BLANK_PACKAGE_ITEM_FORM, formKey: nextPackageItemFormKey(), unitLabel };
 }
 
 function createBlankPackageForm(unitLabel: string): ServicePackageForm {
@@ -212,6 +221,20 @@ const VAT_SOURCE_LABEL_KEYS = {
   legacy: "finance_catalog_vat_source_legacy",
 } satisfies Partial<Record<string, TranslationKey>>;
 
+const financeMoneyFormatters = new Map<string, Intl.NumberFormat>();
+
+function financeMoneyFormatter(currency: string) {
+  const cached = financeMoneyFormatters.get(currency);
+  if (cached) return cached;
+  const formatter = Intl.NumberFormat("de-DE", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 2,
+  });
+  financeMoneyFormatters.set(currency, formatter);
+  return formatter;
+}
+
 function numberValue(value: string | null | undefined) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : 0;
@@ -219,11 +242,7 @@ function numberValue(value: string | null | undefined) {
 
 function formatMoney(value: string | number | null | undefined, currency = "EUR") {
   const numeric = typeof value === "number" ? value : numberValue(value);
-  return new Intl.NumberFormat("de-DE", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 2,
-  }).format(numeric);
+  return financeMoneyFormatter(currency).format(numeric);
 }
 
 function taxProfileToForm(profile: TaxProfile): TaxProfileForm {
@@ -242,6 +261,7 @@ function taxProfileToForm(profile: TaxProfile): TaxProfileForm {
 
 function packageItemToForm(item: ServicePackageItem): ServicePackageItemForm {
   return {
+    formKey: item.id || nextPackageItemFormKey(),
     description: item.description,
     serviceKey: item.service_key ?? "",
     includedQuantity: item.included_quantity,
@@ -267,7 +287,7 @@ function packageToForm(item: ServicePackage): ServicePackageForm {
     items:
       item.items && item.items.length > 0
         ? item.items.map(packageItemToForm)
-        : [{ ...BLANK_PACKAGE_ITEM_FORM }],
+        : [createBlankPackageItem("unit")],
   };
 }
 
@@ -280,7 +300,59 @@ function decimalInputIsValid(value: string) {
   return Number.isFinite(Number(value.replace(",", ".")));
 }
 
-export function FinanceCatalogPage() {
+type FinanceCatalogState = {
+  taxProfiles: TaxProfile[];
+  catalogRows: CatalogTaxProfile[];
+  servicePackages: ServicePackage[];
+  loading: boolean;
+  error: string;
+  createOpen: boolean;
+  createBusy: boolean;
+  createError: string;
+  form: TaxProfileForm;
+  editingTaxProfileId: string;
+  taxEditBusy: boolean;
+  taxEditError: string;
+  taxEditForm: TaxProfileForm;
+  packageFormOpen: boolean;
+  packageBusy: boolean;
+  packageError: string;
+  packageForm: ServicePackageForm;
+};
+
+type FinanceCatalogPatch =
+  | Partial<FinanceCatalogState>
+  | ((current: FinanceCatalogState) => Partial<FinanceCatalogState>);
+
+function financeCatalogReducer(
+  current: FinanceCatalogState,
+  patch: FinanceCatalogPatch,
+): FinanceCatalogState {
+  return {
+    ...current,
+    ...(typeof patch === "function" ? patch(current) : patch),
+  };
+}
+
+function resolveFinanceCatalogStateAction<T>(
+  action: SetStateAction<T>,
+  current: T,
+): T {
+  return typeof action === "function"
+    ? (action as (value: T) => T)(current)
+    : action;
+}
+
+function createFinanceCatalogFieldPatch<K extends keyof FinanceCatalogState>(
+  field: K,
+  nextValue: SetStateAction<FinanceCatalogState[K]>,
+): FinanceCatalogPatch {
+  return (current) => ({
+    [field]: resolveFinanceCatalogStateAction(nextValue, current[field]),
+  } as Partial<FinanceCatalogState>);
+}
+
+function useFinanceCatalogPageContent() {
   const { user } = useAuth();
   const { t } = useLang();
   const vatCategoryLabel = (value: string | null | undefined) =>
@@ -298,8 +370,6 @@ export function FinanceCatalogPage() {
   };
   const totalCountLabel = (count: number) =>
     t.finance_catalog_total_count.replace("{count}", String(count));
-  const moreItemsLabel = (count: number) =>
-    t.finance_catalog_more_items.replace("{count}", String(count));
   const blankPackageItem = useCallback(
     () => createBlankPackageItem(t.finance_catalog_unit_default),
     [t.finance_catalog_unit_default],
@@ -310,25 +380,89 @@ export function FinanceCatalogPage() {
   );
   const canManageTaxProfiles = user?.role === "ceo" || user?.role === "billing";
 
-  const [taxProfiles, setTaxProfiles] = useState<TaxProfile[]>([]);
-  const [catalogRows, setCatalogRows] = useState<CatalogTaxProfile[]>([]);
-  const [servicePackages, setServicePackages] = useState<ServicePackage[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [createOpen, setCreateOpen] = useState(false);
-  const [createBusy, setCreateBusy] = useState(false);
-  const [createError, setCreateError] = useState("");
-  const [form, setForm] = useState<TaxProfileForm>(BLANK_TAX_PROFILE_FORM);
-  const [editingTaxProfileId, setEditingTaxProfileId] = useState("");
-  const [taxEditBusy, setTaxEditBusy] = useState(false);
-  const [taxEditError, setTaxEditError] = useState("");
-  const [taxEditForm, setTaxEditForm] = useState<TaxProfileForm>(BLANK_TAX_PROFILE_FORM);
-  const [packageFormOpen, setPackageFormOpen] = useState(false);
-  const [packageBusy, setPackageBusy] = useState(false);
-  const [packageError, setPackageError] = useState("");
-  const [packageForm, setPackageForm] = useState<ServicePackageForm>(() =>
-    createBlankPackageForm(t.finance_catalog_unit_default),
+  const [financeCatalogState, dispatchFinanceCatalogState] = useReducer(
+    financeCatalogReducer,
+    undefined,
+    (): FinanceCatalogState => ({
+      taxProfiles: [],
+      catalogRows: [],
+      servicePackages: [],
+      loading: true,
+      error: "",
+      createOpen: false,
+      createBusy: false,
+      createError: "",
+      form: BLANK_TAX_PROFILE_FORM,
+      editingTaxProfileId: "",
+      taxEditBusy: false,
+      taxEditError: "",
+      taxEditForm: BLANK_TAX_PROFILE_FORM,
+      packageFormOpen: false,
+      packageBusy: false,
+      packageError: "",
+      packageForm: createBlankPackageForm(t.finance_catalog_unit_default),
+    }),
   );
+  const {
+    catalogRows,
+    createBusy,
+    createError,
+    createOpen,
+    editingTaxProfileId,
+    error,
+    form,
+    loading,
+    packageBusy,
+    packageError,
+    packageForm,
+    packageFormOpen,
+    servicePackages,
+    taxEditBusy,
+    taxEditError,
+    taxEditForm,
+    taxProfiles,
+  } = financeCatalogState;
+  const setFinanceCatalogField = <K extends keyof FinanceCatalogState>(
+    field: K,
+    nextValue: SetStateAction<FinanceCatalogState[K]>,
+  ) =>
+    dispatchFinanceCatalogState(
+      createFinanceCatalogFieldPatch(field, nextValue),
+    );
+  const setTaxProfiles = (nextValue: SetStateAction<TaxProfile[]>) =>
+    setFinanceCatalogField("taxProfiles", nextValue);
+  const setCatalogRows = (nextValue: SetStateAction<CatalogTaxProfile[]>) =>
+    setFinanceCatalogField("catalogRows", nextValue);
+  const setServicePackages = (nextValue: SetStateAction<ServicePackage[]>) =>
+    setFinanceCatalogField("servicePackages", nextValue);
+  const setLoading = (nextValue: SetStateAction<boolean>) =>
+    setFinanceCatalogField("loading", nextValue);
+  const setError = (nextValue: SetStateAction<string>) =>
+    setFinanceCatalogField("error", nextValue);
+  const setCreateOpen = (nextValue: SetStateAction<boolean>) =>
+    setFinanceCatalogField("createOpen", nextValue);
+  const setCreateBusy = (nextValue: SetStateAction<boolean>) =>
+    setFinanceCatalogField("createBusy", nextValue);
+  const setCreateError = (nextValue: SetStateAction<string>) =>
+    setFinanceCatalogField("createError", nextValue);
+  const setForm = (nextValue: SetStateAction<TaxProfileForm>) =>
+    setFinanceCatalogField("form", nextValue);
+  const setEditingTaxProfileId = (nextValue: SetStateAction<string>) =>
+    setFinanceCatalogField("editingTaxProfileId", nextValue);
+  const setTaxEditBusy = (nextValue: SetStateAction<boolean>) =>
+    setFinanceCatalogField("taxEditBusy", nextValue);
+  const setTaxEditError = (nextValue: SetStateAction<string>) =>
+    setFinanceCatalogField("taxEditError", nextValue);
+  const setTaxEditForm = (nextValue: SetStateAction<TaxProfileForm>) =>
+    setFinanceCatalogField("taxEditForm", nextValue);
+  const setPackageFormOpen = (nextValue: SetStateAction<boolean>) =>
+    setFinanceCatalogField("packageFormOpen", nextValue);
+  const setPackageBusy = (nextValue: SetStateAction<boolean>) =>
+    setFinanceCatalogField("packageBusy", nextValue);
+  const setPackageError = (nextValue: SetStateAction<string>) =>
+    setFinanceCatalogField("packageError", nextValue);
+  const setPackageForm = (nextValue: SetStateAction<ServicePackageForm>) =>
+    setFinanceCatalogField("packageForm", nextValue);
 
   const activeTaxProfiles = useMemo(
     () => taxProfiles.filter((item) => item.is_active).length,
@@ -778,7 +912,7 @@ export function FinanceCatalogPage() {
                   !item.is_active && "opacity-75",
                 )}
               >
-                <summary className="relative grid cursor-pointer list-none gap-2 rounded-lg px-3 py-3 pr-12 transition hover:bg-[#f9fdff] group-open:bg-[#f9fdff] group-open:ring-1 group-open:ring-border/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                <summary className="relative grid cursor-pointer list-none gap-2 rounded-lg p-3 pr-12 transition hover:bg-[#f9fdff] group-open:bg-[#f9fdff] group-open:ring-1 group-open:ring-border/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
                   <div className="absolute -left-9 bottom-0 top-0 flex w-8 items-start justify-center pt-3">
                     <span
                       className={cn(
@@ -794,6 +928,7 @@ export function FinanceCatalogPage() {
 
                   {canManageTaxProfiles ? (
                     <div
+                      role="presentation"
                       className="absolute right-3 top-3 z-20"
                       onClick={(event) => {
                         event.preventDefault();
@@ -1561,8 +1696,8 @@ export function FinanceCatalogPage() {
                     </div>
                     {packageForm.items.map((item, index) => (
                       <div
-                        key={`package-item-${index}`}
-                        className="rounded-xl border border-border/50 bg-muted/20 px-3 py-3"
+                        key={item.formKey}
+                        className="rounded-xl border border-border/50 bg-muted/20 p-3"
                       >
                         <div className="grid gap-3 sm:grid-cols-2">
                           <Field label={t.finance_catalog_description_label}>
@@ -1680,4 +1815,8 @@ export function FinanceCatalogPage() {
       </Sheet>
     </div>
   );
+}
+
+export function FinanceCatalogPage(...args: Parameters<typeof useFinanceCatalogPageContent>) {
+  return useFinanceCatalogPageContent(...args);
 }

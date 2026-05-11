@@ -4,6 +4,56 @@ import type {
   AppointmentTimelineTone,
 } from "@/pages/appointments/model/types";
 
+const TIMELINE_DATE_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
+  weekday: "short",
+  day: "2-digit",
+  month: "short",
+};
+
+const TIMELINE_DATE_FORMATTERS = new Map<string, Intl.DateTimeFormat>([
+  [
+    "de-DE:current",
+    new Intl.DateTimeFormat("de-DE", TIMELINE_DATE_FORMAT_OPTIONS),
+  ],
+  [
+    "de-DE:year",
+    new Intl.DateTimeFormat("de-DE", {
+      ...TIMELINE_DATE_FORMAT_OPTIONS,
+      year: "numeric",
+    }),
+  ],
+  [
+    "ru-RU:current",
+    new Intl.DateTimeFormat("ru-RU", TIMELINE_DATE_FORMAT_OPTIONS),
+  ],
+  [
+    "ru-RU:year",
+    new Intl.DateTimeFormat("ru-RU", {
+      ...TIMELINE_DATE_FORMAT_OPTIONS,
+      year: "numeric",
+    }),
+  ],
+  [
+    "en-GB:current",
+    new Intl.DateTimeFormat("en-GB", TIMELINE_DATE_FORMAT_OPTIONS),
+  ],
+  [
+    "en-GB:year",
+    new Intl.DateTimeFormat("en-GB", {
+      ...TIMELINE_DATE_FORMAT_OPTIONS,
+      year: "numeric",
+    }),
+  ],
+]);
+
+function getTimelineDateFormatter(locale: string, includeYear: boolean) {
+  const formatterKey = `${locale}:${includeYear ? "year" : "current"}`;
+  return (
+    TIMELINE_DATE_FORMATTERS.get(formatterKey) ??
+    TIMELINE_DATE_FORMATTERS.get(`en-GB:${includeYear ? "year" : "current"}`)!
+  );
+}
+
 export function appointmentTimelineToneBadgeClassName(
   tone: AppointmentTimelineTone,
 ) {
@@ -163,15 +213,10 @@ export function appointmentTimelineDateGroupLabel(
   }
 
   try {
-    return new Intl.DateTimeFormat(options.locale, {
-      weekday: "short",
-      day: "2-digit",
-      month: "short",
-      year:
-        startOfTarget.getFullYear() === startOfToday.getFullYear()
-          ? undefined
-          : "numeric",
-    }).format(date);
+    return getTimelineDateFormatter(
+      options.locale,
+      startOfTarget.getFullYear() !== startOfToday.getFullYear(),
+    ).format(date);
   } catch {
     return key;
   }

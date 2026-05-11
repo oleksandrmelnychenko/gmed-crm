@@ -9,6 +9,9 @@ import { cn } from "@/lib/utils";
 import type { ColumnDef } from "./types";
 import { useOutsideClose } from "./use-outside-close";
 
+const EMPTY_STRING_ARRAY: readonly string[] = [];
+const EMPTY_GROUP_LABELS: Record<string, string> = {};
+
 export type ColumnVisibilityMenuProps<T> = {
   columns: readonly ColumnDef<T>[];
   hiddenColumns: readonly string[];
@@ -36,12 +39,12 @@ export function ColumnVisibilityMenu<T>({
   columns,
   hiddenColumns,
   onChange,
-  defaultHidden = [],
-  frozenColumns = [],
+  defaultHidden = EMPTY_STRING_ARRAY,
+  frozenColumns = EMPTY_STRING_ARRAY,
   onFrozenColumnsChange,
-  defaultFrozen = [],
+  defaultFrozen = EMPTY_STRING_ARRAY,
   maxFrozenColumns = 4,
-  groupLabels = {},
+  groupLabels = EMPTY_GROUP_LABELS,
   buttonLabel,
   searchPlaceholder,
   resetLabel,
@@ -70,22 +73,25 @@ export function ColumnVisibilityMenu<T>({
   const menuRef = useRef<HTMLDivElement | null>(null);
   useOutsideClose(menuRef, () => setOpen(false), { enabled: open });
 
-  const totalVisible = columns.filter((c) => !hiddenColumns.includes(c.id)).length;
+  const hiddenSet = useMemo(() => new Set(hiddenColumns), [hiddenColumns]);
+  const columnIdSet = useMemo(() => new Set(columns.map((column) => column.id)), [columns]);
+  const totalVisible = columns.filter((c) => !hiddenSet.has(c.id)).length;
   const totalCols = columns.length;
   const frozenSet = useMemo(() => new Set(frozenColumns), [frozenColumns]);
-  const totalFrozen = frozenColumns.filter((id) => columns.some((column) => column.id === id)).length;
+  const totalFrozen = frozenColumns.filter((id) => columnIdSet.has(id)).length;
 
   const grouped = useMemo(() => {
     const query = search.trim().toLowerCase();
-    const filteredCols = query
-      ? columns.filter(
-          (c) =>
-            c.label.toLowerCase().includes(query) ||
-            c.id.toLowerCase().includes(query),
-        )
-      : columns;
+    const queryPattern = query ? new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) : null;
     const groups = new Map<string, ColumnDef<T>[]>();
-    for (const col of filteredCols) {
+    for (const col of columns) {
+      if (
+        queryPattern &&
+        !queryPattern.test(col.label.toLowerCase()) &&
+        !queryPattern.test(col.id.toLowerCase())
+      ) {
+        continue;
+      }
       const key = col.group ?? "";
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key)!.push(col);
@@ -95,7 +101,7 @@ export function ColumnVisibilityMenu<T>({
 
   const toggle = (col: ColumnDef<T>) => {
     if (col.required) return;
-    const isHidden = hiddenColumns.includes(col.id);
+    const isHidden = hiddenSet.has(col.id);
     const next = isHidden
       ? hiddenColumns.filter((id) => id !== col.id)
       : [...hiddenColumns, col.id];
@@ -122,10 +128,20 @@ export function ColumnVisibilityMenu<T>({
     onChange(requiredHidden);
   };
   const hideAll = () => {
-    const nextHidden = columns.filter((c) => !c.required).map((c) => c.id);
+    const nextHidden: string[] = [];
+    for (const column of columns) {
+      if (!column.required) {
+        nextHidden.push(column.id);
+      }
+    }
     onChange(nextHidden);
     if (onFrozenColumnsChange) {
-      const requiredIds = new Set(columns.filter((c) => c.required).map((c) => c.id));
+      const requiredIds = new Set<string>();
+      for (const column of columns) {
+        if (column.required) {
+          requiredIds.add(column.id);
+        }
+      }
       onFrozenColumnsChange(frozenColumns.filter((id) => requiredIds.has(id)));
     }
   };
@@ -182,7 +198,7 @@ export function ColumnVisibilityMenu<T>({
                     </div>
                   ) : null}
                   {cols.map((col) => {
-                    const isHidden = hiddenColumns.includes(col.id);
+                    const isHidden = hiddenSet.has(col.id);
                     const isVisible = !isHidden;
                     const isFrozen = frozenSet.has(col.id);
                     const freezeDisabled =

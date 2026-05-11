@@ -1,8 +1,9 @@
 import {
   memo,
   useEffect,
-  useState,
+  useReducer,
   type FormEvent,
+  type SetStateAction,
 } from "react";
 import { LoaderCircle, Plus } from "lucide-react";
 
@@ -28,28 +29,67 @@ export type CreatePatientSheetProps = {
   onCreated: (patientId: string) => void;
 };
 
+type CreatePatientSheetState = {
+  form: PatientFormState;
+  busy: boolean;
+  error: string;
+};
+
+type CreatePatientSheetPatch =
+  | Partial<CreatePatientSheetState>
+  | ((current: CreatePatientSheetState) => Partial<CreatePatientSheetState>);
+
+function createPatientSheetReducer(
+  state: CreatePatientSheetState,
+  patch: CreatePatientSheetPatch,
+): CreatePatientSheetState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
 function CreatePatientSheet({
   open,
   dictionary,
   onOpenChange,
   onCreated,
 }: CreatePatientSheetProps) {
-  const [form, setForm] = useState<PatientFormState>(blankPatientForm);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [sheetState, dispatchSheetState] = useReducer(
+    createPatientSheetReducer,
+    undefined,
+    () => ({
+      form: blankPatientForm(),
+      busy: false,
+      error: "",
+    }),
+  );
+  const { form, busy, error } = sheetState;
+  const setForm = (nextValue: SetStateAction<PatientFormState>) => {
+    dispatchSheetState((current) => ({
+      form:
+        typeof nextValue === "function"
+          ? nextValue(current.form)
+          : nextValue,
+    }));
+  };
 
   useEffect(() => {
     if (!open) {
-      setForm(blankPatientForm());
-      setBusy(false);
-      setError("");
+      dispatchSheetState({
+        form: blankPatientForm(),
+        busy: false,
+        error: "",
+      });
     }
   }, [open]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setBusy(true);
-    setError("");
+    dispatchSheetState({
+      busy: true,
+      error: "",
+    });
 
     try {
       const created = await createPatient({
@@ -80,13 +120,14 @@ function CreatePatientSheet({
       onOpenChange(false);
       onCreated(created.id);
     } catch (submitError) {
-      setError(
-        submitError instanceof Error
-          ? submitError.message
-          : dictionary.common_failed_create,
-      );
+      dispatchSheetState({
+        error:
+          submitError instanceof Error
+            ? submitError.message
+            : dictionary.common_failed_create,
+      });
     } finally {
-      setBusy(false);
+      dispatchSheetState({ busy: false });
     }
   }
 

@@ -55,6 +55,7 @@ type OrderServiceGroupPanelProps = {
 };
 
 type WizardParticipant = {
+  clientKey: string;
   provider_id: string;
   doctor_id: string;
   role_label: string;
@@ -80,22 +81,30 @@ type OrderServiceGroupWizardProps = {
   onCreate: (input: CreateOrderServiceGroupInput) => void | Promise<void>;
 };
 
-const blankParticipant: WizardParticipant = {
-  provider_id: "",
-  doctor_id: "",
-  role_label: "",
-};
+let wizardParticipantSequence = 0;
 
-const blankWizardForm: WizardForm = {
-  group_title: "",
-  description: "",
-  service_date: "",
-  quantity: "1",
-  unit_price: "0",
-  currency: "EUR",
-  vat_rate: "19",
-  participants: [{ ...blankParticipant }],
-};
+function createBlankParticipant(): WizardParticipant {
+  wizardParticipantSequence += 1;
+  return {
+    clientKey: `participant-${wizardParticipantSequence}`,
+    provider_id: "",
+    doctor_id: "",
+    role_label: "",
+  };
+}
+
+function createBlankWizardForm(): WizardForm {
+  return {
+    group_title: "",
+    description: "",
+    service_date: "",
+    quantity: "1",
+    unit_price: "0",
+    currency: "EUR",
+    vat_rate: "19",
+    participants: [createBlankParticipant()],
+  };
+}
 
 const SERVICE_GROUP_STATUS_LABEL_KEYS = {
   draft: "orders_service_group_status_draft",
@@ -291,16 +300,16 @@ export function OrderServiceGroupWizard({
 }: OrderServiceGroupWizardProps) {
   const { t } = useLang();
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState<WizardForm>(blankWizardForm);
+  const [form, setForm] = useState<WizardForm>(createBlankWizardForm);
   const [localError, setLocalError] = useState("");
   const selectedDoctorCount = form.participants.filter(
     (item) => item.provider_id && item.doctor_id,
   ).length;
 
   const duplicateDoctorCount = useMemo(() => {
-    const selected = form.participants
-      .map((participant) => participant.doctor_id)
-      .filter(Boolean);
+    const selected = form.participants.flatMap((participant) =>
+      participant.doctor_id ? [participant.doctor_id] : [],
+    );
     return selected.length - new Set(selected).size;
   }, [form.participants]);
 
@@ -320,13 +329,15 @@ export function OrderServiceGroupWizard({
       setLocalError(t.orders_service_group_wizard_title_required);
       return;
     }
-    const participants = form.participants
-      .filter((participant) => participant.provider_id && participant.doctor_id)
-      .map<ServiceGroupParticipantInput>((participant) => ({
+    const participants = form.participants.reduce<ServiceGroupParticipantInput[]>((acc, participant) => {
+      if (!participant.provider_id || !participant.doctor_id) return acc;
+      acc.push({
         provider_id: participant.provider_id,
         doctor_id: participant.doctor_id,
         role_label: participant.role_label.trim() || null,
-      }));
+      });
+      return acc;
+    }, []);
     if (participants.length === 0) {
       setLocalError(t.orders_service_group_wizard_doctor_required);
       return;
@@ -354,7 +365,7 @@ export function OrderServiceGroupWizard({
       );
       return;
     }
-    setForm(blankWizardForm);
+    setForm(createBlankWizardForm());
     setOpen(false);
   }
 
@@ -385,7 +396,7 @@ export function OrderServiceGroupWizard({
             <Field label={t.orders_service_group_title} className="md:col-span-2">
               <Input
                 value={form.group_title}
-                onChange={(event) => setForm({ ...form, group_title: event.target.value })}
+                onChange={(event) => setForm((current) => ({ ...current, group_title: event.target.value }))}
                 className={inputClass}
                 placeholder={t.orders_service_group_title_placeholder}
               />
@@ -394,14 +405,14 @@ export function OrderServiceGroupWizard({
               <Input
                 type="date"
                 value={form.service_date}
-                onChange={(event) => setForm({ ...form, service_date: event.target.value })}
+                onChange={(event) => setForm((current) => ({ ...current, service_date: event.target.value }))}
                 className={inputClass}
               />
             </Field>
             <Field label={t.orders_service_group_currency}>
               <Input
                 value={form.currency}
-                onChange={(event) => setForm({ ...form, currency: event.target.value })}
+                onChange={(event) => setForm((current) => ({ ...current, currency: event.target.value }))}
                 className={inputClass}
               />
             </Field>
@@ -410,28 +421,28 @@ export function OrderServiceGroupWizard({
             <Field label={t.orders_service_group_quantity}>
               <Input
                 value={form.quantity}
-                onChange={(event) => setForm({ ...form, quantity: event.target.value })}
+                onChange={(event) => setForm((current) => ({ ...current, quantity: event.target.value }))}
                 className={inputClass}
               />
             </Field>
             <Field label={t.orders_service_group_unit_price}>
               <Input
                 value={form.unit_price}
-                onChange={(event) => setForm({ ...form, unit_price: event.target.value })}
+                onChange={(event) => setForm((current) => ({ ...current, unit_price: event.target.value }))}
                 className={inputClass}
               />
             </Field>
             <Field label={t.orders_service_group_vat_percent}>
               <Input
                 value={form.vat_rate}
-                onChange={(event) => setForm({ ...form, vat_rate: event.target.value })}
+                onChange={(event) => setForm((current) => ({ ...current, vat_rate: event.target.value }))}
                 className={inputClass}
               />
             </Field>
             <Field label={t.orders_service_group_description}>
               <Input
                 value={form.description}
-                onChange={(event) => setForm({ ...form, description: event.target.value })}
+                onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
                 className={inputClass}
               />
             </Field>
@@ -448,7 +459,7 @@ export function OrderServiceGroupWizard({
                 onClick={() =>
                   setForm((current) => ({
                     ...current,
-                    participants: [...current.participants, { ...blankParticipant }],
+                    participants: [...current.participants, createBlankParticipant()],
                   }))
                 }
               >
@@ -461,7 +472,7 @@ export function OrderServiceGroupWizard({
                 : [];
               return (
                 <div
-                  key={index}
+                  key={participant.clientKey}
                   className="grid gap-2 rounded-xl border border-border/50 bg-muted/20 p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]"
                 >
                   <Field label={t.orders_service_group_provider}>

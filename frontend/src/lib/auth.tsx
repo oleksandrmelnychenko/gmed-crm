@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, use, useEffect, useReducer, type ReactNode } from "react";
 
 import { buildApiUrl, clearApiCache } from "@/lib/api";
 import { clearSecurePersistedState } from "@/lib/secure-persist";
@@ -46,13 +46,22 @@ interface ApiErrorBody {
   status?: string;
 }
 
+type AuthState = {
+  user: User | null;
+  loading: boolean;
+};
+
+type AuthStatePatch =
+  | Partial<AuthState>
+  | ((current: AuthState) => Partial<AuthState>);
+
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 const ACCESS_TOKEN_KEY = "gmed_access_token";
 const REFRESH_TOKEN_KEY = "gmed_refresh_token";
 
 export function useAuth() {
-  const ctx = useContext(AuthContext);
+  const ctx = use(AuthContext);
   if (!ctx) {
     throw new Error("useAuth must be inside AuthProvider");
   }
@@ -144,9 +153,27 @@ async function refreshSession() {
   return tokens.access_token;
 }
 
+function createAuthState(): AuthState {
+  return {
+    user: null,
+    loading: true,
+  };
+}
+
+function authStateReducer(state: AuthState, patch: AuthStatePatch): AuthState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [authState, dispatchAuthState] = useReducer(
+    authStateReducer,
+    undefined,
+    createAuthState,
+  );
+  const { user, loading } = authState;
 
   useEffect(() => {
     let cancelled = false;
@@ -156,16 +183,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (!accessToken) {
         if (!cancelled) {
-          setLoading(false);
+          dispatchAuthState({ loading: false });
         }
         return;
       }
 
+      let nextUser: User | null = null;
+
       try {
-        const me = await fetchMe(accessToken);
-        if (!cancelled) {
-          setUser(me);
-        }
+        nextUser = await fetchMe(accessToken);
       } catch {
         try {
           const refreshedAccessToken = await refreshSession();
@@ -173,20 +199,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             throw new Error("Missing refresh token");
           }
 
-          const me = await fetchMe(refreshedAccessToken);
-          if (!cancelled) {
-            setUser(me);
-          }
+          nextUser = await fetchMe(refreshedAccessToken);
         } catch {
           clearTokens();
-          if (!cancelled) {
-            setUser(null);
-          }
+          nextUser = null;
         }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+      }
+
+      if (!cancelled) {
+        dispatchAuthState({ user: nextUser, loading: false });
       }
     }
 
@@ -209,7 +230,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     saveTokens(result);
     const me = await fetchMe(result.access_token);
-    setUser(me);
+    dispatchAuthState({ user: me });
   };
 
   const checkPending = async (pendingId: string): Promise<"pending" | "approved" | "rejected"> => {
@@ -221,7 +242,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (result.status === "approved" && result.access_token && result.refresh_token) {
         saveTokens({ access_token: result.access_token, refresh_token: result.refresh_token, token_type: "Bearer", expires_in: 900 });
         const me = await fetchMe(result.access_token);
-        setUser(me);
+        dispatchAuthState({ user: me });
         return "approved";
       }
       if (result.status === "rejected") return "rejected";
@@ -245,7 +266,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Ignore network errors on logout and clear local session anyway.
     } finally {
       clearTokens();
-      setUser(null);
+      dispatchAuthState({ user: null });
     }
   };
 

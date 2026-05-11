@@ -17,22 +17,26 @@ const APPOINTMENT_METADATA_CACHE_TTL_MS = 60_000;
 export function useAppointmentsMetadata({
   failedLoadMessage,
 }: UseAppointmentsMetadataOptions) {
-  const [patients, setPatients] = useState<PatientSummary[]>([]);
-  const [providers, setProviders] = useState<ProviderSummary[]>([]);
-  const [interpreters, setInterpreters] = useState<InterpreterOption[]>([]);
-  const [staff, setStaff] = useState<StaffOption[]>([]);
-  const [metadataLoading, setMetadataLoading] = useState(true);
-  const [metadataError, setMetadataError] = useState("");
+  const [metadataState, setMetadataState] = useState({
+    patients: [] as PatientSummary[],
+    providers: [] as ProviderSummary[],
+    interpreters: [] as InterpreterOption[],
+    staff: [] as StaffOption[],
+    metadataLoading: true,
+    metadataError: "",
+  });
 
   useEffect(() => {
     let active = true;
 
     void (async () => {
-      setMetadataLoading(true);
-      setMetadataError("");
+      setMetadataState((current) => ({
+        ...current,
+        metadataLoading: true,
+        metadataError: "",
+      }));
 
-      const [patientRows, providerRows, interpreterRows, staffRows] =
-        await Promise.all([
+      const metadataRequest = Promise.all([
           apiFetch<PatientSummary[]>("/patients", {
             cacheTtlMs: APPOINTMENT_METADATA_CACHE_TTL_MS,
           }).catch(() => []),
@@ -48,21 +52,27 @@ export function useAppointmentsMetadata({
         ]);
 
       if (!active) return;
+      void metadataRequest.then(
+        ([patientRows, providerRows, interpreterRows, staffRows]) => {
+          if (!active) return;
 
-      setPatients(patientRows);
-      setProviders(providerRows);
-      setInterpreters(interpreterRows);
-      setStaff(staffRows);
+          const metadataError =
+            patientRows.length === 0 &&
+            interpreterRows.length === 0 &&
+            staffRows.length === 0
+              ? failedLoadMessage
+              : "";
 
-      if (
-        patientRows.length === 0 &&
-        interpreterRows.length === 0 &&
-        staffRows.length === 0
-      ) {
-        setMetadataError(failedLoadMessage);
-      }
-
-      setMetadataLoading(false);
+          setMetadataState({
+            patients: patientRows,
+            providers: providerRows,
+            interpreters: interpreterRows,
+            staff: staffRows,
+            metadataLoading: false,
+            metadataError,
+          });
+        },
+      );
     })();
 
     return () => {
@@ -71,11 +81,11 @@ export function useAppointmentsMetadata({
   }, [failedLoadMessage]);
 
   return {
-    patients,
-    providers,
-    interpreters,
-    staff,
-    metadataLoading,
-    metadataError,
+    patients: metadataState.patients,
+    providers: metadataState.providers,
+    interpreters: metadataState.interpreters,
+    staff: metadataState.staff,
+    metadataLoading: metadataState.metadataLoading,
+    metadataError: metadataState.metadataError,
   };
 }

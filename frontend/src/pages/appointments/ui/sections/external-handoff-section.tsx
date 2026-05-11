@@ -4,8 +4,9 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useState,
+  useReducer,
   type FormEvent,
+  type SetStateAction,
 } from "react";
 
 import { LoaderCircle } from "lucide-react";
@@ -90,11 +91,59 @@ const sectionCardClass = appointmentElevatedSectionCardClassName;
 const selectClassName = appointmentSelectControlClassName;
 const textareaClassName = appointmentTextareaControlClassName;
 
+type ExternalHandoffSectionState = {
+  form: ExternalHandoffFormState;
+  submitBusy: boolean;
+  actionBusy: string;
+};
+
+type ExternalHandoffSectionAction =
+  | { type: "patch"; value: Partial<ExternalHandoffSectionState> }
+  | {
+      type: "update";
+      updater: (state: ExternalHandoffSectionState) => ExternalHandoffSectionState;
+    };
+
+function externalHandoffSectionReducer(
+  state: ExternalHandoffSectionState,
+  action: ExternalHandoffSectionAction,
+): ExternalHandoffSectionState {
+  switch (action.type) {
+    case "patch":
+      return { ...state, ...action.value };
+    case "update":
+      return action.updater(state);
+    default:
+      return state;
+  }
+}
+
+function createExternalHandoffFieldAction<K extends keyof ExternalHandoffSectionState>(
+  field: K,
+  value: SetStateAction<ExternalHandoffSectionState[K]>,
+): ExternalHandoffSectionAction {
+  return {
+    type: "update",
+    updater: (state) => {
+      const currentValue = state[field];
+      const nextValue =
+        typeof value === "function"
+          ? (value as (
+              current: ExternalHandoffSectionState[K],
+            ) => ExternalHandoffSectionState[K])(currentValue)
+          : value;
+
+      if (Object.is(currentValue, nextValue)) return state;
+      return { ...state, [field]: nextValue };
+    },
+  };
+}
+
 function withEllipsis(text: string) {
   return text.trim().endsWith("...") ? text : `${text.trim()}...`;
 }
 
-function AppointmentExternalHandoffSection({
+function useAppointmentExternalHandoffSectionContent({
   detail,
   communications,
   reminders,
@@ -144,16 +193,38 @@ function AppointmentExternalHandoffSection({
     [detail, initialAssigneeId],
   );
 
-  const [form, setForm] = useState<ExternalHandoffFormState>(() =>
-    buildDefaultForm(),
-  );
-  const [submitBusy, setSubmitBusy] = useState(false);
-  const [actionBusy, setActionBusy] = useState("");
+  const [{ form, submitBusy, actionBusy }, dispatchExternalHandoffState] =
+    useReducer(
+      externalHandoffSectionReducer,
+      undefined,
+      () => ({
+        form: buildDefaultForm(),
+        submitBusy: false,
+        actionBusy: "",
+      }),
+    );
+  const setForm = (value: SetStateAction<ExternalHandoffFormState>) =>
+    dispatchExternalHandoffState(
+      createExternalHandoffFieldAction("form", value),
+    );
+  const setSubmitBusy = (value: SetStateAction<boolean>) =>
+    dispatchExternalHandoffState(
+      createExternalHandoffFieldAction("submitBusy", value),
+    );
+  const setActionBusy = (value: SetStateAction<string>) =>
+    dispatchExternalHandoffState(
+      createExternalHandoffFieldAction("actionBusy", value),
+    );
 
   useEffect(() => {
-    setForm(buildDefaultForm());
-    setSubmitBusy(false);
-    setActionBusy("");
+    dispatchExternalHandoffState({
+      type: "patch",
+      value: {
+        form: buildDefaultForm(),
+        submitBusy: false,
+        actionBusy: "",
+      },
+    });
   }, [buildDefaultForm]);
 
   function openChatDraft() {
@@ -309,10 +380,10 @@ function AppointmentExternalHandoffSection({
                 >
                   <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-900">
+                      <p className="text-sm font-medium text-zinc-900">
                         {item.subject}
                       </p>
-                      <p className="mt-1 text-xs text-slate-500">
+                      <p className="mt-1 text-xs text-zinc-500">
                         {item.created_by_name} · {communicationDirectionLabel(item.direction)}{" "}
                         {t.appointments_common_via}{" "}
                         {communicationChannelLabel(item.channel)} ·{" "}
@@ -333,7 +404,7 @@ function AppointmentExternalHandoffSection({
                     </span>
                   </div>
                   {item.message ? (
-                    <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
+                    <p className="mt-3 whitespace-pre-line text-sm text-zinc-600">
                       {item.message}
                     </p>
                   ) : null}
@@ -404,7 +475,7 @@ function AppointmentExternalHandoffSection({
                 </div>
               ))}
               {canViewReminders && (reminders.length > 0 || tasks.length > 0) ? (
-                <div className="rounded-2xl border border-dashed border-slate-200 bg-white/70 p-4">
+                <div className="rounded-2xl border border-dashed border-zinc-200 bg-white/70 p-4">
                   <AppointmentDotLabel>
                     {t.appointments_external_handoff_internal_trail}
                   </AppointmentDotLabel>
@@ -414,14 +485,14 @@ function AppointmentExternalHandoffSection({
                         key={item.id}
                         className={appointmentSoftRowClassName}
                       >
-                        <p className="text-sm font-medium text-slate-900">
+                        <p className="text-sm font-medium text-zinc-900">
                           {item.title.replace(`${EXTERNAL_HANDOFF_PREFIX} `, "")}
                         </p>
-                        <p className="mt-1 text-xs text-slate-500">
+                        <p className="mt-1 text-xs text-zinc-500">
                           {item.user_name} · {formatDateTimeLabel(item.remind_at)}
                         </p>
                         {item.description ? (
-                          <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
+                          <p className="mt-3 whitespace-pre-line text-sm text-zinc-600">
                             {item.description}
                           </p>
                         ) : null}
@@ -433,22 +504,22 @@ function AppointmentExternalHandoffSection({
                         className={appointmentSoftRowClassName}
                       >
                         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                          <p className="text-sm font-medium text-slate-900">
+                          <p className="text-sm font-medium text-zinc-900">
                             {task.title.replace(`${EXTERNAL_HANDOFF_PREFIX} `, "")}
                           </p>
-                          <span className="text-xs text-slate-500">
+                          <span className="text-xs text-zinc-500">
                             {taskStatusLabel(task.status)} ·{" "}
                             {taskPriorityLabel(task.priority)}
                           </span>
                         </div>
-                        <p className="mt-1 text-xs text-slate-500">
+                        <p className="mt-1 text-xs text-zinc-500">
                           {task.assigned_to_name}
                           {task.due_date
                             ? ` · ${formatDateTimeLabel(task.due_date)}`
                             : ""}
                         </p>
                         {task.description ? (
-                          <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
+                          <p className="mt-3 whitespace-pre-line text-sm text-zinc-600">
                             {task.description}
                           </p>
                         ) : null}
@@ -690,6 +761,10 @@ function AppointmentExternalHandoffSection({
       </div>
     </section>
   );
+}
+
+function AppointmentExternalHandoffSection(...args: Parameters<typeof useAppointmentExternalHandoffSectionContent>) {
+  return useAppointmentExternalHandoffSectionContent(...args);
 }
 
 const MemoizedAppointmentExternalHandoffSection = memo(

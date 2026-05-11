@@ -1,4 +1,10 @@
-import { useCallback, useState, type FormEvent, type ReactNode } from "react";
+import {
+  useCallback,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from "react";
 import { Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -23,10 +29,10 @@ export type CaseItemListProps<T> = {
   isValid: (form: T) => boolean;
   validate?: (form: T) => string | null;
   save: (nextItems: T[]) => Promise<boolean>;
-  renderCard: (item: T, index: number) => ReactNode;
-  renderForm: (args: {
+  cardContent: (item: T, index: number) => ReactNode;
+  formContent: (args: {
     form: T;
-    setForm: (next: T) => void;
+    setForm: Dispatch<SetStateAction<T>>;
     updateField: <K extends keyof T>(field: K, value: T[K]) => void;
     disabled: boolean;
   }) => ReactNode;
@@ -42,6 +48,20 @@ export type CaseItemListProps<T> = {
   missingPrimaryMessage: string;
 };
 
+function caseItemStableKey(item: unknown) {
+  if (item && typeof item === "object") {
+    const record = item as { id?: unknown };
+    if (record.id != null) {
+      return String(record.id);
+    }
+  }
+  try {
+    return JSON.stringify(item);
+  } catch {
+    return String(item);
+  }
+}
+
 export function CaseItemList<T>({
   title,
   description,
@@ -51,8 +71,8 @@ export function CaseItemList<T>({
   isValid,
   validate,
   save,
-  renderCard,
-  renderForm,
+  cardContent,
+  formContent,
   busy,
   sectionError,
   canEdit,
@@ -66,7 +86,7 @@ export function CaseItemList<T>({
 }: CaseItemListProps<T>) {
   const { t } = useLang();
   const [sheet, setSheet] = useState<SheetState>({ mode: "closed" });
-  const [form, setForm] = useState<T>(blankItem);
+  const [form, setForm] = useState<T>(() => cloneItem(blankItem));
   const [sheetError, setSheetError] = useState("");
 
   const closeSheet = useCallback(() => {
@@ -96,8 +116,7 @@ export function CaseItemList<T>({
     setSheet({ mode: "edit", index });
   }
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function handleSubmit() {
     if (!canEdit) return;
 
     if (!isValid(form)) {
@@ -198,7 +217,7 @@ export function CaseItemList<T>({
             {items.map((item, index) => (
               <button
                 type="button"
-                key={`case-item-${index}`}
+                key={caseItemStableKey(item)}
                 onClick={() => openEdit(index)}
                 disabled={busy || !canEdit}
                 className={cn(
@@ -207,7 +226,7 @@ export function CaseItemList<T>({
                   "disabled:opacity-60 disabled:cursor-not-allowed",
                 )}
               >
-                {renderCard(item, index)}
+                {cardContent(item, index)}
               </button>
             ))}
           </div>
@@ -230,7 +249,7 @@ export function CaseItemList<T>({
         onDelete={sheet.mode === "edit" ? handleDelete : undefined}
         width={sheetWidth}
       >
-        {renderForm({
+        {formContent({
           form,
           setForm,
           updateField,

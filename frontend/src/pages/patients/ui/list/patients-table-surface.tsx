@@ -19,10 +19,6 @@ const LazyPatientDetailSheet = lazy(async () => {
   return { default: mod.MemoizedPatientDetailSheet };
 });
 
-export function preloadPatientListDetailSheet() {
-  void loadPatientListDetailSheet();
-}
-
 type PatientsTableSurfaceProps = {
   columns: ColumnDef<PatientSummary>[];
   density: DensityLevel;

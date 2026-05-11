@@ -4,9 +4,11 @@ import {
   useDeferredValue,
   useEffect,
   useMemo,
+  useReducer,
   useState,
   type FormEvent,
   type ReactNode,
+  type SetStateAction,
 } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import {
@@ -185,21 +187,6 @@ function Banner({ tone, children }: { tone: "error" | "warning"; children: React
   );
 }
 
-function InlineInfo({
-  icon: Icon,
-  children,
-}: {
-  icon: typeof MapPin;
-  children: ReactNode;
-}) {
-  return (
-    <div className="flex items-center gap-2 text-sm text-slate-600">
-      <Icon className="size-4 text-slate-400" />
-      <span>{children}</span>
-    </div>
-  );
-}
-
 function EmptyPanel({
   title,
   text,
@@ -208,9 +195,9 @@ function EmptyPanel({
   text: string;
 }) {
   return (
-    <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50/90 px-5 py-6">
-      <p className="text-sm font-medium text-slate-900">{title}</p>
-      <p className="mt-2 text-sm leading-6 text-slate-600">{text}</p>
+    <div className="rounded-[1.5rem] border border-dashed border-zinc-200 bg-zinc-50/90 px-5 py-6">
+      <p className="text-sm font-medium text-zinc-900">{title}</p>
+      <p className="mt-2 text-sm leading-6 text-zinc-600">{text}</p>
     </div>
   );
 }
@@ -219,7 +206,65 @@ type ProvidersPageProps = {
   detailRouteId?: string;
 };
 
-function ProvidersPage({ detailRouteId = "" }: ProvidersPageProps = {}) {
+type ProvidersPageState = {
+  filterPredicates: FilterPredicate[];
+  sortStack: SortStack;
+  providers: ProviderSummary[];
+  listBusy: boolean;
+  listError: string;
+  listVersion: number;
+  createOpen: boolean;
+  createBusy: boolean;
+  createError: string;
+  createForm: ProviderFormState;
+  detailOpen: boolean;
+  selectedId: string;
+  detail: ProviderDetail | null;
+  detailBusy: boolean;
+  detailError: string;
+  detailVersion: number;
+  providerForm: ProviderFormState;
+  providerBusy: boolean;
+  providerError: string;
+  providerActionBusy: string | null;
+  doctorForm: DoctorFormState;
+  doctorDialogOpen: boolean;
+  doctorBusy: boolean;
+  doctorError: string;
+  serviceForm: ServiceFormState;
+  serviceDialogOpen: boolean;
+  serviceBusy: boolean;
+  serviceError: string;
+};
+
+type ProvidersPagePatch =
+  | Partial<ProvidersPageState>
+  | ((current: ProvidersPageState) => Partial<ProvidersPageState>);
+
+function providersPageReducer(
+  state: ProvidersPageState,
+  patch: ProvidersPagePatch,
+): ProvidersPageState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
+function createProvidersPageFieldPatch<K extends keyof ProvidersPageState>(
+  field: K,
+  value: SetStateAction<ProvidersPageState[K]>,
+): ProvidersPagePatch {
+  return (current) => {
+    const nextValue =
+      typeof value === "function"
+        ? (value as (previous: ProvidersPageState[K]) => ProvidersPageState[K])(current[field])
+        : value;
+    return { [field]: nextValue } as Partial<ProvidersPageState>;
+  };
+}
+
+function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}) {
   const { user } = useAuth();
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
@@ -311,15 +356,6 @@ function ProvidersPage({ detailRouteId = "" }: ProvidersPageProps = {}) {
     [setPersistedProviderFilters],
   );
   const deferredSearch = useDeferredValue(filters.search);
-  const [filterPredicates, setFilterPredicatesState] = useState<FilterPredicate[]>(() => {
-    if (typeof window === "undefined") return [];
-    return readDataTableState(new URLSearchParams(window.location.search)).filters ?? [];
-  });
-  const [sortStack, setSortStackState] = useState<SortStack>(() => {
-    if (typeof window === "undefined") return DEFAULT_PROVIDER_SORT;
-    const tableState = readDataTableState(new URLSearchParams(window.location.search));
-    return tableState.sort?.length ? tableState.sort : DEFAULT_PROVIDER_SORT;
-  });
   const [hiddenColumns, setHiddenColumns] = useVersionedLocalStorage<string[]>(
     "providers.hiddenColumns",
     DEFAULT_PROVIDER_HIDDEN_COLUMNS,
@@ -331,39 +367,136 @@ function ProvidersPage({ detailRouteId = "" }: ProvidersPageProps = {}) {
     1,
   );
   const [density, setDensity] = useLocalStorage<DensityLevel>("providers.density", "compact");
-  const [providers, setProviders] = useState<ProviderSummary[]>([]);
-  const [listBusy, setListBusy] = useState(false);
-  const [listError, setListError] = useState("");
-  const [listVersion, setListVersion] = useState(0);
-
-  const [createOpen, setCreateOpen] = useState(false);
-  const [createBusy, setCreateBusy] = useState(false);
-  const [createError, setCreateError] = useState("");
-  const [createForm, setCreateForm] = useState<ProviderFormState>(
-    blankProviderForm(permissions.forceNonMedical ? "non_medical" : "medical")
+  const [pageState, dispatchPageState] = useReducer(
+    providersPageReducer,
+    undefined,
+    (): ProvidersPageState => {
+      const tableState =
+        typeof window === "undefined"
+          ? null
+          : readDataTableState(new URLSearchParams(window.location.search));
+      return {
+        filterPredicates: tableState?.filters ?? [],
+        sortStack: tableState?.sort?.length ? tableState.sort : DEFAULT_PROVIDER_SORT,
+        providers: [],
+        listBusy: false,
+        listError: "",
+        listVersion: 0,
+        createOpen: false,
+        createBusy: false,
+        createError: "",
+        createForm: blankProviderForm(permissions.forceNonMedical ? "non_medical" : "medical"),
+        detailOpen: false,
+        selectedId: "",
+        detail: null,
+        detailBusy: false,
+        detailError: "",
+        detailVersion: 0,
+        providerForm: blankProviderForm(),
+        providerBusy: false,
+        providerError: "",
+        providerActionBusy: null,
+        doctorForm: blankDoctorForm(),
+        doctorDialogOpen: false,
+        doctorBusy: false,
+        doctorError: "",
+        serviceForm: blankServiceForm(),
+        serviceDialogOpen: false,
+        serviceBusy: false,
+        serviceError: "",
+      };
+    },
   );
-
-  const [detailOpen, setDetailOpen] = useState(detailPageMode);
-  const [selectedId, setSelectedId] = useState(detailRouteId);
-  const [detail, setDetail] = useState<ProviderDetail | null>(null);
-  const [detailBusy, setDetailBusy] = useState(detailPageMode);
-  const [detailError, setDetailError] = useState("");
-  const [detailVersion, setDetailVersion] = useState(0);
-
-  const [providerForm, setProviderForm] = useState<ProviderFormState>(blankProviderForm());
-  const [providerBusy, setProviderBusy] = useState(false);
-  const [providerError, setProviderError] = useState("");
-  const [providerActionBusy, setProviderActionBusy] = useState<string | null>(null);
-
-  const [doctorForm, setDoctorForm] = useState<DoctorFormState>(blankDoctorForm());
-  const [doctorDialogOpen, setDoctorDialogOpen] = useState(false);
-  const [doctorBusy, setDoctorBusy] = useState(false);
-  const [doctorError, setDoctorError] = useState("");
-
-  const [serviceForm, setServiceForm] = useState<ServiceFormState>(blankServiceForm());
-  const [serviceDialogOpen, setServiceDialogOpen] = useState(false);
-  const [serviceBusy, setServiceBusy] = useState(false);
-  const [serviceError, setServiceError] = useState("");
+  const {
+    filterPredicates,
+    sortStack,
+    providers,
+    listBusy,
+    listError,
+    listVersion,
+    createOpen,
+    createBusy,
+    createError,
+    createForm,
+    detailOpen,
+    selectedId,
+    detail,
+    detailBusy,
+    detailError,
+    detailVersion,
+    providerForm,
+    providerBusy,
+    providerError,
+    providerActionBusy,
+    doctorForm,
+    doctorDialogOpen,
+    doctorBusy,
+    doctorError,
+    serviceForm,
+    serviceDialogOpen,
+    serviceBusy,
+    serviceError,
+  } = pageState;
+  const setProvidersPageField = <K extends keyof ProvidersPageState>(
+    field: K,
+    value: SetStateAction<ProvidersPageState[K]>,
+  ) => dispatchPageState(createProvidersPageFieldPatch(field, value));
+  const setFilterPredicatesState = (value: SetStateAction<FilterPredicate[]>) =>
+    setProvidersPageField("filterPredicates", value);
+  const setSortStackState = (value: SetStateAction<SortStack>) =>
+    setProvidersPageField("sortStack", value);
+  const setProviders = (value: SetStateAction<ProviderSummary[]>) =>
+    setProvidersPageField("providers", value);
+  const setListBusy = (value: SetStateAction<boolean>) =>
+    setProvidersPageField("listBusy", value);
+  const setListError = (value: SetStateAction<string>) =>
+    setProvidersPageField("listError", value);
+  const setListVersion = (value: SetStateAction<number>) =>
+    setProvidersPageField("listVersion", value);
+  const setCreateOpen = (value: SetStateAction<boolean>) =>
+    setProvidersPageField("createOpen", value);
+  const setCreateBusy = (value: SetStateAction<boolean>) =>
+    setProvidersPageField("createBusy", value);
+  const setCreateError = (value: SetStateAction<string>) =>
+    setProvidersPageField("createError", value);
+  const setCreateForm = (value: SetStateAction<ProviderFormState>) =>
+    setProvidersPageField("createForm", value);
+  const setDetailOpen = (value: SetStateAction<boolean>) =>
+    setProvidersPageField("detailOpen", value);
+  const setSelectedId = (value: SetStateAction<string>) =>
+    setProvidersPageField("selectedId", value);
+  const setDetail = (value: SetStateAction<ProviderDetail | null>) =>
+    setProvidersPageField("detail", value);
+  const setDetailBusy = (value: SetStateAction<boolean>) =>
+    setProvidersPageField("detailBusy", value);
+  const setDetailError = (value: SetStateAction<string>) =>
+    setProvidersPageField("detailError", value);
+  const setDetailVersion = (value: SetStateAction<number>) =>
+    setProvidersPageField("detailVersion", value);
+  const setProviderForm = (value: SetStateAction<ProviderFormState>) =>
+    setProvidersPageField("providerForm", value);
+  const setProviderBusy = (value: SetStateAction<boolean>) =>
+    setProvidersPageField("providerBusy", value);
+  const setProviderError = (value: SetStateAction<string>) =>
+    setProvidersPageField("providerError", value);
+  const setProviderActionBusy = (value: SetStateAction<string | null>) =>
+    setProvidersPageField("providerActionBusy", value);
+  const setDoctorForm = (value: SetStateAction<DoctorFormState>) =>
+    setProvidersPageField("doctorForm", value);
+  const setDoctorDialogOpen = (value: SetStateAction<boolean>) =>
+    setProvidersPageField("doctorDialogOpen", value);
+  const setDoctorBusy = (value: SetStateAction<boolean>) =>
+    setProvidersPageField("doctorBusy", value);
+  const setDoctorError = (value: SetStateAction<string>) =>
+    setProvidersPageField("doctorError", value);
+  const setServiceForm = (value: SetStateAction<ServiceFormState>) =>
+    setProvidersPageField("serviceForm", value);
+  const setServiceDialogOpen = (value: SetStateAction<boolean>) =>
+    setProvidersPageField("serviceDialogOpen", value);
+  const setServiceBusy = (value: SetStateAction<boolean>) =>
+    setProvidersPageField("serviceBusy", value);
+  const setServiceError = (value: SetStateAction<string>) =>
+    setProvidersPageField("serviceError", value);
 
   const effectiveFilters = useMemo<ProviderFilters>(
     () => ({ ...filters, search: deferredSearch || filters.search }),
@@ -444,85 +577,148 @@ function ProvidersPage({ detailRouteId = "" }: ProvidersPageProps = {}) {
     setSearchParams(params, { replace: true });
   }
 
+  const applyDetailRouteState = useCallback((providerId: string) => {
+    setSelectedId(providerId);
+    setDetailOpen(Boolean(providerId));
+    setDetail(null);
+  }, []);
+
+  const openProviderFromQuery = useCallback((providerId: string) => {
+    setSelectedId(providerId);
+    setDetailOpen(true);
+  }, []);
+
+  const clearProviderList = useCallback(() => {
+    setProviders([]);
+  }, []);
+
+  const startProviderListLoad = useCallback(() => {
+    setListBusy(true);
+    setListError("");
+  }, []);
+
+  const applyProviderList = useCallback((items: ProviderSummary[]) => {
+    setProviders(items);
+  }, []);
+
+  const applyProviderListError = useCallback((error: unknown) => {
+    setListError(error instanceof Error ? error.message : t.common_failed_load);
+  }, [t.common_failed_load]);
+
+  const finishProviderListLoad = useCallback(() => {
+    setListBusy(false);
+  }, []);
+
+  const startProviderDetailLoad = useCallback(() => {
+    setDetailBusy(true);
+    setDetailError("");
+    setProviderError("");
+    setDoctorError("");
+    setServiceError("");
+  }, []);
+
+  const applyProviderDetail = useCallback((item: ProviderDetail) => {
+    setDetail(item);
+    setProviderForm(providerToForm(item));
+  }, []);
+
+  const applyProviderDetailError = useCallback((error: unknown) => {
+    setDetailError(error instanceof Error ? error.message : t.common_failed_load);
+  }, [t.common_failed_load]);
+
+  const finishProviderDetailLoad = useCallback(() => {
+    setDetailBusy(false);
+  }, []);
+
   useEffect(() => {
     if (!detailPageMode) return;
-    setSelectedId(detailRouteId);
-    setDetailOpen(Boolean(detailRouteId));
-    setDetail(null);
-  }, [detailPageMode, detailRouteId]);
+    applyDetailRouteState(detailRouteId);
+  }, [applyDetailRouteState, detailPageMode, detailRouteId]);
 
   useEffect(() => {
     if (detailPageMode) return;
     const providerParam = searchParams.get("provider") ?? "";
     if (providerParam && providerParam !== selectedId) {
-      setSelectedId(providerParam);
-      setDetailOpen(true);
+      openProviderFromQuery(providerParam);
     }
-  }, [detailPageMode, searchParams, selectedId]);
+  }, [detailPageMode, openProviderFromQuery, searchParams, selectedId]);
 
   useEffect(() => {
     if (!permissions.canViewPage || detailPageMode) {
-      startTransition(() => setProviders([]));
+      startTransition(() => clearProviderList());
       return;
     }
 
     let cancelled = false;
-    setListBusy(true);
-    setListError("");
+    startProviderListLoad();
 
     void fetchProviders(providersPath)
       .then((items) => {
         if (cancelled) return;
-        startTransition(() => setProviders(items));
+        startTransition(() => applyProviderList(items));
       })
       .catch((error: unknown) => {
         if (cancelled) return;
-        setListError(error instanceof Error ? error.message : t.common_failed_load);
+        applyProviderListError(error);
       })
       .finally(() => {
         if (!cancelled) {
-          setListBusy(false);
+          finishProviderListLoad();
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [detailPageMode, permissions.canViewPage, providersPath, listVersion, t.common_failed_load]);
+  }, [
+    applyProviderList,
+    applyProviderListError,
+    clearProviderList,
+    detailPageMode,
+    finishProviderListLoad,
+    permissions.canViewPage,
+    providersPath,
+    listVersion,
+    startProviderListLoad,
+  ]);
 
   useEffect(() => {
     const shouldLoadDetail = detailOpen || detailPageMode;
     if (!shouldLoadDetail || !selectedId) return;
 
     let cancelled = false;
-    setDetailBusy(true);
-    setDetailError("");
-    setProviderError("");
-    setDoctorError("");
-    setServiceError("");
+    startProviderDetailLoad();
 
     void fetchProviderDetail(selectedId)
       .then((item) => {
         if (cancelled) return;
         startTransition(() => {
-          setDetail(item);
-          setProviderForm(providerToForm(item));
+          applyProviderDetail(item);
         });
       })
       .catch((error: unknown) => {
         if (cancelled) return;
-        setDetailError(error instanceof Error ? error.message : t.common_failed_load);
+        applyProviderDetailError(error);
       })
       .finally(() => {
         if (!cancelled) {
-          setDetailBusy(false);
+          finishProviderDetailLoad();
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [detailOpen, detailPageMode, selectedId, detailVersion, t.common_failed_load]);
+  }, [
+    applyProviderDetail,
+    applyProviderDetailError,
+    detailOpen,
+    detailPageMode,
+    detailVersion,
+    finishProviderDetailLoad,
+    selectedId,
+    startProviderDetailLoad,
+  ]);
 
   useEffect(() => {
     setCreateForm(blankProviderForm(permissions.forceNonMedical ? "non_medical" : "medical"));
@@ -778,10 +974,10 @@ function ProvidersPage({ detailRouteId = "" }: ProvidersPageProps = {}) {
     return (
       <div className="space-y-6">
         <section className={cardClass("p-8")}>
-          <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
+          <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">
             {t.providers_no_access_title}
           </h1>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
+          <p className="mt-3 max-w-2xl text-sm leading-7 text-zinc-600">
             {t.providers_no_access_body}
           </p>
         </section>
@@ -1066,7 +1262,7 @@ function ProvidersPage({ detailRouteId = "" }: ProvidersPageProps = {}) {
         <div className="relative z-30 flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
             <div className="relative min-w-[240px] flex-1 sm:max-w-sm">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -tranzinc-y-1/2 text-muted-foreground" />
               <Input
                 value={filters.search}
                 onChange={(event) => setSearch(event.target.value)}
@@ -1555,7 +1751,11 @@ function ProvidersPage({ detailRouteId = "" }: ProvidersPageProps = {}) {
   );
 }
 
-export function ProviderOverviewSection({
+function ProvidersPage(...args: Parameters<typeof useProvidersPageContent>) {
+  return useProvidersPageContent(...args);
+}
+
+function ProviderOverviewSection({
   detail,
   onOpenPatients,
   onOpenAppointments,
@@ -1608,7 +1808,7 @@ export function ProviderOverviewSection({
         <div className="grid h-full gap-3 sm:grid-cols-2">
           <button
             type="button"
-            className="group relative h-full min-h-0 overflow-hidden rounded-xl border border-border/70 bg-muted/20 p-4 pr-14 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-orange-200 hover:bg-orange-50/30"
+            className="group relative h-full min-h-0 overflow-hidden rounded-xl border border-border/70 bg-muted/20 p-4 pr-14 text-left transition-all duration-200 hover:-tranzinc-y-0.5 hover:border-orange-200 hover:bg-orange-50/30"
             onClick={onOpenPatients}
           >
             <span className="block text-sm font-semibold text-foreground">
@@ -1622,12 +1822,12 @@ export function ProviderOverviewSection({
               )}
             </span>
             <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-              <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+              <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-tranzinc-y-0.5 group-hover:tranzinc-x-0.5" />
             </span>
           </button>
           <button
             type="button"
-            className="group relative h-full min-h-0 overflow-hidden rounded-xl border border-border/70 bg-muted/20 p-4 pr-14 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-orange-200 hover:bg-orange-50/30"
+            className="group relative h-full min-h-0 overflow-hidden rounded-xl border border-border/70 bg-muted/20 p-4 pr-14 text-left transition-all duration-200 hover:-tranzinc-y-0.5 hover:border-orange-200 hover:bg-orange-50/30"
             onClick={onOpenAppointments}
           >
             <span className="block text-sm font-semibold text-foreground">
@@ -1641,7 +1841,7 @@ export function ProviderOverviewSection({
               )}
             </span>
             <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-              <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+              <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-tranzinc-y-0.5 group-hover:tranzinc-x-0.5" />
             </span>
           </button>
         </div>
@@ -1693,7 +1893,7 @@ function ProviderSheetHero({
       <span
         className={cn(
           "absolute left-0 top-4 h-12 w-1 rounded-r-full",
-          detail.is_active ? "bg-emerald-500" : "bg-slate-300",
+          detail.is_active ? "bg-emerald-500" : "bg-zinc-300",
         )}
       />
       <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_240px] md:items-stretch">
@@ -1706,7 +1906,7 @@ function ProviderSheetHero({
                 "rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.08em]",
                 detail.is_active
                   ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                  : "border-slate-200 bg-slate-50 text-slate-600",
+                  : "border-zinc-200 bg-zinc-50 text-zinc-600",
               )}
             >
               {detail.is_active ? t.common_active : t.common_inactive}
@@ -1829,7 +2029,7 @@ function DoctorSection({
     <section className="space-y-3 rounded-xl border border-border/70 bg-card p-3.5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
-          <div className="h-2 w-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
           <h3 className="truncate text-sm font-semibold text-foreground">
             {detail.provider_type === "non_medical"
               ? l("Kontakte", "Контакты", "Contacts")
@@ -1993,7 +2193,7 @@ function ServiceSection({
     <section className="space-y-3 rounded-xl border border-border/70 bg-card p-3.5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
-          <div className="h-2 w-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
           <h3 className="truncate text-sm font-semibold text-foreground">
             {l("Servicekatalog", "Каталог сервисов", "Service catalog")}
           </h3>
@@ -2089,14 +2289,12 @@ function ServiceSection({
     </section>
   );
 }
-export function LinkedPatientsSection({
+function LinkedPatientsSection({
   detail,
-  onOpenPatient,
-  onOpenAppointments,
 }: {
   detail: ProviderDetail;
-  onOpenPatient: (patientId: string) => void;
-  onOpenAppointments: (patientId: string) => void;
+  onOpenPatient?: (patientId: string) => void;
+  onOpenAppointments?: (patientId: string) => void;
 }) {
   const { t, lang } = useLang();
   const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
@@ -2104,7 +2302,7 @@ export function LinkedPatientsSection({
     <section className="space-y-3 rounded-xl border border-border/70 bg-card p-3.5">
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
-          <div className="h-2 w-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
           <h3 className="truncate text-sm font-semibold text-foreground">
             {l("Verknüpfte Patienten", "Связанные пациенты", "Linked patients")}
           </h3>
@@ -2180,18 +2378,14 @@ export function LinkedPatientsSection({
   );
 }
 
-export function InteractionHistorySection({
+function InteractionHistorySection({
   detail,
-  onOpenPatient,
-  onOpenAppointments,
-  onOpenAppointment,
-  onOpenOrder,
 }: {
   detail: ProviderDetail;
-  onOpenPatient: (patientId: string) => void;
-  onOpenAppointments: (patientId: string) => void;
-  onOpenAppointment: (appointmentId: string) => void;
-  onOpenOrder: (orderId: string) => void;
+  onOpenPatient?: (patientId: string) => void;
+  onOpenAppointments?: (patientId: string) => void;
+  onOpenAppointment?: (appointmentId: string) => void;
+  onOpenOrder?: (orderId: string) => void;
 }) {
   const { t, lang } = useLang();
   const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
@@ -2199,7 +2393,7 @@ export function InteractionHistorySection({
     <section className="space-y-3 rounded-xl border border-border/70 bg-card p-3.5">
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
-          <div className="h-2 w-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
           <h3 className="truncate text-sm font-semibold text-foreground">
             {l("Interaktionsverlauf", "История взаимодействий", "Interaction history")}
           </h3>
@@ -2237,18 +2431,18 @@ export function InteractionHistorySection({
                   {compactDateTime(item.occurred_at)}
                 </span>
               </div>
-              <div className="rounded-[1.4rem] border border-slate-200 p-4">
+              <div className="rounded-[1.4rem] border border-zinc-200 p-4">
                 <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_160px]">
                   <div className="min-w-0 space-y-4">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline" className="rounded-full border-slate-200 text-slate-700">
+                      <Badge variant="outline" className="rounded-full border-zinc-200 text-zinc-700">
                         {humanizeCode(item.kind)}
                       </Badge>
-                      <Badge variant="outline" className="rounded-full border-slate-200 text-slate-700">
+                      <Badge variant="outline" className="rounded-full border-zinc-200 text-zinc-700">
                         {humanizeCode(item.status)}
                       </Badge>
                       {item.appointment_type ? (
-                        <Badge variant="outline" className="rounded-full border-slate-200 text-slate-700">
+                        <Badge variant="outline" className="rounded-full border-zinc-200 text-zinc-700">
                           {humanizeCode(item.appointment_type)}
                         </Badge>
                       ) : null}
@@ -2270,7 +2464,7 @@ export function InteractionHistorySection({
                     </div>
 
                     {item.notes ? (
-                      <div className="rounded-xl border border-border/60 px-3 py-2 text-sm leading-6 text-slate-700">
+                      <div className="rounded-xl border border-border/60 px-3 py-2 text-sm leading-6 text-zinc-700">
                         <span className="mb-1 block text-xs text-muted-foreground">{l("Notiz", "Заметка", "Note")}</span>
                         {item.notes}
                       </div>

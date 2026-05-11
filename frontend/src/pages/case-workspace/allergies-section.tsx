@@ -71,7 +71,7 @@ export function AllergiesSection() {
         "Укажите аллерген.",
         "Please enter the allergen.",
       )}
-      renderCard={(item) => (
+      cardContent={(item) => (
         <>
           <div className="flex items-center gap-2">
             <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
@@ -93,7 +93,7 @@ export function AllergiesSection() {
           )}
         </>
       )}
-      renderForm={({ form, updateField, disabled }) => (
+      formContent={({ form, updateField, disabled }) => (
         <>
           <Field
             label={tri(lang, "Allergen", "Аллерген", "Allergen")}
@@ -101,7 +101,6 @@ export function AllergiesSection() {
           >
             <Input
               value={form.allergie}
-              autoFocus
               onChange={(event) => updateField("allergie", event.target.value)}
               className={inputBaseClassName}
               disabled={disabled}

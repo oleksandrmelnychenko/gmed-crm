@@ -81,7 +81,7 @@ export function AppointmentsPageChrome({
           <Button
             variant="ghost"
             size="sm"
-            className="h-9 w-9 rounded-lg p-0 text-muted-foreground"
+            className="size-9 rounded-lg p-0 text-muted-foreground"
             onClick={onRefresh}
             title={refreshTitle}
           >

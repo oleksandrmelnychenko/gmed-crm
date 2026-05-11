@@ -41,7 +41,11 @@ async function waitForConversationContent(
   const contentPattern = new RegExp(escapeRegExp(content), "i");
   const deadline = Date.now() + 35_000;
 
-  while (Date.now() < deadline) {
+  async function pollForMessage(): Promise<void> {
+    if (Date.now() >= deadline) {
+      return;
+    }
+
     const textBubbleLocator = page
       .locator('[data-testid^="chat-message-text-"]')
       .filter({ hasText: content })
@@ -52,19 +56,24 @@ async function waitForConversationContent(
     const attachmentLink = page
       .getByRole("link", { name: contentPattern })
       .first();
-    if (
-      await textBubbleLocator.isVisible().catch(() => false) ||
-      await secureAttachmentButton.isVisible().catch(() => false) ||
-      await attachmentLink.isVisible().catch(() => false)
-    ) {
-      return;
-    }
+    return Promise.all([
+      textBubbleLocator.isVisible().catch(() => false),
+      secureAttachmentButton.isVisible().catch(() => false),
+      attachmentLink.isVisible().catch(() => false),
+    ]).then(async ([textVisible, buttonVisible, linkVisible]) => {
+      if (textVisible || buttonVisible || linkVisible) {
+        return;
+      }
 
-    await ensureLiveBackendHealthy().catch(() => undefined);
-    await refreshOwnChatKey(page).catch(() => undefined);
-    await reopenConversation(page, peerName).catch(() => undefined);
-    await page.waitForTimeout(750);
+      await ensureLiveBackendHealthy().catch(() => undefined);
+      await refreshOwnChatKey(page).catch(() => undefined);
+      await reopenConversation(page, peerName).catch(() => undefined);
+      await page.waitForTimeout(750);
+      return pollForMessage();
+    });
   }
+
+  await pollForMessage();
 
   const textBubbleLocator = page
     .locator('[data-testid^="chat-message-text-"]')
@@ -138,18 +147,19 @@ async function sendEncryptedTextWithRetry(
   peerUserId: string,
   message: string,
 ) {
-  let lastStatus = 0;
-  let lastBody = "";
-
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  async function attemptSend(attempt: number): Promise<void> {
     await refreshOwnChatKey(page);
     await page
       .getByPlaceholder(/Nachricht eingeben|Введите сообщение/i)
       .fill(message);
     const textSendResponse = page.waitForResponse(
-      (nextResponse) =>
-        nextResponse.url().includes(`/api/v1/messages/${peerUserId}`) &&
-        nextResponse.request().method() === "POST",
+      (nextResponse) => {
+        const responseUrl = new URL(nextResponse.url());
+        return (
+          responseUrl.pathname === `/api/v1/messages/${peerUserId}` &&
+          nextResponse.request().method() === "POST"
+        );
+      },
     );
     await page.locator("form button[type='submit']").click();
     const response = await textSendResponse;
@@ -157,14 +167,18 @@ async function sendEncryptedTextWithRetry(
       return;
     }
 
-    lastStatus = response.status();
-    lastBody = await response.text();
+    const lastStatus = response.status();
+    const lastBody = await response.text();
+    if (attempt >= 2) {
+      throw new Error(
+        `Encrypted text send failed after retries: ${lastStatus} ${lastBody}`,
+      );
+    }
     await page.waitForTimeout(1_000);
+    return attemptSend(attempt + 1);
   }
 
-  throw new Error(
-    `Encrypted text send failed after retries: ${lastStatus} ${lastBody}`,
-  );
+  await attemptSend(0);
 }
 
 test.describe("secure chat live workflows", () => {
@@ -172,28 +186,36 @@ test.describe("secure chat live workflows", () => {
     browser,
     request,
   }) => {
-    const scenario = await bootstrapFullSmokeScenario(request);
-    const patientContext = await browser.newContext();
-    const pmContext = await browser.newContext();
-    const patientPage = await patientContext.newPage();
-    const pmPage = await pmContext.newPage();
+    const [scenario, patientContext, pmContext] = await Promise.all([
+      bootstrapFullSmokeScenario(request),
+      browser.newContext(),
+      browser.newContext(),
+    ]);
+    const [patientPage, pmPage] = await Promise.all([
+      patientContext.newPage(),
+      pmContext.newPage(),
+    ]);
 
     try {
-      await setGermanLanguage(patientPage);
-      await setGermanLanguage(pmPage);
+      await Promise.all([
+        setGermanLanguage(patientPage),
+        setGermanLanguage(pmPage),
+      ]);
 
-      await loginViaApi(
-        patientPage,
-        request,
-        scenario.credentials.patient.email,
-        scenario.credentials.password,
-      );
-      await loginViaApi(
-        pmPage,
-        request,
-        scenario.credentials.pm.email,
-        scenario.credentials.password,
-      );
+      await Promise.all([
+        loginViaApi(
+          patientPage,
+          request,
+          scenario.credentials.patient.email,
+          scenario.credentials.password,
+        ),
+        loginViaApi(
+          pmPage,
+          request,
+          scenario.credentials.pm.email,
+          scenario.credentials.password,
+        ),
+      ]);
 
       const patientKeyResponse = patientPage.waitForResponse(
         (nextResponse) =>

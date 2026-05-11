@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import type { ViewMode } from "./types";
 
-export const DEFAULT_SPLIT_BREAKPOINT = 1280;
+const DEFAULT_SPLIT_BREAKPOINT = 1280;
 
 export function useResponsiveViewMode(breakpoint: number = DEFAULT_SPLIT_BREAKPOINT): ViewMode {
   const [mode, setMode] = useState<ViewMode>(() => {

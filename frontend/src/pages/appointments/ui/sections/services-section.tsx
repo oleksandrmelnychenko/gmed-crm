@@ -21,8 +21,13 @@ type AppointmentServicesSectionProps = {
   detailReport: ReportSummary | null;
   reportReviewMeta: string;
   interpreterReportReady: boolean;
-  canShowConciergeSection: boolean;
-  canShowBillingHandoffSection: boolean;
+  serviceAccess: {
+    canShowConciergeSection: boolean;
+    canShowBillingHandoffSection: boolean;
+    canManageConciergeServices: boolean;
+    canManageConciergeBilling: boolean;
+    canCreateTasks: boolean;
+  };
   nonMedicalProviders: ProviderSummary[];
   conciergeStaff: StaffOption[];
   billingStaff: StaffOption[];
@@ -32,9 +37,6 @@ type AppointmentServicesSectionProps = {
   readyConciergeServices: ConciergeServiceEntry[];
   settledConciergeServices: ConciergeServiceEntry[];
   billingReadinessWarnings: string[];
-  canManageConciergeServices: boolean;
-  canManageConciergeBilling: boolean;
-  canCreateTasks: boolean;
   onRefresh: () => void;
   onError: (message: string) => void;
 };
@@ -45,8 +47,7 @@ function AppointmentServicesSection({
   detailReport,
   reportReviewMeta,
   interpreterReportReady,
-  canShowConciergeSection,
-  canShowBillingHandoffSection,
+  serviceAccess,
   nonMedicalProviders,
   conciergeStaff,
   billingStaff,
@@ -56,12 +57,16 @@ function AppointmentServicesSection({
   readyConciergeServices,
   settledConciergeServices,
   billingReadinessWarnings,
-  canManageConciergeServices,
-  canManageConciergeBilling,
-  canCreateTasks,
   onRefresh,
   onError,
 }: AppointmentServicesSectionProps) {
+  const {
+    canShowConciergeSection,
+    canShowBillingHandoffSection,
+    canManageConciergeServices,
+    canManageConciergeBilling,
+    canCreateTasks,
+  } = serviceAccess;
   const hasServicesContent =
     canShowConciergeSection || canShowBillingHandoffSection;
   const servicesEmpty = appointmentText(

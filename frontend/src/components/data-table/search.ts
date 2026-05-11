@@ -1,4 +1,4 @@
-export type FieldAccessor<T> = (row: T) => unknown;
+type FieldAccessor<T> = (row: T) => unknown;
 
 export type SearchContext<T> = {
   fields: readonly FieldAccessor<T>[];
@@ -12,6 +12,14 @@ export function tokenize(query: string): string[] {
     .filter(Boolean);
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function blobContainsToken(blob: string, token: string) {
+  return new RegExp(escapeRegExp(token)).test(blob);
+}
+
 function valueToSearchString(value: unknown): string {
   if (value == null) return "";
   if (typeof value === "string") return value.toLowerCase();
@@ -20,14 +28,14 @@ function valueToSearchString(value: unknown): string {
   return "";
 }
 
-export function buildSearchBlob<T>(row: T, ctx: SearchContext<T>): string {
+function buildSearchBlob<T>(row: T, ctx: SearchContext<T>): string {
   return ctx.fields.map((accessor) => valueToSearchString(accessor(row))).join(" ");
 }
 
 export function matchesSearch<T>(row: T, tokens: readonly string[], ctx: SearchContext<T>): boolean {
   if (tokens.length === 0) return true;
   const blob = buildSearchBlob(row, ctx);
-  return tokens.every((token) => blob.includes(token.toLowerCase()));
+  return tokens.every((token) => blobContainsToken(blob, token));
 }
 
 export function applySearch<T>(
@@ -55,7 +63,11 @@ export function searchWithIndex<T>(
 ): T[] {
   const tokens = tokenize(query);
   if (tokens.length === 0) return index.map((entry) => entry.row);
-  return index
-    .filter((entry) => tokens.every((token) => entry.blob.includes(token.toLowerCase())))
-    .map((entry) => entry.row);
+  const rows: T[] = [];
+  for (const entry of index) {
+    if (tokens.every((token) => blobContainsToken(entry.blob, token))) {
+      rows.push(entry.row);
+    }
+  }
+  return rows;
 }

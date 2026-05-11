@@ -839,14 +839,18 @@ test.describe("staff live workflows", () => {
       expect(created!.auto_send_on_confirmed_appointment).toBe(true);
     }).toPass({ timeout: 15_000 });
 
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const response = await request.post(
-        `${pmApi.backendUrl}/api/v1/appointments/${scenario.appointment.id}/status`,
-        {
-          headers: pmApi.headers,
-          data: { status: "confirmed" },
-        },
-      );
+    const statusResponses = await Promise.all(
+      Array.from({ length: 2 }, () =>
+        request.post(
+          `${pmApi.backendUrl}/api/v1/appointments/${scenario.appointment.id}/status`,
+          {
+            headers: pmApi.headers,
+            data: { status: "confirmed" },
+          },
+        ),
+      ),
+    );
+    for (const response of statusResponses) {
       expect(response.ok()).toBe(true);
     }
 

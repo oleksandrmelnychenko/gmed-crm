@@ -92,7 +92,11 @@ export function useProvidersListTableModel({
   }, [columns]);
 
   const searchAccessors = useMemo(
-    () => columns.filter((column) => column.searchable).map((column) => column.accessor),
+    () =>
+      columns.reduce<ColumnDef<ProviderSummary>["accessor"][]>((acc, column) => {
+        if (column.searchable) acc.push(column.accessor);
+        return acc;
+      }, []),
     [columns],
   );
 

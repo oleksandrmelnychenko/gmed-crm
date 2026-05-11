@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useReducer } from "react";
 import { Download, LoaderCircle, RefreshCw, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -141,23 +141,78 @@ function portalDocumentValueLabel(
   return sharedPortalDocumentValueLabel(value);
 }
 
-export function PatientDashboardPage() {
+interface PatientDashboardState {
+  loading: boolean;
+  refreshing: boolean;
+  documents: PortalDocumentItem[];
+  documentAlerts: PortalDocumentAlertsSummary | null;
+  appointments: PortalAppointmentItem[];
+  services: PortalConciergeServiceItem[];
+  invoices: PortalInvoiceItem[];
+  recommendations: PortalRecommendationItem[];
+  nextActions: PortalNextActionItem[];
+  requests: PortalPrivacyRequest[];
+  feedback: PortalFeedbackItem[];
+  error: string;
+  version: number;
+  exportBusy: boolean;
+}
+
+type PatientDashboardAction =
+  | Partial<PatientDashboardState>
+  | ((current: PatientDashboardState) => Partial<PatientDashboardState>);
+
+const INITIAL_PATIENT_DASHBOARD_STATE: PatientDashboardState = {
+  loading: true,
+  refreshing: false,
+  documents: [],
+  documentAlerts: null,
+  appointments: [],
+  services: [],
+  invoices: [],
+  recommendations: [],
+  nextActions: [],
+  requests: [],
+  feedback: [],
+  error: "",
+  version: 0,
+  exportBusy: false,
+};
+
+function patientDashboardReducer(
+  current: PatientDashboardState,
+  action: PatientDashboardAction,
+): PatientDashboardState {
+  const patch = typeof action === "function" ? action(current) : action;
+  return {
+    ...current,
+    ...patch,
+  };
+}
+
+function usePatientDashboardPageContent() {
   const { user } = useAuth();
   const { t, lang } = useLang();
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [documents, setDocuments] = useState<PortalDocumentItem[]>([]);
-  const [documentAlerts, setDocumentAlerts] = useState<PortalDocumentAlertsSummary | null>(null);
-  const [appointments, setAppointments] = useState<PortalAppointmentItem[]>([]);
-  const [services, setServices] = useState<PortalConciergeServiceItem[]>([]);
-  const [invoices, setInvoices] = useState<PortalInvoiceItem[]>([]);
-  const [recommendations, setRecommendations] = useState<PortalRecommendationItem[]>([]);
-  const [nextActions, setNextActions] = useState<PortalNextActionItem[]>([]);
-  const [requests, setRequests] = useState<PortalPrivacyRequest[]>([]);
-  const [feedback, setFeedback] = useState<PortalFeedbackItem[]>([]);
-  const [error, setError] = useState("");
-  const [version, setVersion] = useState(0);
-  const [exportBusy, setExportBusy] = useState(false);
+  const [dashboardState, dispatchDashboardState] = useReducer(
+    patientDashboardReducer,
+    INITIAL_PATIENT_DASHBOARD_STATE,
+  );
+  const {
+    appointments,
+    documentAlerts,
+    documents,
+    error,
+    exportBusy,
+    feedback,
+    invoices,
+    loading,
+    nextActions,
+    recommendations,
+    refreshing,
+    requests,
+    services,
+    version,
+  } = dashboardState;
   const l = useCallback(
     (de: string, ru: string, en: string) =>
       lang === "de" ? de : lang === "ru" ? ru : en,
@@ -179,43 +234,45 @@ export function PatientDashboardPage() {
     clearApiCache("/me/privacy-requests");
     clearApiCache("/me/feedback");
     clearApiCache("/me/followup-milestones");
-    setVersion((value) => value + 1);
+    dispatchDashboardState((current) => ({ version: current.version + 1 }));
   });
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
-      if (loading) {
-        setRefreshing(false);
-      } else {
-        setRefreshing(true);
-      }
+      dispatchDashboardState((current) => ({
+        refreshing: !current.loading,
+        error: "",
+      }));
 
       try {
         const workspace = await fetchPatientPortalWorkspace();
 
         if (cancelled) return;
-        startTransition(() => {
-          setAppointments(workspace.appointments);
-          setServices(workspace.services);
-          setDocuments(workspace.documents);
-          setDocumentAlerts(workspace.documentAlerts);
-          setInvoices(workspace.invoices);
-          setRecommendations(workspace.recommendations);
-          setNextActions(workspace.nextActions);
-          setRequests(workspace.privacyRequests);
-          setFeedback(workspace.feedback);
-          setError("");
-        });
+        startTransition(() =>
+          dispatchDashboardState({
+            appointments: workspace.appointments,
+            services: workspace.services,
+            documents: workspace.documents,
+            documentAlerts: workspace.documentAlerts,
+            invoices: workspace.invoices,
+            recommendations: workspace.recommendations,
+            nextActions: workspace.nextActions,
+            requests: workspace.privacyRequests,
+            feedback: workspace.feedback,
+            error: "",
+            loading: false,
+            refreshing: false,
+          }),
+        );
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : t.portal_dashboard_failed_to_load_portal_workspace);
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-          setRefreshing(false);
-        }
+        dispatchDashboardState({
+          error: err instanceof Error ? err.message : t.portal_dashboard_failed_to_load_portal_workspace,
+          loading: false,
+          refreshing: false,
+        });
       }
     }
 
@@ -223,7 +280,7 @@ export function PatientDashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [loading, t.portal_dashboard_failed_to_load_portal_workspace, version, l]);
+  }, [t.portal_dashboard_failed_to_load_portal_workspace, version]);
 
   const releasedDocuments = documents.length;
   const upcomingAppointments = useMemo(
@@ -259,7 +316,7 @@ export function PatientDashboardPage() {
   const recentServices = useMemo(() => services.slice(0, 4), [services]);
   const recentInvoices = useMemo(() => invoices.slice(0, 4), [invoices]);
   const topNextActions = useMemo(
-    () => [...nextActions].sort(compareNextActions).slice(0, 6),
+    () => nextActions.toSorted(compareNextActions).slice(0, 6),
     [nextActions],
   );
   const urgentNextActionCount = useMemo(
@@ -277,13 +334,15 @@ export function PatientDashboardPage() {
   const recentRequests = useMemo(() => requests.slice(0, 4), [requests]);
 
   async function handleExportData() {
-    setExportBusy(true);
+    dispatchDashboardState({ exportBusy: true });
     try {
       await downloadPatientPortalExport();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t.portal_dashboard_failed_to_export_patient_data);
+      dispatchDashboardState({
+        error: err instanceof Error ? err.message : t.portal_dashboard_failed_to_export_patient_data,
+      });
     } finally {
-      setExportBusy(false);
+      dispatchDashboardState({ exportBusy: false });
     }
   }
 
@@ -351,7 +410,7 @@ export function PatientDashboardPage() {
             <Button
               variant="outline"
               className={tokens.control.primaryButton}
-              onClick={() => setVersion((value) => value + 1)}
+              onClick={() => dispatchDashboardState((current) => ({ version: current.version + 1 }))}
             >
               {refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
               {t.portal_dashboard_refresh}
@@ -777,4 +836,8 @@ export function PatientDashboardPage() {
       </section>
     </TabShell>
   );
+}
+
+export function PatientDashboardPage(...args: Parameters<typeof usePatientDashboardPageContent>) {
+  return usePatientDashboardPageContent(...args);
 }

@@ -1,6 +1,6 @@
 export type OrderPhase = "discovery" | "intake" | "execution" | "closure" | "followup";
 export type OrderStatus = "active" | "paused" | "completed" | "cancelled";
-export type LeistungStatus = "draft" | "delivered" | "approved" | "cancelled";
+type LeistungStatus = "draft" | "delivered" | "approved" | "cancelled";
 export type ExternalInvoiceStatus =
   | "expected"
   | "received"
@@ -47,7 +47,7 @@ export type Leistung = {
   external_document_filename?: string | null;
 };
 
-export type ExternalInvoice = {
+type ExternalInvoice = {
   id: string;
   provider_id: string | null;
   provider_name: string | null;
@@ -115,7 +115,7 @@ export type OrderProcessGates = {
   blocking_reasons: string[];
 };
 
-export type OrderDebtManagement = {
+type OrderDebtManagement = {
   status: string;
   effective_status: string;
   workflow_required: boolean;
@@ -242,7 +242,7 @@ export type OrderFollowupFlow = {
   blocking_reasons: string[];
 };
 
-export type LifecycleEvent = {
+type LifecycleEvent = {
   from_stage: string | null;
   to_stage: string;
   transition_kind: string;
@@ -250,13 +250,13 @@ export type LifecycleEvent = {
   created_at: string;
 };
 
-export type OrderLifecycleTransition = {
+type OrderLifecycleTransition = {
   phase: string;
   blocked: boolean;
   reasons: string[];
 };
 
-export type OrderLifecycle = {
+type OrderLifecycle = {
   current_stage: string;
   stage_entered_at: string | null;
   next_stage: string | null;
@@ -376,20 +376,20 @@ export type CreateResponse = {
   id: string;
 };
 
-export type PatientRecheckCheck = {
+type PatientRecheckCheck = {
   key: string;
   label: string;
   passed: boolean;
   blocking_for: string;
 };
 
-export type PatientRecheckDocumentAlerts = {
+type PatientRecheckDocumentAlerts = {
   missing_documents: Array<{ key: string; label: string }>;
   missing_count: number;
   out_of_sync: boolean;
 };
 
-export type PatientRecheckContract = {
+type PatientRecheckContract = {
   id: string;
   contract_number: string;
   status: string;

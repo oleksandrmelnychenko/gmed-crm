@@ -1,7 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { CountBadge, InfoRow, StatusBadge, TabShell, tokens, toneForStatus } from "./index";
+import { CountBadge } from "./primitives/count-badge";
+import { tokens } from "./primitives/design-tokens";
+import { toneForStatus } from "./primitives/status-tones";
+import { InfoRow } from "./recipes/info-row";
+import { StatusBadge } from "./recipes/status-badge";
+import { TabShell } from "./shells/tab-shell";
 
 describe("record-workspace", () => {
   it("re-exports the shared design contract", () => {

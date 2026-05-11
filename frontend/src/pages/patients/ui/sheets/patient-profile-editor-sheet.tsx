@@ -1,7 +1,6 @@
 import {
   memo,
   useCallback,
-  useEffect,
   useState,
   type FormEvent,
 } from "react";
@@ -49,142 +48,31 @@ type PatientProfileEditorSheetProps = {
   onError: (message: string) => void;
 };
 
-function PatientProfileEditorSheet({
-  open,
-  patientId,
-  detail,
-  dictionary,
-  statusLabel,
-  onOpenChange,
-  onSaved,
-  onError,
-}: PatientProfileEditorSheetProps) {
-  const [form, setForm] = useState<PatientEditFormState | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    if (!open) {
-      setForm(null);
-      setBusy(false);
-    }
-  }, [open]);
-
-  useEffect(() => {
-    if (open && detail && form === null) {
-      setForm(patientToEditForm(detail));
-    }
-  }, [detail, form, open]);
-
-  function updateField<K extends keyof PatientEditFormState>(
-    field: K,
-    value: PatientEditFormState[K]
-  ) {
-    setForm((current) => (current ? { ...current, [field]: value } : current));
-  }
-
-  function updateLegalStatusField<K extends keyof PatientLegalStatus>(
-    field: K,
-    value: PatientLegalStatus[K]
-  ) {
-    setForm((current) =>
-      current
-        ? {
-            ...current,
-            legalStatus: { ...current.legalStatus, [field]: value },
-          }
-        : current
-    );
-  }
-
-  const handleSubmit = useCallback(
-    async (event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-      if (!patientId || !form) return;
-      setBusy(true);
-      onError("");
-      try {
-        await updatePatient(patientId, {
-          title: form.title,
-          first_name: form.firstName,
-          last_name: form.lastName,
-          phone_primary: form.phonePrimary,
-          phone_secondary: form.phoneSecondary,
-          email: form.email,
-          nationality: form.nationality,
-          residence_country: form.residenceCountry,
-          languages: form.languages
-            .split(",")
-            .map((value) => value.trim())
-            .filter(Boolean),
-          functional_labels: parseFunctionalLabels(form.functionalLabels),
-          address_street: form.addressStreet,
-          address_city: form.addressCity,
-          address_zip: form.addressZip,
-          address_country: form.addressCountry,
-          insurance_provider: form.insuranceProvider,
-          insurance_number: form.insuranceNumber,
-          insurance_type: form.insuranceType,
-          emergency_contact_name: form.emergencyContactName,
-          emergency_contact_phone: form.emergencyContactPhone,
-          emergency_contact_relation: form.emergencyContactRelation,
-          legal_status: serializePatientLegalStatus(form.legalStatus),
-          clinical_warnings: form.clinicalWarnings,
-          notes: form.notes,
-        });
-        toast.success(dictionary.common_active);
-        onOpenChange(false);
-        onSaved();
-      } catch (error) {
-        onError(
-          error instanceof Error ? error.message : dictionary.common_failed_update
-        );
-      } finally {
-        setBusy(false);
-      }
-    },
-    [
-      dictionary.common_active,
-      dictionary.common_failed_update,
-      form,
-      onError,
-      onOpenChange,
-      onSaved,
-      patientId,
-    ]
-  );
-
+function PatientProfileEditorSheet(props: PatientProfileEditorSheetProps) {
   return (
-    <PatientSheetScaffold
-      open={open}
-      onOpenChange={onOpenChange}
-      width="detail-wide"
-      onSubmit={handleSubmit}
-      title={dictionary.patient_profile_editor_edit_patient_profile}
-      footer={
-        form ? (
-          <>
-            <Button
-              type="button"
-              variant="outline"
-              className="h-9 rounded-lg"
-              onClick={() => onOpenChange(false)}
-            >
-              {dictionary.patient_profile_editor_cancel}
-            </Button>
-            <Button
-              type="submit"
-              className="h-9 rounded-lg gap-1.5 px-3.5"
-              disabled={busy}
-            >
-              {busy ? <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : null}
-              {dictionary.patient_profile_editor_save_patient}
-            </Button>
-          </>
-        ) : undefined
-      }
-    >
-      {form ? (
-        <div className="space-y-3">
+    <PatientProfileEditorSheetContent
+      key={`${props.open ? "open" : "closed"}:${props.detail?.id ?? "none"}`}
+      {...props}
+    />
+  );
+}
+
+type PatientProfileEditorFormSectionsProps = {
+  dictionary: Record<string, string>;
+  form: PatientEditFormState;
+  statusLabel: (status: string) => string;
+  updateField: <K extends keyof PatientEditFormState>(field: K, value: PatientEditFormState[K]) => void;
+  updateLegalStatusField: <K extends keyof PatientLegalStatus>(field: K, value: PatientLegalStatus[K]) => void;
+};
+
+function PatientProfileEditorFormSections({
+  dictionary,
+  form,
+  statusLabel,
+  updateField,
+  updateLegalStatusField,
+}: PatientProfileEditorFormSectionsProps) {
+  return (        <div className="space-y-3">
               <FormSection title={dictionary.patient_profile_editor_personal_data}>
                 <div className="grid gap-3 md:grid-cols-3">
                   <FormField label={dictionary.patient_profile_editor_title}>
@@ -475,6 +363,139 @@ function PatientProfileEditorSheet({
                 />
               </FormSection>
         </div>
+  );
+}
+function PatientProfileEditorSheetContent({
+  open,
+  patientId,
+  detail,
+  dictionary,
+  statusLabel,
+  onOpenChange,
+  onSaved,
+  onError,
+}: PatientProfileEditorSheetProps) {
+  const [form, setForm] = useState<PatientEditFormState | null>(() =>
+    open && detail ? patientToEditForm(detail) : null,
+  );
+  const [busy, setBusy] = useState(false);
+
+  function updateField<K extends keyof PatientEditFormState>(
+    field: K,
+    value: PatientEditFormState[K]
+  ) {
+    setForm((current) => (current ? { ...current, [field]: value } : current));
+  }
+
+  function updateLegalStatusField<K extends keyof PatientLegalStatus>(
+    field: K,
+    value: PatientLegalStatus[K]
+  ) {
+    setForm((current) =>
+      current
+        ? {
+            ...current,
+            legalStatus: { ...current.legalStatus, [field]: value },
+          }
+        : current
+    );
+  }
+
+  const handleSubmit = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (!patientId || !form) return;
+      setBusy(true);
+      onError("");
+      try {
+        await updatePatient(patientId, {
+          title: form.title,
+          first_name: form.firstName,
+          last_name: form.lastName,
+          phone_primary: form.phonePrimary,
+          phone_secondary: form.phoneSecondary,
+          email: form.email,
+          nationality: form.nationality,
+          residence_country: form.residenceCountry,
+          languages: form.languages.split(",").flatMap((value) => {
+            const language = value.trim();
+            return language ? [language] : [];
+          }),
+          functional_labels: parseFunctionalLabels(form.functionalLabels),
+          address_street: form.addressStreet,
+          address_city: form.addressCity,
+          address_zip: form.addressZip,
+          address_country: form.addressCountry,
+          insurance_provider: form.insuranceProvider,
+          insurance_number: form.insuranceNumber,
+          insurance_type: form.insuranceType,
+          emergency_contact_name: form.emergencyContactName,
+          emergency_contact_phone: form.emergencyContactPhone,
+          emergency_contact_relation: form.emergencyContactRelation,
+          legal_status: serializePatientLegalStatus(form.legalStatus),
+          clinical_warnings: form.clinicalWarnings,
+          notes: form.notes,
+        });
+        toast.success(dictionary.common_active);
+        onOpenChange(false);
+        onSaved();
+      } catch (error) {
+        onError(
+          error instanceof Error ? error.message : dictionary.common_failed_update
+        );
+      } finally {
+        setBusy(false);
+      }
+    },
+    [
+      dictionary.common_active,
+      dictionary.common_failed_update,
+      form,
+      onError,
+      onOpenChange,
+      onSaved,
+      patientId,
+    ]
+  );
+
+  return (
+    <PatientSheetScaffold
+      open={open}
+      onOpenChange={onOpenChange}
+      width="detail-wide"
+      onSubmit={handleSubmit}
+      title={dictionary.patient_profile_editor_edit_patient_profile}
+      footer={
+        form ? (
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-9 rounded-lg"
+              onClick={() => onOpenChange(false)}
+            >
+              {dictionary.patient_profile_editor_cancel}
+            </Button>
+            <Button
+              type="submit"
+              className="h-9 rounded-lg gap-1.5 px-3.5"
+              disabled={busy}
+            >
+              {busy ? <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : null}
+              {dictionary.patient_profile_editor_save_patient}
+            </Button>
+          </>
+        ) : undefined
+      }
+    >
+      {form ? (
+        <PatientProfileEditorFormSections
+          dictionary={dictionary}
+          form={form}
+          statusLabel={statusLabel}
+          updateField={updateField}
+          updateLegalStatusField={updateLegalStatusField}
+        />
       ) : null}
     </PatientSheetScaffold>
   );

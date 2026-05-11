@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 
 import { Banner, EmptyCell, InfoRow, ListItem } from "@/components/ui-shell";
 import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
@@ -112,7 +112,7 @@ function LinkedRecordsSheet({
 }: LinkedRecordsSheetProps) {
   const { t } = useLang();
 
-  function renderContent() {
+  const content = useMemo(() => {
     if (loading) {
       return (
         <div className="flex items-center justify-center py-10 text-sm text-muted-foreground">
@@ -307,7 +307,7 @@ function LinkedRecordsSheet({
         ) : null}
       </div>
     );
-  }
+  }, [error, kind, loading, payload, t]);
 
   return (
     <AppointmentPreviewSheet
@@ -317,7 +317,7 @@ function LinkedRecordsSheet({
       maxWidthClassName="sm:max-w-[540px]"
       bodyClassName="px-4 pb-6 pt-4"
     >
-      {renderContent()}
+      {content}
     </AppointmentPreviewSheet>
   );
 }

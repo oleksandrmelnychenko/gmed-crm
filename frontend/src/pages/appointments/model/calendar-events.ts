@@ -5,7 +5,7 @@ import type {
   CalendarEventExtendedProps,
 } from "@/pages/appointments/model/types";
 
-export function appointmentEventClass(item: AppointmentListItem) {
+function appointmentEventClass(item: AppointmentListItem) {
   if (item.is_blocked) return "fc-apt-event-blocked";
   if (item.status === "completed") return "fc-apt-event-completed";
   if (item.status === "cancelled") return "fc-apt-event-cancelled";

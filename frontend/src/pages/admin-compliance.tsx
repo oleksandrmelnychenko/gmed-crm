@@ -2,8 +2,9 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useState,
+  useReducer,
   type FormEvent,
+  type SetStateAction,
 } from "react";
 import {
   CheckCircle2,
@@ -254,11 +255,11 @@ function privacyStatusBadgeClass(status: string) {
     case "approved":
       return "bg-sky-500/15 text-sky-700";
     case "rejected":
-      return "bg-slate-500/15 text-slate-700";
+      return "bg-zinc-500/15 text-zinc-700";
     case "completed":
       return "bg-green-500/15 text-green-700";
     default:
-      return "bg-slate-500/15 text-slate-700";
+      return "bg-zinc-500/15 text-zinc-700";
   }
 }
 
@@ -303,53 +304,186 @@ function canExecutePrivacyRequest(
   return role === "patient_manager" && requestType === "third_party_revoke";
 }
 
-export function AdminCompliancePage() {
+type AdminComplianceState = {
+  dashboard: ConsentDashboard | null;
+  expired: ExpiredConsent[];
+  loading: boolean;
+  privacyQueue: PrivacyRequestRecord[];
+  privacyQueueLoading: boolean;
+  patientInput: string;
+  activePatientId: string;
+  patientConsents: PatientConsentRecord[];
+  patientPrivacyRequests: PrivacyRequestRecord[];
+  patientLoading: boolean;
+  patientError: string;
+  consentType: string;
+  consentNote: string;
+  consentExpiresAt: string;
+  consentBusy: "grant" | "revoke" | null;
+  privacyRequestType: PrivacyRequestType;
+  privacyReason: string;
+  privacyCreateBusy: boolean;
+  privacyActionBusy: string | null;
+  consentSheetOpen: boolean;
+  privacySheetOpen: boolean;
+  reviewSheetRecord: PrivacyRequestRecord | null;
+  exportResult: string | null;
+  actionError: string;
+};
+
+type AdminCompliancePatch =
+  | Partial<AdminComplianceState>
+  | ((current: AdminComplianceState) => Partial<AdminComplianceState>);
+
+function adminComplianceReducer(
+  current: AdminComplianceState,
+  patch: AdminCompliancePatch,
+): AdminComplianceState {
+  return {
+    ...current,
+    ...(typeof patch === "function" ? patch(current) : patch),
+  };
+}
+
+function resolveAdminComplianceStateAction<T>(
+  action: SetStateAction<T>,
+  current: T,
+): T {
+  return typeof action === "function"
+    ? (action as (value: T) => T)(current)
+    : action;
+}
+
+function createAdminComplianceFieldPatch<K extends keyof AdminComplianceState>(
+  field: K,
+  nextValue: SetStateAction<AdminComplianceState[K]>,
+): AdminCompliancePatch {
+  return (current) => ({
+    [field]: resolveAdminComplianceStateAction(nextValue, current[field]),
+  } as Partial<AdminComplianceState>);
+}
+
+function useAdminCompliancePageContent() {
   const { t } = useLang();
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const patientParam = searchParams.get("patient") ?? "";
 
-  const [dashboard, setDashboard] = useState<ConsentDashboard | null>(null);
-  const [expired, setExpired] = useState<ExpiredConsent[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const [privacyQueue, setPrivacyQueue] = useState<PrivacyRequestRecord[]>([]);
-  const [privacyQueueLoading, setPrivacyQueueLoading] = useState(true);
-
-  const [patientInput, setPatientInput] = useState(patientParam);
-  const [activePatientId, setActivePatientId] = useState(patientParam);
-  const [patientConsents, setPatientConsents] = useState<
-    PatientConsentRecord[]
-  >([]);
-  const [patientPrivacyRequests, setPatientPrivacyRequests] = useState<
-    PrivacyRequestRecord[]
-  >([]);
-  const [patientLoading, setPatientLoading] = useState(false);
-  const [patientError, setPatientError] = useState("");
-
-  const [consentType, setConsentType] = useState<string>(
-    CONSENT_TYPE_VALUES[0],
+  const [complianceState, dispatchComplianceState] = useReducer(
+    adminComplianceReducer,
+    undefined,
+    (): AdminComplianceState => ({
+      dashboard: null,
+      expired: [],
+      loading: true,
+      privacyQueue: [],
+      privacyQueueLoading: true,
+      patientInput: patientParam,
+      activePatientId: patientParam,
+      patientConsents: [],
+      patientPrivacyRequests: [],
+      patientLoading: false,
+      patientError: "",
+      consentType: CONSENT_TYPE_VALUES[0],
+      consentNote: "",
+      consentExpiresAt: "",
+      consentBusy: null,
+      privacyRequestType: "erasure",
+      privacyReason: "",
+      privacyCreateBusy: false,
+      privacyActionBusy: null,
+      consentSheetOpen: false,
+      privacySheetOpen: false,
+      reviewSheetRecord: null,
+      exportResult: null,
+      actionError: "",
+    }),
   );
-  const [consentNote, setConsentNote] = useState("");
-  const [consentExpiresAt, setConsentExpiresAt] = useState("");
-  const [consentBusy, setConsentBusy] = useState<"grant" | "revoke" | null>(
-    null,
-  );
-
-  const [privacyRequestType, setPrivacyRequestType] =
-    useState<PrivacyRequestType>("erasure");
-  const [privacyReason, setPrivacyReason] = useState("");
-  const [privacyCreateBusy, setPrivacyCreateBusy] = useState(false);
-  const [privacyActionBusy, setPrivacyActionBusy] = useState<string | null>(
-    null,
-  );
-  const [consentSheetOpen, setConsentSheetOpen] = useState(false);
-  const [privacySheetOpen, setPrivacySheetOpen] = useState(false);
-  const [reviewSheetRecord, setReviewSheetRecord] =
-    useState<PrivacyRequestRecord | null>(null);
-
-  const [exportResult, setExportResult] = useState<string | null>(null);
-  const [actionError, setActionError] = useState("");
+  const {
+    actionError,
+    activePatientId,
+    consentBusy,
+    consentExpiresAt,
+    consentNote,
+    consentSheetOpen,
+    consentType,
+    dashboard,
+    expired,
+    exportResult,
+    loading,
+    patientConsents,
+    patientError,
+    patientInput,
+    patientLoading,
+    patientPrivacyRequests,
+    privacyActionBusy,
+    privacyCreateBusy,
+    privacyQueue,
+    privacyQueueLoading,
+    privacyReason,
+    privacyRequestType,
+    privacySheetOpen,
+    reviewSheetRecord,
+  } = complianceState;
+  const setComplianceField = <K extends keyof AdminComplianceState>(
+    field: K,
+    nextValue: SetStateAction<AdminComplianceState[K]>,
+  ) =>
+    dispatchComplianceState(createAdminComplianceFieldPatch(field, nextValue));
+  const setDashboard = (nextValue: SetStateAction<ConsentDashboard | null>) =>
+    setComplianceField("dashboard", nextValue);
+  const setExpired = (nextValue: SetStateAction<ExpiredConsent[]>) =>
+    setComplianceField("expired", nextValue);
+  const setLoading = (nextValue: SetStateAction<boolean>) =>
+    setComplianceField("loading", nextValue);
+  const setPrivacyQueue = (
+    nextValue: SetStateAction<PrivacyRequestRecord[]>,
+  ) => setComplianceField("privacyQueue", nextValue);
+  const setPrivacyQueueLoading = (nextValue: SetStateAction<boolean>) =>
+    setComplianceField("privacyQueueLoading", nextValue);
+  const setPatientInput = (nextValue: SetStateAction<string>) =>
+    setComplianceField("patientInput", nextValue);
+  const setActivePatientId = (nextValue: SetStateAction<string>) =>
+    setComplianceField("activePatientId", nextValue);
+  const setPatientConsents = (
+    nextValue: SetStateAction<PatientConsentRecord[]>,
+  ) => setComplianceField("patientConsents", nextValue);
+  const setPatientPrivacyRequests = (
+    nextValue: SetStateAction<PrivacyRequestRecord[]>,
+  ) => setComplianceField("patientPrivacyRequests", nextValue);
+  const setPatientLoading = (nextValue: SetStateAction<boolean>) =>
+    setComplianceField("patientLoading", nextValue);
+  const setPatientError = (nextValue: SetStateAction<string>) =>
+    setComplianceField("patientError", nextValue);
+  const setConsentType = (nextValue: SetStateAction<string>) =>
+    setComplianceField("consentType", nextValue);
+  const setConsentNote = (nextValue: SetStateAction<string>) =>
+    setComplianceField("consentNote", nextValue);
+  const setConsentExpiresAt = (nextValue: SetStateAction<string>) =>
+    setComplianceField("consentExpiresAt", nextValue);
+  const setConsentBusy = (
+    nextValue: SetStateAction<"grant" | "revoke" | null>,
+  ) => setComplianceField("consentBusy", nextValue);
+  const setPrivacyRequestType = (
+    nextValue: SetStateAction<PrivacyRequestType>,
+  ) => setComplianceField("privacyRequestType", nextValue);
+  const setPrivacyReason = (nextValue: SetStateAction<string>) =>
+    setComplianceField("privacyReason", nextValue);
+  const setPrivacyCreateBusy = (nextValue: SetStateAction<boolean>) =>
+    setComplianceField("privacyCreateBusy", nextValue);
+  const setPrivacyActionBusy = (nextValue: SetStateAction<string | null>) =>
+    setComplianceField("privacyActionBusy", nextValue);
+  const setConsentSheetOpen = (nextValue: SetStateAction<boolean>) =>
+    setComplianceField("consentSheetOpen", nextValue);
+  const setPrivacySheetOpen = (nextValue: SetStateAction<boolean>) =>
+    setComplianceField("privacySheetOpen", nextValue);
+  const setReviewSheetRecord = (
+    nextValue: SetStateAction<PrivacyRequestRecord | null>,
+  ) => setComplianceField("reviewSheetRecord", nextValue);
+  const setExportResult = (nextValue: SetStateAction<string | null>) =>
+    setComplianceField("exportResult", nextValue);
+  const setActionError = (nextValue: SetStateAction<string>) =>
+    setComplianceField("actionError", nextValue);
 
   const activePatientLabel = useMemo(() => {
     const latestConsent = patientConsents[0];
@@ -724,7 +858,7 @@ export function AdminCompliancePage() {
             ? "bg-amber-500/15 text-amber-700"
             : record.granted
               ? "bg-green-500/15 text-green-700"
-              : "bg-slate-500/15 text-slate-700";
+              : "bg-zinc-500/15 text-zinc-700";
 
         return (
           <Badge className={badgeClass}>
@@ -752,7 +886,7 @@ export function AdminCompliancePage() {
           : compactDt(record.granted_at ?? record.created_at),
       width: 132,
       render: (record) => (
-        <span className="font-mono text-sm text-slate-500">
+        <span className="font-mono text-sm text-zinc-500">
           {Boolean(record.revoked_at) && !record.granted
             ? compactDt(record.revoked_at)
             : compactDt(record.granted_at ?? record.created_at)}
@@ -765,7 +899,7 @@ export function AdminCompliancePage() {
       accessor: (record) => compactDt(record.expires_at),
       width: 132,
       render: (record) => (
-        <span className="font-mono text-sm text-slate-500">
+        <span className="font-mono text-sm text-zinc-500">
           {compactDt(record.expires_at)}
         </span>
       ),
@@ -776,7 +910,7 @@ export function AdminCompliancePage() {
       accessor: (record) => record.note?.trim() || "",
       width: 240,
       render: (record) => (
-        <span className="truncate text-sm text-slate-600">
+        <span className="truncate text-sm text-zinc-600">
           {record.note?.trim() || "\u2014"}
         </span>
       ),
@@ -796,7 +930,7 @@ export function AdminCompliancePage() {
           <div className="truncate font-medium text-foreground">
             {privacyRequestTypeLabel(record.request_type, t)}
           </div>
-          <div className="truncate text-xs text-slate-500">
+          <div className="truncate text-xs text-zinc-500">
             {t.compliance_created_label} {compactDt(record.requested_at)}
           </div>
         </div>
@@ -813,7 +947,7 @@ export function AdminCompliancePage() {
             {privacyStatusLabel(record.status, t)}
           </Badge>
           {record.manual_override ? (
-            <span className="truncate text-xs text-slate-500">
+            <span className="truncate text-xs text-zinc-500">
               {t.compliance_manual_override}
             </span>
           ) : null}
@@ -832,7 +966,7 @@ export function AdminCompliancePage() {
       accessor: (record) => compactDt(record.due_at),
       width: 126,
       render: (record) => (
-        <span className="font-mono text-sm text-slate-500">
+        <span className="font-mono text-sm text-zinc-500">
           {compactDt(record.due_at)}
         </span>
       ),
@@ -843,7 +977,7 @@ export function AdminCompliancePage() {
       accessor: (record) => compactDt(record.retention_until),
       width: 150,
       render: (record) => (
-        <span className="font-mono text-sm text-slate-500">
+        <span className="font-mono text-sm text-zinc-500">
           {compactDt(record.retention_until)}
         </span>
       ),
@@ -854,7 +988,7 @@ export function AdminCompliancePage() {
       accessor: (record) => recordSummaryLabel(record.record_summary, t),
       width: 142,
       render: (record) => (
-        <span className="truncate text-xs text-slate-600">
+        <span className="truncate text-xs text-zinc-600">
           {recordSummaryLabel(record.record_summary, t)}
         </span>
       ),
@@ -865,7 +999,7 @@ export function AdminCompliancePage() {
       accessor: (record) => privacyNotesLabel(record),
       width: 240,
       render: (record) => (
-        <span className="truncate text-sm text-slate-600">
+        <span className="truncate text-sm text-zinc-600">
           {privacyNotesLabel(record)}
         </span>
       ),
@@ -940,7 +1074,7 @@ export function AdminCompliancePage() {
       accessor: (item) => compactDt(item.expires_at),
       width: 132,
       render: (item) => (
-        <span className="font-mono text-sm text-slate-500">
+        <span className="font-mono text-sm text-zinc-500">
           {compactDt(item.expires_at)}
         </span>
       ),
@@ -987,7 +1121,7 @@ export function AdminCompliancePage() {
           ? "bg-red-500/15 text-red-700"
           : item.granted
             ? "bg-green-500/15 text-green-700"
-            : "bg-slate-500/15 text-slate-700";
+            : "bg-zinc-500/15 text-zinc-700";
         return (
           <Badge className={badgeCls}>
             {isRevoked ? t.compliance_revoked : t.compliance_granted}
@@ -1004,7 +1138,7 @@ export function AdminCompliancePage() {
           : compactDt(item.granted_at),
       width: 132,
       render: (item) => (
-        <span className="font-mono text-sm text-slate-500">
+        <span className="font-mono text-sm text-zinc-500">
           {Boolean(item.revoked_at) && !item.granted
             ? compactDt(item.revoked_at)
             : compactDt(item.granted_at)}
@@ -1037,7 +1171,7 @@ export function AdminCompliancePage() {
           <div className="truncate font-medium text-foreground">
             {privacyRequestTypeLabel(record.request_type, t)}
           </div>
-          <div className="truncate text-xs text-slate-500">
+          <div className="truncate text-xs text-zinc-500">
             {privacySourceLabel(record.source, t)}
           </div>
         </div>
@@ -1070,7 +1204,7 @@ export function AdminCompliancePage() {
       accessor: (record) => compactDt(record.due_at),
       width: 126,
       render: (record) => (
-        <span className="font-mono text-sm text-slate-500">
+        <span className="font-mono text-sm text-zinc-500">
           {compactDt(record.due_at)}
         </span>
       ),
@@ -1081,7 +1215,7 @@ export function AdminCompliancePage() {
       accessor: (record) => recordSummaryLabel(record.record_summary, t),
       width: 142,
       render: (record) => (
-        <span className="truncate text-xs text-slate-600">
+        <span className="truncate text-xs text-zinc-600">
           {recordSummaryLabel(record.record_summary, t)}
         </span>
       ),
@@ -1092,7 +1226,7 @@ export function AdminCompliancePage() {
       accessor: (record) => privacyNotesLabel(record),
       width: 220,
       render: (record) => (
-        <span className="truncate text-sm text-slate-600">
+        <span className="truncate text-sm text-zinc-600">
           {privacyNotesLabel(record)}
         </span>
       ),
@@ -1129,13 +1263,13 @@ export function AdminCompliancePage() {
 
         if (record.status === "completed" && record.executed_at) {
           return (
-            <span className="truncate text-xs text-slate-500">
+            <span className="truncate text-xs text-zinc-500">
               {t.compliance_executed_label} {compactDt(record.executed_at)}
             </span>
           );
         }
 
-        return <span className="text-xs text-slate-500">-</span>;
+        return <span className="text-xs text-zinc-500">-</span>;
       },
     },
   ], [privacyActionBusy, t, user?.role]);
@@ -1608,7 +1742,7 @@ export function AdminCompliancePage() {
                       <Badge className={privacyStatusBadgeClass(reviewSheetRecord.status)}>
                         {privacyStatusLabel(reviewSheetRecord.status, t)}
                       </Badge>
-                      <Badge className="bg-slate-500/15 text-slate-700">
+                      <Badge className="bg-zinc-500/15 text-zinc-700">
                         {privacyRequestTypeLabel(reviewSheetRecord.request_type, t)}
                       </Badge>
                       {reviewSheetRecord.is_overdue ? (
@@ -1740,4 +1874,8 @@ export function AdminCompliancePage() {
       ) : null}
     </div>
   );
+}
+
+export function AdminCompliancePage(...args: Parameters<typeof useAdminCompliancePageContent>) {
+  return useAdminCompliancePageContent(...args);
 }

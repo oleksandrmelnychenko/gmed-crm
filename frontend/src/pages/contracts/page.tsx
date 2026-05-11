@@ -4,9 +4,10 @@ import {
   useDeferredValue,
   useEffect,
   useMemo,
-  useState,
+  useReducer,
   type FormEvent,
   type ReactNode,
+  type SetStateAction,
 } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
@@ -26,7 +27,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   AdminSheetScaffold,
-  AdminTableCard,
   AdminToolbar,
   SheetFormFooter,
 } from "@/components/admin-page-patterns";
@@ -51,7 +51,6 @@ import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { formatEnumLabelFromKeys, useLang, type TranslationKey } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
-import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 import {
   contractStatusClassName,
@@ -158,7 +157,7 @@ function contractMetricCard(
   return (
     <article className="relative min-h-[44px] min-w-[190px] px-3 py-1">
       {!options?.groupedLast ? (
-        <span className="absolute right-0 top-1/2 hidden -translate-y-1/2 space-y-1 xl:block">
+        <span className="absolute right-0 top-1/2 hidden -tranzinc-y-1/2 space-y-1 xl:block">
           <span className="block h-1.5 w-px bg-border" />
           <span className="block h-1.5 w-px bg-border" />
           <span className="block h-1.5 w-px bg-border" />
@@ -190,11 +189,109 @@ function ContractSummaryLine({ label, value }: { label: string; value: ReactNode
   );
 }
 
-export function ContractsPage() {
+interface ContractsWorkspaceState {
+  contracts: ContractItem[];
+  quotes: QuoteItem[];
+  agencyServices: AgencyServiceItem[];
+  patients: PatientOption[];
+  orders: OrderOption[];
+  contractsLoading: boolean;
+  quotesLoading: boolean;
+  agencyServicesLoading: boolean;
+  optionsLoading: boolean;
+  contractsError: string | null;
+  quotesError: string | null;
+  agencyServicesError: string | null;
+  optionsError: string | null;
+  selectedContractId: string;
+  selectedQuoteId: string;
+  contractDetail: ContractItem | null;
+  quoteDetail: QuoteItem | null;
+  quoteVersions: QuoteVersionItem[];
+  contractDetailLoading: boolean;
+  quoteDetailLoading: boolean;
+  quoteVersionsLoading: boolean;
+  contractDetailError: string | null;
+  quoteDetailError: string | null;
+  quoteVersionsError: string | null;
+  contractsReloadToken: number;
+  quotesReloadToken: number;
+  agencyServicesReloadToken: number;
+}
+
+interface ContractsUiState {
+  contractFilters: ContractFilters;
+  quoteFilters: QuoteFilters;
+  agencyServiceSheetOpen: boolean;
+  createContractOpen: boolean;
+  createQuoteOpen: boolean;
+  createContractForm: ContractFormState;
+  createQuoteForm: QuoteFormState;
+  createContractBusy: boolean;
+  createQuoteBusy: boolean;
+  createContractError: string | null;
+  createQuoteError: string | null;
+  agencyServiceFilters: AgencyServiceFilters;
+  agencyServiceForm: AgencyServiceFormState;
+  agencyServiceBusy: boolean;
+  agencyServiceFormError: string | null;
+  contractStatusForm: ContractStatusFormState;
+  quoteStatusForm: QuoteStatusFormState;
+  contractStatusBusy: boolean;
+  quoteStatusBusy: boolean;
+  contractStatusError: string | null;
+  quoteStatusError: string | null;
+}
+
+type ContractsWorkspaceAction =
+  | Partial<ContractsWorkspaceState>
+  | ((current: ContractsWorkspaceState) => Partial<ContractsWorkspaceState>);
+
+type ContractsUiAction =
+  | Partial<ContractsUiState>
+  | ((current: ContractsUiState) => Partial<ContractsUiState>);
+
+function contractsWorkspaceReducer(
+  current: ContractsWorkspaceState,
+  action: ContractsWorkspaceAction,
+): ContractsWorkspaceState {
+  const patch = typeof action === "function" ? action(current) : action;
+  return {
+    ...current,
+    ...patch,
+  };
+}
+
+function contractsUiReducer(
+  current: ContractsUiState,
+  action: ContractsUiAction,
+): ContractsUiState {
+  const patch = typeof action === "function" ? action(current) : action;
+  return {
+    ...current,
+    ...patch,
+  };
+}
+
+function resolveStateAction<T>(action: SetStateAction<T>, current: T): T {
+  return typeof action === "function"
+    ? (action as (value: T) => T)(current)
+    : action;
+}
+
+function createContractsUiFieldPatch<K extends keyof ContractsUiState>(
+  field: K,
+  nextValue: SetStateAction<ContractsUiState[K]>,
+): ContractsUiAction {
+  return (current) => ({
+    [field]: resolveStateAction(nextValue, current[field]),
+  } as Partial<ContractsUiState>);
+}
+
+function useContractsPageContent() {
   const { user } = useAuth();
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const { staffGo } = useStaffNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = contractsPermissions(user?.role);
   const locale = lang === "de" ? "de-DE" : "ru-RU";
@@ -312,88 +409,303 @@ export function ContractsPage() {
   const initialContractId = searchParams.get("contract") ?? "";
   const initialQuoteId = searchParams.get("quote") ?? "";
 
-  const [contractFilters, setContractFilters] = useState<ContractFilters>({
-    ...DEFAULT_CONTRACT_FILTERS,
-    patientId: initialPatientId,
-  });
-  const [quoteFilters, setQuoteFilters] = useState<QuoteFilters>({
-    ...DEFAULT_QUOTE_FILTERS,
-    patientId: initialPatientId,
-    orderId: initialOrderId,
-  });
-  const [contracts, setContracts] = useState<ContractItem[]>([]);
-  const [quotes, setQuotes] = useState<QuoteItem[]>([]);
-  const [agencyServices, setAgencyServices] = useState<AgencyServiceItem[]>([]);
-  const [patients, setPatients] = useState<PatientOption[]>([]);
-  const [orders, setOrders] = useState<OrderOption[]>([]);
-  const [contractsLoading, setContractsLoading] = useState(false);
-  const [quotesLoading, setQuotesLoading] = useState(false);
-  const [agencyServicesLoading, setAgencyServicesLoading] = useState(false);
-  const [optionsLoading, setOptionsLoading] = useState(false);
-  const [contractsError, setContractsError] = useState<string | null>(null);
-  const [quotesError, setQuotesError] = useState<string | null>(null);
-  const [agencyServicesError, setAgencyServicesError] = useState<string | null>(null);
-  const [optionsError, setOptionsError] = useState<string | null>(null);
-  const [selectedContractId, setSelectedContractId] = useState(initialContractId);
-  const [selectedQuoteId, setSelectedQuoteId] = useState(initialQuoteId);
-  const [contractDetail, setContractDetail] = useState<ContractItem | null>(null);
-  const [quoteDetail, setQuoteDetail] = useState<QuoteItem | null>(null);
-  const [quoteVersions, setQuoteVersions] = useState<QuoteVersionItem[]>([]);
-  const [contractDetailLoading, setContractDetailLoading] = useState(false);
-  const [quoteDetailLoading, setQuoteDetailLoading] = useState(false);
-  const [quoteVersionsLoading, setQuoteVersionsLoading] = useState(false);
-  const [contractDetailError, setContractDetailError] = useState<string | null>(null);
-  const [quoteDetailError, setQuoteDetailError] = useState<string | null>(null);
-  const [quoteVersionsError, setQuoteVersionsError] = useState<string | null>(null);
-  const [contractsReloadToken, setContractsReloadToken] = useState(0);
-  const [quotesReloadToken, setQuotesReloadToken] = useState(0);
-  const [agencyServicesReloadToken, setAgencyServicesReloadToken] = useState(0);
-  const [agencyServiceSheetOpen, setAgencyServiceSheetOpen] = useState(false);
-  const [createContractOpen, setCreateContractOpen] = useState(false);
-  const [createQuoteOpen, setCreateQuoteOpen] = useState(false);
-  const [createContractForm, setCreateContractForm] = useState<ContractFormState>(
-    blankContractForm(initialPatientId),
-  );
-  const [createQuoteForm, setCreateQuoteForm] = useState<QuoteFormState>(
-    blankQuoteForm(initialOrderId),
-  );
-  const [createContractBusy, setCreateContractBusy] = useState(false);
-  const [createQuoteBusy, setCreateQuoteBusy] = useState(false);
-  const [createContractError, setCreateContractError] = useState<string | null>(null);
-  const [createQuoteError, setCreateQuoteError] = useState<string | null>(null);
-  const [agencyServiceFilters, setAgencyServiceFilters] = useState<AgencyServiceFilters>(
-    DEFAULT_AGENCY_SERVICE_FILTERS,
-  );
-  const [agencyServiceForm, setAgencyServiceForm] = useState<AgencyServiceFormState>(
-    blankAgencyServiceForm(t.revenue_unit_default),
-  );
-  const [agencyServiceBusy, setAgencyServiceBusy] = useState(false);
-  const [agencyServiceFormError, setAgencyServiceFormError] = useState<string | null>(null);
-  const [contractStatusForm, setContractStatusForm] = useState<ContractStatusFormState>(
-    contractToStatusForm({
-      id: "",
-      patient_id: "",
-      patient_name: "",
-      patient_pid: "",
-      contract_number: "",
-      status: "draft",
-      signed_at: null,
-      valid_from: null,
-      valid_to: null,
-      conditions: null,
-      created_at: "",
-      updated_at: "",
+  const [contractsUiState, dispatchContractsUiState] = useReducer(
+    contractsUiReducer,
+    undefined,
+    (): ContractsUiState => ({
+      contractFilters: {
+        ...DEFAULT_CONTRACT_FILTERS,
+        patientId: initialPatientId,
+      },
+      quoteFilters: {
+        ...DEFAULT_QUOTE_FILTERS,
+        patientId: initialPatientId,
+        orderId: initialOrderId,
+      },
+      agencyServiceSheetOpen: false,
+      createContractOpen: false,
+      createQuoteOpen: false,
+      createContractForm: blankContractForm(initialPatientId),
+      createQuoteForm: blankQuoteForm(initialOrderId),
+      createContractBusy: false,
+      createQuoteBusy: false,
+      createContractError: null,
+      createQuoteError: null,
+      agencyServiceFilters: DEFAULT_AGENCY_SERVICE_FILTERS,
+      agencyServiceForm: blankAgencyServiceForm(t.revenue_unit_default),
+      agencyServiceBusy: false,
+      agencyServiceFormError: null,
+      contractStatusForm: contractToStatusForm({
+        id: "",
+        patient_id: "",
+        patient_name: "",
+        patient_pid: "",
+        contract_number: "",
+        status: "draft",
+        signed_at: null,
+        valid_from: null,
+        valid_to: null,
+        conditions: null,
+        created_at: "",
+        updated_at: "",
+      }),
+      quoteStatusForm: {
+        status: "draft",
+        paidAmount: "",
+        notes: "",
+      },
+      contractStatusBusy: false,
+      quoteStatusBusy: false,
+      contractStatusError: null,
+      quoteStatusError: null,
     }),
   );
-  const [quoteStatusForm, setQuoteStatusForm] = useState<QuoteStatusFormState>({
-    status: "draft",
-    paidAmount: "",
-    notes: "",
-  });
-  const [contractStatusBusy, setContractStatusBusy] = useState(false);
-  const [quoteStatusBusy, setQuoteStatusBusy] = useState(false);
-  const [contractStatusError, setContractStatusError] = useState<string | null>(null);
-  const [quoteStatusError, setQuoteStatusError] = useState<string | null>(null);
+  const {
+    agencyServiceBusy,
+    agencyServiceFilters,
+    agencyServiceForm,
+    agencyServiceFormError,
+    agencyServiceSheetOpen,
+    contractFilters,
+    contractStatusBusy,
+    contractStatusError,
+    contractStatusForm,
+    createContractBusy,
+    createContractError,
+    createContractForm,
+    createContractOpen,
+    createQuoteBusy,
+    createQuoteError,
+    createQuoteForm,
+    createQuoteOpen,
+    quoteFilters,
+    quoteStatusBusy,
+    quoteStatusError,
+    quoteStatusForm,
+  } = contractsUiState;
+  const setContractsUiField = <K extends keyof ContractsUiState>(
+    field: K,
+    nextValue: SetStateAction<ContractsUiState[K]>,
+  ) => dispatchContractsUiState(createContractsUiFieldPatch(field, nextValue));
+  const setContractFilters = (nextValue: SetStateAction<ContractFilters>) =>
+    setContractsUiField("contractFilters", nextValue);
+  const setQuoteFilters = (nextValue: SetStateAction<QuoteFilters>) =>
+    setContractsUiField("quoteFilters", nextValue);
+  const [contractsWorkspaceState, dispatchContractsWorkspaceState] = useReducer(
+    contractsWorkspaceReducer,
+    {
+      contracts: [],
+      quotes: [],
+      agencyServices: [],
+      patients: [],
+      orders: [],
+      contractsLoading: false,
+      quotesLoading: false,
+      agencyServicesLoading: false,
+      optionsLoading: false,
+      contractsError: null,
+      quotesError: null,
+      agencyServicesError: null,
+      optionsError: null,
+      selectedContractId: initialContractId,
+      selectedQuoteId: initialQuoteId,
+      contractDetail: null,
+      quoteDetail: null,
+      quoteVersions: [],
+      contractDetailLoading: false,
+      quoteDetailLoading: false,
+      quoteVersionsLoading: false,
+      contractDetailError: null,
+      quoteDetailError: null,
+      quoteVersionsError: null,
+      contractsReloadToken: 0,
+      quotesReloadToken: 0,
+      agencyServicesReloadToken: 0,
+    },
+  );
+  const {
+    agencyServices,
+    agencyServicesError,
+    agencyServicesLoading,
+    agencyServicesReloadToken,
+    contractDetail,
+    contractDetailError,
+    contractDetailLoading,
+    contracts,
+    contractsError,
+    contractsLoading,
+    contractsReloadToken,
+    optionsError,
+    optionsLoading,
+    orders,
+    patients,
+    quoteDetail,
+    quoteDetailError,
+    quoteDetailLoading,
+    quoteVersions,
+    quoteVersionsError,
+    quoteVersionsLoading,
+    quotes,
+    quotesError,
+    quotesLoading,
+    quotesReloadToken,
+    selectedContractId,
+    selectedQuoteId,
+  } = contractsWorkspaceState;
+  const setContracts = (nextValue: SetStateAction<ContractItem[]>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      contracts: resolveStateAction(nextValue, current.contracts),
+    }));
+  const setQuotes = (nextValue: SetStateAction<QuoteItem[]>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      quotes: resolveStateAction(nextValue, current.quotes),
+    }));
+  const setAgencyServices = (nextValue: SetStateAction<AgencyServiceItem[]>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      agencyServices: resolveStateAction(nextValue, current.agencyServices),
+    }));
+  const setPatients = (nextValue: SetStateAction<PatientOption[]>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      patients: resolveStateAction(nextValue, current.patients),
+    }));
+  const setOrders = (nextValue: SetStateAction<OrderOption[]>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      orders: resolveStateAction(nextValue, current.orders),
+    }));
+  const setContractsLoading = (nextValue: SetStateAction<boolean>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      contractsLoading: resolveStateAction(nextValue, current.contractsLoading),
+    }));
+  const setQuotesLoading = (nextValue: SetStateAction<boolean>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      quotesLoading: resolveStateAction(nextValue, current.quotesLoading),
+    }));
+  const setAgencyServicesLoading = (nextValue: SetStateAction<boolean>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      agencyServicesLoading: resolveStateAction(nextValue, current.agencyServicesLoading),
+    }));
+  const setOptionsLoading = (nextValue: SetStateAction<boolean>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      optionsLoading: resolveStateAction(nextValue, current.optionsLoading),
+    }));
+  const setContractsError = (nextValue: SetStateAction<string | null>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      contractsError: resolveStateAction(nextValue, current.contractsError),
+    }));
+  const setQuotesError = (nextValue: SetStateAction<string | null>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      quotesError: resolveStateAction(nextValue, current.quotesError),
+    }));
+  const setAgencyServicesError = (nextValue: SetStateAction<string | null>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      agencyServicesError: resolveStateAction(nextValue, current.agencyServicesError),
+    }));
+  const setOptionsError = (nextValue: SetStateAction<string | null>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      optionsError: resolveStateAction(nextValue, current.optionsError),
+    }));
+  const setSelectedContractId = (nextValue: SetStateAction<string>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      selectedContractId: resolveStateAction(nextValue, current.selectedContractId),
+    }));
+  const setSelectedQuoteId = (nextValue: SetStateAction<string>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      selectedQuoteId: resolveStateAction(nextValue, current.selectedQuoteId),
+    }));
+  const setContractDetail = (nextValue: SetStateAction<ContractItem | null>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      contractDetail: resolveStateAction(nextValue, current.contractDetail),
+    }));
+  const setQuoteDetail = (nextValue: SetStateAction<QuoteItem | null>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      quoteDetail: resolveStateAction(nextValue, current.quoteDetail),
+    }));
+  const setQuoteVersions = (nextValue: SetStateAction<QuoteVersionItem[]>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      quoteVersions: resolveStateAction(nextValue, current.quoteVersions),
+    }));
+  const setContractDetailLoading = (nextValue: SetStateAction<boolean>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      contractDetailLoading: resolveStateAction(nextValue, current.contractDetailLoading),
+    }));
+  const setQuoteDetailLoading = (nextValue: SetStateAction<boolean>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      quoteDetailLoading: resolveStateAction(nextValue, current.quoteDetailLoading),
+    }));
+  const setQuoteVersionsLoading = (nextValue: SetStateAction<boolean>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      quoteVersionsLoading: resolveStateAction(nextValue, current.quoteVersionsLoading),
+    }));
+  const setContractDetailError = (nextValue: SetStateAction<string | null>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      contractDetailError: resolveStateAction(nextValue, current.contractDetailError),
+    }));
+  const setQuoteDetailError = (nextValue: SetStateAction<string | null>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      quoteDetailError: resolveStateAction(nextValue, current.quoteDetailError),
+    }));
+  const setQuoteVersionsError = (nextValue: SetStateAction<string | null>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      quoteVersionsError: resolveStateAction(nextValue, current.quoteVersionsError),
+    }));
+  const setContractsReloadToken = (nextValue: SetStateAction<number>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      contractsReloadToken: resolveStateAction(nextValue, current.contractsReloadToken),
+    }));
+  const setQuotesReloadToken = (nextValue: SetStateAction<number>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      quotesReloadToken: resolveStateAction(nextValue, current.quotesReloadToken),
+    }));
+  const setAgencyServicesReloadToken = (nextValue: SetStateAction<number>) =>
+    dispatchContractsWorkspaceState((current) => ({
+      agencyServicesReloadToken: resolveStateAction(nextValue, current.agencyServicesReloadToken),
+    }));
+  const setAgencyServiceSheetOpen = (nextValue: SetStateAction<boolean>) =>
+    setContractsUiField("agencyServiceSheetOpen", nextValue);
+  const setCreateContractOpen = (nextValue: SetStateAction<boolean>) =>
+    setContractsUiField("createContractOpen", nextValue);
+  const setCreateQuoteOpen = (nextValue: SetStateAction<boolean>) =>
+    setContractsUiField("createQuoteOpen", nextValue);
+  const setCreateContractForm = (
+    nextValue: SetStateAction<ContractFormState>,
+  ) => setContractsUiField("createContractForm", nextValue);
+  const setCreateQuoteForm = (nextValue: SetStateAction<QuoteFormState>) =>
+    setContractsUiField("createQuoteForm", nextValue);
+  const setCreateContractBusy = (nextValue: SetStateAction<boolean>) =>
+    setContractsUiField("createContractBusy", nextValue);
+  const setCreateQuoteBusy = (nextValue: SetStateAction<boolean>) =>
+    setContractsUiField("createQuoteBusy", nextValue);
+  const setCreateContractError = (
+    nextValue: SetStateAction<string | null>,
+  ) => setContractsUiField("createContractError", nextValue);
+  const setCreateQuoteError = (nextValue: SetStateAction<string | null>) =>
+    setContractsUiField("createQuoteError", nextValue);
+  const setAgencyServiceFilters = (
+    nextValue: SetStateAction<AgencyServiceFilters>,
+  ) => setContractsUiField("agencyServiceFilters", nextValue);
+  const setAgencyServiceForm = (
+    nextValue: SetStateAction<AgencyServiceFormState>,
+  ) => setContractsUiField("agencyServiceForm", nextValue);
+  const setAgencyServiceBusy = (nextValue: SetStateAction<boolean>) =>
+    setContractsUiField("agencyServiceBusy", nextValue);
+  const setAgencyServiceFormError = (
+    nextValue: SetStateAction<string | null>,
+  ) => setContractsUiField("agencyServiceFormError", nextValue);
+  const setContractStatusForm = (
+    nextValue: SetStateAction<ContractStatusFormState>,
+  ) => setContractsUiField("contractStatusForm", nextValue);
+  const setQuoteStatusForm = (
+    nextValue: SetStateAction<QuoteStatusFormState>,
+  ) => setContractsUiField("quoteStatusForm", nextValue);
+  const setContractStatusBusy = (nextValue: SetStateAction<boolean>) =>
+    setContractsUiField("contractStatusBusy", nextValue);
+  const setQuoteStatusBusy = (nextValue: SetStateAction<boolean>) =>
+    setContractsUiField("quoteStatusBusy", nextValue);
+  const setContractStatusError = (
+    nextValue: SetStateAction<string | null>,
+  ) => setContractsUiField("contractStatusError", nextValue);
+  const setQuoteStatusError = (nextValue: SetStateAction<string | null>) =>
+    setContractsUiField("quoteStatusError", nextValue);
 
   const deferredContractSearch = useDeferredValue(contractFilters.search);
   const deferredQuoteSearch = useDeferredValue(quoteFilters.search);
@@ -543,7 +855,7 @@ export function ContractsPage() {
               "rounded-full",
               row.is_active
                 ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                : "border-slate-200 bg-slate-100 text-slate-600",
+                : "border-zinc-200 bg-zinc-100 text-zinc-600",
             )}
           >
             {row.is_active ? text.activeState : text.inactiveState}
@@ -959,153 +1271,254 @@ export function ContractsPage() {
     ],
   );
 
+  const startOptionsLoad = useCallback(() => {
+    setOptionsLoading(true);
+    setOptionsError(null);
+  }, []);
+
+  const applyContractOptions = useCallback((result: Awaited<ReturnType<typeof fetchContractsLookups>>) => {
+    setPatients(result.patients);
+    setOrders(result.orders);
+  }, []);
+
+  const failOptionsLoad = useCallback((error: unknown) => {
+    setOptionsError(error instanceof Error ? error.message : t.common_error);
+  }, [t.common_error]);
+
+  const finishOptionsLoad = useCallback(() => {
+    setOptionsLoading(false);
+  }, []);
+
+  const startContractsLoad = useCallback(() => {
+    setContractsLoading(true);
+    setContractsError(null);
+  }, []);
+
+  const applyContracts = useCallback((data: Awaited<ReturnType<typeof fetchContracts>>) => {
+    setContracts(data);
+  }, []);
+
+  const failContractsLoad = useCallback((error: unknown) => {
+    setContractsError(error instanceof Error ? error.message : t.common_error);
+  }, [t.common_error]);
+
+  const finishContractsLoad = useCallback(() => {
+    setContractsLoading(false);
+  }, []);
+
+  const startQuotesLoad = useCallback(() => {
+    setQuotesLoading(true);
+    setQuotesError(null);
+  }, []);
+
+  const applyQuotes = useCallback((data: Awaited<ReturnType<typeof fetchQuotes>>) => {
+    setQuotes(data);
+  }, []);
+
+  const failQuotesLoad = useCallback((error: unknown) => {
+    setQuotesError(error instanceof Error ? error.message : t.common_error);
+  }, [t.common_error]);
+
+  const finishQuotesLoad = useCallback(() => {
+    setQuotesLoading(false);
+  }, []);
+
+  const startAgencyServicesLoad = useCallback(() => {
+    setAgencyServicesLoading(true);
+    setAgencyServicesError(null);
+  }, []);
+
+  const applyAgencyServices = useCallback((data: Awaited<ReturnType<typeof fetchAgencyServices>>) => {
+    setAgencyServices(data);
+  }, []);
+
+  const failAgencyServicesLoad = useCallback((error: unknown) => {
+    setAgencyServicesError(error instanceof Error ? error.message : t.common_error);
+  }, [t.common_error]);
+
+  const finishAgencyServicesLoad = useCallback(() => {
+    setAgencyServicesLoading(false);
+  }, []);
+
+  const resetContractDetail = useCallback(() => {
+    setContractDetail(null);
+    setContractDetailError(null);
+  }, []);
+
+  const startContractDetailLoad = useCallback(() => {
+    setContractDetailLoading(true);
+    setContractDetailError(null);
+  }, []);
+
+  const applyContractDetail = useCallback((data: Awaited<ReturnType<typeof fetchContract>>) => {
+    setContractDetail(data);
+    setContractStatusForm(contractToStatusForm(data));
+  }, []);
+
+  const failContractDetailLoad = useCallback((error: unknown) => {
+    setContractDetailError(error instanceof Error ? error.message : t.common_error);
+  }, [t.common_error]);
+
+  const finishContractDetailLoad = useCallback(() => {
+    setContractDetailLoading(false);
+  }, []);
+
+  const resetQuoteDetail = useCallback(() => {
+    setQuoteDetail(null);
+    setQuoteVersions([]);
+    setQuoteDetailError(null);
+    setQuoteVersionsError(null);
+  }, []);
+
+  const startQuoteDetailLoad = useCallback(() => {
+    setQuoteDetailLoading(true);
+    setQuoteVersionsLoading(true);
+    setQuoteDetailError(null);
+    setQuoteVersionsError(null);
+  }, []);
+
+  const applyQuoteWorkspace = useCallback((workspace: Awaited<ReturnType<typeof fetchQuoteWorkspace>>) => {
+    setQuoteDetail(workspace.quote);
+    setQuoteVersions(workspace.versions);
+    setQuoteStatusForm(quoteToStatusForm(workspace.quote));
+  }, []);
+
+  const failQuoteDetailLoad = useCallback((error: unknown) => {
+    const message = error instanceof Error ? error.message : t.common_error;
+    setQuoteDetailError(message);
+    setQuoteVersionsError(message);
+  }, [t.common_error]);
+
+  const finishQuoteDetailLoad = useCallback(() => {
+    setQuoteDetailLoading(false);
+    setQuoteVersionsLoading(false);
+  }, []);
+
   useEffect(() => {
     let ignore = false;
     async function loadOptions() {
-      setOptionsLoading(true);
-      setOptionsError(null);
+      startOptionsLoad();
       try {
-        const { patients: patientsResult, orders: ordersResult } =
-          await fetchContractsLookups();
+        const result = await fetchContractsLookups();
         if (ignore) return;
-        setPatients(patientsResult);
-        setOrders(ordersResult);
+        applyContractOptions(result);
       } catch (error) {
         if (ignore) return;
-        setOptionsError(error instanceof Error ? error.message : t.common_error);
+        failOptionsLoad(error);
       } finally {
-        if (!ignore) setOptionsLoading(false);
+        if (!ignore) finishOptionsLoad();
       }
     }
     void loadOptions();
     return () => {
       ignore = true;
     };
-  }, [t.common_error]);
+  }, [applyContractOptions, failOptionsLoad, finishOptionsLoad, startOptionsLoad]);
 
   useEffect(() => {
     let ignore = false;
     async function loadContracts() {
-      setContractsLoading(true);
-      setContractsError(null);
+      startContractsLoad();
       try {
         const data = await fetchContracts(buildContractsPath(contractQuery));
-        if (!ignore) setContracts(data);
+        if (!ignore) applyContracts(data);
       } catch (error) {
-        if (!ignore) setContractsError(error instanceof Error ? error.message : t.common_error);
+        if (!ignore) failContractsLoad(error);
       } finally {
-        if (!ignore) setContractsLoading(false);
+        if (!ignore) finishContractsLoad();
       }
     }
     void loadContracts();
     return () => {
       ignore = true;
     };
-  }, [contractQuery, contractsReloadToken, t.common_error]);
+  }, [applyContracts, contractQuery, contractsReloadToken, failContractsLoad, finishContractsLoad, startContractsLoad]);
 
   useEffect(() => {
     let ignore = false;
     async function loadQuotes() {
-      setQuotesLoading(true);
-      setQuotesError(null);
+      startQuotesLoad();
       try {
         const data = await fetchQuotes(buildQuotesPath(quoteQuery));
-        if (!ignore) setQuotes(data);
+        if (!ignore) applyQuotes(data);
       } catch (error) {
-        if (!ignore) setQuotesError(error instanceof Error ? error.message : t.common_error);
+        if (!ignore) failQuotesLoad(error);
       } finally {
-        if (!ignore) setQuotesLoading(false);
+        if (!ignore) finishQuotesLoad();
       }
     }
     void loadQuotes();
     return () => {
       ignore = true;
     };
-  }, [quoteQuery, quotesReloadToken, t.common_error]);
+  }, [applyQuotes, failQuotesLoad, finishQuotesLoad, quoteQuery, quotesReloadToken, startQuotesLoad]);
 
   useEffect(() => {
     let ignore = false;
     async function loadAgencyServices() {
-      setAgencyServicesLoading(true);
-      setAgencyServicesError(null);
+      startAgencyServicesLoad();
       try {
         const data = await fetchAgencyServices(buildAgencyServicesPath(agencyServiceQuery));
-        if (!ignore) setAgencyServices(data);
+        if (!ignore) applyAgencyServices(data);
       } catch (error) {
         if (!ignore) {
-          setAgencyServicesError(
-            error instanceof Error ? error.message : t.common_error,
-          );
+          failAgencyServicesLoad(error);
         }
       } finally {
-        if (!ignore) setAgencyServicesLoading(false);
+        if (!ignore) finishAgencyServicesLoad();
       }
     }
     void loadAgencyServices();
     return () => {
       ignore = true;
     };
-  }, [agencyServiceQuery, agencyServicesReloadToken, t.common_error]);
+  }, [agencyServiceQuery, agencyServicesReloadToken, applyAgencyServices, failAgencyServicesLoad, finishAgencyServicesLoad, startAgencyServicesLoad]);
 
   useEffect(() => {
     if (!selectedContractId) {
-      setContractDetail(null);
-      setContractDetailError(null);
+      resetContractDetail();
       return;
     }
     let ignore = false;
     async function loadContractDetail() {
-      setContractDetailLoading(true);
-      setContractDetailError(null);
+      startContractDetailLoad();
       try {
         const data = await fetchContract(selectedContractId);
         if (ignore) return;
-        setContractDetail(data);
-        setContractStatusForm(contractToStatusForm(data));
+        applyContractDetail(data);
       } catch (error) {
         if (!ignore) {
-          setContractDetailError(error instanceof Error ? error.message : t.common_error);
+          failContractDetailLoad(error);
         }
       } finally {
-        if (!ignore) setContractDetailLoading(false);
+        if (!ignore) finishContractDetailLoad();
       }
     }
     void loadContractDetail();
     return () => {
       ignore = true;
     };
-  }, [selectedContractId, contractsReloadToken, t.common_error]);
+  }, [applyContractDetail, contractsReloadToken, failContractDetailLoad, finishContractDetailLoad, resetContractDetail, selectedContractId, startContractDetailLoad]);
 
   useEffect(() => {
     if (!selectedQuoteId) {
-      setQuoteDetail(null);
-      setQuoteVersions([]);
-      setQuoteDetailError(null);
-      setQuoteVersionsError(null);
+      resetQuoteDetail();
       return;
     }
     let ignore = false;
     async function loadQuoteDetail() {
-      setQuoteDetailLoading(true);
-      setQuoteVersionsLoading(true);
-      setQuoteDetailError(null);
-      setQuoteVersionsError(null);
+      startQuoteDetailLoad();
       try {
-        const { quote: data, versions } = await fetchQuoteWorkspace(selectedQuoteId);
+        const workspace = await fetchQuoteWorkspace(selectedQuoteId);
         if (ignore) return;
-        setQuoteDetail(data);
-        setQuoteVersions(versions);
-        setQuoteStatusForm(quoteToStatusForm(data));
+        applyQuoteWorkspace(workspace);
       } catch (error) {
         if (!ignore) {
-          const message = error instanceof Error ? error.message : t.common_error;
-          setQuoteDetailError(message);
-          setQuoteVersionsError(message);
+          failQuoteDetailLoad(error);
         }
       } finally {
         if (!ignore) {
-          setQuoteDetailLoading(false);
-          setQuoteVersionsLoading(false);
+          finishQuoteDetailLoad();
         }
       }
     }
@@ -1113,7 +1526,7 @@ export function ContractsPage() {
     return () => {
       ignore = true;
     };
-  }, [selectedQuoteId, quotesReloadToken, t.common_error]);
+  }, [applyQuoteWorkspace, failQuoteDetailLoad, finishQuoteDetailLoad, quotesReloadToken, resetQuoteDetail, selectedQuoteId, startQuoteDetailLoad]);
 
   async function handleCreateContract(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1387,15 +1800,15 @@ export function ContractsPage() {
 
             <div className="flex items-center gap-2" aria-hidden>
               <span className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-border" />
-              <span className="h-1.5 w-1.5 rounded-full bg-orange-400" />
-              <span className="h-1.5 w-1.5 rounded-full bg-orange-300" />
-              <span className="h-1.5 w-1.5 rounded-full bg-orange-200" />
+              <span className="size-1.5 rounded-full bg-orange-400" />
+              <span className="size-1.5 rounded-full bg-orange-300" />
+              <span className="size-1.5 rounded-full bg-orange-200" />
               <span className="h-px flex-1 bg-gradient-to-r from-border via-border to-transparent" />
             </div>
 
             <AdminToolbar className="rounded-none border-0 bg-transparent p-0 shadow-none">
               <div className="relative min-w-[260px] flex-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -tranzinc-y-1/2 text-muted-foreground" />
                 <Input
                   value={agencyServiceFilters.search}
                   onChange={(event) =>
@@ -1451,7 +1864,7 @@ export function ContractsPage() {
             onRowClick={permissions.canManageCatalog ? handleEditAgencyService : undefined}
             rowAccent={(row) => {
               if (row.id === agencyServiceForm.id) return "bg-sky-500";
-              return row.is_active ? "bg-emerald-500" : "bg-slate-300";
+              return row.is_active ? "bg-emerald-500" : "bg-zinc-300";
             }}
             emptyState={
               <EmptyState
@@ -1484,7 +1897,7 @@ export function ContractsPage() {
               <div className="mt-5 space-y-4 border-b border-border pb-4">
                 <AdminToolbar className="rounded-none border-0 bg-transparent p-0 shadow-none">
                   <div className="relative min-w-[260px] flex-1">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -tranzinc-y-1/2 text-muted-foreground" />
                     <Input
                       value={contractFilters.search}
                       onChange={(event) =>
@@ -1599,7 +2012,7 @@ export function ContractsPage() {
               <div className="mt-5 space-y-4 border-b border-border pb-4">
                 <AdminToolbar className="rounded-none border-0 bg-transparent p-0 shadow-none">
                   <div className="relative min-w-[240px] flex-1">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -tranzinc-y-1/2 text-muted-foreground" />
                     <Input
                       value={quoteFilters.search}
                       onChange={(event) =>
@@ -2188,7 +2601,7 @@ export function ContractsPage() {
                     <div className="mt-5 grid gap-3 md:grid-cols-3">
                       <button
                         type="button"
-                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                         onClick={() => window.open(`/patients?patient=${contractDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
@@ -2198,12 +2611,12 @@ export function ContractsPage() {
                           </p>
                         </div>
                         <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-tranzinc-y-0.5 group-hover:tranzinc-x-0.5" />
                         </span>
                       </button>
                       <button
                         type="button"
-                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                         onClick={() => window.open(`/orders?patient=${contractDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
@@ -2213,12 +2626,12 @@ export function ContractsPage() {
                           </p>
                         </div>
                         <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-tranzinc-y-0.5 group-hover:tranzinc-x-0.5" />
                         </span>
                       </button>
                       <button
                         type="button"
-                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                         onClick={() => window.open(`/documents?patient=${contractDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
@@ -2228,7 +2641,7 @@ export function ContractsPage() {
                           </p>
                         </div>
                         <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-tranzinc-y-0.5 group-hover:tranzinc-x-0.5" />
                         </span>
                       </button>
                     </div>
@@ -2408,7 +2821,7 @@ export function ContractsPage() {
                     <div className="mt-5 grid gap-3 md:grid-cols-4">
                       <button
                         type="button"
-                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                         onClick={() => window.open(`/patients?patient=${quoteDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
@@ -2418,12 +2831,12 @@ export function ContractsPage() {
                           </p>
                         </div>
                         <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-tranzinc-y-0.5 group-hover:tranzinc-x-0.5" />
                         </span>
                       </button>
                       <button
                         type="button"
-                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                         onClick={() => window.open(`/orders?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
@@ -2433,12 +2846,12 @@ export function ContractsPage() {
                           </p>
                         </div>
                         <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-tranzinc-y-0.5 group-hover:tranzinc-x-0.5" />
                         </span>
                       </button>
                       <button
                         type="button"
-                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                         onClick={() => window.open(`/invoices?quote=${quoteDetail.id}&order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
@@ -2448,12 +2861,12 @@ export function ContractsPage() {
                           </p>
                         </div>
                         <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-tranzinc-y-0.5 group-hover:tranzinc-x-0.5" />
                         </span>
                       </button>
                       <button
                         type="button"
-                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                         onClick={() => window.open(`/documents?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
@@ -2463,7 +2876,7 @@ export function ContractsPage() {
                           </p>
                         </div>
                         <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-tranzinc-y-0.5 group-hover:tranzinc-x-0.5" />
                         </span>
                       </button>
                     </div>
@@ -2580,26 +2993,8 @@ export function ContractsPage() {
   );
 }
 
-function DetailField({ label, value }: { label: string; value: ReactNode }) {
-  const rendered =
-    typeof value === "string" && value.includes("{") && value.includes("}")
-      ? (
-          <pre className="whitespace-pre-wrap break-words rounded-xl border border-border bg-muted/20 px-4 py-3 text-xs text-foreground">
-            {value}
-          </pre>
-        )
-      : (
-          <div className="text-sm text-foreground">{value}</div>
-        );
-
-  return (
-    <div className="rounded-xl border border-border bg-muted/20 px-4 py-3">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-        {label}
-      </div>
-      <div className="mt-2">{rendered}</div>
-    </div>
-  );
+export function ContractsPage(...args: Parameters<typeof useContractsPageContent>) {
+  return useContractsPageContent(...args);
 }
 
 function MiniMetric({ label, value }: { label: string; value: ReactNode }) {

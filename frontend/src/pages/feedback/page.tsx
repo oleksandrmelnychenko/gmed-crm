@@ -2,7 +2,7 @@ import {
   startTransition,
   useEffect,
   useMemo,
-  useState,
+  useReducer,
   type Dispatch,
   type FormEvent,
   type ReactNode,
@@ -106,6 +106,89 @@ const FEEDBACK_STATUSES = ["submitted", "reviewed", "archived"];
 const FEEDBACK_SOURCES = ["patient_portal", "staff_capture"];
 
 type SetFeedbackForm = Dispatch<SetStateAction<FeedbackFormState>>;
+type StatePatch<TState> =
+  | Partial<TState>
+  | ((current: TState) => Partial<TState>);
+
+type PatientFeedbackWorkspaceState = {
+  feedback: PortalFeedbackItem[];
+  appointments: PortalAppointmentItem[];
+  form: FeedbackFormState;
+  loading: boolean;
+  refreshing: boolean;
+  submitting: boolean;
+  error: string;
+  notice: string;
+  version: number;
+  activeFeedbackId: string;
+};
+
+type StaffFeedbackWorkspaceState = {
+  feedback: PortalFeedbackItem[];
+  summary: PortalFeedbackSummary | null;
+  patients: PatientOption[];
+  patientAppointments: PatientAppointmentOption[];
+  form: FeedbackFormState;
+  selectedPatientId: string;
+  loading: boolean;
+  refreshing: boolean;
+  submitting: boolean;
+  reviewBusy: boolean;
+  error: string;
+  notice: string;
+  version: number;
+  activeReview: PortalFeedbackItem | null;
+  reviewStatus: string;
+  reviewNote: string;
+  captureOpen: boolean;
+};
+
+function applyStatePatch<TState>(
+  state: TState,
+  patch: StatePatch<TState>,
+): TState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
+function createPatientFeedbackWorkspaceState(): PatientFeedbackWorkspaceState {
+  return {
+    feedback: [],
+    appointments: [],
+    form: blankFeedbackForm(),
+    loading: true,
+    refreshing: false,
+    submitting: false,
+    error: "",
+    notice: "",
+    version: 0,
+    activeFeedbackId: "",
+  };
+}
+
+function createStaffFeedbackWorkspaceState(): StaffFeedbackWorkspaceState {
+  return {
+    feedback: [],
+    summary: null,
+    patients: [],
+    patientAppointments: [],
+    form: blankFeedbackForm(),
+    selectedPatientId: "",
+    loading: true,
+    refreshing: false,
+    submitting: false,
+    reviewBusy: false,
+    error: "",
+    notice: "",
+    version: 0,
+    activeReview: null,
+    reviewStatus: "reviewed",
+    reviewNote: "",
+    captureOpen: false,
+  };
+}
 
 const FEEDBACK_STATUS_LABEL_KEYS = {
   submitted: "feedback_status_submitted",
@@ -218,15 +301,6 @@ function EmptyState({
   );
 }
 
-function DetailField({ label, value }: { label: string; value?: string | null }) {
-  return (
-    <div className={cn("rounded-xl p-3", tokens.surface.mutedCard)}>
-      <p className={tokens.text.eyebrow}>{label}</p>
-      <p className="mt-2 text-sm text-foreground">{value || portalNotSetLabel()}</p>
-    </div>
-  );
-}
-
 function FeedbackSummaryLine({ label, value }: { label: string; value?: string | null }) {
   return (
     <div className="flex min-w-0 items-center gap-2 px-3 py-1.5">
@@ -280,7 +354,7 @@ function FeedbackReviewHeaderVariants({ item, t }: { item: PortalFeedbackItem; t
 
   return (
     <section className="rounded-xl border border-border bg-card">
-      <div className="relative overflow-hidden px-4 py-4">
+      <div className="relative overflow-hidden p-4">
         <span
           className={cn(
             "absolute left-0 top-4 h-12 w-1 rounded-r-full",
@@ -584,18 +658,205 @@ export function FeedbackPage() {
   return <StaffFeedbackWorkspace />;
 }
 
+type PatientFeedbackContentProps = {
+  activeFeedback: PortalFeedbackItem | null;
+  activeFeedbackId: string;
+  availableAppointments: PortalAppointmentItem[];
+  averageOverall: number | null;
+  error: string;
+  feedback: PortalFeedbackItem[];
+  feedbackColumns: ColumnDef<PortalFeedbackItem>[];
+  form: FeedbackFormState;
+  notice: string;
+  promoters: number;
+  refreshing: boolean;
+  submitting: boolean;
+  t: ReturnType<typeof useLang>["t"];
+  setActiveFeedbackId: Dispatch<SetStateAction<string>>;
+  setForm: SetFeedbackForm;
+  setVersion: Dispatch<SetStateAction<number>>;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
+};
+
+function PatientFeedbackContent({
+  activeFeedback,
+  activeFeedbackId,
+  availableAppointments,
+  averageOverall,
+  error,
+  feedback,
+  feedbackColumns,
+  form,
+  notice,
+  promoters,
+  refreshing,
+  submitting,
+  t,
+  setActiveFeedbackId,
+  setForm,
+  setVersion,
+  onSubmit,
+}: PatientFeedbackContentProps) {
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        title={t.feedback_patient_page_title}
+        description={t.feedback_patient_page_description}
+        actions={
+          <Button variant="outline" className="h-9 rounded-lg" onClick={() => setVersion((value) => value + 1)}>
+            {refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+            {t.common_refresh}
+          </Button>
+        }
+      />
+
+      {notice ? <Banner tone="success">{notice}</Banner> : null}
+      {error ? <Banner tone="error">{error}</Banner> : null}
+
+      <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
+        <AdminInlineMetric icon={MessageSquare} label={t.feedback_submitted_feedback_metric} value={feedback.length} tone="sky" />
+        <AdminInlineMetric icon={Star} label={null} value={promoters} tone="emerald" />
+        <AdminInlineMetric
+          icon={BarChart3}
+          label={t.feedback_average_overall_metric}
+          value={averageOverall === null ? portalNotSetLabel() : formatPortalAverage(averageOverall)}
+          tone="amber"
+        />
+        <AdminInlineMetric icon={Users} label={t.feedback_available_visits_metric} value={availableAppointments.length} tone="slate" />
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[1fr_1.2fr]">
+        <AdminTableCard
+          title={titleWithDot(t.feedback_new_survey_title)}
+          description={t.feedback_new_survey_description}
+        >
+          <form className="space-y-3 p-4" onSubmit={(event) => void onSubmit(event)}>
+            <Field label={t.feedback_visit}>
+              <NativeComboboxSelect
+                value={form.appointmentId || "__general__"}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    appointmentId:
+                      event.target.value === "__general__" || !event.target.value
+                        ? ""
+                        : event.target.value,
+                  }))
+                }
+                className={selectClassName}
+              >
+                <option value="__general__">{t.feedback_general_feedback}</option>
+                {availableAppointments.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {appointmentOptionLabel(item)}
+                  </option>
+                ))}
+              </NativeComboboxSelect>
+            </Field>
+
+            <ScoreGrid t={t} form={form} setForm={setForm} />
+            <FeedbackFormNotes t={t} form={form} setForm={setForm} />
+
+            <Button type="submit" className="h-9 rounded-lg" disabled={submitting}>
+              {submitting ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
+              {t.feedback_submit_button}
+            </Button>
+          </form>
+        </AdminTableCard>
+
+        <AdminTableCard
+          title={titleWithDot(t.feedback_history_title)}
+          description={t.feedback_history_description}
+          count={feedback.length}
+        >
+          <div className="p-3">
+            <DataTable
+              rows={feedback}
+              columns={feedbackColumns}
+              rowId={(row) => row.id}
+              activeRowId={activeFeedbackId || null}
+              onRowClick={(row) => setActiveFeedbackId(row.id)}
+              emptyState={
+                <EmptyState
+                  title={t.feedback_empty_title}
+                  description={t.feedback_empty_description}
+                />
+              }
+            />
+          </div>
+        </AdminTableCard>
+      </div>
+
+      <Sheet open={Boolean(activeFeedback)} onOpenChange={(open) => !open && setActiveFeedbackId("")}>
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
+          <AdminSheetScaffold
+            title={t.feedback_detail_title}
+            description={t.feedback_detail_description}
+          >
+            {activeFeedback ? feedbackCard(activeFeedback, t) : null}
+          </AdminSheetScaffold>
+        </SheetContent>
+      </Sheet>
+    </div>
+  );
+}
+
 function PatientFeedbackWorkspace() {
   const { t } = useLang();
-  const [feedback, setFeedback] = useState<PortalFeedbackItem[]>([]);
-  const [appointments, setAppointments] = useState<PortalAppointmentItem[]>([]);
-  const [form, setForm] = useState<FeedbackFormState>(blankFeedbackForm());
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [version, setVersion] = useState(0);
-  const [activeFeedbackId, setActiveFeedbackId] = useState("");
+  const [patientState, dispatchPatientState] = useReducer(
+    (
+      state: PatientFeedbackWorkspaceState,
+      patch: StatePatch<PatientFeedbackWorkspaceState>,
+    ) => applyStatePatch(state, patch),
+    undefined,
+    createPatientFeedbackWorkspaceState,
+  );
+  const {
+    feedback,
+    appointments,
+    form,
+    loading,
+    refreshing,
+    submitting,
+    error,
+    notice,
+    version,
+    activeFeedbackId,
+  } = patientState;
+
+  const setForm = useMemo<SetFeedbackForm>(
+    () => (nextValue) => {
+      dispatchPatientState((current) => ({
+        form:
+          typeof nextValue === "function"
+            ? nextValue(current.form)
+            : nextValue,
+      }));
+    },
+    [],
+  );
+  const setVersion = useMemo<Dispatch<SetStateAction<number>>>(
+    () => (nextValue) => {
+      dispatchPatientState((current) => ({
+        version:
+          typeof nextValue === "function"
+            ? nextValue(current.version)
+            : nextValue,
+      }));
+    },
+    [],
+  );
+  const setActiveFeedbackId = useMemo<Dispatch<SetStateAction<string>>>(
+    () => (nextValue) => {
+      dispatchPatientState((current) => ({
+        activeFeedbackId:
+          typeof nextValue === "function"
+            ? nextValue(current.activeFeedbackId)
+            : nextValue,
+      }));
+    },
+    [],
+  );
 
   useDebouncedRealtimeSubscription(FEEDBACK_REALTIME_EVENTS, () => {
     clearApiCache("/me/feedback");
@@ -605,32 +866,36 @@ function PatientFeedbackWorkspace() {
 
   useEffect(() => {
     let cancelled = false;
+    const initialLoad = loading;
 
     async function load() {
-      if (loading) setRefreshing(false);
-      else setRefreshing(true);
+      dispatchPatientState({
+        refreshing: !initialLoad,
+      });
 
       try {
         const { feedback: feedbackRows, appointments: appointmentRows } =
           await fetchPatientFeedbackWorkspace();
         if (cancelled) return;
         startTransition(() => {
-          setFeedback(feedbackRows);
-          setAppointments(appointmentRows);
-          setError("");
+          dispatchPatientState({
+            feedback: feedbackRows,
+            appointments: appointmentRows,
+            error: "",
+            loading: false,
+            refreshing: false,
+          });
         });
       } catch (err) {
         if (cancelled) return;
-        setError(
-          err instanceof Error
-            ? err.message
-            : t.feedback_workspace_load_error,
-        );
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-          setRefreshing(false);
-        }
+        dispatchPatientState({
+          error:
+            err instanceof Error
+              ? err.message
+              : t.feedback_workspace_load_error,
+          loading: false,
+          refreshing: false,
+        });
       }
     }
 
@@ -638,10 +903,15 @@ function PatientFeedbackWorkspace() {
     return () => {
       cancelled = true;
     };
-  }, [loading, version, t]);
+  }, [version, t]);
 
   const ratedAppointmentIds = useMemo(
-    () => new Set(feedback.map((item) => item.appointment_id).filter(Boolean) as string[]),
+    () =>
+      new Set(
+        feedback.flatMap((item) =>
+          item.appointment_id ? [item.appointment_id] : [],
+        ),
+      ),
     [feedback],
   );
 
@@ -752,9 +1022,11 @@ function PatientFeedbackWorkspace() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setSubmitting(true);
-    setError("");
-    setNotice("");
+    dispatchPatientState({
+      submitting: true,
+      error: "",
+      notice: "",
+    });
 
     try {
       await submitPatientFeedback({
@@ -775,19 +1047,20 @@ function PatientFeedbackWorkspace() {
         comments: form.comments.trim() || null,
         improvement_notes: form.improvementNotes.trim() || null,
       });
-      setForm(blankFeedbackForm());
-      setNotice(
-        t.feedback_submit_success,
-      );
-      setVersion((value) => value + 1);
+      dispatchPatientState((current) => ({
+        form: blankFeedbackForm(),
+        notice: t.feedback_submit_success,
+        version: current.version + 1,
+        submitting: false,
+      }));
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : t.feedback_submit_error,
-      );
-    } finally {
-      setSubmitting(false);
+      dispatchPatientState({
+        error:
+          err instanceof Error
+            ? err.message
+            : t.feedback_submit_error,
+        submitting: false,
+      });
     }
   }
 
@@ -800,151 +1073,139 @@ function PatientFeedbackWorkspace() {
   }
 
   return (
-    <div className="space-y-4">
-      <PageHeader
-        title={t.feedback_patient_page_title}
-        description={t.feedback_patient_page_description}
-        actions={
-          <Button variant="outline" className="h-9 rounded-lg" onClick={() => setVersion((value) => value + 1)}>
-            {refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-            {t.common_refresh}
-          </Button>
-        }
-      />
-
-      {notice ? <Banner tone="success">{notice}</Banner> : null}
-      {error ? <Banner tone="error">{error}</Banner> : null}
-
-      <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
-        <AdminInlineMetric
-          icon={MessageSquare}
-          label={t.feedback_submitted_feedback_metric}
-          value={feedback.length}
-          tone="sky"
-        />
-        <AdminInlineMetric
-          icon={Star}
-          label={null}
-          value={promoters}
-          tone="emerald"
-        />
-        <AdminInlineMetric
-          icon={BarChart3}
-          label={t.feedback_average_overall_metric}
-          value={averageOverall === null ? portalNotSetLabel() : formatPortalAverage(averageOverall)}
-          tone="amber"
-        />
-        <AdminInlineMetric
-          icon={Users}
-          label={t.feedback_available_visits_metric}
-          value={availableAppointments.length}
-          tone="slate"
-        />
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[1fr_1.2fr]">
-        <AdminTableCard
-          title={titleWithDot(t.feedback_new_survey_title)}
-          description={t.feedback_new_survey_description}
-        >
-          <form className="space-y-3 p-4" onSubmit={(event) => void handleSubmit(event)}>
-            <Field label={t.feedback_visit}>
-              <NativeComboboxSelect
-                value={form.appointmentId || "__general__"}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    appointmentId:
-                      event.target.value === "__general__" || !event.target.value
-                        ? ""
-                        : event.target.value,
-                  }))
-                }
-                className={selectClassName}
-              >
-                <option value="__general__">
-                    {t.feedback_general_feedback}
-                  </option>
-                {availableAppointments.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {appointmentOptionLabel(item)}
-                  </option>
-                ))}
-              </NativeComboboxSelect>
-            </Field>
-
-            <ScoreGrid t={t} form={form} setForm={setForm} />
-            <FeedbackFormNotes t={t} form={form} setForm={setForm} />
-
-            <Button type="submit" className="h-9 rounded-lg" disabled={submitting}>
-              {submitting ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
-              {t.feedback_submit_button}
-            </Button>
-          </form>
-        </AdminTableCard>
-
-        <AdminTableCard
-          title={titleWithDot(t.feedback_history_title)}
-          description={t.feedback_history_description}
-          count={feedback.length}
-        >
-          <div className="p-3">
-            <DataTable
-              rows={feedback}
-              columns={feedbackColumns}
-              rowId={(row) => row.id}
-              activeRowId={activeFeedbackId || null}
-              onRowClick={(row) => setActiveFeedbackId(row.id)}
-              emptyState={
-                <EmptyState
-                  title={t.feedback_empty_title}
-                  description={t.feedback_empty_description}
-                />
-              }
-            />
-          </div>
-        </AdminTableCard>
-      </div>
-
-      <Sheet open={Boolean(activeFeedback)} onOpenChange={(open) => !open && setActiveFeedbackId("")}>
-        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
-          <AdminSheetScaffold
-            title={t.feedback_detail_title}
-            description={t.feedback_detail_description}
-          >
-            {activeFeedback ? feedbackCard(activeFeedback, t) : null}
-          </AdminSheetScaffold>
-        </SheetContent>
-      </Sheet>
-    </div>
+    <PatientFeedbackContent
+      activeFeedback={activeFeedback}
+      activeFeedbackId={activeFeedbackId}
+      availableAppointments={availableAppointments}
+      averageOverall={averageOverall}
+      error={error}
+      feedback={feedback}
+      feedbackColumns={feedbackColumns}
+      form={form}
+      notice={notice}
+      promoters={promoters}
+      refreshing={refreshing}
+      submitting={submitting}
+      t={t}
+      setActiveFeedbackId={setActiveFeedbackId}
+      setForm={setForm}
+      setVersion={setVersion}
+      onSubmit={handleSubmit}
+    />
   );
 }
 
-function StaffFeedbackWorkspace() {
+function useStaffFeedbackWorkspaceContent() {
   const { user } = useAuth();
   const { t } = useLang();
   const canViewWorkspace = canViewStaffFeedback(user?.role);
   const canCapture = roleCanCaptureFeedback(user?.role);
 
-  const [feedback, setFeedback] = useState<PortalFeedbackItem[]>([]);
-  const [summary, setSummary] = useState<PortalFeedbackSummary | null>(null);
-  const [patients, setPatients] = useState<PatientOption[]>([]);
-  const [patientAppointments, setPatientAppointments] = useState<PatientAppointmentOption[]>([]);
-  const [form, setForm] = useState<FeedbackFormState>(blankFeedbackForm());
-  const [selectedPatientId, setSelectedPatientId] = useState("");
+  const [staffState, dispatchStaffState] = useReducer(
+    (
+      state: StaffFeedbackWorkspaceState,
+      patch: StatePatch<StaffFeedbackWorkspaceState>,
+    ) => applyStatePatch(state, patch),
+    undefined,
+    createStaffFeedbackWorkspaceState,
+  );
+  const {
+    feedback,
+    summary,
+    patients,
+    patientAppointments,
+    form,
+    selectedPatientId,
+    loading,
+    refreshing,
+    submitting,
+    reviewBusy,
+    error,
+    notice,
+    version,
+    activeReview,
+    reviewStatus,
+    reviewNote,
+    captureOpen,
+  } = staffState;
 
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [reviewBusy, setReviewBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [version, setVersion] = useState(0);
-
-  const [activeReview, setActiveReview] = useState<PortalFeedbackItem | null>(null);
-  const [reviewStatus, setReviewStatus] = useState("reviewed");
-  const [reviewNote, setReviewNote] = useState("");
-  const [captureOpen, setCaptureOpen] = useState(false);
+  const setForm = useMemo<SetFeedbackForm>(
+    () => (nextValue) => {
+      dispatchStaffState((current) => ({
+        form:
+          typeof nextValue === "function"
+            ? nextValue(current.form)
+            : nextValue,
+      }));
+    },
+    [],
+  );
+  const setVersion = useMemo<Dispatch<SetStateAction<number>>>(
+    () => (nextValue) => {
+      dispatchStaffState((current) => ({
+        version:
+          typeof nextValue === "function"
+            ? nextValue(current.version)
+            : nextValue,
+      }));
+    },
+    [],
+  );
+  const setSelectedPatientId = useMemo<Dispatch<SetStateAction<string>>>(
+    () => (nextValue) => {
+      dispatchStaffState((current) => ({
+        selectedPatientId:
+          typeof nextValue === "function"
+            ? nextValue(current.selectedPatientId)
+            : nextValue,
+      }));
+    },
+    [],
+  );
+  const setCaptureOpen = useMemo<Dispatch<SetStateAction<boolean>>>(
+    () => (nextValue) => {
+      dispatchStaffState((current) => ({
+        captureOpen:
+          typeof nextValue === "function"
+            ? nextValue(current.captureOpen)
+            : nextValue,
+      }));
+    },
+    [],
+  );
+  const setActiveReview = useMemo<Dispatch<SetStateAction<PortalFeedbackItem | null>>>(
+    () => (nextValue) => {
+      dispatchStaffState((current) => ({
+        activeReview:
+          typeof nextValue === "function"
+            ? nextValue(current.activeReview)
+            : nextValue,
+      }));
+    },
+    [],
+  );
+  const setReviewStatus = useMemo<Dispatch<SetStateAction<string>>>(
+    () => (nextValue) => {
+      dispatchStaffState((current) => ({
+        reviewStatus:
+          typeof nextValue === "function"
+            ? nextValue(current.reviewStatus)
+            : nextValue,
+      }));
+    },
+    [],
+  );
+  const setReviewNote = useMemo<Dispatch<SetStateAction<string>>>(
+    () => (nextValue) => {
+      dispatchStaffState((current) => ({
+        reviewNote:
+          typeof nextValue === "function"
+            ? nextValue(current.reviewNote)
+            : nextValue,
+      }));
+    },
+    [],
+  );
 
   useDebouncedRealtimeSubscription(FEEDBACK_REALTIME_EVENTS, () => {
     if (!canViewWorkspace) return;
@@ -956,18 +1217,22 @@ function StaffFeedbackWorkspace() {
   useEffect(() => {
     let cancelled = false;
     if (!canViewWorkspace) {
-      setFeedback([]);
-      setSummary(null);
-      setLoading(false);
-      setRefreshing(false);
+      dispatchStaffState({
+        feedback: [],
+        summary: null,
+        loading: false,
+        refreshing: false,
+      });
       return () => {
         cancelled = true;
       };
     }
+    const initialLoad = loading;
 
     async function load() {
-      if (loading) setRefreshing(false);
-      else setRefreshing(true);
+      dispatchStaffState({
+        refreshing: !initialLoad,
+      });
 
       try {
         const {
@@ -976,22 +1241,24 @@ function StaffFeedbackWorkspace() {
         } = await fetchStaffFeedbackWorkspace("");
         if (cancelled) return;
         startTransition(() => {
-          setFeedback(feedbackRows);
-          setSummary(summaryData);
-          setError("");
+          dispatchStaffState({
+            feedback: feedbackRows,
+            summary: summaryData,
+            error: "",
+            loading: false,
+            refreshing: false,
+          });
         });
       } catch (err) {
         if (cancelled) return;
-        setError(
-          err instanceof Error
-            ? err.message
-            : t.feedback_workspace_load_error,
-        );
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-          setRefreshing(false);
-        }
+        dispatchStaffState({
+          error:
+            err instanceof Error
+              ? err.message
+              : t.feedback_workspace_load_error,
+          loading: false,
+          refreshing: false,
+        });
       }
     }
 
@@ -999,7 +1266,7 @@ function StaffFeedbackWorkspace() {
     return () => {
       cancelled = true;
     };
-  }, [canViewWorkspace, loading, version, t]);
+  }, [canViewWorkspace, version, t]);
 
   useEffect(() => {
     if (!canViewWorkspace || !canCapture) return;
@@ -1008,9 +1275,9 @@ function StaffFeedbackWorkspace() {
     async function loadPatients() {
       try {
         const rows = await fetchFeedbackPatients();
-        if (!cancelled) setPatients(rows);
+        if (!cancelled) dispatchStaffState({ patients: rows });
       } catch {
-        if (!cancelled) setPatients([]);
+        if (!cancelled) dispatchStaffState({ patients: [] });
       }
     }
 
@@ -1022,8 +1289,10 @@ function StaffFeedbackWorkspace() {
 
   useEffect(() => {
     if (!canViewWorkspace || !canCapture || !selectedPatientId) {
-      setPatientAppointments([]);
-      setForm((current) => ({ ...current, appointmentId: "" }));
+      dispatchStaffState((current) => ({
+        patientAppointments: [],
+        form: { ...current.form, appointmentId: "" },
+      }));
       return;
     }
 
@@ -1031,9 +1300,9 @@ function StaffFeedbackWorkspace() {
     async function loadAppointments() {
       try {
         const rows = await fetchFeedbackPatientAppointments(selectedPatientId);
-        if (!cancelled) setPatientAppointments(rows);
+        if (!cancelled) dispatchStaffState({ patientAppointments: rows });
       } catch {
-        if (!cancelled) setPatientAppointments([]);
+        if (!cancelled) dispatchStaffState({ patientAppointments: [] });
       }
     }
 
@@ -1272,21 +1541,25 @@ function StaffFeedbackWorkspace() {
   );
 
   function openReview(item: PortalFeedbackItem) {
-    setActiveReview(item);
-    setReviewStatus(item.status === "archived" ? "archived" : "reviewed");
-    setReviewNote(item.review_note || "");
+    dispatchStaffState({
+      activeReview: item,
+      reviewStatus: item.status === "archived" ? "archived" : "reviewed",
+      reviewNote: item.review_note || "",
+    });
   }
 
   async function handleCapture(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedPatientId) {
-      setError(t.feedback_select_patient_error);
+      dispatchStaffState({ error: t.feedback_select_patient_error });
       return;
     }
 
-    setSubmitting(true);
-    setError("");
-    setNotice("");
+    dispatchStaffState({
+      submitting: true,
+      error: "",
+      notice: "",
+    });
 
     try {
       await captureStaffFeedback({
@@ -1309,20 +1582,23 @@ function StaffFeedbackWorkspace() {
         improvement_notes: form.improvementNotes.trim() || null,
         internal_note: form.internalNote.trim() || null,
       });
-      setForm(blankFeedbackForm());
-      setSelectedPatientId("");
-      setPatientAppointments([]);
-      setCaptureOpen(false);
-      setNotice(t.feedback_capture_notice);
-      setVersion((value) => value + 1);
+      dispatchStaffState((current) => ({
+        form: blankFeedbackForm(),
+        selectedPatientId: "",
+        patientAppointments: [],
+        captureOpen: false,
+        notice: t.feedback_capture_notice,
+        version: current.version + 1,
+        submitting: false,
+      }));
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : t.feedback_capture_error,
-      );
-    } finally {
-      setSubmitting(false);
+      dispatchStaffState({
+        error:
+          err instanceof Error
+            ? err.message
+            : t.feedback_capture_error,
+        submitting: false,
+      });
     }
   }
 
@@ -1330,30 +1606,33 @@ function StaffFeedbackWorkspace() {
     event.preventDefault();
     if (!activeReview) return;
 
-    setReviewBusy(true);
-    setError("");
-    setNotice("");
+    dispatchStaffState({
+      reviewBusy: true,
+      error: "",
+      notice: "",
+    });
 
     try {
       await reviewFeedback(activeReview.id, {
         status: reviewStatus,
         review_note: reviewNote.trim() || null,
       });
-      setActiveReview(null);
-      setReviewStatus("reviewed");
-      setReviewNote("");
-      setNotice(
-        t.feedback_review_notice,
-      );
-      setVersion((value) => value + 1);
+      dispatchStaffState((current) => ({
+        activeReview: null,
+        reviewStatus: "reviewed",
+        reviewNote: "",
+        notice: t.feedback_review_notice,
+        version: current.version + 1,
+        reviewBusy: false,
+      }));
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : t.feedback_review_error,
-      );
-    } finally {
-      setReviewBusy(false);
+      dispatchStaffState({
+        error:
+          err instanceof Error
+            ? err.message
+            : t.feedback_review_error,
+        reviewBusy: false,
+      });
     }
   }
 
@@ -1668,4 +1947,8 @@ function StaffFeedbackWorkspace() {
       </Sheet>
     </div>
   );
+}
+
+function StaffFeedbackWorkspace(...args: Parameters<typeof useStaffFeedbackWorkspaceContent>) {
+  return useStaffFeedbackWorkspaceContent(...args);
 }

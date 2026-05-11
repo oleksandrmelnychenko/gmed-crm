@@ -9,10 +9,15 @@ import {
 } from "./support/live-helpers";
 
 function privacyQueueRow(page: Page, requestType: RegExp, reason: string) {
+  const escapedReason = reason.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const flags = requestType.flags.replace("g", "");
+  const combinedMatch = new RegExp(
+    `(${requestType.source}[\\s\\S]*${escapedReason})|(${escapedReason}[\\s\\S]*${requestType.source})`,
+    flags,
+  );
   return page
     .getByRole("row")
-    .filter({ hasText: requestType })
-    .filter({ hasText: reason })
+    .filter({ hasText: combinedMatch })
     .last();
 }
 
@@ -122,16 +127,18 @@ test.describe("compliance live workflows", () => {
     const scenario = await bootstrapFullSmokeScenario(request);
     const reason = `Browser erasure request ${scenario.tag}`;
 
-    const pmApi = await authenticateApiClient(
-      request,
-      scenario.credentials.pm.email,
-      scenario.credentials.password,
-    );
-    const ceoApi = await authenticateApiClient(
-      request,
-      scenario.credentials.ceo.email,
-      scenario.credentials.password,
-    );
+    const [pmApi, ceoApi] = await Promise.all([
+      authenticateApiClient(
+        request,
+        scenario.credentials.pm.email,
+        scenario.credentials.password,
+      ),
+      authenticateApiClient(
+        request,
+        scenario.credentials.ceo.email,
+        scenario.credentials.password,
+      ),
+    ]);
 
     const createResponse = await request.post(
       `${pmApi.backendUrl}/api/v1/admin/compliance/patient/${scenario.patient.id}/privacy-requests`,
@@ -195,11 +202,7 @@ test.describe("compliance live workflows", () => {
     reviewSheet = await openQueueReviewSheet(page, queueRow);
     await reviewSheet.getByRole("button", { name: /Ausführen|Execute/i }).click();
     await expect(
-      page
-        .getByRole("row")
-        .filter({ hasText: /Löschantrag|Erasure/i })
-        .filter({ hasText: reason })
-        .last()
+      privacyQueueRow(page, /Löschantrag|Erasure/i, reason)
         .getByText(/Abgeschlossen|Completed/i),
     ).toBeVisible();
     await expect(page.getByText(/"request_type": "erasure"/)).toBeVisible();

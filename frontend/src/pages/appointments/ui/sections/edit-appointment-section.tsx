@@ -3,8 +3,9 @@ import {
   memo,
   useEffect,
   useMemo,
-  useState,
+  useReducer,
   type FormEvent,
+  type SetStateAction,
 } from "react";
 import { LoaderCircle } from "lucide-react";
 
@@ -67,6 +68,70 @@ type EditAppointmentSectionProps = {
   onSaved: (notice: string) => void;
 };
 
+type EditAppointmentSectionState = {
+  form: AppointmentFormState;
+  recurrenceScope: AppointmentRecurringActionScope;
+  doctors: DoctorOption[];
+  conflicts: ConflictSummary | null;
+  error: string;
+  busy: boolean;
+};
+
+type EditAppointmentSectionAction =
+  | { type: "patch"; value: Partial<EditAppointmentSectionState> }
+  | {
+      type: "update";
+      updater: (state: EditAppointmentSectionState) => EditAppointmentSectionState;
+    };
+
+function createEditAppointmentSectionState(
+  detail: AppointmentDetail,
+): EditAppointmentSectionState {
+  return {
+    form: buildEditAppointmentForm(detail),
+    recurrenceScope: "single",
+    doctors: [],
+    conflicts: null,
+    error: "",
+    busy: false,
+  };
+}
+
+function editAppointmentSectionReducer(
+  state: EditAppointmentSectionState,
+  action: EditAppointmentSectionAction,
+): EditAppointmentSectionState {
+  switch (action.type) {
+    case "patch":
+      return { ...state, ...action.value };
+    case "update":
+      return action.updater(state);
+    default:
+      return state;
+  }
+}
+
+function createEditAppointmentFieldAction<K extends keyof EditAppointmentSectionState>(
+  field: K,
+  value: SetStateAction<EditAppointmentSectionState[K]>,
+): EditAppointmentSectionAction {
+  return {
+    type: "update",
+    updater: (state) => {
+      const currentValue = state[field];
+      const nextValue =
+        typeof value === "function"
+          ? (value as (
+              current: EditAppointmentSectionState[K],
+            ) => EditAppointmentSectionState[K])(currentValue)
+          : value;
+
+      if (Object.is(currentValue, nextValue)) return state;
+      return { ...state, [field]: nextValue };
+    },
+  };
+}
+
 const selectClassName = appointmentSelectControlClassName;
 const inputClassName = appointmentSlateInputClassName;
 
@@ -76,7 +141,12 @@ function withEllipsis(value: string | null | undefined) {
   return /[.…]$/u.test(normalized) ? normalized : `${normalized}…`;
 }
 
-function EditAppointmentSection({
+function EditAppointmentSection(props: EditAppointmentSectionProps) {
+  const resetKey = useMemo(() => JSON.stringify(props.detail), [props.detail]);
+  return <EditAppointmentSectionContent key={resetKey} {...props} />;
+}
+
+function useEditAppointmentSectionContentContent({
   detail,
   appointments,
   providers,
@@ -89,24 +159,25 @@ function EditAppointmentSection({
   const interpreterFieldLabel =
     tr.role_interpreter ??
     appointmentText("Dolmetscher", "Переводчик", "Interpreter");
-  const [form, setForm] = useState<AppointmentFormState>(() =>
-    buildEditAppointmentForm(detail),
-  );
-  const [recurrenceScope, setRecurrenceScope] =
-    useState<AppointmentRecurringActionScope>("single");
-  const [doctors, setDoctors] = useState<DoctorOption[]>([]);
-  const [conflicts, setConflicts] = useState<ConflictSummary | null>(null);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    setForm(buildEditAppointmentForm(detail));
-    setRecurrenceScope("single");
-    setDoctors([]);
-    setConflicts(null);
-    setError("");
-    setBusy(false);
-  }, [detail]);
+  const [{ form, recurrenceScope, doctors, conflicts, error, busy }, dispatchEditState] =
+    useReducer(
+      editAppointmentSectionReducer,
+      detail,
+      createEditAppointmentSectionState,
+    );
+  const setForm = (value: SetStateAction<AppointmentFormState>) =>
+    dispatchEditState(createEditAppointmentFieldAction("form", value));
+  const setRecurrenceScope = (
+    value: SetStateAction<AppointmentRecurringActionScope>,
+  ) => dispatchEditState(createEditAppointmentFieldAction("recurrenceScope", value));
+  const setDoctors = (value: SetStateAction<DoctorOption[]>) =>
+    dispatchEditState(createEditAppointmentFieldAction("doctors", value));
+  const setConflicts = (value: SetStateAction<ConflictSummary | null>) =>
+    dispatchEditState(createEditAppointmentFieldAction("conflicts", value));
+  const setError = (value: SetStateAction<string>) =>
+    dispatchEditState(createEditAppointmentFieldAction("error", value));
+  const setBusy = (value: SetStateAction<boolean>) =>
+    dispatchEditState(createEditAppointmentFieldAction("busy", value));
 
   const scheduleWarningLabels = useMemo(
     () => ({
@@ -164,21 +235,41 @@ function EditAppointmentSection({
   ]);
   const debouncedConflictQuery = useDebouncedValue(conflictQuery);
 
+  const clearProviderDoctors = () => {
+    setDoctors([]);
+    setForm((current) =>
+        current.doctorId ? { ...current, doctorId: "" } : current,
+    );
+  };
+
+  const applyProviderDoctors = (rows: Awaited<ReturnType<typeof getProviderDoctors>>) => {
+    setDoctors(rows);
+  };
+
+  const clearDoctors = () => {
+    setDoctors([]);
+  };
+
+  const clearConflicts = () => {
+    setConflicts(null);
+  };
+
+  const applyConflicts = (value: ConflictSummary) => {
+    setConflicts(value);
+  };
+
   useEffect(() => {
     if (!form.providerId) {
-      setDoctors([]);
-      setForm((current) =>
-        current.doctorId ? { ...current, doctorId: "" } : current,
-      );
+      clearProviderDoctors();
       return;
     }
     let active = true;
     getProviderDoctors(form.providerId)
       .then((rows) => {
-        if (active) setDoctors(rows);
+        if (active) applyProviderDoctors(rows);
       })
       .catch(() => {
-        if (active) setDoctors([]);
+        if (active) clearDoctors();
       });
     return () => {
       active = false;
@@ -187,16 +278,16 @@ function EditAppointmentSection({
 
   useEffect(() => {
     if (!debouncedConflictQuery) {
-      setConflicts(null);
+      clearConflicts();
       return;
     }
     let active = true;
     apiFetch<ConflictSummary>(debouncedConflictQuery)
       .then((value) => {
-        if (active) setConflicts(value);
+        if (active) applyConflicts(value);
       })
       .catch(() => {
-        if (active) setConflicts(null);
+        if (active) clearConflicts();
       });
     return () => {
       active = false;
@@ -591,6 +682,10 @@ function EditAppointmentSection({
       </form>
     </section>
   );
+}
+
+function EditAppointmentSectionContent(...args: Parameters<typeof useEditAppointmentSectionContentContent>) {
+  return useEditAppointmentSectionContentContent(...args);
 }
 
 export const MemoizedEditAppointmentSection = memo(EditAppointmentSection);

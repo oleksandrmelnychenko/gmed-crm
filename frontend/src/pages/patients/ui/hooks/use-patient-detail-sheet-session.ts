@@ -1,4 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useReducer,
+  type SetStateAction,
+} from "react";
 
 import { assignPatient } from "../../data/patient-mutations";
 
@@ -9,42 +14,85 @@ type UsePatientDetailSheetSessionParams = {
   refreshDetail: () => void;
 };
 
+type PatientDetailSheetSessionState = {
+  assignmentBusy: boolean;
+  assignmentError: string;
+  selectedAssignee: string;
+};
+
+type PatientDetailSheetSessionPatch =
+  | Partial<PatientDetailSheetSessionState>
+  | ((current: PatientDetailSheetSessionState) => Partial<PatientDetailSheetSessionState>);
+
+function patientDetailSheetSessionReducer(
+  state: PatientDetailSheetSessionState,
+  patch: PatientDetailSheetSessionPatch,
+): PatientDetailSheetSessionState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
 export function usePatientDetailSheetSession({
   detailId,
   detailOpen,
   failedAssignMessage,
   refreshDetail,
 }: UsePatientDetailSheetSessionParams) {
-  const [assignmentBusy, setAssignmentBusy] = useState(false);
-  const [assignmentError, setAssignmentError] = useState("");
-  const [selectedAssignee, setSelectedAssignee] = useState("");
+  const [sessionState, dispatchSessionState] = useReducer(
+    patientDetailSheetSessionReducer,
+    undefined,
+    () => ({
+      assignmentBusy: false,
+      assignmentError: "",
+      selectedAssignee: "",
+    }),
+  );
+  const { assignmentBusy, assignmentError, selectedAssignee } = sessionState;
+
+  const setSelectedAssignee = useCallback((nextValue: SetStateAction<string>) => {
+    dispatchSessionState((current) => ({
+      selectedAssignee:
+        typeof nextValue === "function"
+          ? nextValue(current.selectedAssignee)
+          : nextValue,
+    }));
+  }, []);
 
   useEffect(() => {
     if (!detailOpen || !detailId) {
-      setSelectedAssignee("");
-      setAssignmentError("");
+      dispatchSessionState({
+        selectedAssignee: "",
+        assignmentError: "",
+      });
       return;
     }
 
-    setAssignmentError("");
+    dispatchSessionState({ assignmentError: "" });
   }, [detailId, detailOpen]);
 
   const handleAssignPatient = useCallback(async () => {
     if (!detailId || !selectedAssignee) return;
 
-    setAssignmentBusy(true);
-    setAssignmentError("");
+    dispatchSessionState({
+      assignmentBusy: true,
+      assignmentError: "",
+    });
 
     try {
       await assignPatient(detailId, selectedAssignee);
-      setSelectedAssignee("");
+      dispatchSessionState({
+        selectedAssignee: "",
+        assignmentBusy: false,
+      });
       refreshDetail();
     } catch (error) {
-      setAssignmentError(
-        error instanceof Error ? error.message : failedAssignMessage,
-      );
-    } finally {
-      setAssignmentBusy(false);
+      dispatchSessionState({
+        assignmentError:
+          error instanceof Error ? error.message : failedAssignMessage,
+        assignmentBusy: false,
+      });
     }
   }, [detailId, failedAssignMessage, refreshDetail, selectedAssignee]);
 

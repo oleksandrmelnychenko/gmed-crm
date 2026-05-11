@@ -1,4 +1,4 @@
-import type { ElementType, FormEvent, ReactNode } from "react";
+import { useId, type FormEvent, type ReactNode } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import {
@@ -23,7 +23,7 @@ export function AppointmentWorkspaceSectionIntro({
   accessory?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-muted/20 px-4 py-4 sm:flex-row sm:items-start sm:justify-between">
+    <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-muted/20 p-4 sm:flex-row sm:items-start sm:justify-between">
       <div className="space-y-1">
         <h2 className="text-sm font-semibold text-foreground">{title}</h2>
         <p className="max-w-3xl text-xs text-muted-foreground">{description}</p>
@@ -46,8 +46,11 @@ export function AppointmentClinicalToggleCard({
   description: string;
   onChange: (checked: boolean) => void;
 }) {
+  const id = useId();
   return (
     <label
+      htmlFor={id}
+      aria-label={title}
       className={cn(
         "flex items-start gap-3",
         appointmentPreviewInfoCardClassName,
@@ -55,6 +58,7 @@ export function AppointmentClinicalToggleCard({
       )}
     >
       <input
+        id={id}
         type="checkbox"
         checked={checked}
         disabled={disabled}
@@ -195,42 +199,6 @@ export function AppointmentPreviewSheetLoadingState({
   );
 }
 
-export function AptKpi({
-  icon: Icon,
-  tone,
-  label,
-  value,
-}: {
-  icon: ElementType;
-  tone: "sky" | "emerald" | "amber" | "rose" | "neutral";
-  label: string;
-  value: number | string;
-}) {
-  const toneColor = {
-    sky: "text-sky-600",
-    emerald: "text-emerald-600",
-    amber: "text-amber-600",
-    rose: "text-rose-600",
-    neutral: "text-muted-foreground",
-  }[tone];
-  return (
-    <div className="flex items-center gap-3 px-4 py-3 min-w-0">
-      <Icon
-        strokeWidth={1.6}
-        className={cn("size-[22px] shrink-0", toneColor)}
-      />
-      <div className="min-w-0">
-        <p className="text-[22px] font-semibold tracking-tight text-foreground leading-none tabular-nums">
-          {value}
-        </p>
-        <p className="mt-1 text-[11.5px] text-muted-foreground truncate">
-          {label}
-        </p>
-      </div>
-    </div>
-  );
-}
-
 export function Field({
   label,
   children,
@@ -257,7 +225,7 @@ export function AppointmentSectionHeading({
   return (
     <div className="min-w-0 space-y-1">
       <div className="flex min-w-0 items-center gap-2">
-        <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--brand)]" />
+        <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
         <h3 className={cn(tokens.text.sectionTitle, "truncate")}>{title}</h3>
       </div>
       {description ? (
@@ -270,7 +238,7 @@ export function AppointmentSectionHeading({
 export function AppointmentDotLabel({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-w-0 items-center gap-2">
-      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+      <span className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
       <p className={cn(tokens.text.eyebrow, "truncate")}>{children}</p>
     </div>
   );

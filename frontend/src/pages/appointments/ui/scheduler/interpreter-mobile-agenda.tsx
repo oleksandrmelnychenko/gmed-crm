@@ -94,10 +94,10 @@ function StatsCard({
 }) {
   return (
     <div className="relative flex h-full min-w-0 flex-col rounded-[1.2rem] border border-white/90 bg-white/88 p-3 pr-10 backdrop-blur">
-      <span className="block w-full whitespace-normal break-words text-left text-[11px] font-semibold uppercase leading-tight tracking-[0.08em] text-slate-600">
+      <span className="block w-full whitespace-normal break-words text-left text-[11px] font-semibold uppercase leading-tight tracking-[0.08em] text-zinc-600">
         {label}
       </span>
-      <p className="mt-auto pt-2 text-[2rem] leading-none font-semibold tracking-tight text-slate-950">
+      <p className="mt-auto pt-2 text-[2rem] leading-none font-semibold tracking-tight text-zinc-950">
         {value}
       </p>
       <span
@@ -351,7 +351,7 @@ export function InterpreterMobileAgenda({
                     : ""}
                 </p>
               </div>
-              <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+              <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-600">
                 {section.itemCount}
               </span>
             </div>

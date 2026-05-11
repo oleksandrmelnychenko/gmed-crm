@@ -1,4 +1,12 @@
-import { startTransition, useEffect, useMemo, useState } from "react";
+import {
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useState,
+  type SetStateAction,
+} from "react";
 
 import { apiFetch } from "@/lib/api";
 
@@ -11,6 +19,32 @@ import {
 } from "../model/list-model";
 
 const PATIENTS_LOOKUP_CACHE_TTL_MS = 60_000;
+
+type PatientsListState = {
+  patients: PatientSummary[];
+  listBusy: boolean;
+  listError: string;
+  lastUpdated: Date | null;
+};
+
+type PatientsListAction =
+  | Partial<PatientsListState>
+  | ((state: PatientsListState) => Partial<PatientsListState>);
+
+const INITIAL_PATIENTS_LIST_STATE: PatientsListState = {
+  patients: [],
+  listBusy: true,
+  listError: "",
+  lastUpdated: null,
+};
+
+function patientsListReducer(
+  state: PatientsListState,
+  action: PatientsListAction,
+) {
+  const patch = typeof action === "function" ? action(state) : action;
+  return { ...state, ...patch };
+}
 
 type UsePatientsListDataArgs = {
   canViewPage: boolean;
@@ -27,16 +61,32 @@ export function usePatientsListData({
 }: UsePatientsListDataArgs) {
   const [providers, setProviders] = useState<ProviderOption[]>([]);
   const [doctorOptions, setDoctorOptions] = useState<DoctorOption[]>([]);
-  const [patients, setPatients] = useState<PatientSummary[]>([]);
-  const [listBusy, setListBusy] = useState(true);
-  const [listError, setListError] = useState("");
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [listState, dispatchListState] = useReducer(
+    patientsListReducer,
+    INITIAL_PATIENTS_LIST_STATE,
+  );
 
   const patientsPath = useMemo(() => buildPatientsPath(filters), [filters]);
   const doctors = useMemo(
     () => (filters.providerId ? doctorOptions : []),
     [doctorOptions, filters.providerId]
   );
+
+  const setPatients = useCallback(
+    (nextPatients: SetStateAction<PatientSummary[]>) => {
+      dispatchListState((current) => ({
+        patients:
+          typeof nextPatients === "function"
+            ? nextPatients(current.patients)
+            : nextPatients,
+      }));
+    },
+    [],
+  );
+
+  const setListError = useCallback((listError: string) => {
+    dispatchListState({ listError });
+  }, []);
 
   useEffect(() => {
     if (!canViewPage) return;
@@ -97,19 +147,22 @@ export function usePatientsListData({
             : filters.activeOnly === "true"
               ? items.filter((patient) => patient.is_active)
             : items;
-          startTransition(() => setPatients(filtered));
-          setListError("");
-          setLastUpdated(new Date());
+          startTransition(() => {
+            dispatchListState({
+              patients: filtered,
+              listError: "",
+              lastUpdated: new Date(),
+              listBusy: false,
+            });
+          });
         }
       })
       .catch((error: unknown) => {
         if (!cancelled) {
-          setListError(error instanceof Error ? error.message : commonFailedLoad);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setListBusy(false);
+          dispatchListState({
+            listError: error instanceof Error ? error.message : commonFailedLoad,
+            listBusy: false,
+          });
         }
       });
 
@@ -120,10 +173,10 @@ export function usePatientsListData({
 
   return {
     doctors,
-    lastUpdated,
-    listBusy,
-    listError,
-    patients,
+    lastUpdated: listState.lastUpdated,
+    listBusy: listState.listBusy,
+    listError: listState.listError,
+    patients: listState.patients,
     providers,
     setListError,
     setPatients,

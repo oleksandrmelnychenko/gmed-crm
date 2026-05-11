@@ -4,7 +4,6 @@ import type {
   FilterOperator,
   FilterPredicate,
   FilterValue,
-  SortDir,
   SortStack,
 } from "./types";
 
@@ -156,10 +155,14 @@ export function serializeFilters(filters: readonly FilterPredicate[]): string {
 
 export function parseFilters(raw: string | null | undefined): FilterPredicate[] {
   if (!raw) return [];
-  return raw
-    .split(FILTER_SEP)
-    .map((chunk, i) => parseFilterPredicate(chunk, i))
-    .filter((p): p is FilterPredicate => p !== null);
+  const predicates: FilterPredicate[] = [];
+  raw.split(FILTER_SEP).forEach((chunk, i) => {
+    const predicate = parseFilterPredicate(chunk, i);
+    if (predicate) {
+      predicates.push(predicate);
+    }
+  });
+  return predicates;
 }
 
 export function serializeSort(stack: SortStack): string {
@@ -168,14 +171,15 @@ export function serializeSort(stack: SortStack): string {
 
 export function parseSort(raw: string | null | undefined): SortStack {
   if (!raw) return [];
-  return raw
-    .split(ARRAY_SEP)
-    .map((chunk) => {
-      const [field, dir] = chunk.split(FIELD_SEP);
-      if (!field || (dir !== "asc" && dir !== "desc")) return null;
-      return { field, dir: dir as SortDir };
-    })
-    .filter((s): s is { field: string; dir: SortDir } => s !== null);
+  const stack: SortStack = [];
+  for (const chunk of raw.split(ARRAY_SEP)) {
+    const [field, dir] = chunk.split(FIELD_SEP);
+    if (!field || (dir !== "asc" && dir !== "desc")) {
+      continue;
+    }
+    stack.push({ field, dir });
+  }
+  return stack;
 }
 
 export function serializeHiddenColumns(hidden: readonly string[]): string {
@@ -200,7 +204,7 @@ export type DataTableQueryKeys = {
   hide: string;
 };
 
-export const DEFAULT_QUERY_KEYS: DataTableQueryKeys = {
+const DEFAULT_QUERY_KEYS: DataTableQueryKeys = {
   filters: "filters",
   sort: "sort",
   search: "q",

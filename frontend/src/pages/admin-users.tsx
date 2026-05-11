@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useReducer, type FormEvent, type ReactNode, type SetStateAction } from "react";
 import {
   Mail,
   Plus,
@@ -90,6 +90,12 @@ const ADMIN_USER_REALTIME_EVENTS = [
   "user.mfa_toggled",
 ] as const;
 
+const ADMIN_USER_DATE_FORMATTER = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+});
+
 function initials(name: string) {
   return name
     .split(/\s+/)
@@ -100,11 +106,7 @@ function initials(name: string) {
 
 function formatDate(value: string) {
   try {
-    return new Intl.DateTimeFormat("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }).format(new Date(value));
+    return ADMIN_USER_DATE_FORMATTER.format(new Date(value));
   } catch {
     return value.split("T")[0];
   }
@@ -130,30 +132,139 @@ function DotSection({ title, children }: { title: ReactNode; children: ReactNode
   );
 }
 
-export function AdminUsersPage() {
+type AdminUsersState = {
+  users: User[];
+  loading: boolean;
+  error: string | null;
+  search: string;
+  showCreate: boolean;
+  creating: boolean;
+  createError: string | null;
+  newName: string;
+  newEmail: string;
+  newPassword: string;
+  newPasswordConfirm: string;
+  newRole: string;
+  editUser: User | null;
+  euName: string;
+  euEmail: string;
+  euRole: string;
+  euPassword: string;
+  euSaving: boolean;
+};
+
+type AdminUsersPatch =
+  | Partial<AdminUsersState>
+  | ((current: AdminUsersState) => Partial<AdminUsersState>);
+
+function adminUsersReducer(state: AdminUsersState, patch: AdminUsersPatch): AdminUsersState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
+function createAdminUsersFieldPatch<K extends keyof AdminUsersState>(
+  field: K,
+  value: SetStateAction<AdminUsersState[K]>,
+): AdminUsersPatch {
+  return (current) => {
+    const nextValue =
+      typeof value === "function"
+        ? (value as (previous: AdminUsersState[K]) => AdminUsersState[K])(current[field])
+        : value;
+    return { [field]: nextValue } as Partial<AdminUsersState>;
+  };
+}
+
+function useAdminUsersPageContent() {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
 
-  const [users, setUsers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-
-  const [showCreate, setShowCreate] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [newName, setNewName] = useState("");
-  const [newEmail, setNewEmail] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
-  const [newRole, setNewRole] = useState<string>("patient_manager");
-
-  const [editUser, setEditUser] = useState<User | null>(null);
-  const [euName, setEuName] = useState("");
-  const [euEmail, setEuEmail] = useState("");
-  const [euRole, setEuRole] = useState("");
-  const [euPassword, setEuPassword] = useState("");
-  const [euSaving, setEuSaving] = useState(false);
+  const [adminUsersState, dispatchAdminUsersState] = useReducer(
+    adminUsersReducer,
+    undefined,
+    (): AdminUsersState => ({
+      users: [],
+      loading: true,
+      error: null,
+      search: "",
+      showCreate: false,
+      creating: false,
+      createError: null,
+      newName: "",
+      newEmail: "",
+      newPassword: "",
+      newPasswordConfirm: "",
+      newRole: "patient_manager",
+      editUser: null,
+      euName: "",
+      euEmail: "",
+      euRole: "",
+      euPassword: "",
+      euSaving: false,
+    }),
+  );
+  const {
+    users,
+    loading,
+    error,
+    search,
+    showCreate,
+    creating,
+    createError,
+    newName,
+    newEmail,
+    newPassword,
+    newPasswordConfirm,
+    newRole,
+    editUser,
+    euName,
+    euEmail,
+    euRole,
+    euPassword,
+    euSaving,
+  } = adminUsersState;
+  const setAdminUsersField = <K extends keyof AdminUsersState>(
+    field: K,
+    value: SetStateAction<AdminUsersState[K]>,
+  ) => dispatchAdminUsersState(createAdminUsersFieldPatch(field, value));
+  const setUsers = (value: SetStateAction<User[]>) =>
+    setAdminUsersField("users", value);
+  const setLoading = (value: SetStateAction<boolean>) =>
+    setAdminUsersField("loading", value);
+  const setError = (value: SetStateAction<string | null>) =>
+    setAdminUsersField("error", value);
+  const setSearch = (value: SetStateAction<string>) =>
+    setAdminUsersField("search", value);
+  const setShowCreate = (value: SetStateAction<boolean>) =>
+    setAdminUsersField("showCreate", value);
+  const setCreating = (value: SetStateAction<boolean>) =>
+    setAdminUsersField("creating", value);
+  const setCreateError = (value: SetStateAction<string | null>) =>
+    setAdminUsersField("createError", value);
+  const setNewName = (value: SetStateAction<string>) =>
+    setAdminUsersField("newName", value);
+  const setNewEmail = (value: SetStateAction<string>) =>
+    setAdminUsersField("newEmail", value);
+  const setNewPassword = (value: SetStateAction<string>) =>
+    setAdminUsersField("newPassword", value);
+  const setNewPasswordConfirm = (value: SetStateAction<string>) =>
+    setAdminUsersField("newPasswordConfirm", value);
+  const setNewRole = (value: SetStateAction<string>) =>
+    setAdminUsersField("newRole", value);
+  const setEditUser = (value: SetStateAction<User | null>) =>
+    setAdminUsersField("editUser", value);
+  const setEuName = (value: SetStateAction<string>) =>
+    setAdminUsersField("euName", value);
+  const setEuEmail = (value: SetStateAction<string>) =>
+    setAdminUsersField("euEmail", value);
+  const setEuRole = (value: SetStateAction<string>) =>
+    setAdminUsersField("euRole", value);
+  const setEuPassword = (value: SetStateAction<string>) =>
+    setAdminUsersField("euPassword", value);
+  const setEuSaving = (value: SetStateAction<boolean>) =>
+    setAdminUsersField("euSaving", value);
 
   const roleLabel = useCallback(
     (role: string) => tr[`role_${role}`] ?? formatUnknownValue(role, t),
@@ -552,12 +663,8 @@ export function AdminUsersPage() {
 
       <Sheet open={editUser !== null} onOpenChange={handleEditSheetOpenChange}>
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
-          <form
+          <div
             className="flex min-h-0 flex-1 flex-col"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void saveUser();
-            }}
           >
             <AdminSheetScaffold
               title={`${t.patients_edit} - ${editUser?.name ?? ""}`}
@@ -568,6 +675,7 @@ export function AdminUsersPage() {
                   submitLabel={t.common_save}
                   submitting={euSaving}
                   onCancel={closeEditSheet}
+                  onSubmit={() => void saveUser()}
                 />
               )}
             >
@@ -604,7 +712,7 @@ export function AdminUsersPage() {
                 </div>
               </DotSection>
             </AdminSheetScaffold>
-          </form>
+          </div>
         </SheetContent>
       </Sheet>
 
@@ -670,4 +778,8 @@ export function AdminUsersPage() {
       ) : null}
     </div>
   );
+}
+
+export function AdminUsersPage(...args: Parameters<typeof useAdminUsersPageContent>) {
+  return useAdminUsersPageContent(...args);
 }

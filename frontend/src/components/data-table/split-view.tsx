@@ -80,19 +80,17 @@ export function SplitView({
     <div className={cn("flex min-h-0 flex-1 flex-col", className)}>
       {children}
       {active ? (
-        <div
-          className="fixed inset-0 z-40 flex items-stretch justify-end"
-          onClick={() => onClose?.()}
-        >
-          <div
-            aria-hidden="true"
+        <div className="fixed inset-0 z-40 flex items-stretch justify-end">
+          <button
+            type="button"
+            aria-label={resolvedCloseLabel}
             className="absolute inset-0 bg-foreground/20"
+            onClick={() => onClose?.()}
           />
           <aside
             aria-label={resolvedPaneLabel}
             role="dialog"
             className="relative flex w-full max-w-md flex-col overflow-hidden border-l border-border bg-card shadow-2xl sm:max-w-lg"
-            onClick={(e) => e.stopPropagation()}
           >
             {onClose ? (
               <div className="flex items-center justify-end border-b border-border px-2 py-1">

@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useReducer, type FormEvent, type ReactNode, type SetStateAction } from "react";
 import { CalendarPlus, CheckCircle2, LoaderCircle, MessageCircle, RefreshCw, XCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -51,16 +51,57 @@ const PORTAL_RECOMMENDATION_REALTIME_EVENTS = [
   "appointment_request.created",
 ] as const;
 
+interface PatientRecommendationsState {
+  recommendations: PortalRecommendationItem[];
+  loading: boolean;
+  refreshing: boolean;
+  busyId: string | null;
+  error: string;
+  notice: string;
+  version: number;
+}
+
+type PatientRecommendationsAction =
+  | Partial<PatientRecommendationsState>
+  | ((current: PatientRecommendationsState) => Partial<PatientRecommendationsState>);
+
+const INITIAL_PATIENT_RECOMMENDATIONS_STATE: PatientRecommendationsState = {
+  recommendations: [],
+  loading: true,
+  refreshing: false,
+  busyId: null,
+  error: "",
+  notice: "",
+  version: 0,
+};
+
+function patientRecommendationsReducer(
+  current: PatientRecommendationsState,
+  action: PatientRecommendationsAction,
+): PatientRecommendationsState {
+  const patch = typeof action === "function" ? action(current) : action;
+  return {
+    ...current,
+    ...patch,
+  };
+}
+
 export function PatientRecommendationsPage() {
   const { user } = useAuth();
   const { lang } = useLang();
-  const [recommendations, setRecommendations] = useState<PortalRecommendationItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [version, setVersion] = useState(0);
+  const [recommendationsState, dispatchRecommendationsState] = useReducer(
+    patientRecommendationsReducer,
+    INITIAL_PATIENT_RECOMMENDATIONS_STATE,
+  );
+  const {
+    busyId,
+    error,
+    loading,
+    notice,
+    recommendations,
+    refreshing,
+    version,
+  } = recommendationsState;
   const l = useCallback(
     (de: string, ru: string, en: string) =>
       lang === "de" ? de : lang === "ru" ? ru : en,
@@ -71,7 +112,7 @@ export function PatientRecommendationsPage() {
   useRealtimeSubscription(PORTAL_RECOMMENDATION_REALTIME_EVENTS, () => {
     clearApiCache("/me/recommendations");
     clearApiCache("/me/next-actions");
-    setVersion((value) => value + 1);
+    dispatchRecommendationsState((current) => ({ version: current.version + 1 }));
   });
 
   useEffect(() => {
@@ -79,34 +120,38 @@ export function PatientRecommendationsPage() {
 
     async function load() {
       if (!isPatientPortalUser) {
-        setRecommendations([]);
-        setError("");
-        setLoading(false);
-        setRefreshing(false);
+        dispatchRecommendationsState({
+          recommendations: [],
+          error: "",
+          loading: false,
+          refreshing: false,
+        });
         return;
       }
 
-      if (loading) {
-        setRefreshing(false);
-      } else {
-        setRefreshing(true);
-      }
+      dispatchRecommendationsState((current) => ({
+        refreshing: !current.loading,
+        error: "",
+      }));
 
       try {
         const rows = await fetchPortalRecommendations();
         if (cancelled) return;
-        startTransition(() => {
-          setRecommendations(rows);
-          setError("");
-        });
+        startTransition(() =>
+          dispatchRecommendationsState({
+            recommendations: rows,
+            error: "",
+            loading: false,
+            refreshing: false,
+          }),
+        );
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : l("Empfehlungen konnten nicht geladen werden.", "Не удалось загрузить рекомендации.", "Failed to load recommendations."));
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-          setRefreshing(false);
-        }
+        dispatchRecommendationsState({
+          error: err instanceof Error ? err.message : l("Empfehlungen konnten nicht geladen werden.", "Не удалось загрузить рекомендации.", "Failed to load recommendations."),
+          loading: false,
+          refreshing: false,
+        });
       }
     }
 
@@ -114,7 +159,7 @@ export function PatientRecommendationsPage() {
     return () => {
       cancelled = true;
     };
-  }, [isPatientPortalUser, loading, version, l]);
+  }, [isPatientPortalUser, version, l]);
 
   const activeCount = useMemo(
     () => recommendations.filter((item) => item.status === "active").length,
@@ -126,25 +171,34 @@ export function PatientRecommendationsPage() {
       return;
     }
 
-    setBusyId(`${recommendationId}:${decision}`);
-    setError("");
-    setNotice("");
+    dispatchRecommendationsState({
+      busyId: `${recommendationId}:${decision}`,
+      error: "",
+      notice: "",
+    });
 
     try {
+      const successNotice =
+        decision === "schedule"
+          ? l("Terminanfrage wurde aus der Empfehlung erstellt.", "Запрос на визит создан из рекомендации.", "Appointment request created from the recommendation.")
+          : l("Ihre Entscheidung wurde gespeichert.", "Ваше решение сохранено.", "Your decision was saved.");
       if (decision === "schedule") {
         await requestRecommendationAppointment(recommendationId, {});
-        setNotice(l("Terminanfrage wurde aus der Empfehlung erstellt.", "Запрос на визит создан из рекомендации.", "Appointment request created from the recommendation."));
       } else {
         await decidePortalRecommendation(recommendationId, { decision });
-        setNotice(l("Ihre Entscheidung wurde gespeichert.", "Ваше решение сохранено.", "Your decision was saved."));
       }
       clearApiCache("/me/recommendations");
       clearApiCache("/me/next-actions");
-      setVersion((value) => value + 1);
+      dispatchRecommendationsState((current) => ({
+        busyId: null,
+        notice: successNotice,
+        version: current.version + 1,
+      }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : l("Aktion konnte nicht gespeichert werden.", "Не удалось сохранить действие.", "Failed to save action."));
-    } finally {
-      setBusyId(null);
+      dispatchRecommendationsState({
+        busyId: null,
+        error: err instanceof Error ? err.message : l("Aktion konnte nicht gespeichert werden.", "Не удалось сохранить действие.", "Failed to save action."),
+      });
     }
   }
 
@@ -169,7 +223,7 @@ export function PatientRecommendationsPage() {
           <>
             <CountBadge>{l("Patientenportal", "Портал пациента", "Patient portal")}</CountBadge>
             <CountBadge>{l("Aktiv", "Активно", "Active")}: {activeCount}</CountBadge>
-            <Button variant="outline" className={tokens.control.primaryButton} onClick={() => setVersion((value) => value + 1)}>
+            <Button variant="outline" className={tokens.control.primaryButton} onClick={() => dispatchRecommendationsState((current) => ({ version: current.version + 1 }))}>
               <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
               {l("Aktualisieren", "Обновить", "Refresh")}
             </Button>
@@ -368,36 +422,115 @@ function emptyRecommendationForm(): RecommendationFormState {
   };
 }
 
-function StaffRecommendationsWorkspace() {
+interface StaffRecommendationsState {
+  patients: StaffPatientOption[];
+  doctors: StaffDoctorOption[];
+  selectedPatientId: string;
+  recommendations: PortalRecommendationItem[];
+  orders: StaffOrderOption[];
+  appointments: StaffAppointmentOption[];
+  documents: StaffDocumentOption[];
+  form: RecommendationFormState;
+  lookupLoading: boolean;
+  patientLoading: boolean;
+  saving: boolean;
+  busyId: string;
+  error: string;
+  notice: string;
+  version: number;
+}
+
+type StaffRecommendationsAction =
+  | Partial<StaffRecommendationsState>
+  | ((current: StaffRecommendationsState) => Partial<StaffRecommendationsState>);
+
+function createStaffRecommendationsState(): StaffRecommendationsState {
+  return {
+    patients: [],
+    doctors: [],
+    selectedPatientId: "",
+    recommendations: [],
+    orders: [],
+    appointments: [],
+    documents: [],
+    form: emptyRecommendationForm(),
+    lookupLoading: true,
+    patientLoading: false,
+    saving: false,
+    busyId: "",
+    error: "",
+    notice: "",
+    version: 0,
+  };
+}
+
+function staffRecommendationsReducer(
+  current: StaffRecommendationsState,
+  action: StaffRecommendationsAction,
+): StaffRecommendationsState {
+  const patch = typeof action === "function" ? action(current) : action;
+  return {
+    ...current,
+    ...patch,
+  };
+}
+
+function resolveStaffRecommendationsStateAction<T>(action: SetStateAction<T>, current: T): T {
+  return typeof action === "function"
+    ? (action as (value: T) => T)(current)
+    : action;
+}
+
+function useStaffRecommendationsWorkspaceContent() {
   const { user } = useAuth();
   const { t } = useLang();
-  const [patients, setPatients] = useState<StaffPatientOption[]>([]);
-  const [doctors, setDoctors] = useState<StaffDoctorOption[]>([]);
-  const [selectedPatientId, setSelectedPatientId] = useState("");
-  const [recommendations, setRecommendations] = useState<PortalRecommendationItem[]>([]);
-  const [orders, setOrders] = useState<StaffOrderOption[]>([]);
-  const [appointments, setAppointments] = useState<StaffAppointmentOption[]>([]);
-  const [documents, setDocuments] = useState<StaffDocumentOption[]>([]);
-  const [form, setForm] = useState<RecommendationFormState>(() => emptyRecommendationForm());
-  const [lookupLoading, setLookupLoading] = useState(true);
-  const [patientLoading, setPatientLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [busyId, setBusyId] = useState("");
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [version, setVersion] = useState(0);
+  const [staffState, dispatchStaffState] = useReducer(
+    staffRecommendationsReducer,
+    undefined,
+    createStaffRecommendationsState,
+  );
+  const {
+    appointments,
+    busyId,
+    doctors,
+    documents,
+    error,
+    form,
+    lookupLoading,
+    notice,
+    orders,
+    patientLoading,
+    patients,
+    recommendations,
+    saving,
+    selectedPatientId,
+    version,
+  } = staffState;
+  const setSelectedPatientId = (nextValue: SetStateAction<string>) =>
+    dispatchStaffState((current) => ({ selectedPatientId: resolveStaffRecommendationsStateAction(nextValue, current.selectedPatientId) }));
+  const setForm = (nextValue: SetStateAction<RecommendationFormState>) =>
+    dispatchStaffState((current) => ({ form: resolveStaffRecommendationsStateAction(nextValue, current.form) }));
+  const setSaving = (nextValue: SetStateAction<boolean>) =>
+    dispatchStaffState((current) => ({ saving: resolveStaffRecommendationsStateAction(nextValue, current.saving) }));
+  const setBusyId = (nextValue: SetStateAction<string>) =>
+    dispatchStaffState((current) => ({ busyId: resolveStaffRecommendationsStateAction(nextValue, current.busyId) }));
+  const setError = (nextValue: SetStateAction<string>) =>
+    dispatchStaffState((current) => ({ error: resolveStaffRecommendationsStateAction(nextValue, current.error) }));
+  const setNotice = (nextValue: SetStateAction<string>) =>
+    dispatchStaffState((current) => ({ notice: resolveStaffRecommendationsStateAction(nextValue, current.notice) }));
+  const setVersion = (nextValue: SetStateAction<number>) =>
+    dispatchStaffState((current) => ({ version: resolveStaffRecommendationsStateAction(nextValue, current.version) }));
   const canEdit = user?.role === "ceo" || user?.role === "patient_manager";
 
   useEffect(() => {
     let cancelled = false;
     if (!canEdit) {
-      setLookupLoading(false);
+      dispatchStaffState({ lookupLoading: false });
       return () => {
         cancelled = true;
       };
     }
-    setLookupLoading(true);
-    setError("");
+    dispatchStaffState({ lookupLoading: true, error: "" });
 
     Promise.all([
       apiFetch<StaffPatientOption[]>("/patients?active_only=true", { cacheTtlMs: 60_000 }),
@@ -406,19 +539,24 @@ function StaffRecommendationsWorkspace() {
       .then(([patientRows, doctorRows]) => {
         if (cancelled) return;
         startTransition(() => {
-          setPatients(patientRows);
-          setDoctors(doctorRows);
-          if (patientRows.length === 1) {
-            setSelectedPatientId((current) => current || patientRows[0].id);
-          }
+          dispatchStaffState((current) => ({
+            patients: patientRows,
+            doctors: doctorRows,
+            selectedPatientId:
+              patientRows.length === 1
+                ? current.selectedPatientId || patientRows[0].id
+                : current.selectedPatientId,
+          }));
         });
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : t.patient_recommendations_staff_lookup_failed);
+        dispatchStaffState({
+          error: err instanceof Error ? err.message : t.patient_recommendations_staff_lookup_failed,
+        });
       })
       .finally(() => {
-        if (!cancelled) setLookupLoading(false);
+        if (!cancelled) dispatchStaffState({ lookupLoading: false });
       });
 
     return () => {
@@ -430,16 +568,17 @@ function StaffRecommendationsWorkspace() {
     let cancelled = false;
 
     if (!selectedPatientId || !canEdit) {
-      setRecommendations([]);
-      setOrders([]);
-      setAppointments([]);
-      setDocuments([]);
-      setPatientLoading(false);
+      dispatchStaffState({
+        recommendations: [],
+        orders: [],
+        appointments: [],
+        documents: [],
+        patientLoading: false,
+      });
       return;
     }
 
-    setPatientLoading(true);
-    setError("");
+    dispatchStaffState({ patientLoading: true, error: "" });
 
     Promise.all([
       apiFetch<PortalRecommendationItem[]>(`/patients/${selectedPatientId}/recommendations`, {
@@ -452,18 +591,22 @@ function StaffRecommendationsWorkspace() {
       .then(([recommendationRows, orderRows, appointmentRows, documentRows]) => {
         if (cancelled) return;
         startTransition(() => {
-          setRecommendations(recommendationRows);
-          setOrders(orderRows);
-          setAppointments(appointmentRows);
-          setDocuments(documentRows);
+          dispatchStaffState({
+            recommendations: recommendationRows,
+            orders: orderRows,
+            appointments: appointmentRows,
+            documents: documentRows,
+          });
         });
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : t.patient_recommendations_staff_load_failed);
+        dispatchStaffState({
+          error: err instanceof Error ? err.message : t.patient_recommendations_staff_load_failed,
+        });
       })
       .finally(() => {
-        if (!cancelled) setPatientLoading(false);
+        if (!cancelled) dispatchStaffState({ patientLoading: false });
       });
 
     return () => {
@@ -913,6 +1056,10 @@ function StaffRecommendationsWorkspace() {
       </Section>
     </TabShell>
   );
+}
+
+function StaffRecommendationsWorkspace(...args: Parameters<typeof useStaffRecommendationsWorkspaceContent>) {
+  return useStaffRecommendationsWorkspaceContent(...args);
 }
 
 function formatPatientOption(patient: StaffPatientOption) {

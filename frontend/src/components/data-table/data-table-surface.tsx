@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useReducer, type ReactNode, type SetStateAction } from "react";
 
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -52,13 +52,50 @@ export type DataTableSurfaceProps<T> = Omit<
 };
 
 const DEFAULT_MAX_FROZEN_COLUMNS = 3;
+const EMPTY_STRING_ARRAY: readonly string[] = [];
+const EMPTY_SORT_STACK: SortStack = [];
+
+type DataTableSurfaceState = {
+  density: DensityLevel;
+  filters: FilterPredicate[];
+  frozenColumns: string[];
+  hiddenColumns: string[];
+  sortStack: SortStack;
+};
+
+type DataTableSurfacePatch =
+  | Partial<DataTableSurfaceState>
+  | ((current: DataTableSurfaceState) => Partial<DataTableSurfaceState>);
+
+function dataTableSurfaceReducer(
+  state: DataTableSurfaceState,
+  patch: DataTableSurfacePatch,
+): DataTableSurfaceState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
+function createDataTableSurfaceFieldPatch<K extends keyof DataTableSurfaceState>(
+  field: K,
+  value: SetStateAction<DataTableSurfaceState[K]>,
+): DataTableSurfacePatch {
+  return (current) => {
+    const nextValue =
+      typeof value === "function"
+        ? (value as (previous: DataTableSurfaceState[K]) => DataTableSurfaceState[K])(current[field])
+        : value;
+    return { [field]: nextValue } as Partial<DataTableSurfaceState>;
+  };
+}
 
 export function DataTableSurface<T>({
   columns,
   defaultDensity = "comfortable",
   defaultFrozenColumns,
-  defaultHiddenColumns = [],
-  defaultSort = [],
+  defaultHiddenColumns = EMPTY_STRING_ARRAY,
+  defaultSort = EMPTY_SORT_STACK,
   dictionary,
   footer,
   groupLabels,
@@ -73,23 +110,51 @@ export function DataTableSurface<T>({
 }: DataTableSurfaceProps<T>) {
   const { t } = useLang();
   const initialFrozenColumns = useMemo(
-    () =>
-      defaultFrozenColumns ??
-      columns
-        .filter((column) => column.pinned === "left")
-        .map((column) => column.id),
+    () => {
+      if (defaultFrozenColumns) return defaultFrozenColumns;
+      const pinnedColumnIds: string[] = [];
+      for (const column of columns) {
+        if (column.pinned === "left") {
+          pinnedColumnIds.push(column.id);
+        }
+      }
+      return pinnedColumnIds;
+    },
     [columns, defaultFrozenColumns],
   );
 
-  const [density, setDensity] = useState<DensityLevel>(defaultDensity);
-  const [filters, setFilters] = useState<FilterPredicate[]>([]);
-  const [frozenColumns, setFrozenColumns] = useState<string[]>(
-    () => initialFrozenColumns.slice(),
+  const [surfaceState, dispatchSurfaceState] = useReducer(
+    dataTableSurfaceReducer,
+    undefined,
+    (): DataTableSurfaceState => ({
+      density: defaultDensity,
+      filters: [],
+      frozenColumns: initialFrozenColumns.slice(),
+      hiddenColumns: defaultHiddenColumns.slice(),
+      sortStack: defaultSort.slice(),
+    }),
   );
-  const [hiddenColumns, setHiddenColumns] = useState<string[]>(
-    () => defaultHiddenColumns.slice(),
-  );
-  const [sortStack, setSortStack] = useState<SortStack>(() => defaultSort.slice());
+  const {
+    density,
+    filters,
+    frozenColumns,
+    hiddenColumns,
+    sortStack,
+  } = surfaceState;
+  const setSurfaceField = <K extends keyof DataTableSurfaceState>(
+    field: K,
+    value: SetStateAction<DataTableSurfaceState[K]>,
+  ) => dispatchSurfaceState(createDataTableSurfaceFieldPatch(field, value));
+  const setDensity = (value: SetStateAction<DensityLevel>) =>
+    setSurfaceField("density", value);
+  const setFilters = (value: SetStateAction<FilterPredicate[]>) =>
+    setSurfaceField("filters", value);
+  const setFrozenColumns = (value: SetStateAction<string[]>) =>
+    setSurfaceField("frozenColumns", value);
+  const setHiddenColumns = (value: SetStateAction<string[]>) =>
+    setSurfaceField("hiddenColumns", value);
+  const setSortStack = (value: SetStateAction<SortStack>) =>
+    setSurfaceField("sortStack", value);
 
   const visibleColumnIds = useMemo(
     () => new Set(columns.map((column) => column.id)),

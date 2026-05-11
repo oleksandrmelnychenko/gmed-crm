@@ -1,4 +1,9 @@
-import { useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useReducer,
+  type SetStateAction,
+} from "react";
 
 import { apiFetch } from "@/lib/api";
 import type {
@@ -10,6 +15,34 @@ type UseAppointmentRequestsQueueOptions = {
   appointmentsVersion: number;
   failedLoadMessage: string;
 };
+
+type AppointmentRequestsQueueState = {
+  appointmentRequests: AppointmentRequestItem[];
+  appointmentRequestsLoading: boolean;
+  appointmentRequestsError: string;
+};
+
+type AppointmentRequestsQueuePatch =
+  | Partial<AppointmentRequestsQueueState>
+  | ((current: AppointmentRequestsQueueState) => Partial<AppointmentRequestsQueueState>);
+
+function createAppointmentRequestsQueueState(): AppointmentRequestsQueueState {
+  return {
+    appointmentRequests: [],
+    appointmentRequestsLoading: false,
+    appointmentRequestsError: "",
+  };
+}
+
+function appointmentRequestsQueueReducer(
+  state: AppointmentRequestsQueueState,
+  patch: AppointmentRequestsQueuePatch,
+): AppointmentRequestsQueueState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
 
 function mergeOpenRequests(
   requested: AppointmentRequestItem[],
@@ -32,28 +65,44 @@ export function useAppointmentRequestsQueue({
   appointmentsVersion,
   failedLoadMessage,
 }: UseAppointmentRequestsQueueOptions) {
-  const [appointmentRequests, setAppointmentRequests] = useState<
-    AppointmentRequestItem[]
-  >([]);
-  const [appointmentRequestsLoading, setAppointmentRequestsLoading] =
-    useState(false);
-  const [appointmentRequestsError, setAppointmentRequestsError] = useState("");
+  const [queueState, dispatchQueueState] = useReducer(
+    appointmentRequestsQueueReducer,
+    undefined,
+    createAppointmentRequestsQueueState,
+  );
+  const {
+    appointmentRequests,
+    appointmentRequestsLoading,
+    appointmentRequestsError,
+  } = queueState;
+
+  const setAppointmentRequestsError = useCallback(
+    (nextValue: SetStateAction<string>) => {
+      dispatchQueueState((current) => ({
+        appointmentRequestsError:
+          typeof nextValue === "function"
+            ? nextValue(current.appointmentRequestsError)
+            : nextValue,
+      }));
+    },
+    [],
+  );
 
   useEffect(() => {
     let active = true;
 
     if (!enabled) {
-      setAppointmentRequests([]);
-      setAppointmentRequestsLoading(false);
-      setAppointmentRequestsError("");
+      dispatchQueueState(createAppointmentRequestsQueueState());
       return () => {
         active = false;
       };
     }
 
     async function loadRequests() {
-      setAppointmentRequestsLoading(true);
-      setAppointmentRequestsError("");
+      dispatchQueueState({
+        appointmentRequestsLoading: true,
+        appointmentRequestsError: "",
+      });
       try {
         const [requested, approved] = await Promise.all([
           apiFetch<AppointmentRequestItem[]>(
@@ -64,15 +113,18 @@ export function useAppointmentRequestsQueue({
           ),
         ]);
         if (!active) return;
-        setAppointmentRequests(mergeOpenRequests(requested, approved));
+        dispatchQueueState({
+          appointmentRequests: mergeOpenRequests(requested, approved),
+          appointmentRequestsLoading: false,
+        });
       } catch (error) {
         if (!active) return;
-        setAppointmentRequests([]);
-        setAppointmentRequestsError(
-          error instanceof Error ? error.message : failedLoadMessage,
-        );
-      } finally {
-        if (active) setAppointmentRequestsLoading(false);
+        dispatchQueueState({
+          appointmentRequests: [],
+          appointmentRequestsError:
+            error instanceof Error ? error.message : failedLoadMessage,
+          appointmentRequestsLoading: false,
+        });
       }
     }
 

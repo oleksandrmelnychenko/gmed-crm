@@ -10,6 +10,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type RefObject,
   type ReactNode,
+  type SetStateAction,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
@@ -22,13 +23,15 @@ import type { ColumnDef, DensityLevel, SortStack } from "./types";
 import { useOutsideClose } from "./use-outside-close";
 
 const HEADER_HEIGHT = 36;
+const EMPTY_STRING_ARRAY: readonly string[] = [];
+const EMPTY_SORT_STACK: SortStack = [];
 
 type DataTableRowStyle = CSSProperties & {
   "--dt-row-bg": string;
   "--dt-row-hover-bg": string;
 };
 
-export type ColumnHeaderContextMenuLabels = {
+type ColumnHeaderContextMenuLabels = {
   column?: string;
   freeze?: string;
   unfreeze?: string;
@@ -105,11 +108,11 @@ function saveStoredWidths(storageKey: string | undefined, widths: Record<string,
   }
 }
 
-export function DataTable<T>({
+function useDataTableContent<T>({
   rows,
   columns,
-  hiddenColumns = [],
-  sort = [],
+  hiddenColumns = EMPTY_STRING_ARRAY,
+  sort = EMPTY_SORT_STACK,
   onSortChange,
   onColumnFreezeChange,
   isColumnFreezeDisabled,
@@ -119,7 +122,7 @@ export function DataTable<T>({
   activeRowId = null,
   onRowClick,
   onRowDoubleClick,
-  selectedIds = [],
+  selectedIds = EMPTY_STRING_ARRAY,
   onSelectedIdsChange,
   selectionEnabled = false,
   rowAccent,
@@ -146,13 +149,33 @@ export function DataTable<T>({
   const rowHeight = rowHeightOverrides?.[density] ?? DENSITY_ROW_HEIGHT[density];
   const resolvedRowActionsLabel = rowActionsLabel ?? t.table_actions;
 
-  const [widthOverrides, setWidthOverrides] = useState<Record<string, number>>(
-    () => loadStoredWidths(storageKey),
+  const [widthOverrideState, setWidthOverrideState] = useState<{
+    storageKey?: string;
+    widths: Record<string, number>;
+  }>(() => ({
+    storageKey,
+    widths: loadStoredWidths(storageKey),
+  }));
+  const widthOverrides =
+    widthOverrideState.storageKey === storageKey
+      ? widthOverrideState.widths
+      : loadStoredWidths(storageKey);
+  const setWidthOverrides = useCallback(
+    (value: SetStateAction<Record<string, number>>) => {
+      setWidthOverrideState((current) => {
+        const currentWidths =
+          current.storageKey === storageKey
+            ? current.widths
+            : loadStoredWidths(storageKey);
+        const widths =
+          typeof value === "function"
+            ? (value as (previous: Record<string, number>) => Record<string, number>)(currentWidths)
+            : value;
+        return { storageKey, widths };
+      });
+    },
+    [storageKey],
   );
-
-  useEffect(() => {
-    setWidthOverrides(loadStoredWidths(storageKey));
-  }, [storageKey]);
 
   const baseVisibleCols = useMemo(
     () => orderColumnsForPinning(columns.filter((c) => !hiddenColumns.includes(c.id) || c.required)),
@@ -302,6 +325,7 @@ export function DataTable<T>({
       ? isColumnFreezeDisabled(columnMenuColumn, columnMenuNextFrozen)
       : false;
   const closeColumnMenu = useCallback(() => setColumnMenu(null), []);
+  const closeColumnMenuRef = useRef(closeColumnMenu);
 
   const showEmpty = !loading && rows.length === 0;
   const showLoading = loading;
@@ -309,14 +333,19 @@ export function DataTable<T>({
   useOutsideClose(columnMenuRef, closeColumnMenu, { enabled: Boolean(columnMenu) });
 
   useEffect(() => {
+    closeColumnMenuRef.current = closeColumnMenu;
+  }, [closeColumnMenu]);
+
+  useEffect(() => {
     if (!columnMenu) return;
-    window.addEventListener("resize", closeColumnMenu);
-    window.addEventListener("scroll", closeColumnMenu, true);
+    const closeOpenColumnMenu = () => closeColumnMenuRef.current();
+    window.addEventListener("resize", closeOpenColumnMenu);
+    window.addEventListener("scroll", closeOpenColumnMenu, true);
     return () => {
-      window.removeEventListener("resize", closeColumnMenu);
-      window.removeEventListener("scroll", closeColumnMenu, true);
+      window.removeEventListener("resize", closeOpenColumnMenu);
+      window.removeEventListener("scroll", closeOpenColumnMenu, true);
     };
-  }, [closeColumnMenu, columnMenu]);
+  }, [columnMenu]);
 
   const handleColumnContextMenu = (
     col: ColumnDef<T>,
@@ -431,6 +460,7 @@ export function DataTable<T>({
                   aria-label={t.table_resize_column}
                   onMouseDown={(e) => beginColumnResize(col.id, e)}
                   onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
                   onContextMenu={(e) => e.stopPropagation()}
                   className="absolute right-0 top-0 z-10 h-full w-1 cursor-col-resize select-none bg-transparent transition-colors hover:bg-primary/40 active:bg-primary/60"
                 />
@@ -476,6 +506,12 @@ export function DataTable<T>({
                   data-state={isSelected ? "selected" : undefined}
                   onClick={() => onRowClick?.(row)}
                   onDoubleClick={() => onRowDoubleClick?.(row)}
+                  onKeyDown={(event) => {
+                    if (!onRowClick || (event.key !== "Enter" && event.key !== " ")) return;
+                    event.preventDefault();
+                    onRowClick(row);
+                  }}
+                  tabIndex={onRowClick ? -1 : undefined}
                   className="data-table-row group/row absolute inset-x-0 grid cursor-pointer items-center border-b border-border/45 transition-[background-color,box-shadow]"
                   style={{
                     top: vRow.start,
@@ -526,12 +562,14 @@ export function DataTable<T>({
                   })}
                   {rowActions ? (
                     <div
+                      role="presentation"
                       className="data-table-cell sticky right-0 z-20 flex h-full items-center justify-end gap-1 border-l border-border/45 px-1 opacity-0 shadow-[-1px_0_0_color-mix(in_oklch,var(--border)_65%,transparent)] transition-[opacity,background-color] group-focus-within/row:opacity-100 group-hover/row:opacity-100"
                       style={{
                         gridColumn: `${visibleCols.length + (selectionEnabled ? 2 : 1)}`,
                         width: rowActionsWidth,
                       }}
                       onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
                     >
                       <span className="flex items-center justify-end gap-1">
                         {rowActions(row)}
@@ -566,6 +604,10 @@ export function DataTable<T>({
       {footer ? <div className="border-t border-border/60 bg-muted/15 px-3 py-1.5 text-xs text-muted-foreground">{footer}</div> : null}
     </div>
   );
+}
+
+export function DataTable<T>(props: DataTableProps<T>) {
+  return useDataTableContent(props);
 }
 
 function defaultRender(value: unknown, translations: Translations): ReactNode {
@@ -785,7 +827,7 @@ function DefaultSkeleton({ rows, height }: DefaultSkeletonProps) {
     <div className="flex flex-col">
       {Array.from({ length: rows }).map((_, i) => (
         <div
-          key={i}
+          key={`skeleton-row-${i + 1}`}
           className="animate-pulse border-b border-border/40 px-3"
           style={{ height }}
         >

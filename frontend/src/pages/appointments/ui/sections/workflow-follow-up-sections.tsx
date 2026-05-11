@@ -2,7 +2,6 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
   useCallback,
-  useEffect,
   useState,
   type FormEvent,
 } from "react";
@@ -99,7 +98,20 @@ function withEllipsis(text: string) {
   return text.trim().endsWith("...") ? text : `${text.trim()}...`;
 }
 
-function AppointmentDoctorFollowUpSection({
+function AppointmentDoctorFollowUpSection(props: AppointmentDoctorFollowUpSectionProps) {
+  return (
+    <AppointmentDoctorFollowUpSectionContent
+      key={[
+        props.detail.id,
+        props.defaultAssigneeId,
+        appointmentAnchorDateTime(props.detail),
+      ].join(":")}
+      {...props}
+    />
+  );
+}
+
+function AppointmentDoctorFollowUpSectionContent({
   detail,
   reminders,
   tasks,
@@ -125,11 +137,6 @@ function AppointmentDoctorFollowUpSection({
     buildDefaultForm(),
   );
   const [submitBusy, setSubmitBusy] = useState(false);
-
-  useEffect(() => {
-    setForm(buildDefaultForm());
-    setSubmitBusy(false);
-  }, [buildDefaultForm]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -221,10 +228,10 @@ function AppointmentDoctorFollowUpSection({
                   >
                     <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                       <div>
-                        <p className="text-sm font-medium text-slate-900">
+                        <p className="text-sm font-medium text-zinc-900">
                           {item.title.replace(`${DOCTOR_FOLLOW_UP_PREFIX} `, "")}
                         </p>
-                        <p className="mt-1 text-xs text-slate-500">
+                        <p className="mt-1 text-xs text-zinc-500">
                           {item.user_name} · {formatDateTimeLabel(item.remind_at)}
                         </p>
                       </div>
@@ -239,7 +246,7 @@ function AppointmentDoctorFollowUpSection({
                       )}
                     </div>
                     {item.description ? (
-                      <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
+                      <p className="mt-3 whitespace-pre-line text-sm text-zinc-600">
                         {item.description}
                       </p>
                     ) : null}
@@ -261,20 +268,20 @@ function AppointmentDoctorFollowUpSection({
                   >
                     <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                       <div>
-                        <p className="text-sm font-medium text-slate-900">
+                        <p className="text-sm font-medium text-zinc-900">
                           {task.title.replace(`${DOCTOR_FOLLOW_UP_PREFIX} `, "")}
                         </p>
-                        <p className="mt-1 text-xs text-slate-500">
+                        <p className="mt-1 text-xs text-zinc-500">
                           {task.assigned_to_name} · {taskStatusLabel(task.status)} ·{" "}
                           {taskPriorityLabel(task.priority)}
                         </p>
                       </div>
-                      <span className="text-xs text-slate-500">
+                      <span className="text-xs text-zinc-500">
                         {task.due_date ? formatDateTimeLabel(task.due_date) : t.common_not_set}
                       </span>
                     </div>
                     {task.description ? (
-                      <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
+                      <p className="mt-3 whitespace-pre-line text-sm text-zinc-600">
                         {task.description}
                       </p>
                     ) : null}
@@ -404,7 +411,20 @@ function AppointmentDoctorFollowUpSection({
   );
 }
 
-function AppointmentPackageEndSection({
+function AppointmentPackageEndSection(props: AppointmentPackageEndSectionProps) {
+  return (
+    <AppointmentPackageEndSectionContent
+      key={[
+        props.detail.id,
+        props.defaultAssigneeId,
+        props.defaultTitle,
+      ].join(":")}
+      {...props}
+    />
+  );
+}
+
+function AppointmentPackageEndSectionContent({
   detail,
   reminders,
   tasks,
@@ -427,11 +447,6 @@ function AppointmentPackageEndSection({
     buildDefaultForm(),
   );
   const [submitBusy, setSubmitBusy] = useState(false);
-
-  useEffect(() => {
-    setForm(buildDefaultForm());
-    setSubmitBusy(false);
-  }, [buildDefaultForm]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -525,14 +540,14 @@ function AppointmentPackageEndSection({
                   key={item.id}
                   className={appointmentSoftRowClassName}
                 >
-                  <p className="text-sm font-medium text-slate-900">
+                  <p className="text-sm font-medium text-zinc-900">
                     {item.title.replace(`${PACKAGE_END_FOLLOW_UP_PREFIX} `, "")}
                   </p>
-                  <p className="mt-1 text-xs text-slate-500">
+                  <p className="mt-1 text-xs text-zinc-500">
                     {item.user_name} · {formatDateTimeLabel(item.remind_at)}
                   </p>
                   {item.description ? (
-                    <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
+                    <p className="mt-3 whitespace-pre-line text-sm text-zinc-600">
                       {item.description}
                     </p>
                   ) : null}
@@ -544,19 +559,19 @@ function AppointmentPackageEndSection({
                   className={appointmentSoftRowClassName}
                 >
                   <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                    <p className="text-sm font-medium text-slate-900">
+                    <p className="text-sm font-medium text-zinc-900">
                       {task.title.replace(`${PACKAGE_END_FOLLOW_UP_PREFIX} `, "")}
                     </p>
-                    <span className="text-xs text-slate-500">
+                    <span className="text-xs text-zinc-500">
                       {taskStatusLabel(task.status)} · {taskPriorityLabel(task.priority)}
                     </span>
                   </div>
-                  <p className="mt-1 text-xs text-slate-500">
+                  <p className="mt-1 text-xs text-zinc-500">
                     {task.assigned_to_name}
                     {task.due_date ? ` · ${formatDateTimeLabel(task.due_date)}` : ""}
                   </p>
                   {task.description ? (
-                    <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
+                    <p className="mt-3 whitespace-pre-line text-sm text-zinc-600">
                       {task.description}
                     </p>
                   ) : null}

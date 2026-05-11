@@ -50,6 +50,11 @@ const LazyPatientsShortcutsDialog = lazy(async () => {
   return { default: mod.PatientsShortcutsDialog };
 });
 
+function createPatientsExportFilename() {
+  const stamp = new Date().toISOString().slice(0, 10);
+  return `patients-${stamp}.csv`;
+}
+
 const PATIENT_REALTIME_EVENTS = [
   "patient.created",
   "patient.updated",
@@ -58,6 +63,96 @@ const PATIENT_REALTIME_EVENTS = [
   "patient.activated",
   "patient.deactivated",
 ] as const;
+
+type PatientsPageHeaderProps = {
+  canCreate: boolean;
+  createLabel: string;
+  showStats: boolean;
+  tallyParts: string[];
+  title: string;
+  onCreate: () => void;
+};
+
+function PatientsPageHeader({
+  canCreate,
+  createLabel,
+  showStats,
+  tallyParts,
+  title,
+  onCreate,
+}: PatientsPageHeaderProps) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="flex items-baseline gap-2">
+        <h1 className="text-[22px] font-semibold tracking-tight text-foreground leading-tight">
+          {title}
+        </h1>
+        {showStats ? (
+          <span className="text-xs text-muted-foreground tabular-nums">
+            В· {tallyParts.join(" В· ")}
+          </span>
+        ) : null}
+      </div>
+      <div className="flex items-center gap-1.5">
+        {canCreate ? (
+          <Button
+            type="button"
+            size="sm"
+            onClick={onCreate}
+          >
+            <Plus className="size-3.5" />
+            {createLabel}
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+type PatientsPageSheetsProps = {
+  closeLabel: string;
+  createOpen: boolean;
+  dictionary: Record<string, string>;
+  helpOpen: boolean;
+  onCreateOpenChange: (open: boolean) => void;
+  onHelpClose: () => void;
+  onPatientCreated: (patientId: string) => void;
+};
+
+function PatientsPageSheets({
+  closeLabel,
+  createOpen,
+  dictionary,
+  helpOpen,
+  onCreateOpenChange,
+  onHelpClose,
+  onPatientCreated,
+}: PatientsPageSheetsProps) {
+  return (
+    <>
+      {createOpen ? (
+        <Suspense fallback={null}>
+          <LazyCreatePatientSheet
+            open={createOpen}
+            dictionary={dictionary}
+            onOpenChange={onCreateOpenChange}
+            onCreated={onPatientCreated}
+          />
+        </Suspense>
+      ) : null}
+
+      {helpOpen ? (
+        <Suspense fallback={null}>
+          <LazyPatientsShortcutsDialog
+            open={helpOpen}
+            closeLabel={closeLabel}
+            onClose={onHelpClose}
+          />
+        </Suspense>
+      ) : null}
+    </>
+  );
+}
 
 export function PatientsPage() {
   const { user } = useAuth();
@@ -179,10 +274,10 @@ export function PatientsPage() {
         <section
           className={cn("rounded-xl p-8", tokens.surface.softCard)}
         >
-          <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
+          <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">
             Patient registry
           </h1>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
+          <p className="mt-3 max-w-2xl text-sm leading-7 text-zinc-600">
             This workspace is available only to staff roles with patient access.
           </p>
         </section>
@@ -220,30 +315,14 @@ export function PatientsPage() {
     <>
       <div className="flex min-h-0 flex-1 flex-col gap-3">
         {/* Title + inline tally + primary CTA */}
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-baseline gap-2">
-            <h1 className="text-[22px] font-semibold tracking-tight text-foreground leading-tight">
-              {t.patients_title}
-            </h1>
-            {showStats ? (
-              <span className="text-xs text-muted-foreground tabular-nums">
-                · {tallyParts.join(" · ")}
-              </span>
-            ) : null}
-          </div>
-          <div className="flex items-center gap-1.5">
-            {permissions.canCreateEdit ? (
-              <Button
-                type="button"
-                size="sm"
-                onClick={openCreateSheet}
-              >
-                <Plus className="size-3.5" />
-                {t.patients_new}
-              </Button>
-            ) : null}
-          </div>
-        </div>
+        <PatientsPageHeader
+          canCreate={permissions.canCreateEdit}
+          createLabel={t.patients_new}
+          showStats={showStats}
+          tallyParts={tallyParts}
+          title={t.patients_title}
+          onCreate={openCreateSheet}
+        />
 
         <PatientsListToolbar
           anyTopFilterActive={anyTopFilterActive}
@@ -276,8 +355,7 @@ export function PatientsPage() {
             const visibleCols = columns.filter(
               (column) => !hiddenColumns.includes(column.id) || column.required,
             );
-            const stamp = new Date().toISOString().slice(0, 10);
-            exportCsv(sortedAndFilteredPatients, visibleCols, `patients-${stamp}.csv`);
+            exportCsv(sortedAndFilteredPatients, visibleCols, createPatientsExportFilename());
           }}
           onFiltersChange={setFilterPredicates}
           onFrozenColumnsChange={setFrozenColumns}
@@ -318,9 +396,12 @@ export function PatientsPage() {
             detailBusy,
             detailError,
             dictionary: tr,
-            canCreateEdit: permissions.canCreateEdit,
-            canViewAssignments: permissions.canViewAssignments,
-            canManageAssignments: permissions.canManageAssignments,
+            detailControls: {
+              canCreateEdit: permissions.canCreateEdit,
+              canViewAssignments: permissions.canViewAssignments,
+              canManageAssignments: permissions.canManageAssignments,
+              hideWorkspaceActions: viewMode === "split",
+            },
             assignments,
             assignableStaff,
             selectedAssignee,
@@ -335,7 +416,6 @@ export function PatientsPage() {
             onOpenAppointments: () => detail ? staffGo(`/appointments?patient=${detail.id}`) : undefined,
             onOpenContracts: () => detail ? staffGo(`/contracts?patient=${detail.id}`) : undefined,
             onOpenDocuments: () => detail ? staffGo(`/documents?patient=${detail.id}`) : undefined,
-            hideWorkspaceActions: viewMode === "split",
           }}
           emptyLabel={t.patients_no_match}
           filteredCount={sortedAndFilteredPatients.length}
@@ -357,26 +437,15 @@ export function PatientsPage() {
         />
       </div>
 
-      {createOpen ? (
-        <Suspense fallback={null}>
-          <LazyCreatePatientSheet
-            open={createOpen}
-            dictionary={tr}
-            onOpenChange={handleCreateOpenChange}
-            onCreated={handlePatientCreated}
-          />
-        </Suspense>
-      ) : null}
-
-      {helpOpen ? (
-        <Suspense fallback={null}>
-          <LazyPatientsShortcutsDialog
-            open={helpOpen}
-            closeLabel={t.common_close ?? "Close"}
-            onClose={() => setHelpOpen(false)}
-          />
-        </Suspense>
-      ) : null}
+      <PatientsPageSheets
+        closeLabel={t.common_close ?? "Close"}
+        createOpen={createOpen}
+        dictionary={tr}
+        helpOpen={helpOpen}
+        onCreateOpenChange={handleCreateOpenChange}
+        onHelpClose={() => setHelpOpen(false)}
+        onPatientCreated={handlePatientCreated}
+      />
     </>
   );
 }

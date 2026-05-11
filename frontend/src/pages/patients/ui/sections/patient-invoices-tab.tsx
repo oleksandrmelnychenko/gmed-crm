@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useReducer,
+  type FormEvent,
+  type ReactNode,
+  type SetStateAction,
+} from "react";
 
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Badge } from "@/components/ui/badge";
@@ -72,6 +79,37 @@ type ConsumptionForm = {
   notes: string;
 };
 
+type FinanceFilters = {
+  from: string;
+  to: string;
+  orderId: string;
+  packageId: string;
+};
+
+type PatientInvoicesFinanceState = {
+  financeFilters: FinanceFilters;
+  refreshedFinancialSummary: PatientFinancialSummary | null;
+  refreshedFinancialLedger: PatientFinancialLedger | null;
+  refreshedServicePackages: PatientServicePackageItem[] | null;
+  packageCatalog: PackageCatalogItem[];
+  patientOrders: OrderItem[];
+  financeBusy: boolean;
+  financeError: string;
+  assignOpen: boolean;
+  assignForm: AssignPackageForm;
+  assignBusy: boolean;
+  assignError: string;
+  consumeTargetId: string;
+  consumeForm: ConsumptionForm;
+  consumeBusy: boolean;
+  consumeError: string;
+  approvalBusyKey: string;
+};
+
+type PatientInvoicesFinancePatch =
+  | Partial<PatientInvoicesFinanceState>
+  | ((current: PatientInvoicesFinanceState) => Partial<PatientInvoicesFinanceState>);
+
 const BLANK_ASSIGN_PACKAGE_FORM: AssignPackageForm = {
   packageId: "",
   orderId: "",
@@ -89,6 +127,45 @@ const BLANK_CONSUMPTION_FORM: ConsumptionForm = {
   quantity: "1",
   notes: "",
 };
+
+const BLANK_FINANCE_FILTERS: FinanceFilters = {
+  from: "",
+  to: "",
+  orderId: "",
+  packageId: "",
+};
+
+function patientInvoicesFinanceReducer(
+  state: PatientInvoicesFinanceState,
+  patch: PatientInvoicesFinancePatch,
+): PatientInvoicesFinanceState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
+function createPatientInvoicesFinanceState(): PatientInvoicesFinanceState {
+  return {
+    financeFilters: BLANK_FINANCE_FILTERS,
+    refreshedFinancialSummary: null,
+    refreshedFinancialLedger: null,
+    refreshedServicePackages: null,
+    packageCatalog: [],
+    patientOrders: [],
+    financeBusy: false,
+    financeError: "",
+    assignOpen: false,
+    assignForm: BLANK_ASSIGN_PACKAGE_FORM,
+    assignBusy: false,
+    assignError: "",
+    consumeTargetId: "",
+    consumeForm: BLANK_CONSUMPTION_FORM,
+    consumeBusy: false,
+    consumeError: "",
+    approvalBusyKey: "",
+  };
+}
 
 type PatientInvoicesTabProps = {
   l: LocalizeFn;
@@ -164,7 +241,7 @@ async function downloadPatientLedgerExport(patientId: string, query: URLSearchPa
   URL.revokeObjectURL(url);
 }
 
-export function PatientInvoicesTab({
+function usePatientInvoicesTabContent({
   commonNotSet,
   tabLoading,
   invoices,
@@ -188,43 +265,128 @@ export function PatientInvoicesTab({
 }: PatientInvoicesTabProps) {
   const { t } = useLang();
   const patientId = financialSummary?.patient_id ?? invoices.find((item) => item.patient_id)?.patient_id ?? "";
-  const [financeFilters, setFinanceFilters] = useState({
-    from: "",
-    to: "",
-    orderId: "",
-    packageId: "",
-  });
-  const [localFinancialSummary, setLocalFinancialSummary] =
-    useState<PatientFinancialSummary | null>(financialSummary);
-  const [localFinancialLedger, setLocalFinancialLedger] =
-    useState<PatientFinancialLedger | null>(financialLedger);
-  const [localServicePackages, setLocalServicePackages] =
-    useState<PatientServicePackageItem[]>(servicePackages);
-  const [packageCatalog, setPackageCatalog] = useState<PackageCatalogItem[]>([]);
-  const [patientOrders, setPatientOrders] = useState<OrderItem[]>([]);
-  const [financeBusy, setFinanceBusy] = useState(false);
-  const [financeError, setFinanceError] = useState("");
-  const [assignOpen, setAssignOpen] = useState(false);
-  const [assignForm, setAssignForm] = useState<AssignPackageForm>(BLANK_ASSIGN_PACKAGE_FORM);
-  const [assignBusy, setAssignBusy] = useState(false);
-  const [assignError, setAssignError] = useState("");
-  const [consumeTargetId, setConsumeTargetId] = useState("");
-  const [consumeForm, setConsumeForm] = useState<ConsumptionForm>(BLANK_CONSUMPTION_FORM);
-  const [consumeBusy, setConsumeBusy] = useState(false);
-  const [consumeError, setConsumeError] = useState("");
-  const [approvalBusyKey, setApprovalBusyKey] = useState("");
-
-  useEffect(() => {
-    setLocalFinancialSummary(financialSummary);
-  }, [financialSummary]);
-
-  useEffect(() => {
-    setLocalFinancialLedger(financialLedger);
-  }, [financialLedger]);
-
-  useEffect(() => {
-    setLocalServicePackages(servicePackages);
-  }, [servicePackages]);
+  const [financeState, dispatchFinanceState] = useReducer(
+    patientInvoicesFinanceReducer,
+    undefined,
+    createPatientInvoicesFinanceState,
+  );
+  const {
+    financeFilters,
+    refreshedFinancialSummary,
+    refreshedFinancialLedger,
+    refreshedServicePackages,
+    packageCatalog,
+    patientOrders,
+    financeBusy,
+    financeError,
+    assignOpen,
+    assignForm,
+    assignBusy,
+    assignError,
+    consumeTargetId,
+    consumeForm,
+    consumeBusy,
+    consumeError,
+    approvalBusyKey,
+  } = financeState;
+  const setFinanceFilters = (nextValue: SetStateAction<FinanceFilters>) => {
+    dispatchFinanceState((current) => ({
+      financeFilters:
+        typeof nextValue === "function"
+          ? nextValue(current.financeFilters)
+          : nextValue,
+    }));
+  };
+  const setRefreshedServicePackages = (
+    nextValue: SetStateAction<PatientServicePackageItem[] | null>,
+  ) => {
+    dispatchFinanceState((current) => ({
+      refreshedServicePackages:
+        typeof nextValue === "function"
+          ? nextValue(current.refreshedServicePackages)
+          : nextValue,
+    }));
+  };
+  const setFinanceError = (nextValue: SetStateAction<string>) => {
+    dispatchFinanceState((current) => ({
+      financeError:
+        typeof nextValue === "function"
+          ? nextValue(current.financeError)
+          : nextValue,
+    }));
+  };
+  const setAssignOpen = (nextValue: SetStateAction<boolean>) => {
+    dispatchFinanceState((current) => ({
+      assignOpen:
+        typeof nextValue === "function"
+          ? nextValue(current.assignOpen)
+          : nextValue,
+    }));
+  };
+  const setAssignForm = (nextValue: SetStateAction<AssignPackageForm>) => {
+    dispatchFinanceState((current) => ({
+      assignForm:
+        typeof nextValue === "function"
+          ? nextValue(current.assignForm)
+          : nextValue,
+    }));
+  };
+  const setAssignError = (nextValue: SetStateAction<string>) => {
+    dispatchFinanceState((current) => ({
+      assignError:
+        typeof nextValue === "function"
+          ? nextValue(current.assignError)
+          : nextValue,
+    }));
+  };
+  const setConsumeTargetId = (nextValue: SetStateAction<string>) => {
+    dispatchFinanceState((current) => ({
+      consumeTargetId:
+        typeof nextValue === "function"
+          ? nextValue(current.consumeTargetId)
+          : nextValue,
+    }));
+  };
+  const setConsumeForm = (nextValue: SetStateAction<ConsumptionForm>) => {
+    dispatchFinanceState((current) => ({
+      consumeForm:
+        typeof nextValue === "function"
+          ? nextValue(current.consumeForm)
+          : nextValue,
+    }));
+  };
+  const setConsumeError = (nextValue: SetStateAction<string>) => {
+    dispatchFinanceState((current) => ({
+      consumeError:
+        typeof nextValue === "function"
+          ? nextValue(current.consumeError)
+          : nextValue,
+    }));
+  };
+  const setAssignBusy = (nextValue: SetStateAction<boolean>) => {
+    dispatchFinanceState((current) => ({
+      assignBusy:
+        typeof nextValue === "function"
+          ? nextValue(current.assignBusy)
+          : nextValue,
+    }));
+  };
+  const setConsumeBusy = (nextValue: SetStateAction<boolean>) => {
+    dispatchFinanceState((current) => ({
+      consumeBusy:
+        typeof nextValue === "function"
+          ? nextValue(current.consumeBusy)
+          : nextValue,
+    }));
+  };
+  const setApprovalBusyKey = (nextValue: SetStateAction<string>) => {
+    dispatchFinanceState((current) => ({
+      approvalBusyKey:
+        typeof nextValue === "function"
+          ? nextValue(current.approvalBusyKey)
+          : nextValue,
+    }));
+  };
 
   const financeQuery = useMemo(() => {
     const params = new URLSearchParams();
@@ -240,8 +402,10 @@ export function PatientInvoicesTab({
     let cancelled = false;
 
     async function loadFinanceContext() {
-      setFinanceBusy(true);
-      setFinanceError("");
+      dispatchFinanceState({
+        financeBusy: true,
+        financeError: "",
+      });
       try {
         const suffix = financeQuery.toString();
         const [summary, ledger, packages, catalog, orders] = await Promise.all([
@@ -256,17 +420,24 @@ export function PatientInvoicesTab({
           apiFetch<OrderItem[]>(`/patients/${patientId}/orders`).catch(() => []),
         ]);
         if (cancelled) return;
-        setLocalFinancialSummary(summary);
-        setLocalFinancialLedger(ledger);
-        setLocalServicePackages(packages);
-        setPackageCatalog(catalog);
-        setPatientOrders(orders);
+        dispatchFinanceState({
+          refreshedFinancialSummary: summary,
+          refreshedFinancialLedger: ledger,
+          refreshedServicePackages: packages,
+          packageCatalog: catalog,
+          patientOrders: orders,
+          financeBusy: false,
+        });
       } catch (error) {
         if (!cancelled) {
-          setFinanceError(error instanceof Error ? error.message : t.patient_invoices_error_load_filters);
+          dispatchFinanceState({
+            financeError:
+              error instanceof Error
+                ? error.message
+                : t.patient_invoices_error_load_filters,
+            financeBusy: false,
+          });
         }
-      } finally {
-        if (!cancelled) setFinanceBusy(false);
       }
     }
 
@@ -281,7 +452,7 @@ export function PatientInvoicesTab({
     const packages = await apiFetch<PatientServicePackageItem[]>(
       `/patients/${patientId}/service-packages`,
     );
-    setLocalServicePackages(packages);
+    setRefreshedServicePackages(packages);
   }
 
   async function handleAssignPackage(event: FormEvent<HTMLFormElement>) {
@@ -371,15 +542,16 @@ export function PatientInvoicesTab({
     }
   }
 
-  const packageGroupItems = buildPackageGroups(localServicePackages);
+  const effectiveServicePackages = refreshedServicePackages ?? servicePackages;
+  const packageGroupItems = buildPackageGroups(effectiveServicePackages);
   const assignedPackageIds = new Set(
-    localServicePackages.map((item) => item.package_id),
+    effectiveServicePackages.map((item) => item.package_id),
   );
   const assignablePackages = packageCatalog.filter(
     (item) => item.is_active && !assignedPackageIds.has(item.id),
   );
-  const effectiveFinancialSummary = localFinancialSummary ?? financialSummary;
-  const effectiveFinancialLedger = localFinancialLedger ?? financialLedger;
+  const effectiveFinancialSummary = refreshedFinancialSummary ?? financialSummary;
+  const effectiveFinancialLedger = refreshedFinancialLedger ?? financialLedger;
   const ledgerEntries = effectiveFinancialLedger?.entries ?? [];
   const revenueGross =
     effectiveFinancialSummary?.revenue_gross ??
@@ -879,7 +1051,7 @@ export function PatientInvoicesTab({
                   ))}
                 </div>
                 {canManageInvoices ? (
-                  <div className="mt-3 rounded-xl border border-border/50 bg-muted/20 px-3 py-3">
+                  <div className="mt-3 rounded-xl border border-border/50 bg-muted/20 p-3">
                     {consumeError && consumeTargetId === id ? (
                       <Banner tone="error" withIcon>
                         {consumeError}
@@ -905,13 +1077,17 @@ export function PatientInvoicesTab({
                             <option value="__summary__">
                               {t.patient_invoices_package_summary}
                             </option>
-                            {group.items
-                              .filter((item) => item.package_item_id)
-                              .map((item) => (
-                                <option key={item.package_item_id} value={item.package_item_id ?? ""}>
+                            {group.items.reduce<ReactNode[]>((options, item) => {
+                              if (!item.package_item_id) {
+                                return options;
+                              }
+                              options.push(
+                                <option key={item.package_item_id} value={item.package_item_id}>
                                   {item.description}
-                                </option>
-                              ))}
+                                </option>,
+                              );
+                              return options;
+                            }, [])}
                           </NativeComboboxSelect>
                         </Field>
                         <Field label={t.patient_invoices_order}>
@@ -1203,4 +1379,8 @@ export function PatientInvoicesTab({
       </FormSection>
     </TabsContent>
   );
+}
+
+export function PatientInvoicesTab(...args: Parameters<typeof usePatientInvoicesTabContent>) {
+  return usePatientInvoicesTabContent(...args);
 }

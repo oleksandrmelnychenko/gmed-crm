@@ -160,6 +160,7 @@ export function SheetFormFooter({
   submitting = false,
   submitDisabled = false,
   onCancel,
+  onSubmit,
 }: {
   cancelLabel: ReactNode;
   submitLabel: ReactNode;
@@ -167,6 +168,7 @@ export function SheetFormFooter({
   submitting?: boolean;
   submitDisabled?: boolean;
   onCancel: () => void;
+  onSubmit?: () => void;
 }) {
   return (
     <div className="shrink-0 flex justify-end gap-2 bg-popover px-4 py-3">
@@ -179,7 +181,12 @@ export function SheetFormFooter({
       >
         {cancelLabel}
       </Button>
-      <Button type="submit" className="h-9 rounded-lg" disabled={submitting || submitDisabled}>
+      <Button
+        type={onSubmit ? "button" : "submit"}
+        className="h-9 rounded-lg"
+        disabled={submitting || submitDisabled}
+        onClick={onSubmit}
+      >
         {submitting ? <LoaderCircle className="size-4 animate-spin" /> : null}
         {submitting ? (submittingLabel ?? submitLabel) : submitLabel}
       </Button>

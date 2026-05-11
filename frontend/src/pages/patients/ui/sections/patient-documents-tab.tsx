@@ -55,6 +55,63 @@ type PatientDocumentsTabProps = {
   formatDate: DateFormatter;
 };
 
+type DocumentsOverviewSectionProps = {
+  l: LocalizeFn;
+  documents: DocumentItem[];
+  documentAlerts: DocumentAlerts | null;
+  requiredDocumentFulfilledCount: number;
+  documentCategoryOptions: string[];
+};
+
+function DocumentsOverviewSection({
+  l,
+  documents,
+  documentAlerts,
+  requiredDocumentFulfilledCount,
+  documentCategoryOptions,
+}: DocumentsOverviewSectionProps) {
+  return (
+    <FormSection
+      title={l("Гњberblick", "РћР±Р·РѕСЂ", "Overview")}
+      accessory={<CountBadge>{documents.length} {l("Dateien", "С„Р°Р№Р»РѕРІ", "files")}</CountBadge>}
+    >
+      <div className="grid gap-3 md:grid-cols-3">
+        <StatCard
+          label={l("Dokumente gesamt", "Р’СЃРµРіРѕ РґРѕРєСѓРјРµРЅС‚РѕРІ", "Total documents")}
+          value={documents.length}
+          description={l(
+            "Alle Dateien, die direkt mit diesem Patienten verknГјpft sind.",
+            "Р’СЃРµ С„Р°Р№Р»С‹, РЅР°РїСЂСЏРјСѓСЋ СЃРІСЏР·Р°РЅРЅС‹Рµ СЃ СЌС‚РёРј РїР°С†РёРµРЅС‚РѕРј.",
+            "All files linked directly to this patient.",
+          )}
+        />
+        <StatCard
+          label={l("Pflichtdokumente erfГјllt", "РћР±СЏР·Р°С‚РµР»СЊРЅС‹Рµ РґРѕРєСѓРјРµРЅС‚С‹ РІС‹РїРѕР»РЅРµРЅС‹", "Required docs fulfilled")}
+          value={
+            documentAlerts?.configured_rule_count
+              ? `${requiredDocumentFulfilledCount}/${documentAlerts.configured_rule_count}`
+              : requiredDocumentFulfilledCount
+          }
+          description={l(
+            "Abdeckung des minimalen Dokumentenpakets fГјr Aufnahme und Compliance.",
+            "РџРѕРєСЂС‹С‚РёРµ РјРёРЅРёРјР°Р»СЊРЅРѕРіРѕ РїР°РєРµС‚Р° РґРѕРєСѓРјРµРЅС‚РѕРІ РґР»СЏ intake Рё compliance.",
+            "Coverage of the minimum document pack for intake and compliance.",
+          )}
+        />
+        <StatCard
+          label={l("Dokumentarten", "РўРёРїС‹ РґРѕРєСѓРјРµРЅС‚РѕРІ", "Document types")}
+          value={documentCategoryOptions.length}
+          description={l(
+            "Wie viele Kategorien aktuell im Profil dieses Patienten vorkommen.",
+            "РЎРєРѕР»СЊРєРѕ РєР°С‚РµРіРѕСЂРёР№ РґРѕРєСѓРјРµРЅС‚РѕРІ СЃРµР№С‡Р°СЃ РїСЂРёСЃСѓС‚СЃС‚РІСѓРµС‚ РІ РїСЂРѕС„РёР»Рµ РїР°С†РёРµРЅС‚Р°.",
+            "How many document categories currently appear in this patient profile.",
+          )}
+        />
+      </div>
+    </FormSection>
+  );
+}
+
 export function PatientDocumentsTab({
   l,
   commonNotSet,
@@ -106,44 +163,13 @@ export function PatientDocumentsTab({
         accessory={<CountBadge>{filteredDocuments.length}</CountBadge>}
       />
 
-      <FormSection
-        title={l("Überblick", "Обзор", "Overview")}
-        accessory={<CountBadge>{documents.length} {l("Dateien", "файлов", "files")}</CountBadge>}
-      >
-        <div className="grid gap-3 md:grid-cols-3">
-          <StatCard
-            label={l("Dokumente gesamt", "Всего документов", "Total documents")}
-            value={documents.length}
-            description={l(
-              "Alle Dateien, die direkt mit diesem Patienten verknüpft sind.",
-              "Все файлы, напрямую связанные с этим пациентом.",
-              "All files linked directly to this patient.",
-            )}
-          />
-          <StatCard
-            label={l("Pflichtdokumente erfüllt", "Обязательные документы выполнены", "Required docs fulfilled")}
-            value={
-              documentAlerts?.configured_rule_count
-                ? `${requiredDocumentFulfilledCount}/${documentAlerts.configured_rule_count}`
-                : requiredDocumentFulfilledCount
-            }
-            description={l(
-              "Abdeckung des minimalen Dokumentenpakets für Aufnahme und Compliance.",
-              "Покрытие минимального пакета документов для intake и compliance.",
-              "Coverage of the minimum document pack for intake and compliance.",
-            )}
-          />
-          <StatCard
-            label={l("Dokumentarten", "Типы документов", "Document types")}
-            value={documentCategoryOptions.length}
-            description={l(
-              "Wie viele Kategorien aktuell im Profil dieses Patienten vorkommen.",
-              "Сколько категорий документов сейчас присутствует в профиле пациента.",
-              "How many document categories currently appear in this patient profile.",
-            )}
-          />
-        </div>
-      </FormSection>
+      <DocumentsOverviewSection
+        l={l}
+        documents={documents}
+        documentAlerts={documentAlerts}
+        requiredDocumentFulfilledCount={requiredDocumentFulfilledCount}
+        documentCategoryOptions={documentCategoryOptions}
+      />
 
       {!tabLoading && documentAlerts && documentAlerts.configured_rule_count > 0 ? (
         <div

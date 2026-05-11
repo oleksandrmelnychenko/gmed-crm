@@ -4,8 +4,9 @@ import {
   useDeferredValue,
   useEffect,
   useMemo,
-  useState,
+  useReducer,
   type FormEvent,
+  type SetStateAction,
 } from "react";
 import {
   BellRing,
@@ -94,25 +95,141 @@ function channelTypeTone(channelType: string) {
   return "neutral" as const;
 }
 
-export function AdminNotificationsPage() {
+type AdminNotificationsState = {
+  channels: Channel[];
+  loading: boolean;
+  error: string;
+  flash: FlashState;
+  actionBusyId: string;
+  search: string;
+  typeFilter: string;
+  statusFilter: string;
+  detailOpen: boolean;
+  selectedChannelId: string;
+  createOpen: boolean;
+  submitting: boolean;
+  formError: string;
+  formName: string;
+  formType: string;
+  formConfig: string;
+};
+
+type AdminNotificationsPatch =
+  | Partial<AdminNotificationsState>
+  | ((current: AdminNotificationsState) => Partial<AdminNotificationsState>);
+
+function adminNotificationsReducer(
+  current: AdminNotificationsState,
+  patch: AdminNotificationsPatch,
+): AdminNotificationsState {
+  return {
+    ...current,
+    ...(typeof patch === "function" ? patch(current) : patch),
+  };
+}
+
+function resolveAdminNotificationsStateAction<T>(
+  action: SetStateAction<T>,
+  current: T,
+): T {
+  return typeof action === "function"
+    ? (action as (value: T) => T)(current)
+    : action;
+}
+
+function createAdminNotificationsFieldPatch<
+  K extends keyof AdminNotificationsState,
+>(
+  field: K,
+  nextValue: SetStateAction<AdminNotificationsState[K]>,
+): AdminNotificationsPatch {
+  return (current) => ({
+    [field]: resolveAdminNotificationsStateAction(nextValue, current[field]),
+  } as Partial<AdminNotificationsState>);
+}
+
+function useAdminNotificationsPageContent() {
   const { t } = useLang();
-  const [channels, setChannels] = useState<Channel[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [flash, setFlash] = useState<FlashState>(null);
-  const [actionBusyId, setActionBusyId] = useState("");
-  const [search, setSearch] = useState("");
+  const [notificationsState, dispatchNotificationsState] = useReducer(
+    adminNotificationsReducer,
+    undefined,
+    (): AdminNotificationsState => ({
+      channels: [],
+      loading: true,
+      error: "",
+      flash: null,
+      actionBusyId: "",
+      search: "",
+      typeFilter: "",
+      statusFilter: "",
+      detailOpen: false,
+      selectedChannelId: "",
+      createOpen: false,
+      submitting: false,
+      formError: "",
+      formName: "",
+      formType: "smtp",
+      formConfig: "",
+    }),
+  );
+  const {
+    actionBusyId,
+    channels,
+    createOpen,
+    detailOpen,
+    error,
+    flash,
+    formConfig,
+    formError,
+    formName,
+    formType,
+    loading,
+    search,
+    selectedChannelId,
+    statusFilter,
+    submitting,
+    typeFilter,
+  } = notificationsState;
+  const setNotificationsField = <K extends keyof AdminNotificationsState>(
+    field: K,
+    nextValue: SetStateAction<AdminNotificationsState[K]>,
+  ) =>
+    dispatchNotificationsState(
+      createAdminNotificationsFieldPatch(field, nextValue),
+    );
+  const setChannels = (nextValue: SetStateAction<Channel[]>) =>
+    setNotificationsField("channels", nextValue);
+  const setLoading = (nextValue: SetStateAction<boolean>) =>
+    setNotificationsField("loading", nextValue);
+  const setError = (nextValue: SetStateAction<string>) =>
+    setNotificationsField("error", nextValue);
+  const setFlash = (nextValue: SetStateAction<FlashState>) =>
+    setNotificationsField("flash", nextValue);
+  const setActionBusyId = (nextValue: SetStateAction<string>) =>
+    setNotificationsField("actionBusyId", nextValue);
+  const setSearch = (nextValue: SetStateAction<string>) =>
+    setNotificationsField("search", nextValue);
   const deferredSearch = useDeferredValue(search);
-  const [typeFilter, setTypeFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [selectedChannelId, setSelectedChannelId] = useState("");
-  const [createOpen, setCreateOpen] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [formError, setFormError] = useState("");
-  const [formName, setFormName] = useState("");
-  const [formType, setFormType] = useState("smtp");
-  const [formConfig, setFormConfig] = useState("");
+  const setTypeFilter = (nextValue: SetStateAction<string>) =>
+    setNotificationsField("typeFilter", nextValue);
+  const setStatusFilter = (nextValue: SetStateAction<string>) =>
+    setNotificationsField("statusFilter", nextValue);
+  const setDetailOpen = (nextValue: SetStateAction<boolean>) =>
+    setNotificationsField("detailOpen", nextValue);
+  const setSelectedChannelId = (nextValue: SetStateAction<string>) =>
+    setNotificationsField("selectedChannelId", nextValue);
+  const setCreateOpen = (nextValue: SetStateAction<boolean>) =>
+    setNotificationsField("createOpen", nextValue);
+  const setSubmitting = (nextValue: SetStateAction<boolean>) =>
+    setNotificationsField("submitting", nextValue);
+  const setFormError = (nextValue: SetStateAction<string>) =>
+    setNotificationsField("formError", nextValue);
+  const setFormName = (nextValue: SetStateAction<string>) =>
+    setNotificationsField("formName", nextValue);
+  const setFormType = (nextValue: SetStateAction<string>) =>
+    setNotificationsField("formType", nextValue);
+  const setFormConfig = (nextValue: SetStateAction<string>) =>
+    setNotificationsField("formConfig", nextValue);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -671,4 +788,8 @@ export function AdminNotificationsPage() {
       </Sheet>
     </>
   );
+}
+
+export function AdminNotificationsPage(...args: Parameters<typeof useAdminNotificationsPageContent>) {
+  return useAdminNotificationsPageContent(...args);
 }

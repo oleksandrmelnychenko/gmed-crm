@@ -131,11 +131,13 @@ type AppointmentDesktopDetailWorkspaceContentProps = {
   interpreterReportReady: boolean;
   completionWarnings: string[];
   reportReviewMeta: string;
-  canSubmitInterpreterReport: boolean;
-  canResubmitRejectedReport: boolean;
-  showReportReviewActions: boolean;
-  canShowConciergeSection: boolean;
-  canShowBillingHandoffSection: boolean;
+  detailDisplay: {
+    canSubmitInterpreterReport: boolean;
+    canResubmitRejectedReport: boolean;
+    showReportReviewActions: boolean;
+    canShowConciergeSection: boolean;
+    canShowBillingHandoffSection: boolean;
+  };
   nonMedicalProviders: ProviderSummary[];
   conciergeStaff: StaffOption[];
   billingStaff: StaffOption[];
@@ -154,7 +156,7 @@ type AppointmentDesktopDetailWorkspaceContentProps = {
   onFollowUpVisitCreated: (payload: { id?: string; notice: string }) => void;
 };
 
-function AppointmentDesktopDetailWorkspaceContent({
+function useAppointmentDesktopDetailWorkspaceContentContent({
   detailLoading,
   detailError,
   detail,
@@ -200,11 +202,7 @@ function AppointmentDesktopDetailWorkspaceContent({
   interpreterReportReady,
   completionWarnings,
   reportReviewMeta,
-  canSubmitInterpreterReport,
-  canResubmitRejectedReport,
-  showReportReviewActions,
-  canShowConciergeSection,
-  canShowBillingHandoffSection,
+  detailDisplay,
   nonMedicalProviders,
   conciergeStaff,
   billingStaff,
@@ -224,6 +222,13 @@ function AppointmentDesktopDetailWorkspaceContent({
 }: AppointmentDesktopDetailWorkspaceContentProps) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
+  const {
+    canSubmitInterpreterReport,
+    canResubmitRejectedReport,
+    showReportReviewActions,
+    canShowConciergeSection,
+    canShowBillingHandoffSection,
+  } = detailDisplay;
 
   if (detailLoading) {
     return (
@@ -535,8 +540,13 @@ function AppointmentDesktopDetailWorkspaceContent({
               detailReport={detailReport}
               reportReviewMeta={reportReviewMeta}
               interpreterReportReady={interpreterReportReady}
-              canShowConciergeSection={canShowConciergeSection}
-              canShowBillingHandoffSection={canShowBillingHandoffSection}
+              serviceAccess={{
+                canShowConciergeSection,
+                canShowBillingHandoffSection,
+                canManageConciergeServices: permissions.canManageConciergeServices,
+                canManageConciergeBilling: permissions.canManageConciergeBilling,
+                canCreateTasks: permissions.canCreateTasks,
+              }}
               nonMedicalProviders={nonMedicalProviders}
               conciergeStaff={conciergeStaff}
               billingStaff={billingStaff}
@@ -546,9 +556,6 @@ function AppointmentDesktopDetailWorkspaceContent({
               readyConciergeServices={readyConciergeServices}
               settledConciergeServices={settledConciergeServices}
               billingReadinessWarnings={billingReadinessWarnings}
-              canManageConciergeServices={permissions.canManageConciergeServices}
-              canManageConciergeBilling={permissions.canManageConciergeBilling}
-              canCreateTasks={permissions.canCreateTasks}
               onRefresh={onRefresh}
               onError={onError}
             />
@@ -582,6 +589,10 @@ function AppointmentDesktopDetailWorkspaceContent({
       ) : null}
     </div>
   );
+}
+
+function AppointmentDesktopDetailWorkspaceContent(...args: Parameters<typeof useAppointmentDesktopDetailWorkspaceContentContent>) {
+  return useAppointmentDesktopDetailWorkspaceContentContent(...args);
 }
 
 export const MemoizedAppointmentDesktopDetailWorkspaceContent = memo(

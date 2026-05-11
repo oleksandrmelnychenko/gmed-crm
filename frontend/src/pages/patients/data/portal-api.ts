@@ -154,12 +154,6 @@ export function requestPortalDocumentTranslation(documentId: string, payload: Js
   );
 }
 
-export function fetchPortalTranslationRequests() {
-  return apiFetch<PortalTranslationRequestItem[]>("/me/translation-requests", {
-    cacheTtlMs: PORTAL_CACHE_TTL_MS,
-  });
-}
-
 export function fetchPortalRecommendations() {
   return apiFetch<PortalRecommendationItem[]>("/me/recommendations", {
     cacheTtlMs: PORTAL_CACHE_TTL_MS,
@@ -181,12 +175,6 @@ export function requestRecommendationAppointment(
     `/me/recommendations/${recommendationId}/appointment-request`,
     payload,
   );
-}
-
-export function fetchPortalNextActions() {
-  return apiFetch<PortalNextActionsResponse>("/me/next-actions", {
-    cacheTtlMs: PORTAL_CACHE_TTL_MS,
-  });
 }
 
 export function fetchPortalServices() {

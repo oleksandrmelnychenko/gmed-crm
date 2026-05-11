@@ -72,7 +72,6 @@ export function StatusActionPill({
       </button>
       {open ? (
         <div
-          onClick={(event) => event.stopPropagation()}
           className="absolute left-0 top-full z-30 mt-1 w-[220px] rounded-lg border border-border bg-popover p-1.5 shadow-md"
         >
           <button

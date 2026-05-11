@@ -16,15 +16,6 @@ export function translationStatusBadge(status: string) {
   return "border-amber-200 bg-amber-50 text-amber-700";
 }
 
-export function textExtractionStatusBadge(status: string) {
-  if (status === "completed")
-    return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  if (status === "failed") return "border-rose-200 bg-rose-50 text-rose-700";
-  if (status === "unsupported")
-    return "border-amber-200 bg-amber-50 text-amber-700";
-  return "border-border/60 bg-muted/25 text-muted-foreground";
-}
-
 export function visibilityBadge(visibility: string) {
   if (visibility === "released_internal")
     return "border-sky-200 bg-sky-50 text-sky-700";

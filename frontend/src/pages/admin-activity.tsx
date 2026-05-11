@@ -4,7 +4,7 @@ import {
   useDeferredValue,
   useEffect,
   useMemo,
-  useState,
+  useReducer,
 } from "react";
 import {
   Activity,
@@ -388,29 +388,303 @@ function prettyContext(context: Record<string, unknown> | null) {
   return context ? JSON.stringify(context, null, 2) : "-";
 }
 
+type AdminActivityMetricsValue = {
+  total: number;
+  uniqueUsers: number;
+  loginCount: number;
+  settingsUpdates: number;
+  securityEvents: number;
+};
+
+type AdminActivityMetricsProps = {
+  metrics: AdminActivityMetricsValue;
+  t: Translations;
+};
+
+function AdminActivityMetrics({
+  metrics,
+  t,
+}: AdminActivityMetricsProps) {
+  return (
+    <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
+      <AdminInlineMetric
+        icon={Activity}
+        tone="sky"
+        label={t.activity_title}
+        value={metrics.total}
+        description={t.common_registry}
+      />
+      <AdminInlineMetric
+        icon={UsersRound}
+        tone="emerald"
+        label={t.activity_user}
+        value={metrics.uniqueUsers}
+        description={t.common_monitoring}
+      />
+      <AdminInlineMetric
+        icon={ShieldAlert}
+        tone="amber"
+        label={t.security_title}
+        value={metrics.securityEvents}
+        description={t.activity_action}
+      />
+      <AdminInlineMetric
+        icon={Settings2}
+        tone="slate"
+        label={t.settings_title}
+        value={metrics.settingsUpdates}
+        description={`${metrics.loginCount} ${actionLabel("login", t)}`}
+      />
+    </div>
+  );
+}
+
+type AdminActivityDetailSheetProps = {
+  detailOpen: boolean;
+  lang: Parameters<typeof formatAdminDateTime>[1];
+  selectedActivity: ActivityRow | null;
+  t: Translations;
+  onOpenChange: (open: boolean) => void;
+};
+
+function AdminActivityDetailSheet({
+  detailOpen,
+  lang,
+  selectedActivity,
+  t,
+  onOpenChange,
+}: AdminActivityDetailSheetProps) {
+  return (
+    <Sheet open={detailOpen} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
+        <AdminSheetScaffold
+          title={selectedActivity ? actionLabel(selectedActivity.action, t) : t.activity_details}
+          description={
+            selectedActivity
+              ? `${selectedActivity.user_name} - ${formatAdminDateTime(selectedActivity.created_at, lang)}`
+              : t.activity_subtitle
+          }
+          footer={(
+            <SheetActionsFooter>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 rounded-lg"
+                onClick={() => onOpenChange(false)}
+              >
+                {t.common_cancel}
+              </Button>
+            </SheetActionsFooter>
+          )}
+        >
+          {selectedActivity ? (
+            <>
+              <section className={`space-y-3 rounded-xl p-3.5 ${tokens.surface.softCard}`}>
+                <h3 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
+                  <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+                  <span>{t.activity_details}</span>
+                </h3>
+
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
+                    <p className="text-[11.5px] text-muted-foreground">{t.activity_user}</p>
+                    <p className="mt-1 text-sm font-medium text-foreground">
+                      {selectedActivity.user_name || "-"}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {selectedActivity.user_email || "-"}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
+                    <p className="text-[11.5px] text-muted-foreground">{t.activity_action}</p>
+                    <div className="mt-1">
+                      <StatusBadge tone={actionTone(selectedActivity.action)}>
+                        {actionLabel(selectedActivity.action, t)}
+                      </StatusBadge>
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
+                    <p className="text-[11.5px] text-muted-foreground">{t.activity_entity}</p>
+                    <p className="mt-1 text-sm font-medium text-foreground">
+                      {entityDisplay(selectedActivity.entity_type, selectedActivity.entity_id, t) || "-"}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
+                    <p className="text-[11.5px] text-muted-foreground">{t.activity_time}</p>
+                    <p className="mt-1 text-sm font-medium text-foreground">
+                      {formatAdminDateTime(selectedActivity.created_at, lang) || "-"}
+                    </p>
+                  </div>
+                </div>
+              </section>
+
+              <section className={`space-y-3 rounded-xl p-3.5 ${tokens.surface.softCard}`}>
+                <h3 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
+                  <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+                  <span>{t.activity_payload}</span>
+                </h3>
+                <pre className="overflow-x-auto rounded-lg border border-border/50 bg-card/60 p-3 text-xs leading-6 text-muted-foreground">
+                  {prettyContext(selectedActivity.context)}
+                </pre>
+              </section>
+            </>
+          ) : (
+            <EmptyCell>{t.activity_subtitle}</EmptyCell>
+          )}
+        </AdminSheetScaffold>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+type AdminActivityToolbarSectionProps = {
+  actionOptions: string[];
+  anyFilterActive: boolean;
+  filterAction: string;
+  search: string;
+  t: Translations;
+  onFilterActionChange: (value: string) => void;
+  onReset: () => void;
+  onSearchChange: (value: string) => void;
+};
+
+function AdminActivityToolbarSection({
+  actionOptions,
+  anyFilterActive,
+  filterAction,
+  search,
+  t,
+  onFilterActionChange,
+  onReset,
+  onSearchChange,
+}: AdminActivityToolbarSectionProps) {
+  return (
+    <AdminToolbar className="rounded-none border-0 bg-transparent p-0 shadow-none">
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+        <Input
+          type="text"
+          value={search}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder={t.search_placeholder}
+          className="h-8 w-[240px] rounded-lg bg-card pl-8 text-[13px]"
+        />
+      </div>
+
+      <NativeComboboxSelect
+        value={filterAction}
+        onChange={(event) =>
+          onFilterActionChange(
+            event.target.value && event.target.value !== "__all__"
+              ? event.target.value
+              : "",
+          )
+        }
+        className="h-8 w-[240px] rounded-lg bg-card text-[13px]"
+      >
+        <option value="__all__">{t.providers_all}</option>
+        {actionOptions.map((value) => (
+          <option key={value} value={value}>
+            {actionLabel(value, t)}
+          </option>
+        ))}
+      </NativeComboboxSelect>
+
+      {anyFilterActive ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-8 rounded-lg gap-1 text-[12.5px] text-muted-foreground"
+          onClick={onReset}
+        >
+          <X className="size-3.5" />
+          {t.common_reset}
+        </Button>
+      ) : null}
+    </AdminToolbar>
+  );
+}
+
+interface AdminActivityPageState {
+  activities: ActivityRow[];
+  loading: boolean;
+  error: string;
+  search: string;
+  filterAction: string;
+  detailOpen: boolean;
+  selectedIndex: number | null;
+}
+
+type AdminActivityPagePatch = Partial<AdminActivityPageState>;
+
+const INITIAL_ADMIN_ACTIVITY_PAGE_STATE: AdminActivityPageState = {
+  activities: [],
+  loading: true,
+  error: "",
+  search: "",
+  filterAction: "",
+  detailOpen: false,
+  selectedIndex: null,
+};
+
+function adminActivityPageReducer(
+  current: AdminActivityPageState,
+  patch: AdminActivityPagePatch,
+): AdminActivityPageState {
+  return {
+    ...current,
+    ...patch,
+  };
+}
+
 export function AdminActivityPage() {
   const { t, lang } = useLang();
 
-  const [activities, setActivities] = useState<ActivityRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [search, setSearch] = useState("");
+  const [activityState, dispatchActivityState] = useReducer(
+    adminActivityPageReducer,
+    INITIAL_ADMIN_ACTIVITY_PAGE_STATE,
+  );
+  const {
+    activities,
+    detailOpen,
+    error,
+    filterAction,
+    loading,
+    search,
+    selectedIndex,
+  } = activityState;
   const deferredSearch = useDeferredValue(search);
-  const [filterAction, setFilterAction] = useState("");
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const setSearch = useCallback(
+    (value: string) => dispatchActivityState({ search: value }),
+    [],
+  );
+  const setFilterAction = useCallback(
+    (value: string) => dispatchActivityState({ filterAction: value }),
+    [],
+  );
+  const setDetailOpen = useCallback(
+    (value: boolean) => dispatchActivityState({ detailOpen: value }),
+    [],
+  );
 
   const loadData = useCallback(async (action: string) => {
-    setLoading(true);
-    setError("");
+    dispatchActivityState({ loading: true, error: "" });
     try {
       const data = await fetchAdminActivity<ActivityRow>(action);
-      startTransition(() => setActivities(data));
+      startTransition(() =>
+        dispatchActivityState({
+          activities: data,
+          error: "",
+          loading: false,
+        }),
+      );
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : t.common_error);
-      setActivities([]);
-    } finally {
-      setLoading(false);
+      dispatchActivityState({
+        activities: [],
+        error: loadError instanceof Error ? loadError.message : t.common_error,
+        loading: false,
+      });
     }
   }, [t.common_error]);
 
@@ -446,23 +720,33 @@ export function AdminActivityPage() {
   }, [activities, deferredSearch]);
 
   const metrics = useMemo(() => {
-    const uniqueUsers = new Set(filtered.map((item) => item.user_email)).size;
-    const loginCount = filtered.filter((item) => item.action === "login").length;
-    const settingsUpdates = filtered.filter(
-      (item) => item.action === "update_setting",
-    ).length;
-    const securityEvents = filtered.filter((item) =>
-      [
-        "revoke_all_sessions",
-        "admin_force_logout_user",
-        "revoke_all_users_sessions",
-        "token_theft_detected",
-      ].includes(item.action),
-    ).length;
+    const uniqueUserEmails = new Set<string>();
+    let loginCount = 0;
+    let settingsUpdates = 0;
+    let securityEvents = 0;
+
+    for (const item of filtered) {
+      uniqueUserEmails.add(item.user_email);
+
+      if (item.action === "login") {
+        loginCount += 1;
+      }
+      if (item.action === "update_setting") {
+        settingsUpdates += 1;
+      }
+      if (
+        item.action === "revoke_all_sessions" ||
+        item.action === "admin_force_logout_user" ||
+        item.action === "revoke_all_users_sessions" ||
+        item.action === "token_theft_detected"
+      ) {
+        securityEvents += 1;
+      }
+    }
 
     return {
       total: filtered.length,
-      uniqueUsers,
+      uniqueUsers: uniqueUserEmails.size,
       loginCount,
       settingsUpdates,
       securityEvents,
@@ -577,78 +861,18 @@ export function AdminActivityPage() {
           )}
         />
 
-        <AdminToolbar className="rounded-none border-0 bg-transparent p-0 shadow-none">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-            <Input
-              type="text"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder={t.search_placeholder}
-              className="h-8 w-[240px] rounded-lg bg-card pl-8 text-[13px]"
-            />
-          </div>
+        <AdminActivityToolbarSection
+          actionOptions={actionOptions}
+          anyFilterActive={anyFilterActive}
+          filterAction={filterAction}
+          search={search}
+          t={t}
+          onFilterActionChange={setFilterAction}
+          onReset={() => dispatchActivityState({ search: "", filterAction: "" })}
+          onSearchChange={setSearch}
+        />
 
-          <NativeComboboxSelect
-            value={filterAction}
-
-
-            onChange={(event) => setFilterAction(event.target.value && event.target.value !== "__all__" ? event.target.value : "")} className="h-8 w-[240px] rounded-lg bg-card text-[13px]">
-              <option value="__all__">{t.providers_all}</option>
-              {actionOptions.map((value) => (
-                <option key={value} value={value}>
-                  {actionLabel(value, t)}
-                </option>
-              ))}
-            </NativeComboboxSelect>
-
-          {anyFilterActive ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-8 rounded-lg gap-1 text-[12.5px] text-muted-foreground"
-              onClick={() => {
-                setSearch("");
-                setFilterAction("");
-              }}
-            >
-              <X className="size-3.5" />
-              {t.common_reset}
-            </Button>
-          ) : null}
-        </AdminToolbar>
-
-        <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
-          <AdminInlineMetric
-            icon={Activity}
-            tone="sky"
-            label={t.activity_title}
-            value={metrics.total}
-            description={t.common_registry}
-          />
-          <AdminInlineMetric
-            icon={UsersRound}
-            tone="emerald"
-            label={t.activity_user}
-            value={metrics.uniqueUsers}
-            description={t.common_monitoring}
-          />
-          <AdminInlineMetric
-            icon={ShieldAlert}
-            tone="amber"
-            label={t.security_title}
-            value={metrics.securityEvents}
-            description={t.activity_action}
-          />
-          <AdminInlineMetric
-            icon={Settings2}
-            tone="slate"
-            label={t.settings_title}
-            value={metrics.settingsUpdates}
-            description={`${metrics.loginCount} ${actionLabel("login", t)}`}
-          />
-        </div>
+        <AdminActivityMetrics metrics={metrics} t={t} />
 
         {loading ? <TabLoader /> : null}
         {!loading && error ? <Banner tone="error">{error}</Banner> : null}
@@ -673,8 +897,10 @@ export function AdminActivityPage() {
                 rowId={(activity) => `${activity.user_email}-${activity.created_at}-${activity.action}`}
                 activeRowId={selectedActivityId}
                 onRowClick={(activity) => {
-                  setSelectedIndex(filtered.indexOf(activity));
-                  setDetailOpen(true);
+                  dispatchActivityState({
+                    detailOpen: true,
+                    selectedIndex: filtered.indexOf(activity),
+                  });
                 }}
                 tableClassName="min-h-[360px]"
               />
@@ -683,85 +909,13 @@ export function AdminActivityPage() {
         ) : null}
       </div>
 
-      <Sheet open={detailOpen} onOpenChange={setDetailOpen}>
-        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
-          <AdminSheetScaffold
-            title={selectedActivity ? actionLabel(selectedActivity.action, t) : t.activity_details}
-            description={
-              selectedActivity
-                ? `${selectedActivity.user_name} - ${formatAdminDateTime(selectedActivity.created_at, lang)}`
-                : t.activity_subtitle
-            }
-            footer={(
-              <SheetActionsFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-9 rounded-lg"
-                  onClick={() => setDetailOpen(false)}
-                >
-                  {t.common_cancel}
-                </Button>
-              </SheetActionsFooter>
-            )}
-          >
-            {selectedActivity ? (
-              <>
-                <section className={`space-y-3 rounded-xl p-3.5 ${tokens.surface.softCard}`}>
-                  <h3 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                    <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
-                    <span>{t.activity_details}</span>
-                  </h3>
-
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                    <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
-                      <p className="text-[11.5px] text-muted-foreground">{t.activity_user}</p>
-                      <p className="mt-1 text-sm font-medium text-foreground">
-                        {selectedActivity.user_name || "-"}
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {selectedActivity.user_email || "-"}
-                      </p>
-                    </div>
-                    <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
-                      <p className="text-[11.5px] text-muted-foreground">{t.activity_action}</p>
-                      <div className="mt-1">
-                        <StatusBadge tone={actionTone(selectedActivity.action)}>
-                          {actionLabel(selectedActivity.action, t)}
-                        </StatusBadge>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
-                      <p className="text-[11.5px] text-muted-foreground">{t.activity_entity}</p>
-                      <p className="mt-1 text-sm font-medium text-foreground">
-                        {entityDisplay(selectedActivity.entity_type, selectedActivity.entity_id, t) || "-"}
-                      </p>
-                    </div>
-                    <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
-                      <p className="text-[11.5px] text-muted-foreground">{t.activity_time}</p>
-                      <p className="mt-1 text-sm font-medium text-foreground">
-                        {formatAdminDateTime(selectedActivity.created_at, lang) || "-"}
-                      </p>
-                    </div>
-                  </div>
-                </section>
-
-                <section className={`space-y-3 rounded-xl p-3.5 ${tokens.surface.softCard}`}>
-                  <h3 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                    <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
-                    <span>{t.activity_payload}</span>
-                  </h3>
-                  <pre className="overflow-x-auto rounded-lg border border-border/50 bg-card/60 p-3 text-xs leading-6 text-muted-foreground">
-                    {prettyContext(selectedActivity.context)}
-                  </pre>
-                </section>
-              </>
-            ) : (
-              <EmptyCell>{t.activity_subtitle}</EmptyCell>
-            )}
-          </AdminSheetScaffold>
-        </SheetContent>
-      </Sheet>
+      <AdminActivityDetailSheet
+        detailOpen={detailOpen}
+        lang={lang}
+        selectedActivity={selectedActivity}
+        t={t}
+        onOpenChange={setDetailOpen}
+      />
     </>
   );
 }

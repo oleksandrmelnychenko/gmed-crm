@@ -244,7 +244,6 @@ export function FilterBuilder<T>({
                 onChange={(e) => setPickerQuery(e.target.value)}
                 placeholder={resolvedTranslations.searchPlaceholder}
                 className="h-6 border-0 px-0 text-xs shadow-none focus-visible:ring-0"
-                autoFocus
               />
             </div>
             <div className="max-h-64 overflow-y-auto p-1">

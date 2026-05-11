@@ -3,9 +3,7 @@
  * Re-exports the existing apiFetch from @/lib/api and adds convenience helpers.
  */
 
-import { apiFetch, buildApiUrl, clearApiCache, getAccessToken } from "@/lib/api";
-
-export { apiFetch };
+import { apiFetch } from "@/lib/api";
 
 /** GET shorthand */
 export function get<T>(path: string): Promise<T> {
@@ -18,33 +16,4 @@ export function post<T>(path: string, body?: unknown): Promise<T> {
     method: "POST",
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
-}
-
-/** POST without body (fire-and-forget style actions) */
-export function postNoBody(path: string): Promise<void> {
-  return apiFetch<void>(path, { method: "POST" });
-}
-
-/** POST multipart/form-data (file upload) */
-export async function uploadFile<T>(path: string, formData: FormData): Promise<T> {
-  const token = getAccessToken();
-  const headers = new Headers();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-  // Do NOT set Content-Type — browser sets it with boundary
-
-  const res = await fetch(buildApiUrl(path), {
-    method: "POST",
-    headers,
-    body: formData,
-  });
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => null) as
-      | { message?: string; error?: string }
-      | null;
-    throw new Error(body?.message ?? body?.error ?? `${res.status} ${res.statusText}`);
-  }
-
-  clearApiCache();
-  return res.json() as Promise<T>;
 }

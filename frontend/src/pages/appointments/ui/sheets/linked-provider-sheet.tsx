@@ -23,11 +23,13 @@ function humanizeLinkedCode(value: string | null | undefined) {
   if (!value) {
     return appointmentText("Nicht festgelegt", "Не указано", "Not set");
   }
-  return value
-    .split("_")
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+  const parts: string[] = [];
+  for (const part of value.split("_")) {
+    if (part) {
+      parts.push(part.charAt(0).toUpperCase() + part.slice(1));
+    }
+  }
+  return parts.join(" ");
 }
 
 function linkedProviderAddress(detail: ProviderSheetDetail) {

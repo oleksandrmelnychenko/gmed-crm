@@ -1,4 +1,4 @@
-import type { Translations } from "./index";
+import type { TranslationShape as Translations } from "./translations-shape";
 import { adminSystemRu } from "./catalogs/admin-system";
 import { casesClinicalRu } from "./catalogs/cases-clinical";
 import { clinicalRu } from "./catalogs/clinical";
@@ -7,7 +7,7 @@ import { patientsPortalRu } from "./catalogs/patients-portal";
 import { revenueRu } from "./catalogs/revenue";
 import { sharedCoreRu } from "./catalogs/shared";
 
-export const ru: Translations = {
+export const ru = {
   app_name: "GMED CONSOLE",
   app_subtitle: "Управление медицинским туризмом",
 
@@ -1456,4 +1456,4 @@ export const ru: Translations = {
   ...patientsPortalRu,
   ...revenueRu,
   ...sharedCoreRu,
-};
+} satisfies Translations;

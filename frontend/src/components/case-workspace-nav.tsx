@@ -34,10 +34,16 @@ export function CaseWorkspaceNav() {
   const backHref = patientContext ? `/patients/${patientContext}?tab=cases` : "/cases";
   const backLabel = patientContext ? t.patients_col_patient : t.cases_title;
 
-  const groupedSections = GROUP_ORDER.map((group) => ({
-    group,
-    items: CASE_WORKSPACE_SECTIONS.filter((item) => item.group === group),
-  })).filter((entry) => entry.items.length > 0);
+  const groupedSections: Array<{
+    group: CaseSectionGroup;
+    items: Array<(typeof CASE_WORKSPACE_SECTIONS)[number]>;
+  }> = [];
+  for (const group of GROUP_ORDER) {
+    const items = CASE_WORKSPACE_SECTIONS.filter((item) => item.group === group);
+    if (items.length > 0) {
+      groupedSections.push({ group, items });
+    }
+  }
 
   return (
     <aside

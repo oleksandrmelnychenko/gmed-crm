@@ -161,7 +161,7 @@ export type AppointmentRequestItem = {
   converted_appointment_date: string | null;
 };
 
-export type RecurringScopePreviewItem = {
+type RecurringScopePreviewItem = {
   id: string;
   date: string;
   status: AppointmentStatus;
@@ -204,7 +204,7 @@ export type AppointmentAttentionItem = AppointmentListItem & {
   next_due_at: string | null;
 };
 
-export type ConflictItem = {
+type ConflictItem = {
   id: string;
   title: string;
   date: string;

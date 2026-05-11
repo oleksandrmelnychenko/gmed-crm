@@ -219,11 +219,13 @@ function AppointmentClinicalSection({
               detail={detail}
               detailReport={detailReport}
               reportReviewMeta={reportReviewMeta}
-              canSubmitInterpreterReport={canSubmitInterpreterReport}
-              canResubmitRejectedReport={canResubmitRejectedReport}
-              showReportReviewActions={showReportReviewActions}
-              canApproveReport={permissions.canApproveReport}
-              canRejectReport={permissions.canRejectReport}
+              reportActions={{
+                canSubmitInterpreterReport,
+                canResubmitRejectedReport,
+                showReportReviewActions,
+                canApproveReport: permissions.canApproveReport,
+                canRejectReport: permissions.canRejectReport,
+              }}
               onRefresh={onRefresh}
               onError={onError}
             />

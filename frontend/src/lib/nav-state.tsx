@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, use, useState, type ReactNode } from "react";
 
 interface NavStateValue {
   collapsed: boolean;
@@ -8,7 +8,7 @@ interface NavStateValue {
 const NavStateContext = createContext<NavStateValue | null>(null);
 
 export function useNavState() {
-  const ctx = useContext(NavStateContext);
+  const ctx = use(NavStateContext);
   if (!ctx) throw new Error("useNavState must be inside NavStateProvider");
   return ctx;
 }

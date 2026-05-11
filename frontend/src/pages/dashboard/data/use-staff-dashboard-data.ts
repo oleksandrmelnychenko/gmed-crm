@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useEffect, useMemo, useReducer, useRef, type SetStateAction } from "react";
 
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
@@ -106,19 +106,110 @@ function clearStaffDashboardCache() {
   clearApiCache("/tasks");
 }
 
-export function useStaffDashboardData(period: Period) {
-  const [overview, setOverview] = useState<OverviewStats | null>(null);
-  const [monthly, setMonthly] = useState<MonthlyEntry[]>([]);
-  const [upcoming, setUpcoming] = useState<UpcomingAppointment[]>([]);
-  const [tasks, setTasks] = useState<TaskItem[]>([]);
-  const [patients, setPatients] = useState<PatientSummary[]>([]);
-  const [loading, setLoading] = useState(true);
+type StaffDashboardDataState = {
+  overview: OverviewStats | null;
+  monthly: MonthlyEntry[];
+  upcoming: UpcomingAppointment[];
+  tasks: TaskItem[];
+  patients: PatientSummary[];
+  loading: boolean;
+  demographics: DemographicsPayload | null;
+  clinical: ClinicalPayload | null;
+  operations: OperationsPayload | null;
+  sectionsLoading: boolean;
+  refreshVersion: number;
+};
 
-  const [demographics, setDemographics] = useState<DemographicsPayload | null>(null);
-  const [clinical, setClinical] = useState<ClinicalPayload | null>(null);
-  const [operations, setOperations] = useState<OperationsPayload | null>(null);
-  const [sectionsLoading, setSectionsLoading] = useState(true);
-  const [refreshVersion, setRefreshVersion] = useState(0);
+type StaffDashboardDataAction =
+  | {
+      type: "overview-success";
+      overview: OverviewStats | null;
+      monthly: MonthlyEntry[];
+      upcoming: UpcomingAppointment[];
+      tasks: TaskItem[];
+      patients: PatientSummary[];
+    }
+  | {
+      type: "sections-success";
+      demographics: DemographicsPayload | null;
+      clinical: ClinicalPayload | null;
+      operations: OperationsPayload | null;
+    }
+  | { type: "set-loading"; loading: boolean }
+  | { type: "set-sections-loading"; value: SetStateAction<boolean> }
+  | { type: "refresh" };
+
+const STAFF_DASHBOARD_INITIAL_STATE: StaffDashboardDataState = {
+  overview: null,
+  monthly: [],
+  upcoming: [],
+  tasks: [],
+  patients: [],
+  loading: true,
+  demographics: null,
+  clinical: null,
+  operations: null,
+  sectionsLoading: true,
+  refreshVersion: 0,
+};
+
+function staffDashboardDataReducer(
+  state: StaffDashboardDataState,
+  action: StaffDashboardDataAction,
+): StaffDashboardDataState {
+  switch (action.type) {
+    case "overview-success":
+      return {
+        ...state,
+        overview: action.overview,
+        monthly: action.monthly,
+        upcoming: action.upcoming,
+        tasks: action.tasks,
+        patients: action.patients,
+        loading: false,
+      };
+    case "sections-success":
+      return {
+        ...state,
+        demographics: action.demographics,
+        clinical: action.clinical,
+        operations: action.operations,
+        sectionsLoading: false,
+      };
+    case "set-loading":
+      return { ...state, loading: action.loading };
+    case "set-sections-loading":
+      return {
+        ...state,
+        sectionsLoading:
+          typeof action.value === "function"
+            ? action.value(state.sectionsLoading)
+            : action.value,
+      };
+    case "refresh":
+      return { ...state, refreshVersion: state.refreshVersion + 1 };
+    default:
+      return state;
+  }
+}
+
+export function useStaffDashboardData(period: Period) {
+  const [
+    {
+      overview,
+      monthly,
+      upcoming,
+      tasks,
+      patients,
+      loading,
+      demographics,
+      clinical,
+      operations,
+      sectionsLoading,
+      refreshVersion,
+    },
+    dispatchDashboardData,
+  ] = useReducer(staffDashboardDataReducer, STAFF_DASHBOARD_INITIAL_STATE);
   const overviewLoadedRef = useRef(false);
 
   useEffect(() => {
@@ -145,14 +236,16 @@ export function useStaffDashboardData(period: Period) {
     ]).then(([ov, mm, up, tk, pts]) => {
       if (cancelled) return;
       startTransition(() => {
-        setOverview(ov);
-        setMonthly(mm);
-        setUpcoming(up);
-        setTasks(tk);
-        setPatients(pts);
+        dispatchDashboardData({
+          type: "overview-success",
+          overview: ov,
+          monthly: mm,
+          upcoming: up,
+          tasks: tk,
+          patients: pts,
+        });
       });
       overviewLoadedRef.current = true;
-      setLoading(false);
     });
 
     return () => {
@@ -176,11 +269,13 @@ export function useStaffDashboardData(period: Period) {
     ]).then(([d, c, o]) => {
       if (cancelled) return;
       startTransition(() => {
-        setDemographics(d);
-        setClinical(c);
-        setOperations(o);
+        dispatchDashboardData({
+          type: "sections-success",
+          demographics: d,
+          clinical: c,
+          operations: o,
+        });
       });
-      setSectionsLoading(false);
     });
 
     return () => {
@@ -191,9 +286,9 @@ export function useStaffDashboardData(period: Period) {
   useDebouncedRealtimeSubscription(STAFF_DASHBOARD_REALTIME_EVENTS, () => {
     clearStaffDashboardCache();
     if (!overviewLoadedRef.current) {
-      setLoading(true);
+      dispatchDashboardData({ type: "set-loading", loading: true });
     }
-    setRefreshVersion((version) => version + 1);
+    dispatchDashboardData({ type: "refresh" });
   }, 300);
 
   const newPatientsThisMonth = useMemo(() => {
@@ -211,6 +306,9 @@ export function useStaffDashboardData(period: Period) {
     () => tasks.filter((task) => task.status !== "done" && task.status !== "cancelled").length,
     [tasks],
   );
+  const setSectionsLoading = (value: SetStateAction<boolean>) => {
+    dispatchDashboardData({ type: "set-sections-loading", value });
+  };
 
   return {
     clinical,

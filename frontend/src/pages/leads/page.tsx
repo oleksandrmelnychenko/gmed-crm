@@ -4,9 +4,11 @@ import {
   useDeferredValue,
   useEffect,
   useMemo,
+  useReducer,
   useState,
   type FormEvent,
   type ReactNode,
+  type SetStateAction,
 } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
@@ -156,7 +158,95 @@ function Banner({
   return <ShellBanner tone={tone}>{children}</ShellBanner>;
 }
 
-export function LeadsPage() {
+type LeadsListState = {
+  version: number;
+  leads: LeadListItem[];
+  loading: boolean;
+  error: string;
+  stats: LeadsStats | null;
+  monthly: MonthlyEntry[];
+  byStatus: StatusCount[];
+};
+
+type LeadsDetailState = {
+  detailOpen: boolean;
+  selectedLeadId: string;
+  detail: LeadDetail | null;
+  detailLoading: boolean;
+  detailError: string;
+};
+
+type LeadsListPatch =
+  | Partial<LeadsListState>
+  | ((current: LeadsListState) => Partial<LeadsListState>);
+
+type LeadsDetailPatch =
+  | Partial<LeadsDetailState>
+  | ((current: LeadsDetailState) => Partial<LeadsDetailState>);
+
+type LeadsUiState = {
+  successMessage: string;
+  pendingConvertLead: LeadListItem | null;
+  createOpen: boolean;
+  createBusy: boolean;
+  createError: string;
+  createForm: LeadForm;
+  paneTab: LeadPaneTab;
+  gateForm: LeadGateForm | null;
+  gateBusy: boolean;
+  failedLeadForm: FailedLeadResolutionForm;
+  failedLeadBusy: boolean;
+  actionBusy: string | null;
+};
+
+type LeadsUiPatch =
+  | Partial<LeadsUiState>
+  | ((current: LeadsUiState) => Partial<LeadsUiState>);
+
+function leadsListReducer(
+  state: LeadsListState,
+  patch: LeadsListPatch,
+): LeadsListState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
+function leadsDetailReducer(
+  state: LeadsDetailState,
+  patch: LeadsDetailPatch,
+): LeadsDetailState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
+function leadsUiReducer(
+  state: LeadsUiState,
+  patch: LeadsUiPatch,
+): LeadsUiState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
+function createLeadsUiFieldPatch<K extends keyof LeadsUiState>(
+  field: K,
+  value: SetStateAction<LeadsUiState[K]>,
+): LeadsUiPatch {
+  return (current) => {
+    const nextValue =
+      typeof value === "function"
+        ? (value as (previous: LeadsUiState[K]) => LeadsUiState[K])(current[field])
+        : value;
+    return { [field]: nextValue } as Partial<LeadsUiState>;
+  };
+}
+
+function useLeadsPageContent() {
   const { user } = useAuth();
   const { t, lang } = useLang();
   const l = (de: string, ru: string, en: string) =>
@@ -219,40 +309,147 @@ export function LeadsPage() {
     [setPersistedLeadFilters],
   );
   const deferredSearch = useDeferredValue(filters.search);
-  const [version, setVersion] = useState(0);
-
-  const [leads, setLeads] = useState<LeadListItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
-  // When a PM clicks "Convert" on the card we open a confirmation modal
-  // keyed on the lead id, instead of firing POST immediately. The actual
-  // convert call happens in `confirmConvertLead` below.
-  const [pendingConvertLead, setPendingConvertLead] = useState<LeadListItem | null>(null);
-
-  const [stats, setStats] = useState<LeadsStats | null>(null);
-  const [monthly, setMonthly] = useState<MonthlyEntry[]>([]);
-  const [byStatus, setByStatus] = useState<StatusCount[]>([]);
-
-  const [createOpen, setCreateOpen] = useState(false);
-  const [createBusy, setCreateBusy] = useState(false);
-  const [createError, setCreateError] = useState("");
-  const [createForm, setCreateForm] = useState<LeadForm>(blankLeadForm());
-
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [selectedLeadId, setSelectedLeadId] = useState("");
-  const [detail, setDetail] = useState<LeadDetail | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState("");
-  const [paneTab, setPaneTab] = useState<LeadPaneTab>("overview");
-  const [gateForm, setGateForm] = useState<LeadGateForm | null>(null);
-  const [gateBusy, setGateBusy] = useState(false);
-  const [failedLeadForm, setFailedLeadForm] = useState<FailedLeadResolutionForm>(
-    blankFailedLeadResolutionForm()
+  const [listState, dispatchListState] = useReducer(
+    leadsListReducer,
+    undefined,
+    () => ({
+      version: 0,
+      leads: [],
+      loading: false,
+      error: "",
+      stats: null,
+      monthly: [],
+      byStatus: [],
+    }),
   );
-  const [failedLeadBusy, setFailedLeadBusy] = useState(false);
+  const {
+    version,
+    leads,
+    loading,
+    error,
+    stats,
+    monthly,
+    byStatus,
+  } = listState;
+  const setVersion = (nextValue: SetStateAction<number>) => {
+    dispatchListState((current) => ({
+      version:
+        typeof nextValue === "function"
+          ? nextValue(current.version)
+          : nextValue,
+    }));
+  };
+  const setError = (nextValue: SetStateAction<string>) => {
+    dispatchListState((current) => ({
+      error:
+        typeof nextValue === "function"
+          ? nextValue(current.error)
+          : nextValue,
+    }));
+  };
+  const [uiState, dispatchUiState] = useReducer(
+    leadsUiReducer,
+    undefined,
+    (): LeadsUiState => ({
+      successMessage: "",
+      pendingConvertLead: null,
+      createOpen: false,
+      createBusy: false,
+      createError: "",
+      createForm: blankLeadForm(),
+      paneTab: "overview",
+      gateForm: null,
+      gateBusy: false,
+      failedLeadForm: blankFailedLeadResolutionForm(),
+      failedLeadBusy: false,
+      actionBusy: null,
+    }),
+  );
+  const {
+    successMessage,
+    pendingConvertLead,
+    createOpen,
+    createBusy,
+    createError,
+    createForm,
+    paneTab,
+    gateForm,
+    gateBusy,
+    failedLeadForm,
+    failedLeadBusy,
+    actionBusy,
+  } = uiState;
+  const setLeadUiField = <K extends keyof LeadsUiState>(
+    field: K,
+    value: SetStateAction<LeadsUiState[K]>,
+  ) => dispatchUiState(createLeadsUiFieldPatch(field, value));
+  const setSuccessMessage = (value: SetStateAction<string>) =>
+    setLeadUiField("successMessage", value);
+  const setPendingConvertLead = (value: SetStateAction<LeadListItem | null>) =>
+    setLeadUiField("pendingConvertLead", value);
+  const setCreateOpen = (value: SetStateAction<boolean>) =>
+    setLeadUiField("createOpen", value);
+  const setCreateBusy = (value: SetStateAction<boolean>) =>
+    setLeadUiField("createBusy", value);
+  const setCreateError = (value: SetStateAction<string>) =>
+    setLeadUiField("createError", value);
+  const setCreateForm = (value: SetStateAction<LeadForm>) =>
+    setLeadUiField("createForm", value);
 
-  const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const [detailState, dispatchDetailState] = useReducer(
+    leadsDetailReducer,
+    undefined,
+    () => ({
+      detailOpen: false,
+      selectedLeadId: "",
+      detail: null,
+      detailLoading: false,
+      detailError: "",
+    }),
+  );
+  const {
+    detailOpen,
+    selectedLeadId,
+    detail,
+    detailLoading,
+    detailError,
+  } = detailState;
+  const setDetailOpen = (nextValue: SetStateAction<boolean>) => {
+    dispatchDetailState((current) => ({
+      detailOpen:
+        typeof nextValue === "function"
+          ? nextValue(current.detailOpen)
+          : nextValue,
+    }));
+  };
+  const setSelectedLeadId = (nextValue: SetStateAction<string>) => {
+    dispatchDetailState((current) => ({
+      selectedLeadId:
+        typeof nextValue === "function"
+          ? nextValue(current.selectedLeadId)
+          : nextValue,
+    }));
+  };
+  const setDetailError = (nextValue: SetStateAction<string>) => {
+    dispatchDetailState((current) => ({
+      detailError:
+        typeof nextValue === "function"
+          ? nextValue(current.detailError)
+          : nextValue,
+    }));
+  };
+  const setPaneTab = (value: SetStateAction<LeadPaneTab>) =>
+    setLeadUiField("paneTab", value);
+  const setGateForm = (value: SetStateAction<LeadGateForm | null>) =>
+    setLeadUiField("gateForm", value);
+  const setGateBusy = (value: SetStateAction<boolean>) =>
+    setLeadUiField("gateBusy", value);
+  const setFailedLeadForm = (value: SetStateAction<FailedLeadResolutionForm>) =>
+    setLeadUiField("failedLeadForm", value);
+  const setFailedLeadBusy = (value: SetStateAction<boolean>) =>
+    setLeadUiField("failedLeadBusy", value);
+  const setActionBusy = (value: SetStateAction<string | null>) =>
+    setLeadUiField("actionBusy", value);
 
   const effectiveFilters = useMemo(
     () => ({ ...filters, search: deferredSearch || filters.search }),
@@ -392,35 +589,38 @@ export function LeadsPage() {
   useEffect(() => {
     const leadParam = searchParams.get("lead") ?? "";
     if (!leadParam) return;
-    if (leadParam !== selectedLeadId) {
-      setSelectedLeadId(leadParam);
-    }
-    if (!detailOpen) {
-      setDetailOpen(true);
-    }
+    dispatchDetailState({
+      selectedLeadId: leadParam !== selectedLeadId ? leadParam : selectedLeadId,
+      detailOpen: true,
+    });
   }, [detailOpen, searchParams, selectedLeadId]);
 
   useEffect(() => {
     if (!permissions.canViewPage) return;
 
     let cancelled = false;
-    setLoading(true);
-    setError("");
+    dispatchListState({
+      loading: true,
+      error: "",
+    });
 
     void fetchLeads(leadsPath)
       .then((items) => {
         if (!cancelled) {
-          startTransition(() => setLeads(items));
+          startTransition(() =>
+            dispatchListState({
+              leads: items,
+              loading: false,
+            }),
+          );
         }
       })
       .catch((fetchError: unknown) => {
         if (!cancelled) {
-          setError(fetchError instanceof Error ? fetchError.message : failedLoadMessage);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
+          dispatchListState({
+            error: fetchError instanceof Error ? fetchError.message : failedLoadMessage,
+            loading: false,
+          });
         }
       });
 
@@ -436,9 +636,11 @@ export function LeadsPage() {
     void fetchLeadStats().then(({ stats: statsPayload, monthly: monthlyPayload, byStatus: statusPayload }) => {
       if (cancelled) return;
       startTransition(() => {
-        setStats(statsPayload);
-        setMonthly(monthlyPayload);
-        setByStatus(statusPayload);
+        dispatchListState({
+          stats: statsPayload,
+          monthly: monthlyPayload,
+          byStatus: statusPayload,
+        });
       });
     });
 
@@ -451,23 +653,28 @@ export function LeadsPage() {
     if (!detailOpen || !selectedLeadId) return;
 
     let cancelled = false;
-    setDetailLoading(true);
-    setDetailError("");
+    dispatchDetailState({
+      detailLoading: true,
+      detailError: "",
+    });
 
     void fetchLeadDetail(selectedLeadId)
       .then((item) => {
         if (!cancelled) {
-          startTransition(() => setDetail(item));
+          startTransition(() =>
+            dispatchDetailState({
+              detail: item,
+              detailLoading: false,
+            }),
+          );
         }
       })
       .catch((fetchError: unknown) => {
         if (!cancelled) {
-          setDetailError(fetchError instanceof Error ? fetchError.message : failedLoadMessage);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setDetailLoading(false);
+          dispatchDetailState({
+            detailError: fetchError instanceof Error ? fetchError.message : failedLoadMessage,
+            detailLoading: false,
+          });
         }
       });
 
@@ -478,20 +685,24 @@ export function LeadsPage() {
 
   useEffect(() => {
     if (!detail) {
-      setGateForm(null);
-      setFailedLeadForm(blankFailedLeadResolutionForm());
+      dispatchUiState({
+        gateForm: null,
+        failedLeadForm: blankFailedLeadResolutionForm(),
+      });
       return;
     }
-    setGateForm(leadToGateForm(detail));
-    setFailedLeadForm((current) => ({
-      resolution:
-        current.resolution === "delete" &&
-        user?.role !== "patient_manager" &&
-        user?.role !== "ceo"
-          ? "archive"
-          : current.resolution,
-      reason: detail.failed_outcome?.reason ?? "",
-      note: detail.failed_outcome?.note ?? "",
+    dispatchUiState((current) => ({
+      gateForm: leadToGateForm(detail),
+      failedLeadForm: {
+        resolution:
+          current.failedLeadForm.resolution === "delete" &&
+          user?.role !== "patient_manager" &&
+          user?.role !== "ceo"
+            ? "archive"
+            : current.failedLeadForm.resolution,
+        reason: detail.failed_outcome?.reason ?? "",
+        note: detail.failed_outcome?.note ?? "",
+      },
     }));
   }, [detail, user?.role]);
 
@@ -722,7 +933,7 @@ export function LeadsPage() {
       </div>
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
         {detailLoading ? (
-          <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
+          <div className="flex min-h-[320px] items-center justify-center text-sm text-zinc-500">
             <LoaderCircle className="mr-2 size-4 animate-spin" />
             {t.lead_loading_detail}
           </div>
@@ -751,10 +962,10 @@ export function LeadsPage() {
                       <StatusBadge tone="success">{statusLabel("converted", t)}</StatusBadge>
                     ) : null}
                   </div>
-                  <h2 className="mt-4 text-2xl font-semibold text-slate-950">
+                  <h2 className="mt-4 text-2xl font-semibold text-zinc-950">
                     {detail.first_name} {detail.last_name}
                   </h2>
-                  <p className="mt-2 text-sm text-slate-600">
+                  <p className="mt-2 text-sm text-zinc-600">
                     {t.users_created} {formatDate(detail.created_at, locale, t.common_not_set)}
                   </p>
                 </section>
@@ -786,7 +997,7 @@ export function LeadsPage() {
                         </Badge>
                       ) : null}
                       {detail.submitted_at ? (
-                        <span className="text-xs text-slate-500">
+                        <span className="text-xs text-zinc-500">
                           {t.lead_submitted_at} {formatDate(detail.submitted_at, locale, t.common_not_set)}
                         </span>
                       ) : null}
@@ -836,7 +1047,7 @@ export function LeadsPage() {
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <SectionTitle>{t.lead_section_process_readiness}</SectionTitle>
-                      <p className="mt-1 text-sm text-slate-600">
+                      <p className="mt-1 text-sm text-zinc-600">
                         {t.lead_process_readiness_description}
                       </p>
                     </div>
@@ -874,12 +1085,12 @@ export function LeadsPage() {
                     {detail.readiness.checks.map((check) => (
                       <div
                         key={check.key}
-                        className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                        className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3"
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <p className="text-sm font-medium text-slate-900">{check.label}</p>
-                            <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">
+                            <p className="text-sm font-medium text-zinc-900">{check.label}</p>
+                            <p className="mt-1 text-xs uppercase tracking-[0.12em] text-zinc-500">
                               {t.lead_blocks} {leadStageLabel(check.blocking_for, t)}
                             </p>
                           </div>
@@ -917,7 +1128,7 @@ export function LeadsPage() {
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <SectionTitle>{t.lead_section_lifecycle}</SectionTitle>
-                      <p className="mt-1 text-sm text-slate-600">
+                      <p className="mt-1 text-sm text-zinc-600">
                         {t.lead_lifecycle_description}
                       </p>
                     </div>
@@ -938,28 +1149,34 @@ export function LeadsPage() {
                   </div>
 
                   <div className="mt-4 space-y-3">
-                    {detail.lifecycle.history.map((event, index) => (
+                    {detail.lifecycle.history.map((event) => (
                       <div
-                        key={`${event.created_at}-${event.to_stage}-${index}`}
-                        className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                        key={[
+                          event.created_at,
+                          event.from_stage ?? "",
+                          event.to_stage,
+                          event.transition_kind,
+                          event.note ?? "",
+                        ].join("|")}
+                        className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3"
                       >
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <div>
-                            <p className="text-sm font-medium text-slate-900">
+                            <p className="text-sm font-medium text-zinc-900">
                               {event.from_stage
                                 ? `${leadStageLabel(event.from_stage, t)} -> ${leadStageLabel(event.to_stage, t)}`
                                 : leadStageLabel(event.to_stage, t)}
                             </p>
-                            <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">
+                            <p className="mt-1 text-xs uppercase tracking-[0.12em] text-zinc-500">
                               {leadTransitionKindLabel(event.transition_kind, t)}
                             </p>
                           </div>
-                          <span className="text-xs text-slate-500">
+                          <span className="text-xs text-zinc-500">
                             {formatDate(event.created_at, locale, t.common_not_set)}
                           </span>
                         </div>
                         {event.note ? (
-                          <p className="mt-2 text-sm text-slate-600">{event.note}</p>
+                          <p className="mt-2 text-sm text-zinc-600">{event.note}</p>
                         ) : null}
                       </div>
                     ))}
@@ -975,7 +1192,7 @@ export function LeadsPage() {
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <SectionTitle>{t.lead_qualification_gate_data}</SectionTitle>
-                        <p className="mt-1 text-sm text-slate-600">
+                        <p className="mt-1 text-sm text-zinc-600">
                           {t.lead_qualification_gate_description}
                         </p>
                       </div>
@@ -1178,7 +1395,7 @@ export function LeadsPage() {
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
                         <SectionTitle>{t.lead_failed_resolution_title}</SectionTitle>
-                        <p className="mt-1 text-sm text-slate-600">
+                        <p className="mt-1 text-sm text-zinc-600">
                           {t.lead_failed_resolution_description}
                         </p>
                       </div>
@@ -1189,7 +1406,7 @@ export function LeadsPage() {
                             "rounded-full",
                             detail.failed_outcome.status === "delete_anonymized"
                               ? "border-rose-200 bg-rose-50 text-rose-700"
-                              : "border-slate-200 bg-slate-100 text-slate-700"
+                              : "border-zinc-200 bg-zinc-100 text-zinc-700"
                           )}
                         >
                           {failedOutcomeLabel(detail.failed_outcome.status, t)}
@@ -1324,12 +1541,12 @@ export function LeadsPage() {
                       <DetailCard label={t.lead_health_risk_for_travel} value={yesNo(detail.has_health_risk_for_travel, t)} />
                     </div>
                     {detail.primary_concern_text ? (
-                      <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">
+                      <div className="mt-4 rounded-2xl bg-zinc-50 px-4 py-3 text-sm leading-6 text-zinc-700 whitespace-pre-wrap">
                         {detail.primary_concern_text}
                       </div>
                     ) : null}
                     {detail.additional_concerns ? (
-                      <div className="mt-3 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">
+                      <div className="mt-3 rounded-2xl bg-zinc-50 px-4 py-3 text-sm leading-6 text-zinc-700 whitespace-pre-wrap">
                         {detail.additional_concerns}
                       </div>
                     ) : null}
@@ -1362,7 +1579,7 @@ export function LeadsPage() {
                       <DetailCard label={t.lead_visit_timing} value={dashOrValue(detail.visit_timing, t)} />
                     </div>
                     {detail.message ? (
-                      <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">
+                      <div className="mt-4 rounded-2xl bg-zinc-50 px-4 py-3 text-sm leading-6 text-zinc-700 whitespace-pre-wrap">
                         {detail.message}
                       </div>
                     ) : null}
@@ -1392,11 +1609,11 @@ export function LeadsPage() {
                       {detail.attachments.map((file) => (
                         <li
                           key={file.id}
-                          className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+                          className="flex items-center justify-between rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm"
                         >
                           <div>
-                            <div className="font-medium text-slate-800">{file.file_name}</div>
-                            <div className="text-xs text-slate-500">
+                            <div className="font-medium text-zinc-800">{file.file_name}</div>
+                            <div className="text-xs text-zinc-500">
                               {dashOrValue(file.content_type, t)} - {formatSize(file.size_bytes)}
                             </div>
                           </div>
@@ -1430,11 +1647,11 @@ export function LeadsPage() {
                       ))}
                     </ul>
                   ) : (
-                    <p className="mt-3 text-sm text-slate-500">{t.lead_no_files_uploaded}</p>
+                    <p className="mt-3 text-sm text-zinc-500">{t.lead_no_files_uploaded}</p>
                   )}
                   {detail.notes ? (
-                    <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700">
-                      <div className="mb-1 text-xs uppercase tracking-wide text-slate-400">{t.lead_internal_note}</div>
+                    <div className="mt-4 rounded-2xl bg-zinc-50 px-4 py-3 text-sm leading-6 text-zinc-700">
+                      <div className="mb-1 text-xs uppercase tracking-wide text-zinc-400">{t.lead_internal_note}</div>
                       {detail.notes}
                     </div>
                   ) : null}
@@ -1443,7 +1660,7 @@ export function LeadsPage() {
             ) : null}
           </div>
         ) : (
-          <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
+          <div className="flex min-h-[320px] items-center justify-center text-sm text-zinc-500">
             {t.lead_select_from_queue}
           </div>
         )}
@@ -1510,16 +1727,16 @@ export function LeadsPage() {
 
         <div className="grid gap-4 lg:grid-cols-3">
           <div className="rounded-[1.75rem] border border-border/70 bg-card p-5 shadow-[0_20px_60px_rgba(15,23,42,0.05)] lg:col-span-2">
-            <h2 className="mb-4 text-sm font-semibold text-slate-900">{t.leads_monthly_growth}</h2>
+            <h2 className="mb-4 text-sm font-semibold text-zinc-900">{t.leads_monthly_growth}</h2>
             <div className="flex h-48 items-end gap-2">
               {monthly.map((item) => {
                 const pct = (item.count / maxMonthly) * 100;
                 const label = item.month.split("-").pop() ?? "";
                 return (
                   <div key={item.month} className="flex flex-1 flex-col items-center gap-1">
-                    <span className="text-xs font-medium text-slate-600">{item.count}</span>
+                    <span className="text-xs font-medium text-zinc-600">{item.count}</span>
                     <div className="w-full rounded-t-md bg-sky-500 transition-all" style={{ height: `${pct}%`, minHeight: 4 }} />
-                    <span className="text-[10px] text-slate-400">{label}</span>
+                    <span className="text-[10px] text-zinc-400">{label}</span>
                   </div>
                 );
               })}
@@ -1527,18 +1744,18 @@ export function LeadsPage() {
           </div>
 
           <div className="rounded-[1.75rem] border border-border/70 bg-card p-5 shadow-[0_20px_60px_rgba(15,23,42,0.05)]">
-            <h2 className="mb-2 text-sm font-semibold text-slate-900">{t.leads_by_status}</h2>
-            <p className="mb-4 text-3xl font-bold text-slate-950">{totalByStatus}</p>
+            <h2 className="mb-2 text-sm font-semibold text-zinc-900">{t.leads_by_status}</h2>
+            <p className="mb-4 text-3xl font-bold text-zinc-950">{totalByStatus}</p>
             <div className="space-y-3">
               {byStatus.map((item) => {
                 const pct = totalByStatus > 0 ? Math.round((item.count / totalByStatus) * 100) : 0;
                 return (
                   <div key={item.status} className="space-y-1">
-                    <div className="flex items-center justify-between text-xs text-slate-600">
+                    <div className="flex items-center justify-between text-xs text-zinc-600">
                       <span>{statusLabel(item.status, t)}</span>
                       <span className="font-medium">{item.count}</span>
                     </div>
-                    <div className="h-2 w-full rounded-full bg-slate-100">
+                    <div className="h-2 w-full rounded-full bg-zinc-100">
                       <div className="h-2 rounded-full bg-sky-500 transition-all" style={{ width: `${pct}%` }} />
                     </div>
                   </div>
@@ -1565,7 +1782,7 @@ export function LeadsPage() {
         >
           <div className="relative z-30 flex flex-wrap items-center gap-1.5 border-b border-border/70 bg-card px-3 py-2">
             <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -tranzinc-y-1/2 text-muted-foreground" />
               <Input
                 className={cn(shellInputClassName, "h-8 rounded-lg bg-background pl-8 text-[13px]")}
                 placeholder={t.common_search}
@@ -1865,7 +2082,7 @@ export function LeadsPage() {
               {pendingConvertLead ? (
                 <>
                   {t.lead_convert_dialog_start}{" "}
-                  <span className="font-medium text-slate-900">
+                  <span className="font-medium text-zinc-900">
                     {pendingConvertLead.first_name} {pendingConvertLead.last_name}
                   </span>
                   {t.lead_convert_dialog_end}{" "}
@@ -1901,6 +2118,10 @@ export function LeadsPage() {
       </Dialog>
     </>
   );
+}
+
+export function LeadsPage(...args: Parameters<typeof useLeadsPageContent>) {
+  return useLeadsPageContent(...args);
 }
 
 function LeadField({

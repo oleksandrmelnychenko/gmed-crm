@@ -25,7 +25,6 @@ const ARRAY_OPS: ReadonlySet<FilterOperator> = new Set([
 const DATE_SINGLE_OPS: ReadonlySet<FilterOperator> = new Set(["is", "before", "after"]);
 const DATE_RANGE_OPS: ReadonlySet<FilterOperator> = new Set(["between"]);
 const DAYS_OPS: ReadonlySet<FilterOperator> = new Set(["last_n_days"]);
-const BOOL_OPS: ReadonlySet<FilterOperator> = new Set(["is", "is_not"]);
 
 export function operatorTakesValue(operator: FilterOperator): boolean {
   return !EMPTY_OPS.has(operator);
@@ -90,5 +89,3 @@ export function labelForOperator(
 ): string {
   return overrides?.[operator] ?? DEFAULT_OPERATOR_LABELS[operator];
 }
-
-export { ARRAY_OPS, BOOL_OPS };

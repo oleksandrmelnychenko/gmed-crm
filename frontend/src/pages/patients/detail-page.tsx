@@ -5,8 +5,10 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useState,
+  useReducer,
+  useRef,
   type FormEvent,
+  type SetStateAction,
 } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import {
@@ -194,6 +196,47 @@ type WorkflowChecklistFormState = {
   dueDate: string;
 };
 
+const PATIENT_DATE_FORMATTER = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+});
+const PATIENT_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+const PATIENT_MONEY_FORMATTERS: Record<string, Intl.NumberFormat> = {
+  EUR: new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency: "EUR",
+    maximumFractionDigits: 2,
+  }),
+  USD: new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  }),
+};
+
+const PATIENT_VITAL_NUMBER_FORMATTERS: Record<string, Intl.NumberFormat> = {
+  '{"maximumFractionDigits":0}': new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }),
+  '{"maximumFractionDigits":1}': new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }),
+};
+
+function uniqueSortedNonEmpty(values: Iterable<string | null | undefined>) {
+  const uniqueValues = new Set<string>();
+  for (const value of values) {
+    const normalized = (value ?? "").trim();
+    if (normalized) {
+      uniqueValues.add(normalized);
+    }
+  }
+  return [...uniqueValues].toSorted((left, right) => left.localeCompare(right));
+}
+
 function patientName(p: PatientDetail) {
   const t = p.title ? `${p.title} ` : "";
   const n = [p.first_name, p.last_name].filter(Boolean).join(" ").trim();
@@ -203,14 +246,14 @@ function patientName(p: PatientDetail) {
 function fmtDate(v?: string | null, fb = "") {
   if (!v) return fb;
   try {
-    return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(v.includes("T") ? v : `${v}T00:00:00`));
+    return PATIENT_DATE_FORMATTER.format(new Date(v.includes("T") ? v : `${v}T00:00:00`));
   } catch { return v; }
 }
 
 function fmtDateTime(v?: string | null, fb = "") {
   if (!v) return fb;
   try {
-    return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(v));
+    return PATIENT_DATE_TIME_FORMATTER.format(new Date(v));
   } catch { return v; }
 }
 
@@ -231,11 +274,7 @@ function fmtMoney(v?: string | null, currency = "EUR") {
   const numeric = Number(v);
   if (Number.isNaN(numeric)) return `${v} ${currency}`;
   try {
-    return new Intl.NumberFormat("en-GB", {
-      style: "currency",
-      currency,
-      maximumFractionDigits: 2,
-    }).format(numeric);
+    return PATIENT_MONEY_FORMATTERS[currency]?.format(numeric) ?? `${numeric.toFixed(2)} ${currency}`;
   } catch {
     return `${v} ${currency}`;
   }
@@ -271,7 +310,8 @@ function formatVitalNumber(
 ) {
   if (value == null || Number.isNaN(value)) return null;
   try {
-    return new Intl.NumberFormat(undefined, options).format(value);
+    const formatterKey = JSON.stringify(options);
+    return PATIENT_VITAL_NUMBER_FORMATTERS[formatterKey]?.format(value) ?? `${value}`;
   } catch {
     return `${value}`;
   }
@@ -526,7 +566,7 @@ function patientCardEntryCategoryBadgeClass(category: string) {
     case "warning":
       return "border-rose-200 bg-rose-50 text-rose-700";
     default:
-      return "border-slate-200 bg-slate-50 text-slate-700";
+      return "border-zinc-200 bg-zinc-50 text-zinc-700";
   }
 }
 
@@ -742,7 +782,7 @@ function priorityBadgeClass(priority: string) {
     case "high":
       return "border-amber-200 bg-amber-50 text-amber-700";
     case "low":
-      return "border-slate-200 bg-slate-50 text-slate-600";
+      return "border-zinc-200 bg-zinc-50 text-zinc-600";
     default:
       return "border-sky-200 bg-sky-50 text-sky-700";
   }
@@ -763,7 +803,7 @@ function timelineEntityDotClass(entityType: string) {
     case "invoice":
       return "bg-rose-500";
     case "compliance":
-      return "bg-slate-500";
+      return "bg-zinc-500";
     default:
       return "bg-[var(--brand)]";
   }
@@ -849,13 +889,13 @@ const STATUS_COLORS: Record<string, string> = {
   closed: "border-emerald-200 bg-emerald-50 text-emerald-700",
   active: "border-emerald-200 bg-emerald-50 text-emerald-700",
   completed: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  draft: "border-slate-200 bg-slate-50 text-slate-700",
+  draft: "border-zinc-200 bg-zinc-50 text-zinc-700",
   sent: "border-sky-200 bg-sky-50 text-sky-700",
   signed: "border-emerald-200 bg-emerald-50 text-emerald-700",
   overdue: "border-rose-200 bg-rose-50 text-rose-700",
   partially_paid: "border-amber-200 bg-amber-50 text-amber-700",
   paid: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  expired: "border-slate-200 bg-slate-50 text-slate-600",
+  expired: "border-zinc-200 bg-zinc-50 text-zinc-600",
   terminated: "border-red-200 bg-red-50 text-red-700",
   cancelled: "border-red-200 bg-red-50 text-red-700",
   planned: "border-sky-200 bg-sky-50 text-sky-700",
@@ -871,7 +911,7 @@ const ROLE_COLORS: Record<string, string> = {
   concierge: "bg-teal-100 text-teal-700",
   billing: "bg-amber-100 text-amber-700",
   sales: "bg-amber-100 text-amber-700",
-  it_admin: "bg-slate-100 text-slate-700",
+  it_admin: "bg-zinc-100 text-zinc-700",
   patient: "bg-emerald-100 text-emerald-700",
 };
 
@@ -948,7 +988,82 @@ const PATIENT_DETAIL_REALTIME_EVENTS = [
   "workflow_checklist_item.completed",
 ] as const;
 
-export function PatientDetailPage() {
+type PatientDetailPageState = {
+  actionErrorState: { patientId: string; message: string };
+  selectedAssignee: string;
+  assignBusy: boolean;
+  activeTab: string;
+  version: number;
+  tabVersion: number;
+  tabActionError: string;
+  profileEditorOpen: boolean;
+  cardEntrySheetOpen: boolean;
+  docsPreviewOpen: boolean;
+  contractsPreviewOpen: boolean;
+  invoicesPreviewOpen: boolean;
+  legalStatusSheetOpen: boolean;
+  vitalsSheetOpen: boolean;
+  caveSheetOpen: boolean;
+  notesSheetOpen: boolean;
+  medicalOrderActionId: string;
+  medicalOrderSheetOpen: boolean;
+  riskScoreSheetOpen: boolean;
+  appointmentSheetOpen: boolean;
+  relationEditorOpen: boolean;
+  editingRelation: RelationItem | null;
+  documentUploadOpen: boolean;
+  contractCreateOpen: boolean;
+  contractCreateForm: ContractFormState;
+  contractBusy: boolean;
+  contractStatusId: string;
+  contractStatusForm: ContractFormState;
+  invoiceManageId: string;
+  invoiceStatusForm: InvoiceStatusFormState;
+  invoiceBusy: boolean;
+  dunningBusy: boolean;
+  dunningNote: string;
+  complianceExportBusy: boolean;
+  patientLabelBusy: boolean;
+  workflowBusy: boolean;
+  workflowForm: WorkflowChecklistFormState;
+  documentStatusFilter: string;
+  documentCategoryFilter: string;
+  timelineEntityFilter: string;
+  timelineCategoryFilter: string;
+  timelineSourceFilter: string;
+  timelineRangeFilter: PatientTimelineRangeFilter;
+  timelineSearch: string;
+  timelineOffset: ReturnType<typeof normalizeTimelineOffsetValue>;
+};
+
+type PatientDetailPagePatch =
+  | Partial<PatientDetailPageState>
+  | ((current: PatientDetailPageState) => Partial<PatientDetailPageState>);
+
+function patientDetailPageReducer(
+  state: PatientDetailPageState,
+  patch: PatientDetailPagePatch,
+): PatientDetailPageState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
+function createPatientDetailPageFieldPatch<K extends keyof PatientDetailPageState>(
+  field: K,
+  value: SetStateAction<PatientDetailPageState[K]>,
+): PatientDetailPagePatch {
+  return (current) => {
+    const nextValue =
+      typeof value === "function"
+        ? (value as (previous: PatientDetailPageState[K]) => PatientDetailPageState[K])(current[field])
+        : value;
+    return { [field]: nextValue } as Partial<PatientDetailPageState>;
+  };
+}
+
+function usePatientDetailPageContent() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const { staffGo } = useStaffNavigate();
@@ -958,80 +1073,204 @@ export function PatientDetailPage() {
   const l = (de: string, ru: string, en: string) =>
     lang === "de" ? de : lang === "ru" ? ru : en;
 
-  const [actionErrorState, setActionErrorState] = useState<{ patientId: string; message: string }>({
-    patientId: "",
-    message: "",
-  });
-  const [selectedAssignee, setSelectedAssignee] = useState("");
-  const [assignBusy, setAssignBusy] = useState(false);
-
-  const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "profile");
-  const [version, setVersion] = useState(0);
-  const [tabVersion, setTabVersion] = useState(0);
-  const [tabActionError, setTabActionError] = useState("");
-  const [profileEditorOpen, setProfileEditorOpen] = useState(false);
-  const [cardEntrySheetOpen, setCardEntrySheetOpen] = useState(false);
-  const [docsPreviewOpen, setDocsPreviewOpen] = useState(false);
-  const [contractsPreviewOpen, setContractsPreviewOpen] = useState(false);
-  const [invoicesPreviewOpen, setInvoicesPreviewOpen] = useState(false);
-  const [legalStatusSheetOpen, setLegalStatusSheetOpen] = useState(false);
-  const [vitalsSheetOpen, setVitalsSheetOpen] = useState(false);
-  const [caveSheetOpen, setCaveSheetOpen] = useState(false);
-  const [notesSheetOpen, setNotesSheetOpen] = useState(false);
-  const [medicalOrderActionId, setMedicalOrderActionId] = useState("");
-  const [medicalOrderSheetOpen, setMedicalOrderSheetOpen] = useState(false);
-  const [riskScoreSheetOpen, setRiskScoreSheetOpen] = useState(false);
-  const [appointmentSheetOpen, setAppointmentSheetOpen] = useState(false);
-
-  const [relationEditorOpen, setRelationEditorOpen] = useState(false);
-  const [editingRelation, setEditingRelation] = useState<RelationItem | null>(null);
-
-  const [documentUploadOpen, setDocumentUploadOpen] = useState(false);
-
-  const [contractCreateOpen, setContractCreateOpen] = useState(false);
-  const [contractCreateForm, setContractCreateForm] = useState<ContractFormState>(blankContractForm);
-  const [contractBusy, setContractBusy] = useState(false);
-  const [contractStatusId, setContractStatusId] = useState("");
-  const [contractStatusForm, setContractStatusForm] = useState<ContractFormState>(blankContractForm);
-
-  const [invoiceManageId, setInvoiceManageId] = useState("");
-  const [invoiceStatusForm, setInvoiceStatusForm] = useState<InvoiceStatusFormState>({
-    status: "draft",
-    dueDate: "",
-    paidAmount: "",
-    notes: "",
-  });
-  const [invoiceBusy, setInvoiceBusy] = useState(false);
-  const [dunningBusy, setDunningBusy] = useState(false);
-  const [dunningNote, setDunningNote] = useState("");
-  const [complianceExportBusy, setComplianceExportBusy] = useState(false);
-  const [patientLabelBusy, setPatientLabelBusy] = useState(false);
-  const [patientLabelFormat, setPatientLabelFormat] =
-    useState<PatientLabelFormatId>(DEFAULT_PATIENT_LABEL_FORMAT_ID);
-  const [workflowBusy, setWorkflowBusy] = useState(false);
-  const [workflowForm, setWorkflowForm] = useState<WorkflowChecklistFormState>(
-    blankWorkflowChecklistForm
+  const [pageState, dispatchPageState] = useReducer(
+    patientDetailPageReducer,
+    undefined,
+    (): PatientDetailPageState => ({
+      actionErrorState: { patientId: "", message: "" },
+      selectedAssignee: "",
+      assignBusy: false,
+      activeTab: searchParams.get("tab") || "profile",
+      version: 0,
+      tabVersion: 0,
+      tabActionError: "",
+      profileEditorOpen: false,
+      cardEntrySheetOpen: false,
+      docsPreviewOpen: false,
+      contractsPreviewOpen: false,
+      invoicesPreviewOpen: false,
+      legalStatusSheetOpen: false,
+      vitalsSheetOpen: false,
+      caveSheetOpen: false,
+      notesSheetOpen: false,
+      medicalOrderActionId: "",
+      medicalOrderSheetOpen: false,
+      riskScoreSheetOpen: false,
+      appointmentSheetOpen: false,
+      relationEditorOpen: false,
+      editingRelation: null,
+      documentUploadOpen: false,
+      contractCreateOpen: false,
+      contractCreateForm: blankContractForm(),
+      contractBusy: false,
+      contractStatusId: "",
+      contractStatusForm: blankContractForm(),
+      invoiceManageId: "",
+      invoiceStatusForm: {
+        status: "draft",
+        dueDate: "",
+        paidAmount: "",
+        notes: "",
+      },
+      invoiceBusy: false,
+      dunningBusy: false,
+      dunningNote: "",
+      complianceExportBusy: false,
+      patientLabelBusy: false,
+      workflowBusy: false,
+      workflowForm: blankWorkflowChecklistForm(),
+      documentStatusFilter: "all",
+      documentCategoryFilter: "all",
+      timelineEntityFilter: normalizeTimelineQueryValue(searchParams.get("entity_type")),
+      timelineCategoryFilter: normalizeTimelineQueryValue(searchParams.get("category")),
+      timelineSourceFilter: normalizeTimelineQueryValue(searchParams.get("source")),
+      timelineRangeFilter: normalizeTimelineRangeFilterValue(searchParams.get("range")),
+      timelineSearch: normalizeTimelineSearchValue(searchParams.get("search")),
+      timelineOffset: normalizeTimelineOffsetValue(searchParams.get("offset")),
+    }),
   );
-  const [documentStatusFilter, setDocumentStatusFilter] = useState("all");
-  const [documentCategoryFilter, setDocumentCategoryFilter] = useState("all");
-  const [timelineEntityFilter, setTimelineEntityFilter] = useState(() =>
-    normalizeTimelineQueryValue(searchParams.get("entity_type"))
-  );
-  const [timelineCategoryFilter, setTimelineCategoryFilter] = useState(() =>
-    normalizeTimelineQueryValue(searchParams.get("category"))
-  );
-  const [timelineSourceFilter, setTimelineSourceFilter] = useState(() =>
-    normalizeTimelineQueryValue(searchParams.get("source"))
-  );
-  const [timelineRangeFilter, setTimelineRangeFilter] = useState<PatientTimelineRangeFilter>(() =>
-    normalizeTimelineRangeFilterValue(searchParams.get("range"))
-  );
-  const [timelineSearch, setTimelineSearch] = useState(() =>
-    normalizeTimelineSearchValue(searchParams.get("search"))
-  );
-  const [timelineOffset, setTimelineOffset] = useState(() =>
-    normalizeTimelineOffsetValue(searchParams.get("offset"))
-  );
+  const {
+    actionErrorState,
+    selectedAssignee,
+    assignBusy,
+    activeTab,
+    version,
+    tabVersion,
+    tabActionError,
+    profileEditorOpen,
+    cardEntrySheetOpen,
+    docsPreviewOpen,
+    contractsPreviewOpen,
+    invoicesPreviewOpen,
+    legalStatusSheetOpen,
+    vitalsSheetOpen,
+    caveSheetOpen,
+    notesSheetOpen,
+    medicalOrderActionId,
+    medicalOrderSheetOpen,
+    riskScoreSheetOpen,
+    appointmentSheetOpen,
+    relationEditorOpen,
+    editingRelation,
+    documentUploadOpen,
+    contractCreateOpen,
+    contractCreateForm,
+    contractBusy,
+    contractStatusId,
+    contractStatusForm,
+    invoiceManageId,
+    invoiceStatusForm,
+    invoiceBusy,
+    dunningBusy,
+    dunningNote,
+    complianceExportBusy,
+    patientLabelBusy,
+    workflowBusy,
+    workflowForm,
+    documentStatusFilter,
+    documentCategoryFilter,
+    timelineEntityFilter,
+    timelineCategoryFilter,
+    timelineSourceFilter,
+    timelineRangeFilter,
+    timelineSearch,
+    timelineOffset,
+  } = pageState;
+  const setPageField = <K extends keyof PatientDetailPageState>(
+    field: K,
+    value: SetStateAction<PatientDetailPageState[K]>,
+  ) => dispatchPageState(createPatientDetailPageFieldPatch(field, value));
+  const setActionErrorState = (value: SetStateAction<PatientDetailPageState["actionErrorState"]>) =>
+    setPageField("actionErrorState", value);
+  const setSelectedAssignee = (value: SetStateAction<string>) =>
+    setPageField("selectedAssignee", value);
+  const setAssignBusy = (value: SetStateAction<boolean>) =>
+    setPageField("assignBusy", value);
+  const setActiveTab = (value: SetStateAction<string>) =>
+    setPageField("activeTab", value);
+  const setVersion = (value: SetStateAction<number>) =>
+    setPageField("version", value);
+  const setTabVersion = (value: SetStateAction<number>) =>
+    setPageField("tabVersion", value);
+  const setTabActionError = (value: SetStateAction<string>) =>
+    setPageField("tabActionError", value);
+  const setProfileEditorOpen = (value: SetStateAction<boolean>) =>
+    setPageField("profileEditorOpen", value);
+  const setCardEntrySheetOpen = (value: SetStateAction<boolean>) =>
+    setPageField("cardEntrySheetOpen", value);
+  const setDocsPreviewOpen = (value: SetStateAction<boolean>) =>
+    setPageField("docsPreviewOpen", value);
+  const setContractsPreviewOpen = (value: SetStateAction<boolean>) =>
+    setPageField("contractsPreviewOpen", value);
+  const setInvoicesPreviewOpen = (value: SetStateAction<boolean>) =>
+    setPageField("invoicesPreviewOpen", value);
+  const setLegalStatusSheetOpen = (value: SetStateAction<boolean>) =>
+    setPageField("legalStatusSheetOpen", value);
+  const setVitalsSheetOpen = (value: SetStateAction<boolean>) =>
+    setPageField("vitalsSheetOpen", value);
+  const setCaveSheetOpen = (value: SetStateAction<boolean>) =>
+    setPageField("caveSheetOpen", value);
+  const setNotesSheetOpen = (value: SetStateAction<boolean>) =>
+    setPageField("notesSheetOpen", value);
+  const setMedicalOrderActionId = (value: SetStateAction<string>) =>
+    setPageField("medicalOrderActionId", value);
+  const setMedicalOrderSheetOpen = (value: SetStateAction<boolean>) =>
+    setPageField("medicalOrderSheetOpen", value);
+  const setRiskScoreSheetOpen = (value: SetStateAction<boolean>) =>
+    setPageField("riskScoreSheetOpen", value);
+  const setAppointmentSheetOpen = (value: SetStateAction<boolean>) =>
+    setPageField("appointmentSheetOpen", value);
+  const setRelationEditorOpen = (value: SetStateAction<boolean>) =>
+    setPageField("relationEditorOpen", value);
+  const setEditingRelation = (value: SetStateAction<RelationItem | null>) =>
+    setPageField("editingRelation", value);
+  const setDocumentUploadOpen = (value: SetStateAction<boolean>) =>
+    setPageField("documentUploadOpen", value);
+  const setContractCreateOpen = (value: SetStateAction<boolean>) =>
+    setPageField("contractCreateOpen", value);
+  const setContractCreateForm = (value: SetStateAction<ContractFormState>) =>
+    setPageField("contractCreateForm", value);
+  const setContractBusy = (value: SetStateAction<boolean>) =>
+    setPageField("contractBusy", value);
+  const setContractStatusId = (value: SetStateAction<string>) =>
+    setPageField("contractStatusId", value);
+  const setContractStatusForm = (value: SetStateAction<ContractFormState>) =>
+    setPageField("contractStatusForm", value);
+  const setInvoiceManageId = (value: SetStateAction<string>) =>
+    setPageField("invoiceManageId", value);
+  const setInvoiceStatusForm = (value: SetStateAction<InvoiceStatusFormState>) =>
+    setPageField("invoiceStatusForm", value);
+  const setInvoiceBusy = (value: SetStateAction<boolean>) =>
+    setPageField("invoiceBusy", value);
+  const setDunningBusy = (value: SetStateAction<boolean>) =>
+    setPageField("dunningBusy", value);
+  const setDunningNote = (value: SetStateAction<string>) =>
+    setPageField("dunningNote", value);
+  const setComplianceExportBusy = (value: SetStateAction<boolean>) =>
+    setPageField("complianceExportBusy", value);
+  const setPatientLabelBusy = (value: SetStateAction<boolean>) =>
+    setPageField("patientLabelBusy", value);
+  const patientLabelFormatRef = useRef<PatientLabelFormatId>(DEFAULT_PATIENT_LABEL_FORMAT_ID);
+  const setWorkflowBusy = (value: SetStateAction<boolean>) =>
+    setPageField("workflowBusy", value);
+  const setWorkflowForm = (value: SetStateAction<WorkflowChecklistFormState>) =>
+    setPageField("workflowForm", value);
+  const setDocumentStatusFilter = (value: SetStateAction<string>) =>
+    setPageField("documentStatusFilter", value);
+  const setDocumentCategoryFilter = (value: SetStateAction<string>) =>
+    setPageField("documentCategoryFilter", value);
+  const setTimelineEntityFilter = (value: SetStateAction<string>) =>
+    setPageField("timelineEntityFilter", value);
+  const setTimelineCategoryFilter = (value: SetStateAction<string>) =>
+    setPageField("timelineCategoryFilter", value);
+  const setTimelineSourceFilter = (value: SetStateAction<string>) =>
+    setPageField("timelineSourceFilter", value);
+  const setTimelineRangeFilter = (value: SetStateAction<PatientTimelineRangeFilter>) =>
+    setPageField("timelineRangeFilter", value);
+  const setTimelineSearch = (value: SetStateAction<string>) =>
+    setPageField("timelineSearch", value);
+  const setTimelineOffset = (value: SetStateAction<ReturnType<typeof normalizeTimelineOffsetValue>>) =>
+    setPageField("timelineOffset", value);
   const timelineLimit = 50;
 
   const canManage = user?.role === "ceo" || user?.role === "patient_manager" || user?.role === "teamlead_interpreter";
@@ -1194,16 +1433,14 @@ export function PatientDetailPage() {
   const timelineCategoryOptions = useMemo(
     () =>
       isTimelineTabActive
-        ? [...new Set(timeline.map((item) => item.category).filter((value) => Boolean(value?.trim())))]
-            .toSorted((left, right) => left.localeCompare(right))
+        ? uniqueSortedNonEmpty(timeline.map((item) => item.category))
         : [],
     [isTimelineTabActive, timeline]
   );
   const timelineSourceOptions = useMemo(
     () =>
       isTimelineTabActive
-        ? [...new Set(timeline.map((item) => item.source_label ?? "").filter((value) => Boolean(value.trim())))]
-            .toSorted((left, right) => left.localeCompare(right))
+        ? uniqueSortedNonEmpty(timeline.map((item) => item.source_label))
         : [],
     [isTimelineTabActive, timeline]
   );
@@ -1307,16 +1544,14 @@ export function PatientDetailPage() {
   const documentStatusOptions = useMemo(
     () => {
       if (!isDocumentsTabActive) return [];
-      return [...new Set(documents.map((item) => item.status ?? "").filter((value) => Boolean(value.trim())))]
-        .toSorted((left, right) => left.localeCompare(right));
+      return uniqueSortedNonEmpty(documents.map((item) => item.status));
     },
     [documents, isDocumentsTabActive]
   );
   const documentCategoryOptions = useMemo(
     () => {
       if (!isDocumentsTabActive) return [];
-      return [...new Set(documents.map((item) => item.category ?? "").filter((value) => Boolean(value.trim())))]
-        .toSorted((left, right) => left.localeCompare(right));
+      return uniqueSortedNonEmpty(documents.map((item) => item.category));
     },
     [documents, isDocumentsTabActive]
   );
@@ -1422,9 +1657,14 @@ export function PatientDetailPage() {
   void blankPatientVitalForm;
   void parseOptionalIntegerInput;
   void computeVitalBmi;
+  const applyActiveTab = useCallback((nextTab: string) => {
+    setActiveTab(nextTab);
+    setTabActionError("");
+  }, []);
+
   const handleTabChange = useCallback(
     (nextTab: string) => {
-      setActiveTab(nextTab);
+      applyActiveTab(nextTab);
       const nextParams = new URLSearchParams(searchParams);
       if (nextTab === "profile") {
         nextParams.delete("tab");
@@ -1433,7 +1673,40 @@ export function PatientDetailPage() {
       }
       setSearchParams(nextParams, { replace: true });
     },
-    [searchParams, setSearchParams]
+    [applyActiveTab, searchParams, setSearchParams]
+  );
+
+  const applyTimelineFiltersFromQuery = useCallback(
+    ({
+      category,
+      entity,
+      offset,
+      range,
+      search,
+      source,
+    }: {
+      category: string;
+      entity: string;
+      offset: number;
+      range: PatientTimelineRangeFilter;
+      search: string;
+      source: string;
+    }) => {
+      if (timelineEntityFilter !== entity) setTimelineEntityFilter(entity);
+      if (timelineCategoryFilter !== category) setTimelineCategoryFilter(category);
+      if (timelineSourceFilter !== source) setTimelineSourceFilter(source);
+      if (timelineRangeFilter !== range) setTimelineRangeFilter(range);
+      if (timelineSearch !== search) setTimelineSearch(search);
+      if (timelineOffset !== offset) setTimelineOffset(offset);
+    },
+    [
+      timelineCategoryFilter,
+      timelineEntityFilter,
+      timelineOffset,
+      timelineRangeFilter,
+      timelineSearch,
+      timelineSourceFilter,
+    ],
   );
 
   useEffect(() => {
@@ -1445,21 +1718,18 @@ export function PatientDetailPage() {
     const nextSearch = normalizeTimelineSearchValue(searchParams.get("search"));
     const nextOffset = normalizeTimelineOffsetValue(searchParams.get("offset"));
 
-    if (timelineEntityFilter !== nextEntityFilter) setTimelineEntityFilter(nextEntityFilter);
-    if (timelineCategoryFilter !== nextCategoryFilter) setTimelineCategoryFilter(nextCategoryFilter);
-    if (timelineSourceFilter !== nextSourceFilter) setTimelineSourceFilter(nextSourceFilter);
-    if (timelineRangeFilter !== nextRangeFilter) setTimelineRangeFilter(nextRangeFilter);
-    if (timelineSearch !== nextSearch) setTimelineSearch(nextSearch);
-    if (timelineOffset !== nextOffset) setTimelineOffset(nextOffset);
+    applyTimelineFiltersFromQuery({
+      category: nextCategoryFilter,
+      entity: nextEntityFilter,
+      offset: nextOffset,
+      range: nextRangeFilter,
+      search: nextSearch,
+      source: nextSourceFilter,
+    });
   }, [
+    applyTimelineFiltersFromQuery,
     isTimelineTabActive,
     searchParams,
-    timelineCategoryFilter,
-    timelineEntityFilter,
-    timelineOffset,
-    timelineRangeFilter,
-    timelineSearch,
-    timelineSourceFilter,
   ]);
 
   useEffect(() => {
@@ -1523,7 +1793,7 @@ export function PatientDetailPage() {
     });
 
     if (activeTab !== normalizedTab) {
-      setActiveTab(normalizedTab);
+      applyActiveTab(normalizedTab);
     }
 
     if ((requestedTab ?? "profile") !== normalizedTab) {
@@ -1537,6 +1807,7 @@ export function PatientDetailPage() {
     }
   }, [
     activeTab,
+    applyActiveTab,
     canViewContracts,
     canViewDocuments,
     canViewInvoices,
@@ -1544,10 +1815,6 @@ export function PatientDetailPage() {
     searchParams,
     setSearchParams,
   ]);
-
-  useEffect(() => {
-    setTabActionError("");
-  }, [activeTab]);
 
   const handleAssign = async () => {
     if (!id || !selectedAssignee) return;
@@ -1803,7 +2070,7 @@ export function PatientDetailPage() {
 
   async function handlePrintPatientLabel(format?: PatientLabelFormatId) {
     if (!id) return;
-    const chosenFormat = format ?? patientLabelFormat;
+    const chosenFormat = format ?? patientLabelFormatRef.current;
 
     const printWindow = window.open("", "_blank", "noopener,noreferrer");
     if (!printWindow) {
@@ -1854,7 +2121,7 @@ export function PatientDetailPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <LoaderCircle className="size-6 animate-spin text-slate-400" />
+        <LoaderCircle className="size-6 animate-spin text-zinc-400" />
       </div>
     );
   }
@@ -1914,7 +2181,7 @@ export function PatientDetailPage() {
       });
   };
   const handlePatientLabelSelect = (format: PatientLabelFormatId) => {
-    setPatientLabelFormat(format);
+    patientLabelFormatRef.current = format;
     void handlePrintPatientLabel(format);
   };
 
@@ -2220,4 +2487,8 @@ export function PatientDetailPage() {
 
     </>
   );
+}
+
+export function PatientDetailPage(...args: Parameters<typeof usePatientDetailPageContent>) {
+  return usePatientDetailPageContent(...args);
 }

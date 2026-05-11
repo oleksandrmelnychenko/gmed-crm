@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { useCallback, useEffect, useReducer, useRef, type ChangeEvent, type FormEvent, type SetStateAction } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   MessageSquarePlus,
@@ -60,40 +60,166 @@ import {
 } from "./model/chat-model";
 import type { ChatStreamEvent, Conversation, Message, UserItem } from "./model/types";
 
+type KeyDialogMode = "export" | "import" | null;
+
+type ImportedKeyBackup = {
+  name: string;
+  content: string;
+};
+
+type ChatPageState = {
+  conversations: Conversation[];
+  messages: Message[];
+  activePeer: string | null;
+  activeName: string;
+  activeRole: string;
+  input: string;
+  loading: boolean;
+  sending: boolean;
+  search: string;
+  showNewChat: boolean;
+  allUsers: UserItem[];
+  userSearch: string;
+  pendingFile: File | null;
+  activePeerMessageKey: MessageKeyEnvelope | null;
+  secureStatus: string | null;
+  attachmentBusyId: string | null;
+  keyDialogMode: KeyDialogMode;
+  keyPassphrase: string;
+  keyDialogBusy: boolean;
+  keyDialogStatus: string | null;
+  importedKeyBackup: ImportedKeyBackup | null;
+};
+
+type ChatPagePatch =
+  | Partial<ChatPageState>
+  | ((current: ChatPageState) => Partial<ChatPageState>);
+
+function chatPageReducer(state: ChatPageState, patch: ChatPagePatch): ChatPageState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
+function createChatPageFieldPatch<K extends keyof ChatPageState>(
+  field: K,
+  value: SetStateAction<ChatPageState[K]>,
+): ChatPagePatch {
+  return (current) => {
+    const nextValue =
+      typeof value === "function"
+        ? (value as (previous: ChatPageState[K]) => ChatPageState[K])(current[field])
+        : value;
+    return { [field]: nextValue } as Partial<ChatPageState>;
+  };
+}
+
 // ── Component ──
 
-export function ChatPage() {
+function useChatPageContent() {
   const { user } = useAuth();
   const { t } = useLang();
   const [searchParams, setSearchParams] = useSearchParams();
   const myId = user?.id ?? "";
   const canViewChat = canAccessChat(user?.role);
 
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [activePeer, setActivePeer] = useState<string | null>(null);
-  const [activeName, setActiveName] = useState("");
-  const [activeRole, setActiveRole] = useState("");
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
-  const [search, setSearch] = useState("");
-  const [showNewChat, setShowNewChat] = useState(false);
-  const [allUsers, setAllUsers] = useState<UserItem[]>([]);
-  const [userSearch, setUserSearch] = useState("");
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
-  const [activePeerMessageKey, setActivePeerMessageKey] =
-    useState<MessageKeyEnvelope | null>(null);
-  const [secureStatus, setSecureStatus] = useState<string | null>(null);
-  const [attachmentBusyId, setAttachmentBusyId] = useState<string | null>(null);
-  const [keyDialogMode, setKeyDialogMode] = useState<"export" | "import" | null>(null);
-  const [keyPassphrase, setKeyPassphrase] = useState("");
-  const [keyDialogBusy, setKeyDialogBusy] = useState(false);
-  const [keyDialogStatus, setKeyDialogStatus] = useState<string | null>(null);
-  const [importedKeyBackup, setImportedKeyBackup] = useState<{
-    name: string;
-    content: string;
-  } | null>(null);
+  const [chatState, dispatchChatState] = useReducer(
+    chatPageReducer,
+    undefined,
+    (): ChatPageState => ({
+      conversations: [],
+      messages: [],
+      activePeer: null,
+      activeName: "",
+      activeRole: "",
+      input: "",
+      loading: true,
+      sending: false,
+      search: "",
+      showNewChat: false,
+      allUsers: [],
+      userSearch: "",
+      pendingFile: null,
+      activePeerMessageKey: null,
+      secureStatus: null,
+      attachmentBusyId: null,
+      keyDialogMode: null,
+      keyPassphrase: "",
+      keyDialogBusy: false,
+      keyDialogStatus: null,
+      importedKeyBackup: null,
+    }),
+  );
+  const {
+    conversations,
+    messages,
+    activePeer,
+    activeName,
+    activeRole,
+    input,
+    loading,
+    sending,
+    search,
+    showNewChat,
+    allUsers,
+    userSearch,
+    pendingFile,
+    activePeerMessageKey,
+    secureStatus,
+    attachmentBusyId,
+    keyDialogMode,
+    keyPassphrase,
+    keyDialogBusy,
+    keyDialogStatus,
+    importedKeyBackup,
+  } = chatState;
+  const setChatField = <K extends keyof ChatPageState>(
+    field: K,
+    value: SetStateAction<ChatPageState[K]>,
+  ) => dispatchChatState(createChatPageFieldPatch(field, value));
+  const setConversations = (value: SetStateAction<Conversation[]>) =>
+    setChatField("conversations", value);
+  const setMessages = (value: SetStateAction<Message[]>) =>
+    setChatField("messages", value);
+  const setActivePeer = (value: SetStateAction<string | null>) =>
+    setChatField("activePeer", value);
+  const setActiveName = (value: SetStateAction<string>) =>
+    setChatField("activeName", value);
+  const setActiveRole = (value: SetStateAction<string>) =>
+    setChatField("activeRole", value);
+  const setInput = (value: SetStateAction<string>) =>
+    setChatField("input", value);
+  const setLoading = (value: SetStateAction<boolean>) =>
+    setChatField("loading", value);
+  const setSending = (value: SetStateAction<boolean>) =>
+    setChatField("sending", value);
+  const setSearch = (value: SetStateAction<string>) =>
+    setChatField("search", value);
+  const setShowNewChat = (value: SetStateAction<boolean>) =>
+    setChatField("showNewChat", value);
+  const setAllUsers = (value: SetStateAction<UserItem[]>) =>
+    setChatField("allUsers", value);
+  const setUserSearch = (value: SetStateAction<string>) =>
+    setChatField("userSearch", value);
+  const setPendingFile = (value: SetStateAction<File | null>) =>
+    setChatField("pendingFile", value);
+  const setActivePeerMessageKey = (value: SetStateAction<MessageKeyEnvelope | null>) =>
+    setChatField("activePeerMessageKey", value);
+  const setSecureStatus = (value: SetStateAction<string | null>) =>
+    setChatField("secureStatus", value);
+  const setAttachmentBusyId = (value: SetStateAction<string | null>) =>
+    setChatField("attachmentBusyId", value);
+  const setKeyDialogMode = (value: SetStateAction<KeyDialogMode>) =>
+    setChatField("keyDialogMode", value);
+  const setKeyPassphrase = (value: SetStateAction<string>) =>
+    setChatField("keyPassphrase", value);
+  const setKeyDialogBusy = (value: SetStateAction<boolean>) =>
+    setChatField("keyDialogBusy", value);
+  const setKeyDialogStatus = (value: SetStateAction<string | null>) =>
+    setChatField("keyDialogStatus", value);
+  const setImportedKeyBackup = (value: SetStateAction<ImportedKeyBackup | null>) =>
+    setChatField("importedKeyBackup", value);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -236,14 +362,56 @@ export function ChatPage() {
     activePeerRef.current = activePeer;
   }, [activePeer]);
 
+  const clearActivePeerMessageKey = useCallback(() => {
+    setActivePeerMessageKey(null);
+  }, []);
+
+  const resetActivePeerSecurity = useCallback(() => {
+    setActivePeerMessageKey(null);
+    setSecureStatus(null);
+  }, []);
+
+  const applyActivePeerMessageKey = useCallback((key: MessageKeyEnvelope | null) => {
+    setActivePeerMessageKey(key);
+    setSecureStatus(
+      key
+        ? null
+        : t.chat_secure_setup_pending,
+    );
+  }, [t.chat_secure_setup_pending]);
+
+  const failActivePeerMessageKey = useCallback(() => {
+    setActivePeerMessageKey(null);
+    setSecureStatus(t.chat_secure_key_failed);
+  }, [t.chat_secure_key_failed]);
+
+  const openPeerFromRoute = useCallback((peer: string, name: string, role: string) => {
+    setActivePeer(peer);
+    setActiveName(name);
+    setActiveRole(role);
+    setShowNewChat(false);
+    setPendingFile(null);
+  }, []);
+
+  const applyDraftFromRoute = useCallback((draft: string) => {
+    setInput(draft);
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("draft");
+        return next;
+      },
+      { replace: true }
+    );
+  }, [setSearchParams]);
+
   useEffect(() => {
     if (!canViewChat) {
-      setActivePeerMessageKey(null);
+      clearActivePeerMessageKey();
       return;
     }
     if (!activePeer) {
-      setActivePeerMessageKey(null);
-      setSecureStatus(null);
+      resetActivePeerSecurity();
       return;
     }
 
@@ -253,16 +421,10 @@ export function ChatPage() {
       try {
         const key = await loadPeerMessageKey(activePeer);
         if (cancelled) return;
-        setActivePeerMessageKey(key);
-        setSecureStatus(
-          key
-            ? null
-            : t.chat_secure_setup_pending,
-        );
+        applyActivePeerMessageKey(key);
       } catch {
         if (!cancelled) {
-          setActivePeerMessageKey(null);
-          setSecureStatus(t.chat_secure_key_failed);
+          failActivePeerMessageKey();
         }
       }
     })();
@@ -272,10 +434,12 @@ export function ChatPage() {
     };
   }, [
     activePeer,
+    applyActivePeerMessageKey,
     canViewChat,
+    clearActivePeerMessageKey,
+    failActivePeerMessageKey,
     loadPeerMessageKey,
-    t.chat_secure_key_failed,
-    t.chat_secure_setup_pending,
+    resetActivePeerSecurity,
   ]);
 
   useEffect(() => {
@@ -296,34 +460,23 @@ export function ChatPage() {
       activeRole;
 
     if (activePeer !== peer && name) {
-      setActivePeer(peer);
-      setActiveName(name);
-      setActiveRole(role);
-      setShowNewChat(false);
-      setPendingFile(null);
+      openPeerFromRoute(peer, name, role);
     }
 
     const draft = searchParams.get("draft");
     if (draft && hydratedDraftRef.current !== `${peer}:${draft}`) {
       hydratedDraftRef.current = `${peer}:${draft}`;
-      setInput(draft);
-      setSearchParams(
-        (current) => {
-          const next = new URLSearchParams(current);
-          next.delete("draft");
-          return next;
-        },
-        { replace: true }
-      );
+      applyDraftFromRoute(draft);
     }
   }, [
     activeName,
     activePeer,
     activeRole,
     allUsers,
+    applyDraftFromRoute,
     conversations,
+    openPeerFromRoute,
     searchParams,
-    setSearchParams,
   ]);
 
   // Keep chat live via WebSocket push.
@@ -677,14 +830,15 @@ export function ChatPage() {
     : conversations;
 
   // Filtered users for new chat
-  const filteredUsers = allUsers
-    .filter((u) => u.is_active && u.id !== myId)
-    .filter(
-      (u) =>
-        !userSearch ||
-        u.name.toLowerCase().includes(userSearch.toLowerCase()) ||
-        u.email.toLowerCase().includes(userSearch.toLowerCase())
-    );
+  const normalizedUserSearch = userSearch.toLowerCase();
+  const filteredUsers = allUsers.filter(
+    (u) =>
+      u.is_active &&
+      u.id !== myId &&
+      (!normalizedUserSearch ||
+        u.name.toLowerCase().includes(normalizedUserSearch) ||
+        u.email.toLowerCase().includes(normalizedUserSearch)),
+  );
 
   const displayMsgs = [...messages].reverse();
 
@@ -1067,4 +1221,8 @@ export function ChatPage() {
       </div>
     </div>
   );
+}
+
+export function ChatPage(...args: Parameters<typeof useChatPageContent>) {
+  return useChatPageContent(...args);
 }

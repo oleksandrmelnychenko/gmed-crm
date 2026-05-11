@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useReducer } from "react";
 
 import { apiFetch } from "@/lib/api";
 import type {
@@ -13,42 +13,71 @@ type UseAppointmentsSchedulerDataOptions = {
   failedLoadMessage: string;
 };
 
+type SchedulerState = {
+  appointments: AppointmentListItem[];
+  attentionItems: AppointmentAttentionItem[];
+  appointmentsLoading: boolean;
+  appointmentsError: string;
+};
+
+const INITIAL_SCHEDULER_STATE: SchedulerState = {
+  appointments: [],
+  attentionItems: [],
+  appointmentsLoading: true,
+  appointmentsError: "",
+};
+
+function schedulerReducer(
+  state: SchedulerState,
+  patch: Partial<SchedulerState>,
+) {
+  return { ...state, ...patch };
+}
+
 export function useAppointmentsSchedulerData({
   appointmentsQuery,
   attentionQuery,
   appointmentsVersion,
   failedLoadMessage,
 }: UseAppointmentsSchedulerDataOptions) {
-  const [appointments, setAppointments] = useState<AppointmentListItem[]>([]);
-  const [attentionItems, setAttentionItems] = useState<
-    AppointmentAttentionItem[]
-  >([]);
-  const [appointmentsLoading, setAppointmentsLoading] = useState(true);
-  const [appointmentsError, setAppointmentsError] = useState("");
+  const [schedulerState, dispatchSchedulerState] = useReducer(
+    schedulerReducer,
+    INITIAL_SCHEDULER_STATE,
+  );
+
+  const setAppointmentsError = useCallback((appointmentsError: string) => {
+    dispatchSchedulerState({ appointmentsError });
+  }, []);
 
   useEffect(() => {
     let active = true;
 
     async function loadAppointments() {
-      setAppointmentsLoading(true);
-      setAppointmentsError("");
+      dispatchSchedulerState({
+        appointmentsLoading: true,
+        appointmentsError: "",
+      });
       try {
         const [rows, attention] = await Promise.all([
           apiFetch<AppointmentListItem[]>(appointmentsQuery),
           apiFetch<AppointmentAttentionItem[]>(attentionQuery),
         ]);
         if (!active) return;
-        setAppointments(rows);
-        setAttentionItems(attention);
+        dispatchSchedulerState({
+          appointments: rows,
+          attentionItems: attention,
+          appointmentsLoading: false,
+          appointmentsError: "",
+        });
       } catch (error) {
         if (!active) return;
-        setAppointments([]);
-        setAttentionItems([]);
-        setAppointmentsError(
-          error instanceof Error ? error.message : failedLoadMessage,
-        );
-      } finally {
-        if (active) setAppointmentsLoading(false);
+        dispatchSchedulerState({
+          appointments: [],
+          attentionItems: [],
+          appointmentsLoading: false,
+          appointmentsError:
+            error instanceof Error ? error.message : failedLoadMessage,
+        });
       }
     }
 
@@ -64,10 +93,10 @@ export function useAppointmentsSchedulerData({
   ]);
 
   return {
-    appointments,
-    attentionItems,
-    appointmentsLoading,
-    appointmentsError,
+    appointments: schedulerState.appointments,
+    attentionItems: schedulerState.attentionItems,
+    appointmentsLoading: schedulerState.appointmentsLoading,
+    appointmentsError: schedulerState.appointmentsError,
     setAppointmentsError,
   };
 }

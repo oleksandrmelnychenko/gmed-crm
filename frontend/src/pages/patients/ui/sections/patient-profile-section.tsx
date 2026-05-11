@@ -100,16 +100,19 @@ type LegalStatusChecklistItem = {
 };
 
 type PatientProfileTabProps = {
-  canEditPatientProfile: boolean;
-  canExportPatientCompliance: boolean;
-  canManagePatientCardEntries: boolean;
-  canManagePatientMedicalOrders: boolean;
-  canManagePatientRiskScores: boolean;
-  canManagePatientVitals: boolean;
-  canOpenComplianceWorkspace: boolean;
-  canViewContracts: boolean;
-  canViewDocuments: boolean;
-  canViewInvoices: boolean;
+  profileControls: {
+    canEditPatientProfile: boolean;
+    canExportPatientCompliance: boolean;
+    canManagePatientCardEntries: boolean;
+    canManagePatientMedicalOrders: boolean;
+    canManagePatientRiskScores: boolean;
+    canManagePatientVitals: boolean;
+    canOpenComplianceWorkspace: boolean;
+    canViewContracts: boolean;
+    canViewDocuments: boolean;
+    canViewInvoices: boolean;
+    hasClinicalSurface: boolean;
+  };
   cardEntries: PatientCardEntry[];
   cardEntrySheetOpen: boolean;
   caveSheetOpen: boolean;
@@ -128,7 +131,6 @@ type PatientProfileTabProps = {
     orderId: string,
     nextStatus: "completed" | "cancelled",
   ) => void | Promise<void>;
-  hasClinicalSurface: boolean;
   id?: string;
   insuranceLabel: (value: string | null | undefined, tr: Record<string, string>) => string;
   invoicesPreviewOpen: boolean;
@@ -172,17 +174,8 @@ type PatientProfileTabProps = {
   vitalsSheetOpen: boolean;
 };
 
-export function PatientProfileTab({
-  canEditPatientProfile,
-  canExportPatientCompliance,
-  canManagePatientCardEntries,
-  canManagePatientMedicalOrders,
-  canManagePatientRiskScores,
-  canManagePatientVitals,
-  canOpenComplianceWorkspace,
-  canViewContracts,
-  canViewDocuments,
-  canViewInvoices,
+function usePatientProfileTabContent({
+  profileControls,
   cardEntries,
   cardEntrySheetOpen,
   caveSheetOpen,
@@ -198,7 +191,6 @@ export function PatientProfileTab({
   genderLabel,
   handleExportPatientCompliance,
   handleUpdatePatientMedicalOrderStatus,
-  hasClinicalSurface,
   id,
   insuranceLabel,
   invoicesPreviewOpen,
@@ -237,6 +229,19 @@ export function PatientProfileTab({
   vitalsHistory,
   vitalsSheetOpen,
 }: PatientProfileTabProps) {
+  const {
+    canEditPatientProfile,
+    canExportPatientCompliance,
+    canManagePatientCardEntries,
+    canManagePatientMedicalOrders,
+    canManagePatientRiskScores,
+    canManagePatientVitals,
+    canOpenComplianceWorkspace,
+    canViewContracts,
+    canViewDocuments,
+    canViewInvoices,
+    hasClinicalSurface,
+  } = profileControls;
   const editAction = canEditPatientProfile ? openProfileEditor : undefined;
 
   function handleDocumentsPreviewOpenChange(open: boolean) {
@@ -345,24 +350,11 @@ export function PatientProfileTab({
 
         <FormSection
           title={t.patient_profile_emergency_contact}
-          accessory={
-            canEditPatientProfile ? (
-              <Button
-                type="button"
-                size="sm"
-                className="h-8 rounded-lg gap-1.5 bg-amber-500 text-white hover:bg-amber-600"
-                onClick={openProfileEditor}
-              >
-                <Pencil className="size-3.5" />
-                {t.patient_profile_edit}
-              </Button>
-            ) : null
-          }
         >
           <div className="grid gap-4 md:grid-cols-3">
-            <InfoRow label={t.patients_emergency_name} value={fieldValue(detail.emergency_contact_name, t.common_not_set)} onEdit={editAction} editLabel={editPatientFieldLabel(t.patients_emergency_name)} />
-            <InfoRow label={t.patients_emergency_phone} value={fieldValue(detail.emergency_contact_phone, t.common_not_set)} onEdit={editAction} editLabel={editPatientFieldLabel(t.patients_emergency_phone)} />
-            <InfoRow label={t.patients_emergency_relation} value={fieldValue(detail.emergency_contact_relation, t.common_not_set)} onEdit={editAction} editLabel={editPatientFieldLabel(t.patients_emergency_relation)} />
+            <InfoRow label={t.patients_emergency_name} value={fieldValue(detail.emergency_contact_name, t.common_not_set)} />
+            <InfoRow label={t.patients_emergency_phone} value={fieldValue(detail.emergency_contact_phone, t.common_not_set)} />
+            <InfoRow label={t.patients_emergency_relation} value={fieldValue(detail.emergency_contact_relation, t.common_not_set)} />
           </div>
         </FormSection>
       </div>
@@ -578,7 +570,7 @@ export function PatientProfileTab({
               ) : null
             }
           >
-            <div className="rounded-xl border border-rose-200 bg-rose-50/70 px-4 py-4">
+            <div className="rounded-xl border border-rose-200 bg-rose-50/70 p-4">
               {detail.clinical_warnings ? (
                 <p className="whitespace-pre-wrap text-sm text-rose-900">{detail.clinical_warnings}</p>
               ) : (
@@ -929,7 +921,7 @@ export function PatientProfileTab({
           ) : null
         }
       >
-        <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-4">
+        <div className="rounded-xl border border-border/50 bg-muted/25 p-4">
           {detail.notes ? (
             <p className="text-sm text-foreground whitespace-pre-wrap">{detail.notes}</p>
           ) : (
@@ -952,6 +944,10 @@ export function PatientProfileTab({
       ) : null}
     </div>
   );
+}
+
+export function PatientProfileTab(...args: Parameters<typeof usePatientProfileTabContent>) {
+  return usePatientProfileTabContent(...args);
 }
 
 function editPatientFieldLabel(label: string) {

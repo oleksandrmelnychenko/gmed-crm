@@ -68,7 +68,12 @@ export function SortBuilder<T>({
   }, [columns, resolvedTranslations.buttonLabel, resolvedTranslations.unknownValue, t.common_sort, t.common_unknown_value, value]);
 
   const availableForIndex = (index: number): ColumnDef<T>[] => {
-    const usedOthers = new Set(value.filter((_, i) => i !== index).map((s) => s.field));
+    const usedOthers = new Set<string>();
+    value.forEach((sortKey, i) => {
+      if (i !== index) {
+        usedOthers.add(sortKey.field);
+      }
+    });
     return sortable.filter((c) => !usedOthers.has(c.id));
   };
 
@@ -133,7 +138,7 @@ export function SortBuilder<T>({
             <div className="flex flex-col gap-1">
               {value.map((key, index) => (
                 <SortRow
-                  key={`${key.field}-${index}`}
+                  key={key.field}
                   sortKey={key}
                   columns={availableForIndex(index)}
                   canMoveUp={index > 0}
@@ -203,7 +208,7 @@ function SortRow<T>({
   };
 
   return (
-    <div className="flex items-center gap-1 rounded-md px-1 py-1 hover:bg-muted/50">
+    <div className="flex items-center gap-1 rounded-md p-1 hover:bg-muted/50">
       <div className="flex flex-col">
         <button
           type="button"
@@ -232,13 +237,13 @@ function SortRow<T>({
         <option value={sortKey.field}>
           {columns.find((c) => c.id === sortKey.field)?.label ?? translations?.unknownValue}
         </option>
-        {columns
-          .filter((c) => c.id !== sortKey.field)
-          .map((c) => (
+        {columns.map((c) =>
+          c.id === sortKey.field ? null : (
             <option key={c.id} value={c.id}>
               {c.label}
             </option>
-          ))}
+          ),
+        )}
       </NativeComboboxSelect>
       <button
         type="button"

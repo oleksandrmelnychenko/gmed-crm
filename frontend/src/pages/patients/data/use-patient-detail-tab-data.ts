@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useEffect, useReducer } from "react";
 
 import { apiFetch } from "@/lib/api";
 
@@ -77,6 +77,37 @@ const EMPTY_TAB_STATE: TabState = {
   workflowChecklist: null,
 };
 
+type PatientDetailTabDataState = {
+  tabs: TabState;
+  settledKey: string;
+};
+
+type PatientDetailTabDataAction = {
+  type: "settle";
+  requestKey: string;
+  update: (current: TabState) => TabState;
+};
+
+const EMPTY_PATIENT_DETAIL_TAB_DATA_STATE: PatientDetailTabDataState = {
+  tabs: EMPTY_TAB_STATE,
+  settledKey: "",
+};
+
+function patientDetailTabDataReducer(
+  state: PatientDetailTabDataState,
+  action: PatientDetailTabDataAction,
+): PatientDetailTabDataState {
+  switch (action.type) {
+    case "settle":
+      return {
+        tabs: action.update(state.tabs),
+        settledKey: action.requestKey,
+      };
+    default:
+      return state;
+  }
+}
+
 export function usePatientDetailTabData({
   activeTab,
   canViewContracts,
@@ -93,8 +124,10 @@ export function usePatientDetailTabData({
   timelineRangeFilter,
   timelineSourceFilter,
 }: UsePatientDetailTabDataArgs) {
-  const [state, setState] = useState<TabState>(EMPTY_TAB_STATE);
-  const [settledKey, setSettledKey] = useState("");
+  const [{ tabs, settledKey }, dispatchTabData] = useReducer(
+    patientDetailTabDataReducer,
+    EMPTY_PATIENT_DETAIL_TAB_DATA_STATE,
+  );
 
   const requestKey =
     !id ||
@@ -136,8 +169,11 @@ export function usePatientDetailTabData({
             const result = await apiFetch<RelationItem[]>(`/patients/${id}/relations`, { signal });
             if (signal.aborted) return;
             startTransition(() => {
-              setState((current) => ({ ...current, relations: result }));
-              setSettledKey(requestKey);
+              dispatchTabData({
+                type: "settle",
+                requestKey,
+                update: (current) => ({ ...current, relations: result }),
+              });
             });
             break;
           }
@@ -145,8 +181,11 @@ export function usePatientDetailTabData({
             const result = await apiFetch<CaseItem[]>(`/patients/${id}/cases`, { signal });
             if (signal.aborted) return;
             startTransition(() => {
-              setState((current) => ({ ...current, cases: result }));
-              setSettledKey(requestKey);
+              dispatchTabData({
+                type: "settle",
+                requestKey,
+                update: (current) => ({ ...current, cases: result }),
+              });
             });
             break;
           }
@@ -154,8 +193,11 @@ export function usePatientDetailTabData({
             const result = await apiFetch<OrderItem[]>(`/patients/${id}/orders`, { signal });
             if (signal.aborted) return;
             startTransition(() => {
-              setState((current) => ({ ...current, orders: result }));
-              setSettledKey(requestKey);
+              dispatchTabData({
+                type: "settle",
+                requestKey,
+                update: (current) => ({ ...current, orders: result }),
+              });
             });
             break;
           }
@@ -163,8 +205,11 @@ export function usePatientDetailTabData({
             const result = await apiFetch<AppointmentItem[]>(`/patients/${id}/appointments`, { signal });
             if (signal.aborted) return;
             startTransition(() => {
-              setState((current) => ({ ...current, appointments: result }));
-              setSettledKey(requestKey);
+              dispatchTabData({
+                type: "settle",
+                requestKey,
+                update: (current) => ({ ...current, appointments: result }),
+              });
             });
             break;
           }
@@ -177,14 +222,17 @@ export function usePatientDetailTabData({
             ]);
             if (signal.aborted) return;
             startTransition(() => {
-              setState((current) => ({
-                ...current,
-                appointments,
-                documentAlerts,
-                documents,
-                orders,
-              }));
-              setSettledKey(requestKey);
+              dispatchTabData({
+                type: "settle",
+                requestKey,
+                update: (current) => ({
+                  ...current,
+                  appointments,
+                  documentAlerts,
+                  documents,
+                  orders,
+                }),
+              });
             });
             break;
           }
@@ -192,8 +240,11 @@ export function usePatientDetailTabData({
             const result = await apiFetch<ContractItem[]>(`/patients/${id}/framework-contracts`, { signal });
             if (signal.aborted) return;
             startTransition(() => {
-              setState((current) => ({ ...current, contracts: result }));
-              setSettledKey(requestKey);
+              dispatchTabData({
+                type: "settle",
+                requestKey,
+                update: (current) => ({ ...current, contracts: result }),
+              });
             });
             break;
           }
@@ -219,14 +270,17 @@ export function usePatientDetailTabData({
               ]);
             if (signal.aborted) return;
             startTransition(() => {
-              setState((current) => ({
-                ...current,
-                financialLedger,
-                financialSummary,
-                invoices: result.items ?? [],
-                servicePackages,
-              }));
-              setSettledKey(requestKey);
+              dispatchTabData({
+                type: "settle",
+                requestKey,
+                update: (current) => ({
+                  ...current,
+                  financialLedger,
+                  financialSummary,
+                  invoices: result.items ?? [],
+                  servicePackages,
+                }),
+              });
             });
             break;
           }
@@ -234,8 +288,11 @@ export function usePatientDetailTabData({
             const result = await apiFetch<WorkflowChecklistResponse>(`/patients/${id}/workflow-checklist`, { signal });
             if (signal.aborted) return;
             startTransition(() => {
-              setState((current) => ({ ...current, workflowChecklist: result }));
-              setSettledKey(requestKey);
+              dispatchTabData({
+                type: "settle",
+                requestKey,
+                update: (current) => ({ ...current, workflowChecklist: result }),
+              });
             });
             break;
           }
@@ -257,12 +314,15 @@ export function usePatientDetailTabData({
             }>(`/patients/${id}/timeline?${params.toString()}`, { signal });
             if (signal.aborted) return;
             startTransition(() => {
-              setState((current) => ({
-                ...current,
-                timeline: result.items ?? [],
-                timelineTotal: result.total ?? 0,
-              }));
-              setSettledKey(requestKey);
+              dispatchTabData({
+                type: "settle",
+                requestKey,
+                update: (current) => ({
+                  ...current,
+                  timeline: result.items ?? [],
+                  timelineTotal: result.total ?? 0,
+                }),
+              });
             });
             break;
           }
@@ -272,37 +332,40 @@ export function usePatientDetailTabData({
       } catch {
         if (signal.aborted) return;
         startTransition(() => {
-          setState((current) => {
-            switch (activeTab) {
-              case "relations":
-                return { ...current, relations: [] };
-              case "cases":
-                return { ...current, cases: [] };
-              case "orders":
-                return { ...current, orders: [] };
-              case "appointments":
-                return { ...current, appointments: [] };
-              case "documents":
-                return { ...current, documentAlerts: null, documents: [] };
-              case "contracts":
-                return { ...current, contracts: [] };
-              case "invoices":
-                return {
-                  ...current,
-                  financialLedger: null,
-                  financialSummary: null,
-                  invoices: [],
-                  servicePackages: [],
-                };
-              case "workflow":
-                return { ...current, workflowChecklist: null };
-              case "timeline":
-                return { ...current, timeline: [], timelineTotal: 0 };
-              default:
-                return current;
-            }
+          dispatchTabData({
+            type: "settle",
+            requestKey,
+            update: (current) => {
+              switch (activeTab) {
+                case "relations":
+                  return { ...current, relations: [] };
+                case "cases":
+                  return { ...current, cases: [] };
+                case "orders":
+                  return { ...current, orders: [] };
+                case "appointments":
+                  return { ...current, appointments: [] };
+                case "documents":
+                  return { ...current, documentAlerts: null, documents: [] };
+                case "contracts":
+                  return { ...current, contracts: [] };
+                case "invoices":
+                  return {
+                    ...current,
+                    financialLedger: null,
+                    financialSummary: null,
+                    invoices: [],
+                    servicePackages: [],
+                  };
+                case "workflow":
+                  return { ...current, workflowChecklist: null };
+                case "timeline":
+                  return { ...current, timeline: [], timelineTotal: 0 };
+                default:
+                  return current;
+              }
+            },
           });
-          setSettledKey(requestKey);
         });
       }
     }
@@ -326,7 +389,7 @@ export function usePatientDetailTabData({
   ]);
 
   return {
-    ...state,
+    ...tabs,
     tabLoading: Boolean(requestKey) && settledKey !== requestKey,
   };
 }

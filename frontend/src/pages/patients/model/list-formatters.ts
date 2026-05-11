@@ -6,14 +6,24 @@ import type {
 
 type DictionaryLike = PatientsDictionary | Record<string, string>;
 
+const PATIENT_DATE_FORMATTER = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+});
+
+const PATIENT_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
 export function formatPatientDate(value?: string | null, fallback = "Not set") {
   if (!value) return fallback;
   try {
-    return new Intl.DateTimeFormat("en-GB", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    }).format(new Date(`${value}T00:00:00`));
+    return PATIENT_DATE_FORMATTER.format(new Date(`${value}T00:00:00`));
   } catch {
     return value;
   }
@@ -22,13 +32,7 @@ export function formatPatientDate(value?: string | null, fallback = "Not set") {
 export function formatPatientDateTime(value?: string | null, fallback = "Not set") {
   if (!value) return fallback;
   try {
-    return new Intl.DateTimeFormat("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(value));
+    return PATIENT_DATE_TIME_FORMATTER.format(new Date(value));
   } catch {
     return value;
   }

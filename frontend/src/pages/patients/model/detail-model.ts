@@ -56,7 +56,6 @@ export type PatientLabelPayload = {
 };
 
 export type PatientTimelineRangeFilter = "all" | "30d" | "90d" | "180d" | "365d";
-export const PATIENT_DETAIL_REFRESH_EVENT = "patient-detail-refresh";
 
 const PATIENT_RELATION_TYPE_LABEL_KEYS = {
   caregiver: "patient_relation_type_caregiver",
@@ -156,6 +155,12 @@ const PATIENT_OPERATIONAL_TAB_KEYS = new Set([
   "curators",
   "timeline",
 ]);
+
+const PATIENT_LABEL_BIRTH_DATE_FORMATTER = new Intl.DateTimeFormat("de-DE", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+});
 
 export const DEFAULT_PATIENT_LABEL_FORMAT_ID: PatientLabelFormatId = "compact-90x48";
 
@@ -403,11 +408,9 @@ function formatPrintValue(value?: string | null, fallback = "Not set") {
 
 function formatPatientLabelBirthDate(value: string) {
   try {
-    return new Intl.DateTimeFormat("de-DE", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    }).format(new Date(value.includes("T") ? value : `${value}T00:00:00`));
+    return PATIENT_LABEL_BIRTH_DATE_FORMATTER.format(
+      new Date(value.includes("T") ? value : `${value}T00:00:00`),
+    );
   } catch {
     return value;
   }

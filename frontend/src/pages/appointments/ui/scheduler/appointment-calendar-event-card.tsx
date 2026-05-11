@@ -4,6 +4,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 
@@ -30,6 +31,26 @@ type AppointmentCalendarEventCardProps = {
 };
 
 const MONTH_TOOLTIP_WIDTH_PX = 432;
+const EVENT_TIME_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+};
+const EVENT_DATE_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+};
+const EVENT_TIME_FORMATTERS = new Map<string, Intl.DateTimeFormat>([
+  ["de-DE", new Intl.DateTimeFormat("de-DE", EVENT_TIME_FORMAT_OPTIONS)],
+  ["ru-RU", new Intl.DateTimeFormat("ru-RU", EVENT_TIME_FORMAT_OPTIONS)],
+  ["en-GB", new Intl.DateTimeFormat("en-GB", EVENT_TIME_FORMAT_OPTIONS)],
+]);
+const EVENT_DATE_FORMATTERS = new Map<string, Intl.DateTimeFormat>([
+  ["de-DE", new Intl.DateTimeFormat("de-DE", EVENT_DATE_FORMAT_OPTIONS)],
+  ["ru-RU", new Intl.DateTimeFormat("ru-RU", EVENT_DATE_FORMAT_OPTIONS)],
+  ["en-GB", new Intl.DateTimeFormat("en-GB", EVENT_DATE_FORMAT_OPTIONS)],
+]);
 
 type StatusBadgePalette = {
   borderColor: string;
@@ -86,12 +107,16 @@ function resolveCalendarLocale(lang: string): string {
   return "en-GB";
 }
 
+function getEventTimeFormatter(locale: string) {
+  return EVENT_TIME_FORMATTERS.get(locale) ?? EVENT_TIME_FORMATTERS.get("en-GB")!;
+}
+
+function getEventDateFormatter(locale: string) {
+  return EVENT_DATE_FORMATTERS.get(locale) ?? EVENT_DATE_FORMATTERS.get("en-GB")!;
+}
+
 function formatEventTime(date: Date, locale: string): string {
-  return new Intl.DateTimeFormat(locale, {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(date);
+  return getEventTimeFormatter(locale).format(date);
 }
 
 function formatEventTimeRange(arg: EventContentArg, lang: string): string {
@@ -114,11 +139,7 @@ function formatEventDate(arg: EventContentArg, lang: string): string {
   if (!start) return "";
 
   const locale = resolveCalendarLocale(lang);
-  return new Intl.DateTimeFormat(locale, {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(start);
+  return getEventDateFormatter(locale).format(start);
 }
 
 function resolveEventDurationMinutes(arg: EventContentArg): number {
@@ -128,6 +149,47 @@ function resolveEventDurationMinutes(arg: EventContentArg): number {
   const diffMs = end.getTime() - start.getTime();
   const diffMinutes = Math.round(diffMs / (60 * 1000));
   return diffMinutes > 0 ? diffMinutes : 30;
+}
+
+type AppointmentQuickActionsButtonProps = {
+  triggerRef: RefObject<HTMLButtonElement | null>;
+  eventId: string;
+  isOpen: boolean;
+  onToggle: () => void;
+};
+
+function AppointmentQuickActionsButton({
+  triggerRef,
+  eventId,
+  isOpen,
+  onToggle,
+}: AppointmentQuickActionsButtonProps) {
+  return (
+    <button
+      ref={triggerRef}
+      type="button"
+      aria-label={appointmentText(
+        "Schnellaktionen Г¶ffnen",
+        "Р‘С‹СЃС‚СЂС‹Рµ РґРµР№СЃС‚РІРёСЏ",
+        "Open quick appointment actions",
+      )}
+      aria-haspopup="menu"
+      aria-expanded={isOpen}
+      aria-controls={`appointment-quick-actions-${eventId}`}
+      className={`absolute top-1 right-1 z-10 inline-flex size-5 cursor-pointer items-center justify-center rounded-md border border-border/60 bg-background/85 text-muted-foreground transition-[opacity,color,background-color] hover:bg-background hover:text-foreground ${
+        isOpen
+          ? "opacity-100 pointer-events-auto"
+          : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
+      }`}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onToggle();
+      }}
+    >
+      <MoreHorizontal className="size-3" />
+    </button>
+  );
 }
 
 export function AppointmentCalendarEventCard({
@@ -261,30 +323,12 @@ export function AppointmentCalendarEventCard({
       data-event-duration-minutes={eventDurationMinutes}
     >
       {canOpenMonthTooltip ? (
-        <button
-          ref={monthTooltipTriggerRef}
-          type="button"
-          aria-label={appointmentText(
-            "Schnellaktionen öffnen",
-            "Быстрые действия",
-            "Open quick appointment actions",
-          )}
-          aria-haspopup="menu"
-          aria-expanded={isMonthTooltipOpen}
-          aria-controls={`appointment-quick-actions-${arg.event.id}`}
-          className={`absolute top-1 right-1 z-10 inline-flex size-5 cursor-pointer items-center justify-center rounded-md border border-border/60 bg-background/85 text-muted-foreground transition-[opacity,color,background-color] hover:bg-background hover:text-foreground ${
-            isMonthTooltipOpen
-              ? "opacity-100 pointer-events-auto"
-              : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
-          }`}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            setIsMonthTooltipOpen((current) => !current);
-          }}
-        >
-          <MoreHorizontal className="size-3" />
-        </button>
+        <AppointmentQuickActionsButton
+          triggerRef={monthTooltipTriggerRef}
+          eventId={arg.event.id}
+          isOpen={isMonthTooltipOpen}
+          onToggle={() => setIsMonthTooltipOpen((current) => !current)}
+        />
       ) : null}
 
       <div className="fc-apt-event-row-primary">{dayPrimaryLine}</div>
@@ -301,6 +345,7 @@ export function AppointmentCalendarEventCard({
         ? createPortal(
             <div
               ref={monthTooltipRef}
+              role="presentation"
               className="fixed z-[9999] min-w-[27rem] w-max max-w-[calc(100vw-16px)] rounded-xl border border-border/80 bg-card p-3 shadow-lg"
               style={{
                 top: `${monthTooltipPosition.top}px`,
@@ -308,6 +353,9 @@ export function AppointmentCalendarEventCard({
               }}
               onClick={(event) => {
                 event.preventDefault();
+                event.stopPropagation();
+              }}
+              onKeyDown={(event) => {
                 event.stopPropagation();
               }}
             >

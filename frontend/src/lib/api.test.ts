@@ -105,19 +105,27 @@ describe("API request deduplication and cache", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const { apiFetch } = await loadApiModule();
-    const first = await apiFetch<{ version: number }>("/meta", {
+    const [first, cached, afterMutation] = await apiFetch<{
+      version: number;
+    }>("/meta", {
       cacheTtlMs: 30_000,
-    });
-    const cached = await apiFetch<{ version: number }>("/meta", {
-      cacheTtlMs: 30_000,
-    });
-    await apiFetch<{ ok: boolean }>("/meta/update", {
-      method: "POST",
-      body: JSON.stringify({ ok: true }),
-    });
-    const afterMutation = await apiFetch<{ version: number }>("/meta", {
-      cacheTtlMs: 30_000,
-    });
+    }).then((firstResult) =>
+      apiFetch<{ version: number }>("/meta", {
+        cacheTtlMs: 30_000,
+      }).then((cachedResult) =>
+        apiFetch<{ ok: boolean }>("/meta/update", {
+          method: "POST",
+          body: JSON.stringify({ ok: true }),
+        }).then(() =>
+          apiFetch<{ version: number }>("/meta", {
+            cacheTtlMs: 30_000,
+          }).then(
+            (afterMutationResult) =>
+              [firstResult, cachedResult, afterMutationResult] as const,
+          ),
+        ),
+      ),
+    );
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(first.version).toBe(1);

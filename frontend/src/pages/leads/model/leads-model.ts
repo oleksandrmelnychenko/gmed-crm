@@ -120,6 +120,23 @@ function runtimeLocale() {
   return getLang() === "de" ? "de-DE" : "ru-RU";
 }
 
+const LEAD_DATE_FORMATTERS: Record<string, Intl.DateTimeFormat> = {
+  "de-DE": new Intl.DateTimeFormat("de-DE", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }),
+  "ru-RU": new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }),
+};
+
+function leadDateFormatter(locale: string) {
+  return LEAD_DATE_FORMATTERS[locale] ?? LEAD_DATE_FORMATTERS["ru-RU"];
+}
+
 export function leadPermissions(role?: string): LeadPermissions {
   return {
     canViewPage: role === "ceo" || role === "patient_manager" || role === "sales",
@@ -284,11 +301,7 @@ export function formatDate(
 ) {
   if (!value) return fallback;
   try {
-    return new Intl.DateTimeFormat(locale, {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }).format(new Date(value));
+    return leadDateFormatter(locale).format(new Date(value));
   } catch {
     return value;
   }

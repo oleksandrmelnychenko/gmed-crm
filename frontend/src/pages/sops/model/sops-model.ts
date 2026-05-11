@@ -1,11 +1,26 @@
 import {
-  formatEnumLabelFromKeys,
   type Lang,
-  type TranslationKey,
   type Translations,
 } from "@/lib/i18n";
 
 import type { SopFormState } from "./types";
+
+const SOP_DATE_TIME_FORMATTERS = {
+  de: new Intl.DateTimeFormat("de-DE", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }),
+  ru: new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }),
+} satisfies Record<Lang, Intl.DateTimeFormat>;
 
 export function emptyForm(): SopFormState {
   return {
@@ -17,21 +32,6 @@ export function emptyForm(): SopFormState {
     targetRoles: [],
     targetUserIds: [],
   };
-}
-
-const SOP_CATEGORY_LABEL_KEYS = {
-  sop: "sops_category_sop",
-  handbook: "sops_category_handbook",
-  training: "sops_category_training",
-} as const satisfies Partial<Record<string, TranslationKey>>;
-
-const SOP_APPROVAL_ROLE_LABEL_KEYS = {
-  ceo: "sops_approval_role_ceo",
-  patient_manager: "sops_approval_role_patient_manager",
-} as const satisfies Partial<Record<string, TranslationKey>>;
-
-export function categoryLabel(value: string, translations: Translations) {
-  return formatEnumLabelFromKeys(value, SOP_CATEGORY_LABEL_KEYS, translations);
 }
 
 export function roleCanOpenLearning(role?: string) {
@@ -49,20 +49,10 @@ export function roleCanReview(role?: string) {
 export function formatDate(value: string | null | undefined, lang: Lang, translations: Translations) {
   if (!value) return translations.sops_date_not_set;
   try {
-    return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(value));
+    return SOP_DATE_TIME_FORMATTERS[lang].format(new Date(value));
   } catch {
     return value;
   }
-}
-
-export function approvalRoleLabel(value: string | null | undefined, translations: Translations) {
-  return formatEnumLabelFromKeys(value, SOP_APPROVAL_ROLE_LABEL_KEYS, translations);
 }
 
 export function reviewQueueCopy(role: string | undefined, translations: Translations) {

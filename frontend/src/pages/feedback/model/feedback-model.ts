@@ -39,15 +39,6 @@ export function canViewStaffFeedback(role?: string) {
   );
 }
 
-export function buildFeedbackQuery(search: string, status: string, source: string) {
-  const params = new URLSearchParams();
-  if (search.trim()) params.set("search", search.trim());
-  if (status) params.set("status", status);
-  if (source) params.set("source", source);
-  const query = params.toString();
-  return query ? `?${query}` : "";
-}
-
 export function patientLabel(item: PatientOption) {
   return `${item.patient_id} - ${[item.first_name, item.last_name].filter(Boolean).join(" ")}`.trim();
 }

@@ -1,5 +1,5 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { startTransition, useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useReducer, type FormEvent } from "react";
 import { Download, LoaderCircle, RefreshCw, ShieldCheck, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -91,30 +91,101 @@ function portalDocumentSourceLabel(
   return sharedPortalDocumentSourceLabel(source, clinic);
 }
 
-export function PatientDocumentsPage() {
+interface PatientDocumentsState {
+  documents: PortalDocumentItem[];
+  documentAlerts: PortalDocumentAlertsSummary | null;
+  uploads: PortalUploadedDocumentItem[];
+  translationRequests: PortalTranslationRequestItem[];
+  loading: boolean;
+  refreshing: boolean;
+  error: string;
+  notice: string;
+  busyId: string | null;
+  uploadBusy: boolean;
+  uploadError: string;
+  uploadKind: string;
+  uploadName: string;
+  uploadNotes: string;
+  uploadFile: File | null;
+  activeCategory: PortalDocumentCategoryKey;
+  translationDocument: PortalDocumentItem | null;
+  translationLanguage: string;
+  translationNote: string;
+  translationBusy: boolean;
+  translationError: string;
+  version: number;
+}
+
+type PatientDocumentsAction =
+  | Partial<PatientDocumentsState>
+  | ((current: PatientDocumentsState) => Partial<PatientDocumentsState>);
+
+const INITIAL_PATIENT_DOCUMENTS_STATE: PatientDocumentsState = {
+  documents: [],
+  documentAlerts: null,
+  uploads: [],
+  translationRequests: [],
+  loading: true,
+  refreshing: false,
+  error: "",
+  notice: "",
+  busyId: null,
+  uploadBusy: false,
+  uploadError: "",
+  uploadKind: "general",
+  uploadName: "",
+  uploadNotes: "",
+  uploadFile: null,
+  activeCategory: "all",
+  translationDocument: null,
+  translationLanguage: "en",
+  translationNote: "",
+  translationBusy: false,
+  translationError: "",
+  version: 0,
+};
+
+function patientDocumentsReducer(
+  current: PatientDocumentsState,
+  action: PatientDocumentsAction,
+): PatientDocumentsState {
+  const patch = typeof action === "function" ? action(current) : action;
+  return {
+    ...current,
+    ...patch,
+  };
+}
+
+function usePatientDocumentsPageContent() {
   const { t, lang } = useLang();
-  const [documents, setDocuments] = useState<PortalDocumentItem[]>([]);
-  const [documentAlerts, setDocumentAlerts] = useState<PortalDocumentAlertsSummary | null>(null);
-  const [uploads, setUploads] = useState<PortalUploadedDocumentItem[]>([]);
-  const [translationRequests, setTranslationRequests] = useState<PortalTranslationRequestItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [uploadBusy, setUploadBusy] = useState(false);
-  const [uploadError, setUploadError] = useState("");
-  const [uploadKind, setUploadKind] = useState("general");
-  const [uploadName, setUploadName] = useState("");
-  const [uploadNotes, setUploadNotes] = useState("");
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [activeCategory, setActiveCategory] = useState<PortalDocumentCategoryKey>("all");
-  const [translationDocument, setTranslationDocument] = useState<PortalDocumentItem | null>(null);
-  const [translationLanguage, setTranslationLanguage] = useState("en");
-  const [translationNote, setTranslationNote] = useState("");
-  const [translationBusy, setTranslationBusy] = useState(false);
-  const [translationError, setTranslationError] = useState("");
-  const [version, setVersion] = useState(0);
+  const [documentsState, dispatchDocumentsState] = useReducer(
+    patientDocumentsReducer,
+    INITIAL_PATIENT_DOCUMENTS_STATE,
+  );
+  const {
+    activeCategory,
+    busyId,
+    documentAlerts,
+    documents,
+    error,
+    loading,
+    notice,
+    refreshing,
+    translationBusy,
+    translationDocument,
+    translationError,
+    translationLanguage,
+    translationNote,
+    translationRequests,
+    uploadBusy,
+    uploadError,
+    uploadFile,
+    uploadKind,
+    uploadName,
+    uploadNotes,
+    uploads,
+    version,
+  } = documentsState;
   const l = useCallback(
     (de: string, ru: string, en: string) =>
       lang === "de" ? de : lang === "ru" ? ru : en,
@@ -125,37 +196,39 @@ export function PatientDocumentsPage() {
     clearApiCache("/me/documents");
     clearApiCache("/me/document-alerts");
     clearApiCache("/me/translation-requests");
-    setVersion((value) => value + 1);
+    dispatchDocumentsState((current) => ({ version: current.version + 1 }));
   });
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
-      if (loading) {
-        setRefreshing(false);
-      } else {
-        setRefreshing(true);
-      }
+      dispatchDocumentsState((current) => ({
+        refreshing: !current.loading,
+        error: "",
+      }));
 
       try {
         const workspace = await fetchPortalDocumentsWorkspace();
         if (cancelled) return;
-        startTransition(() => {
-          setDocuments(workspace.releasedDocuments);
-          setDocumentAlerts(workspace.documentAlerts);
-          setUploads(workspace.uploadedDocuments);
-          setTranslationRequests(workspace.translationRequests);
-          setError("");
-        });
+        startTransition(() =>
+          dispatchDocumentsState({
+            documents: workspace.releasedDocuments,
+            documentAlerts: workspace.documentAlerts,
+            uploads: workspace.uploadedDocuments,
+            translationRequests: workspace.translationRequests,
+            error: "",
+            loading: false,
+            refreshing: false,
+          }),
+        );
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : t.portal_documents_failed_to_load_documents);
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-          setRefreshing(false);
-        }
+        dispatchDocumentsState({
+          error: err instanceof Error ? err.message : t.portal_documents_failed_to_load_documents,
+          loading: false,
+          refreshing: false,
+        });
       }
     }
 
@@ -163,7 +236,7 @@ export function PatientDocumentsPage() {
     return () => {
       cancelled = true;
     };
-  }, [loading, t.portal_documents_failed_to_load_documents, version, l]);
+  }, [t.portal_documents_failed_to_load_documents, version]);
 
   const pending = useMemo(
     () => documents.filter((item) => item.requires_confirmation && !item.confirmed).length,
@@ -188,13 +261,11 @@ export function PatientDocumentsPage() {
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!uploadFile) {
-      setUploadError(t.portal_documents_choose_a_file_first);
+      dispatchDocumentsState({ uploadError: t.portal_documents_choose_a_file_first });
       return;
     }
 
-    setUploadBusy(true);
-    setUploadError("");
-    setNotice("");
+    dispatchDocumentsState({ uploadBusy: true, uploadError: "", notice: "" });
 
     try {
       const formData = new FormData();
@@ -209,91 +280,99 @@ export function PatientDocumentsPage() {
 
       await uploadPortalDocument(formData);
 
-      setNotice(t.portal_documents_upload_sent_to_the_care_team);
-      setUploadFile(null);
-      setUploadName("");
-      setUploadNotes("");
-      setUploadKind("general");
-      setVersion((value) => value + 1);
+      dispatchDocumentsState((current) => ({
+        notice: t.portal_documents_upload_sent_to_the_care_team,
+        uploadFile: null,
+        uploadName: "",
+        uploadNotes: "",
+        uploadKind: "general",
+        uploadBusy: false,
+        version: current.version + 1,
+      }));
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : t.portal_documents_failed_to_upload_document);
-    } finally {
-      setUploadBusy(false);
+      dispatchDocumentsState({
+        uploadError: err instanceof Error ? err.message : t.portal_documents_failed_to_upload_document,
+        uploadBusy: false,
+      });
     }
   }
 
   async function handleConfirm(documentId: string) {
-    setBusyId(documentId);
-    setNotice("");
-    setError("");
+    dispatchDocumentsState({ busyId: documentId, notice: "", error: "" });
 
     try {
       await confirmPortalDocument(documentId);
-      setNotice(t.portal_documents_document_receipt_confirmed);
-      setVersion((value) => value + 1);
+      dispatchDocumentsState((current) => ({
+        busyId: null,
+        notice: t.portal_documents_document_receipt_confirmed,
+        version: current.version + 1,
+      }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t.portal_documents_failed_to_confirm_release);
-    } finally {
-      setBusyId(null);
+      dispatchDocumentsState({
+        busyId: null,
+        error: err instanceof Error ? err.message : t.portal_documents_failed_to_confirm_release,
+      });
     }
   }
 
   async function handleDownload(item: PortalDocumentItem) {
-    setBusyId(item.id);
-    setNotice("");
-    setError("");
+    dispatchDocumentsState({ busyId: item.id, notice: "", error: "" });
 
     try {
       await downloadPortalDocument(item.id, item.original_filename ?? item.auto_name);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t.portal_documents_failed_to_download_document);
-    } finally {
-      setBusyId(null);
+      dispatchDocumentsState({
+        error: err instanceof Error ? err.message : t.portal_documents_failed_to_download_document,
+      });
     }
+    dispatchDocumentsState({ busyId: null });
   }
 
   function openTranslationDialog(item: PortalDocumentItem) {
-    setTranslationDocument(item);
-    setTranslationLanguage("en");
-    setTranslationNote("");
-    setTranslationError("");
+    dispatchDocumentsState({
+      translationDocument: item,
+      translationLanguage: "en",
+      translationNote: "",
+      translationError: "",
+    });
   }
 
   async function handleRequestTranslation() {
     if (!translationDocument) return;
 
-    setTranslationBusy(true);
-    setTranslationError("");
-    setNotice("");
+    dispatchDocumentsState({ translationBusy: true, translationError: "", notice: "" });
 
     try {
       await requestPortalDocumentTranslation(translationDocument.id, {
         requested_language: translationLanguage,
         note: translationNote.trim() || undefined,
       });
-      setNotice(t.portal_documents_translation_request_sent_to_the_care_team);
-      setTranslationDocument(null);
       clearApiCache("/me/translation-requests");
-      setVersion((value) => value + 1);
+      dispatchDocumentsState((current) => ({
+        notice: t.portal_documents_translation_request_sent_to_the_care_team,
+        translationDocument: null,
+        translationBusy: false,
+        version: current.version + 1,
+      }));
     } catch (err) {
-      setTranslationError(err instanceof Error ? err.message : t.portal_documents_failed_to_request_translation);
-    } finally {
-      setTranslationBusy(false);
+      dispatchDocumentsState({
+        translationError: err instanceof Error ? err.message : t.portal_documents_failed_to_request_translation,
+        translationBusy: false,
+      });
     }
   }
 
   async function handleUploadDownload(item: PortalUploadedDocumentItem) {
-    setBusyId(item.id);
-    setNotice("");
-    setError("");
+    dispatchDocumentsState({ busyId: item.id, notice: "", error: "" });
 
     try {
       await downloadPortalUpload(item.id, item.original_filename ?? item.auto_name);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t.portal_documents_failed_to_download_uploaded_document);
-    } finally {
-      setBusyId(null);
+      dispatchDocumentsState({
+        error: err instanceof Error ? err.message : t.portal_documents_failed_to_download_uploaded_document,
+      });
     }
+    dispatchDocumentsState({ busyId: null });
   }
 
   if (loading) {
@@ -317,7 +396,7 @@ export function PatientDocumentsPage() {
             <CountBadge>
               {t.portal_documents_my_uploads}: {uploads.length}
             </CountBadge>
-            <Button variant="outline" className="h-9 rounded-lg" onClick={() => setVersion((value) => value + 1)}>
+            <Button variant="outline" className="h-9 rounded-lg" onClick={() => dispatchDocumentsState((current) => ({ version: current.version + 1 }))}>
               <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
               {t.portal_documents_refresh}
             </Button>
@@ -392,7 +471,7 @@ export function PatientDocumentsPage() {
               <button
                 key={tab.key}
                 type="button"
-                onClick={() => setActiveCategory(tab.key)}
+                onClick={() => dispatchDocumentsState({ activeCategory: tab.key })}
                 className={cn(
                   "inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm transition",
                   activeCategory === tab.key
@@ -559,7 +638,7 @@ export function PatientDocumentsPage() {
                 <NativeComboboxSelect
                   id="portal-document-upload-kind"
                   value={uploadKind}
-                  onChange={(event) => setUploadKind(event.target.value)}
+                  onChange={(event) => dispatchDocumentsState({ uploadKind: event.target.value })}
                   className={selectClass}
                 >
                   <option value="general">{t.portal_documents_general}</option>
@@ -575,7 +654,7 @@ export function PatientDocumentsPage() {
                 <input
                   id="portal-document-upload-title"
                   value={uploadName}
-                  onChange={(event) => setUploadName(event.target.value)}
+                  onChange={(event) => dispatchDocumentsState({ uploadName: event.target.value })}
                   placeholder={t.portal_documents_optional_title}
                   className={cn(inputClass, "w-full border border-input px-3 text-sm")}
                 />
@@ -584,7 +663,7 @@ export function PatientDocumentsPage() {
                 <input
                   id="portal-document-upload-file"
                   type="file"
-                  onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
+                  onChange={(event) => dispatchDocumentsState({ uploadFile: event.target.files?.[0] ?? null })}
                   className={cn(
                     inputClass,
                     "block h-auto w-full border border-input px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-foreground",
@@ -595,7 +674,7 @@ export function PatientDocumentsPage() {
                 <textarea
                   id="portal-document-upload-note"
                   value={uploadNotes}
-                  onChange={(event) => setUploadNotes(event.target.value)}
+                  onChange={(event) => dispatchDocumentsState({ uploadNotes: event.target.value })}
                   placeholder={t.portal_documents_optional_context_for_the_care_team}
                   className={cn(textareaClass, "min-h-[110px]")}
                 />
@@ -678,8 +757,7 @@ export function PatientDocumentsPage() {
         open={Boolean(translationDocument)}
         onOpenChange={(open) => {
           if (!open && !translationBusy) {
-            setTranslationDocument(null);
-            setTranslationError("");
+            dispatchDocumentsState({ translationDocument: null, translationError: "" });
           }
         }}
       >
@@ -698,7 +776,7 @@ export function PatientDocumentsPage() {
               <NativeComboboxSelect
                 id="portal-translation-language"
                 value={translationLanguage}
-                onChange={(event) => setTranslationLanguage(event.target.value)}
+                onChange={(event) => dispatchDocumentsState({ translationLanguage: event.target.value })}
                 className={selectClass}
               >
                 <option value="de">{t.portal_documents_german}</option>
@@ -711,7 +789,7 @@ export function PatientDocumentsPage() {
               <textarea
                 id="portal-translation-note"
                 value={translationNote}
-                onChange={(event) => setTranslationNote(event.target.value)}
+                onChange={(event) => dispatchDocumentsState({ translationNote: event.target.value })}
                 placeholder={t.portal_documents_optional_context_for_the_care_team}
                 className={cn(textareaClass, "min-h-[110px]")}
               />
@@ -724,7 +802,7 @@ export function PatientDocumentsPage() {
               variant="outline"
               className="h-9 rounded-lg"
               disabled={translationBusy}
-              onClick={() => setTranslationDocument(null)}
+              onClick={() => dispatchDocumentsState({ translationDocument: null })}
             >
               {t.portal_documents_cancel}
             </Button>
@@ -742,4 +820,8 @@ export function PatientDocumentsPage() {
       </Dialog>
     </TabShell>
   );
+}
+
+export function PatientDocumentsPage(...args: Parameters<typeof usePatientDocumentsPageContent>) {
+  return usePatientDocumentsPageContent(...args);
 }

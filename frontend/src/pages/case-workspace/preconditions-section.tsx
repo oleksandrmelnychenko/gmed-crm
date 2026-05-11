@@ -81,7 +81,7 @@ export function PreconditionsSection() {
         "Укажите название заболевания.",
         "Please enter the condition name.",
       )}
-      renderCard={(item) => (
+      cardContent={(item) => (
         <>
           <div className="flex items-center gap-2">
             <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
@@ -109,7 +109,7 @@ export function PreconditionsSection() {
           )}
         </>
       )}
-      renderForm={({ form, updateField, disabled }) => (
+      formContent={({ form, updateField, disabled }) => (
         <>
           <Field
             label={tri(lang, "Erkrankung", "Заболевание", "Condition")}
@@ -117,7 +117,6 @@ export function PreconditionsSection() {
           >
             <Input
               value={form.erkrankung}
-              autoFocus
               onChange={(event) => updateField("erkrankung", event.target.value)}
               className={inputBaseClassName}
               disabled={disabled}

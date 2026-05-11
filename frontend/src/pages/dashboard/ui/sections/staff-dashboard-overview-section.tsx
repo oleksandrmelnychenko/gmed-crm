@@ -1,13 +1,5 @@
+import { lazy, Suspense } from "react";
 import { ArrowRight, ClipboardList, Stethoscope, UserPlus, Users as UsersIcon } from "lucide-react";
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip as ChartTooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 
 import { numberOrDash } from "../../model/staff-dashboard-formatters";
 import type {
@@ -22,6 +14,65 @@ import {
   ChartSkeleton,
   type DashboardTranslations,
 } from "../shared/staff-dashboard-surface-primitives";
+
+const MonthlyLeadAreaChart = lazy(async () => {
+  const {
+    Area,
+    AreaChart,
+    CartesianGrid,
+    ResponsiveContainer,
+    Tooltip: ChartTooltip,
+    XAxis,
+    YAxis,
+  } = await import("recharts");
+
+  return {
+    default: function MonthlyLeadAreaChart({ data }: { data: MonthlyEntry[] }) {
+      return (
+        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
+          <AreaChart data={data} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+            <defs>
+              <linearGradient id="dashLeadsGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#f97316" stopOpacity={0.32} />
+                <stop offset="100%" stopColor="#f97316" stopOpacity={0.02} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="#eee" vertical={false} />
+            <XAxis
+              dataKey="month"
+              fontSize={11}
+              tickLine={false}
+              axisLine={false}
+              stroke="#9ca3af"
+            />
+            <YAxis
+              fontSize={11}
+              tickLine={false}
+              axisLine={false}
+              stroke="#9ca3af"
+              allowDecimals={false}
+            />
+            <ChartTooltip
+              contentStyle={{
+                borderRadius: 8,
+                border: "1px solid var(--color-border)",
+                fontSize: 12,
+              }}
+              labelStyle={{ fontSize: 11, color: "#9ca3af" }}
+            />
+            <Area
+              type="monotone"
+              dataKey="count"
+              stroke="#f97316"
+              strokeWidth={2}
+              fill="url(#dashLeadsGrad)"
+            />
+          </AreaChart>
+        </ResponsiveContainer>
+      );
+    },
+  };
+});
 
 export function StaffDashboardOverviewSection({
   activePatientCount,
@@ -124,46 +175,9 @@ export function StaffDashboardOverviewSection({
           ) : monthly.length === 0 ? (
             <EmptyChart label={tr.dash_no_data ?? tr.common_unknown} />
           ) : (
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
-              <AreaChart data={monthly} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="dashLeadsGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#f97316" stopOpacity={0.32} />
-                    <stop offset="100%" stopColor="#f97316" stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#eee" vertical={false} />
-                <XAxis
-                  dataKey="month"
-                  fontSize={11}
-                  tickLine={false}
-                  axisLine={false}
-                  stroke="#9ca3af"
-                />
-                <YAxis
-                  fontSize={11}
-                  tickLine={false}
-                  axisLine={false}
-                  stroke="#9ca3af"
-                  allowDecimals={false}
-                />
-                <ChartTooltip
-                  contentStyle={{
-                    borderRadius: 8,
-                    border: "1px solid var(--color-border)",
-                    fontSize: 12,
-                  }}
-                  labelStyle={{ fontSize: 11, color: "#9ca3af" }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="count"
-                  stroke="#f97316"
-                  strokeWidth={2}
-                  fill="url(#dashLeadsGrad)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+            <Suspense fallback={<ChartSkeleton />}>
+              <MonthlyLeadAreaChart data={monthly} />
+            </Suspense>
           )}
         </div>
       </div>

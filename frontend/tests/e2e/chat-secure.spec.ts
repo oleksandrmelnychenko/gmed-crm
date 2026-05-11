@@ -44,11 +44,10 @@ function parseMultipart(route: Route) {
 
   for (const part of parts) {
     if (!part.trim() || part.trim() === "--") continue;
-    const separatorIndex = part.indexOf("\r\n\r\n");
-    if (separatorIndex === -1) continue;
+    const [headers, ...bodySegments] = part.split("\r\n\r\n");
+    if (bodySegments.length === 0) continue;
 
-    const headers = part.slice(0, separatorIndex);
-    const rawBody = part.slice(separatorIndex + 4).replace(/\r\n$/, "");
+    const rawBody = bodySegments.join("\r\n\r\n").replace(/\r\n$/, "");
     const fieldName = headers.match(/name="([^"]+)"/i)?.[1];
     if (!fieldName) continue;
 
@@ -405,8 +404,10 @@ test.describe("chat secure flows", () => {
   test("staff can send a secure text message in browser E2E", async ({
     page,
   }) => {
-    const myKey = await generateLocalMessageKey();
-    const peerKey = await generateLocalMessageKey();
+    const [myKey, peerKey] = await Promise.all([
+      generateLocalMessageKey(),
+      generateLocalMessageKey(),
+    ]);
 
     await installSecureChatApiMocks(page, myKey, peerKey);
 
@@ -434,8 +435,10 @@ test.describe("chat secure flows", () => {
   }) => {
     const peerId = "00000000-0000-0000-0000-000000000777";
     const attachmentKey = "secure-attachment-key-1";
-    const myKey = await generateLocalMessageKey();
-    const peerKey = await generateLocalMessageKey();
+    const [myKey, peerKey] = await Promise.all([
+      generateLocalMessageKey(),
+      generateLocalMessageKey(),
+    ]);
 
     await installSecureChatApiMocks(page, myKey, peerKey);
 
@@ -484,8 +487,10 @@ test.describe("chat secure flows", () => {
   }) => {
     const peerId = "00000000-0000-0000-0000-000000000778";
     const attachmentKey = "secure-attachment-key-1";
-    const myKey = await generateLocalMessageKey();
-    const peerKey = await generateLocalMessageKey();
+    const [myKey, peerKey] = await Promise.all([
+      generateLocalMessageKey(),
+      generateLocalMessageKey(),
+    ]);
 
     await installSecureChatApiMocks(page, myKey, peerKey, {
       meId: "00000000-0000-0000-0000-000000000009",
@@ -553,8 +558,10 @@ test.describe("chat secure flows", () => {
   }) => {
     const peerId = "00000000-0000-0000-0000-000000000779";
     const hiddenPeerName = "Unrelated Billing";
-    const myKey = await generateLocalMessageKey();
-    const peerKey = await generateLocalMessageKey();
+    const [myKey, peerKey] = await Promise.all([
+      generateLocalMessageKey(),
+      generateLocalMessageKey(),
+    ]);
 
     await installSecureChatApiMocks(page, myKey, peerKey, {
       meId: "00000000-0000-0000-0000-000000000010",

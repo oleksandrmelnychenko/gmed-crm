@@ -5,9 +5,10 @@ import {
   useDeferredValue,
   useEffect,
   useMemo,
-  useState,
+  useReducer,
   type FormEvent,
   type ReactNode,
+  type SetStateAction,
 } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import {
@@ -266,7 +267,7 @@ function SectionCard({
         </div>
         {action ? <div className="shrink-0">{action}</div> : null}
       </div>
-      <div className="px-4 py-4">{children}</div>
+      <div className="p-4">{children}</div>
     </section>
   );
 }
@@ -315,7 +316,100 @@ function eyebrowWithDot(label: ReactNode) {
   );
 }
 
-export function OrdersPage() {
+type OrdersPageState = {
+  filters: OrdersFilters;
+  orders: OrderSummary[];
+  loading: boolean;
+  listError: string | null;
+  reloadNonce: number;
+  patients: PatientOption[];
+  providers: ProviderOption[];
+  providerDoctors: Record<string, DoctorOption[]>;
+  orderDocuments: SupportingDocumentOption[];
+  selectedOrderId: string | null;
+  orderDetail: OrderDetail | null;
+  orderServiceGroups: OrderServiceGroup[];
+  serviceGroupPreviews: Record<string, OrderServiceGroupLinePreview>;
+  serviceGroupsLoading: boolean;
+  serviceGroupsError: string | null;
+  serviceGroupWizardError: string | null;
+  serviceGroupCreating: boolean;
+  generatingServiceGroupId: string | null;
+  workflowChecklist: WorkflowChecklistResponse | null;
+  workflowAssignments: PatientAssignmentOption[];
+  detailLoading: boolean;
+  detailError: string | null;
+  phaseDraft: string;
+  phaseSaving: boolean;
+  phaseError: string | null;
+  approvingLeistungId: string | null;
+  workflowBusy: boolean;
+  workflowForm: WorkflowChecklistFormState;
+  processGateBusy: boolean;
+  processGateError: string | null;
+  processGateForm: OrderProcessGateFormState;
+  debtQueue: OrderDebtQueueItem[];
+  debtQueueLoading: boolean;
+  debtQueueError: string | null;
+  planningBusy: boolean;
+  planningError: string | null;
+  planningForm: OrderPlanningFormState;
+  executionBusy: boolean;
+  executionError: string | null;
+  executionForm: OrderExecutionFormState;
+  followupBusy: boolean;
+  followupError: string | null;
+  followupForm: OrderFollowupFormState;
+  createOpen: boolean;
+  createForm: CreateOrderFormState;
+  createSaving: boolean;
+  createError: string | null;
+  createRecheck: PatientOrderRecheck | null;
+  createRecheckLoading: boolean;
+  createRecheckError: string | null;
+  leistungOpen: boolean;
+  leistungForm: LeistungFormState;
+  leistungSaving: boolean;
+  leistungError: string | null;
+  externalInvoiceForm: ExternalInvoiceFormState;
+  externalInvoiceSaving: boolean;
+  externalInvoiceError: string | null;
+  externalInvoiceUpdatingId: string | null;
+};
+
+type OrdersPagePatch =
+  | Partial<OrdersPageState>
+  | ((current: OrdersPageState) => Partial<OrdersPageState>);
+
+function ordersPageReducer(
+  current: OrdersPageState,
+  patch: OrdersPagePatch,
+): OrdersPageState {
+  return {
+    ...current,
+    ...(typeof patch === "function" ? patch(current) : patch),
+  };
+}
+
+function resolveOrdersPageStateAction<T>(
+  action: SetStateAction<T>,
+  current: T,
+): T {
+  return typeof action === "function"
+    ? (action as (value: T) => T)(current)
+    : action;
+}
+
+function createOrdersPageFieldPatch<K extends keyof OrdersPageState>(
+  field: K,
+  nextValue: SetStateAction<OrdersPageState[K]>,
+): OrdersPagePatch {
+  return (current) => ({
+    [field]: resolveOrdersPageStateAction(nextValue, current[field]),
+  } as Partial<OrdersPageState>);
+}
+
+function useOrdersPageContent() {
   const { t, lang } = useLang();
   const tx = t as unknown as Record<string, string>;
   const { user } = useAuth();
@@ -682,110 +776,272 @@ export function OrdersPage() {
     return reason;
   };
 
-  const [filters, setFilters] = useState<OrdersFilters>(DEFAULT_FILTERS);
+  const [ordersPageState, dispatchOrdersPageState] = useReducer(
+    ordersPageReducer,
+    undefined,
+    (): OrdersPageState => ({
+      filters: DEFAULT_FILTERS,
+      orders: [],
+      loading: true,
+      listError: null,
+      reloadNonce: 0,
+      patients: [],
+      providers: [],
+      providerDoctors: {},
+      orderDocuments: [],
+      selectedOrderId: routeOrderId || null,
+      orderDetail: null,
+      orderServiceGroups: [],
+      serviceGroupPreviews: {},
+      serviceGroupsLoading: false,
+      serviceGroupsError: null,
+      serviceGroupWizardError: null,
+      serviceGroupCreating: false,
+      generatingServiceGroupId: null,
+      workflowChecklist: null,
+      workflowAssignments: [],
+      detailLoading: false,
+      detailError: null,
+      phaseDraft: "",
+      phaseSaving: false,
+      phaseError: null,
+      approvingLeistungId: null,
+      workflowBusy: false,
+      workflowForm: blankWorkflowChecklistForm(),
+      processGateBusy: false,
+      processGateError: null,
+      processGateForm: blankOrderProcessGateForm(),
+      debtQueue: [],
+      debtQueueLoading: false,
+      debtQueueError: null,
+      planningBusy: false,
+      planningError: null,
+      planningForm: blankOrderPlanningForm(),
+      executionBusy: false,
+      executionError: null,
+      executionForm: blankOrderExecutionForm(),
+      followupBusy: false,
+      followupError: null,
+      followupForm: blankOrderFollowupForm(),
+      createOpen: false,
+      createForm: blankCreateOrderForm(),
+      createSaving: false,
+      createError: null,
+      createRecheck: null,
+      createRecheckLoading: false,
+      createRecheckError: null,
+      leistungOpen: false,
+      leistungForm: blankLeistungForm(),
+      leistungSaving: false,
+      leistungError: null,
+      externalInvoiceForm: blankExternalInvoiceForm(),
+      externalInvoiceSaving: false,
+      externalInvoiceError: null,
+      externalInvoiceUpdatingId: null,
+    }),
+  );
+  const {
+    approvingLeistungId,
+    createError,
+    createForm,
+    createOpen,
+    createRecheck,
+    createRecheckError,
+    createRecheckLoading,
+    createSaving,
+    debtQueue,
+    debtQueueError,
+    debtQueueLoading,
+    detailError,
+    detailLoading,
+    executionBusy,
+    executionError,
+    executionForm,
+    externalInvoiceError,
+    externalInvoiceForm,
+    externalInvoiceSaving,
+    externalInvoiceUpdatingId,
+    filters,
+    followupBusy,
+    followupError,
+    followupForm,
+    generatingServiceGroupId,
+    leistungError,
+    leistungForm,
+    leistungOpen,
+    leistungSaving,
+    listError,
+    loading,
+    orderDetail,
+    orderDocuments,
+    orderServiceGroups,
+    orders,
+    patients,
+    phaseDraft,
+    phaseError,
+    phaseSaving,
+    planningBusy,
+    planningError,
+    planningForm,
+    processGateBusy,
+    processGateError,
+    processGateForm,
+    providerDoctors,
+    providers,
+    reloadNonce,
+    selectedOrderId,
+    serviceGroupCreating,
+    serviceGroupPreviews,
+    serviceGroupsError,
+    serviceGroupsLoading,
+    serviceGroupWizardError,
+    workflowAssignments,
+    workflowBusy,
+    workflowChecklist,
+    workflowForm,
+  } = ordersPageState;
+  const setOrdersPageField = <K extends keyof OrdersPageState>(
+    field: K,
+    nextValue: SetStateAction<OrdersPageState[K]>,
+  ) => dispatchOrdersPageState(createOrdersPageFieldPatch(field, nextValue));
+  const setFilters = (nextValue: SetStateAction<OrdersFilters>) =>
+    setOrdersPageField("filters", nextValue);
   const deferredSearch = useDeferredValue(filters.search);
-
-  const [orders, setOrders] = useState<OrderSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [listError, setListError] = useState<string | null>(null);
-  const [reloadNonce, setReloadNonce] = useState(0);
-
-  const [patients, setPatients] = useState<PatientOption[]>([]);
-  const [providers, setProviders] = useState<ProviderOption[]>([]);
-  const [providerDoctors, setProviderDoctors] = useState<
-    Record<string, DoctorOption[]>
-  >({});
-  const [orderDocuments, setOrderDocuments] = useState<
-    SupportingDocumentOption[]
-  >([]);
-
-  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(
-    routeOrderId || null,
-  );
-  const [orderDetail, setOrderDetail] = useState<OrderDetail | null>(null);
-  const [orderServiceGroups, setOrderServiceGroups] = useState<
-    OrderServiceGroup[]
-  >([]);
-  const [serviceGroupPreviews, setServiceGroupPreviews] = useState<
-    Record<string, OrderServiceGroupLinePreview>
-  >({});
-  const [serviceGroupsLoading, setServiceGroupsLoading] = useState(false);
-  const [serviceGroupsError, setServiceGroupsError] = useState<string | null>(
-    null,
-  );
-  const [serviceGroupWizardError, setServiceGroupWizardError] = useState<
-    string | null
-  >(null);
-  const [serviceGroupCreating, setServiceGroupCreating] = useState(false);
-  const [generatingServiceGroupId, setGeneratingServiceGroupId] = useState<
-    string | null
-  >(null);
-  const [workflowChecklist, setWorkflowChecklist] =
-    useState<WorkflowChecklistResponse | null>(null);
-  const [workflowAssignments, setWorkflowAssignments] = useState<
-    PatientAssignmentOption[]
-  >([]);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState<string | null>(null);
-  const [phaseDraft, setPhaseDraft] = useState("");
-  const [phaseSaving, setPhaseSaving] = useState(false);
-  const [phaseError, setPhaseError] = useState<string | null>(null);
-  const [approvingLeistungId, setApprovingLeistungId] = useState<string | null>(
-    null,
-  );
-  const [workflowBusy, setWorkflowBusy] = useState(false);
-  const [workflowForm, setWorkflowForm] = useState<WorkflowChecklistFormState>(
-    blankWorkflowChecklistForm,
-  );
-  const [processGateBusy, setProcessGateBusy] = useState(false);
-  const [processGateError, setProcessGateError] = useState<string | null>(null);
-  const [processGateForm, setProcessGateForm] =
-    useState<OrderProcessGateFormState>(blankOrderProcessGateForm);
-  const [debtQueue, setDebtQueue] = useState<OrderDebtQueueItem[]>([]);
-  const [debtQueueLoading, setDebtQueueLoading] = useState(false);
-  const [debtQueueError, setDebtQueueError] = useState<string | null>(null);
-  const [planningBusy, setPlanningBusy] = useState(false);
-  const [planningError, setPlanningError] = useState<string | null>(null);
-  const [planningForm, setPlanningForm] = useState<OrderPlanningFormState>(
-    blankOrderPlanningForm,
-  );
-  const [executionBusy, setExecutionBusy] = useState(false);
-  const [executionError, setExecutionError] = useState<string | null>(null);
-  const [executionForm, setExecutionForm] = useState<OrderExecutionFormState>(
-    blankOrderExecutionForm,
-  );
-  const [followupBusy, setFollowupBusy] = useState(false);
-  const [followupError, setFollowupError] = useState<string | null>(null);
-  const [followupForm, setFollowupForm] = useState<OrderFollowupFormState>(
-    blankOrderFollowupForm,
-  );
-
-  const [createOpen, setCreateOpen] = useState(false);
-  const [createForm, setCreateForm] =
-    useState<CreateOrderFormState>(blankCreateOrderForm);
-  const [createSaving, setCreateSaving] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [createRecheck, setCreateRecheck] =
-    useState<PatientOrderRecheck | null>(null);
-  const [createRecheckLoading, setCreateRecheckLoading] = useState(false);
-  const [createRecheckError, setCreateRecheckError] = useState<string | null>(
-    null,
-  );
-
-  const [leistungOpen, setLeistungOpen] = useState(false);
-  const [leistungForm, setLeistungForm] =
-    useState<LeistungFormState>(blankLeistungForm);
-  const [leistungSaving, setLeistungSaving] = useState(false);
-  const [leistungError, setLeistungError] = useState<string | null>(null);
-  const [externalInvoiceForm, setExternalInvoiceForm] =
-    useState<ExternalInvoiceFormState>(blankExternalInvoiceForm);
-  const [externalInvoiceSaving, setExternalInvoiceSaving] = useState(false);
-  const [externalInvoiceError, setExternalInvoiceError] = useState<
-    string | null
-  >(null);
-  const [externalInvoiceUpdatingId, setExternalInvoiceUpdatingId] = useState<
-    string | null
-  >(null);
+  const setOrders = (nextValue: SetStateAction<OrderSummary[]>) =>
+    setOrdersPageField("orders", nextValue);
+  const setLoading = (nextValue: SetStateAction<boolean>) =>
+    setOrdersPageField("loading", nextValue);
+  const setListError = (nextValue: SetStateAction<string | null>) =>
+    setOrdersPageField("listError", nextValue);
+  const setReloadNonce = (nextValue: SetStateAction<number>) =>
+    setOrdersPageField("reloadNonce", nextValue);
+  const setPatients = (nextValue: SetStateAction<PatientOption[]>) =>
+    setOrdersPageField("patients", nextValue);
+  const setProviders = (nextValue: SetStateAction<ProviderOption[]>) =>
+    setOrdersPageField("providers", nextValue);
+  const setProviderDoctors = (
+    nextValue: SetStateAction<Record<string, DoctorOption[]>>,
+  ) => setOrdersPageField("providerDoctors", nextValue);
+  const setOrderDocuments = (
+    nextValue: SetStateAction<SupportingDocumentOption[]>,
+  ) => setOrdersPageField("orderDocuments", nextValue);
+  const setSelectedOrderId = (nextValue: SetStateAction<string | null>) =>
+    setOrdersPageField("selectedOrderId", nextValue);
+  const setOrderDetail = (nextValue: SetStateAction<OrderDetail | null>) =>
+    setOrdersPageField("orderDetail", nextValue);
+  const setOrderServiceGroups = (
+    nextValue: SetStateAction<OrderServiceGroup[]>,
+  ) => setOrdersPageField("orderServiceGroups", nextValue);
+  const setServiceGroupPreviews = (
+    nextValue: SetStateAction<Record<string, OrderServiceGroupLinePreview>>,
+  ) => setOrdersPageField("serviceGroupPreviews", nextValue);
+  const setServiceGroupsLoading = (nextValue: SetStateAction<boolean>) =>
+    setOrdersPageField("serviceGroupsLoading", nextValue);
+  const setServiceGroupsError = (
+    nextValue: SetStateAction<string | null>,
+  ) => setOrdersPageField("serviceGroupsError", nextValue);
+  const setServiceGroupWizardError = (
+    nextValue: SetStateAction<string | null>,
+  ) => setOrdersPageField("serviceGroupWizardError", nextValue);
+  const setServiceGroupCreating = (nextValue: SetStateAction<boolean>) =>
+    setOrdersPageField("serviceGroupCreating", nextValue);
+  const setGeneratingServiceGroupId = (
+    nextValue: SetStateAction<string | null>,
+  ) => setOrdersPageField("generatingServiceGroupId", nextValue);
+  const setWorkflowChecklist = (
+    nextValue: SetStateAction<WorkflowChecklistResponse | null>,
+  ) => setOrdersPageField("workflowChecklist", nextValue);
+  const setWorkflowAssignments = (
+    nextValue: SetStateAction<PatientAssignmentOption[]>,
+  ) => setOrdersPageField("workflowAssignments", nextValue);
+  const setDetailLoading = (nextValue: SetStateAction<boolean>) =>
+    setOrdersPageField("detailLoading", nextValue);
+  const setDetailError = (nextValue: SetStateAction<string | null>) =>
+    setOrdersPageField("detailError", nextValue);
+  const setPhaseDraft = (nextValue: SetStateAction<string>) =>
+    setOrdersPageField("phaseDraft", nextValue);
+  const setPhaseSaving = (nextValue: SetStateAction<boolean>) =>
+    setOrdersPageField("phaseSaving", nextValue);
+  const setPhaseError = (nextValue: SetStateAction<string | null>) =>
+    setOrdersPageField("phaseError", nextValue);
+  const setApprovingLeistungId = (
+    nextValue: SetStateAction<string | null>,
+  ) => setOrdersPageField("approvingLeistungId", nextValue);
+  const setWorkflowBusy = (nextValue: SetStateAction<boolean>) =>
+    setOrdersPageField("workflowBusy", nextValue);
+  const setWorkflowForm = (
+    nextValue: SetStateAction<WorkflowChecklistFormState>,
+  ) => setOrdersPageField("workflowForm", nextValue);
+  const setProcessGateBusy = (nextValue: SetStateAction<boolean>) =>
+    setOrdersPageField("processGateBusy", nextValue);
+  const setProcessGateError = (
+    nextValue: SetStateAction<string | null>,
+  ) => setOrdersPageField("processGateError", nextValue);
+  const setProcessGateForm = (
+    nextValue: SetStateAction<OrderProcessGateFormState>,
+  ) => setOrdersPageField("processGateForm", nextValue);
+  const setDebtQueue = (nextValue: SetStateAction<OrderDebtQueueItem[]>) =>
+    setOrdersPageField("debtQueue", nextValue);
+  const setDebtQueueLoading = (nextValue: SetStateAction<boolean>) =>
+    setOrdersPageField("debtQueueLoading", nextValue);
+  const setDebtQueueError = (nextValue: SetStateAction<string | null>) =>
+    setOrdersPageField("debtQueueError", nextValue);
+  const setPlanningBusy = (nextValue: SetStateAction<boolean>) =>
+    setOrdersPageField("planningBusy", nextValue);
+  const setPlanningError = (nextValue: SetStateAction<string | null>) =>
+    setOrdersPageField("planningError", nextValue);
+  const setPlanningForm = (
+    nextValue: SetStateAction<OrderPlanningFormState>,
+  ) => setOrdersPageField("planningForm", nextValue);
+  const setExecutionBusy = (nextValue: SetStateAction<boolean>) =>
+    setOrdersPageField("executionBusy", nextValue);
+  const setExecutionError = (nextValue: SetStateAction<string | null>) =>
+    setOrdersPageField("executionError", nextValue);
+  const setExecutionForm = (
+    nextValue: SetStateAction<OrderExecutionFormState>,
+  ) => setOrdersPageField("executionForm", nextValue);
+  const setFollowupBusy = (nextValue: SetStateAction<boolean>) =>
+    setOrdersPageField("followupBusy", nextValue);
+  const setFollowupError = (nextValue: SetStateAction<string | null>) =>
+    setOrdersPageField("followupError", nextValue);
+  const setFollowupForm = (
+    nextValue: SetStateAction<OrderFollowupFormState>,
+  ) => setOrdersPageField("followupForm", nextValue);
+  const setCreateOpen = (nextValue: SetStateAction<boolean>) =>
+    setOrdersPageField("createOpen", nextValue);
+  const setCreateForm = (nextValue: SetStateAction<CreateOrderFormState>) =>
+    setOrdersPageField("createForm", nextValue);
+  const setCreateSaving = (nextValue: SetStateAction<boolean>) =>
+    setOrdersPageField("createSaving", nextValue);
+  const setCreateError = (nextValue: SetStateAction<string | null>) =>
+    setOrdersPageField("createError", nextValue);
+  const setCreateRecheck = (
+    nextValue: SetStateAction<PatientOrderRecheck | null>,
+  ) => setOrdersPageField("createRecheck", nextValue);
+  const setCreateRecheckLoading = (nextValue: SetStateAction<boolean>) =>
+    setOrdersPageField("createRecheckLoading", nextValue);
+  const setCreateRecheckError = (
+    nextValue: SetStateAction<string | null>,
+  ) => setOrdersPageField("createRecheckError", nextValue);
+  const setLeistungOpen = (nextValue: SetStateAction<boolean>) =>
+    setOrdersPageField("leistungOpen", nextValue);
+  const setLeistungForm = (nextValue: SetStateAction<LeistungFormState>) =>
+    setOrdersPageField("leistungForm", nextValue);
+  const setLeistungSaving = (nextValue: SetStateAction<boolean>) =>
+    setOrdersPageField("leistungSaving", nextValue);
+  const setLeistungError = (nextValue: SetStateAction<string | null>) =>
+    setOrdersPageField("leistungError", nextValue);
+  const setExternalInvoiceForm = (
+    nextValue: SetStateAction<ExternalInvoiceFormState>,
+  ) => setOrdersPageField("externalInvoiceForm", nextValue);
+  const setExternalInvoiceSaving = (nextValue: SetStateAction<boolean>) =>
+    setOrdersPageField("externalInvoiceSaving", nextValue);
+  const setExternalInvoiceError = (
+    nextValue: SetStateAction<string | null>,
+  ) => setOrdersPageField("externalInvoiceError", nextValue);
+  const setExternalInvoiceUpdatingId = (
+    nextValue: SetStateAction<string | null>,
+  ) => setOrdersPageField("externalInvoiceUpdatingId", nextValue);
 
   const filterDoctorOptions = useMemo(
     () =>
@@ -1171,6 +1427,229 @@ export function OrdersPage() {
     }
   }
 
+  const hydrateFiltersFromRoute = useCallback(
+    (patientParam: string, providerParam: string, doctorParam: string) => {
+      setFilters((current) => {
+        if (
+          current.patientId === patientParam &&
+          current.providerId === providerParam &&
+          current.doctorId === doctorParam
+        ) {
+          return current;
+        }
+        return {
+          ...current,
+          patientId: patientParam,
+          providerId: providerParam,
+          doctorId: doctorParam,
+        };
+      });
+    },
+    [],
+  );
+
+  const openRouteOrderWorkspace = useCallback((orderId: string) => {
+    setSelectedOrderId(orderId);
+    setDetailLoading(true);
+  }, []);
+
+  const openCreateDialogFromRoute = useCallback(
+    (patientParam: string, currentSearchParams: URLSearchParams) => {
+      setCreateError(null);
+      setCreateForm({
+        ...blankCreateOrderForm(),
+        patientId: patientParam,
+      });
+      setCreateOpen(true);
+      const params = new URLSearchParams(currentSearchParams);
+      params.delete("create");
+      setSearchParams(params, { replace: true });
+    },
+    [setSearchParams],
+  );
+
+  const applyOrderDirectory = useCallback((directory: Awaited<ReturnType<typeof fetchOrderDirectory>>) => {
+    setPatients(directory.patients);
+    setProviders(directory.providers);
+  }, []);
+
+  const clearOrderDirectory = useCallback(() => {
+    setPatients([]);
+    setProviders([]);
+  }, []);
+
+  const resetCreateRecheckState = useCallback(() => {
+    setCreateRecheck(null);
+    setCreateRecheckError(null);
+    setCreateRecheckLoading(false);
+  }, []);
+
+  const startCreateRecheckLoad = useCallback(() => {
+    setCreateRecheckLoading(true);
+    setCreateRecheckError(null);
+  }, []);
+
+  const applyCreateRecheck = useCallback((response: Awaited<ReturnType<typeof fetchPatientOrderRecheck>>) => {
+    setCreateRecheck(response);
+  }, []);
+
+  const failCreateRecheck = useCallback((error: unknown) => {
+    setCreateRecheck(null);
+    setCreateRecheckError(
+      error instanceof Error
+        ? error.message
+        : "Failed to load patient re-check",
+    );
+  }, []);
+
+  const finishCreateRecheckLoad = useCallback(() => {
+    setCreateRecheckLoading(false);
+  }, []);
+
+  const startOrdersLoad = useCallback(() => {
+    setLoading(true);
+    setListError(null);
+  }, []);
+
+  const applyOrders = useCallback((response: Awaited<ReturnType<typeof fetchOrders>>) => {
+    setOrders(response);
+  }, []);
+
+  const failOrdersLoad = useCallback((error: unknown) => {
+    setListError(
+      error instanceof Error ? error.message : "Failed to load orders",
+    );
+    setOrders([]);
+  }, []);
+
+  const finishOrdersLoad = useCallback(() => {
+    setLoading(false);
+  }, []);
+
+  const resetDebtQueue = useCallback(() => {
+    setDebtQueue([]);
+    setDebtQueueError(null);
+    setDebtQueueLoading(false);
+  }, []);
+
+  const startDebtQueueLoad = useCallback(() => {
+    setDebtQueueLoading(true);
+    setDebtQueueError(null);
+  }, []);
+
+  const applyDebtQueue = useCallback((response: Awaited<ReturnType<typeof fetchOrderDebtQueue>>) => {
+    setDebtQueue(response);
+  }, []);
+
+  const failDebtQueueLoad = useCallback((error: unknown) => {
+    setDebtQueue([]);
+    setDebtQueueError(
+      error instanceof Error
+        ? error.message
+        : "Failed to load debt-management queue",
+    );
+  }, []);
+
+  const finishDebtQueueLoad = useCallback(() => {
+    setDebtQueueLoading(false);
+  }, []);
+
+  const resetSelectedOrderWorkspaceData = useCallback(() => {
+    setOrderDetail(null);
+    setOrderDocuments([]);
+    setOrderServiceGroups([]);
+    setServiceGroupsError(null);
+    setServiceGroupsLoading(false);
+    setGeneratingServiceGroupId(null);
+    setWorkflowChecklist(null);
+    setWorkflowAssignments([]);
+    setPhaseDraft("");
+    setProcessGateForm(blankOrderProcessGateForm());
+    setProcessGateError(null);
+    setPlanningForm(blankOrderPlanningForm());
+    setPlanningError(null);
+    setExecutionForm(blankOrderExecutionForm());
+    setExecutionError(null);
+    setFollowupForm(blankOrderFollowupForm());
+    setFollowupError(null);
+  }, []);
+
+  const startOrderDetailLoad = useCallback(() => {
+    setDetailLoading(true);
+    setDetailError(null);
+  }, []);
+
+  const applyOrderWorkspace = useCallback((workspace: Awaited<ReturnType<typeof fetchOrderWorkspace>>) => {
+    setOrderDetail(workspace.detail);
+    setOrderDocuments(workspace.documents);
+    setWorkflowChecklist(workspace.workflow);
+    setWorkflowAssignments(workspace.assignments);
+    setPhaseDraft(workspace.detail.phase);
+    setProcessGateForm(orderProcessGatesToForm(workspace.detail.process_gates));
+    setProcessGateError(null);
+    setPlanningForm(orderPlanningToForm(workspace.detail.planning_preparation));
+    setPlanningError(null);
+    setExecutionForm(orderExecutionToForm(workspace.detail.execution_flow));
+    setExecutionError(null);
+    setFollowupForm(orderFollowupToForm(workspace.detail.followup_flow));
+    setFollowupError(null);
+  }, []);
+
+  const failOrderWorkspaceLoad = useCallback((error: unknown) => {
+    setOrderDetail(null);
+    setOrderDocuments([]);
+    setWorkflowChecklist(null);
+    setWorkflowAssignments([]);
+    setProcessGateForm(blankOrderProcessGateForm());
+    setPlanningError(null);
+    setPlanningForm(blankOrderPlanningForm());
+    setExecutionForm(blankOrderExecutionForm());
+    setExecutionError(null);
+    setFollowupForm(blankOrderFollowupForm());
+    setFollowupError(null);
+    setDetailError(
+      error instanceof Error ? error.message : "Failed to load order",
+    );
+  }, []);
+
+  const finishOrderDetailLoad = useCallback(() => {
+    setDetailLoading(false);
+  }, []);
+
+  const resetOrderServiceGroupsData = useCallback(() => {
+    setOrderServiceGroups([]);
+    setServiceGroupPreviews({});
+    setServiceGroupsError(null);
+    setServiceGroupsLoading(false);
+  }, []);
+
+  const startOrderServiceGroupsLoad = useCallback(() => {
+    setServiceGroupsLoading(true);
+    setServiceGroupsError(null);
+  }, []);
+
+  const applyOrderServiceGroups = useCallback((groups: Parameters<typeof setOrderServiceGroups>[0]) => {
+    setOrderServiceGroups(groups);
+  }, []);
+
+  const applyOrderServiceGroupPreviews = useCallback((previews: Record<string, OrderServiceGroupLinePreview>) => {
+    setServiceGroupPreviews(previews);
+  }, []);
+
+  const failOrderServiceGroupsLoad = useCallback((error: unknown) => {
+    setOrderServiceGroups([]);
+    setServiceGroupPreviews({});
+    setServiceGroupsError(
+      error instanceof Error
+        ? error.message
+        : t.orders_service_groups_failed_load,
+    );
+  }, [t.orders_service_groups_failed_load]);
+
+  const finishOrderServiceGroupsLoad = useCallback(() => {
+    setServiceGroupsLoading(false);
+  }, []);
+
   useEffect(() => {
     const patientParam = searchParams.get("patient") ?? "";
     const providerParam = searchParams.get("provider") ?? "";
@@ -1188,47 +1667,26 @@ export function OrdersPage() {
 
     const orderParam = routeOrderId;
 
-    setFilters((current) => {
-      if (
-        current.patientId === patientParam &&
-        current.providerId === providerParam &&
-        current.doctorId === doctorParam
-      ) {
-        return current;
-      }
-      return {
-        ...current,
-        patientId: patientParam,
-        providerId: providerParam,
-        doctorId: doctorParam,
-      };
-    });
+    hydrateFiltersFromRoute(patientParam, providerParam, doctorParam);
 
     if (orderParam && orderParam !== selectedOrderId) {
-      setSelectedOrderId(orderParam);
-      setDetailLoading(true);
+      openRouteOrderWorkspace(orderParam);
     } else if (!orderParam && selectedOrderId) {
       resetOrderWorkspace();
     }
 
     if (createParam && permissions.canCreate) {
-      setCreateError(null);
-      setCreateForm({
-        ...blankCreateOrderForm(),
-        patientId: patientParam,
-      });
-      setCreateOpen(true);
-      const params = new URLSearchParams(searchParams);
-      params.delete("create");
-      setSearchParams(params, { replace: true });
+      openCreateDialogFromRoute(patientParam, searchParams);
     }
   }, [
+    hydrateFiltersFromRoute,
+    openCreateDialogFromRoute,
+    openRouteOrderWorkspace,
     permissions.canCreate,
     resetOrderWorkspace,
     routeOrderId,
     searchParams,
     selectedOrderId,
-    setSearchParams,
     staffGo,
   ]);
 
@@ -1240,12 +1698,10 @@ export function OrdersPage() {
       try {
         const directory = await fetchOrderDirectory();
         if (cancelled) return;
-        setPatients(directory.patients);
-        setProviders(directory.providers);
+        applyOrderDirectory(directory);
       } catch {
         if (cancelled) return;
-        setPatients([]);
-        setProviders([]);
+        clearOrderDirectory();
       }
     }
 
@@ -1253,36 +1709,28 @@ export function OrdersPage() {
     return () => {
       cancelled = true;
     };
-  }, [permissions.canViewPage]);
+  }, [applyOrderDirectory, clearOrderDirectory, permissions.canViewPage]);
 
   useEffect(() => {
     if (!createOpen || !createForm.patientId) {
-      setCreateRecheck(null);
-      setCreateRecheckError(null);
-      setCreateRecheckLoading(false);
+      resetCreateRecheckState();
       return;
     }
 
     let cancelled = false;
-    setCreateRecheckLoading(true);
-    setCreateRecheckError(null);
+    startCreateRecheckLoad();
 
     async function loadCreateRecheck() {
       try {
         const response = await fetchPatientOrderRecheck(createForm.patientId);
         if (cancelled) return;
-        setCreateRecheck(response);
+        applyCreateRecheck(response);
       } catch (error) {
         if (cancelled) return;
-        setCreateRecheck(null);
-        setCreateRecheckError(
-          error instanceof Error
-            ? error.message
-            : "Failed to load patient re-check",
-        );
+        failCreateRecheck(error);
       } finally {
         if (!cancelled) {
-          setCreateRecheckLoading(false);
+          finishCreateRecheckLoad();
         }
       }
     }
@@ -1291,14 +1739,21 @@ export function OrdersPage() {
     return () => {
       cancelled = true;
     };
-  }, [createForm.patientId, createOpen]);
+  }, [
+    applyCreateRecheck,
+    createForm.patientId,
+    createOpen,
+    failCreateRecheck,
+    finishCreateRecheckLoad,
+    resetCreateRecheckState,
+    startCreateRecheckLoad,
+  ]);
 
   useEffect(() => {
     if (!permissions.canViewPage) return;
 
     let cancelled = false;
-    setLoading(true);
-    setListError(null);
+    startOrdersLoad();
 
     async function loadOrders() {
       try {
@@ -1315,16 +1770,13 @@ export function OrdersPage() {
           `/orders${queryString ? `?${queryString}` : ""}`,
         );
         if (cancelled) return;
-        setOrders(response);
+        applyOrders(response);
       } catch (error) {
         if (cancelled) return;
-        setListError(
-          error instanceof Error ? error.message : "Failed to load orders",
-        );
-        setOrders([]);
+        failOrdersLoad(error);
       } finally {
         if (!cancelled) {
-          setLoading(false);
+          finishOrdersLoad();
         }
       }
     }
@@ -1335,43 +1787,39 @@ export function OrdersPage() {
     };
   }, [
     deferredSearch,
+    applyOrders,
+    failOrdersLoad,
     filters.doctorId,
     filters.patientId,
     filters.phase,
     filters.providerId,
     filters.status,
+    finishOrdersLoad,
     permissions.canViewPage,
     reloadNonce,
+    startOrdersLoad,
   ]);
 
   useEffect(() => {
     if (!permissions.canViewPage || !canManageDebt) {
-      setDebtQueue([]);
-      setDebtQueueError(null);
-      setDebtQueueLoading(false);
+      resetDebtQueue();
       return;
     }
 
     let cancelled = false;
-    setDebtQueueLoading(true);
-    setDebtQueueError(null);
+    startDebtQueueLoad();
 
     async function loadDebtQueue() {
       try {
         const response = await fetchOrderDebtQueue();
         if (cancelled) return;
-        setDebtQueue(response);
+        applyDebtQueue(response);
       } catch (error) {
         if (cancelled) return;
-        setDebtQueue([]);
-        setDebtQueueError(
-          error instanceof Error
-            ? error.message
-            : "Failed to load debt-management queue",
-        );
+        failDebtQueueLoad(error);
       } finally {
         if (!cancelled) {
-          setDebtQueueLoading(false);
+          finishDebtQueueLoad();
         }
       }
     }
@@ -1380,7 +1828,16 @@ export function OrdersPage() {
     return () => {
       cancelled = true;
     };
-  }, [canManageDebt, permissions.canViewPage, reloadNonce]);
+  }, [
+    applyDebtQueue,
+    canManageDebt,
+    failDebtQueueLoad,
+    finishDebtQueueLoad,
+    permissions.canViewPage,
+    reloadNonce,
+    resetDebtQueue,
+    startDebtQueueLoad,
+  ]);
 
   useEffect(() => {
     if (!filters.providerId) return;
@@ -1404,68 +1861,25 @@ export function OrdersPage() {
 
   useEffect(() => {
     if (!selectedOrderId) {
-      setOrderDetail(null);
-      setOrderDocuments([]);
-      setOrderServiceGroups([]);
-      setServiceGroupsError(null);
-      setServiceGroupsLoading(false);
-      setGeneratingServiceGroupId(null);
-      setWorkflowChecklist(null);
-      setWorkflowAssignments([]);
-      setPhaseDraft("");
-      setProcessGateForm(blankOrderProcessGateForm());
-      setProcessGateError(null);
-      setPlanningForm(blankOrderPlanningForm());
-      setPlanningError(null);
-      setExecutionForm(blankOrderExecutionForm());
-      setExecutionError(null);
-      setFollowupForm(blankOrderFollowupForm());
-      setFollowupError(null);
+      resetSelectedOrderWorkspaceData();
       return;
     }
 
     const currentOrderId = selectedOrderId;
     let cancelled = false;
-    setDetailLoading(true);
-    setDetailError(null);
+    startOrderDetailLoad();
 
     async function loadDetail() {
       try {
-        const { detail, documents, workflow, assignments } =
-          await fetchOrderWorkspace(currentOrderId);
+        const workspace = await fetchOrderWorkspace(currentOrderId);
         if (cancelled) return;
-        setOrderDetail(detail);
-        setOrderDocuments(documents);
-        setWorkflowChecklist(workflow);
-        setWorkflowAssignments(assignments);
-        setPhaseDraft(detail.phase);
-        setProcessGateForm(orderProcessGatesToForm(detail.process_gates));
-        setProcessGateError(null);
-        setPlanningForm(orderPlanningToForm(detail.planning_preparation));
-        setPlanningError(null);
-        setExecutionForm(orderExecutionToForm(detail.execution_flow));
-        setExecutionError(null);
-        setFollowupForm(orderFollowupToForm(detail.followup_flow));
-        setFollowupError(null);
+        applyOrderWorkspace(workspace);
       } catch (error) {
         if (cancelled) return;
-        setOrderDetail(null);
-        setOrderDocuments([]);
-        setWorkflowChecklist(null);
-        setWorkflowAssignments([]);
-        setProcessGateForm(blankOrderProcessGateForm());
-        setPlanningError(null);
-        setPlanningForm(blankOrderPlanningForm());
-        setExecutionForm(blankOrderExecutionForm());
-        setExecutionError(null);
-        setFollowupForm(blankOrderFollowupForm());
-        setFollowupError(null);
-        setDetailError(
-          error instanceof Error ? error.message : "Failed to load order",
-        );
+        failOrderWorkspaceLoad(error);
       } finally {
         if (!cancelled) {
-          setDetailLoading(false);
+          finishOrderDetailLoad();
         }
       }
     }
@@ -1474,21 +1888,25 @@ export function OrdersPage() {
     return () => {
       cancelled = true;
     };
-  }, [reloadNonce, selectedOrderId, t.orders_service_groups_failed_load]);
+  }, [
+    applyOrderWorkspace,
+    failOrderWorkspaceLoad,
+    finishOrderDetailLoad,
+    reloadNonce,
+    resetSelectedOrderWorkspaceData,
+    selectedOrderId,
+    startOrderDetailLoad,
+  ]);
 
   useEffect(() => {
     if (!selectedOrderId) {
-      setOrderServiceGroups([]);
-      setServiceGroupPreviews({});
-      setServiceGroupsError(null);
-      setServiceGroupsLoading(false);
+      resetOrderServiceGroupsData();
       return;
     }
 
     const currentOrderId = selectedOrderId;
     let cancelled = false;
-    setServiceGroupsLoading(true);
-    setServiceGroupsError(null);
+    startOrderServiceGroupsLoad();
 
     async function loadServiceGroups() {
       try {
@@ -1512,7 +1930,7 @@ export function OrdersPage() {
           }),
         );
         if (cancelled) return;
-        setOrderServiceGroups(detailedGroups);
+        applyOrderServiceGroups(detailedGroups);
         const previews = await Promise.all(
           detailedGroups.map(async (group) => {
             try {
@@ -1526,20 +1944,14 @@ export function OrdersPage() {
           }),
         );
         if (cancelled) return;
-        setServiceGroupPreviews(
+        applyOrderServiceGroupPreviews(
           Object.fromEntries(previews.filter(Boolean) as Array<readonly [string, OrderServiceGroupLinePreview]>),
         );
       } catch (error) {
         if (cancelled) return;
-        setOrderServiceGroups([]);
-        setServiceGroupPreviews({});
-        setServiceGroupsError(
-          error instanceof Error
-            ? error.message
-            : t.orders_service_groups_failed_load,
-        );
+        failOrderServiceGroupsLoad(error);
       } finally {
-        if (!cancelled) setServiceGroupsLoading(false);
+        if (!cancelled) finishOrderServiceGroupsLoad();
       }
     }
 
@@ -1547,7 +1959,16 @@ export function OrdersPage() {
     return () => {
       cancelled = true;
     };
-  }, [reloadNonce, selectedOrderId, t.orders_service_groups_failed_load]);
+  }, [
+    applyOrderServiceGroupPreviews,
+    applyOrderServiceGroups,
+    failOrderServiceGroupsLoad,
+    finishOrderServiceGroupsLoad,
+    reloadNonce,
+    resetOrderServiceGroupsData,
+    selectedOrderId,
+    startOrderServiceGroupsLoad,
+  ]);
 
   async function handleCreateOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2139,7 +2560,7 @@ export function OrdersPage() {
               )}
             </div>
           ) : debtQueue.length === 0 ? (
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-700">
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
               {l(
                 "Aktuell gibt es keine offenen Debt-Management-Falle.",
                 "Сейчас нет открытых кейсов debt-management.",
@@ -2152,7 +2573,7 @@ export function OrdersPage() {
                   key={item.order_id}
                   type="button"
                   onClick={() => openOrder(item.order_id, item.patient_id)}
-                  className="rounded-2xl border border-border px-4 py-4 text-left transition hover:-translate-y-0.5 hover:border-border"
+                  className="rounded-2xl border border-border p-4 text-left transition hover:-translate-y-0.5 hover:border-border"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -2833,7 +3254,7 @@ export function OrdersPage() {
                                   placeholder={l("Losungsnotiz", "Заметка по решению")}
                                 />
                               </Field>
-                              <div className="grid gap-2 rounded-2xl border border-border px-3 py-3 text-xs text-muted-foreground">
+                              <div className="grid gap-2 rounded-2xl border border-border p-3 text-xs text-muted-foreground">
                                 <div>
                                   {l("Owner", "Ответственный")}:{" "}
                                   {orderDetail.process_gates.debt_management
@@ -4227,9 +4648,15 @@ export function OrdersPage() {
                   ) : null}
                   {orderDetail.lifecycle?.history?.length ? (
                     <div className="mt-4 space-y-3">
-                      {orderDetail.lifecycle.history.map((event, index) => (
+                      {orderDetail.lifecycle.history.map((event) => (
                         <div
-                          key={`${event.created_at}-${event.to_stage}-${index}`}
+                          key={[
+                            event.created_at,
+                            event.from_stage ?? "",
+                            event.to_stage,
+                            event.transition_kind,
+                            event.note ?? "",
+                          ].join("|")}
                           className="rounded-2xl border border-border px-4 py-3"
                         >
                           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -4329,7 +4756,7 @@ export function OrdersPage() {
                                   <div
                                     key={item.id}
                                     className={cn(
-                                      "rounded-2xl border px-4 py-4",
+                                      "rounded-2xl border p-4",
                                       item.is_completed
                                         ? "border-emerald-200 bg-emerald-50/70"
                                         : "border-border",
@@ -5385,7 +5812,7 @@ export function OrdersPage() {
                         ))}
                       </div>
                     ) : (
-                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-800">
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
                         {createRecheck.reason
                           ? localizedBlockingReason(createRecheck.reason)
                           : l(
@@ -5397,7 +5824,7 @@ export function OrdersPage() {
 
                     {createRecheck.requires_recheck &&
                     createRecheck.base_data_missing_fields.length ? (
-                      <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
                         {l("Fehlende Stammdaten", "Не хватает базовых данных")}:{" "}
                         {createRecheck.base_data_missing_fields
                           .map((field) =>
@@ -5413,7 +5840,7 @@ export function OrdersPage() {
 
                     {createRecheck.requires_recheck &&
                     createRecheck.blocking_reasons.length ? (
-                      <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
                         <div className="font-medium">
                           {l("Blockierende Grunde", "Блокирующие причины")}
                         </div>
@@ -5424,7 +5851,7 @@ export function OrdersPage() {
                         </ul>
                       </div>
                     ) : createRecheck.requires_recheck ? (
-                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-800">
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
                         {l(
                           "Der Bestandskunden-Re-Check ist vollstandig. Der Patient kann in einen neuen Auftrag ubergehen.",
                           "Повторная проверка существующего клиента завершена. Пациент может перейти в новый заказ.",
@@ -5687,8 +6114,13 @@ export function OrdersPage() {
             </div>
 
             <div className={cn("rounded-lg px-4 py-3", tokens.surface.mutedCard)}>
-              <label className="flex items-start gap-3">
+              <label
+                htmlFor="leistung-cost-passthrough"
+                aria-label={t.orders_treat_as_cost_pass_through}
+                className="flex items-start gap-3"
+              >
                 <input
+                  id="leistung-cost-passthrough"
                   type="checkbox"
                   checked={leistungForm.isCostPassthrough}
                   onChange={(event) =>
@@ -5752,6 +6184,10 @@ export function OrdersPage() {
       </Sheet>
     </div>
   );
+}
+
+export function OrdersPage(...args: Parameters<typeof useOrdersPageContent>) {
+  return useOrdersPageContent(...args);
 }
 
 

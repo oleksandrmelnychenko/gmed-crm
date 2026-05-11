@@ -57,7 +57,7 @@ export type PortalUploadedDocumentItem = {
   updated_at: string;
 };
 
-export type PortalRequiredDocumentRuleItem = {
+type PortalRequiredDocumentRuleItem = {
   key: string;
   label: string;
   fulfilled: boolean;
@@ -70,7 +70,7 @@ export type PortalRequiredDocumentRuleItem = {
   }>;
 };
 
-export type PortalMissingRequiredDocumentItem = {
+type PortalMissingRequiredDocumentItem = {
   key: string;
   label: string;
 };
@@ -97,7 +97,7 @@ export type PortalInvoiceLineItem = {
   notes?: string | null;
 };
 
-export type InvoicePortalVisibility = {
+type InvoicePortalVisibility = {
   visible_to_patient: boolean;
   amounts_visible_to_patient: boolean;
   line_items_visible_to_patient: boolean;
@@ -370,7 +370,7 @@ export type PortalFeedbackItem = {
   reviewed_at?: string | null;
 };
 
-export type PortalFeedbackAverageScores = {
+type PortalFeedbackAverageScores = {
   overall?: number | null;
   patient_manager?: number | null;
   interpreter?: number | null;
@@ -383,7 +383,7 @@ export type PortalFeedbackAverageScores = {
   price_value?: number | null;
 };
 
-export type PortalFeedbackPromoter = {
+type PortalFeedbackPromoter = {
   patient_id: string;
   patient_pid?: string | null;
   patient_name: string;
@@ -392,7 +392,7 @@ export type PortalFeedbackPromoter = {
   last_submitted_at?: string | null;
 };
 
-export type PortalFeedbackRanking = {
+type PortalFeedbackRanking = {
   user_id?: string;
   provider_id?: string;
   name: string;
@@ -425,12 +425,77 @@ function portalText(de: string, ru: string, en: string) {
   return en;
 }
 
-function portalLocale() {
+type PortalLocale = "de-DE" | "en-GB" | "ru-RU";
+
+function portalLocale(): PortalLocale {
   const lang = getLang();
   if (lang === "de") return "de-DE";
   if (lang === "ru") return "ru-RU";
   return "en-GB";
 }
+
+const PORTAL_DATE_TIME_FORMATTERS: Record<PortalLocale, Intl.DateTimeFormat> = {
+  "de-DE": new Intl.DateTimeFormat("de-DE", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }),
+  "en-GB": new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }),
+  "ru-RU": new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }),
+};
+
+const PORTAL_DATE_FORMATTERS: Record<PortalLocale, Intl.DateTimeFormat> = {
+  "de-DE": new Intl.DateTimeFormat("de-DE", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }),
+  "en-GB": new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }),
+  "ru-RU": new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }),
+};
+
+const PORTAL_CURRENCY_FORMATTERS: Record<PortalLocale, Intl.NumberFormat> = {
+  "de-DE": new Intl.NumberFormat("de-DE", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }),
+  "en-GB": new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }),
+  "ru-RU": new Intl.NumberFormat("ru-RU", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }),
+};
 
 function portalTranslations() {
   return translateCatalog(getLang());
@@ -529,11 +594,6 @@ const PORTAL_PRIVACY_REQUEST_LABEL_KEYS = {
 const PORTAL_PRIVACY_SOURCE_LABEL_KEYS = {
   patient_portal: "portal_privacy_source_patient_portal",
   staff_workspace: "portal_privacy_source_staff_workspace",
-} satisfies Partial<Record<string, TranslationKey>>;
-
-const PORTAL_FEEDBACK_SOURCE_LABEL_KEYS = {
-  patient_portal: "portal_feedback_source_patient_portal",
-  staff_capture: "portal_feedback_source_staff_capture",
 } satisfies Partial<Record<string, TranslationKey>>;
 
 const PORTAL_RECOMMENDATION_TYPE_LABEL_KEYS = {
@@ -679,13 +739,7 @@ export function formatPortalDateTime(value?: string | null) {
   if (!value) return portalNotSetLabel();
 
   try {
-    return new Intl.DateTimeFormat(portalLocale(), {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(value));
+    return PORTAL_DATE_TIME_FORMATTERS[portalLocale()].format(new Date(value));
   } catch {
     return value;
   }
@@ -695,11 +749,7 @@ export function formatPortalDate(value?: string | null) {
   if (!value) return portalNotSetLabel();
 
   try {
-    return new Intl.DateTimeFormat(portalLocale(), {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }).format(new Date(value));
+    return PORTAL_DATE_FORMATTERS[portalLocale()].format(new Date(value));
   } catch {
     return value;
   }
@@ -715,12 +765,7 @@ export function formatPortalFileSize(value?: number | null) {
 export function formatPortalCurrency(value: unknown) {
   if (value === null || value === undefined) return portalNotSetLabel();
   const numeric = typeof value === "number" ? value : Number(value ?? 0);
-  const formatter = new Intl.NumberFormat(portalLocale(), {
-    style: "currency",
-    currency: "EUR",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+  const formatter = PORTAL_CURRENCY_FORMATTERS[portalLocale()];
   if (!Number.isFinite(numeric)) return formatter.format(0);
   return formatter.format(numeric);
 }
@@ -745,10 +790,6 @@ export function feedbackStatusTone(status: string) {
   if (status === "reviewed") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   if (status === "archived") return "border-slate-300 bg-slate-100 text-slate-700";
   return "border-amber-200 bg-amber-50 text-amber-700";
-}
-
-export function feedbackSourceLabel(source: string) {
-  return portalEnumLabel(source, PORTAL_FEEDBACK_SOURCE_LABEL_KEYS);
 }
 
 export function formatPortalAverage(value?: number | null) {
@@ -828,13 +869,6 @@ export function translationRequestTone(status: string) {
   if (status === "cancelled") return "border-rose-200 bg-rose-50 text-rose-700";
   if (status === "in_progress") return "border-sky-200 bg-sky-50 text-sky-700";
   return "border-amber-200 bg-amber-50 text-amber-700";
-}
-
-export function invoiceTypeTone(invoiceType: string) {
-  if (invoiceType === "advance") return "border-violet-200 bg-violet-50 text-violet-700";
-  if (invoiceType === "interim") return "border-sky-200 bg-sky-50 text-sky-700";
-  if (invoiceType === "final") return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  return "border-slate-200 bg-slate-100 text-slate-700";
 }
 
 export function appointmentStatusTone(status: string) {

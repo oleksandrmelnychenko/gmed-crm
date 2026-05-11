@@ -1,4 +1,4 @@
-export type ContractsTab = "contracts" | "quotes";
+
 export type ContractStatus = "draft" | "sent" | "signed" | "expired" | "terminated";
 export type QuoteStatus = "draft" | "sent" | "accepted" | "rejected" | "expired";
 
@@ -17,7 +17,7 @@ export type ContractItem = {
   updated_at: string;
 };
 
-export type QuoteLineItem = {
+type QuoteLineItem = {
   description: string;
   quantity: string;
   unit_price: string;

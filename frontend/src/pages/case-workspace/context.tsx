@@ -1,11 +1,11 @@
 import {
   createContext,
+  use,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
-  useState,
   type ReactNode,
 } from "react";
 
@@ -236,7 +236,7 @@ export type CaseWorkspaceSnippet = {
   updated_at: string;
 };
 
-export type CaseWorkspacePermissions = {
+type CaseWorkspacePermissions = {
   canViewPage: boolean;
   canEdit: boolean;
 };
@@ -291,10 +291,25 @@ type CaseWorkspaceContextValue = {
   saveUrology: (form: UrologyAssessment) => Promise<boolean>;
 };
 
+type CaseWorkspaceState = {
+  detail: CaseWorkspaceDetail | null;
+  doctors: CaseWorkspaceDoctor[];
+  snippets: CaseWorkspaceSnippet[];
+  loading: boolean;
+  error: string;
+  version: number;
+  sectionBusy: SectionBusyKey | null;
+  sectionError: string;
+};
+
+type CaseWorkspacePatch =
+  | Partial<CaseWorkspaceState>
+  | ((current: CaseWorkspaceState) => Partial<CaseWorkspaceState>);
+
 const CaseWorkspaceContext = createContext<CaseWorkspaceContextValue | null>(null);
 
 export function useCaseWorkspace() {
-  const ctx = useContext(CaseWorkspaceContext);
+  const ctx = use(CaseWorkspaceContext);
   if (!ctx) {
     throw new Error("useCaseWorkspace must be used inside CaseWorkspaceProvider");
   }
@@ -339,7 +354,30 @@ function resolvePermissions(role: string | undefined): CaseWorkspacePermissions 
   };
 }
 
-export function CaseWorkspaceProvider({
+function createCaseWorkspaceState(): CaseWorkspaceState {
+  return {
+    detail: null,
+    doctors: [],
+    snippets: [],
+    loading: true,
+    error: "",
+    version: 0,
+    sectionBusy: null,
+    sectionError: "",
+  };
+}
+
+function caseWorkspaceReducer(
+  state: CaseWorkspaceState,
+  patch: CaseWorkspacePatch,
+): CaseWorkspaceState {
+  return {
+    ...state,
+    ...(typeof patch === "function" ? patch(state) : patch),
+  };
+}
+
+function useCaseWorkspaceProviderContent({
   caseId,
   children,
 }: {
@@ -349,14 +387,21 @@ export function CaseWorkspaceProvider({
   const { user } = useAuth();
   const permissions = useMemo(() => resolvePermissions(user?.role), [user?.role]);
 
-  const [detail, setDetail] = useState<CaseWorkspaceDetail | null>(null);
-  const [doctors, setDoctors] = useState<CaseWorkspaceDoctor[]>([]);
-  const [snippets, setSnippets] = useState<CaseWorkspaceSnippet[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [version, setVersion] = useState(0);
-  const [sectionBusy, setSectionBusy] = useState<SectionBusyKey | null>(null);
-  const [sectionError, setSectionError] = useState("");
+  const [workspaceState, dispatchWorkspaceState] = useReducer(
+    caseWorkspaceReducer,
+    undefined,
+    createCaseWorkspaceState,
+  );
+  const {
+    detail,
+    doctors,
+    snippets,
+    loading,
+    error,
+    version,
+    sectionBusy,
+    sectionError,
+  } = workspaceState;
 
   const bootstrapRef = useRef(false);
   useEffect(() => {
@@ -374,8 +419,10 @@ export function CaseWorkspaceProvider({
       ),
     ]).then(([doctorItems, snippetItems]) => {
       if (signal.aborted) return;
-      setDoctors(doctorItems);
-      setSnippets(snippetItems);
+      dispatchWorkspaceState({
+        doctors: doctorItems,
+        snippets: snippetItems,
+      });
     });
 
     return () => controller.abort();
@@ -383,40 +430,47 @@ export function CaseWorkspaceProvider({
 
   useEffect(() => {
     if (!caseId) {
-      setLoading(false);
+      dispatchWorkspaceState({ loading: false });
       return;
     }
     const controller = new AbortController();
     const { signal } = controller;
-    setLoading(true);
-    setError("");
+    dispatchWorkspaceState({
+      loading: true,
+      error: "",
+    });
 
     apiFetch<CaseWorkspaceDetail>(`/cases/${caseId}`, { signal })
       .then((result) => {
         if (signal.aborted) return;
-        setDetail(result);
+        dispatchWorkspaceState({
+          detail: result,
+          loading: false,
+        });
       })
       .catch((err: unknown) => {
         if (signal.aborted) return;
-        setDetail(null);
-        setError(err instanceof Error ? err.message : String(err));
-      })
-      .finally(() => {
-        if (!signal.aborted) setLoading(false);
+        dispatchWorkspaceState({
+          detail: null,
+          error: err instanceof Error ? err.message : String(err),
+          loading: false,
+        });
       });
 
     return () => controller.abort();
   }, [caseId, version]);
 
   const reload = useCallback(() => {
-    setVersion((current) => current + 1);
+    dispatchWorkspaceState((current) => ({ version: current.version + 1 }));
   }, []);
 
   const saveOverview = useCallback(
     async (form: CaseOverviewForm) => {
       if (!caseId) return false;
-      setSectionBusy("overview");
-      setSectionError("");
+      dispatchWorkspaceState({
+        sectionBusy: "overview",
+        sectionError: "",
+      });
       try {
         await apiFetch(`/cases/${caseId}/anamnesis`, {
           method: "POST",
@@ -427,13 +481,15 @@ export function CaseWorkspaceProvider({
             zuweiser: toOptionalText(form.zuweiser),
           }),
         });
-        setVersion((current) => current + 1);
+        dispatchWorkspaceState((current) => ({ version: current.version + 1 }));
         return true;
       } catch (err: unknown) {
-        setSectionError(err instanceof Error ? err.message : String(err));
+        dispatchWorkspaceState({
+          sectionError: err instanceof Error ? err.message : String(err),
+        });
         return false;
       } finally {
-        setSectionBusy(null);
+        dispatchWorkspaceState({ sectionBusy: null });
       }
     },
     [caseId],
@@ -447,20 +503,24 @@ export function CaseWorkspaceProvider({
       items: T[],
     ): Promise<boolean> => {
       if (!caseId) return false;
-      setSectionBusy(busyKey);
-      setSectionError("");
+      dispatchWorkspaceState({
+        sectionBusy: busyKey,
+        sectionError: "",
+      });
       try {
         await apiFetch(`/cases/${caseId}/${endpoint}`, {
           method: "POST",
           body: JSON.stringify({ items: sanitize(items) }),
         });
-        setVersion((current) => current + 1);
+        dispatchWorkspaceState((current) => ({ version: current.version + 1 }));
         return true;
       } catch (err: unknown) {
-        setSectionError(err instanceof Error ? err.message : String(err));
+        dispatchWorkspaceState({
+          sectionError: err instanceof Error ? err.message : String(err),
+        });
         return false;
       } finally {
-        setSectionBusy(null);
+        dispatchWorkspaceState({ sectionBusy: null });
       }
     },
     [caseId],
@@ -472,13 +532,15 @@ export function CaseWorkspaceProvider({
         "preconditions",
         "vorerkrankungen",
         (list) =>
-          list
-            .filter((item) => item.erkrankung.trim().length > 0)
-            .map((item) => ({
-              erkrankung: item.erkrankung.trim(),
+          list.flatMap((item) => {
+            const erkrankung = item.erkrankung.trim();
+            if (!erkrankung) return [];
+            return [{
+              erkrankung,
               erstdiagnose: toOptionalText(item.erstdiagnose ?? ""),
               notiz: toOptionalText(item.notiz ?? ""),
-            })),
+            }];
+          }),
         items,
       ),
     [runListSave],
@@ -490,12 +552,14 @@ export function CaseWorkspaceProvider({
         "allergies",
         "allergien",
         (list) =>
-          list
-            .filter((item) => item.allergie.trim().length > 0)
-            .map((item) => ({
-              allergie: item.allergie.trim(),
+          list.flatMap((item) => {
+            const allergie = item.allergie.trim();
+            if (!allergie) return [];
+            return [{
+              allergie,
               reaktion: toOptionalText(item.reaktion ?? ""),
-            })),
+            }];
+          }),
         items,
       ),
     [runListSave],
@@ -507,15 +571,17 @@ export function CaseWorkspaceProvider({
         "surgeries",
         "operationen",
         (list) =>
-          list
-            .filter((item) => item.grund.trim().length > 0)
-            .map((item) => ({
+          list.flatMap((item) => {
+            const grund = item.grund.trim();
+            if (!grund) return [];
+            return [{
               datum: toOptionalText(item.datum ?? ""),
-              grund: item.grund.trim(),
+              grund,
               arzt_id: toOptionalText(item.arzt_id ?? ""),
               arzt: toOptionalText(item.arzt ?? ""),
               notiz: toOptionalText(item.notiz ?? ""),
-            })),
+            }];
+          }),
         items,
       ),
     [runListSave],
@@ -527,10 +593,11 @@ export function CaseWorkspaceProvider({
         "medications",
         "medikamente",
         (list) =>
-          list
-            .filter((item) => item.handelsname.trim().length > 0)
-            .map((item) => ({
-              handelsname: item.handelsname.trim(),
+          list.flatMap((item) => {
+            const handelsname = item.handelsname.trim();
+            if (!handelsname) return [];
+            return [{
+              handelsname,
               wirkstoff: toOptionalText(item.wirkstoff ?? ""),
               dosis: toOptionalText(item.dosis ?? ""),
               dosis_einheit: toOptionalText(item.dosis_einheit ?? ""),
@@ -544,7 +611,8 @@ export function CaseWorkspaceProvider({
               verordnender_arzt: toOptionalText(item.verordnender_arzt ?? ""),
               med_typ: toOptionalText(item.med_typ ?? "") ?? "permanent",
               expiry_date: toOptionalText(item.expiry_date ?? ""),
-            })),
+            }];
+          }),
         items,
       ),
     [runListSave],
@@ -556,10 +624,11 @@ export function CaseWorkspaceProvider({
         "pain",
         "pain",
         (list) =>
-          list
-            .filter((item) => item.lokalisierung.trim().length > 0)
-            .map((item) => ({
-              lokalisierung: item.lokalisierung.trim(),
+          list.flatMap((item) => {
+            const lokalisierung = item.lokalisierung.trim();
+            if (!lokalisierung) return [];
+            return [{
+              lokalisierung,
               seit_wann: toOptionalText(item.seit_wann ?? ""),
               ursache: toOptionalText(item.ursache ?? ""),
               qualitaet: toOptionalText(item.qualitaet ?? ""),
@@ -571,7 +640,8 @@ export function CaseWorkspaceProvider({
               dauer_aktuell: toOptionalText(item.dauer_aktuell ?? ""),
               ausstrahlung: toOptionalText(item.ausstrahlung ?? ""),
               auftreten: toOptionalText(item.auftreten ?? ""),
-            })),
+            }];
+          }),
         items,
       ),
     [runListSave],
@@ -583,12 +653,14 @@ export function CaseWorkspaceProvider({
         "symptoms",
         "symptome",
         (list) =>
-          list
-            .filter((item) => item.beschreibung.trim().length > 0)
-            .map((item) => ({
-              beschreibung: item.beschreibung.trim(),
+          list.flatMap((item) => {
+            const beschreibung = item.beschreibung.trim();
+            if (!beschreibung) return [];
+            return [{
+              beschreibung,
               fachrichtung: toOptionalText(item.fachrichtung ?? ""),
-            })),
+            }];
+          }),
         items,
       ),
     [runListSave],
@@ -601,20 +673,24 @@ export function CaseWorkspaceProvider({
       payload: unknown,
     ): Promise<boolean> => {
       if (!caseId) return false;
-      setSectionBusy(busyKey);
-      setSectionError("");
+      dispatchWorkspaceState({
+        sectionBusy: busyKey,
+        sectionError: "",
+      });
       try {
         await apiFetch(`/cases/${caseId}/${endpoint}`, {
           method: "POST",
           body: JSON.stringify(payload),
         });
-        setVersion((current) => current + 1);
+        dispatchWorkspaceState((current) => ({ version: current.version + 1 }));
         return true;
       } catch (err: unknown) {
-        setSectionError(err instanceof Error ? err.message : String(err));
+        dispatchWorkspaceState({
+          sectionError: err instanceof Error ? err.message : String(err),
+        });
         return false;
       } finally {
-        setSectionBusy(null);
+        dispatchWorkspaceState({ sectionBusy: null });
       }
     },
     [caseId],
@@ -728,4 +804,8 @@ export function CaseWorkspaceProvider({
       {children}
     </CaseWorkspaceContext.Provider>
   );
+}
+
+export function CaseWorkspaceProvider(...args: Parameters<typeof useCaseWorkspaceProviderContent>) {
+  return useCaseWorkspaceProviderContent(...args);
 }
