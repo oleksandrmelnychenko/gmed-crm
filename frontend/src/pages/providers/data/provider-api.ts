@@ -8,6 +8,24 @@ import type {
 
 type JsonPayload = Record<string, unknown>;
 
+function arrayOrEmpty<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function normalizeProviderDetail(raw: ProviderDetail): ProviderDetail {
+  return {
+    ...raw,
+    doctors: arrayOrEmpty<ProviderDetail["doctors"][number]>(raw.doctors),
+    services: arrayOrEmpty<ProviderDetail["services"][number]>(raw.services).map((service) => ({
+      ...service,
+      price: String(service.price ?? ""),
+      currency: service.currency || "EUR",
+    })),
+    linked_patients: arrayOrEmpty<ProviderDetail["linked_patients"][number]>(raw.linked_patients),
+    interactions: arrayOrEmpty<ProviderDetail["interactions"][number]>(raw.interactions),
+  };
+}
+
 function postJson<T>(path: string, payload: JsonPayload) {
   return apiFetch<T>(path, {
     method: "POST",
@@ -20,11 +38,16 @@ function post(path: string) {
 }
 
 export function fetchProviders(path: string) {
-  return apiFetch<ProviderSummary[]>(path);
+  return apiFetch<unknown>(path).then((rows) => {
+    if (!Array.isArray(rows)) {
+      throw new Error("Invalid providers response");
+    }
+    return rows as ProviderSummary[];
+  });
 }
 
 export function fetchProviderDetail(id: string) {
-  return apiFetch<ProviderDetail>(`/providers/${id}`);
+  return apiFetch<ProviderDetail>(`/providers/${id}`).then(normalizeProviderDetail);
 }
 
 export function createProvider(payload: JsonPayload) {

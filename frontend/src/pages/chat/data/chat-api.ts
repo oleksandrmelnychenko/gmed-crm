@@ -1,6 +1,6 @@
 import {
   apiFetch,
-  buildApiUrl,
+  apiFetchFile,
   buildApiWebSocketUrl,
   clearApiCache,
   getAccessToken,
@@ -37,31 +37,16 @@ export function sendPeerMessage(peerId: string, payload: JsonPayload) {
 }
 
 export async function uploadPeerAttachment(peerId: string, formData: FormData) {
-  const token = getAccessToken();
-  const response = await fetch(buildApiUrl(`/messages/${peerId}/upload`), {
+  await apiFetch(`/messages/${peerId}/upload`, {
     method: "POST",
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: formData,
   });
-  if (!response.ok) {
-    throw new Error("upload");
-  }
   clearApiCache();
 }
 
 export async function downloadMessageAttachmentBytes(fileKey: string) {
-  const token = getAccessToken();
-  const response = await fetch(buildApiUrl(`/messages/file/${fileKey}`), {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
-  if (!response.ok) {
-    throw new Error("download");
-  }
-  return response.arrayBuffer();
-}
-
-export function getMessageAttachmentUrl(fileKey: string) {
-  return buildApiUrl(`/messages/file/${fileKey}`);
+  const { blob } = await apiFetchFile(`/messages/file/${fileKey}`);
+  return blob.arrayBuffer();
 }
 
 export function openMessagesSocket() {

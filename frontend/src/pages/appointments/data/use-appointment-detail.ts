@@ -244,7 +244,6 @@ export function useAppointmentDetail({
       !selectedId ||
       !detailOpen ||
       detailLoading ||
-      detailError ||
       !detail ||
       !requiresExtendedDetailResources ||
       missingDetailResourceGroups.length === 0
@@ -351,14 +350,14 @@ export function useAppointmentDetail({
         detailResourceRequestKeysRef.current[group] = "";
       }
         if (
-          loadedGroups.length > 0 ||
+          pendingGroups.length > 0 ||
           firstErrorMessage ||
           Object.keys(detailPatch).length > 0
         ) {
           dispatchDetailState((current) => {
-            if (loadedGroups.length > 0) {
+            if (pendingGroups.length > 0) {
               const detailResourceKeys = { ...current.detailResourceKeys };
-              for (const group of loadedGroups) {
+              for (const group of pendingGroups) {
                 detailResourceKeys[group] = currentDetailResourceKey;
               }
               detailPatch.detailResourceKeys = detailResourceKeys;
@@ -384,7 +383,6 @@ export function useAppointmentDetail({
   }, [
     currentDetailResourceKey,
     detail,
-    detailError,
     detailLoading,
     detailOpen,
     missingDetailResourceGroups,

@@ -54,6 +54,159 @@ use windows::{
 
 const MAX_FILE_SIZE: usize = 25 * 1024 * 1024;
 const UPLOAD_DIR: &str = "uploads/documents";
+
+fn normalize_seed_demo_storage_key(storage_key: &str) -> String {
+    storage_key
+        .trim_start_matches(|ch| ch == '/' || ch == '\\')
+        .replace('\\', "/")
+}
+
+fn pdf_escape_text(value: &str) -> String {
+    let ascii_text = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii() && !ch.is_control() {
+                ch
+            } else if ch.is_whitespace() {
+                ' '
+            } else {
+                '?'
+            }
+        })
+        .collect::<String>();
+
+    let mut escaped = String::with_capacity(ascii_text.len());
+    for ch in ascii_text.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\\\"),
+            '(' => escaped.push_str("\\("),
+            ')' => escaped.push_str("\\)"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+fn build_seed_demo_pdf_bytes(title: &str, filename: &str, storage_key: &str) -> Vec<u8> {
+    let title = pdf_escape_text(title);
+    let filename = pdf_escape_text(filename);
+    let storage_key = pdf_escape_text(storage_key);
+    let content = format!(
+        "BT\n/F1 18 Tf\n72 740 Td\n({title}) Tj\n/F1 11 Tf\n0 -28 Td\n(Demo seed document placeholder) Tj\n0 -18 Td\n(File: {filename}) Tj\n0 -18 Td\n(Storage: {storage_key}) Tj\nET\n"
+    );
+
+    let objects = vec![
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n".to_string(),
+        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n".to_string(),
+        "4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n".to_string(),
+        format!(
+            "5 0 obj\n<< /Length {} >>\nstream\n{}endstream\nendobj\n",
+            content.as_bytes().len(),
+            content
+        ),
+    ];
+
+    let mut pdf = String::from("%PDF-1.4\n");
+    let mut offsets = Vec::with_capacity(objects.len());
+    for object in objects {
+        offsets.push(pdf.as_bytes().len());
+        pdf.push_str(&object);
+    }
+
+    let xref_offset = pdf.as_bytes().len();
+    pdf.push_str(&format!("xref\n0 {}\n", offsets.len() + 1));
+    pdf.push_str("0000000000 65535 f \n");
+    for offset in &offsets {
+        pdf.push_str(&format!("{offset:010} 00000 n \n"));
+    }
+    pdf.push_str(&format!(
+        "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+        offsets.len() + 1,
+        xref_offset
+    ));
+    pdf.into_bytes()
+}
+
+fn build_seed_demo_text_bytes(title: &str, filename: &str, storage_key: &str) -> Vec<u8> {
+    format!(
+        "{title}\n\nThis is a generated placeholder for a seeded demo document.\nFile: {filename}\nStorage key: {storage_key}\n"
+    )
+    .into_bytes()
+}
+
+fn build_seed_demo_document_bytes(
+    storage_key: &str,
+    mime_type: Option<&str>,
+    original_filename: Option<&str>,
+    auto_name: Option<&str>,
+) -> Option<Vec<u8>> {
+    let normalized_key = normalize_seed_demo_storage_key(storage_key);
+    if !normalized_key.starts_with("demo/") {
+        return None;
+    }
+
+    let fallback_filename = normalized_key
+        .rsplit('/')
+        .next()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("document");
+    let filename = original_filename
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(fallback_filename);
+    let title = auto_name
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| original_filename.filter(|value| !value.trim().is_empty()))
+        .unwrap_or(filename);
+
+    let is_pdf_mime = mime_type
+        .map(|value| {
+            value
+                .split(';')
+                .next()
+                .unwrap_or(value)
+                .trim()
+                .eq_ignore_ascii_case("application/pdf")
+        })
+        .unwrap_or(false);
+    let is_pdf_name = filename.to_ascii_lowercase().ends_with(".pdf")
+        || normalized_key.to_ascii_lowercase().ends_with(".pdf");
+
+    Some(if is_pdf_mime || is_pdf_name {
+        build_seed_demo_pdf_bytes(title, filename, &normalized_key)
+    } else {
+        build_seed_demo_text_bytes(title, filename, &normalized_key)
+    })
+}
+
+pub(crate) async fn read_document_storage_bytes(
+    document_id: Uuid,
+    storage_key: &str,
+    mime_type: Option<&str>,
+    original_filename: Option<&str>,
+    auto_name: Option<&str>,
+) -> Result<Vec<u8>, std::io::Error> {
+    let path = FsPath::new(UPLOAD_DIR).join(storage_key);
+    match tokio::fs::read(&path).await {
+        Ok(data) => Ok(data),
+        Err(error) => {
+            if let Some(data) =
+                build_seed_demo_document_bytes(storage_key, mime_type, original_filename, auto_name)
+            {
+                let normalized_key = normalize_seed_demo_storage_key(storage_key);
+                tracing::warn!(
+                    document_id = %document_id,
+                    storage_key = %normalized_key,
+                    error = %error,
+                    "using generated seeded demo document placeholder"
+                );
+                Ok(data)
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
 const PDF_PAGE_WIDTH_MM: f32 = 210.0;
 const PDF_PAGE_HEIGHT_MM: f32 = 297.0;
 const PDF_LEFT_MARGIN_MM: f32 = 18.0;
@@ -6550,8 +6703,15 @@ async fn extract_document_text_and_store(
     storage_key: &str,
     actor_id: Uuid,
 ) -> Result<DocumentTextExtractionResult, axum::response::Response> {
-    let path = FsPath::new(UPLOAD_DIR).join(storage_key);
-    let bytes = tokio::fs::read(&path).await.map_err(|e| {
+    let bytes = read_document_storage_bytes(
+        document_id,
+        storage_key,
+        mime_type,
+        original_filename,
+        original_filename,
+    )
+    .await
+    .map_err(|e| {
         tracing::error!(error = %e, document_id = %document_id, storage_key = %storage_key, "read document file for text extraction");
         err(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -9902,16 +10062,23 @@ async fn download_document(
         .try_get::<Option<String>, _>("mime_type")
         .unwrap_or_default()
         .unwrap_or_else(|| "application/octet-stream".to_string());
+    let auto_name = row
+        .try_get::<String, _>("auto_name")
+        .unwrap_or_else(|_| "document".to_string());
     let filename = row
         .try_get::<Option<String>, _>("original_filename")
         .unwrap_or_default()
-        .unwrap_or_else(|| {
-            row.try_get::<String, _>("auto_name")
-                .unwrap_or_else(|_| "document".to_string())
-        });
+        .unwrap_or_else(|| auto_name.clone());
 
-    let path = FsPath::new(UPLOAD_DIR).join(storage_key);
-    let data = match tokio::fs::read(&path).await {
+    let data = match read_document_storage_bytes(
+        id,
+        storage_key.as_str(),
+        Some(mime_type.as_str()),
+        Some(filename.as_str()),
+        Some(auto_name.as_str()),
+    )
+    .await
+    {
         Ok(data) => data,
         Err(_) => return err(StatusCode::NOT_FOUND, "Document file not found on disk"),
     };
@@ -10054,16 +10221,23 @@ async fn download_my_uploaded_document(
         .try_get::<Option<String>, _>("mime_type")
         .unwrap_or_default()
         .unwrap_or_else(|| "application/octet-stream".to_string());
+    let auto_name = row
+        .try_get::<String, _>("auto_name")
+        .unwrap_or_else(|_| "document".to_string());
     let filename = row
         .try_get::<Option<String>, _>("original_filename")
         .unwrap_or_default()
-        .unwrap_or_else(|| {
-            row.try_get::<String, _>("auto_name")
-                .unwrap_or_else(|_| "document".to_string())
-        });
+        .unwrap_or_else(|| auto_name.clone());
 
-    let path = FsPath::new(UPLOAD_DIR).join(storage_key);
-    let data = match tokio::fs::read(&path).await {
+    let data = match read_document_storage_bytes(
+        id,
+        storage_key.as_str(),
+        Some(mime_type.as_str()),
+        Some(filename.as_str()),
+        Some(auto_name.as_str()),
+    )
+    .await
+    {
         Ok(data) => data,
         Err(_) => return err(StatusCode::NOT_FOUND, "Document file not found on disk"),
     };

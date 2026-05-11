@@ -146,6 +146,7 @@ type AdminUsersState = {
   newPasswordConfirm: string;
   newRole: string;
   editUser: User | null;
+  editError: string | null;
   euName: string;
   euEmail: string;
   euRole: string;
@@ -198,6 +199,7 @@ function useAdminUsersPageContent() {
       newPasswordConfirm: "",
       newRole: "patient_manager",
       editUser: null,
+      editError: null,
       euName: "",
       euEmail: "",
       euRole: "",
@@ -219,6 +221,7 @@ function useAdminUsersPageContent() {
     newPasswordConfirm,
     newRole,
     editUser,
+    editError,
     euName,
     euEmail,
     euRole,
@@ -255,6 +258,8 @@ function useAdminUsersPageContent() {
     setAdminUsersField("newRole", value);
   const setEditUser = (value: SetStateAction<User | null>) =>
     setAdminUsersField("editUser", value);
+  const setEditError = (value: SetStateAction<string | null>) =>
+    setAdminUsersField("editError", value);
   const setEuName = (value: SetStateAction<string>) =>
     setAdminUsersField("euName", value);
   const setEuEmail = (value: SetStateAction<string>) =>
@@ -441,6 +446,7 @@ function useAdminUsersPageContent() {
   };
 
   const openEdit = (u: User) => {
+    setEditError(null);
     setEuName(u.name);
     setEuEmail(u.email);
     setEuRole(u.role);
@@ -460,6 +466,7 @@ function useAdminUsersPageContent() {
 
   const closeEditSheet = useCallback(() => {
     setEditUser(null);
+    setEditError(null);
     setEuName("");
     setEuEmail("");
     setEuRole("");
@@ -496,10 +503,13 @@ function useAdminUsersPageContent() {
   const saveUser = async () => {
     if (!editUser) return;
     setEuSaving(true);
+    setEditError(null);
     try {
       await updateAdminUser(editUser.id, { name: euName, email: euEmail, role: euRole });
       closeEditSheet();
       void loadUsers();
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : String(e));
     } finally {
       setEuSaving(false);
     }
@@ -507,13 +517,26 @@ function useAdminUsersPageContent() {
 
   const resetPassword = async () => {
     if (!editUser || euPassword.length < 8) return;
-    await resetAdminUserPassword(editUser.id, { new_password: euPassword });
-    setEuPassword("");
+    setEuSaving(true);
+    setEditError(null);
+    try {
+      await resetAdminUserPassword(editUser.id, { new_password: euPassword });
+      setEuPassword("");
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setEuSaving(false);
+    }
   };
 
   const toggleActive = async (userId: string, currentlyActive: boolean) => {
-    await setAdminUserActive(userId, !currentlyActive);
-    void loadUsers();
+    setError(null);
+    try {
+      await setAdminUserActive(userId, !currentlyActive);
+      void loadUsers();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   return (
@@ -679,6 +702,7 @@ function useAdminUsersPageContent() {
                 />
               )}
             >
+              {editError ? <Banner tone="error">{editError}</Banner> : null}
               <DotSection title={t.users_title}>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">

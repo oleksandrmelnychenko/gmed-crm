@@ -132,7 +132,7 @@ function DunningEventsList({
   return (
     <div className="mt-4 space-y-3">
       {dunningEvents.length === 0 ? (
-        <p className="text-sm text-zinc-500">{l("Noch nicht erfasst.", "РќРµ Р·Р°С„РёРєСЃРёСЂРѕРІР°РЅРѕ.", "Not recorded yet.")}</p>
+        <p className="text-sm text-zinc-500">{l("Noch nicht erfasst.", "Не зафиксировано.", "Not recorded yet.")}</p>
       ) : (
         dunningEvents.map((event) => (
           <div key={event.id} className="rounded-xl border border-zinc-200 bg-white px-4 py-3">
@@ -143,8 +143,8 @@ function DunningEventsList({
               <span className="text-xs text-zinc-400">{formatDateTime(event.sent_at)}</span>
             </div>
             <div className="mt-2 space-y-1 text-sm text-zinc-600">
-              <p>{l("Offener Betrag", "РЎСѓРјРјР° Рє РѕРїР»Р°С‚Рµ", "Balance due")}: {formatMoney(event.balance_due)}</p>
-              <p>{l("Erstellt von", "РЎРѕР·РґР°РЅРѕ", "Created by")}: {event.created_by_name}</p>
+              <p>{l("Offener Betrag", "Сумма к оплате", "Balance due")}: {formatMoney(event.balance_due)}</p>
+              <p>{l("Erstellt von", "Создано", "Created by")}: {event.created_by_name}</p>
               {event.note ? <p>{event.note}</p> : null}
             </div>
           </div>

@@ -91,7 +91,6 @@ import { useAppointmentLinkedSheetState } from "@/pages/appointments/ui/hooks/us
 import { useAppointmentOverlayState } from "@/pages/appointments/ui/hooks/use-appointment-overlay-state";
 import { useAppointmentSchedulerControls } from "@/pages/appointments/ui/hooks/use-appointment-scheduler-controls";
 import { useAppointmentWorkspaceSession } from "@/pages/appointments/ui/hooks/use-appointment-workspace-session";
-import { AppointmentCalendarEventCard } from "@/pages/appointments/ui/scheduler/appointment-calendar-event-card";
 import { AppointmentsPageChrome } from "@/pages/appointments/ui/scheduler/appointments-page-chrome";
 import {
   AppointmentsSchedulerSurface,
@@ -211,6 +210,63 @@ const APPOINTMENT_REALTIME_EVENTS = [
   "task.status_changed",
 ] as const;
 
+function escapeCalendarEventHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function resolveCalendarEventDurationMinutes(arg: EventContentArg): number {
+  const { start, end } = arg.event;
+  if (!start || !end) return 30;
+
+  const diffMinutes = Math.round((end.getTime() - start.getTime()) / 60_000);
+  return diffMinutes > 0 ? diffMinutes : 30;
+}
+
+function renderStaticCalendarEventContent(
+  arg: EventContentArg,
+  dictionary: Record<string, string>,
+) {
+  const props = arg.event.extendedProps as CalendarEventExtendedProps;
+  const statusOrTypeLabel = props.isBlocked
+    ? appointmentText("Blocked", "Blocked", "Blocked")
+    : props.appointmentStatus === "completed"
+      ? dictionary.dash_completed
+      : props.appointmentStatus === "cancelled"
+        ? dictionary.appointments_status_cancelled ?? "Cancelled"
+        : appointmentTypeLabel(props.appointmentType, dictionary);
+  const secondaryLine = [
+    arg.timeText,
+    props.patientName,
+    props.doctorName ||
+      props.providerName ||
+      props.location ||
+      props.ownerName ||
+      appointmentText("Appointment", "Appointment", "Appointment"),
+    props.interpreterName
+      ? `${appointmentText("Interpreter", "Interpreter", "Interpreter")}: ${props.interpreterName}`
+      : "",
+  ]
+    .filter((value): value is string => Boolean(value && value.trim()))
+    .join(" - ");
+
+  return {
+    html: [
+      `<div class="fc-apt-event-card group relative" data-event-duration-minutes="${resolveCalendarEventDurationMinutes(arg)}">`,
+      `<div class="fc-apt-event-row-primary">${escapeCalendarEventHtml(arg.event.title)}</div>`,
+      secondaryLine
+        ? `<div class="fc-apt-event-row-secondary">${escapeCalendarEventHtml(secondaryLine)}</div>`
+        : "",
+      `<div class="mt-auto pt-1"><div class="fc-apt-event-tag">${escapeCalendarEventHtml(statusOrTypeLabel)}</div></div>`,
+      "</div>",
+    ].join(""),
+  };
+}
+
 const loadDesktopDetailWorkspaceContent = () =>
   import("@/pages/appointments/ui/workspace/desktop-detail-workspace-content");
 const loadPatientAppointmentsPage = () =>
@@ -244,10 +300,12 @@ function staffAppointmentsPageReducer(
   state: StaffAppointmentsPageState,
   patch: StaffAppointmentsPagePatch,
 ): StaffAppointmentsPageState {
-  return {
-    ...state,
-    ...(typeof patch === "function" ? patch(state) : patch),
-  };
+  const nextPatch = typeof patch === "function" ? patch(state) : patch;
+  const changed = (
+    Object.keys(nextPatch) as Array<keyof StaffAppointmentsPageState>
+  ).some((key) => !Object.is(state[key], nextPatch[key]));
+
+  return changed ? { ...state, ...nextPatch } : state;
 }
 
 function createStaffAppointmentsPageFieldPatch<K extends keyof StaffAppointmentsPageState>(
@@ -1493,23 +1551,8 @@ function useStaffAppointmentsPageContent() {
   }
 
   const renderCalendarEventContent = useCallback(
-    (arg: EventContentArg) => (
-      <AppointmentCalendarEventCard
-        arg={arg}
-        lang={lang}
-        canManageStatus={permissions.canManageStatus}
-        dictionary={tr}
-        onOpenDetail={openDetailSheet}
-        onStatusChange={performStatusChange}
-      />
-    ),
-    [
-      openDetailSheet,
-      performStatusChange,
-      permissions.canManageStatus,
-      lang,
-      tr,
-    ],
+    (arg: EventContentArg) => renderStaticCalendarEventContent(arg, tr),
+    [tr],
   );
 
   if (!permissions.canViewPage) {

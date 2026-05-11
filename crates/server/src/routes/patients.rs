@@ -130,29 +130,29 @@ struct CreatePatientRequest {
 
 #[derive(Deserialize)]
 struct UpdatePatientRequest {
-    title: Option<String>,
+    title: Option<Value>,
     first_name: Option<String>,
     last_name: Option<String>,
-    phone_primary: Option<String>,
-    phone_secondary: Option<String>,
-    email: Option<String>,
-    nationality: Option<String>,
-    residence_country: Option<String>,
+    phone_primary: Option<Value>,
+    phone_secondary: Option<Value>,
+    email: Option<Value>,
+    nationality: Option<Value>,
+    residence_country: Option<Value>,
     languages: Option<Vec<String>>,
     functional_labels: Option<Vec<String>>,
-    address_street: Option<String>,
-    address_city: Option<String>,
-    address_zip: Option<String>,
-    address_country: Option<String>,
-    insurance_provider: Option<String>,
-    insurance_number: Option<String>,
-    insurance_type: Option<String>,
-    emergency_contact_name: Option<String>,
-    emergency_contact_phone: Option<String>,
-    emergency_contact_relation: Option<String>,
+    address_street: Option<Value>,
+    address_city: Option<Value>,
+    address_zip: Option<Value>,
+    address_country: Option<Value>,
+    insurance_provider: Option<Value>,
+    insurance_number: Option<Value>,
+    insurance_type: Option<Value>,
+    emergency_contact_name: Option<Value>,
+    emergency_contact_phone: Option<Value>,
+    emergency_contact_relation: Option<Value>,
     legal_status: Option<Value>,
     clinical_warnings: Option<String>,
-    notes: Option<String>,
+    notes: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -1125,10 +1125,17 @@ async fn update_patient(
         }
     }
 
-    let current = match sqlx::query!(
-        "SELECT first_name, last_name FROM patients WHERE id = $1",
-        patient_uuid
+    let current = match sqlx::query(
+        r#"SELECT title, first_name, last_name, phone_primary, phone_secondary, email,
+                  nationality, residence_country, languages, functional_labels,
+                  address_street, address_city, address_zip, address_country,
+                  insurance_provider, insurance_number, insurance_type,
+                  emergency_contact_name, emergency_contact_phone, emergency_contact_relation,
+                  notes
+           FROM patients
+           WHERE id = $1"#,
     )
+    .bind(patient_uuid)
     .fetch_optional(&state.db)
     .await
     {
@@ -1151,7 +1158,7 @@ async fn update_patient(
             }
             trimmed.to_string()
         }
-        None => current.first_name,
+        None => current.try_get("first_name").unwrap_or_default(),
     };
     let last = match body.last_name.as_deref() {
         Some(value) => {
@@ -1161,7 +1168,151 @@ async fn update_patient(
             }
             trimmed.to_string()
         }
-        None => current.last_name,
+        None => current.try_get("last_name").unwrap_or_default(),
+    };
+    let title = match normalize_patient_text_patch(
+        body.title,
+        current.try_get("title").unwrap_or_default(),
+        "title",
+    ) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let phone_primary = match normalize_patient_text_patch(
+        body.phone_primary,
+        current.try_get("phone_primary").unwrap_or_default(),
+        "phone_primary",
+    ) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let phone_secondary = match normalize_patient_text_patch(
+        body.phone_secondary,
+        current.try_get("phone_secondary").unwrap_or_default(),
+        "phone_secondary",
+    ) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let email = match normalize_patient_text_patch(
+        body.email,
+        current.try_get("email").unwrap_or_default(),
+        "email",
+    ) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let nationality = match normalize_patient_text_patch(
+        body.nationality,
+        current.try_get("nationality").unwrap_or_default(),
+        "nationality",
+    ) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let residence_country = match normalize_patient_text_patch(
+        body.residence_country,
+        current.try_get("residence_country").unwrap_or_default(),
+        "residence_country",
+    ) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let address_street = match normalize_patient_text_patch(
+        body.address_street,
+        current.try_get("address_street").unwrap_or_default(),
+        "address_street",
+    ) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let address_city = match normalize_patient_text_patch(
+        body.address_city,
+        current.try_get("address_city").unwrap_or_default(),
+        "address_city",
+    ) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let address_zip = match normalize_patient_text_patch(
+        body.address_zip,
+        current.try_get("address_zip").unwrap_or_default(),
+        "address_zip",
+    ) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let address_country = match normalize_patient_text_patch(
+        body.address_country,
+        current.try_get("address_country").unwrap_or_default(),
+        "address_country",
+    ) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let insurance_provider = match normalize_patient_text_patch(
+        body.insurance_provider,
+        current.try_get("insurance_provider").unwrap_or_default(),
+        "insurance_provider",
+    ) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let insurance_number = match normalize_patient_text_patch(
+        body.insurance_number,
+        current.try_get("insurance_number").unwrap_or_default(),
+        "insurance_number",
+    ) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let insurance_type = match normalize_patient_insurance_type_patch(
+        body.insurance_type,
+        current.try_get("insurance_type").unwrap_or_default(),
+    ) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let emergency_contact_name = match normalize_patient_text_patch(
+        body.emergency_contact_name,
+        current.try_get("emergency_contact_name").unwrap_or_default(),
+        "emergency_contact_name",
+    ) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let emergency_contact_phone = match normalize_patient_text_patch(
+        body.emergency_contact_phone,
+        current.try_get("emergency_contact_phone").unwrap_or_default(),
+        "emergency_contact_phone",
+    ) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let emergency_contact_relation = match normalize_patient_text_patch(
+        body.emergency_contact_relation,
+        current.try_get("emergency_contact_relation").unwrap_or_default(),
+        "emergency_contact_relation",
+    ) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let notes = match normalize_patient_text_patch(
+        body.notes,
+        current.try_get("notes").unwrap_or_default(),
+        "notes",
+    ) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let languages = body
+        .languages
+        .unwrap_or_else(|| current.try_get("languages").unwrap_or_default());
+    let functional_labels_supplied = body.functional_labels.is_some();
+    let functional_labels = match normalize_functional_labels(body.functional_labels) {
+        Ok(Some(labels)) => labels,
+        Ok(None) => current.try_get("functional_labels").unwrap_or_default(),
+        Err(response) => return response,
     };
     let legal_status = match body.legal_status {
         Some(value) => match normalize_legal_status(value) {
@@ -1184,13 +1335,9 @@ async fn update_patient(
         }
         None => None,
     };
-    let functional_labels = match normalize_functional_labels(body.functional_labels) {
-        Ok(labels) => labels,
-        Err(response) => return response,
-    };
     let legal_status_updated = legal_status.is_some();
     let clinical_warnings_updated = clinical_warnings_supplied;
-    let functional_labels_updated = functional_labels.is_some();
+    let functional_labels_updated = functional_labels_supplied;
     let contract_status = legal_status
         .as_ref()
         .and_then(|value| value.0.get("contract_status"))
@@ -1203,54 +1350,54 @@ async fn update_patient(
 
     let result = sqlx::query(
         r#"UPDATE patients SET
-            title = COALESCE($2, title),
+            title = $2,
             first_name = $3, last_name = $4,
-            phone_primary = COALESCE($5, phone_primary),
-            phone_secondary = COALESCE($6, phone_secondary),
-            email = COALESCE($7, email),
-            nationality = COALESCE($8, nationality),
-            residence_country = COALESCE($9, residence_country),
-            languages = COALESCE($10, languages),
-            functional_labels = COALESCE($11, functional_labels),
-            address_street = COALESCE($12, address_street),
-            address_city = COALESCE($13, address_city),
-            address_zip = COALESCE($14, address_zip),
-            address_country = COALESCE($15, address_country),
-            insurance_provider = COALESCE($16, insurance_provider),
-            insurance_number = COALESCE($17, insurance_number),
-            insurance_type = COALESCE($18, insurance_type),
-            emergency_contact_name = COALESCE($19, emergency_contact_name),
-            emergency_contact_phone = COALESCE($20, emergency_contact_phone),
-            emergency_contact_relation = COALESCE($21, emergency_contact_relation),
+            phone_primary = $5,
+            phone_secondary = $6,
+            email = $7,
+            nationality = $8,
+            residence_country = $9,
+            languages = $10,
+            functional_labels = $11,
+            address_street = $12,
+            address_city = $13,
+            address_zip = $14,
+            address_country = $15,
+            insurance_provider = $16,
+            insurance_number = $17,
+            insurance_type = $18,
+            emergency_contact_name = $19,
+            emergency_contact_phone = $20,
+            emergency_contact_relation = $21,
             legal_status = COALESCE($22::jsonb, legal_status),
-            notes = COALESCE($23, notes),
+            notes = $23,
             clinical_warnings = CASE WHEN $24 THEN $25 ELSE clinical_warnings END,
             updated_at = now()
         WHERE id = $1"#,
     )
     .bind(patient_uuid)
-    .bind(body.title)
+    .bind(title)
     .bind(&first)
     .bind(&last)
-    .bind(body.phone_primary)
-    .bind(body.phone_secondary)
-    .bind(body.email)
-    .bind(body.nationality)
-    .bind(body.residence_country)
-    .bind(body.languages)
+    .bind(phone_primary)
+    .bind(phone_secondary)
+    .bind(email)
+    .bind(nationality)
+    .bind(residence_country)
+    .bind(languages)
     .bind(functional_labels)
-    .bind(body.address_street)
-    .bind(body.address_city)
-    .bind(body.address_zip)
-    .bind(body.address_country)
-    .bind(body.insurance_provider)
-    .bind(body.insurance_number)
-    .bind(body.insurance_type)
-    .bind(body.emergency_contact_name)
-    .bind(body.emergency_contact_phone)
-    .bind(body.emergency_contact_relation)
+    .bind(address_street)
+    .bind(address_city)
+    .bind(address_zip)
+    .bind(address_country)
+    .bind(insurance_provider)
+    .bind(insurance_number)
+    .bind(insurance_type)
+    .bind(emergency_contact_name)
+    .bind(emergency_contact_phone)
+    .bind(emergency_contact_relation)
     .bind(legal_status)
-    .bind(body.notes)
+    .bind(notes)
     .bind(clinical_warnings_supplied)
     .bind(clinical_warnings.flatten())
     .execute(&state.db)
@@ -2234,6 +2381,41 @@ fn normalize_optional_text(
         }
         None => Ok(None),
     }
+}
+
+#[allow(clippy::result_large_err)]
+fn normalize_patient_text_patch(
+    value: Option<Value>,
+    current: Option<String>,
+    field_name: &str,
+) -> Result<Option<String>, axum::response::Response> {
+    match value {
+        None => Ok(current),
+        Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) => {
+            let trimmed = value.trim();
+            Ok((!trimmed.is_empty()).then(|| trimmed.to_string()))
+        }
+        Some(_) => Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &format!("{field_name} must be a string or null"),
+        )),
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn normalize_patient_insurance_type_patch(
+    value: Option<Value>,
+    current: Option<String>,
+) -> Result<Option<String>, axum::response::Response> {
+    let normalized = normalize_patient_text_patch(value, current, "insurance_type")?;
+    if let Some(ref insurance_type) = normalized {
+        match insurance_type.as_str() {
+            "private" | "public" | "self_pay" | "foreign" => {}
+            _ => return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid insurance type")),
+        }
+    }
+    Ok(normalized)
 }
 
 #[allow(clippy::result_large_err)]
@@ -4438,32 +4620,10 @@ async fn get_patient_timeline(
           AND ($6::timestamptz IS NULL OR happened_at >= $6)
     "#;
 
-    let count_sql = format!(
-        "{events_cte}
-         SELECT COUNT(*) AS total
-         FROM events
-         {filter_clause}"
-    );
-    let total: i64 = sqlx::query_scalar(&count_sql)
-        .bind(patient_uuid)
-        .bind(entity_type)
-        .bind(category)
-        .bind(source)
-        .bind(&search_pattern)
-        .bind(range_cutoff)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to count patient timeline");
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to load patient timeline",
-            )
-        })?;
-
     let rows_sql = format!(
         "{events_cte}
-         SELECT entity_type, entity_id, title, category, status, happened_at, source_label
+         SELECT entity_type, entity_id, title, category, status, happened_at, source_label,
+                COUNT(*) OVER() AS total
          FROM events
          {filter_clause}
          ORDER BY happened_at DESC, entity_type, entity_id
@@ -4488,6 +4648,10 @@ async fn get_patient_timeline(
         )
     })?;
 
+    let total = rows
+        .first()
+        .and_then(|row| row.try_get::<i64, _>("total").ok())
+        .unwrap_or(0);
     let items = rows
         .into_iter()
         .map(|row| {

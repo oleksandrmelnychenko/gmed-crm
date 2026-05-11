@@ -1,5 +1,3 @@
-use std::path::Path as FsPath;
-
 use axum::{
     Json, Router,
     body::Body,
@@ -15,13 +13,12 @@ use uuid::Uuid;
 
 use crate::audit;
 use crate::auth::middleware::AuthUser;
+use crate::routes::documents::read_document_storage_bytes;
 use crate::routes::patients::{
     load_patient_document_alerts_summary, patient_document_alerts_payload,
 };
 use crate::state::AppState;
 use gmed_domain::role::Role;
-
-const DOCUMENT_UPLOAD_DIR: &str = "uploads/documents";
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -527,16 +524,23 @@ async fn download_my_document(
         .try_get::<Option<String>, _>("mime_type")
         .unwrap_or_default()
         .unwrap_or_else(|| "application/octet-stream".to_string());
+    let auto_name = row
+        .try_get::<String, _>("auto_name")
+        .unwrap_or_else(|_| "document".to_string());
     let filename = row
         .try_get::<Option<String>, _>("original_filename")
         .unwrap_or_default()
-        .unwrap_or_else(|| {
-            row.try_get::<String, _>("auto_name")
-                .unwrap_or_else(|_| "document".to_string())
-        });
+        .unwrap_or_else(|| auto_name.clone());
 
-    let path = FsPath::new(DOCUMENT_UPLOAD_DIR).join(storage_key);
-    let data = match tokio::fs::read(&path).await {
+    let data = match read_document_storage_bytes(
+        id,
+        storage_key.as_str(),
+        Some(mime_type.as_str()),
+        Some(filename.as_str()),
+        Some(auto_name.as_str()),
+    )
+    .await
+    {
         Ok(data) => data,
         Err(_) => return err(StatusCode::NOT_FOUND, "Document file not found on disk"),
     };

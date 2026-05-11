@@ -145,9 +145,9 @@ export function useAppointmentLinkedRecords({
           }
           endpoint = `/providers/${currentDetail.provider_id}`;
         } else if (linkedPreviewKind === "documents") {
-          endpoint = `/documents?appointment=${currentDetail.id}&patient=${currentDetail.patient_id}`;
+          endpoint = `/documents?appointment_id=${currentDetail.id}&patient_id=${currentDetail.patient_id}`;
         } else {
-          endpoint = `/cases?patient=${currentDetail.patient_id}`;
+          endpoint = `/cases?patient_id=${currentDetail.patient_id}`;
         }
 
         const payload = await apiFetch<unknown>(endpoint);

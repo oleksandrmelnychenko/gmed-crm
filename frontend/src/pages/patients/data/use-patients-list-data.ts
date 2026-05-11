@@ -135,39 +135,50 @@ export function usePatientsListData({
   }, [filters.providerId]);
 
   useEffect(() => {
-    if (!canViewPage) return;
+    if (!canViewPage) {
+      dispatchListState({
+        patients: [],
+        listBusy: false,
+        listError: "",
+      });
+      return;
+    }
 
-    let cancelled = false;
+    const controller = new AbortController();
+    const { signal } = controller;
 
-    void apiFetch<PatientSummary[]>(patientsPath)
+    dispatchListState({
+      listBusy: true,
+      listError: "",
+    });
+
+    void apiFetch<PatientSummary[]>(patientsPath, { signal })
       .then((items) => {
-        if (!cancelled) {
-          const filtered = filters.activeOnly === "false"
-            ? items.filter((patient) => !patient.is_active)
-            : filters.activeOnly === "true"
-              ? items.filter((patient) => patient.is_active)
-            : items;
-          startTransition(() => {
-            dispatchListState({
-              patients: filtered,
-              listError: "",
-              lastUpdated: new Date(),
-              listBusy: false,
-            });
-          });
-        }
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
+        if (signal.aborted) return;
+        const filtered = filters.activeOnly === "false"
+          ? items.filter((patient) => !patient.is_active)
+          : filters.activeOnly === "true"
+            ? items.filter((patient) => patient.is_active)
+          : items;
+        startTransition(() => {
           dispatchListState({
-            listError: error instanceof Error ? error.message : commonFailedLoad,
+            patients: filtered,
+            listError: "",
+            lastUpdated: new Date(),
             listBusy: false,
           });
-        }
+        });
+      })
+      .catch((error: unknown) => {
+        if (signal.aborted) return;
+        dispatchListState({
+          listError: error instanceof Error ? error.message : commonFailedLoad,
+          listBusy: false,
+        });
       });
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [canViewPage, commonFailedLoad, filters.activeOnly, listVersion, patientsPath]);
 

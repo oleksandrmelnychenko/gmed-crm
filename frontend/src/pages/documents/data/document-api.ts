@@ -1,4 +1,4 @@
-import { apiFetch, buildApiUrl, getAccessToken } from "@/lib/api";
+import { apiFetch, apiFetchFile } from "@/lib/api";
 
 import type {
   AppointmentOption,
@@ -57,14 +57,7 @@ function post(path: string) {
 }
 
 async function fetchDocumentBlob(id: string) {
-  const token = getAccessToken();
-  const response = await fetch(buildApiUrl(`/documents/${id}/download`), {
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-  });
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
-  }
-  return response;
+  return apiFetchFile(`/documents/${id}/download`);
 }
 
 function writePreviewWindow(previewWindow: Window | null, html?: string) {
@@ -86,8 +79,7 @@ function openBlobPreviewWindow(previewWindow: Window | null, blob: Blob) {
 }
 
 export async function downloadDocumentFile(id: string, filename: string) {
-  const response = await fetchDocumentBlob(id);
-  const blob = await response.blob();
+  const { blob } = await fetchDocumentBlob(id);
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -103,10 +95,9 @@ export async function openDocumentPreview(
   popupBlockedMessage: string,
   previewWindow?: Window | null,
 ) {
-  const response = await fetchDocumentBlob(id);
-  const contentType = response.headers.get("content-type") ?? "";
+  const { blob, contentType } = await fetchDocumentBlob(id);
   if (contentType.startsWith("text/html")) {
-    const html = await response.text();
+    const html = await blob.text();
     const opened = writePreviewWindow(
       previewWindow ?? window.open("", "_blank", "noopener,noreferrer"),
       html,
@@ -118,7 +109,6 @@ export async function openDocumentPreview(
     return;
   }
 
-  const blob = await response.blob();
   const opened = openBlobPreviewWindow(previewWindow ?? null, blob);
   if (!opened) {
     if (previewWindow) previewWindow.close();

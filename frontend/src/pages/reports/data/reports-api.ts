@@ -1,4 +1,4 @@
-import { apiFetch, buildApiUrl, getAccessToken } from "@/lib/api";
+import { apiFetch, apiFetchFile } from "@/lib/api";
 
 const REPORTS_WORKSPACE_CACHE_TTL_MS = 30_000;
 
@@ -19,24 +19,16 @@ export async function fetchReportsExport(
   selectedClinicId: string,
   exportError: string,
 ) {
-  const token = getAccessToken();
   const params = new URLSearchParams({ section });
   if ((section === "doctors" || section === "provider_costs") && selectedClinicId) {
     params.set("provider_id", selectedClinicId);
   }
 
-  const response = await fetch(buildApiUrl(`/stats/reports/export?${params.toString()}`), {
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  const { blob, filename } = await apiFetchFile(
+    `/stats/reports/export?${params.toString()}`,
+  ).catch((error) => {
+    throw error instanceof Error ? error : new Error(exportError);
   });
-  if (!response.ok) {
-    throw new Error((await response.text()) || exportError);
-  }
 
-  const blob = await response.blob();
-  const filename =
-    response.headers
-      .get("Content-Disposition")
-      ?.match(/filename="?([^";]+)"?/)?.[1] ?? `${section}.csv`;
-
-  return { blob, filename };
+  return { blob, filename: filename ?? `${section}.csv` };
 }

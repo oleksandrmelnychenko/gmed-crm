@@ -44,7 +44,6 @@ import {
   fetchAllowedPeers,
   fetchConversations,
   fetchPeerMessages,
-  getMessageAttachmentUrl,
   markPeerMessagesRead,
   openMessagesSocket,
   sendPeerMessage,
@@ -485,6 +484,7 @@ function useChatPageContent() {
 
     let socket: WebSocket | null = null;
     let reconnectTimer: number | null = null;
+    let connectTimer: number | null = null;
     let disposed = false;
 
     const connect = () => {
@@ -519,10 +519,11 @@ function useChatPageContent() {
       };
     };
 
-    connect();
+    connectTimer = window.setTimeout(connect, 0);
 
     return () => {
       disposed = true;
+      if (connectTimer !== null) window.clearTimeout(connectTimer);
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       socket?.close();
     };
@@ -661,6 +662,31 @@ function useChatPageContent() {
       t.chat_secure_attachment_peer_key_failed,
       t.chat_secure_attachment_unavailable,
     ],
+  );
+
+  const handleAttachmentDownload = useCallback(
+    async (message: Message) => {
+      if (!message.attachment_key) return;
+
+      setAttachmentBusyId(message.id);
+      try {
+        const bytes = await downloadMessageAttachmentBytes(message.attachment_key);
+        downloadBlob(
+          new Blob([bytes], {
+            type: message.attachment_mime ?? "application/octet-stream",
+          }),
+          message.attachment_filename ?? "attachment",
+        );
+        setSecureStatus(null);
+      } catch (error) {
+        setSecureStatus(
+          error instanceof Error ? error.message : t.chat_secure_operation_failed,
+        );
+      } finally {
+        setAttachmentBusyId(null);
+      }
+    },
+    [downloadBlob, t.chat_secure_operation_failed],
   );
 
   const handleKeyBackupFileChange = useCallback(
@@ -1018,9 +1044,6 @@ function useChatPageContent() {
                 const hasText = !!m.message?.trim();
                 const hasAttachment = !!m.attachment_key;
                 const isSecureAttachment = m.attachment_is_e2e ?? false;
-                const downloadUrl = m.attachment_key
-                  ? getMessageAttachmentUrl(m.attachment_key)
-                  : "";
                 const isImage =
                   !isSecureAttachment && (m.attachment_mime?.startsWith("image/") ?? false);
                 const readReceipt =
@@ -1051,31 +1074,25 @@ function useChatPageContent() {
                           </div>
                           <Download className="size-3.5 shrink-0 opacity-60" />
                         </button>
-                      ) : isImage ? (
-                        <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="mb-1">
-                          <img
-                            src={downloadUrl}
-                            alt={m.attachment_filename ?? ""}
-                            className="max-w-[240px] max-h-[200px] rounded-xl object-cover shadow-sm"
-                          />
-                        </a>
                       ) : (
-                        <a
-                          href={downloadUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
+                        <button
+                          type="button"
+                          onClick={() => void handleAttachmentDownload(m)}
+                          disabled={attachmentBusyId === m.id}
                           className={cn(
-                            "flex items-center gap-2.5 px-3 py-2 rounded-xl mb-1 max-w-[280px] transition-colors",
+                            "flex items-center gap-2.5 px-3 py-2 rounded-xl mb-1 max-w-[280px] transition-colors text-left disabled:opacity-60",
                             mine ? "bg-foreground/90 text-background" : "bg-muted"
                           )}
                         >
                           <FileText className="size-4 shrink-0" />
                           <div className="min-w-0 flex-1">
                             <p className="text-xs font-medium truncate">{m.attachment_filename}</p>
-                            <p className="text-[10px] opacity-70">{formatSize(m.attachment_size ?? 0)}</p>
+                            <p className="text-[10px] opacity-70">
+                              {isImage ? "Image" : "File"} - {formatSize(m.attachment_size ?? 0)}
+                            </p>
                           </div>
                           <Download className="size-3.5 shrink-0 opacity-60" />
-                        </a>
+                        </button>
                       ))}
                     {/* Text bubble */}
                     {hasText && (

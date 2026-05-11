@@ -1,4 +1,4 @@
-import { apiFetch, buildApiUrl, getAccessToken } from "@/lib/api";
+import { apiFetch, apiFetchFile } from "@/lib/api";
 
 import type {
   AccountingLedgerPayload,
@@ -22,16 +22,8 @@ function postJson<T>(path: string, payload: JsonPayload) {
 }
 
 async function fetchProtectedBlob(path: string) {
-  const token = getAccessToken();
-  const response = await fetch(buildApiUrl(path), {
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-  });
-
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
-  }
-
-  return response.blob();
+  const { blob } = await apiFetchFile(path);
+  return blob;
 }
 
 export async function fetchInvoiceLookups(

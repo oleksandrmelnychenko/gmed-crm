@@ -105,6 +105,17 @@ fn bearer(access_token: &str) -> String {
 }
 
 #[tokio::test]
+async fn missing_api_route_returns_json_not_found() {
+    let Some((app, _pool)) = test_context().await else {
+        return;
+    };
+
+    let (status, body) = json_request(&app, "GET", "/api/v1/no-such-route", None, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["error"], "not_found");
+}
+
+#[tokio::test]
 async fn logout_blacklists_current_access_token_and_revokes_family_refresh() {
     let Some((app, pool)) = test_context().await else {
         return;

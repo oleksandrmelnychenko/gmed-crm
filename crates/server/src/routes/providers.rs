@@ -564,23 +564,26 @@ async fn get_provider(
         }
     };
 
-    let doctors = match load_doctors_json(&state, provider_id).await {
+    let (doctors, services, linked_patients, interactions) = tokio::join!(
+        load_doctors_json(&state, provider_id),
+        load_services_json(&state, provider_id),
+        load_provider_patients_json(&state, provider_id, None),
+        load_provider_interactions_json(&state, provider_id, None),
+    );
+
+    let doctors = match doctors {
         Ok(items) => items,
         Err(resp) => return resp,
     };
-    let services = match load_services_json(&state, provider_id).await {
+    let services = match services {
         Ok(items) => items,
         Err(resp) => return resp,
     };
-    let linked_patients = match load_provider_patients_json(&state, provider_id, None).await {
+    let linked_patients = match linked_patients {
         Ok(items) => items,
         Err(resp) => return resp,
     };
-    let interactions = match load_provider_interactions_json(&state, provider_id, None).await {
-        Ok(items) => items,
-        Err(resp) => return resp,
-    };
-    let templates = match load_provider_templates_json(&state, provider_id).await {
+    let interactions = match interactions {
         Ok(items) => items,
         Err(resp) => return resp,
     };
@@ -608,7 +611,6 @@ async fn get_provider(
         "services": services,
         "linked_patients": linked_patients,
         "interactions": interactions,
-        "templates": templates,
     }))
     .into_response()
 }

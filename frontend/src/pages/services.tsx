@@ -253,6 +253,34 @@ function serviceSourceLabel(value: string, t: Translations) {
   return formatEnumLabelFromKeys(value, SERVICE_SOURCE_LABEL_KEYS, t);
 }
 
+function ServiceDetailField({
+  label,
+  value,
+  multiline = false,
+}: {
+  label: string;
+  value?: string | null;
+  multiline?: boolean;
+}) {
+  const displayValue = value?.trim() || "—";
+
+  return (
+    <div className="rounded-xl border border-border/70 bg-muted/20 p-3">
+      <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </div>
+      <div
+        className={cn(
+          "mt-1 text-sm text-foreground",
+          multiline ? "whitespace-pre-wrap leading-relaxed" : "truncate",
+        )}
+      >
+        {displayValue}
+      </div>
+    </div>
+  );
+}
+
 function buildServiceColumns(t: Translations): ColumnDef<StaffConciergeService>[] {
   return [
     {
@@ -360,7 +388,7 @@ function buildServiceColumns(t: Translations): ColumnDef<StaffConciergeService>[
       sortable: true,
       render: (row) => (
         <span className="truncate text-xs text-muted-foreground">
-          {row.vendor_name ?? "—"}
+          {row.vendor_name ?? t.common_not_set}
         </span>
       ),
     },
@@ -373,7 +401,7 @@ function buildServiceColumns(t: Translations): ColumnDef<StaffConciergeService>[
       sortable: true,
       render: (row) => (
         <span className="truncate font-mono text-[11px] text-muted-foreground tabular-nums">
-          {row.booking_reference ?? "—"}
+          {row.booking_reference ?? t.common_not_set}
         </span>
       ),
     },
@@ -387,10 +415,10 @@ function buildServiceColumns(t: Translations): ColumnDef<StaffConciergeService>[
       render: (row) => {
         const start = row.starts_at ? formatPortalDateTime(row.starts_at) : null;
         const end = row.ends_at ? formatPortalDateTime(row.ends_at) : null;
-        const schedule = [start, end].filter(Boolean).join(" – ");
+        const schedule = [start, end].filter(Boolean).join(" - ");
         return (
           <span className="truncate text-xs tabular-nums text-muted-foreground">
-            {schedule || "—"}
+            {schedule || t.common_not_set}
           </span>
         );
       },
@@ -406,7 +434,7 @@ function buildServiceColumns(t: Translations): ColumnDef<StaffConciergeService>[
         const cost = row.actual_cost ?? row.cost_estimate;
         return (
           <span className="truncate text-xs tabular-nums text-foreground">
-            {cost ? formatPortalCurrency(cost) : "—"}
+            {cost ? formatPortalCurrency(cost) : t.common_not_set}
           </span>
         );
       },
@@ -420,7 +448,7 @@ function buildServiceColumns(t: Translations): ColumnDef<StaffConciergeService>[
       sortable: true,
       render: (row) => (
         <span className="truncate text-xs text-muted-foreground">
-          {row.assigned_concierge_name ?? "—"}
+          {row.assigned_concierge_name ?? t.common_not_set}
         </span>
       ),
     },
@@ -440,6 +468,7 @@ type StaffServicesPageState = {
   density: DensityLevel;
   hiddenColumns: string[];
   frozenColumns: string[];
+  selectedServiceId: string | null;
   patients: PatientOption[];
   providers: ProviderOption[];
   conciergeStaff: StaffOption[];
@@ -485,6 +514,7 @@ const STAFF_SERVICES_INITIAL_STATE: StaffServicesPageState = {
   density: "compact",
   hiddenColumns: [],
   frozenColumns: DEFAULT_FROZEN_COLUMNS,
+  selectedServiceId: null,
   patients: [],
   providers: [],
   conciergeStaff: [],
@@ -530,6 +560,10 @@ function staffServicesPageReducer(
       return {
         ...state,
         items: action.items,
+        selectedServiceId:
+          state.selectedServiceId && action.items.some((item) => item.id === state.selectedServiceId)
+            ? state.selectedServiceId
+            : null,
         error: "",
         loading: false,
         refreshing: false,
@@ -595,6 +629,7 @@ function useStaffServicesPageContent() {
       density,
       hiddenColumns,
       frozenColumns,
+      selectedServiceId,
       patients,
       providers,
       conciergeStaff,
@@ -625,6 +660,8 @@ function useStaffServicesPageContent() {
     setStaffServicesField("hiddenColumns", value);
   const setFrozenColumns = (value: SetStateAction<string[]>) =>
     setStaffServicesField("frozenColumns", value);
+  const setSelectedServiceId = (value: SetStateAction<string | null>) =>
+    setStaffServicesField("selectedServiceId", value);
   const setCreateOpen = (value: SetStateAction<boolean>) =>
     setStaffServicesField("createOpen", value);
   const setCreateBusy = (value: SetStateAction<boolean>) =>
@@ -673,6 +710,10 @@ function useStaffServicesPageContent() {
     () => patients.find((patient) => patient.id === createForm.patientId) ?? null,
     [createForm.patientId, patients],
   );
+  const selectedService = useMemo(
+    () => items.find((item) => item.id === selectedServiceId) ?? null,
+    [items, selectedServiceId],
+  );
 
   const openCreateSheet = useCallback(() => {
     setCreateError("");
@@ -686,6 +727,14 @@ function useStaffServicesPageContent() {
     setCreateBusy(false);
     setCreateForm(blankCreateServiceForm(defaultConciergeId));
   }, [defaultConciergeId]);
+
+  const openServiceDetail = useCallback((service: StaffConciergeService) => {
+    setSelectedServiceId(service.id);
+  }, []);
+
+  const closeServiceDetail = useCallback(() => {
+    setSelectedServiceId(null);
+  }, []);
 
   const handleColumnFreezeChange = useCallback((columnId: string, frozen: boolean) => {
     if (frozen) {
@@ -926,7 +975,7 @@ function useStaffServicesPageContent() {
       <div className="relative z-30 flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-1.5">
           <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -tranzinc-y-1/2 text-muted-foreground" />
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -1053,9 +1102,64 @@ function useStaffServicesPageContent() {
           }
           density={density}
           rowId={(row) => row.id}
+          activeRowId={selectedServiceId}
+          onRowClick={openServiceDetail}
           className="min-h-[480px]"
         />
       )}
+
+      <Sheet open={Boolean(selectedService)} onOpenChange={(open) => (!open ? closeServiceDetail() : undefined)}>
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
+          {selectedService ? (
+            <AdminSheetScaffold
+              title={selectedService.title}
+              description={`${selectedService.patient_name} · ${serviceKindLabel(selectedService.service_kind, t)}`}
+              bodyClassName="space-y-4 px-5 py-4"
+            >
+              <Section title={t.staff_services_create_section_service}>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <ServiceDetailField label={t.staff_services_column_status} value={serviceStatusLabel(selectedService.status, t)} />
+                  <ServiceDetailField label={t.staff_services_column_billing} value={billingStatusLabel(selectedService.billing_status, t)} />
+                  <ServiceDetailField label={t.staff_services_column_patient} value={`${selectedService.patient_name} (${selectedService.patient_pid})`} />
+                  <ServiceDetailField label={t.staff_services_column_source} value={serviceSourceLabel(selectedService.request_source, t)} />
+                </div>
+              </Section>
+
+              <Section title={t.staff_services_create_section_schedule}>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <ServiceDetailField label={t.staff_services_form_start} value={selectedService.starts_at ? formatPortalDateTime(selectedService.starts_at) : null} />
+                  <ServiceDetailField label={t.staff_services_form_end} value={selectedService.ends_at ? formatPortalDateTime(selectedService.ends_at) : null} />
+                </div>
+              </Section>
+
+              <Section title={t.staff_services_create_section_assignment}>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <ServiceDetailField label={t.staff_services_form_provider} value={selectedService.provider_name} />
+                  <ServiceDetailField label={t.staff_services_form_concierge} value={selectedService.assigned_concierge_name} />
+                </div>
+              </Section>
+
+              <Section title={t.staff_services_create_section_finance}>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <ServiceDetailField label={t.staff_services_form_cost_estimate} value={selectedService.cost_estimate ? formatPortalCurrency(selectedService.cost_estimate) : null} />
+                  <ServiceDetailField label={t.staff_services_form_actual_cost} value={selectedService.actual_cost ? formatPortalCurrency(selectedService.actual_cost) : null} />
+                  <ServiceDetailField label={t.staff_services_form_currency} value={selectedService.currency} />
+                </div>
+              </Section>
+
+              <Section title={t.staff_services_create_section_vendor_notes}>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <ServiceDetailField label={t.staff_services_form_booking_reference} value={selectedService.booking_reference} />
+                  <ServiceDetailField label={t.staff_services_form_vendor} value={selectedService.vendor_name} />
+                  <ServiceDetailField label={t.staff_services_form_vendor_contact} value={selectedService.vendor_contact} />
+                  <ServiceDetailField label={t.staff_services_form_service_notes} value={selectedService.service_notes} multiline />
+                  <ServiceDetailField label={t.staff_services_form_billing_notes} value={selectedService.billing_notes} multiline />
+                </div>
+              </Section>
+            </AdminSheetScaffold>
+          ) : null}
+        </SheetContent>
+      </Sheet>
 
       <Sheet open={createOpen} onOpenChange={(open) => (open ? setCreateOpen(true) : closeCreateSheet())}>
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[760px]">

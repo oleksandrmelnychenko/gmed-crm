@@ -1328,6 +1328,7 @@ function usePatientDetailPageContent() {
     orders,
     relations,
     servicePackages,
+    tabError,
     tabLoading,
     timeline,
     timelineTotal,
@@ -2299,6 +2300,8 @@ function usePatientDetailPageContent() {
         onCreateRelation={openCreateRelation}
         onDeleteRelation={(relationId) => { void handleDeleteRelation(relationId); }}
         onDocsPreviewOpenChange={setDocsPreviewOpen}
+        onDocumentCategoryFilterChange={setDocumentCategoryFilter}
+        onDocumentStatusFilterChange={setDocumentStatusFilter}
         onEditContractStatus={openContractStatusEditor}
         onEditRelation={openEditRelation}
         onInvoicesPreviewOpenChange={setInvoicesPreviewOpen}
@@ -2393,6 +2396,7 @@ function usePatientDetailPageContent() {
         statusBadgeClasses={STATUS_BADGE_CLASSES}
         t={t}
         tabActionError={tabActionError}
+        tabError={tabError}
         tabLoading={tabLoading}
         timeline={timeline}
         timelineCategoryFilter={timelineCategoryFilter}

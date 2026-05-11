@@ -1,6 +1,11 @@
 import { createContext, use, useEffect, useReducer, type ReactNode } from "react";
 
-import { buildApiUrl, clearApiCache } from "@/lib/api";
+import {
+  AUTH_SESSION_EXPIRED_EVENT,
+  buildApiUrl,
+  clearApiCache,
+  fetchWithApiTimeout,
+} from "@/lib/api";
 import { clearSecurePersistedState } from "@/lib/secure-persist";
 
 export interface User {
@@ -16,8 +21,10 @@ interface AuthContextValue {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
-  checkPending: (pendingId: string) => Promise<"pending" | "approved" | "rejected">;
+  checkPending: (pendingId: string) => Promise<PendingLoginStatus>;
 }
+
+type PendingLoginStatus = "pending" | "approved" | "rejected" | "error";
 
 interface AuthTokens {
   access_token: string;
@@ -121,7 +128,7 @@ async function fetchJson<T>(
     headers.set("Authorization", `Bearer ${accessToken}`);
   }
 
-  const response = await fetch(buildApiUrl(path), {
+  const response = await fetchWithApiTimeout(buildApiUrl(path), {
     ...init,
     headers,
   });
@@ -218,6 +225,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  useEffect(() => {
+    const handleSessionExpired = () => {
+      clearTokens();
+      dispatchAuthState({ user: null, loading: false });
+    };
+
+    window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, handleSessionExpired);
+    return () => {
+      window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, handleSessionExpired);
+    };
+  }, []);
+
   const login = async (email: string, password: string) => {
     const result = await fetchJson<AuthTokens | PendingLoginResponse>("/auth/login", {
       method: "POST",
@@ -233,7 +252,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     dispatchAuthState({ user: me });
   };
 
-  const checkPending = async (pendingId: string): Promise<"pending" | "approved" | "rejected"> => {
+  const checkPending = async (pendingId: string): Promise<PendingLoginStatus> => {
     try {
       const result = await fetchJson<{ status: string; access_token?: string; refresh_token?: string }>(
         `/auth/pending/${pendingId}`,
@@ -248,7 +267,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (result.status === "rejected") return "rejected";
       return "pending";
     } catch {
-      return "pending";
+      return "error";
     }
   };
 
@@ -256,7 +275,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const accessToken = getAccessToken();
 
     try {
-      await fetch(buildApiUrl("/auth/logout"), {
+      await fetchWithApiTimeout(buildApiUrl("/auth/logout"), {
         method: "POST",
         headers: accessToken
           ? { Authorization: `Bearer ${accessToken}` }

@@ -163,12 +163,19 @@ async fn delete_field(
         return e;
     }
 
-    let _ = sqlx::query!(
-        "UPDATE custom_fields SET is_active = false WHERE id = $1",
-        id
-    )
+    match sqlx::query("UPDATE custom_fields SET is_active = false WHERE id = $1 AND is_active = true")
+        .bind(id)
     .execute(&state.db)
-    .await;
+    .await
+    {
+        Ok(result) if result.rows_affected() > 0 => {}
+        Ok(_) => return err(StatusCode::NOT_FOUND, "Field not found"),
+        Err(e) => {
+            tracing::error!(error = %e, "delete custom field");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    }
+
     state.audit_sender.try_send(audit::domain_event(
         "delete_custom_field",
         Some(auth.user_id),
@@ -248,7 +255,7 @@ async fn set_values(
     }
 
     for fv in &body.values {
-        let _ = sqlx::query!(
+        if let Err(e) = sqlx::query!(
             "INSERT INTO custom_field_values (field_id, entity_id, value) VALUES ($1, $2, $3)
              ON CONFLICT (field_id, entity_id) DO UPDATE SET value = $3, updated_at = now()",
             fv.field_id,
@@ -256,7 +263,11 @@ async fn set_values(
             fv.value
         )
         .execute(&state.db)
-        .await;
+        .await
+        {
+            tracing::error!(error = %e, field_id = %fv.field_id, entity_id = %entity_id, "set custom field value");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
     }
 
     Json(serde_json::json!({"ok": true})).into_response()

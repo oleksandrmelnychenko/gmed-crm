@@ -50,10 +50,10 @@ const AUTH_BURST: u32 = 10;
 const AUTH_REFILL: Duration = Duration::from_secs(6);
 
 /// Allowed general request burst.
-const GENERAL_BURST: u32 = 100;
+const GENERAL_BURST: u32 = 600;
 /// Refill interval for the general bucket — one token every 600 ms gives
 /// a steady-state of 100 requests per minute after the initial burst.
-const GENERAL_REFILL: Duration = Duration::from_millis(600);
+const GENERAL_REFILL: Duration = Duration::from_millis(100);
 
 fn limiter_disabled_for_e2e() -> bool {
     std::env::var("ENABLE_E2E_SUPPORT")

@@ -38,7 +38,7 @@ const HorizontalBarsChart = lazy(async () => {
       labelWidth: number;
     }) {
       return (
-        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={height}>
+        <ResponsiveContainer width="100%" height={height}>
           <BarChart
             data={data}
             layout="vertical"
@@ -97,7 +97,7 @@ const MiniDonutChart = lazy(async () => {
       palette: string[];
     }) {
       return (
-        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={height}>
+        <ResponsiveContainer width="100%" height={height}>
           <PieChart>
             <Pie
               data={data}

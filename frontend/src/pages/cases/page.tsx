@@ -1659,7 +1659,8 @@ function useCasesPageContent({
   );
 
   const startSnippetLoad = useCallback(() => {
-    startSnippetLoad();
+    setSnippetsBusy(true);
+    setSnippetsError("");
   }, []);
 
   const finishSnippetLoad = useCallback(() => {

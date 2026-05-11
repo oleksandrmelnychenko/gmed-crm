@@ -301,6 +301,8 @@ type PatientDetailWorkspaceContentProps = {
   onCreateRelation: () => void;
   onDeleteRelation: (relationId: string) => void;
   onDocsPreviewOpenChange: (open: boolean) => void;
+  onDocumentCategoryFilterChange: (value: string) => void;
+  onDocumentStatusFilterChange: (value: string) => void;
   onEditContractStatus: (contract: ContractItem) => void;
   onEditRelation: (relation: RelationItem) => void;
   onInvoicesPreviewOpenChange: (open: boolean) => void;
@@ -362,6 +364,7 @@ type PatientDetailWorkspaceContentProps = {
   statusBadgeClasses: Record<string, string>;
   t: Translations;
   tabActionError: string;
+  tabError: string;
   tabLoading: boolean;
   timeline: PatientTimelineItem[];
   timelineCategoryFilter: string;
@@ -494,6 +497,8 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     onCreateRelation,
     onDeleteRelation,
     onDocsPreviewOpenChange,
+    onDocumentCategoryFilterChange,
+    onDocumentStatusFilterChange,
     onEditContractStatus,
     onEditRelation,
     onInvoicesPreviewOpenChange,
@@ -555,6 +560,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     statusBadgeClasses,
     t,
     tabActionError,
+    tabError,
     tabLoading,
     timeline,
     timelineCategoryFilter,
@@ -652,9 +658,9 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
           </TabsList>
         </div>
 
-        {tabActionError ? (
+        {tabActionError || tabError ? (
           <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-            {tabActionError}
+            {tabActionError || tabError}
           </div>
         ) : null}
 
@@ -831,8 +837,8 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               hasDocumentFilters={hasDocumentFilters}
               documentStatusFilter={documentStatusFilter}
               documentCategoryFilter={documentCategoryFilter}
-              onDocumentStatusFilterChange={onTimelineEntityFilterChange}
-              onDocumentCategoryFilterChange={onTimelineCategoryFilterChange}
+              onDocumentStatusFilterChange={onDocumentStatusFilterChange}
+              onDocumentCategoryFilterChange={onDocumentCategoryFilterChange}
               onResetDocumentFilters={onResetDocumentFilters}
               canManageDocuments={canManageDocuments}
               onOpenUpload={onOpenUpload}

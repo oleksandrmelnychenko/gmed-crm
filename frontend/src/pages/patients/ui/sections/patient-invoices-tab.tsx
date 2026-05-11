@@ -24,7 +24,7 @@ import {
   selectClass,
   textareaClass,
 } from "@/components/ui-shell";
-import { apiFetch, buildApiUrl, getAccessToken } from "@/lib/api";
+import { apiFetch, downloadApiFile } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -220,25 +220,10 @@ function moneyNumeric(value?: string | null) {
 }
 
 async function downloadPatientLedgerExport(patientId: string, query: URLSearchParams) {
-  const token = getAccessToken();
-  const response = await fetch(
-    buildApiUrl(`/patients/${patientId}/financial-ledger/export?${query.toString()}`),
-    {
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    },
+  await downloadApiFile(
+    `/patients/${patientId}/financial-ledger/export?${query.toString()}`,
+    `patient-profitability-${patientId}.csv`,
   );
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
-  }
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `patient-profitability-${patientId}.csv`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
 }
 
 function usePatientInvoicesTabContent({

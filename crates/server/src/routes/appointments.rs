@@ -2540,22 +2540,32 @@ async fn load_recurring_series_lineage_history(
                GROUP BY recurrence_series_id
            ),
            ancestors AS (
-               SELECT series_id, parent_series_id, 0 AS depth
+               SELECT series_id, parent_series_id, 0 AS depth, ARRAY[series_id] AS path
                FROM series_stats
                WHERE series_id = $1
                UNION ALL
-               SELECT parent.series_id, parent.parent_series_id, ancestors.depth - 1
+               SELECT parent.series_id,
+                      parent.parent_series_id,
+                      ancestors.depth - 1,
+                      ancestors.path || parent.series_id
                FROM ancestors
                JOIN series_stats parent ON parent.series_id = ancestors.parent_series_id
+               WHERE NOT parent.series_id = ANY(ancestors.path)
+                 AND ancestors.depth > -32
            ),
            descendants AS (
-               SELECT series_id, parent_series_id, 0 AS depth
+               SELECT series_id, parent_series_id, 0 AS depth, ARRAY[series_id] AS path
                FROM series_stats
                WHERE series_id = $1
                UNION ALL
-               SELECT child.series_id, child.parent_series_id, descendants.depth + 1
+               SELECT child.series_id,
+                      child.parent_series_id,
+                      descendants.depth + 1,
+                      descendants.path || child.series_id
                FROM descendants
                JOIN series_stats child ON child.parent_series_id = descendants.series_id
+               WHERE NOT child.series_id = ANY(descendants.path)
+                 AND descendants.depth < 32
            ),
            related AS (
                SELECT series_id, MIN(depth) AS depth

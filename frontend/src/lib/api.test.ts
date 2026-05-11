@@ -1,21 +1,35 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 function setWindowOrigin(origin: string) {
+  const events = new EventTarget();
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: {
       location: {
         origin,
       },
+      addEventListener: events.addEventListener.bind(events),
+      removeEventListener: events.removeEventListener.bind(events),
+      dispatchEvent: events.dispatchEvent.bind(events),
     },
   });
 }
 
-function setAccessToken(token: string | null = null) {
+function setTokenStorage(accessToken: string | null = null, refreshToken: string | null = null) {
+  const values = new Map<string, string>();
+  if (accessToken) values.set("gmed_access_token", accessToken);
+  if (refreshToken) values.set("gmed_refresh_token", refreshToken);
+
   Object.defineProperty(globalThis, "localStorage", {
     configurable: true,
     value: {
-      getItem: vi.fn(() => token),
+      getItem: vi.fn((key: string) => values.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => {
+        values.set(key, value);
+      }),
+      removeItem: vi.fn((key: string) => {
+        values.delete(key);
+      }),
     },
   });
 }
@@ -27,6 +41,7 @@ async function loadApiModule(apiOrigin = "") {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   vi.resetModules();
@@ -73,7 +88,7 @@ describe("API URL builders", () => {
 describe("API request deduplication and cache", () => {
   it("deduplicates concurrent GET requests for the same URL", async () => {
     setWindowOrigin("http://app.local:4173");
-    setAccessToken("token-a");
+    setTokenStorage("token-a");
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), { status: 200 }),
     );
@@ -92,7 +107,7 @@ describe("API request deduplication and cache", () => {
 
   it("uses short-lived GET cache and clears it after a mutation", async () => {
     setWindowOrigin("http://app.local:4173");
-    setAccessToken("token-a");
+    setTokenStorage("token-a");
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -131,5 +146,84 @@ describe("API request deduplication and cache", () => {
     expect(first.version).toBe(1);
     expect(cached.version).toBe(1);
     expect(afterMutation.version).toBe(2);
+  });
+});
+
+describe("API error handling", () => {
+  it("rejects stalled requests with a timeout error", async () => {
+    vi.useFakeTimers();
+    setWindowOrigin("http://app.local:4173");
+    setTokenStorage("token-a");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: string, init?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("Aborted", "AbortError"));
+          });
+        }),
+      ),
+    );
+
+    const { apiFetch } = await loadApiModule();
+    const request = apiFetch<{ ok: boolean }>("/slow", { timeoutMs: 25 });
+    const assertion = expect(request).rejects.toMatchObject({
+      name: "ApiRequestError",
+      code: "timeout",
+    });
+    await vi.advanceTimersByTimeAsync(25);
+
+    await assertion;
+  });
+
+  it("surfaces HTTP status and error code for server errors", async () => {
+    setWindowOrigin("http://app.local:4173");
+    setTokenStorage("token-a");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "internal", message: "Failed" }), {
+          status: 500,
+          statusText: "Internal Server Error",
+        }),
+      ),
+    );
+
+    const { apiFetch } = await loadApiModule();
+
+    await expect(apiFetch("/meta")).rejects.toMatchObject({
+      name: "ApiRequestError",
+      status: 500,
+      code: "internal",
+      message: "Failed",
+    });
+  });
+
+  it("clears tokens and emits session-expired when refresh fails after a 401", async () => {
+    setWindowOrigin("http://app.local:4173");
+    setTokenStorage("stale-access", "stale-refresh");
+    const sessionExpired = vi.fn();
+    window.addEventListener("gmed:auth-session-expired", sessionExpired);
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ error: "invalid_token" }), { status: 401 }),
+        ),
+    );
+
+    const { apiFetch } = await loadApiModule();
+
+    await expect(apiFetch("/me")).rejects.toMatchObject({
+      status: 401,
+      code: "unauthorized",
+    });
+    expect(localStorage.removeItem).toHaveBeenCalledWith("gmed_access_token");
+    expect(localStorage.removeItem).toHaveBeenCalledWith("gmed_refresh_token");
+    expect(sessionExpired).toHaveBeenCalledTimes(1);
   });
 });

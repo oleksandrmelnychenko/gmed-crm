@@ -194,6 +194,24 @@ const AdminAnnouncementsPage = lazy(() =>
   })),
 );
 
+function NotFoundPage() {
+  return (
+    <div className="flex min-h-[calc(100vh-3rem)] items-center justify-center px-6">
+      <div className="max-w-lg rounded-3xl border border-border bg-card p-8 text-center shadow-sm">
+        <p className="text-sm font-semibold uppercase tracking-[0.28em] text-muted-foreground">
+          404
+        </p>
+        <h1 className="mt-3 text-2xl font-semibold text-foreground">
+          Page not found
+        </h1>
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">
+          This route does not exist or is not available for the current session.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <LocalizationProvider dateAdapter={AdapterDayjs}>
@@ -240,6 +258,7 @@ export default function App() {
                     <Route path="admin/notifications" element={<AdminNotificationsPage />} />
                     <Route path="admin/custom-fields" element={<AdminCustomFieldsPage />} />
                     <Route path="admin/announcements" element={<AdminAnnouncementsPage />} />
+                    <Route path="*" element={<NotFoundPage />} />
                   </Route>
                 </Routes>
               </Suspense>

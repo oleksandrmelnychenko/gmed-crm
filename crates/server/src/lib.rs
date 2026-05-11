@@ -16,7 +16,18 @@ pub mod settings;
 pub mod state;
 pub mod telemetry;
 
-use axum::{Router, middleware};
+use axum::{Json, Router, http::StatusCode, middleware, response::IntoResponse};
+use serde_json::json;
+
+async fn api_not_found() -> impl IntoResponse {
+    (
+        StatusCode::NOT_FOUND,
+        Json(json!({
+            "error": "not_found",
+            "message": "API route not found",
+        })),
+    )
+}
 
 /// Build the full application router (for tests and main).
 ///
@@ -62,9 +73,11 @@ pub fn build_app(app_state: state::AppState) -> Router {
             )),
     );
 
+    let api_router = auth_public.merge(misc_public).merge(protected).fallback(api_not_found);
+
     let router = Router::new()
         .merge(routes::health::router())
-        .nest("/api/v1", auth_public.merge(misc_public).merge(protected))
+        .nest("/api/v1", api_router)
         .with_state(app_state);
 
     security_headers::apply(router)

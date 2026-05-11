@@ -171,8 +171,8 @@ function AppointmentWorkflowOverviewSection({
   return (
     <Section
       title={appointmentText(
-        "Operativer Гњberblick",
-        "РћРїРµСЂР°С†РёРѕРЅРЅС‹Р№ РѕР±Р·РѕСЂ",
+        "Operativer Überblick",
+        "Операционный обзор",
         "Operational overview",
       )}
       accessory={<CountBadge>{workflowSummary.openIssueCount}</CountBadge>}
@@ -181,46 +181,46 @@ function AppointmentWorkflowOverviewSection({
         <StatCard
           label={appointmentText(
             "Offene Punkte",
-            "РћС‚РєСЂС‹С‚С‹Рµ РїСѓРЅРєС‚С‹",
+            "Открытые пункты",
             "Open issues",
           )}
           value={workflowSummary.openIssueCount}
           description={appointmentText(
             "Checklisten, Reminder und Aufgaben mit offener Nachverfolgung.",
-            "Р§РµРє-Р»РёСЃС‚С‹, РЅР°РїРѕРјРёРЅР°РЅРёСЏ Рё Р·Р°РґР°С‡Рё СЃ РѕС‚РєСЂС‹С‚С‹Рј follow-up.",
+            "Чек-листы, напоминания и задачи с открытым follow-up.",
             "Checklist, reminder and task items still requiring follow-up.",
           )}
         />
         <StatCard
           label={appointmentText(
             "Checklisten-Fortschritt",
-            "РџСЂРѕРіСЂРµСЃСЃ С‡РµРє-Р»РёСЃС‚Р°",
+            "Прогресс чек-листа",
             "Checklist progress",
           )}
           value={checklistProgressValue}
           description={appointmentText(
             "Abgeschlossene gegen alle appointment-gebundenen Schritte.",
-            "Р—Р°РІРµСЂС€С‘РЅРЅС‹Рµ РїСЂРѕС‚РёРІ РІСЃРµС… С€Р°РіРѕРІ, РїСЂРёРІСЏР·Р°РЅРЅС‹С… Рє РїСЂРёС‘РјСѓ.",
+            "Завершённые против всех шагов, привязанных к приёму.",
             "Completed versus total appointment-bound workflow steps.",
           )}
         />
         <StatCard
           label={appointmentText(
             "Follow-up-Warteschlange",
-            "РћС‡РµСЂРµРґСЊ follow-up",
+            "Очередь follow-up",
             "Follow-up queue",
           )}
           value={workflowSummary.followUpQueueCount}
           description={appointmentText(
             "Offene Aufgaben plus ausstehende Erinnerungen.",
-            "РћС‚РєСЂС‹С‚С‹Рµ Р·Р°РґР°С‡Рё РїР»СЋСЃ РѕР¶РёРґР°СЋС‰РёРµ РЅР°РїРѕРјРёРЅР°РЅРёСЏ.",
+            "Открытые задачи плюс ожидающие напоминания.",
             "Open tasks plus pending reminders.",
           )}
         />
         <StatCard
           label={appointmentText(
             "Dolmetscher-Gate",
-            "Р“РµР№С‚ РїРµСЂРµРІРѕРґС‡РёРєР°",
+            "Гейт переводчика",
             "Interpreter gate",
           )}
           value={interpreterGateValue}
@@ -234,7 +234,7 @@ function AppointmentWorkflowOverviewSection({
             <p className="font-medium">
               {appointmentText(
                 "Vor dem Abschluss bleiben noch operative Blocker offen.",
-                "РџРµСЂРµРґ Р·Р°РєСЂС‹С‚РёРµРј РѕСЃС‚Р°СЋС‚СЃСЏ РѕС‚РєСЂС‹С‚С‹Рµ РѕРїРµСЂР°С†РёРѕРЅРЅС‹Рµ Р±Р»РѕРєРµСЂС‹.",
+                "Перед закрытием остаются открытые операционные блокеры.",
                 "Operational blockers remain before closure.",
               )}
             </p>
@@ -1386,10 +1386,10 @@ function AppointmentCompletionReadinessGrid({
         label={casesStatusLabel}
         value={
           openChecklistCount === 0
-            ? appointmentText("Bereit", "Р“РѕС‚РѕРІРѕ", "Ready")
+            ? appointmentText("Bereit", "Готово", "Ready")
             : appointmentText(
                 `${openChecklistCount} offen`,
-                `${openChecklistCount} РѕС‚РєСЂС‹С‚Рѕ`,
+                `${openChecklistCount} открыто`,
                 `${openChecklistCount} open`,
               )
         }
@@ -1397,24 +1397,24 @@ function AppointmentCompletionReadinessGrid({
           openChecklistCount === 0
             ? appointmentText(
                 "Keine offenen Checklistenpunkte.",
-                "РќРµС‚ РѕС‚РєСЂС‹С‚С‹С… РїСѓРЅРєС‚РѕРІ С‡РµРє-Р»РёСЃС‚Р°.",
+                "Нет открытых пунктов чек-листа.",
                 "No pending checklist items.",
               )
             : appointmentText(
-                "Offene Vorbereitungs- oder Follow-up-Schritte zuerst abschlieГџen.",
-                "РЎРЅР°С‡Р°Р»Р° Р·Р°РєСЂРѕР№С‚Рµ РѕС‚РєСЂС‹С‚С‹Рµ РїРѕРґРіРѕС‚РѕРІРёС‚РµР»СЊРЅС‹Рµ РёР»Рё follow-up С€Р°РіРё.",
+                "Offene Vorbereitungs- oder Follow-up-Schritte zuerst abschließen.",
+                "Сначала закройте открытые подготовительные или follow-up шаги.",
                 "Finish outstanding preparation or follow-up steps.",
               )
         }
       />
       <ContextCard
-        label={appointmentText("Aufgaben", "Р—Р°РґР°С‡Рё", "Tasks")}
+        label={appointmentText("Aufgaben", "Задачи", "Tasks")}
         value={
           openTaskCount === 0
-            ? appointmentText("Bereit", "Р“РѕС‚РѕРІРѕ", "Ready")
+            ? appointmentText("Bereit", "Готово", "Ready")
             : appointmentText(
                 `${openTaskCount} offen`,
-                `${openTaskCount} РѕС‚РєСЂС‹С‚Рѕ`,
+                `${openTaskCount} открыто`,
                 `${openTaskCount} open`,
               )
         }
@@ -1422,33 +1422,33 @@ function AppointmentCompletionReadinessGrid({
           openTaskCount === 0
             ? appointmentText(
                 "Keine offenen operativen Aufgaben.",
-                "РќРµС‚ РѕС‚РєСЂС‹С‚С‹С… РѕРїРµСЂР°С†РёРѕРЅРЅС‹С… Р·Р°РґР°С‡.",
+                "Нет открытых операционных задач.",
                 "No open operational tasks.",
               )
             : appointmentText(
-                "Aktive PM-, Dolmetscher- oder Concierge-Aufgaben noch abschlieГџen.",
-                "РќСѓР¶РЅРѕ Р·Р°РєСЂС‹С‚СЊ Р°РєС‚РёРІРЅС‹Рµ Р·Р°РґР°С‡Рё PM, РїРµСЂРµРІРѕРґС‡РёРєР° РёР»Рё concierge.",
+                "Aktive PM-, Dolmetscher- oder Concierge-Aufgaben noch abschließen.",
+                "Нужно закрыть активные задачи PM, переводчика или concierge.",
                 "Resolve active PM, interpreter or concierge tasks.",
               )
         }
       />
       <ContextCard
-        label={appointmentText("Erinnerungen", "РќР°РїРѕРјРёРЅР°РЅРёСЏ", "Reminders")}
+        label={appointmentText("Erinnerungen", "Напоминания", "Reminders")}
         value={appointmentText(
           `${pendingReminderCount} ausstehend`,
-          `${pendingReminderCount} РѕР¶РёРґР°РµС‚`,
+          `${pendingReminderCount} ожидает`,
           `${pendingReminderCount} pending`,
         )}
         meta={
           pendingReminderCount === 0
             ? appointmentText(
                 "Keine offenen Erinnerungen.",
-                "РќРµС‚ РѕС‚РєСЂС‹С‚С‹С… РЅР°РїРѕРјРёРЅР°РЅРёР№.",
+                "Нет открытых напоминаний.",
                 "No outstanding reminders.",
               )
             : appointmentText(
                 "Offene Erinnerungen bleiben auch nach dem Abschluss aktiv.",
-                "РћР¶РёРґР°СЋС‰РёРµ РЅР°РїРѕРјРёРЅР°РЅРёСЏ РѕСЃС‚Р°СЋС‚СЃСЏ Р°РєС‚РёРІРЅС‹РјРё Рё РїРѕСЃР»Рµ Р·Р°РєСЂС‹С‚РёСЏ.",
+                "Ожидающие напоминания остаются активными и после закрытия.",
                 "Pending reminders stay active after closure.",
               )
         }
@@ -1457,23 +1457,23 @@ function AppointmentCompletionReadinessGrid({
         label={interpreterLabel}
         value={
           !detail.interpreter_id
-            ? appointmentText("Nicht erforderlich", "РќРµ С‚СЂРµР±СѓРµС‚СЃСЏ", "Not required")
+            ? appointmentText("Nicht erforderlich", "Не требуется", "Not required")
             : interpreterReportReady
-              ? appointmentText("Freigegeben", "РЎРѕРіР»Р°СЃРѕРІР°РЅРѕ", "Approved")
-              : appointmentText("Ausstehend", "РћР¶РёРґР°РµС‚СЃСЏ", "Pending")
+              ? appointmentText("Freigegeben", "Согласовано", "Approved")
+              : appointmentText("Ausstehend", "Ожидается", "Pending")
         }
         meta={
           !detail.interpreter_id
             ? appointmentText(
                 "Kein Dolmetscher verknupft.",
-                "РџРµСЂРµРІРѕРґС‡РёРє РЅРµ РїСЂРёРІСЏР·Р°РЅ.",
+                "Переводчик не привязан.",
                 "No interpreter linked.",
               )
             : detailReport
               ? detailReport.approval_status
               : appointmentText(
                   "Bericht noch nicht eingereicht.",
-                  "РћС‚С‡С‘С‚ РµС‰С‘ РЅРµ РѕС‚РїСЂР°РІР»РµРЅ.",
+                  "Отчёт ещё не отправлен.",
                   "No report submitted yet.",
                 )
         }

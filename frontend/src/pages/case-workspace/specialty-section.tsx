@@ -95,7 +95,7 @@ function SpecialtySectionContent<T extends Record<string, unknown>>({
   const relevantLabel = tri(
     lang,
     "Fachrelevant",
-    "РћС‚РЅРѕСЃРёС‚СЃСЏ Рє СЃРїРµС†РёР°Р»СЊРЅРѕСЃС‚Рё",
+    "Относится к специальности",
     "Specialty relevant",
   );
 

@@ -1,8 +1,10 @@
-const CLIENT_API_ORIGIN =
+﻿const CLIENT_API_ORIGIN =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/+$/, "") ?? "";
 const API_PREFIX = "/api/v1";
 const ACCESS_TOKEN_KEY = "gmed_access_token";
 const REFRESH_TOKEN_KEY = "gmed_refresh_token";
+export const AUTH_SESSION_EXPIRED_EVENT = "gmed:auth-session-expired";
+export const DEFAULT_API_TIMEOUT_MS = 20_000;
 
 type ApiErrorBody = {
   error?: string;
@@ -13,7 +15,35 @@ type ApiFetchInit = RequestInit & {
   cacheTtlMs?: number;
   forceFresh?: boolean;
   skipDedupe?: boolean;
+  timeoutMs?: number;
 };
+
+type ApiFileFetchInit = RequestInit & {
+  timeoutMs?: number;
+};
+
+type ApiRequestErrorOptions = {
+  status?: number;
+  code?: string;
+  body?: ApiErrorBody | null;
+  cause?: unknown;
+};
+
+export class ApiRequestError extends Error {
+  status?: number;
+  code?: string;
+  body?: ApiErrorBody | null;
+  cause?: unknown;
+
+  constructor(message: string, options: ApiRequestErrorOptions = {}) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = options.status;
+    this.code = options.code;
+    this.body = options.body;
+    this.cause = options.cause;
+  }
+}
 
 export function getAccessToken() {
   return localStorage.getItem(ACCESS_TOKEN_KEY);
@@ -23,26 +53,43 @@ function getRefreshToken() {
   return localStorage.getItem(REFRESH_TOKEN_KEY);
 }
 
+function dispatchAuthSessionExpired() {
+  if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") {
+    return;
+  }
+  window.dispatchEvent(new Event(AUTH_SESSION_EXPIRED_EVENT));
+}
+
 function clearAuthTokens() {
+  const hadTokens =
+    Boolean(localStorage.getItem(ACCESS_TOKEN_KEY)) ||
+    Boolean(localStorage.getItem(REFRESH_TOKEN_KEY));
   localStorage.removeItem(ACCESS_TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
+  if (hadTokens) {
+    dispatchAuthSessionExpired();
+  }
 }
 
 let refreshInFlight: Promise<string | null> | null = null;
 
-async function tryRefreshAccessToken(): Promise<string | null> {
+async function tryRefreshAccessToken(timeoutMs = DEFAULT_API_TIMEOUT_MS): Promise<string | null> {
   if (refreshInFlight) return refreshInFlight;
 
   const refreshToken = getRefreshToken();
-  if (!refreshToken) return null;
+  if (!refreshToken) {
+    clearAuthTokens();
+    jsonCache.clear();
+    return null;
+  }
 
   refreshInFlight = (async () => {
     try {
-      const res = await fetch(buildApiUrl("/auth/refresh"), {
+      const res = await fetchWithApiTimeout(buildApiUrl("/auth/refresh"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refresh_token: refreshToken }),
-      });
+      }, timeoutMs);
       if (!res.ok) {
         clearAuthTokens();
         jsonCache.clear();
@@ -123,6 +170,96 @@ const RATE_LIMIT_MAX_RETRIES = 3;
 const RATE_LIMIT_DEFAULT_BACKOFF_MS = 1000;
 const RATE_LIMIT_MAX_BACKOFF_MS = 10_000;
 
+function cancelledRequestError() {
+  return new ApiRequestError("Request was cancelled.", { code: "aborted" });
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+function timeoutError(timeoutMs: number) {
+  const seconds = Math.max(1, Math.round(timeoutMs / 1000));
+  return new ApiRequestError(`Request timed out after ${seconds}s. Please try again.`, {
+    code: "timeout",
+  });
+}
+
+export async function fetchWithApiTimeout(
+  url: string,
+  init: RequestInit = {},
+  timeoutMs = DEFAULT_API_TIMEOUT_MS,
+): Promise<Response> {
+  const callerSignal = init.signal;
+  if (callerSignal?.aborted) {
+    throw cancelledRequestError();
+  }
+
+  if (timeoutMs <= 0) {
+    try {
+      return await fetch(url, init);
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw cancelledRequestError();
+      }
+      throw new ApiRequestError("Network error. Please check your connection and try again.", {
+        code: "network",
+        cause: error,
+      });
+    }
+  }
+
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  const abortFromCaller = () => {
+    controller.abort();
+  };
+  callerSignal?.addEventListener("abort", abortFromCaller, { once: true });
+
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (timedOut) {
+      throw timeoutError(timeoutMs);
+    }
+    if (callerSignal?.aborted || isAbortError(error)) {
+      throw cancelledRequestError();
+    }
+    throw new ApiRequestError("Network error. Please check your connection and try again.", {
+      code: "network",
+      cause: error,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+    callerSignal?.removeEventListener("abort", abortFromCaller);
+  }
+}
+
+function waitForRetryDelay(ms: number, signal?: AbortSignal | null) {
+  if (ms <= 0) return Promise.resolve();
+  if (signal?.aborted) return Promise.reject(cancelledRequestError());
+
+  return new Promise<void>((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+
+    function onAbort() {
+      clearTimeout(timeoutId);
+      signal?.removeEventListener("abort", onAbort);
+      reject(cancelledRequestError());
+    }
+
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 function parseRetryAfterMs(header: string | null) {
   if (!header) return null;
   const seconds = Number(header);
@@ -139,16 +276,17 @@ function parseRetryAfterMs(header: string | null) {
 async function fetchWithRateLimitRetry(
   url: string,
   init: RequestInit,
+  timeoutMs: number,
   attempt = 0,
 ): Promise<Response> {
-  const res = await fetch(url, init);
+  const res = await fetchWithApiTimeout(url, init, timeoutMs);
   if (res.status !== 429 || attempt >= RATE_LIMIT_MAX_RETRIES) {
     return res;
   }
   const retryAfterMs = parseRetryAfterMs(res.headers.get("retry-after"));
   const backoffMs = retryAfterMs ?? RATE_LIMIT_DEFAULT_BACKOFF_MS * 2 ** attempt;
-  await new Promise((resolve) => setTimeout(resolve, backoffMs));
-  return fetchWithRateLimitRetry(url, init, attempt + 1);
+  await waitForRetryDelay(backoffMs, init.signal);
+  return fetchWithRateLimitRetry(url, init, timeoutMs, attempt + 1);
 }
 
 const JSON_CACHE_MAX_ENTRIES = 160;
@@ -236,10 +374,18 @@ export function clearApiCache(pathPrefix?: string) {
 async function readApiJsonResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = await res.json().catch(() => null) as ApiErrorBody | null;
+    const message = body?.message ?? body?.error ?? `${res.status} ${res.statusText}`;
     if (res.status === 429) {
-      throw new Error(body?.message ?? body?.error ?? "Забагато запитів. Спробуйте ще раз пізніше.");
+      throw new ApiRequestError(
+        message || "Too many requests. Please try again later.",
+        { status: res.status, code: "rate_limited", body },
+      );
     }
-    throw new Error(body?.message ?? body?.error ?? `${res.status} ${res.statusText}`);
+    throw new ApiRequestError(message, {
+      status: res.status,
+      code: body?.error ?? "http_error",
+      body,
+    });
   }
 
   if (res.status === 204) {
@@ -275,6 +421,7 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
     cacheTtlMs,
     forceFresh = false,
     skipDedupe = false,
+    timeoutMs = DEFAULT_API_TIMEOUT_MS,
     ...requestInit
   } = init;
   const headers = buildApiHeaders(requestInit);
@@ -297,14 +444,21 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
   }
 
   const request = (async () => {
-    let res = await fetchWithRateLimitRetry(url, { ...requestInit, headers });
+    let res = await fetchWithRateLimitRetry(url, { ...requestInit, headers }, timeoutMs);
 
     if (res.status === 401 && canRetryAuth) {
-      const newAccessToken = await tryRefreshAccessToken();
+      const newAccessToken = await tryRefreshAccessToken(timeoutMs);
       if (newAccessToken) {
         const retriedHeaders = new Headers(headers);
         retriedHeaders.set("Authorization", `Bearer ${newAccessToken}`);
-        res = await fetchWithRateLimitRetry(url, { ...requestInit, headers: retriedHeaders });
+        res = await fetchWithRateLimitRetry(
+          url,
+          { ...requestInit, headers: retriedHeaders },
+          timeoutMs,
+        );
+      } else {
+        clearAuthTokens();
+        jsonCache.clear();
       }
     }
 
@@ -339,31 +493,48 @@ export function buildApiWebSocketUrl(
   return url.toString();
 }
 
-export async function apiFetchFile(path: string, init: RequestInit = {}) {
-  const headers = buildApiHeaders(init);
+export async function apiFetchFile(path: string, init: ApiFileFetchInit = {}) {
+  const { timeoutMs = DEFAULT_API_TIMEOUT_MS, ...requestInit } = init;
+  const headers = buildApiHeaders(requestInit);
   const url = buildApiUrl(path);
   const canRetryAuth = headers.has("Authorization") && !isAuthEndpoint(path);
-  let res = await fetchWithRateLimitRetry(url, { ...init, headers });
+  let res = await fetchWithRateLimitRetry(url, { ...requestInit, headers }, timeoutMs);
 
   if (res.status === 401 && canRetryAuth) {
-    const newAccessToken = await tryRefreshAccessToken();
+    const newAccessToken = await tryRefreshAccessToken(timeoutMs);
     if (newAccessToken) {
       const retriedHeaders = new Headers(headers);
       retriedHeaders.set("Authorization", `Bearer ${newAccessToken}`);
-      res = await fetchWithRateLimitRetry(url, { ...init, headers: retriedHeaders });
+      res = await fetchWithRateLimitRetry(
+        url,
+        { ...requestInit, headers: retriedHeaders },
+        timeoutMs,
+      );
+    } else {
+      clearAuthTokens();
+      jsonCache.clear();
     }
   }
 
   if (!res.ok) {
     const body = await res.json().catch(() => null) as ApiErrorBody | null;
+    const message = body?.message ?? body?.error ?? `${res.status} ${res.statusText}`;
     if (res.status === 429) {
-      throw new Error(body?.message ?? body?.error ?? "Забагато запитів. Спробуйте ще раз пізніше.");
+      throw new ApiRequestError(
+        message || "Too many requests. Please try again later.",
+        { status: res.status, code: "rate_limited", body },
+      );
     }
-    throw new Error(body?.message ?? body?.error ?? `${res.status} ${res.statusText}`);
+    throw new ApiRequestError(message, {
+      status: res.status,
+      code: body?.error ?? "http_error",
+      body,
+    });
   }
 
   return {
     blob: await res.blob(),
+    contentType: res.headers.get("content-type") ?? "",
     filename: parseContentDispositionFilename(res.headers.get("content-disposition")),
   };
 }
@@ -382,7 +553,7 @@ export function downloadBlob(blob: Blob, filename: string) {
 export async function downloadApiFile(
   path: string,
   fallbackFilename: string,
-  init: RequestInit = {},
+  init: ApiFileFetchInit = {},
 ) {
   const { blob, filename } = await apiFetchFile(path, init);
   const resolvedFilename = filename || fallbackFilename;

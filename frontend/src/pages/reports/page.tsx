@@ -414,6 +414,7 @@ function metricCard(
     grouped?: boolean;
     groupedLast?: boolean;
     hideIcon?: boolean;
+    itemKey?: string;
     connector?: boolean;
   },
 ) {
@@ -421,6 +422,7 @@ function metricCard(
   if (!options?.borderless) {
     return (
       <article
+        key={options?.itemKey}
         className={cn(
           "relative min-h-[44px] min-w-[190px] px-3 py-1",
           options?.grouped ? null : "border border-border",
@@ -448,6 +450,7 @@ function metricCard(
 
   return (
     <article
+      key={options?.itemKey}
       className={cn(
         "flex min-w-[210px] items-center justify-between gap-3 px-3 py-1.5",
         options?.borderless ? null : "border border-border",
@@ -1879,15 +1882,15 @@ function useReportsPageContent() {
   }
 
   const summaryMetricNodes = data ? [
-    metricCard(text.summary.activePatients, data.summary.active_patients, Globe2, { grouped: true }),
-    metricCard(text.summary.activeOrders, data.summary.active_orders, Rows3, { grouped: true }),
-    metricCard(text.summary.activeClinics, data.summary.active_clinics, Building2, { grouped: true }),
-    metricCard(text.summary.deliveredServiceItems, data.summary.delivered_service_items, BarChart3, { grouped: true }),
+    metricCard(text.summary.activePatients, data.summary.active_patients, Globe2, { grouped: true, itemKey: "active-patients" }),
+    metricCard(text.summary.activeOrders, data.summary.active_orders, Rows3, { grouped: true, itemKey: "active-orders" }),
+    metricCard(text.summary.activeClinics, data.summary.active_clinics, Building2, { grouped: true, itemKey: "active-clinics" }),
+    metricCard(text.summary.deliveredServiceItems, data.summary.delivered_service_items, BarChart3, { grouped: true, itemKey: "delivered-service-items" }),
     metricCard(
       text.summary.deliveredServiceVolume,
       data.summary.delivered_service_volume ? formatMoney(data.summary.delivered_service_volume, locale) : text.roleScoped,
       BarChart3,
-      { grouped: true, groupedLast: true },
+      { grouped: true, groupedLast: true, itemKey: "delivered-service-volume" },
     ),
   ] : [];
 
@@ -2052,7 +2055,7 @@ function useReportsPageContent() {
                         <div className="grid min-h-[148px] grid-cols-[repeat(auto-fit,minmax(34px,1fr))] items-end gap-2 pb-2">
                           {data.sales_kpis.top_countries.map((item) => (
                             <div
-                              key={item.country}
+                              key={`${item.country || "unknown"}-${item.lead_count}`}
                               className="flex min-w-0 flex-col items-center gap-1.5"
                             >
                               <span className="text-xs font-semibold tabular-nums text-foreground">

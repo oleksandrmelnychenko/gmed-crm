@@ -1,4 +1,4 @@
-import { buildApiUrl, getAccessToken } from "@/lib/api";
+import { apiFetchFile } from "@/lib/api";
 import {
   formatEnumLabelFromKeys,
   getLang,
@@ -930,16 +930,8 @@ export function conciergeServiceSourceLabel(value?: string | null) {
 }
 
 async function fetchPortalBlob(path: string) {
-  const token = getAccessToken();
-  const response = await fetch(buildApiUrl(path), {
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-  });
-
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
-  }
-
-  return response.blob();
+  const { blob } = await apiFetchFile(path);
+  return blob;
 }
 
 function downloadBlob(blob: Blob, filename: string) {

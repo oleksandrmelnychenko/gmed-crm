@@ -60,6 +60,18 @@ type InvoiceListResponse = {
   total_pages: number;
 };
 
+const REMOTE_PATIENT_DETAIL_TABS = new Set([
+  "relations",
+  "cases",
+  "orders",
+  "appointments",
+  "documents",
+  "contracts",
+  "invoices",
+  "workflow",
+  "timeline",
+]);
+
 const EMPTY_TAB_STATE: TabState = {
   appointments: [],
   cases: [],
@@ -80,17 +92,20 @@ const EMPTY_TAB_STATE: TabState = {
 type PatientDetailTabDataState = {
   tabs: TabState;
   settledKey: string;
+  error: string;
 };
 
 type PatientDetailTabDataAction = {
   type: "settle";
   requestKey: string;
   update: (current: TabState) => TabState;
+  error?: string;
 };
 
 const EMPTY_PATIENT_DETAIL_TAB_DATA_STATE: PatientDetailTabDataState = {
   tabs: EMPTY_TAB_STATE,
   settledKey: "",
+  error: "",
 };
 
 function patientDetailTabDataReducer(
@@ -102,6 +117,7 @@ function patientDetailTabDataReducer(
       return {
         tabs: action.update(state.tabs),
         settledKey: action.requestKey,
+        error: action.error ?? "",
       };
     default:
       return state;
@@ -124,13 +140,14 @@ export function usePatientDetailTabData({
   timelineRangeFilter,
   timelineSourceFilter,
 }: UsePatientDetailTabDataArgs) {
-  const [{ tabs, settledKey }, dispatchTabData] = useReducer(
+  const [{ tabs, settledKey, error }, dispatchTabData] = useReducer(
     patientDetailTabDataReducer,
     EMPTY_PATIENT_DETAIL_TAB_DATA_STATE,
   );
 
   const requestKey =
     !id ||
+    !REMOTE_PATIENT_DETAIL_TABS.has(activeTab) ||
     activeTab === "profile" ||
     (activeTab === "documents" && !canViewDocuments) ||
     (activeTab === "contracts" && !canViewContracts) ||
@@ -329,12 +346,14 @@ export function usePatientDetailTabData({
           default:
             break;
         }
-      } catch {
+      } catch (error: unknown) {
         if (signal.aborted) return;
+        const message = error instanceof Error ? error.message : "Failed to load patient tab data";
         startTransition(() => {
           dispatchTabData({
             type: "settle",
             requestKey,
+            error: message,
             update: (current) => {
               switch (activeTab) {
                 case "relations":
@@ -390,6 +409,7 @@ export function usePatientDetailTabData({
 
   return {
     ...tabs,
+    tabError: requestKey && settledKey === requestKey ? error : "",
     tabLoading: Boolean(requestKey) && settledKey !== requestKey,
   };
 }

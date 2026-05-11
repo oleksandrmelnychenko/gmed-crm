@@ -468,14 +468,16 @@ export function AdminCustomFieldsPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setMsg(null);
     try {
       setFields(await fetchAdminCustomFields<CustomField>(filterEntity));
-    } catch {
+    } catch (loadError) {
       setFields([]);
+      setMsg(loadError instanceof Error ? loadError.message : t.common_error);
     } finally {
       setLoading(false);
     }
-  }, [filterEntity]);
+  }, [filterEntity, t.common_error]);
 
   useEffect(() => {
     void load();
@@ -496,7 +498,11 @@ export function AdminCustomFieldsPage() {
       try {
         opts = JSON.parse(fOptions);
       } catch {
-        opts = null;
+        const message = t.common_error;
+        setCreateError(message);
+        setMsg(message);
+        setCreating(false);
+        return;
       }
     }
     try {

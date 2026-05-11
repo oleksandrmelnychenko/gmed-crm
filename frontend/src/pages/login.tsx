@@ -163,22 +163,40 @@ export function LoginPage() {
   useEffect(() => {
     if (!pendingLogin || pendingLogin.status !== "pending") return;
 
-    const interval = setInterval(async () => {
+    let cancelled = false;
+
+    const pollPendingLogin = async () => {
+      if (cancelled) return;
       const status = await checkPending(pendingLogin.id);
-      if (status === "approved") {
-        dispatchLoginState({ pendingLogin: null });
-        navigate(redirectTo, { replace: true });
-      } else if (status === "rejected") {
-        dispatchLoginState((current) => ({
-          pendingLogin: current.pendingLogin
-            ? { ...current.pendingLogin, status: "rejected" }
-            : current.pendingLogin,
-        }));
+      if (!cancelled) {
+        if (status === "approved") {
+          dispatchLoginState({ pendingLogin: null });
+          navigate(redirectTo, { replace: true });
+        } else if (status === "rejected") {
+          dispatchLoginState((current) => ({
+            pendingLogin: current.pendingLogin
+              ? { ...current.pendingLogin, status: "rejected" }
+              : current.pendingLogin,
+          }));
+        } else if (status === "error") {
+          dispatchLoginState({
+            pendingLogin: null,
+            error: tr.login_error_unknown,
+          });
+        }
       }
+    };
+
+    void pollPendingLogin();
+    const interval = setInterval(() => {
+      void pollPendingLogin();
     }, 3000);
 
-    return () => clearInterval(interval);
-  }, [pendingLogin, checkPending, navigate, redirectTo]);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [pendingLogin, checkPending, navigate, redirectTo, tr.login_error_unknown]);
 
   if (user) {
     return <Navigate to={redirectTo} replace />;

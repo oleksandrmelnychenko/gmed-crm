@@ -934,6 +934,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       await saveProviderService(detail.id, serviceForm.id, toServicePayload(serviceForm));
       setServiceDialogOpen(false);
       setServiceForm(blankServiceForm());
+      refreshList();
       refreshDetail();
     } catch (error) {
       setServiceError(error instanceof Error ? error.message : t.common_failed_update);
@@ -962,6 +963,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       if (serviceForm.id === serviceId) {
         setServiceForm(blankServiceForm());
       }
+      refreshList();
       refreshDetail();
     } catch (error) {
       setServiceError(error instanceof Error ? error.message : t.common_failed_update);

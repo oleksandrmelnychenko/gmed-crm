@@ -29,6 +29,18 @@ type FullCalendarProps = ComponentProps<typeof FullCalendar>;
 
 const TIMEGRID_SLOT_MINUTES = 30;
 const HEIGHT_DIFF_EPSILON_PX = 1;
+const FULL_CALENDAR_PLUGINS = [
+  dayGridPlugin,
+  timeGridPlugin,
+  listPlugin,
+  interactionPlugin,
+];
+const FULL_CALENDAR_EVENT_TIME_FORMAT = {
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+  omitZeroMinute: false,
+} as const;
 
 type AdaptiveEventHeights = {
   eventMinHeight: number;
@@ -142,9 +154,31 @@ export function DesktopCalendarSurface({
 }: DesktopCalendarSurfaceProps) {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const isTimeGridView = isTimeGridCalendarView(calendarView);
-  const [slotHeightPx, setSlotHeightPx] = useState<number>(() =>
-    computeBaseSlotHeight(calendarView),
+  const eventLayoutKey = useMemo(
+    () =>
+      events
+        .map((event) =>
+          [
+            event.id ?? "",
+            event.title ?? "",
+            event.start ?? "",
+            event.end ?? "",
+            event.allDay ? "1" : "0",
+          ].join(":"),
+        )
+        .join("|"),
+    [events],
   );
+  const slotHeightResetKey = `${calendarDate}:${calendarView}:${eventLayoutKey}`;
+  const baseSlotHeight = computeBaseSlotHeight(calendarView);
+  const [slotHeightState, setSlotHeightState] = useState(() => ({
+    resetKey: slotHeightResetKey,
+    height: baseSlotHeight,
+  }));
+  const slotHeightPx =
+    slotHeightState.resetKey === slotHeightResetKey
+      ? slotHeightState.height
+      : baseSlotHeight;
   const eventHeights = useMemo(
     () => computeAdaptiveEventHeights(calendarView, slotHeightPx),
     [calendarView, slotHeightPx],
@@ -158,6 +192,30 @@ export function DesktopCalendarSurface({
         : undefined,
     [isTimeGridView, slotHeightPx],
   );
+  const headerToolbar = useMemo(
+    () => ({
+      left: "prev,next today",
+      center: "title",
+      right: "dayGridMonth,timeGridWeek,timeGridDay,listWeek",
+    }),
+    [],
+  );
+  const buttonText = useMemo(
+    () => ({
+      today: dictionary.dash_patients_today ?? "Today",
+      month: dictionary.dash_this_month ?? "Month",
+      week: dictionary.dash_this_week ?? "Week",
+      day: dictionary.appointments_date ?? "Day",
+      list: dictionary.providers_all ?? "List",
+    }),
+    [
+      dictionary.appointments_date,
+      dictionary.dash_patients_today,
+      dictionary.dash_this_month,
+      dictionary.dash_this_week,
+      dictionary.providers_all,
+    ],
+  );
 
   useEffect(() => {
     if (!isTimeGridView || typeof window === "undefined") return;
@@ -170,7 +228,12 @@ export function DesktopCalendarSurface({
       const shellElement = shellRef.current;
       const baseSlotHeight = computeBaseSlotHeight(calendarView);
       if (!shellElement) {
-        setSlotHeightPx(baseSlotHeight);
+        setSlotHeightState((currentState) =>
+          currentState.resetKey === slotHeightResetKey &&
+          Math.abs(currentState.height - baseSlotHeight) <= HEIGHT_DIFF_EPSILON_PX
+            ? currentState
+            : { resetKey: slotHeightResetKey, height: baseSlotHeight },
+        );
         return;
       }
 
@@ -183,12 +246,14 @@ export function DesktopCalendarSurface({
       );
 
       let requiredSlotHeight = baseSlotHeight;
+      let hasOverflowedCards = false;
       for (const cardElement of cards) {
         const visibleHeight = Math.max(1, cardElement.clientHeight);
         const fullHeight = Math.max(visibleHeight, cardElement.scrollHeight);
         const isOverflowed = fullHeight > visibleHeight + 0.5;
         cardElement.dataset.overflowed = isOverflowed ? "true" : "false";
         if (!isOverflowed) continue;
+        hasOverflowedCards = true;
 
         const rawDurationMinutes = Number(
           cardElement.dataset.eventDurationMinutes ?? TIMEGRID_SLOT_MINUTES,
@@ -205,11 +270,19 @@ export function DesktopCalendarSurface({
       const normalizedHeight = Math.round(
         clamp(requiredSlotHeight, baseSlotHeight, maxSlotHeight),
       );
-      setSlotHeightPx((currentHeight) =>
-        Math.abs(currentHeight - normalizedHeight) <= HEIGHT_DIFF_EPSILON_PX
-          ? currentHeight
-          : normalizedHeight,
-      );
+      setSlotHeightState((currentState) => {
+        const currentHeight =
+          currentState.resetKey === slotHeightResetKey
+            ? currentState.height
+            : baseSlotHeight;
+        const nextHeight = hasOverflowedCards
+          ? Math.max(currentHeight, normalizedHeight)
+          : currentHeight;
+        return currentState.resetKey === slotHeightResetKey &&
+          Math.abs(currentHeight - nextHeight) <= HEIGHT_DIFF_EPSILON_PX
+          ? currentState
+          : { resetKey: slotHeightResetKey, height: nextHeight };
+      });
     };
 
     const scheduleMeasurement = () => {
@@ -228,7 +301,7 @@ export function DesktopCalendarSurface({
       window.clearTimeout(timeoutId);
       window.removeEventListener("resize", scheduleMeasurement);
     };
-  }, [calendarView, calendarDate, events, isTimeGridView]);
+  }, [baseSlotHeight, calendarView, isTimeGridView, slotHeightResetKey]);
 
   return (
     <section className="overflow-hidden rounded-xl border border-border bg-card">
@@ -239,35 +312,15 @@ export function DesktopCalendarSurface({
       >
         <FullCalendar
           ref={calendarRef}
-          plugins={[
-            dayGridPlugin,
-            timeGridPlugin,
-            listPlugin,
-            interactionPlugin,
-          ]}
+          plugins={FULL_CALENDAR_PLUGINS}
           locale={lang === "de" ? deLocale : ruLocale}
-          eventTimeFormat={{
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: false,
-            omitZeroMinute: false,
-          }}
+          eventTimeFormat={FULL_CALENDAR_EVENT_TIME_FORMAT}
           eventDisplay="block"
           displayEventEnd={false}
           initialView={calendarView}
           initialDate={calendarDate}
-          headerToolbar={{
-            left: "prev,next today",
-            center: "title",
-            right: "dayGridMonth,timeGridWeek,timeGridDay,listWeek",
-          }}
-          buttonText={{
-            today: dictionary.dash_patients_today ?? "Today",
-            month: dictionary.dash_this_month ?? "Month",
-            week: dictionary.dash_this_week ?? "Week",
-            day: dictionary.appointments_date ?? "Day",
-            list: dictionary.providers_all ?? "List",
-          }}
+          headerToolbar={headerToolbar}
+          buttonText={buttonText}
           height="auto"
           firstDay={1}
           slotDuration="00:30:00"

@@ -47,6 +47,8 @@ interface Announcement {
   creator: string;
 }
 
+type AdminAnnouncementsTranslations = ReturnType<typeof useLang>["t"];
+
 const VARIANT_COLORS: Record<string, string> = {
   info: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
   warning: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
@@ -127,7 +129,7 @@ type AdminAnnouncementCreateSheetProps = {
   fVariant: string;
   minAnnouncementEndsAt: string;
   showCreate: boolean;
-  t: Record<string, string>;
+  t: AdminAnnouncementsTranslations;
   onCreate: (event: FormEvent) => void;
   onEndsChange: (value: string) => void;
   onMessageChange: (value: string) => void;
@@ -220,7 +222,7 @@ function AdminAnnouncementCreateSheet({
 }
 
 type AdminAnnouncementsHeaderActionsProps = {
-  t: Record<string, string>;
+  t: AdminAnnouncementsTranslations;
   onCreate: () => void;
   onRefresh: () => void;
 };
@@ -257,7 +259,7 @@ function AdminAnnouncementsHeaderActions({
 type AdminAnnouncementsTableProps = {
   columns: ColumnDef<Announcement>[];
   items: Announcement[];
-  t: Record<string, string>;
+  t: AdminAnnouncementsTranslations;
 };
 
 function AdminAnnouncementsTable({
@@ -275,7 +277,7 @@ function AdminAnnouncementsTable({
         rows={items}
         columns={columns}
         defaultDensity="compact"
-        dictionary={t}
+        dictionary={t as unknown as Record<string, string>}
         rowId={(announcement) => announcement.id}
         emptyState={<EmptyCell>{t.ann_no_announcements}</EmptyCell>}
         tableClassName="min-h-[320px]"
@@ -284,9 +286,7 @@ function AdminAnnouncementsTable({
   );
 }
 
-export function AdminAnnouncementsPage() {
-  const { t } = useLang();
-
+function useAdminAnnouncementsController(t: AdminAnnouncementsTranslations) {
   const [announcementState, dispatchAnnouncementState] = useReducer(
     adminAnnouncementsReducer,
     undefined,
@@ -412,9 +412,14 @@ export function AdminAnnouncementsPage() {
   };
 
   const onDelete = useCallback(async (id: string) => {
-    await deleteAdminAnnouncement(id);
-    void load();
-  }, [load]);
+    setError("");
+    try {
+      await deleteAdminAnnouncement(id);
+      void load();
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : t.common_error);
+    }
+  }, [load, t.common_error]);
 
   const variantLabel = useCallback(
     (value: string | null | undefined) =>
@@ -536,6 +541,53 @@ export function AdminAnnouncementsPage() {
     variantLabel,
   ]);
 
+  return {
+    columns,
+    createError,
+    creating,
+    error,
+    fEnds,
+    fMsg,
+    fTitle,
+    fVariant,
+    items,
+    loading,
+    minAnnouncementEndsAt,
+    onCreate,
+    refresh: load,
+    setFEnds,
+    setFMsg,
+    setFTitle,
+    setFVariant,
+    setShowCreate,
+    showCreate,
+  };
+}
+
+export function AdminAnnouncementsPage() {
+  const { t } = useLang();
+  const {
+    columns,
+    createError,
+    creating,
+    error,
+    fEnds,
+    fMsg,
+    fTitle,
+    fVariant,
+    items,
+    loading,
+    minAnnouncementEndsAt,
+    onCreate,
+    refresh,
+    setFEnds,
+    setFMsg,
+    setFTitle,
+    setFVariant,
+    setShowCreate,
+    showCreate,
+  } = useAdminAnnouncementsController(t);
+
   return (
     <>
       <div className="space-y-4">
@@ -544,9 +596,9 @@ export function AdminAnnouncementsPage() {
           description={t.ann_subtitle}
           actions={(
             <AdminAnnouncementsHeaderActions
-              t={t as unknown as Record<string, string>}
+              t={t}
               onCreate={() => setShowCreate(true)}
-              onRefresh={() => void load()}
+              onRefresh={() => void refresh()}
             />
           )}
         />
@@ -558,7 +610,7 @@ export function AdminAnnouncementsPage() {
           <AdminAnnouncementsTable
             columns={columns}
             items={items}
-            t={t as unknown as Record<string, string>}
+            t={t}
           />
         ) : null}
       </div>
@@ -572,7 +624,7 @@ export function AdminAnnouncementsPage() {
         fVariant={fVariant}
         minAnnouncementEndsAt={minAnnouncementEndsAt}
         showCreate={showCreate}
-        t={t as unknown as Record<string, string>}
+        t={t}
         onCreate={onCreate}
         onEndsChange={setFEnds}
         onMessageChange={setFMsg}
