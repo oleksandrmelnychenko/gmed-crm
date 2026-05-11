@@ -33,12 +33,6 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import {
@@ -1135,83 +1129,31 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
         </div>
 
         {detail ? (
-          <Dialog open={doctorDialogOpen} onOpenChange={handleDoctorDialogOpenChange}>
-            <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
-              <DialogHeader className="pr-8">
-                <DialogTitle>{doctorForm.id ? t.providers_doctor_detail : t.providers_doctor_new}</DialogTitle>
-              </DialogHeader>
-              <form onSubmit={handleDoctorSubmit} className="space-y-4">
-                <div className="space-y-3 rounded-xl p-4">
-                  {doctorError ? <Banner tone="error">{doctorError}</Banner> : null}
-                  <DoctorFormFields
-                    form={doctorForm}
-                    onChange={(field, value) =>
-                      setDoctorForm((current) => ({ ...current, [field]: value }))
-                    }
-                  />
-                  <div className="flex justify-end gap-2 pt-1">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-9 rounded-lg"
-                      onClick={() => handleDoctorDialogOpenChange(false)}
-                      disabled={doctorBusy}
-                    >
-                      {l("Abbrechen", "Отмена", "Cancel")}
-                    </Button>
-                    <Button
-                      type="submit"
-                      className="h-9 rounded-lg"
-                      disabled={doctorBusy}
-                    >
-                      {doctorBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                      {doctorForm.id ? t.common_save : t.providers_doctor_new}
-                    </Button>
-                  </div>
-                </div>
-              </form>
-            </DialogContent>
-          </Dialog>
+          <ProviderDoctorFormSheet
+            open={doctorDialogOpen}
+            onOpenChange={handleDoctorDialogOpenChange}
+            form={doctorForm}
+            busy={doctorBusy}
+            error={doctorError}
+            onSubmit={handleDoctorSubmit}
+            onChange={(field, value) =>
+              setDoctorForm((current) => ({ ...current, [field]: value }))
+            }
+          />
         ) : null}
 
         {detail ? (
-          <Dialog open={serviceDialogOpen} onOpenChange={handleServiceDialogOpenChange}>
-            <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
-              <DialogHeader className="pr-8">
-                <DialogTitle>{serviceForm.id ? t.providers_service_detail : t.providers_service_new}</DialogTitle>
-              </DialogHeader>
-              <form onSubmit={handleServiceSubmit} className="space-y-4">
-                <div className="space-y-3 rounded-xl p-4">
-                  {serviceError ? <Banner tone="error">{serviceError}</Banner> : null}
-                  <ServiceFormFields
-                    form={serviceForm}
-                    onChange={(field, value) =>
-                      setServiceForm((current) => ({ ...current, [field]: value }))
-                    }
-                  />
-                  <div className="flex justify-end gap-2 pt-1">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-9 rounded-lg"
-                      onClick={() => handleServiceDialogOpenChange(false)}
-                      disabled={serviceBusy}
-                    >
-                      {l("Abbrechen", "Отмена", "Cancel")}
-                    </Button>
-                    <Button
-                      type="submit"
-                      className="h-9 rounded-lg"
-                      disabled={serviceBusy}
-                    >
-                      {serviceBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                      {serviceForm.id ? t.common_save : t.providers_service_new}
-                    </Button>
-                  </div>
-                </div>
-              </form>
-            </DialogContent>
-          </Dialog>
+          <ProviderServiceFormSheet
+            open={serviceDialogOpen}
+            onOpenChange={handleServiceDialogOpenChange}
+            form={serviceForm}
+            busy={serviceBusy}
+            error={serviceError}
+            onSubmit={handleServiceSubmit}
+            onChange={(field, value) =>
+              setServiceForm((current) => ({ ...current, [field]: value }))
+            }
+          />
         ) : null}
       </>
     );
@@ -1671,85 +1613,127 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       </Sheet>
 
       {detail ? (
-        <Dialog open={doctorDialogOpen} onOpenChange={handleDoctorDialogOpenChange}>
-          <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
-            <DialogHeader className="pr-8">
-              <DialogTitle>{doctorForm.id ? t.providers_doctor_detail : t.providers_doctor_new}</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={handleDoctorSubmit} className="space-y-4">
-              <div className="space-y-3 rounded-xl p-4">
-                {doctorError ? <Banner tone="error">{doctorError}</Banner> : null}
-                <DoctorFormFields
-                  form={doctorForm}
-                  onChange={(field, value) =>
-                    setDoctorForm((current) => ({ ...current, [field]: value }))
-                  }
-                />
-                  <div className="flex justify-end gap-2 pt-1">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-9 rounded-lg"
-                    onClick={() => handleDoctorDialogOpenChange(false)}
-                    disabled={doctorBusy}
-                  >
-                    {l("Abbrechen", "Отмена", "Cancel")}
-                  </Button>
-                  <Button
-                    type="submit"
-                    className="h-9 rounded-lg"
-                    disabled={doctorBusy}
-                  >
-                    {doctorBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                    {doctorForm.id ? t.common_save : t.providers_doctor_new}
-                  </Button>
-                </div>
-              </div>
-            </form>
-          </DialogContent>
-        </Dialog>
+        <ProviderDoctorFormSheet
+          open={doctorDialogOpen}
+          onOpenChange={handleDoctorDialogOpenChange}
+          form={doctorForm}
+          busy={doctorBusy}
+          error={doctorError}
+          onSubmit={handleDoctorSubmit}
+          onChange={(field, value) =>
+            setDoctorForm((current) => ({ ...current, [field]: value }))
+          }
+        />
       ) : null}
 
       {detail ? (
-        <Dialog open={serviceDialogOpen} onOpenChange={handleServiceDialogOpenChange}>
-          <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
-            <DialogHeader className="pr-8">
-              <DialogTitle>{serviceForm.id ? t.providers_service_detail : t.providers_service_new}</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={handleServiceSubmit} className="space-y-4">
-              <div className="space-y-3 rounded-xl p-4">
-                {serviceError ? <Banner tone="error">{serviceError}</Banner> : null}
-                <ServiceFormFields
-                  form={serviceForm}
-                  onChange={(field, value) =>
-                    setServiceForm((current) => ({ ...current, [field]: value }))
-                  }
-                />
-                <div className="flex justify-end gap-2 pt-1">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-9 rounded-lg"
-                    onClick={() => handleServiceDialogOpenChange(false)}
-                    disabled={serviceBusy}
-                  >
-                    {l("Abbrechen", "Отмена", "Cancel")}
-                  </Button>
-                  <Button
-                    type="submit"
-                    className="h-9 rounded-lg"
-                    disabled={serviceBusy}
-                  >
-                    {serviceBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                    {serviceForm.id ? t.common_save : t.providers_service_new}
-                  </Button>
-                </div>
-              </div>
-            </form>
-          </DialogContent>
-        </Dialog>
+        <ProviderServiceFormSheet
+          open={serviceDialogOpen}
+          onOpenChange={handleServiceDialogOpenChange}
+          form={serviceForm}
+          busy={serviceBusy}
+          error={serviceError}
+          onSubmit={handleServiceSubmit}
+          onChange={(field, value) =>
+            setServiceForm((current) => ({ ...current, [field]: value }))
+          }
+        />
       ) : null}
     </>
+  );
+}
+
+function ProviderDoctorFormSheet({
+  open,
+  onOpenChange,
+  form,
+  busy,
+  error,
+  onSubmit,
+  onChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  form: DoctorFormState;
+  busy: boolean;
+  error: string;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onChange: (field: keyof DoctorFormState, value: string) => void;
+}) {
+  const { t } = useLang();
+  const submitLabel = form.id ? t.common_save : t.providers_doctor_new;
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
+        <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
+          <AdminSheetScaffold
+            title={form.id ? t.providers_doctor_detail : t.providers_doctor_new}
+            footer={
+              <SheetFormFooter
+                cancelLabel={t.common_cancel}
+                submitLabel={submitLabel}
+                submittingLabel={submitLabel}
+                submitting={busy}
+                onCancel={() => onOpenChange(false)}
+              />
+            }
+          >
+            <div className="space-y-3 rounded-xl p-4">
+              {error ? <Banner tone="error">{error}</Banner> : null}
+              <DoctorFormFields form={form} onChange={onChange} />
+            </div>
+          </AdminSheetScaffold>
+        </form>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function ProviderServiceFormSheet({
+  open,
+  onOpenChange,
+  form,
+  busy,
+  error,
+  onSubmit,
+  onChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  form: ServiceFormState;
+  busy: boolean;
+  error: string;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onChange: (field: keyof ServiceFormState, value: string) => void;
+}) {
+  const { t } = useLang();
+  const submitLabel = form.id ? t.common_save : t.providers_service_new;
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
+        <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
+          <AdminSheetScaffold
+            title={form.id ? t.providers_service_detail : t.providers_service_new}
+            footer={
+              <SheetFormFooter
+                cancelLabel={t.common_cancel}
+                submitLabel={submitLabel}
+                submittingLabel={submitLabel}
+                submitting={busy}
+                onCancel={() => onOpenChange(false)}
+              />
+            }
+          >
+            <div className="space-y-3 rounded-xl p-4">
+              {error ? <Banner tone="error">{error}</Banner> : null}
+              <ServiceFormFields form={form} onChange={onChange} />
+            </div>
+          </AdminSheetScaffold>
+        </form>
+      </SheetContent>
+    </Sheet>
   );
 }
 

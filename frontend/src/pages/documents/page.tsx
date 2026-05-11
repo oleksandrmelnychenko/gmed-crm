@@ -2941,131 +2941,150 @@ function StaffDocumentsPage({
                 />
               )}
             >
-              {shareError ? <Banner tone="error">{shareError}</Banner> : null}
-              {selectedDocumentIds.length > 1 ? (
-                <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-                  {t.documents_sharing_selected.replace(
-                    "{count}",
-                    String(selectedDocumentIds.length),
-                  )}
-                </div>
-              ) : null}
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant={shareForm.targetType === "user" ? "default" : "outline"}
-                  className="rounded-xl"
-                  onClick={() =>
-                    setShareForm((current) => ({
-                      ...current,
-                      targetType: "user",
-                      providerId: "",
-                      message: "",
-                    }))
-                  }
+              <div className="space-y-4 rounded-xl p-4">
+                {shareError ? <Banner tone="error">{shareError}</Banner> : null}
+                {selectedDocumentIds.length > 1 ? (
+                  <div className="rounded-xl border border-sky-200 bg-sky-50/80 px-4 py-3 text-sm font-medium text-sky-900">
+                    {t.documents_sharing_selected.replace(
+                      "{count}",
+                      String(selectedDocumentIds.length),
+                    )}
+                  </div>
+                ) : null}
+
+                <DocumentSheetSection
+                  title={l("Empfänger", "Получатель", "Отримувач")}
                 >
-                  {t.documents_internal_user}
-                </Button>
-                <Button
-                  type="button"
-                  variant={shareForm.targetType === "provider" ? "default" : "outline"}
-                  className="rounded-xl"
-                  onClick={() =>
-                    setShareForm((current) => ({
-                      ...current,
-                      targetType: "provider",
-                      userId: "",
-                    }))
-                  }
+                  <div className="space-y-4">
+                    <div className="inline-flex flex-wrap gap-1 rounded-xl border border-border bg-muted/25 p-1">
+                      <Button
+                        type="button"
+                        variant={shareForm.targetType === "user" ? "default" : "outline"}
+                        className="h-9 rounded-lg"
+                        onClick={() =>
+                          setShareForm((current) => ({
+                            ...current,
+                            targetType: "user",
+                            providerId: "",
+                            message: "",
+                          }))
+                        }
+                      >
+                        {t.documents_internal_user}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant={shareForm.targetType === "provider" ? "default" : "outline"}
+                        className="h-9 rounded-lg"
+                        onClick={() =>
+                          setShareForm((current) => ({
+                            ...current,
+                            targetType: "provider",
+                            userId: "",
+                          }))
+                        }
+                      >
+                        {t.documents_provider_target}
+                      </Button>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      {shareForm.targetType === "user" ? (
+                        <Field label={t.patients_assign_owner} required>
+                          <NativeComboboxSelect
+                            value={shareForm.userId}
+                            onChange={(event) =>
+                              setShareForm((current) => ({
+                                ...current,
+                                userId: event.target.value,
+                              }))
+                            }
+                            className={selectClassName}
+                          >
+                            <option value="">{t.documents_select_user}</option>
+                            {staff.map((item) => (
+                              <option key={item.id} value={item.id}>
+                                {item.name} · {formatRoleLabel(item.role)}
+                              </option>
+                            ))}
+                          </NativeComboboxSelect>
+                        </Field>
+                      ) : (
+                        <Field label={t.common_provider} required>
+                          <NativeComboboxSelect
+                            value={shareForm.providerId}
+                            onChange={(event) =>
+                              setShareForm((current) => ({
+                                ...current,
+                                providerId: event.target.value,
+                              }))
+                            }
+                            className={selectClassName}
+                          >
+                            <option value="">{t.documents_select_provider}</option>
+                            {providers.map((item) => (
+                              <option key={item.id} value={item.id}>
+                                {item.name} · {item.address_city || t.documents_no_city}
+                              </option>
+                            ))}
+                          </NativeComboboxSelect>
+                        </Field>
+                      )}
+                      <Field label={t.documents_source}>
+                        <Input
+                          value={shareForm.channel}
+                          onChange={(event) =>
+                            setShareForm((current) => ({
+                              ...current,
+                              channel: event.target.value,
+                            }))
+                          }
+                          className={shellInputClassName}
+                        />
+                      </Field>
+                    </div>
+                  </div>
+                </DocumentSheetSection>
+
+                <DocumentSheetSection
+                  title={l("Nachricht", "Сообщение", "Повідомлення")}
                 >
-                  {t.documents_provider_target}
-                </Button>
-              </div>
-              <div className="grid gap-4 md:grid-cols-2">
-                {shareForm.targetType === "user" ? (
-                  <Field label={t.patients_assign_owner} required>
-                    <NativeComboboxSelect
-                      value={shareForm.userId}
+                  <Field
+                    label={t.documents_share_message}
+                    required={shareForm.targetType === "provider"}
+                  >
+                    <textarea
+                      value={shareForm.message}
                       onChange={(event) =>
                         setShareForm((current) => ({
                           ...current,
-                          userId: event.target.value,
+                          message: event.target.value,
                         }))
                       }
-                      className={selectClassName}
-                    >
-                      <option value="">{t.documents_select_user}</option>
-                      {staff.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.name} · {formatRoleLabel(item.role)}
-                        </option>
-                      ))}
-                    </NativeComboboxSelect>
+                      placeholder={t.documents_share_message_placeholder}
+                      className={cn(textareaClassName, "min-h-[140px] bg-background/60")}
+                    />
                   </Field>
-                ) : (
-                  <Field label={t.common_provider} required>
-                    <NativeComboboxSelect
-                      value={shareForm.providerId}
+                </DocumentSheetSection>
+
+                <DocumentSheetSection
+                  title={l("Bestätigung", "Подтверждение", "Підтвердження")}
+                >
+                  <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={shareForm.requiresConfirmation}
                       onChange={(event) =>
                         setShareForm((current) => ({
                           ...current,
-                          providerId: event.target.value,
+                          requiresConfirmation: event.target.checked,
                         }))
                       }
-                      className={selectClassName}
-                    >
-                      <option value="">{t.documents_select_provider}</option>
-                      {providers.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.name} · {item.address_city || t.documents_no_city}
-                        </option>
-                      ))}
-                    </NativeComboboxSelect>
-                  </Field>
-                )}
-                <Field label={t.documents_source}>
-                  <Input
-                    value={shareForm.channel}
-                    onChange={(event) =>
-                      setShareForm((current) => ({
-                        ...current,
-                        channel: event.target.value,
-                      }))
-                    }
-                    className={shellInputClassName}
-                  />
-                </Field>
+                      className={checkboxClass}
+                    />
+                    {t.documents_require_confirmation}
+                  </label>
+                </DocumentSheetSection>
               </div>
-              <Field
-                label={t.documents_share_message}
-                required={shareForm.targetType === "provider"}
-              >
-                <textarea
-                  value={shareForm.message}
-                  onChange={(event) =>
-                    setShareForm((current) => ({
-                      ...current,
-                      message: event.target.value,
-                    }))
-                  }
-                  placeholder={t.documents_share_message_placeholder}
-                  className={textareaClassName}
-                />
-              </Field>
-              <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-card px-4 py-3 text-sm text-foreground">
-                <input
-                  type="checkbox"
-                  checked={shareForm.requiresConfirmation}
-                  onChange={(event) =>
-                    setShareForm((current) => ({
-                      ...current,
-                      requiresConfirmation: event.target.checked,
-                    }))
-                  }
-                  className={checkboxClass}
-                />
-                {t.documents_require_confirmation}
-              </label>
             </AdminSheetScaffold>
           </form>
         </SheetContent>
@@ -3097,7 +3116,7 @@ function StaffDocumentsPage({
               >
                 {saveError ? <Banner tone="error">{saveError}</Banner> : null}
                 <div className="space-y-4 rounded-xl p-4">
-                  <MetadataSheetSection
+                  <DocumentSheetSection
                     title={l("Metadaten", "Метаданные", "Метадані")}
                   >
                     <div className="grid gap-4 md:grid-cols-2">
@@ -3175,9 +3194,9 @@ function StaffDocumentsPage({
                     </NativeComboboxSelect>
                   </Field>
                     </div>
-                  </MetadataSheetSection>
+                  </DocumentSheetSection>
 
-                  <MetadataSheetSection
+                  <DocumentSheetSection
                     title={l("Dokument", "Документ", "Документ")}
                   >
                     <div className="grid gap-4 md:grid-cols-2">
@@ -3229,9 +3248,9 @@ function StaffDocumentsPage({
                     </NativeComboboxSelect>
                   </Field>
                     </div>
-                  </MetadataSheetSection>
+                  </DocumentSheetSection>
 
-                  <MetadataSheetSection
+                  <DocumentSheetSection
                     title={l("Status und Sichtbarkeit", "Статус и видимость", "Статус і видимість")}
                   >
                     <div className="grid gap-4 md:grid-cols-2">
@@ -3324,9 +3343,9 @@ function StaffDocumentsPage({
                       />
                       {t.documents_mark_medical_data}
                     </label>
-                  </MetadataSheetSection>
+                  </DocumentSheetSection>
 
-                  <MetadataSheetSection
+                  <DocumentSheetSection
                     title={t.patients_notes}
                   >
                     <Field label={t.patients_notes}>
@@ -3342,7 +3361,7 @@ function StaffDocumentsPage({
                         className={cn(textareaClassName, "min-h-[140px] bg-background/60")}
                       />
                     </Field>
-                  </MetadataSheetSection>
+                  </DocumentSheetSection>
                 </div>
               </AdminSheetScaffold>
             </form>
@@ -5448,7 +5467,7 @@ function documentSectionToneIcon(tone: DocumentSectionTone) {
   }
 }
 
-function MetadataSheetSection({
+function DocumentSheetSection({
   title,
   children,
 }: {
