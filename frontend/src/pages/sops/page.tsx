@@ -155,6 +155,46 @@ function DetailField({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
+function SummaryLine({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="flex min-w-0 items-center gap-3 py-2">
+      <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
+      <span className="h-px min-w-6 flex-1 bg-border/70" />
+      <span className="max-w-[55%] truncate text-right text-sm font-semibold text-foreground">
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function DetailSection({
+  title,
+  accessory,
+  children,
+}: {
+  title: ReactNode;
+  accessory?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border border-border bg-card p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
+        {accessory ? <div className="shrink-0">{accessory}</div> : null}
+      </div>
+      <div className="mt-5">{children}</div>
+    </section>
+  );
+}
+
+function sopAccentClass(status: string | null | undefined) {
+  if (status === "approved") return "bg-emerald-500";
+  if (status === "pending_approval") return "bg-amber-500";
+  if (status === "rejected") return "bg-rose-500";
+  if (status === "archived") return "bg-slate-400";
+  return "bg-sky-500";
+}
+
 function Field({
   label,
   className,
@@ -1033,87 +1073,108 @@ function useSopsPageContent() {
                 description={text.noSelectionDescription}
               />
             ) : (
-              <>
-                <AdminTableCard
-                  title={titleWithDot(text.detailOverview)}
-                  accessory={
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline" className={cn("rounded-full", statusTone(selectedItem.status))}>
-                        {statusLabel(selectedItem.status)}
-                      </Badge>
-                      <Badge variant="outline" className="rounded-full">
-                        {categoryLabel(selectedItem.category)}
-                      </Badge>
+              <div className="space-y-4 rounded-xl p-4">
+                <section className="relative overflow-hidden rounded-xl border border-border bg-card">
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "absolute left-0 top-4 h-12 w-1 rounded-r-full",
+                      sopAccentClass(selectedItem.status),
+                    )}
+                  />
+                  <div className="grid gap-4 p-4 pl-7 md:grid-cols-[minmax(0,1fr)_180px]">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="h-px w-8 bg-border" />
+                        <Badge variant="outline" className={cn("rounded-full", statusTone(selectedItem.status))}>
+                          {statusLabel(selectedItem.status)}
+                        </Badge>
+                      </div>
+                      <h3 className="mt-2 truncate text-lg font-semibold leading-none text-foreground">
+                        {selectedItem.title}
+                      </h3>
+                      <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                        {selectedItem.summary || text.statusNotSet}
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Badge variant="outline" className="rounded-full">
+                          {categoryLabel(selectedItem.category)}
+                        </Badge>
+                        <Badge variant="outline" className="rounded-full">
+                          {text.columns.revision} {selectedItem.revision_no}
+                        </Badge>
+                        {selectedItem.requires_ack ? (
+                          <Badge variant="outline" className="rounded-full">
+                            {text.formRequiresAck}
+                          </Badge>
+                        ) : null}
+                      </div>
                     </div>
+                    <div className="flex flex-col justify-between gap-4 border-l border-dashed border-border pl-4">
+                      <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                        {text.columns.updated}
+                      </span>
+                      <div className="text-right">
+                        <p className="text-xs font-medium leading-5 text-foreground">
+                          {formatDate(selectedItem.updated_at, lang, t)}
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                          {selectedItem.created_by_name || roleLabel(selectedItem.created_by_role)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <DetailSection title={text.detailOverview}>
+                  <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
+                    <SummaryLine label={text.columns.revision} value={selectedItem.revision_no} />
+                    <SummaryLine label={text.columns.updated} value={formatDate(selectedItem.updated_at, lang, t)} />
+                    <SummaryLine label={text.columns.author} value={selectedItem.created_by_name || roleLabel(selectedItem.created_by_role)} />
+                    <SummaryLine label={text.columns.ack} value={ackLabel(selectedItem.my_ack_status)} />
+                    <SummaryLine label={text.pendingAck} value={selectedItem.pending_ack_count} />
+                    <SummaryLine label={text.acknowledged} value={selectedItem.acknowledged_count} />
+                    <SummaryLine label={text.columns.approval} value={approvalRoleLabel(selectedItem.approval_required_role)} />
+                    <SummaryLine label={text.myStatus} value={ackLabel(selectedItem.my_ack_status)} />
+                  </div>
+                </DetailSection>
+
+                <DetailSection
+                  title={text.detailTargeting}
+                  accessory={
+                    <Badge variant="outline" className="rounded-full">
+                      {text.directUsers}: {selectedItem.assigned_user_count}
+                    </Badge>
                   }
                 >
-                  <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
-                    <DetailField label={text.columns.revision} value={selectedItem.revision_no} />
-                    <DetailField
-                      label={text.columns.updated}
-                      value={formatDate(selectedItem.updated_at, lang, t)}
-                    />
-                    <DetailField
-                      label={text.columns.author}
-                      value={selectedItem.created_by_name || roleLabel(selectedItem.created_by_role)}
-                    />
-                    <DetailField
-                      label={text.columns.ack}
-                      value={ackLabel(selectedItem.my_ack_status)}
-                    />
-                    <DetailField label={text.pendingAck} value={selectedItem.pending_ack_count} />
-                    <DetailField
-                      label={text.acknowledged}
-                      value={selectedItem.acknowledged_count}
-                    />
-                    <DetailField
-                      label={text.columns.approval}
-                      value={approvalRoleLabel(selectedItem.approval_required_role)}
-                    />
-                    <DetailField
-                      label={text.myStatus}
-                      value={ackLabel(selectedItem.my_ack_status)}
-                    />
+                  <div className="flex flex-wrap gap-2">
+                    {selectedItem.target_roles.length > 0 ? (
+                      selectedItem.target_roles.map((role) => (
+                        <Badge key={`${selectedItem.id}-${role}`} variant="outline" className="rounded-full">
+                          {roleLabel(role)}
+                        </Badge>
+                      ))
+                    ) : (
+                      <span className="text-sm text-muted-foreground">{text.statusNotSet}</span>
+                    )}
                   </div>
-                </AdminTableCard>
+                </DetailSection>
 
-                <AdminTableCard title={titleWithDot(text.detailTargeting)}>
-                  <div className="space-y-3 p-4">
-                    <div className="flex flex-wrap gap-2">
-                      {selectedItem.target_roles.length > 0 ? (
-                        selectedItem.target_roles.map((role) => (
-                          <Badge key={`${selectedItem.id}-${role}`} variant="outline" className="rounded-full">
-                            {roleLabel(role)}
-                          </Badge>
-                        ))
-                      ) : (
-                        <span className="text-sm text-muted-foreground">{text.statusNotSet}</span>
-                      )}
-                    </div>
-                    <div className="text-sm text-muted-foreground">
-                      {text.directUsers}: {selectedItem.assigned_user_count}
-                    </div>
-                  </div>
-                </AdminTableCard>
-
-                <AdminTableCard title={titleWithDot(text.detailBody)}>
-                  <div className="p-4">
+                <DetailSection title={text.detailBody}>
+                  <div className="space-y-4">
                     {selectedItem.summary ? (
-                      <p className="mb-4 text-sm text-muted-foreground">{selectedItem.summary}</p>
+                      <p className="rounded-xl border border-border/50 bg-muted/20 p-4 text-sm leading-6 text-muted-foreground">
+                        {selectedItem.summary}
+                      </p>
                     ) : null}
-                    <pre
-                      className={cn(
-                        "whitespace-pre-wrap break-words rounded-xl p-4 text-sm text-foreground",
-                        tokens.surface.mutedCard,
-                      )}
-                    >
+                    <pre className="max-h-[520px] overflow-auto whitespace-pre-wrap break-words rounded-xl border border-border/50 bg-background/60 p-4 text-sm leading-6 text-foreground">
                       {selectedItem.body_markdown}
                     </pre>
                   </div>
-                </AdminTableCard>
+                </DetailSection>
 
-                <AdminTableCard title={titleWithDot(text.detailActions)}>
-                  <div className="flex flex-wrap gap-2 p-4">
+                <DetailSection title={text.detailActions}>
+                  <div className="flex flex-wrap gap-2">
                     {selectedItem.can_edit ? (
                       <Button
                         type="button"
@@ -1162,8 +1223,8 @@ function useSopsPageContent() {
                       </Button>
                     ) : null}
                   </div>
-                </AdminTableCard>
-              </>
+                </DetailSection>
+              </div>
             )}
           </AdminSheetScaffold>
         </SheetContent>
@@ -1186,146 +1247,162 @@ function useSopsPageContent() {
               }
             >
               {formError ? <ShellBanner tone="error">{formError}</ShellBanner> : null}
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label={text.formTitle}>
-                  <Input
-                    value={form.title}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, title: event.target.value }))
-                    }
-                    className={shellInputClassName}
-                    required
-                  />
-                </Field>
-                <Field label={text.formCategory}>
-                  <NativeComboboxSelect
-                    value={form.category}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        category: event.target.value as SopFormState["category"],
-                      }))
-                    }
-                    className={selectClassName}
-                  >
-                    <option value="sop">{categoryLabel("sop")}</option>
-                    <option value="handbook">{categoryLabel("handbook")}</option>
-                    <option value="training">{categoryLabel("training")}</option>
-                  </NativeComboboxSelect>
-                </Field>
-                <Field label={text.formSummary} className="sm:col-span-2">
-                  <Input
-                    value={form.summary}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, summary: event.target.value }))
-                    }
-                    className={shellInputClassName}
-                  />
-                </Field>
-                <Field label={text.formBody} className="sm:col-span-2">
-                  <textarea
-                    value={form.bodyMarkdown}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, bodyMarkdown: event.target.value }))
-                    }
-                    className={cn(textareaClassName, "min-h-[220px]")}
-                    required
-                  />
-                </Field>
-              </div>
-
-              <div className="grid gap-5 lg:grid-cols-2">
-                <Field label={text.formTargetRoles}>
-                  <div
-                    className={cn(
-                      "max-h-72 space-y-2 overflow-y-auto rounded-xl p-3",
-                      tokens.surface.mutedCard,
-                    )}
-                  >
-                    {allowedTargetRoles.length > 0 ? (
-                      allowedTargetRoles.map((role) => (
-                        <label
-                          key={role}
-                          className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground"
-                        >
-                          <input
-                            type="checkbox"
-                            className={checkboxClass}
-                            checked={form.targetRoles.includes(role)}
-                            onChange={(event) =>
-                              setForm((current) => ({
-                                ...current,
-                                targetRoles: event.target.checked
-                                  ? [...current.targetRoles, role]
-                                  : current.targetRoles.filter((value) => value !== role),
-                              }))
-                            }
-                          />
-                          <span>{roleLabel(role)}</span>
-                        </label>
-                      ))
-                    ) : (
-                      <span className="text-sm text-muted-foreground">{text.statusNotSet}</span>
-                    )}
-                  </div>
-                </Field>
-
-                <Field label={text.formDirectUsers}>
-                  <div
-                    className={cn(
-                      "max-h-72 space-y-2 overflow-y-auto rounded-xl p-3",
-                      tokens.surface.mutedCard,
-                    )}
-                  >
-                    {(filteredUsers.length > 0 ? filteredUsers : eligibleUsers).map((item) => (
-                      <label
-                        key={item.id}
-                        aria-label={item.name}
-                        className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground"
+              <div className="space-y-4 rounded-xl p-4">
+                <DetailSection title={text.detailOverview}>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label={text.formTitle}>
+                      <Input
+                        value={form.title}
+                        onChange={(event) =>
+                          setForm((current) => ({ ...current, title: event.target.value }))
+                        }
+                        className={shellInputClassName}
+                        required
+                      />
+                    </Field>
+                    <Field label={text.formCategory}>
+                      <NativeComboboxSelect
+                        value={form.category}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            category: event.target.value as SopFormState["category"],
+                          }))
+                        }
+                        className={selectClassName}
                       >
-                        <input
-                          type="checkbox"
-                          className={checkboxClass}
-                          checked={form.targetUserIds.includes(item.id)}
-                          onChange={(event) =>
-                            setForm((current) => ({
-                              ...current,
-                              targetUserIds: event.target.checked
-                                ? [...current.targetUserIds, item.id]
-                                : current.targetUserIds.filter((value) => value !== item.id),
-                            }))
-                          }
-                        />
-                        <div>
-                          <p className="font-medium text-foreground">{item.name}</p>
-                          <p className="text-xs text-muted-foreground">{roleLabel(item.role)}</p>
-                        </div>
-                      </label>
-                    ))}
+                        <option value="sop">{categoryLabel("sop")}</option>
+                        <option value="handbook">{categoryLabel("handbook")}</option>
+                        <option value="training">{categoryLabel("training")}</option>
+                      </NativeComboboxSelect>
+                    </Field>
+                    <Field label={text.formSummary} className="sm:col-span-2">
+                      <Input
+                        value={form.summary}
+                        onChange={(event) =>
+                          setForm((current) => ({ ...current, summary: event.target.value }))
+                        }
+                        className={shellInputClassName}
+                      />
+                    </Field>
                   </div>
-                </Field>
-              </div>
+                </DetailSection>
 
-              <label
-                aria-label={text.formRequiresAck}
-                className={cn(
-                  "flex items-center gap-3 rounded-xl px-3 py-3 text-sm text-foreground",
-                  tokens.surface.mutedCard,
-                )}
-              >
-                <input
-                  type="checkbox"
-                  className={checkboxClass}
-                  checked={form.requiresAck}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      requiresAck: event.target.checked,
-                    }))
+                <DetailSection title={text.detailBody}>
+                  <Field label={text.formBody}>
+                    <textarea
+                      value={form.bodyMarkdown}
+                      onChange={(event) =>
+                        setForm((current) => ({ ...current, bodyMarkdown: event.target.value }))
+                      }
+                      className={cn(textareaClassName, "min-h-[260px] bg-background/60")}
+                      required
+                    />
+                  </Field>
+                </DetailSection>
+
+                <DetailSection
+                  title={text.detailTargeting}
+                  accessory={
+                    <Badge variant="outline" className="rounded-full">
+                      {text.formDirectUsers}: {form.targetUserIds.length}
+                    </Badge>
                   }
-                />
-                <span>{text.formRequiresAck}</span>
-              </label>
+                >
+                  <div className="grid gap-5 lg:grid-cols-2">
+                    <Field label={text.formTargetRoles}>
+                      <div
+                        className={cn(
+                          "max-h-72 space-y-2 overflow-y-auto rounded-xl p-3",
+                          tokens.surface.mutedCard,
+                        )}
+                      >
+                        {allowedTargetRoles.length > 0 ? (
+                          allowedTargetRoles.map((role) => (
+                            <label
+                              key={role}
+                              className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground"
+                            >
+                              <input
+                                type="checkbox"
+                                className={checkboxClass}
+                                checked={form.targetRoles.includes(role)}
+                                onChange={(event) =>
+                                  setForm((current) => ({
+                                    ...current,
+                                    targetRoles: event.target.checked
+                                      ? [...current.targetRoles, role]
+                                      : current.targetRoles.filter((value) => value !== role),
+                                  }))
+                                }
+                              />
+                              <span>{roleLabel(role)}</span>
+                            </label>
+                          ))
+                        ) : (
+                          <span className="text-sm text-muted-foreground">{text.statusNotSet}</span>
+                        )}
+                      </div>
+                    </Field>
+
+                    <Field label={text.formDirectUsers}>
+                      <div
+                        className={cn(
+                          "max-h-72 space-y-2 overflow-y-auto rounded-xl p-3",
+                          tokens.surface.mutedCard,
+                        )}
+                      >
+                        {(filteredUsers.length > 0 ? filteredUsers : eligibleUsers).map((item) => (
+                          <label
+                            key={item.id}
+                            aria-label={item.name}
+                            className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground"
+                          >
+                            <input
+                              type="checkbox"
+                              className={checkboxClass}
+                              checked={form.targetUserIds.includes(item.id)}
+                              onChange={(event) =>
+                                setForm((current) => ({
+                                  ...current,
+                                  targetUserIds: event.target.checked
+                                    ? [...current.targetUserIds, item.id]
+                                    : current.targetUserIds.filter((value) => value !== item.id),
+                                }))
+                              }
+                            />
+                            <div>
+                              <p className="font-medium text-foreground">{item.name}</p>
+                              <p className="text-xs text-muted-foreground">{roleLabel(item.role)}</p>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                    </Field>
+                  </div>
+
+                  <label
+                    aria-label={text.formRequiresAck}
+                    className={cn(
+                      "mt-4 flex items-center gap-3 rounded-xl px-3 py-3 text-sm text-foreground",
+                      tokens.surface.mutedCard,
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      className={checkboxClass}
+                      checked={form.requiresAck}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          requiresAck: event.target.checked,
+                        }))
+                      }
+                    />
+                    <span>{text.formRequiresAck}</span>
+                  </label>
+                </DetailSection>
+              </div>
             </AdminSheetScaffold>
           </form>
         </SheetContent>
