@@ -52,6 +52,7 @@ import {
   inputClass as shellInputClassName,
   selectClass as shellSelectClassName,
   textareaClass as shellTextareaClass,
+  tokens,
   type StatusTone,
 } from "@/components/ui-shell";
 import { Badge } from "@/components/ui/badge";
@@ -3095,7 +3096,11 @@ function StaffDocumentsPage({
                 )}
               >
                 {saveError ? <Banner tone="error">{saveError}</Banner> : null}
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-4 rounded-xl p-4">
+                  <MetadataSheetSection
+                    title={l("Metadaten", "Метаданные", "Метадані")}
+                  >
+                    <div className="grid gap-4 md:grid-cols-2">
                   <Field label={t.orders_patient}>
                     <NativeComboboxSelect
                       value={editForm.patientId}
@@ -3169,6 +3174,13 @@ function StaffDocumentsPage({
                       ))}
                     </NativeComboboxSelect>
                   </Field>
+                    </div>
+                  </MetadataSheetSection>
+
+                  <MetadataSheetSection
+                    title={l("Dokument", "Документ", "Документ")}
+                  >
+                    <div className="grid gap-4 md:grid-cols-2">
                   <Field label={t.documents_filename} required>
                     <Input
                       value={editForm.autoName}
@@ -3216,6 +3228,13 @@ function StaffDocumentsPage({
                       ))}
                     </NativeComboboxSelect>
                   </Field>
+                    </div>
+                  </MetadataSheetSection>
+
+                  <MetadataSheetSection
+                    title={l("Status und Sichtbarkeit", "Статус и видимость", "Статус і видимість")}
+                  >
+                    <div className="grid gap-4 md:grid-cols-2">
                   <Field label={t.users_status}>
                     <NativeComboboxSelect
                       value={editForm.status}
@@ -3286,38 +3305,45 @@ function StaffDocumentsPage({
                       className={shellInputClassName}
                     />
                   </Field>
+                    </div>
+                    <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
+                      <input
+                        type="checkbox"
+                        checked={editForm.isMedical}
+                        onChange={(event) =>
+                          setEditForm((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  isMedical: event.target.checked,
+                                }
+                              : current,
+                          )
+                        }
+                        className={checkboxClass}
+                      />
+                      {t.documents_mark_medical_data}
+                    </label>
+                  </MetadataSheetSection>
+
+                  <MetadataSheetSection
+                    title={t.patients_notes}
+                  >
+                    <Field label={t.patients_notes}>
+                      <textarea
+                        value={editForm.notes}
+                        onChange={(event) =>
+                          setEditForm((current) =>
+                            current
+                              ? { ...current, notes: event.target.value }
+                              : current,
+                          )
+                        }
+                        className={cn(textareaClassName, "min-h-[140px] bg-background/60")}
+                      />
+                    </Field>
+                  </MetadataSheetSection>
                 </div>
-                <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
-                  <input
-                    type="checkbox"
-                    checked={editForm.isMedical}
-                    onChange={(event) =>
-                      setEditForm((current) =>
-                        current
-                          ? {
-                              ...current,
-                              isMedical: event.target.checked,
-                            }
-                          : current,
-                      )
-                    }
-                    className={checkboxClass}
-                  />
-                  {t.documents_mark_medical_data}
-                </label>
-                <Field label={t.patients_notes}>
-                  <textarea
-                    value={editForm.notes}
-                    onChange={(event) =>
-                      setEditForm((current) =>
-                        current
-                          ? { ...current, notes: event.target.value }
-                          : current,
-                      )
-                    }
-                    className={textareaClassName}
-                  />
-                </Field>
               </AdminSheetScaffold>
             </form>
           </SheetContent>
@@ -5420,6 +5446,30 @@ function documentSectionToneIcon(tone: DocumentSectionTone) {
     default:
       return "border-border/60 bg-background text-muted-foreground";
   }
+}
+
+function MetadataSheetSection({
+  title,
+  children,
+}: {
+  title: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border border-border bg-card p-6">
+      <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
+      <div className="mt-5">{children}</div>
+    </section>
+  );
+}
+
+function titleWithDot(title: ReactNode) {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+      <span>{title}</span>
+    </span>
+  );
 }
 
 function SectionCard({
