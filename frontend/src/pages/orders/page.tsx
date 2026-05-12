@@ -272,6 +272,21 @@ function SectionCard({
   );
 }
 
+function OrderSheetSection({
+  title,
+  children,
+}: {
+  title: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border border-border bg-card p-6">
+      <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
+      <div className="mt-5 space-y-4">{children}</div>
+    </section>
+  );
+}
+
 function DetailField({ label, value }: DetailFieldProps) {
   return (
     <div className={cn("rounded-xl p-3", tokens.surface.card)}>
@@ -5683,49 +5698,47 @@ function useOrdersPageContent() {
                 />
               }
             >
-            {createError ? (
-              <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                {createError}
-              </div>
-            ) : null}
+              <div className="space-y-4 rounded-xl p-4">
+                {createError ? (
+                  <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                    {createError}
+                  </div>
+                ) : null}
 
-            <Field label={t.orders_patient}>
-              <NativeComboboxSelect
-                value={createForm.patientId || "__empty__"}
-                onChange={(event) => {
-                  const patientId =
-                    event.target.value && event.target.value !== "__empty__"
-                      ? event.target.value
-                      : "";
-                  setCreateError(null);
-                  setCreateRecheck(null);
-                  setCreateForm((current) => ({
-                    ...current,
-                    patientId,
-                  }));
-                }}
-                className={selectClassName}
-              >
-                <option value="__empty__">{t.orders_patient}</option>
-                {patients.map((patient) => (
-                  <option key={patient.id} value={patient.id}>
-                    {patientLabel(patient, t.orders_patient_fallback)}
-                  </option>
-                ))}
-              </NativeComboboxSelect>
-            </Field>
+                <OrderSheetSection title={l("Grunddaten", "Основные данные")}>
+                  <Field label={t.orders_patient}>
+                    <NativeComboboxSelect
+                      value={createForm.patientId || "__empty__"}
+                      onChange={(event) => {
+                        const patientId =
+                          event.target.value && event.target.value !== "__empty__"
+                            ? event.target.value
+                            : "";
+                        setCreateError(null);
+                        setCreateRecheck(null);
+                        setCreateForm((current) => ({
+                          ...current,
+                          patientId,
+                        }));
+                      }}
+                      className={selectClassName}
+                    >
+                      <option value="__empty__">{t.orders_patient}</option>
+                      {patients.map((patient) => (
+                        <option key={patient.id} value={patient.id}>
+                          {patientLabel(patient, t.orders_patient_fallback)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+                </OrderSheetSection>
 
-            {createForm.patientId ? (
-              <div className={cn("rounded-xl p-4", tokens.surface.mutedCard)}>
+                {createForm.patientId ? (
+                  <OrderSheetSection title={l("Re-Check", "Повторная проверка")}>
+                    <div className="space-y-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="space-y-1">
-                    <div className="text-sm font-semibold text-foreground">
-                      {l(
-                        "Re-Check fur Bestandskunden",
-                        "Повторная проверка для существующего клиента",
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm leading-6 text-muted-foreground">
                       {l(
                         "Stammdaten, Compliance, Identitat, Dokumentenpaket, Vertragsstatus und Debt-Hold vor dem Anlegen eines neuen Auftrags prufen.",
                         "Проверьте базовые данные, compliance, идентификацию, комплект документов, статус договора и debt-hold перед созданием нового заказа.",
@@ -5954,22 +5967,26 @@ function useOrdersPageContent() {
                     </div>
                   </div>
                 ) : null}
-              </div>
-            ) : null}
+                    </div>
+                  </OrderSheetSection>
+                ) : null}
 
-            <Field label={t.orders_intake_note}>
-              <textarea
-                value={createForm.needsDescription}
-                onChange={(event) =>
-                  setCreateForm((current) => ({
-                    ...current,
-                    needsDescription: event.target.value,
-                  }))
-                }
-                className={textareaClassName}
-                placeholder={tx.patients_notes}
-              />
-            </Field>
+                <OrderSheetSection title={l("Zusätzlich", "Дополнительно")}>
+                  <Field label={t.orders_intake_note}>
+                    <textarea
+                      value={createForm.needsDescription}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({
+                          ...current,
+                          needsDescription: event.target.value,
+                        }))
+                      }
+                      className={cn(textareaClassName, "min-h-[140px] bg-background/60")}
+                      placeholder={tx.patients_notes}
+                    />
+                  </Field>
+                </OrderSheetSection>
+              </div>
 
             </AdminSheetScaffold>
           </form>
@@ -6189,8 +6206,3 @@ function useOrdersPageContent() {
 export function OrdersPage(...args: Parameters<typeof useOrdersPageContent>) {
   return useOrdersPageContent(...args);
 }
-
-
-
-
-

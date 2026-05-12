@@ -2302,24 +2302,30 @@ function StaffDocumentsPage({
                 />
               )}
             >
-            {generateError ? (
-              <Banner tone="error">{generateError}</Banner>
-            ) : null}
-            {selectedTemplate ? (
-              <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-4 text-sm text-sky-900">
-                <p className="font-semibold">{selectedTemplate.label}</p>
-                <p className="mt-1 text-sky-800/80">
-                  {selectedTemplate.description}
-                </p>
-              </div>
-            ) : null}
-            {generateForm.replaceDocumentId && detail?.id === generateForm.replaceDocumentId ? (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
-                {t.documents_generate_replace_warning}{" "}
-                {detail.version_number}.
-              </div>
-            ) : null}
-            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-4 rounded-xl p-4">
+                {generateError ? (
+                  <Banner tone="error">{generateError}</Banner>
+                ) : null}
+
+                <DocumentSheetSection
+                  title={l("Vorlage", "Шаблон", "Шаблон")}
+                >
+                  <div className="space-y-4">
+                    {selectedTemplate ? (
+                      <div className="rounded-xl border border-sky-200 bg-sky-50/80 px-4 py-3 text-sm text-sky-900">
+                        <p className="font-semibold">{selectedTemplate.label}</p>
+                        <p className="mt-1 text-sky-800/80">
+                          {selectedTemplate.description}
+                        </p>
+                      </div>
+                    ) : null}
+                    {generateForm.replaceDocumentId && detail?.id === generateForm.replaceDocumentId ? (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-900">
+                        {t.documents_generate_replace_warning}{" "}
+                        {detail.version_number}.
+                      </div>
+                    ) : null}
+                    <div className="grid gap-4 md:grid-cols-2">
               <Field label={t.documents_category} required>
                 <NativeComboboxSelect
                   value={generateForm.templateId}
@@ -2371,6 +2377,14 @@ function StaffDocumentsPage({
                   className={shellInputClassName}
                 />
               </Field>
+                    </div>
+                  </div>
+                </DocumentSheetSection>
+
+                <DocumentSheetSection
+                  title={l("Kontext", "Контекст", "Контекст")}
+                >
+                  <div className="grid gap-4 md:grid-cols-2">
               <Field label={t.orders_patient} required>
                 <NativeComboboxSelect
                   value={generateForm.patientId}
@@ -2442,6 +2456,13 @@ function StaffDocumentsPage({
                   ))}
                 </NativeComboboxSelect>
               </Field>
+                  </div>
+                </DocumentSheetSection>
+
+                <DocumentSheetSection
+                  title={l("Dokumentparameter", "Параметры документа", "Параметри документа")}
+                >
+                  <div className="grid gap-4 md:grid-cols-2">
               <Field label={t.users_status}>
                 <NativeComboboxSelect
                   value={generateForm.status}
@@ -2520,19 +2541,15 @@ function StaffDocumentsPage({
                   )}
                 />
               </Field>
-            </div>
-            {availableTemplateBlocks.length > 0 ? (
-              <div className="space-y-3 rounded-xl border border-border/60 p-4">
-                <div>
-                  <p className="inline-flex items-center gap-2 text-sm font-semibold text-foreground">
-                    <span aria-hidden className="size-2 rounded-full bg-amber-500" />
-                    <span>{t.documents_text_blocks}</span>
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {t.documents_text_blocks_hint}
-                  </p>
-                </div>
-                <div className="grid gap-3 md:grid-cols-2">
+                  </div>
+                </DocumentSheetSection>
+                {availableTemplateBlocks.length > 0 ? (
+                  <DocumentSheetSection title={t.documents_text_blocks}>
+                    <div className="space-y-4">
+                      <p className="text-xs text-muted-foreground">
+                        {t.documents_text_blocks_hint}
+                      </p>
+                      <div className="grid gap-3 md:grid-cols-2">
                   {availableTemplateBlocks.map((block) => {
                     const checked = generateForm.textBlockKeys.includes(
                       block.key,
@@ -2571,11 +2588,16 @@ function StaffDocumentsPage({
                       </label>
                     );
                   })}
-                </div>
-              </div>
-            ) : null}
-            <div className="grid gap-4 md:grid-cols-2">
-              <Field label={t.patients_notes}>
+                      </div>
+                    </div>
+                  </DocumentSheetSection>
+                ) : null}
+
+                <DocumentSheetSection
+                  title={l("Text und Notizen", "Текст и заметки", "Текст і нотатки")}
+                >
+                  <div className="grid gap-4 md:grid-cols-2">
+              <Field label={l("Einleitung", "Вступление", "Вступ")}>
                 <textarea
                   value={generateForm.introduction}
                   onChange={(event) =>
@@ -2585,10 +2607,10 @@ function StaffDocumentsPage({
                     }))
                   }
                   className={textareaClassName}
-                  placeholder={t.patients_notes}
+                  placeholder={l("Einleitungstext", "Текст вступления", "Текст вступу")}
                 />
               </Field>
-              <Field label={t.patients_notes}>
+              <Field label={l("Schlussnotiz", "Заключительная заметка", "Фінальна нотатка")}>
                 <textarea
                   value={generateForm.closingNote}
                   onChange={(event) =>
@@ -2598,23 +2620,25 @@ function StaffDocumentsPage({
                     }))
                   }
                   className={textareaClassName}
-                  placeholder={t.patients_notes}
+                  placeholder={l("Text am Dokumentende", "Текст в конце документа", "Текст наприкінці документа")}
                 />
               </Field>
-            </div>
-            <Field label={t.patients_notes}>
-              <textarea
-                value={generateForm.notes}
-                onChange={(event) =>
-                  setGenerateForm((current) => ({
-                    ...current,
-                    notes: event.target.value,
-                  }))
-                }
-                className={textareaClassName}
-                placeholder={t.patients_notes}
-              />
-            </Field>
+                  </div>
+                  <Field label={l("Interne Notiz", "Внутренняя заметка", "Внутрішня нотатка")}>
+                    <textarea
+                      value={generateForm.notes}
+                      onChange={(event) =>
+                        setGenerateForm((current) => ({
+                          ...current,
+                          notes: event.target.value,
+                        }))
+                      }
+                      className={cn(textareaClassName, "min-h-[120px] bg-background/60")}
+                      placeholder={t.patients_notes}
+                    />
+                  </Field>
+                </DocumentSheetSection>
+              </div>
             </AdminSheetScaffold>
           </form>
         </SheetContent>
@@ -2636,224 +2660,244 @@ function StaffDocumentsPage({
                 />
               )}
             >
-            {uploadError ? <Banner tone="error">{uploadError}</Banner> : null}
-            {!canManage ? (
-              <Banner tone="warning">
-                {user?.role === "interpreter"
-                  ? t.documents_upload_interpreter_hint
-                  : t.documents_upload_teamlead_hint}
-              </Banner>
-            ) : null}
-            <div className="grid gap-4 md:grid-cols-2">
-              <Field label={t.documents_filename} required>
-                <Input
-                  type="file"
-                  onChange={handleUploadFileChange}
-                  className={shellInputClassName}
-                />
-              </Field>
-              <Field label={t.documents_filename}>
-                <Input
-                  value={uploadForm.autoName}
-                  onChange={(event) =>
-                    setUploadForm((current) => ({
-                      ...current,
-                      autoName: event.target.value,
-                    }))
-                  }
-                  className={shellInputClassName}
-                />
-              </Field>
-              <Field label={t.orders_patient}>
-                <NativeComboboxSelect
-                  value={uploadForm.patientId}
-                  onChange={(event) =>
-                    setUploadForm((current) => ({
-                      ...current,
-                      patientId: event.target.value,
-                      orderId: "",
-                      appointmentId: "",
-                    }))
-                  }
-                  className={selectClassName}
+              <div className="space-y-4 rounded-xl p-4">
+                {uploadError ? <Banner tone="error">{uploadError}</Banner> : null}
+                {!canManage ? (
+                  <Banner tone="warning">
+                    {user?.role === "interpreter"
+                      ? t.documents_upload_interpreter_hint
+                      : t.documents_upload_teamlead_hint}
+                  </Banner>
+                ) : null}
+
+                <DocumentSheetSection title={l("Datei", "Файл", "Файл")}>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field label={t.documents_filename} required>
+                      <Input
+                        type="file"
+                        onChange={handleUploadFileChange}
+                        className={shellInputClassName}
+                      />
+                    </Field>
+                    <Field label={t.documents_filename}>
+                      <Input
+                        value={uploadForm.autoName}
+                        onChange={(event) =>
+                          setUploadForm((current) => ({
+                            ...current,
+                            autoName: event.target.value,
+                          }))
+                        }
+                        className={shellInputClassName}
+                      />
+                    </Field>
+                  </div>
+                </DocumentSheetSection>
+
+                <DocumentSheetSection title={l("Kontext", "Контекст", "Контекст")}>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field label={t.orders_patient}>
+                      <NativeComboboxSelect
+                        value={uploadForm.patientId}
+                        onChange={(event) =>
+                          setUploadForm((current) => ({
+                            ...current,
+                            patientId: event.target.value,
+                            orderId: "",
+                            appointmentId: "",
+                          }))
+                        }
+                        className={selectClassName}
+                      >
+                        <option value="">{t.documents_select_patient}</option>
+                        {patients.map((patient) => (
+                          <option key={patient.id} value={patient.id}>
+                            {patientOptionLabel(patient)}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                    </Field>
+                    <Field label={t.orders_title}>
+                      <NativeComboboxSelect
+                        value={uploadForm.orderId}
+                        onChange={(event) =>
+                          setUploadForm((current) => ({
+                            ...current,
+                            orderId: event.target.value,
+                          }))
+                        }
+                        className={selectClassName}
+                        disabled={!uploadForm.patientId}
+                      >
+                        <option value="">{t.documents_optional_order_link}</option>
+                        {uploadOrders.map((order) => (
+                          <option key={order.id} value={order.id}>
+                            {order.order_number} · {order.patient_pid}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                    </Field>
+                    <Field label={t.appointments_title}>
+                      <NativeComboboxSelect
+                        value={uploadForm.appointmentId}
+                        onChange={(event) =>
+                          setUploadForm((current) => ({
+                            ...current,
+                            appointmentId: event.target.value,
+                          }))
+                        }
+                        className={selectClassName}
+                        disabled={!uploadForm.patientId}
+                      >
+                        <option value="">{t.documents_optional_appointment_link}</option>
+                        {uploadAppointments.map((appointment) => (
+                          <option key={appointment.id} value={appointment.id}>
+                            {appointment.title} · {formatDate(appointment.date)}
+                            {appointment.time_start
+                              ? ` · ${appointment.time_start}`
+                              : ""}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                    </Field>
+                  </div>
+                </DocumentSheetSection>
+
+                <DocumentSheetSection
+                  title={l("Dokument", "Документ", "Документ")}
                 >
-                  <option value="">{t.documents_select_patient}</option>
-                  {patients.map((patient) => (
-                    <option key={patient.id} value={patient.id}>
-                      {patientOptionLabel(patient)}
-                    </option>
-                  ))}
-                </NativeComboboxSelect>
-              </Field>
-              <Field label={t.orders_title}>
-                <NativeComboboxSelect
-                  value={uploadForm.orderId}
-                  onChange={(event) =>
-                    setUploadForm((current) => ({
-                      ...current,
-                      orderId: event.target.value,
-                    }))
-                  }
-                  className={selectClassName}
-                  disabled={!uploadForm.patientId}
-                >
-                  <option value="">{t.documents_optional_order_link}</option>
-                  {uploadOrders.map((order) => (
-                    <option key={order.id} value={order.id}>
-                      {order.order_number} · {order.patient_pid}
-                    </option>
-                  ))}
-                </NativeComboboxSelect>
-              </Field>
-              <Field label={t.appointments_title}>
-                <NativeComboboxSelect
-                  value={uploadForm.appointmentId}
-                  onChange={(event) =>
-                    setUploadForm((current) => ({
-                      ...current,
-                      appointmentId: event.target.value,
-                    }))
-                  }
-                  className={selectClassName}
-                  disabled={!uploadForm.patientId}
-                >
-                  <option value="">{t.documents_optional_appointment_link}</option>
-                  {uploadAppointments.map((appointment) => (
-                    <option key={appointment.id} value={appointment.id}>
-                      {appointment.title} · {formatDate(appointment.date)}
-                      {appointment.time_start
-                        ? ` · ${appointment.time_start}`
-                        : ""}
-                    </option>
-                  ))}
-                </NativeComboboxSelect>
-              </Field>
-              <Field label={t.operations_document_type}>
-                <Input
-                  value={uploadForm.art}
-                  onChange={(event) =>
-                    setUploadForm((current) => ({
-                      ...current,
-                      art: event.target.value,
-                    }))
-                  }
-                  list="documents-art-options"
-                  className={shellInputClassName}
-                  placeholder={t.documents_auto_classification_optional}
-                />
-              </Field>
-              <Field label={t.documents_category}>
-                <NativeComboboxSelect
-                  value={uploadForm.category}
-                  onChange={(event) =>
-                    setUploadForm((current) => ({
-                      ...current,
-                      category: event.target.value,
-                    }))
-                  }
-                  className={selectClassName}
-                >
-                  <option value="">{t.documents_no_category}</option>
-                  {categories.map((category) => (
-                    <option key={category.key} value={category.key}>
-                      {category.label}
-                    </option>
-                  ))}
-                </NativeComboboxSelect>
-              </Field>
-              {canManage ? (
-                <Field label={t.users_status}>
-                  <NativeComboboxSelect
-                    value={uploadForm.status}
-                    onChange={(event) =>
-                      setUploadForm((current) => ({
-                        ...current,
-                        status: event.target.value as DocumentStatus,
-                      }))
-                    }
-                    className={selectClassName}
-                  >
-                    {STATUS_OPTIONS.map((status) => (
-                      <option key={status} value={status}>
-                        {formatDocumentStatusLabel(status, t)}
-                      </option>
-                    ))}
-                  </NativeComboboxSelect>
-                </Field>
-              ) : null}
-              {canManage ? (
-                <Field label={text.visibilityHeader}>
-                  <NativeComboboxSelect
-                    value={uploadForm.visibility}
-                    onChange={(event) =>
-                      setUploadForm((current) => ({
-                        ...current,
-                        visibility: event.target.value as DocumentVisibility,
-                      }))
-                    }
-                    className={selectClassName}
-                  >
-                    {VISIBILITY_OPTIONS.map((value) => (
-                      <option key={value} value={value}>
-                        {formatVisibilityLabel(value, t)}
-                      </option>
-                    ))}
-                  </NativeComboboxSelect>
-                </Field>
-              ) : null}
-              <Field label={t.common_provider}>
-                <Input
-                  value={uploadForm.klinik}
-                  onChange={(event) =>
-                    setUploadForm((current) => ({
-                      ...current,
-                      klinik: event.target.value,
-                    }))
-                  }
-                  className={shellInputClassName}
-                />
-              </Field>
-              {canManage ? (
-                <Field label={t.documents_source}>
-                  <Input
-                    value={uploadForm.ursprung}
-                    onChange={(event) =>
-                      setUploadForm((current) => ({
-                        ...current,
-                        ursprung: event.target.value,
-                      }))
-                    }
-                    className={shellInputClassName}
-                  />
-                </Field>
-              ) : null}
-            </div>
-            <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
-              <input
-                type="checkbox"
-                checked={uploadForm.isMedical}
-                onChange={(event) =>
-                  setUploadForm((current) => ({
-                    ...current,
-                    isMedical: event.target.checked,
-                  }))
-                }
-                className={checkboxClass}
-              />
-              {t.documents_mark_medical_data}
-            </label>
-            <Field label={t.patients_notes}>
-              <textarea
-                value={uploadForm.notes}
-                onChange={(event) =>
-                  setUploadForm((current) => ({
-                    ...current,
-                    notes: event.target.value,
-                  }))
-                }
-                className={textareaClassName}
-              />
-            </Field>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field label={t.operations_document_type}>
+                      <Input
+                        value={uploadForm.art}
+                        onChange={(event) =>
+                          setUploadForm((current) => ({
+                            ...current,
+                            art: event.target.value,
+                          }))
+                        }
+                        list="documents-art-options"
+                        className={shellInputClassName}
+                        placeholder={t.documents_auto_classification_optional}
+                      />
+                    </Field>
+                    <Field label={t.documents_category}>
+                      <NativeComboboxSelect
+                        value={uploadForm.category}
+                        onChange={(event) =>
+                          setUploadForm((current) => ({
+                            ...current,
+                            category: event.target.value,
+                          }))
+                        }
+                        className={selectClassName}
+                      >
+                        <option value="">{t.documents_no_category}</option>
+                        {categories.map((category) => (
+                          <option key={category.key} value={category.key}>
+                            {category.label}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                    </Field>
+                    {canManage ? (
+                      <Field label={t.users_status}>
+                        <NativeComboboxSelect
+                          value={uploadForm.status}
+                          onChange={(event) =>
+                            setUploadForm((current) => ({
+                              ...current,
+                              status: event.target.value as DocumentStatus,
+                            }))
+                          }
+                          className={selectClassName}
+                        >
+                          {STATUS_OPTIONS.map((status) => (
+                            <option key={status} value={status}>
+                              {formatDocumentStatusLabel(status, t)}
+                            </option>
+                          ))}
+                        </NativeComboboxSelect>
+                      </Field>
+                    ) : null}
+                    {canManage ? (
+                      <Field label={text.visibilityHeader}>
+                        <NativeComboboxSelect
+                          value={uploadForm.visibility}
+                          onChange={(event) =>
+                            setUploadForm((current) => ({
+                              ...current,
+                              visibility: event.target.value as DocumentVisibility,
+                            }))
+                          }
+                          className={selectClassName}
+                        >
+                          {VISIBILITY_OPTIONS.map((value) => (
+                            <option key={value} value={value}>
+                              {formatVisibilityLabel(value, t)}
+                            </option>
+                          ))}
+                        </NativeComboboxSelect>
+                      </Field>
+                    ) : null}
+                    <Field label={t.common_provider}>
+                      <Input
+                        value={uploadForm.klinik}
+                        onChange={(event) =>
+                          setUploadForm((current) => ({
+                            ...current,
+                            klinik: event.target.value,
+                          }))
+                        }
+                        className={shellInputClassName}
+                      />
+                    </Field>
+                    {canManage ? (
+                      <Field label={t.documents_source}>
+                        <Input
+                          value={uploadForm.ursprung}
+                          onChange={(event) =>
+                            setUploadForm((current) => ({
+                              ...current,
+                              ursprung: event.target.value,
+                            }))
+                          }
+                          className={shellInputClassName}
+                        />
+                      </Field>
+                    ) : null}
+                  </div>
+                  <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={uploadForm.isMedical}
+                      onChange={(event) =>
+                        setUploadForm((current) => ({
+                          ...current,
+                          isMedical: event.target.checked,
+                        }))
+                      }
+                      className={checkboxClass}
+                    />
+                    {t.documents_mark_medical_data}
+                  </label>
+                </DocumentSheetSection>
+
+                <DocumentSheetSection title={l("Zusätzlich", "Дополнительно", "Додатково")}>
+                  <Field label={t.patients_notes}>
+                    <textarea
+                      value={uploadForm.notes}
+                      onChange={(event) =>
+                        setUploadForm((current) => ({
+                          ...current,
+                          notes: event.target.value,
+                        }))
+                      }
+                      className={cn(textareaClassName, "min-h-[120px] bg-background/60")}
+                    />
+                  </Field>
+                </DocumentSheetSection>
+              </div>
             </AdminSheetScaffold>
           </form>
         </SheetContent>
@@ -3346,7 +3390,7 @@ function StaffDocumentsPage({
                   </DocumentSheetSection>
 
                   <DocumentSheetSection
-                    title={t.patients_notes}
+                    title={l("Zusätzlich", "Дополнительно", "Додатково")}
                   >
                     <Field label={t.patients_notes}>
                       <textarea
