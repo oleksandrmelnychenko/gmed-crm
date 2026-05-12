@@ -581,6 +581,8 @@ function usePatientInvoicesTabContent({
   const effectiveFinancialSummary = refreshedFinancialSummary ?? financialSummary;
   const effectiveFinancialLedger = refreshedFinancialLedger ?? financialLedger;
   const ledgerEntries = effectiveFinancialLedger?.entries ?? [];
+  const financialBreakdownByServiceType =
+    effectiveFinancialSummary?.breakdown_by_service_type ?? [];
   const revenueGross =
     effectiveFinancialSummary?.revenue_gross ??
     String(invoiceOutstandingAmount + invoicePaidAmountTotal);
@@ -795,9 +797,9 @@ function usePatientInvoicesTabContent({
           )}
         </div>
 
-        {effectiveFinancialSummary?.breakdown_by_service_type.length ? (
+        {financialBreakdownByServiceType.length ? (
           <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-            {effectiveFinancialSummary.breakdown_by_service_type.map((item) => (
+            {financialBreakdownByServiceType.map((item) => (
               <div
                 key={item.service_type}
                 className="rounded-xl border border-border/50 bg-card px-4 py-3"

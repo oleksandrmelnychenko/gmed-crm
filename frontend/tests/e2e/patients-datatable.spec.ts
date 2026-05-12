@@ -145,9 +145,7 @@ async function mockPatientsApi(page: Page) {
     if (path === "/providers") return json(route, []);
     if (path === "/patients" || path.startsWith("/patients?")) {
       const activeOnly = url.searchParams.get("active_only");
-      const rows = activeOnly === "false"
-        ? patients.filter((p) => !p.is_active)
-        : activeOnly === "true"
+      const rows = activeOnly === "true"
           ? patients.filter((p) => p.is_active)
           : patients;
       return json(route, rows);

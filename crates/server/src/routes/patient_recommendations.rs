@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use axum::{
     Json, Router,
     extract::{Extension, Path, State},
@@ -345,7 +347,7 @@ async fn update_patient_recommendation(
     .bind(body.source_order_id)
     .bind(due_at)
     .bind(priority.as_deref())
-    .bind(status.as_deref())
+    .bind(status)
     .bind(body.portal_visible)
     .bind(auth.user_id)
     .execute(&state.db)

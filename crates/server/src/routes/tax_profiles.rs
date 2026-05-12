@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use axum::{
     Json, Router,
     extract::{Extension, Path, State},
@@ -340,18 +342,17 @@ async fn update_tax_profile(
         }
     };
 
-    if body.is_default.unwrap_or(false) {
-        if let Err(e) = sqlx::query("UPDATE tax_profiles SET is_default = false WHERE id <> $1")
+    if body.is_default.unwrap_or(false)
+        && let Err(e) = sqlx::query("UPDATE tax_profiles SET is_default = false WHERE id <> $1")
             .bind(profile_id)
             .execute(&mut *tx)
             .await
-        {
-            tracing::error!(error = %e, profile_id = %profile_id, "clear default tax profiles");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to update tax profile defaults",
-            );
-        }
+    {
+        tracing::error!(error = %e, profile_id = %profile_id, "clear default tax profiles");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update tax profile defaults",
+        );
     }
 
     let result = match sqlx::query(

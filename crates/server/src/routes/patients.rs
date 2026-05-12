@@ -1275,7 +1275,9 @@ async fn update_patient(
     };
     let emergency_contact_name = match normalize_patient_text_patch(
         body.emergency_contact_name,
-        current.try_get("emergency_contact_name").unwrap_or_default(),
+        current
+            .try_get("emergency_contact_name")
+            .unwrap_or_default(),
         "emergency_contact_name",
     ) {
         Ok(value) => value,
@@ -1283,7 +1285,9 @@ async fn update_patient(
     };
     let emergency_contact_phone = match normalize_patient_text_patch(
         body.emergency_contact_phone,
-        current.try_get("emergency_contact_phone").unwrap_or_default(),
+        current
+            .try_get("emergency_contact_phone")
+            .unwrap_or_default(),
         "emergency_contact_phone",
     ) {
         Ok(value) => value,
@@ -1291,7 +1295,9 @@ async fn update_patient(
     };
     let emergency_contact_relation = match normalize_patient_text_patch(
         body.emergency_contact_relation,
-        current.try_get("emergency_contact_relation").unwrap_or_default(),
+        current
+            .try_get("emergency_contact_relation")
+            .unwrap_or_default(),
         "emergency_contact_relation",
     ) {
         Ok(value) => value,
@@ -2412,7 +2418,12 @@ fn normalize_patient_insurance_type_patch(
     if let Some(ref insurance_type) = normalized {
         match insurance_type.as_str() {
             "private" | "public" | "self_pay" | "foreign" => {}
-            _ => return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid insurance type")),
+            _ => {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Invalid insurance type",
+                ));
+            }
         }
     }
     Ok(normalized)

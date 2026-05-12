@@ -29,9 +29,9 @@ describe("InterpreterSuggestionsPanel", () => {
     );
 
     expect(html).toContain("Iryna Interpreter");
-    expect(html).toContain("worked before");
-    expect(html).toContain("high feedback");
-    expect(html).toContain("language unknown");
+    expect(html).toContain("Работал ранее");
+    expect(html).toContain("Высокая оценка");
+    expect(html).toContain("Язык неизвестен");
   });
 
   it("renders preference controls and patient interpreter history", () => {
@@ -58,8 +58,8 @@ describe("InterpreterSuggestionsPanel", () => {
       />,
     );
 
-    expect(html).toContain("Interpreter history for this patient");
-    expect(html).toContain("avoid");
+    expect(html).toContain("История переводчиков для этого пациента");
+    expect(html).toContain("Избегать");
     expect(html).toContain("Patient requested a different interpreter");
   });
 });

@@ -9,6 +9,7 @@ import type {
   PortalFeedbackItem,
   PortalFollowupMilestoneItem,
   PortalInvoiceItem,
+  PortalNextActionItem,
   PortalNextActionsResponse,
   PortalPrivacyRequest,
   PortalRecommendationItem,
@@ -19,6 +20,11 @@ import type {
 type JsonPayload = Record<string, unknown>;
 
 const PORTAL_CACHE_TTL_MS = 15_000;
+
+function normalizeNextActions(response: PortalNextActionsResponse | PortalNextActionItem[] | null | undefined) {
+  if (Array.isArray(response)) return response;
+  return Array.isArray(response?.items) ? response.items : [];
+}
 
 function postJson<T = unknown>(path: string, payload?: JsonPayload) {
   const init: RequestInit = { method: "POST" };
@@ -79,7 +85,7 @@ export async function fetchPatientPortalWorkspace() {
     documents,
     invoices,
     recommendations,
-    nextActions: nextActions.items,
+    nextActions: normalizeNextActions(nextActions),
     privacyRequests,
     feedback,
     documentAlerts,

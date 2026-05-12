@@ -1021,8 +1021,8 @@ async fn review_appointment_request(
         }),
     ));
 
-    if requested_by != Uuid::nil() {
-        if let Ok(notification_id) = sqlx::query_scalar::<_, Uuid>(
+    if requested_by != Uuid::nil()
+        && let Ok(notification_id) = sqlx::query_scalar::<_, Uuid>(
             "INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id) VALUES ($1, 'appointment_request_update', $2, $3, 'appointment_request', $4) RETURNING id",
         )
         .bind(requested_by)
@@ -1037,19 +1037,18 @@ async fn review_appointment_request(
         .bind(id)
         .fetch_one(&state.db)
         .await
-        {
-            crate::realtime::publish_notification_event(
-                &state,
-                requested_by,
-                "notification.created",
-                Some(notification_id),
-                serde_json::json!({
-                    "entity_type": "appointment_request",
-                    "entity_id": id,
-                }),
-            )
-            .await;
-        }
+    {
+        crate::realtime::publish_notification_event(
+            &state,
+            requested_by,
+            "notification.created",
+            Some(notification_id),
+            serde_json::json!({
+                "entity_type": "appointment_request",
+                "entity_id": id,
+            }),
+        )
+        .await;
     }
 
     crate::realtime::publish_appointment_request_event(
@@ -1329,8 +1328,8 @@ async fn convert_appointment_request(
         }),
     ));
 
-    if requested_by != Uuid::nil() {
-        if let Ok(notification_id) = sqlx::query_scalar::<_, Uuid>(
+    if requested_by != Uuid::nil()
+        && let Ok(notification_id) = sqlx::query_scalar::<_, Uuid>(
             "INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id) VALUES ($1, 'appointment_request_update', $2, $3, 'appointment_request', $4) RETURNING id",
         )
         .bind(requested_by)
@@ -1339,19 +1338,18 @@ async fn convert_appointment_request(
         .bind(id)
         .fetch_one(&state.db)
         .await
-        {
-            crate::realtime::publish_notification_event(
-                &state,
-                requested_by,
-                "notification.created",
-                Some(notification_id),
-                serde_json::json!({
-                    "entity_type": "appointment_request",
-                    "entity_id": id,
-                }),
-            )
-            .await;
-        }
+    {
+        crate::realtime::publish_notification_event(
+            &state,
+            requested_by,
+            "notification.created",
+            Some(notification_id),
+            serde_json::json!({
+                "entity_type": "appointment_request",
+                "entity_id": id,
+            }),
+        )
+        .await;
     }
 
     crate::realtime::publish_appointment_request_event(

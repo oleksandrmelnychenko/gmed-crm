@@ -595,14 +595,14 @@ test("admin routes stay on the patients-style shell", async ({ page }) => {
   await page.goto("/admin/access");
   await expect(page.locator("h1", { hasText: "Zugriffsmatrix" })).toBeVisible();
   await page.getByRole("button", { name: /Name/i }).click();
-  await expect(page.getByRole("heading", { name: /^Name$/i })).toBeVisible();
+  await expect(page.getByRole("dialog").filter({ hasText: "Vorname" })).toBeVisible();
   await page.screenshot({ path: "test-results/admin-pattern-access-sheet.png", fullPage: true });
   await page.keyboard.press("Escape");
 
   await page.goto("/admin/activity");
   await expect(page.locator("h1", { hasText: "Aktivitätsprotokoll" })).toBeVisible();
-  await page.getByText(/update setting/i).click();
-  await expect(page.getByRole("heading", { name: /update setting/i })).toBeVisible();
+  await page.getByText(/Einstellung aktualisiert|update setting/i).click();
+  await expect(page.getByRole("heading", { name: /Einstellung aktualisiert|update setting/i })).toBeVisible();
   await page.screenshot({ path: "test-results/admin-pattern-activity-sheet.png", fullPage: true });
   await page.keyboard.press("Escape");
 

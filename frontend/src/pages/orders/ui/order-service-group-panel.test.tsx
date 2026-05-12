@@ -39,8 +39,8 @@ describe("OrderServiceGroupPanel", () => {
       />,
     );
 
-    expect(html).toContain("3 doctors create 3 generated billing lines");
-    expect(html).toContain("source_service_group_participant_id");
+    expect(html).toContain("3 врачей создают 3 строк биллинга");
+    expect(html).toContain("Только предпросмотр");
     expect(html).toContain("Dr. One");
     expect(html).toContain("Dr. Two");
     expect(html).toContain("Dr. Three");
@@ -92,8 +92,8 @@ describe("OrderServiceGroupPanel", () => {
       />,
     );
 
-    expect(html).toContain("Will skip duplicates");
-    expect(html).toContain("Existing line: leistung-1");
-    expect(html).toContain("duplicate-safe");
+    expect(html).toContain("Пропустить дубли");
+    expect(html).toContain("Существующая строка: leistung-1");
+    expect(html).toContain("без дублей");
   });
 });

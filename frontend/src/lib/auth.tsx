@@ -209,7 +209,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           nextUser = await fetchMe(refreshedAccessToken);
         } catch {
           clearTokens();
-          nextUser = null;
         }
       }
 

@@ -420,9 +420,7 @@ test.describe("chat secure flows", () => {
     await page.goto("/chat");
     await page.getByRole("button", { name: /Dr Secure Peer/i }).click();
 
-    await expect(
-      page.getByText(/End-to-end encrypted chat/i),
-    ).toBeVisible();
+    await expect(page.getByText(/Ende-zu-Ende|End-to-end/i)).toBeVisible();
 
     await page.getByPlaceholder(/Nachricht eingeben/i).fill("Secure browser hello");
     await page.locator("form button[type='submit']").click();
@@ -451,9 +449,7 @@ test.describe("chat secure flows", () => {
     await page.goto("/chat");
     await page.getByRole("button", { name: /Dr Secure Peer/i }).click();
 
-    await expect(
-      page.getByText(/End-to-end encrypted chat/i),
-    ).toBeVisible();
+    await expect(page.getByText(/Ende-zu-Ende|End-to-end/i)).toBeVisible();
 
     await page.locator("form input[type='file']").setInputFiles({
       name: "secure-result.pdf",
@@ -512,9 +508,7 @@ test.describe("chat secure flows", () => {
     await page.goto("/chat");
     await page.getByRole("button", { name: /Assigned Care Manager/i }).click();
 
-    await expect(
-      page.getByText(/End-to-end encrypted chat/i),
-    ).toBeVisible();
+    await expect(page.getByText(/Ende-zu-Ende|End-to-end/i)).toBeVisible();
 
     await page
       .getByPlaceholder(/Nachricht eingeben/i)

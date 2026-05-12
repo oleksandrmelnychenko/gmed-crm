@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use axum::{
     Json, Router,
     extract::{Extension, Path, Query, State},
@@ -266,13 +268,12 @@ async fn create_order_service_group(
         }
     };
 
-    if let Some(participants) = body.participants {
-        if let Err(resp) =
+    if let Some(participants) = body.participants
+        && let Err(resp) =
             replace_participants_in_tx(&state, &mut tx, order_id, service_group_id, participants)
                 .await
-        {
-            return resp;
-        }
+    {
+        return resp;
     }
 
     if let Err(error) = tx.commit().await {
@@ -1080,6 +1081,17 @@ fn decimal_json(row: &sqlx::postgres::PgRow, column: &str) -> String {
         .to_string()
 }
 
+fn err(status: StatusCode, message: &str) -> axum::response::Response {
+    (
+        status,
+        Json(serde_json::json!({
+            "error": status.canonical_reason().unwrap_or("error"),
+            "message": message,
+        })),
+    )
+        .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1115,15 +1127,4 @@ mod tests {
 
         assert_eq!(result, vec![first, second]);
     }
-}
-
-fn err(status: StatusCode, message: &str) -> axum::response::Response {
-    (
-        status,
-        Json(serde_json::json!({
-            "error": status.canonical_reason().unwrap_or("error"),
-            "message": message,
-        })),
-    )
-        .into_response()
 }

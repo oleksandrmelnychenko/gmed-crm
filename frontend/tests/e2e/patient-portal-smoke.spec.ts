@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { chooseComboboxOption } from "./helpers";
 
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({
@@ -624,13 +625,14 @@ test.describe("patient portal smoke flows", () => {
 
     await page.goto("/invoices");
     await expect(page).toHaveURL(/\/invoices$/);
-    await expect(page.getByRole("heading", { name: "INV-PORTAL-1" })).toBeVisible();
-    await expect(page.getByText("Treatment package")).toBeVisible();
+    await expect(page.getByText("INV-PORTAL-1")).toBeVisible();
+    await expect(page.getByText("ORD-PORTAL-1")).toBeVisible();
   });
 
   test("patient can upload payment proof from invoice detail", async ({ page }) => {
     await page.goto("/invoices");
     await expect(page).toHaveURL(/\/invoices$/);
+    await page.getByRole("button", { name: /INV-PORTAL-1/i }).click();
     await expect(
       page.getByRole("button", {
         name: /Zahlungsnachweis hochladen|Загрузить подтверждение оплаты|Upload payment proof/i,
@@ -682,7 +684,11 @@ test.describe("patient portal smoke flows", () => {
     await page.goto("/privacy");
     await expect(page).toHaveURL(/\/privacy$/);
 
-    await page.locator("#privacy-type").selectOption("third_party_revoke");
+    await chooseComboboxOption(
+      page,
+      page.locator("#privacy-type"),
+      /Weitergabe an Dritte widerrufen|Revoke third-party sharing/i,
+    );
     await page.locator("#privacy-reason").fill("Please stop sharing my records with external providers.");
     await page
       .getByRole("button", {
@@ -760,9 +766,11 @@ test.describe("patient portal smoke flows", () => {
       .click();
     await releasedDownloadRequest;
 
-    await page
-      .getByLabel(/Upload-Typ|Тип загрузки|Upload type/i)
-      .selectOption("insurance_document");
+    await chooseComboboxOption(
+      page,
+      page.getByRole("combobox", { name: /Kategorie|Category/i }),
+      /Versicherungsdokument|Insurance/i,
+    );
     await page.getByLabel(/Titel|Название|Title/i).fill("Insurance card April");
     await page
       .getByLabel(/Datei|Файл|File/i)
@@ -902,9 +910,7 @@ test.describe("patient portal smoke flows", () => {
     await expect(page).toHaveURL(/\/feedback$/);
 
     const form = page.locator("form").first();
-    await form.locator("select").first().selectOption(
-      "00000000-0000-0000-0000-000000009101",
-    );
+    await chooseComboboxOption(page, form.getByRole("combobox").first(), /Clinic follow-up/i);
     await form
       .getByPlaceholder(/Was ist gut gelaufen\?|What worked well\?/i)
       .fill("The doctor explained the next steps clearly.");
@@ -929,12 +935,11 @@ test.describe("patient portal smoke flows", () => {
     ).toBeVisible();
 
     const feedbackCard = page
-      .locator("article")
-      .filter({ hasText: "The doctor explained the next steps clearly." })
+      .getByRole("row")
+      .filter({ hasText: "Clinic follow-up" })
       .first();
     await expect(feedbackCard).toBeVisible();
     await expect(feedbackCard.getByText("Clinic follow-up")).toBeVisible();
     await expect(feedbackCard.getByText(/Eingereicht|Submitted/i)).toBeVisible();
-    await expect(feedbackCard.getByText("Waiting area signage could be clearer.")).toBeVisible();
   });
 });

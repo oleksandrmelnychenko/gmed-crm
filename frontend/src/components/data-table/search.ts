@@ -17,7 +17,7 @@ function escapeRegExp(value: string) {
 }
 
 function blobContainsToken(blob: string, token: string) {
-  return new RegExp(escapeRegExp(token)).test(blob);
+  return new RegExp(escapeRegExp(token.toLowerCase())).test(blob);
 }
 
 function valueToSearchString(value: unknown): string {

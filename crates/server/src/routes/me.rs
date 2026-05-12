@@ -264,19 +264,18 @@ async fn create_my_privacy_request(
 
     if let Ok(notification_rows) = sqlx::query(
         r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-           SELECT pa.user_id, 'privacy_request', $2, $3, 'privacy_request', $1
+           SELECT pa.user_id, 'privacy_request', $2, $3, 'patient', $1
            FROM patient_assignments pa
            JOIN users u ON u.id = pa.user_id
-           WHERE pa.patient_id = $4
+           WHERE pa.patient_id = $1
              AND pa.revoked_at IS NULL
              AND u.is_active = true
              AND u.role IN ('patient_manager', 'ceo')
            RETURNING id, user_id"#,
     )
-    .bind(request_id)
+    .bind(patient_id)
     .bind(notification_title)
     .bind(notification_body)
-    .bind(patient_id)
     .fetch_all(&state.db)
     .await
     {

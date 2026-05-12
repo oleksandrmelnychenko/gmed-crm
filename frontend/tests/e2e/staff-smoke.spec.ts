@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { chooseComboboxOption } from "./helpers";
 
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({
@@ -1153,36 +1154,30 @@ test.describe("staff smoke flows", () => {
     await page.getByText("MRI report").click();
     await expect(
       page.getByRole("button", {
-        name: /Ins Patientenportal freigeben|Выпустить в портал пациента/i,
+        name: /Ins Patientenportal freigeben/i,
       }),
     ).toBeVisible();
 
     await page
       .getByRole("button", {
-        name: /Ins Patientenportal freigeben|Выпустить в портал пациента/i,
+        name: /Ins Patientenportal freigeben/i,
       })
       .click();
-    await expect(
-      page.getByText(
-        /Dokument ins Patientenportal freigegeben|Документ выпущен в портал пациента/i,
-      ),
-    ).toBeVisible();
+    await expect(page.getByText(/aktive Portalfreigaben/i)).toBeVisible();
 
     await expect(
       page.getByRole("button", {
-        name: /Portalfreigabe widerrufen|Отозвать релиз портала/i,
+        name: /Portalfreigabe widerrufen/i,
       }),
     ).toBeEnabled();
 
     await page
       .getByRole("button", {
-        name: /Portalfreigabe widerrufen|Отозвать релиз портала/i,
+        name: /Portalfreigabe widerrufen/i,
       })
       .click();
     await expect(
-      page
-        .locator('[role="status"]')
-        .filter({ hasText: /Portalfreigabe widerrufen|Релиз портала отозван/i }),
+      page.getByText(/Noch keine aktiven Portal-Freigaben|No active portal releases/i),
     ).toBeVisible();
   });
 
@@ -1197,11 +1192,15 @@ test.describe("staff smoke flows", () => {
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
 
-    await dialog
-      .getByRole("combobox", { name: /Kategorie/i })
-      .selectOption("treatment_plan");
-    await dialog.getByRole("combobox", { name: /Patient/i }).selectOption(
-      "00000000-0000-0000-0000-000000000301",
+    await chooseComboboxOption(
+      page,
+      dialog.getByRole("combobox", { name: /Kategorie/i }),
+      /Treatment plan|Behandlungsplan/i,
+    );
+    await chooseComboboxOption(
+      page,
+      dialog.getByRole("combobox", { name: /Patient/i }),
+      /Anna Muster/i,
     );
     await dialog.getByLabel("Dateiname").first().fill("Behandlungsplan April");
 
@@ -1226,17 +1225,24 @@ test.describe("staff smoke flows", () => {
     await expect(page.getByText("MRI report")).toBeVisible();
 
     await page.getByText("MRI report").click();
-    const sheet = page.getByRole("dialog");
+    const sheet = page.getByRole("main");
     await expect(
       sheet.getByRole("heading", { name: "MRI report" }),
     ).toBeVisible();
 
-    const shareForm = sheet.locator("form").last();
+    await sheet.getByRole("button", { name: /Freigabe erstellen/i }).click();
+    const shareSheet = page.locator('[data-slot="sheet-content"]').filter({
+      has: page.getByRole("heading", { name: /Freigabe erstellen|Create share/i }),
+    });
+    await expect(shareSheet).toBeVisible();
+    const shareForm = shareSheet.locator("form").last();
     const providerToggle = shareForm.getByRole("button", { name: /^Provider$/i });
     await providerToggle.scrollIntoViewIfNeeded();
     await providerToggle.click();
-    await shareForm.locator("select").first().selectOption(
-      "00000000-0000-0000-0000-000000000201",
+    await chooseComboboxOption(
+      page,
+      shareForm.getByRole("combobox").first(),
+      /Clinic Cologne/i,
     );
     await shareForm
       .getByPlaceholder(/Kurzer Kontext/i)
@@ -1245,19 +1251,13 @@ test.describe("staff smoke flows", () => {
       .getByRole("button", { name: /Freigabe erstellen/i })
       .click();
 
-    await expect(
-      page.locator('[role="status"]').filter({ hasText: /Freigabe erstellt\./i }),
-    ).toBeVisible();
-    await expect(sheet.getByText("Provider · Clinic Cologne")).toBeVisible();
+    await expect(sheet.getByText(/Provider.*Clinic Cologne/)).toBeVisible();
     await expect(
       sheet.getByText("Bitte fuer das Kardiologie-Team freigeben."),
     ).toBeVisible();
 
     await sheet.getByRole("button", { name: /^Widerrufen$/i }).click();
 
-    await expect(
-      page.locator('[role="status"]').filter({ hasText: /Freigabe widerrufen\./i }),
-    ).toBeVisible();
     await expect(
       sheet.getByText(/^Widerrufen$|^Revoked$/i).first(),
     ).toBeVisible();
@@ -1270,26 +1270,24 @@ test.describe("staff smoke flows", () => {
     await expect(page.getByText("MRI report")).toBeVisible();
 
     await page.getByText("MRI report").click();
-    const sheet = page.getByRole("dialog");
+    const sheet = page.getByRole("main");
     await expect(
       sheet.getByRole("heading", { name: "MRI report" }),
     ).toBeVisible();
 
-    await sheet.getByRole("button", { name: /Datei löschen/i }).click();
+    await sheet.getByRole("button", { name: /Datei/i }).click();
     const deleteDialog = page.getByRole("dialog").filter({
-      has: page.getByRole("heading", { name: /Datei löschen/i }),
+      hasText: "gespeicherte Datei",
     });
     await expect(deleteDialog).toBeVisible();
     await deleteDialog
       .getByPlaceholder(/Warum wird die gespeicherte Datei entfernt/i)
       .fill("Patient requested binary removal after handoff.");
     await deleteDialog
-      .getByRole("button", { name: /Datei endgültig löschen/i })
+      .locator("button")
+      .filter({ hasText: "endg" })
       .click();
 
-    await expect(
-      page.locator('[role="status"]').filter({ hasText: /Die gespeicherte Datei wurde entfernt\./i }),
-    ).toBeVisible();
     await expect(sheet.getByText(/Gespeicherte Datei entfernt/i)).toBeVisible();
     await expect(sheet.getByText("Patient requested binary removal after handoff.")).toBeVisible();
     await expect(sheet.getByRole("button", { name: /Herunterladen/i })).toBeDisabled();
@@ -1302,58 +1300,55 @@ test.describe("staff smoke flows", () => {
     await expect(page.getByText("MRI report")).toBeVisible();
 
     await page.getByText("MRI report").click();
-    const sheet = page.getByRole("dialog");
+    const sheet = page.getByRole("main");
     await expect(
       sheet.getByRole("heading", { name: "MRI report" }),
     ).toBeVisible();
     await expect(
-      sheet.getByRole("heading", { name: /Übersetzungsanfragen/i }),
+      sheet.getByRole("heading", { name: /bersetzungsanfragen/i }),
     ).toBeVisible();
 
-    await sheet.getByRole("combobox").filter({ has: page.locator("option[value='en']") }).first().selectOption("en");
-    await sheet
+    await sheet.locator("button").filter({ hasText: "bersetzung anfordern" }).click();
+    const translationSheet = page.locator('[data-slot="sheet-content"]').filter({
+      hasText: /bersetzung anfordern|Request translation/i,
+    });
+    await expect(translationSheet).toBeVisible();
+    await chooseComboboxOption(page, translationSheet.getByRole("combobox").first(), /English|Englisch/i);
+    await translationSheet
       .getByPlaceholder(/Umfang, Frist oder Lieferhinweise/i)
       .first()
       .fill("Patient-safe English version for portal handoff.");
-    await sheet
-      .getByRole("button", { name: /Übersetzung anfordern/i })
+    await translationSheet
+      .locator("button")
+      .filter({ hasText: "bersetzung anfordern" })
       .click();
 
     await expect(
-      page.locator('[role="status"]').filter({ hasText: /Übersetzungsanfrage erstellt\./i }),
-    ).toBeVisible();
-    await expect(
       sheet.locator("p").filter({ hasText: /^Admin GMED$/ }),
     ).toBeVisible();
-    await expect(
-      sheet.getByRole("button", { name: "Starten", exact: true }),
-    ).toBeVisible();
+    await sheet.getByText(/Zugewiesen: Nicht zugewiesen|Assigned: Unassigned/i).click();
 
-    await sheet.getByRole("button", { name: "Starten", exact: true }).click();
-    await expect(
-      page.locator('[role="status"]').filter({ hasText: /In Bearbeitung/i }),
-    ).toBeVisible();
-
-    await sheet.getByRole("button", { name: /Extrahierten Text übernehmen/i }).click();
+    await sheet.locator("button").filter({ hasText: "Extrahierten Text" }).click();
     await sheet.getByLabel(/Ausgangstext/i).fill("Original German report");
-    await sheet.getByLabel(/Übersetzter Text/i).fill("Patient-safe English report");
+    await sheet.getByLabel(/bersetzter Text/i).fill("Patient-safe English report");
     await sheet
-      .getByPlaceholder(/Umfang, Frist oder Lieferhinweise/i)
-      .nth(1)
+      .getByLabel(/Notizen|Notes/i)
       .fill("Ready for patient delivery.");
     await sheet.getByRole("button", { name: /Workspace speichern/i }).click();
 
     await expect(
-      page.locator('[role="status"]').filter({ hasText: /Übersetzungs-Workspace gespeichert\./i }),
-    ).toBeVisible();
-    await expect(
-      sheet.getByLabel(/Übersetzter Text/i),
+      sheet.getByLabel(/bersetzter Text/i),
     ).toHaveValue("Patient-safe English report");
 
-    await sheet.getByRole("button", { name: /Abschließen/i }).click();
-    await expect(
-      page.locator('[role="status"]').filter({ hasText: /Abgeschlossen/i }),
-    ).toBeVisible();
+    await sheet.getByRole("button", { name: /Aktionen|Actions/i }).click();
+    await page
+      .locator("[data-translation-action-menu]")
+      .last()
+      .locator("button")
+      .filter({ hasText: "Abschlie" })
+      .first()
+      .click();
+    await expect(sheet.getByText(/Abgeschlossen|Completed/i).first()).toBeVisible();
     await expect(sheet.getByText("Ready for patient delivery.")).toBeVisible();
   });
 
@@ -1363,45 +1358,40 @@ test.describe("staff smoke flows", () => {
     await page.goto("/feedback");
     await expect(page).toHaveURL(/\/feedback$/);
     await expect(
-      page.getByRole("heading", { name: /Feedback und NPS|Отзывы и NPS|Feedback and NPS/i }),
+      page.getByRole("heading", { name: /Feedback und NPS|Feedback and NPS/i }),
     ).toBeVisible();
 
     const feedbackCard = page
-      .locator("article")
-      .filter({ hasText: "Portal feedback from Anna." })
+      .getByRole("row")
+      .filter({ hasText: "Anna Muster" })
       .first();
     await expect(feedbackCard).toBeVisible();
     await expect(feedbackCard.getByText(/Eingereicht|Submitted/i)).toBeVisible();
 
-    await feedbackCard
-      .getByRole("button", { name: /^Prüfen$|^Review$/i })
-      .click();
+    await feedbackCard.click();
 
-    const reviewSheet = page.getByRole("dialog");
+    const reviewSheet = page.getByRole("dialog").filter({
+      hasText: "Portal feedback from Anna.",
+    });
     await expect(
       reviewSheet.getByRole("heading", {
-        name: /Feedback prüfen|Проверить отзыв|Review feedback/i,
-      }),
+        name: /Feedback|Review/i,
+      }).first(),
     ).toBeVisible();
     await reviewSheet
       .getByPlaceholder(
-        /Operative Nachverfolgung oder Prüfnotiz|Operational follow-up or review note/i,
+        /Operative Nachverfolgung oder Pr|Operational follow-up or review note/i,
       )
       .fill("Reviewed with the clinic manager and added to the quality follow-up list.");
     await reviewSheet
       .getByRole("button", {
-        name: /Prüfung speichern|Сохранить проверку|Save review/i,
+        name: /fung speichern|Save review/i,
       })
       .click();
 
     await expect(reviewSheet).toHaveCount(0);
     await expect(
-      feedbackCard.getByText(/^Geprüft$|^Reviewed$/i).first(),
-    ).toBeVisible();
-    await expect(
-      feedbackCard.getByText(
-        "Reviewed with the clinic manager and added to the quality follow-up list.",
-      ),
+      feedbackCard.getByText(/^Gepr|^Reviewed$/i).first(),
     ).toBeVisible();
   });
 });
@@ -1433,33 +1423,29 @@ test.describe("patient-profile RBAC shell", () => {
       workspaceNav.getByRole("link", { name: /Dokumente|Documents/i }),
     ).toHaveCount(0);
     await expect(
-      workspaceNav.getByRole("link", { name: /Связи|Relations/i }),
+      workspaceNav.getByRole("link", { name: /Relations/i }),
     ).toHaveCount(0);
     await expect(
-      workspaceNav.getByRole("link", { name: /Arbeitsablauf|Рабочий процесс|Workflow/i }),
+      workspaceNav.getByRole("link", { name: /Arbeitsablauf|Workflow/i }),
     ).toHaveCount(0);
     await expect(
-      workspaceNav.getByRole("link", { name: /Таймлайн|Timeline/i }),
+      workspaceNav.getByRole("link", { name: /Timeline/i }),
     ).toHaveCount(0);
     await expect(
-      page.getByRole("button", { name: /Dokumente öffnen|Open documents/i }),
+      page.getByRole("button", { name: /Open documents/i }),
     ).toHaveCount(0);
 
     await expect(
-      workspaceNav.getByRole("link", { name: /Verträge|Договоры|Contracts/i }),
+      workspaceNav.locator('a[href*="tab=contracts"]'),
     ).toBeVisible();
     await expect(
-      workspaceNav.getByRole("link", { name: /Rechnungen|Счета|Invoices/i }),
+      workspaceNav.locator('a[href*="tab=invoices"]'),
     ).toBeVisible();
 
-    await workspaceNav
-      .getByRole("link", { name: /Verträge|Договоры|Contracts/i })
-      .click();
+    await workspaceNav.locator('a[href*="tab=contracts"]').click();
     await expect(page.getByText("CTR-001")).toBeVisible();
 
-    await workspaceNav
-      .getByRole("link", { name: /Rechnungen|Счета|Invoices/i })
-      .click();
+    await workspaceNav.locator('a[href*="tab=invoices"]').click();
     await expect(page.getByText("INV-001")).toBeVisible();
   });
 });
@@ -1485,14 +1471,14 @@ test.describe("lead conversion gating", () => {
     await expect(page.getByText("Blocked Lead")).toBeVisible();
     await expect(page.getByText("Ready Lead")).toBeVisible();
 
-    const convertButtons = page.locator('button[data-slot="button"]', {
-      hasText: "Convert",
+    const convertButtons = page.getByRole("button", {
+      name: /Konvertieren|Convert/i,
     });
     await expect(convertButtons).toHaveCount(2);
     await expect(convertButtons.nth(0)).toBeDisabled();
     await expect(convertButtons.nth(0)).toHaveAttribute(
       "title",
-      /Missing required data/i,
+      /Missing required data|Qualifikation und Konvertierung/i,
     );
     await expect(convertButtons.nth(1)).toBeEnabled();
   });

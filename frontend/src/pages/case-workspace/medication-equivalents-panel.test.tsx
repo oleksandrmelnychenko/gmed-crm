@@ -45,9 +45,9 @@ describe("MedicationEquivalentsPanel", () => {
 
     expect(html).toContain("Sortis");
     expect(html).toContain("Candidate");
-    expect(html).toContain("not a prescription");
-    expect(html).toContain("Unverified candidate");
-    expect(html).toContain("not patient-facing");
+    expect(html).toContain("не назначением");
+    expect(html).toContain("Непроверенный кандидат");
+    expect(html).toContain("не показывать пациенту");
   });
 
   it("shows verification controls only for curated equivalent relationships", () => {
@@ -75,7 +75,7 @@ describe("MedicationEquivalentsPanel", () => {
       />,
     );
 
-    expect(html).toContain("Verify");
-    expect(html).toContain("Reject");
+    expect(html).toContain("Проверить");
+    expect(html).toContain("Отклонить");
   });
 });

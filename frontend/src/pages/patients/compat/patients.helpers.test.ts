@@ -44,9 +44,9 @@ describe("buildPatientsPath", () => {
       .toBe("/patients?active_only=true");
   });
 
-  it("does not send active_only for all patients", () => {
+  it("sends active_only=false for all patients", () => {
     expect(buildPatientsPath({ search: "", activeOnly: "", providerId: "", doctorId: "" }))
-      .toBe("/patients");
+      .toBe("/patients?active_only=false");
   });
 
   it("sends inactive-only explicitly", () => {

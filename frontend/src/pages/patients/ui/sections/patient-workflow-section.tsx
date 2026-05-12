@@ -98,6 +98,86 @@ type WorkflowItemFormProps = {
   onWorkflowDueDateChange: (value: string) => void;
 };
 
+type WorkflowCreateFooterProps = {
+  l: LocalizeFn;
+  workflowBusy: boolean;
+  itemText: string;
+  onCancel: () => void;
+};
+
+type WorkflowCreateSheetProps = WorkflowItemFormProps & {
+  createOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSubmitWorkflowItem: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
+};
+
+type WorkflowChecklistRenderProps = {
+  l: LocalizeFn;
+  commonNotSet: string;
+  workflowBusy: boolean;
+  statusColors: Record<string, string>;
+  statusLabel: StatusLabelFn;
+  formatDateTime: DateTimeFormatter;
+  roleLabel: RoleLabelFn;
+  priorityLabel: PriorityLabelFn;
+  priorityBadgeClass: PriorityBadgeClassFn;
+  onCompleteWorkflowItem: (itemId: string) => void | Promise<void>;
+};
+
+type WorkflowContentProps = WorkflowChecklistRenderProps & {
+  workflowChecklist: WorkflowChecklistResponse | null;
+  workflowChecklistGroups: WorkflowGroup[];
+  workflowItemCount: number;
+  canManageWorkflowChecklist: boolean;
+  overdueCount: number;
+  ownerCount: number;
+  onCreateItemClick: () => void;
+};
+
+type WorkflowIntroProps = {
+  l: LocalizeFn;
+  workflowItemCount: number;
+  canManageWorkflowChecklist: boolean;
+  onCreateItemClick: () => void;
+};
+
+type WorkflowEmptyStateProps = {
+  l: LocalizeFn;
+  workflowItemCount: number;
+};
+
+type WorkflowOverviewProps = {
+  l: LocalizeFn;
+  workflowChecklist: WorkflowChecklistResponse;
+  workflowChecklistGroups: WorkflowGroup[];
+  overdueCount: number;
+  ownerCount: number;
+};
+
+type WorkflowChecklistSectionProps = WorkflowChecklistRenderProps & {
+  workflowChecklistGroups: WorkflowGroup[];
+};
+
+type WorkflowChecklistGroupProps = WorkflowChecklistRenderProps & {
+  group: WorkflowGroup;
+};
+
+type WorkflowGroupSummaryProps = {
+  l: LocalizeFn;
+  group: WorkflowGroup;
+  openItems: number;
+  completedItems: number;
+  groupIsActive: boolean;
+};
+
+type WorkflowChecklistItemsProps = WorkflowChecklistRenderProps & {
+  items: WorkflowChecklistItem[];
+};
+
+type WorkflowChecklistItemCardProps = WorkflowChecklistRenderProps & {
+  item: WorkflowChecklistItem;
+};
+
 function isWorkflowItemOverdue(item: WorkflowChecklistItem) {
   if (item.is_completed || !item.due_date) return false;
 
@@ -205,6 +285,441 @@ function WorkflowItemForm({
   );
 }
 
+
+function WorkflowCreateFooter({ l, workflowBusy, itemText, onCancel }: WorkflowCreateFooterProps) {
+  return (
+    <>
+      <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={onCancel} disabled={workflowBusy}>
+        {l("Abbrechen", "Отмена", "Cancel")}
+      </Button>
+      <Button type="submit" className="h-9 rounded-lg gap-1.5" disabled={workflowBusy || !itemText.trim()}>
+        <Plus className="size-3.5" />
+        {l("Hinzufügen", "Добавить", "Add")}
+      </Button>
+    </>
+  );
+}
+
+function WorkflowCreateSheet({
+  l,
+  workflowForm,
+  workflowBusy,
+  activeWorkflowAssignees,
+  roleLabel,
+  priorityLabel,
+  createOpen,
+  onOpenChange,
+  onSubmitWorkflowItem,
+  onWorkflowItemTextChange,
+  onWorkflowOwnerChange,
+  onWorkflowPriorityChange,
+  onWorkflowDueDateChange,
+}: WorkflowCreateSheetProps) {
+  return (
+    <PatientSheetScaffold
+      open={createOpen}
+      onOpenChange={onOpenChange}
+      title={l("Workflow-Element hinzufügen", "Добавить элемент процесса", "Add workflow item")}
+      width="form-heavy"
+      onSubmit={onSubmitWorkflowItem}
+      footer={
+        <WorkflowCreateFooter
+          l={l}
+          workflowBusy={workflowBusy}
+          itemText={workflowForm.itemText}
+          onCancel={() => onOpenChange(false)}
+        />
+      }
+    >
+      <WorkflowItemForm
+        l={l}
+        workflowForm={workflowForm}
+        workflowBusy={workflowBusy}
+        activeWorkflowAssignees={activeWorkflowAssignees}
+        roleLabel={roleLabel}
+        priorityLabel={priorityLabel}
+        onWorkflowItemTextChange={onWorkflowItemTextChange}
+        onWorkflowOwnerChange={onWorkflowOwnerChange}
+        onWorkflowPriorityChange={onWorkflowPriorityChange}
+        onWorkflowDueDateChange={onWorkflowDueDateChange}
+      />
+    </PatientSheetScaffold>
+  );
+}
+
+function WorkflowContent({
+  l,
+  commonNotSet,
+  workflowChecklist,
+  workflowChecklistGroups,
+  workflowItemCount,
+  canManageWorkflowChecklist,
+  overdueCount,
+  ownerCount,
+  workflowBusy,
+  statusColors,
+  statusLabel,
+  formatDateTime,
+  roleLabel,
+  priorityLabel,
+  priorityBadgeClass,
+  onCompleteWorkflowItem,
+  onCreateItemClick,
+}: WorkflowContentProps) {
+  return (
+    <>
+      <WorkflowIntro
+        l={l}
+        workflowItemCount={workflowItemCount}
+        canManageWorkflowChecklist={canManageWorkflowChecklist}
+        onCreateItemClick={onCreateItemClick}
+      />
+
+      {!workflowChecklist || workflowChecklist.items.length === 0 ? (
+        <WorkflowEmptyState l={l} workflowItemCount={workflowItemCount} />
+      ) : (
+        <>
+          <WorkflowOverview
+            l={l}
+            workflowChecklist={workflowChecklist}
+            workflowChecklistGroups={workflowChecklistGroups}
+            overdueCount={overdueCount}
+            ownerCount={ownerCount}
+          />
+
+          <WorkflowChecklistSection
+            l={l}
+            commonNotSet={commonNotSet}
+            workflowChecklistGroups={workflowChecklistGroups}
+            workflowBusy={workflowBusy}
+            statusColors={statusColors}
+            statusLabel={statusLabel}
+            formatDateTime={formatDateTime}
+            roleLabel={roleLabel}
+            priorityLabel={priorityLabel}
+            priorityBadgeClass={priorityBadgeClass}
+            onCompleteWorkflowItem={onCompleteWorkflowItem}
+          />
+        </>
+      )}
+    </>
+  );
+}
+
+function WorkflowIntro({
+  l,
+  workflowItemCount,
+  canManageWorkflowChecklist,
+  onCreateItemClick,
+}: WorkflowIntroProps) {
+  return (
+    <WorkspaceSectionIntro
+      title={l("Workflow-Cockpit", "Панель workflow", "Workflow cockpit")}
+      description={l(
+        "Operative Nachverfolgung, Eigentümerschaft und patientenbezogene To-dos in einer eigenen Oberfläche.",
+        "Операционное сопровождение, зоны ответственности и задачи по пациенту в отдельной рабочей зоне.",
+        "Operational follow-through, ownership and patient-bound tasks in a dedicated workspace.",
+      )}
+      accessory={
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <CountBadge>{workflowItemCount}</CountBadge>
+          {canManageWorkflowChecklist ? (
+            <Button type="button" size="sm" className="h-8 rounded-lg gap-1.5" onClick={onCreateItemClick}>
+              <Plus className="size-3.5" />
+              {l("Element hinzufügen", "Добавить элемент", "Add item")}
+            </Button>
+          ) : null}
+        </div>
+      }
+    />
+  );
+}
+
+function WorkflowEmptyState({ l, workflowItemCount }: WorkflowEmptyStateProps) {
+  return (
+    <FormSection
+      title={l("Live-Checkliste", "Живой чек-лист", "Live checklist")}
+      accessory={<CountBadge>{workflowItemCount}</CountBadge>}
+    >
+      <EmptyCell>
+        {l(
+          "Noch keine Workflow-Checkliste für diesen Patienten.",
+          "Чек-лист workflow для этого пациента ещё пуст.",
+          "No patient workflow checklist yet.",
+        )}
+      </EmptyCell>
+    </FormSection>
+  );
+}
+
+function WorkflowOverview({
+  l,
+  workflowChecklist,
+  workflowChecklistGroups,
+  overdueCount,
+  ownerCount,
+}: WorkflowOverviewProps) {
+  return (
+    <FormSection
+      title={l("Operativer Überblick", "Операционный обзор", "Operational overview")}
+      accessory={
+        <CountBadge>
+          {workflowChecklistGroups.length} {l("Gruppen", "групп", "groups")}
+        </CountBadge>
+      }
+    >
+      <div className="grid gap-y-4 overflow-hidden rounded-xl border border-border px-3 pb-4 pt-4 md:grid-cols-2 xl:grid-cols-4 [&>article:not(:last-child):not(:nth-child(4n))_.admin-inline-metric-separator]:xl:block">
+        <AdminInlineMetric
+          icon={ListChecks}
+          label={l("Offene Punkte", "Открытые пункты", "Open items")}
+          value={workflowChecklist.open_count}
+          description={l("Aktive Aufgaben.", "Активные задачи.", "Active tasks.")}
+          tone="sky"
+        />
+        <AdminInlineMetric
+          icon={CheckCircle2}
+          label={l("Abgeschlossen", "Завершено", "Completed")}
+          value={workflowChecklist.completed_count}
+          description={l("Geschlossene Punkte.", "Закрытые пункты.", "Closed items.")}
+          tone="emerald"
+        />
+        <AdminInlineMetric
+          icon={Clock3}
+          label={l("Überfällig", "Просрочено", "Overdue")}
+          value={overdueCount}
+          description={l("Fällige offene Punkte.", "Открытые задачи со сроком.", "Due open tasks.")}
+          tone="amber"
+        />
+        <AdminInlineMetric
+          icon={UserRound}
+          label={l("Verantwortliche", "Ответственные", "Owners")}
+          value={ownerCount}
+          description={l("Aktive Rollen oder Nutzer.", "Активные роли или пользователи.", "Active roles or users.")}
+          tone="slate"
+        />
+      </div>
+    </FormSection>
+  );
+}
+
+function WorkflowChecklistSection({
+  l,
+  workflowChecklistGroups,
+  ...checklistProps
+}: WorkflowChecklistSectionProps) {
+  return (
+    <FormSection
+      title={l("Live-Checkliste", "Живой чек-лист", "Live checklist")}
+      accessory={
+        <CountBadge>
+          {workflowChecklistGroups.length} {l("Gruppen", "групп", "groups")}
+        </CountBadge>
+      }
+    >
+      <div className="space-y-0">
+        {workflowChecklistGroups.map((group) => (
+          <WorkflowChecklistGroup key={group.key} l={l} group={group} {...checklistProps} />
+        ))}
+      </div>
+    </FormSection>
+  );
+}
+
+function WorkflowChecklistGroup({ l, group, ...checklistProps }: WorkflowChecklistGroupProps) {
+  const openItems = group.items.filter((item) => !item.is_completed).length;
+  const completedItems = group.items.length - openItems;
+  const groupIsActive = openItems > 0;
+
+  return (
+    <details className="group relative pl-9">
+      <WorkflowGroupSummary
+        l={l}
+        group={group}
+        openItems={openItems}
+        completedItems={completedItems}
+        groupIsActive={groupIsActive}
+      />
+      <WorkflowGroupConnector />
+      <WorkflowChecklistItems items={group.items} l={l} {...checklistProps} />
+    </details>
+  );
+}
+
+function WorkflowGroupSummary({
+  l,
+  group,
+  openItems,
+  completedItems,
+  groupIsActive,
+}: WorkflowGroupSummaryProps) {
+  return (
+    <summary className="relative grid cursor-pointer list-none gap-2 rounded-lg p-3 transition hover:bg-[#f9fdff] group-open:bg-[#f9fdff] group-open:ring-1 group-open:ring-border/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+      <div className="absolute -left-9 bottom-0 top-0 flex w-8 items-start justify-center pt-3">
+        <span
+          className={cn(
+            "inline-flex size-7 shrink-0 items-center justify-center rounded-full transition-colors",
+            groupIsActive
+              ? "bg-sky-50 text-sky-700 ring-1 ring-sky-200"
+              : "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
+          )}
+        >
+          <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
+        </span>
+      </div>
+
+      <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+        <div className="min-w-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <p className="max-w-full truncate text-[15px] font-semibold leading-5 text-foreground">{group.label}</p>
+            <span className="size-1 rounded-full bg-muted-foreground/35" />
+            <span className="text-xs tabular-nums text-muted-foreground">
+              {openItems} {l("offen", "открыто", "open")} / {group.items.length}{" "}
+              {l("gesamt", "всего", "total")}
+            </span>
+          </div>
+          <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1">
+              <ClipboardList className="size-3.5 shrink-0 text-muted-foreground/65" />
+              {group.items.length} {l("Einträge", "записей", "items")}
+            </span>
+            {completedItems > 0 ? (
+              <>
+                <span className="size-1 rounded-full bg-muted-foreground/35" />
+                <span>
+                  {completedItems} {l("abgeschlossen", "завершено", "completed")}
+                </span>
+              </>
+            ) : null}
+          </div>
+        </div>
+        <div className="flex min-w-0 flex-wrap justify-start gap-1.5 lg:justify-end">
+          <Badge
+            variant="outline"
+            className={cn(
+              "rounded-full text-[10px]",
+              groupIsActive
+                ? "border-sky-200 bg-sky-50 text-sky-700"
+                : "border-emerald-200 bg-emerald-50 text-emerald-700",
+            )}
+          >
+            {groupIsActive ? l("In Arbeit", "В работе", "In progress") : l("Fertig", "Готово", "Done")}
+          </Badge>
+          <Badge
+            variant="outline"
+            className="rounded-full border-0 bg-white px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
+          >
+            {l("Offen", "Открыто", "Open")}:{" "}
+            <span className="ml-1 font-semibold text-foreground">{openItems}</span>
+          </Badge>
+        </div>
+      </div>
+    </summary>
+  );
+}
+
+function WorkflowGroupConnector() {
+  return (
+    <div aria-hidden="true" className="ml-20 flex h-3 items-center px-3">
+      <span className="h-px w-12 bg-gradient-to-r from-transparent via-border/70 to-border/70" />
+      <span className="size-1.5 rounded-full bg-border" />
+      <span className="h-px flex-1 bg-gradient-to-r from-border/70 to-transparent" />
+    </div>
+  );
+}
+
+function WorkflowChecklistItems({ items, ...checklistProps }: WorkflowChecklistItemsProps) {
+  return (
+    <div className="mb-2 ml-20 overflow-hidden rounded-lg bg-[#fbfdff] p-2 shadow-sm">
+      <div className="grid gap-2">
+        {items.map((item) => (
+          <WorkflowChecklistItemCard key={item.id} item={item} {...checklistProps} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function WorkflowChecklistItemCard({
+  l,
+  commonNotSet,
+  workflowBusy,
+  statusColors,
+  statusLabel,
+  formatDateTime,
+  roleLabel,
+  priorityLabel,
+  priorityBadgeClass,
+  onCompleteWorkflowItem,
+  item,
+}: WorkflowChecklistItemCardProps) {
+  const itemStatus = workflowItemStatus(item);
+  const itemStatusClass = statusColors[itemStatus] ?? "border-border/60 bg-muted/25 text-muted-foreground";
+
+  return (
+    <article
+      className={cn(
+        "rounded-md bg-white px-3 py-2 text-xs shadow-sm ring-1 ring-border/40",
+        item.is_completed && "opacity-75",
+      )}
+    >
+      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <p className="min-w-0 truncate text-sm font-medium text-foreground">
+              {localizeWorkflowItemText(item.item_key, item.item_text, l)}
+            </p>
+            <Badge variant="outline" className={cn("rounded-full text-[10px]", priorityBadgeClass(item.priority))}>
+              {priorityLabel(item.priority)}
+            </Badge>
+            <Badge variant="outline" className={cn("rounded-full text-[10px]", itemStatusClass)}>
+              {statusLabel(itemStatus)}
+            </Badge>
+          </div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1">
+              <UserRound className="size-3.5 shrink-0 text-muted-foreground/65" />
+              {item.owner_name
+                ? `${item.owner_name} · ${roleLabel(item.owner_user_role ?? item.owner_role)}`
+                : roleLabel(item.owner_role)}
+            </span>
+            <span className="size-1 rounded-full bg-muted-foreground/35" />
+            <span className="inline-flex items-center gap-1">
+              <CalendarClock className="size-3.5 shrink-0 text-muted-foreground/65" />
+              {formatDateTime(item.due_date, commonNotSet)}
+            </span>
+            <span className="size-1 rounded-full bg-muted-foreground/35" />
+            <span>
+              {l("Erstellt", "Создано", "Created")}: {formatDateTime(item.created_at, commonNotSet)}
+            </span>
+            {item.completed_at ? (
+              <>
+                <span className="size-1 rounded-full bg-muted-foreground/35" />
+                <span>
+                  {l("Abgeschlossen", "Завершено", "Completed")}:{" "}
+                  {formatDateTime(item.completed_at, commonNotSet)}
+                </span>
+              </>
+            ) : null}
+          </div>
+        </div>
+        {!item.is_completed ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 shrink-0 rounded-lg gap-1.5 px-2 text-xs"
+            disabled={workflowBusy}
+            onClick={() => void onCompleteWorkflowItem(item.id)}
+          >
+            <CheckCircle2 className="size-3.5" />
+            {l("Abschließen", "Завершить", "Complete")}
+          </Button>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
 export function PatientWorkflowTab({
   l,
   commonNotSet,
@@ -249,313 +764,45 @@ export function PatientWorkflowTab({
   return (
     <TabsContent value="workflow" className="mt-4 min-h-[400px] space-y-4">
       {canManageWorkflowChecklist ? (
-        <PatientSheetScaffold
-          open={createOpen}
+        <WorkflowCreateSheet
+          l={l}
+          workflowForm={workflowForm}
+          workflowBusy={workflowBusy}
+          activeWorkflowAssignees={activeWorkflowAssignees}
+          roleLabel={roleLabel}
+          priorityLabel={priorityLabel}
+          createOpen={createOpen}
           onOpenChange={setCreateOpen}
-          title={l("Workflow-Element hinzufügen", "Добавить элемент процесса", "Add workflow item")}
-          width="form-heavy"
-          onSubmit={onSubmitWorkflowItem}
-          footer={
-            <>
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9 rounded-lg"
-                onClick={() => setCreateOpen(false)}
-                disabled={workflowBusy}
-              >
-                {l("Abbrechen", "Отмена", "Cancel")}
-              </Button>
-              <Button
-                type="submit"
-                className="h-9 rounded-lg gap-1.5"
-                disabled={workflowBusy || !workflowForm.itemText.trim()}
-              >
-                <Plus className="size-3.5" />
-                {l("Hinzufügen", "Добавить", "Add")}
-              </Button>
-            </>
-          }
-        >
-          <WorkflowItemForm
-            l={l}
-            workflowForm={workflowForm}
-            workflowBusy={workflowBusy}
-            activeWorkflowAssignees={activeWorkflowAssignees}
-            roleLabel={roleLabel}
-            priorityLabel={priorityLabel}
-            onWorkflowItemTextChange={onWorkflowItemTextChange}
-            onWorkflowOwnerChange={onWorkflowOwnerChange}
-            onWorkflowPriorityChange={onWorkflowPriorityChange}
-            onWorkflowDueDateChange={onWorkflowDueDateChange}
-          />
-        </PatientSheetScaffold>
+          onSubmitWorkflowItem={onSubmitWorkflowItem}
+          onWorkflowItemTextChange={onWorkflowItemTextChange}
+          onWorkflowOwnerChange={onWorkflowOwnerChange}
+          onWorkflowPriorityChange={onWorkflowPriorityChange}
+          onWorkflowDueDateChange={onWorkflowDueDateChange}
+        />
       ) : null}
 
       {tabLoading ? (
         <TabLoader />
       ) : (
-        <>
-          <WorkspaceSectionIntro
-            title={l("Workflow-Cockpit", "Панель workflow", "Workflow cockpit")}
-            description={l(
-              "Operative Nachverfolgung, Eigentümerschaft und patientenbezogene To-dos in einer eigenen Oberfläche.",
-              "Операционное сопровождение, зоны ответственности и задачи по пациенту в отдельной рабочей зоне.",
-              "Operational follow-through, ownership and patient-bound tasks in a dedicated workspace.",
-            )}
-            accessory={
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                <CountBadge>{workflowItemCount}</CountBadge>
-                {canManageWorkflowChecklist ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="h-8 rounded-lg gap-1.5"
-                    onClick={() => setCreateOpen(true)}
-                  >
-                    <Plus className="size-3.5" />
-                    {l("Element hinzufügen", "Добавить элемент", "Add item")}
-                  </Button>
-                ) : null}
-              </div>
-            }
-          />
-
-          {!workflowChecklist || workflowChecklist.items.length === 0 ? (
-            <FormSection
-              title={l("Live-Checkliste", "Живой чек-лист", "Live checklist")}
-              accessory={<CountBadge>{workflowItemCount}</CountBadge>}
-            >
-              <EmptyCell>
-                {l(
-                  "Noch keine Workflow-Checkliste für diesen Patienten.",
-                  "Чек-лист workflow для этого пациента ещё пуст.",
-                  "No patient workflow checklist yet.",
-                )}
-              </EmptyCell>
-            </FormSection>
-          ) : (
-            <>
-              <FormSection
-                title={l("Operativer Überblick", "Операционный обзор", "Operational overview")}
-                accessory={
-                  <CountBadge>
-                    {workflowChecklistGroups.length} {l("Gruppen", "групп", "groups")}
-                  </CountBadge>
-                }
-              >
-                <div className="grid gap-y-4 overflow-hidden rounded-xl border border-border px-3 pb-4 pt-4 md:grid-cols-2 xl:grid-cols-4 [&>article:not(:last-child):not(:nth-child(4n))_.admin-inline-metric-separator]:xl:block">
-                  <AdminInlineMetric
-                    icon={ListChecks}
-                    label={l("Offene Punkte", "Открытые пункты", "Open items")}
-                    value={workflowChecklist.open_count}
-                    description={l("Aktive Aufgaben.", "Активные задачи.", "Active tasks.")}
-                    tone="sky"
-                  />
-                  <AdminInlineMetric
-                    icon={CheckCircle2}
-                    label={l("Abgeschlossen", "Завершено", "Completed")}
-                    value={workflowChecklist.completed_count}
-                    description={l("Geschlossene Punkte.", "Закрытые пункты.", "Closed items.")}
-                    tone="emerald"
-                  />
-                  <AdminInlineMetric
-                    icon={Clock3}
-                    label={l("Überfällig", "Просрочено", "Overdue")}
-                    value={overdueCount}
-                    description={l("Fällige offene Punkte.", "Открытые задачи со сроком.", "Due open tasks.")}
-                    tone="amber"
-                  />
-                  <AdminInlineMetric
-                    icon={UserRound}
-                    label={l("Verantwortliche", "Ответственные", "Owners")}
-                    value={ownerCount}
-                    description={l("Aktive Rollen oder Nutzer.", "Активные роли или пользователи.", "Active roles or users.")}
-                    tone="slate"
-                  />
-                </div>
-              </FormSection>
-
-              <FormSection
-                title={l("Live-Checkliste", "Живой чек-лист", "Live checklist")}
-                accessory={
-                  <CountBadge>
-                    {workflowChecklistGroups.length} {l("Gruppen", "групп", "groups")}
-                  </CountBadge>
-                }
-              >
-                <div className="space-y-0">
-                  {workflowChecklistGroups.map((group) => {
-                    const openItems = group.items.filter((item) => !item.is_completed).length;
-                    const completedItems = group.items.length - openItems;
-                    const groupIsActive = openItems > 0;
-
-                    return (
-                      <details key={group.key} className="group relative pl-9">
-                        <summary className="relative grid cursor-pointer list-none gap-2 rounded-lg p-3 transition hover:bg-[#f9fdff] group-open:bg-[#f9fdff] group-open:ring-1 group-open:ring-border/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-                          <div className="absolute -left-9 bottom-0 top-0 flex w-8 items-start justify-center pt-3">
-                            <span
-                              className={cn(
-                                "inline-flex size-7 shrink-0 items-center justify-center rounded-full transition-colors",
-                                groupIsActive
-                                  ? "bg-sky-50 text-sky-700 ring-1 ring-sky-200"
-                                  : "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
-                              )}
-                            >
-                              <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
-                            </span>
-                          </div>
-
-                          <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
-                            <div className="min-w-0">
-                              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                                <p className="max-w-full truncate text-[15px] font-semibold leading-5 text-foreground">
-                                  {group.label}
-                                </p>
-                                <span className="size-1 rounded-full bg-muted-foreground/35" />
-                                <span className="text-xs tabular-nums text-muted-foreground">
-                                  {openItems} {l("offen", "открыто", "open")} / {group.items.length}{" "}
-                                  {l("gesamt", "всего", "total")}
-                                </span>
-                              </div>
-                              <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                                <span className="inline-flex items-center gap-1">
-                                  <ClipboardList className="size-3.5 shrink-0 text-muted-foreground/65" />
-                                  {group.items.length} {l("Einträge", "записей", "items")}
-                                </span>
-                                {completedItems > 0 ? (
-                                  <>
-                                    <span className="size-1 rounded-full bg-muted-foreground/35" />
-                                    <span>
-                                      {completedItems} {l("abgeschlossen", "завершено", "completed")}
-                                    </span>
-                                  </>
-                                ) : null}
-                              </div>
-                            </div>
-                            <div className="flex min-w-0 flex-wrap justify-start gap-1.5 lg:justify-end">
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  "rounded-full text-[10px]",
-                                  groupIsActive
-                                    ? "border-sky-200 bg-sky-50 text-sky-700"
-                                    : "border-emerald-200 bg-emerald-50 text-emerald-700",
-                                )}
-                              >
-                                {groupIsActive
-                                  ? l("In Arbeit", "В работе", "In progress")
-                                  : l("Fertig", "Готово", "Done")}
-                              </Badge>
-                              <Badge
-                                variant="outline"
-                                className="rounded-full border-0 bg-white px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
-                              >
-                                {l("Offen", "Открыто", "Open")}:{" "}
-                                <span className="ml-1 font-semibold text-foreground">{openItems}</span>
-                              </Badge>
-                            </div>
-                          </div>
-                        </summary>
-
-                        <div aria-hidden="true" className="ml-20 flex h-3 items-center px-3">
-                          <span className="h-px w-12 bg-gradient-to-r from-transparent via-border/70 to-border/70" />
-                          <span className="size-1.5 rounded-full bg-border" />
-                          <span className="h-px flex-1 bg-gradient-to-r from-border/70 to-transparent" />
-                        </div>
-                        <div className="mb-2 ml-20 overflow-hidden rounded-lg bg-[#fbfdff] p-2 shadow-sm">
-                          <div className="grid gap-2">
-                            {group.items.map((item) => {
-                              const itemStatus = workflowItemStatus(item);
-                              const itemStatusClass =
-                                statusColors[itemStatus] ??
-                                "border-border/60 bg-muted/25 text-muted-foreground";
-
-                              return (
-                                <article
-                                  key={item.id}
-                                  className={cn(
-                                    "rounded-md bg-white px-3 py-2 text-xs shadow-sm ring-1 ring-border/40",
-                                    item.is_completed && "opacity-75",
-                                  )}
-                                >
-                                  <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                                    <div className="min-w-0">
-                                      <div className="flex min-w-0 flex-wrap items-center gap-2">
-                                        <p className="min-w-0 truncate text-sm font-medium text-foreground">
-                                          {localizeWorkflowItemText(item.item_key, item.item_text, l)}
-                                        </p>
-                                        <Badge
-                                          variant="outline"
-                                          className={cn(
-                                            "rounded-full text-[10px]",
-                                            priorityBadgeClass(item.priority),
-                                          )}
-                                        >
-                                          {priorityLabel(item.priority)}
-                                        </Badge>
-                                        <Badge
-                                          variant="outline"
-                                          className={cn("rounded-full text-[10px]", itemStatusClass)}
-                                        >
-                                          {statusLabel(itemStatus)}
-                                        </Badge>
-                                      </div>
-                                      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-                                        <span className="inline-flex items-center gap-1">
-                                          <UserRound className="size-3.5 shrink-0 text-muted-foreground/65" />
-                                          {item.owner_name
-                                            ? `${item.owner_name} · ${roleLabel(item.owner_user_role ?? item.owner_role)}`
-                                            : roleLabel(item.owner_role)}
-                                        </span>
-                                        <span className="size-1 rounded-full bg-muted-foreground/35" />
-                                        <span className="inline-flex items-center gap-1">
-                                          <CalendarClock className="size-3.5 shrink-0 text-muted-foreground/65" />
-                                          {formatDateTime(item.due_date, commonNotSet)}
-                                        </span>
-                                        <span className="size-1 rounded-full bg-muted-foreground/35" />
-                                        <span>
-                                          {l("Erstellt", "Создано", "Created")}:{" "}
-                                          {formatDateTime(item.created_at, commonNotSet)}
-                                        </span>
-                                        {item.completed_at ? (
-                                          <>
-                                            <span className="size-1 rounded-full bg-muted-foreground/35" />
-                                            <span>
-                                              {l("Abgeschlossen", "Завершено", "Completed")}:{" "}
-                                              {formatDateTime(item.completed_at, commonNotSet)}
-                                            </span>
-                                          </>
-                                        ) : null}
-                                      </div>
-                                    </div>
-                                    {!item.is_completed ? (
-                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-7 shrink-0 rounded-lg gap-1.5 px-2 text-xs"
-                                        disabled={workflowBusy}
-                                        onClick={() => void onCompleteWorkflowItem(item.id)}
-                                      >
-                                        <CheckCircle2 className="size-3.5" />
-                                        {l("Abschließen", "Завершить", "Complete")}
-                                      </Button>
-                                    ) : null}
-                                  </div>
-                                </article>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </details>
-                    );
-                  })}
-                </div>
-              </FormSection>
-            </>
-          )}
-        </>
+        <WorkflowContent
+          l={l}
+          commonNotSet={commonNotSet}
+          workflowChecklist={workflowChecklist}
+          workflowChecklistGroups={workflowChecklistGroups}
+          workflowItemCount={workflowItemCount}
+          canManageWorkflowChecklist={canManageWorkflowChecklist}
+          overdueCount={overdueCount}
+          ownerCount={ownerCount}
+          workflowBusy={workflowBusy}
+          statusColors={statusColors}
+          statusLabel={statusLabel}
+          formatDateTime={formatDateTime}
+          roleLabel={roleLabel}
+          priorityLabel={priorityLabel}
+          priorityBadgeClass={priorityBadgeClass}
+          onCompleteWorkflowItem={onCompleteWorkflowItem}
+          onCreateItemClick={() => setCreateOpen(true)}
+        />
       )}
     </TabsContent>
   );

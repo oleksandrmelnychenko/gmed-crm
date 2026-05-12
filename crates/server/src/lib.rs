@@ -73,7 +73,10 @@ pub fn build_app(app_state: state::AppState) -> Router {
             )),
     );
 
-    let api_router = auth_public.merge(misc_public).merge(protected).fallback(api_not_found);
+    let api_router = auth_public
+        .merge(misc_public)
+        .merge(protected)
+        .fallback(api_not_found);
 
     let router = Router::new()
         .merge(routes::health::router())

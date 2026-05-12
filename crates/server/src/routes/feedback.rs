@@ -850,11 +850,11 @@ async fn create_feedback_record(
             .unwrap_or_else(|| "Patient".to_string());
         if let Ok(notification_rows) = sqlx::query(
             r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-               SELECT DISTINCT u.id, 'feedback', $2, $3, 'feedback', $1
+               SELECT DISTINCT u.id, 'feedback', $2, $3, 'patient', $1
                FROM users u
                LEFT JOIN patient_assignments pa
                  ON pa.user_id = u.id
-                AND pa.patient_id = $4
+                AND pa.patient_id = $1
                 AND pa.revoked_at IS NULL
                WHERE u.is_active = true
                  AND (
@@ -863,10 +863,9 @@ async fn create_feedback_record(
                  )
                RETURNING id, user_id"#,
         )
-        .bind(feedback_id)
+        .bind(patient_id)
         .bind(format!("New patient feedback: {patient_label}"))
         .bind("A patient submitted a satisfaction survey in the portal.")
-        .bind(patient_id)
         .fetch_all(&state.db)
         .await
         {

@@ -94,6 +94,6 @@ describe("getPatientLegalStatusSummary", () => {
         contractStatus: "signed",
         notes: "",
       })
-    ).toBe("Compliance complete");
+    ).toBe("Комплаенс завершен");
   });
 });

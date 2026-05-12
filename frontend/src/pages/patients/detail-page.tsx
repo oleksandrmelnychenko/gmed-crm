@@ -1528,7 +1528,6 @@ function usePatientDetailPageContent() {
       label: localizeWorkflowGroupLabel(key, workflowChecklistLabel(key), l),
       items: groupItems,
     }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isWorkflowTabActive, workflowChecklist, lang]);
   const legalStatus = useMemo(
     () => normalizePatientLegalStatus(detail?.legal_status),

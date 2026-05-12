@@ -1,4 +1,5 @@
 import { expect, test, type Route } from "@playwright/test";
+import { chooseComboboxOption } from "./helpers";
 
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({
@@ -297,8 +298,7 @@ test.describe("appointments recurring flows", () => {
     const statusScopeSelect = page.getByRole("combobox", {
       name: /Statusänderung anwenden auf/i,
     });
-    await expect(statusScopeSelect).toBeVisible();
-    await statusScopeSelect.selectOption("series");
+    await chooseComboboxOption(page, statusScopeSelect, /Ganze Serie|Вся серия/i);
 
     const cancelWholeSeriesButton = page
       .getByRole("button", { name: /Ganze Serie absagen/i })

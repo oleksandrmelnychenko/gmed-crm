@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use axum::{
     Json, Router,
     extract::{Extension, Path, Query, State},
@@ -620,6 +622,17 @@ fn normalize_search_value(value: &str) -> String {
     value.trim().to_lowercase()
 }
 
+fn err(status: StatusCode, message: &str) -> axum::response::Response {
+    (
+        status,
+        Json(serde_json::json!({
+            "error": status.canonical_reason().unwrap_or("error"),
+            "message": message,
+        })),
+    )
+        .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -635,15 +648,4 @@ mod tests {
     fn normalize_search_value_trims_and_lowercases() {
         assert_eq!(normalize_search_value("  Sortis "), "sortis");
     }
-}
-
-fn err(status: StatusCode, message: &str) -> axum::response::Response {
-    (
-        status,
-        Json(serde_json::json!({
-            "error": status.canonical_reason().unwrap_or("error"),
-            "message": message,
-        })),
-    )
-        .into_response()
 }

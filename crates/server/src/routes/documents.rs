@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err, clippy::too_many_arguments)]
+
 use std::{
     collections::{BTreeMap, HashSet},
     path::{Path as FsPath, PathBuf},
@@ -57,7 +59,7 @@ const UPLOAD_DIR: &str = "uploads/documents";
 
 fn normalize_seed_demo_storage_key(storage_key: &str) -> String {
     storage_key
-        .trim_start_matches(|ch| ch == '/' || ch == '\\')
+        .trim_start_matches(['/', '\\'])
         .replace('\\', "/")
 }
 
@@ -102,7 +104,7 @@ fn build_seed_demo_pdf_bytes(title: &str, filename: &str, storage_key: &str) -> 
         "4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n".to_string(),
         format!(
             "5 0 obj\n<< /Length {} >>\nstream\n{}endstream\nendobj\n",
-            content.as_bytes().len(),
+            content.len(),
             content
         ),
     ];
@@ -110,11 +112,11 @@ fn build_seed_demo_pdf_bytes(title: &str, filename: &str, storage_key: &str) -> 
     let mut pdf = String::from("%PDF-1.4\n");
     let mut offsets = Vec::with_capacity(objects.len());
     for object in objects {
-        offsets.push(pdf.as_bytes().len());
+        offsets.push(pdf.len());
         pdf.push_str(&object);
     }
 
-    let xref_offset = pdf.as_bytes().len();
+    let xref_offset = pdf.len();
     pdf.push_str(&format!("xref\n0 {}\n", offsets.len() + 1));
     pdf.push_str("0000000000 65535 f \n");
     for offset in &offsets {
@@ -1432,13 +1434,6 @@ async fn extract_text_from_image_bytes_windows(
         .map_err(|_| IMAGE_OCR_FAILED_MESSAGE)?
         .to_string();
     Ok(normalize_extracted_text(&text))
-}
-
-#[cfg(not(windows))]
-async fn extract_text_from_image_bytes_windows(
-    _bytes: &[u8],
-) -> Result<Option<String>, &'static str> {
-    Err(IMAGE_OCR_UNAVAILABLE_MESSAGE)
 }
 
 /// Upper bound for a single tesseract process. The child is run with

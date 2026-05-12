@@ -163,8 +163,10 @@ async fn delete_field(
         return e;
     }
 
-    match sqlx::query("UPDATE custom_fields SET is_active = false WHERE id = $1 AND is_active = true")
-        .bind(id)
+    match sqlx::query(
+        "UPDATE custom_fields SET is_active = false WHERE id = $1 AND is_active = true",
+    )
+    .bind(id)
     .execute(&state.db)
     .await
     {
