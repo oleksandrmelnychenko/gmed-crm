@@ -1,10 +1,9 @@
 import { lazy, Suspense, type ReactNode } from "react";
 import {
   AlertTriangle,
+  ArrowUpRight,
   CheckCircle2,
   ClipboardCheck,
-  ClipboardList,
-  FileText,
   LoaderCircle,
   NotebookText,
   Pencil,
@@ -18,7 +17,6 @@ import { Button } from "@/components/ui/button";
 import {
   CountBadge,
   EmptyCell,
-  InfoRow,
   Section as FormSection,
 } from "@/components/ui-shell";
 import type { Translations } from "@/lib/i18n";
@@ -140,6 +138,106 @@ function ProfileDetailTile({
         {children ? <div className="shrink-0">{children}</div> : null}
       </div>
     </article>
+  );
+}
+
+function ProfileSummaryCard({
+  title,
+  children,
+  contentClassName,
+}: {
+  title: ReactNode;
+  children: ReactNode;
+  contentClassName?: string;
+}) {
+  return (
+    <section className="rounded-xl border border-border bg-card p-4">
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+        <h3 className="truncate text-[13px] font-semibold tracking-tight text-foreground">
+          {title}
+        </h3>
+      </div>
+      <div className={cn("mt-3 grid gap-1.5", contentClassName)}>
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function ProfileSummaryLine({
+  label,
+  value,
+  onEdit,
+  editLabel,
+}: {
+  label: ReactNode;
+  value: ReactNode;
+  onEdit?: () => void;
+  editLabel?: string;
+}) {
+  return (
+    <div className="group relative flex min-w-0 items-center gap-2 rounded-lg px-2 py-1.5">
+      <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+        {label}
+      </span>
+      <span className="h-px min-w-5 flex-1 bg-border/70" />
+      <span
+        className={cn(
+          "min-w-0 max-w-[58%] truncate text-right text-sm font-semibold leading-none text-foreground",
+          onEdit ? "pr-5" : undefined,
+        )}
+      >
+        {value}
+      </span>
+      {onEdit ? (
+        <button
+          type="button"
+          onClick={onEdit}
+          aria-label={editLabel}
+          className="absolute right-1 top-1/2 rounded-md p-1 text-muted-foreground/70 opacity-0 transition -translate-y-1/2 hover:bg-muted hover:text-foreground group-hover:opacity-100"
+        >
+          <Pencil className="size-3.5" />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function ProfileActionCard({
+  title,
+  description,
+  disabled = false,
+  busy = false,
+  onClick,
+}: {
+  title: ReactNode;
+  description: ReactNode;
+  disabled?: boolean;
+  busy?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-zinc-200 disabled:hover:bg-zinc-50/80"
+      onClick={onClick}
+    >
+      <div className="relative z-10">
+        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+        <p className="mt-2 text-xs leading-tight text-muted-foreground">
+          {description}
+        </p>
+      </div>
+      <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800 group-disabled:size-12 group-disabled:bg-orange-100 group-disabled:text-orange-700">
+        {busy ? (
+          <LoaderCircle className="size-4 animate-spin" />
+        ) : (
+          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+        )}
+      </span>
+    </button>
   );
 }
 
@@ -286,7 +384,6 @@ function usePatientProfileTabContent({
   reload,
   riskScoreSheetOpen,
   riskScores,
-  staffGo,
   statusBadgeClasses,
   t,
   tr,
@@ -360,62 +457,127 @@ function usePatientProfileTabContent({
   return (
     <div className="space-y-6 mt-4 min-h-[400px]">
       <div className="grid gap-4 xl:grid-cols-2">
-        <FormSection title={t.patient_profile_personal_data}>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            <InfoRow label={t.patients_birth_date} value={formatDate(detail.birth_date, t.common_not_set)} />
-            <InfoRow label={t.patients_gender} value={genderLabel(detail.gender, tr)} />
-            <InfoRow label={t.patients_nationality} value={fieldValue(detail.nationality, t.common_not_set)} onEdit={editAction} editLabel={editPatientFieldLabel(t.patients_nationality)} />
-            <InfoRow label={t.patients_residence_country} value={fieldValue(detail.residence_country, t.common_not_set)} onEdit={editAction} editLabel={editPatientFieldLabel(t.patients_residence_country)} />
-            <InfoRow label={t.patients_languages} value={fieldValue(detail.languages, t.common_not_set)} onEdit={editAction} editLabel={editPatientFieldLabel(t.patients_languages)} />
-            <InfoRow
-              label={t.patient_profile_functional_labels}
-              value={
-                detail.functional_labels?.length
-                  ? detail.functional_labels
-                      .map((label) => humanizeFunctionalLabel(label))
-                      .join(", ")
-                  : t.common_not_set
-              }
-              onEdit={editAction}
-              editLabel={editPatientFieldLabel(t.patient_profile_functional_labels)}
-            />
-          </div>
-        </FormSection>
+        <ProfileSummaryCard
+          title={t.patient_profile_personal_data}
+          contentClassName="md:grid-cols-2"
+        >
+          <ProfileSummaryLine label={t.patients_birth_date} value={formatDate(detail.birth_date, t.common_not_set)} />
+          <ProfileSummaryLine label={t.patients_gender} value={genderLabel(detail.gender, tr)} />
+          <ProfileSummaryLine
+            label={t.patients_nationality}
+            value={fieldValue(detail.nationality, t.common_not_set)}
+            onEdit={editAction}
+            editLabel={editPatientFieldLabel(t.patients_nationality)}
+          />
+          <ProfileSummaryLine
+            label={t.patients_residence_country}
+            value={fieldValue(detail.residence_country, t.common_not_set)}
+            onEdit={editAction}
+            editLabel={editPatientFieldLabel(t.patients_residence_country)}
+          />
+          <ProfileSummaryLine
+            label={t.patients_languages}
+            value={fieldValue(detail.languages, t.common_not_set)}
+            onEdit={editAction}
+            editLabel={editPatientFieldLabel(t.patients_languages)}
+          />
+          <ProfileSummaryLine
+            label={t.patient_profile_functional_labels}
+            value={
+              detail.functional_labels?.length
+                ? detail.functional_labels
+                    .map((label) => humanizeFunctionalLabel(label))
+                    .join(", ")
+                : t.common_not_set
+            }
+            onEdit={editAction}
+            editLabel={editPatientFieldLabel(t.patient_profile_functional_labels)}
+          />
+        </ProfileSummaryCard>
 
-        <FormSection title={t.patient_profile_contact}>
-          <div className="grid gap-4 md:grid-cols-2">
-            <InfoRow label={t.patients_phone_primary} value={fieldValue(detail.phone_primary, t.common_not_set)} onEdit={editAction} editLabel={editPatientFieldLabel(t.patients_phone_primary)} />
-            <InfoRow label={t.patients_phone_secondary} value={fieldValue(detail.phone_secondary, t.common_not_set)} onEdit={editAction} editLabel={editPatientFieldLabel(t.patients_phone_secondary)} />
-            <InfoRow label={t.patients_email} value={fieldValue(detail.email, t.common_not_set)} onEdit={editAction} editLabel={editPatientFieldLabel(t.patients_email)} />
-          </div>
-        </FormSection>
+        <ProfileSummaryCard
+          title={t.patient_profile_contact}
+        >
+          <ProfileSummaryLine
+            label={t.patients_phone_primary}
+            value={fieldValue(detail.phone_primary, t.common_not_set)}
+            onEdit={editAction}
+            editLabel={editPatientFieldLabel(t.patients_phone_primary)}
+          />
+          <ProfileSummaryLine
+            label={t.patients_phone_secondary}
+            value={fieldValue(detail.phone_secondary, t.common_not_set)}
+            onEdit={editAction}
+            editLabel={editPatientFieldLabel(t.patients_phone_secondary)}
+          />
+          <ProfileSummaryLine
+            label={t.patients_email}
+            value={fieldValue(detail.email, t.common_not_set)}
+            onEdit={editAction}
+            editLabel={editPatientFieldLabel(t.patients_email)}
+          />
+        </ProfileSummaryCard>
 
-        <FormSection title={t.patient_profile_insurance_and_payer}>
-          <div className="grid gap-4 md:grid-cols-2">
-            <InfoRow label={t.patients_insurance_type} value={insuranceLabel(detail.insurance_type, tr)} onEdit={editAction} editLabel={editPatientFieldLabel(t.patients_insurance_type)} />
-            <InfoRow label={t.patients_insurance_provider} value={fieldValue(detail.insurance_provider, t.common_not_set)} onEdit={editAction} editLabel={editPatientFieldLabel(t.patients_insurance_provider)} />
-            <InfoRow label={t.patients_insurance_number} value={fieldValue(detail.insurance_number, t.common_not_set)} onEdit={editAction} editLabel={editPatientFieldLabel(t.patients_insurance_number)} />
-          </div>
-        </FormSection>
+        <ProfileSummaryCard
+          title={t.patient_profile_insurance_and_payer}
+        >
+          <ProfileSummaryLine
+            label={t.patients_insurance_type}
+            value={insuranceLabel(detail.insurance_type, tr)}
+            onEdit={editAction}
+            editLabel={editPatientFieldLabel(t.patients_insurance_type)}
+          />
+          <ProfileSummaryLine
+            label={t.patients_insurance_provider}
+            value={fieldValue(detail.insurance_provider, t.common_not_set)}
+            onEdit={editAction}
+            editLabel={editPatientFieldLabel(t.patients_insurance_provider)}
+          />
+          <ProfileSummaryLine
+            label={t.patients_insurance_number}
+            value={fieldValue(detail.insurance_number, t.common_not_set)}
+            onEdit={editAction}
+            editLabel={editPatientFieldLabel(t.patients_insurance_number)}
+          />
+        </ProfileSummaryCard>
 
-        <FormSection title={t.patient_profile_address}>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <InfoRow label={t.patients_address_street} value={fieldValue(detail.address_street, t.common_not_set)} onEdit={editAction} editLabel={editPatientFieldLabel(t.patients_address_street)} />
-            <InfoRow label={t.patients_address_city} value={fieldValue(detail.address_city, t.common_not_set)} onEdit={editAction} editLabel={editPatientFieldLabel(t.patients_address_city)} />
-            <InfoRow label={t.patients_address_zip} value={fieldValue(detail.address_zip, t.common_not_set)} onEdit={editAction} editLabel={editPatientFieldLabel(t.patients_address_zip)} />
-            <InfoRow label={t.patients_address_country} value={fieldValue(detail.address_country, t.common_not_set)} onEdit={editAction} editLabel={editPatientFieldLabel(t.patients_address_country)} />
-          </div>
-        </FormSection>
+        <ProfileSummaryCard
+          title={t.patient_profile_address}
+          contentClassName="md:grid-cols-2"
+        >
+          <ProfileSummaryLine
+            label={t.patients_address_street}
+            value={fieldValue(detail.address_street, t.common_not_set)}
+            onEdit={editAction}
+            editLabel={editPatientFieldLabel(t.patients_address_street)}
+          />
+          <ProfileSummaryLine
+            label={t.patients_address_city}
+            value={fieldValue(detail.address_city, t.common_not_set)}
+            onEdit={editAction}
+            editLabel={editPatientFieldLabel(t.patients_address_city)}
+          />
+          <ProfileSummaryLine
+            label={t.patients_address_zip}
+            value={fieldValue(detail.address_zip, t.common_not_set)}
+            onEdit={editAction}
+            editLabel={editPatientFieldLabel(t.patients_address_zip)}
+          />
+          <ProfileSummaryLine
+            label={t.patients_address_country}
+            value={fieldValue(detail.address_country, t.common_not_set)}
+            onEdit={editAction}
+            editLabel={editPatientFieldLabel(t.patients_address_country)}
+          />
+        </ProfileSummaryCard>
 
-        <FormSection
+        <ProfileSummaryCard
           title={t.patient_profile_emergency_contact}
         >
-          <div className="grid gap-4 md:grid-cols-3">
-            <InfoRow label={t.patients_emergency_name} value={fieldValue(detail.emergency_contact_name, t.common_not_set)} />
-            <InfoRow label={t.patients_emergency_phone} value={fieldValue(detail.emergency_contact_phone, t.common_not_set)} />
-            <InfoRow label={t.patients_emergency_relation} value={fieldValue(detail.emergency_contact_relation, t.common_not_set)} />
-          </div>
-        </FormSection>
+          <ProfileSummaryLine label={t.patients_emergency_name} value={fieldValue(detail.emergency_contact_name, t.common_not_set)} />
+          <ProfileSummaryLine label={t.patients_emergency_phone} value={fieldValue(detail.emergency_contact_phone, t.common_not_set)} />
+          <ProfileSummaryLine label={t.patients_emergency_relation} value={fieldValue(detail.emergency_contact_relation, t.common_not_set)} />
+        </ProfileSummaryCard>
       </div>
 
       <FormSection
@@ -500,71 +662,71 @@ function usePatientProfileTabContent({
           </ProfileRecordShell>
         ) : null}
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex items-center gap-2" aria-hidden>
+          <span className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-border" />
+          <span className="size-1.5 rounded-full bg-orange-400" />
+          <span className="size-1.5 rounded-full bg-orange-300" />
+          <span className="size-1.5 rounded-full bg-orange-200" />
+          <span className="h-px flex-1 bg-gradient-to-r from-border via-border to-transparent" />
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
           {canExportPatientCompliance ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-lg gap-1.5"
-              disabled={complianceExportBusy}
-              onClick={() => void handleExportPatientCompliance()}
-            >
-              {complianceExportBusy ? (
-                <LoaderCircle className="size-3.5 animate-spin" />
-              ) : (
-                <FileText className="size-3.5" />
+            <ProfileActionCard
+              title={t.patient_profile_dsgvo_export}
+              description={l(
+                "Erstellen Sie einen DSGVO-Export fuer diesen Patienten.",
+                "Сформируйте DSGVO-выгрузку по этому пациенту.",
+                "Generate a DSGVO export for this patient.",
               )}
-              {t.patient_profile_dsgvo_export}
-            </Button>
+              disabled={complianceExportBusy}
+              busy={complianceExportBusy}
+              onClick={() => void handleExportPatientCompliance()}
+            />
           ) : null}
           {canOpenComplianceWorkspace ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-lg gap-1.5"
-              onClick={() => staffGo(`/admin/compliance?patient=${id}`)}
-            >
-              <ShieldCheck className="size-3.5" />
-              {t.patient_profile_open_dsgvo_workspace}
-            </Button>
+            <ProfileActionCard
+              title={t.patient_profile_open_dsgvo_workspace}
+              description={l(
+                "Oeffnen Sie den Compliance-Bereich mit den Patientendaten.",
+                "Откройте раздел комплаенса с данными этого пациента.",
+                "Open the compliance workspace for this patient.",
+              )}
+              onClick={() => window.open(`/admin/compliance?patient=${id}`, "_blank", "noopener,noreferrer")}
+            />
           ) : null}
           {canViewDocuments ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-lg gap-1.5"
+            <ProfileActionCard
+              title={t.patient_profile_open_documents}
+              description={l(
+                "Pruefen Sie die mit dem Patienten verknuepften Dokumente.",
+                "Проверьте документы, связанные с этим пациентом.",
+                "Review documents linked to this patient.",
+              )}
               onClick={() => handleDocumentsPreviewOpenChange(true)}
-            >
-              <FileText className="size-3.5" />
-              {t.patient_profile_open_documents}
-            </Button>
+            />
           ) : null}
           {canViewContracts ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-lg gap-1.5"
+            <ProfileActionCard
+              title={t.patient_profile_open_contracts}
+              description={l(
+                "Oeffnen Sie die Vertraege und Freigaben dieses Patienten.",
+                "Откройте договоры и подтверждения этого пациента.",
+                "Open this patient's contracts and confirmations.",
+              )}
               onClick={() => handleContractsPreviewOpenChange(true)}
-            >
-              <ClipboardList className="size-3.5" />
-              {t.patient_profile_open_contracts}
-            </Button>
+            />
           ) : null}
           {canViewInvoices ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-lg gap-1.5"
+            <ProfileActionCard
+              title={t.patient_profile_open_invoices}
+              description={l(
+                "Pruefen Sie Rechnungen und Zahlungen zu diesem Patienten.",
+                "Проверьте счета и оплаты этого пациента.",
+                "Review invoices and payments for this patient.",
+              )}
               onClick={() => handleInvoicesPreviewOpenChange(true)}
-            >
-              <FileText className="size-3.5" />
-              {t.patient_profile_open_invoices}
-            </Button>
+            />
           ) : null}
         </div>
       </FormSection>
