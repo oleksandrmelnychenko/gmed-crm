@@ -1,3 +1,6 @@
+import { Activity, Clock3, Layers3, ListChecks } from "lucide-react";
+
+import { AdminInlineMetric } from "@/components/admin-page-patterns";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -7,7 +10,6 @@ import {
   CountBadge,
   EmptyCell,
   Section as FormSection,
-  StatCard,
   TabLoader,
   inputClass as formInputClassName,
 } from "@/components/ui-shell";
@@ -104,26 +106,34 @@ function TimelineStatsOverview({
   timelineSummary,
 }: TimelineStatsOverviewProps) {
   return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-      <StatCard
+    <div className="grid gap-y-4 overflow-hidden rounded-xl border border-border px-3 pb-4 pt-4 md:grid-cols-2 xl:grid-cols-4 [&>article:not(:last-child):not(:nth-child(4n))_.admin-inline-metric-separator]:xl:block">
+      <AdminInlineMetric
+        icon={Activity}
         label={l("Ereignisse gesamt", "Всего событий", "Total events")}
         value={timelineSummary.total}
-        description={l("Alle erfassten Touchpoints im Patienten-Workflow.", "Все зафиксированные точки касания в процессе ведения пациента.", "All recorded patient workflow touchpoints.")}
+        description={l("Alle Touchpoints.", "Все точки касания.", "All touchpoints.")}
+        tone="sky"
       />
-      <StatCard
+      <AdminInlineMetric
+        icon={ListChecks}
         label={l("Offene Punkte", "Открытые пункты", "Open items")}
         value={timelineSummary.open}
-        description={l("Ereignisse, die noch operative Nachverfolgung erfordern.", "События, которые ещё требуют операционного сопровождения.", "Events that still require operational follow-through.")}
+        description={l("Brauchen Nachverfolgung.", "Требуют сопровождения.", "Need follow-up.")}
+        tone="amber"
       />
-      <StatCard
+      <AdminInlineMetric
+        icon={Clock3}
         label={l("Letzte 30 Tage", "Последние 30 дней", "Last 30 days")}
         value={timelineSummary.recent}
-        description={l("Aktuelle Bewegung über Behandlung, Billing und Dokumente.", "Недавняя активность по лечению, счетам и документам.", "Recent movement across care, billing and documents.")}
+        description={l("Aktuelle Bewegung.", "Недавняя активность.", "Recent movement.")}
+        tone="emerald"
       />
-      <StatCard
+      <AdminInlineMetric
+        icon={Layers3}
         label={l("Aktive Bereiche", "Активные направления", "Domains active")}
         value={timelineSummary.entityCounts.length}
-        description={l("Eindeutige Workstreams, die diesen Patienten bereits berühren.", "Уникальные направления работы, уже затрагивающие этого пациента.", "Unique workstreams already touching this patient.")}
+        description={l("Workstreams im Profil.", "Workstreams в профиле.", "Profile workstreams.")}
+        tone="slate"
       />
     </div>
   );
