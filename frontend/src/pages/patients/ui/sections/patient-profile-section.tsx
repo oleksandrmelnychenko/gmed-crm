@@ -1,6 +1,18 @@
-import { lazy, Suspense } from "react";
-import { LoaderCircle, Pencil, Plus } from "lucide-react";
+import { lazy, Suspense, type ReactNode } from "react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ClipboardCheck,
+  ClipboardList,
+  FileText,
+  LoaderCircle,
+  NotebookText,
+  Pencil,
+  Plus,
+  ShieldCheck,
+} from "lucide-react";
 
+import { AdminInlineMetric } from "@/components/admin-page-patterns";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,7 +34,6 @@ import type {
 } from "../../model/detail-resource-types";
 import { LegalStatusPill } from "../shared/legal-status-pill";
 import { humanizeFunctionalLabel } from "../shared/patient-form-primitives";
-import { WorkspaceSectionIntro } from "../shared/workspace-primitives";
 
 const loadPatientLegalPreviewSheets = () => import("../sheets/patient-legal-preview-sheets");
 const loadPatientLegalStatusSheet = () => import("../sheets/patient-legal-status-sheet");
@@ -98,6 +109,60 @@ type LegalStatusChecklistItem = {
   label: string;
   done: boolean;
 };
+
+function ProfileDetailTile({
+  label,
+  value,
+  description,
+  children,
+}: {
+  label: ReactNode;
+  value: ReactNode;
+  description?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <article className="rounded-lg bg-white px-3 py-2 text-xs shadow-sm ring-1 ring-border/40">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] font-medium leading-tight text-muted-foreground">
+            {label}
+          </p>
+          <p className="mt-1 text-[13px] font-medium leading-5 text-foreground">
+            {value}
+          </p>
+          {description ? (
+            <p className="mt-0.5 line-clamp-2 text-[11px] leading-tight text-muted-foreground">
+              {description}
+            </p>
+          ) : null}
+        </div>
+        {children ? <div className="shrink-0">{children}</div> : null}
+      </div>
+    </article>
+  );
+}
+
+function ProfileRecordShell({
+  children,
+  aside,
+}: {
+  children: ReactNode;
+  aside?: ReactNode;
+}) {
+  return (
+    <article className="overflow-hidden rounded-xl border border-border bg-card">
+      <div className="grid gap-3 px-4 py-3 text-sm md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
+        <div className="min-w-0">{children}</div>
+        {aside ? (
+          <div className="flex shrink-0 justify-start md:min-w-[120px] md:justify-end">
+            {aside}
+          </div>
+        ) : null}
+      </div>
+    </article>
+  );
+}
 
 type PatientProfileTabProps = {
   profileControls: {
@@ -179,7 +244,6 @@ function usePatientProfileTabContent({
   cardEntries,
   cardEntrySheetOpen,
   caveSheetOpen,
-  clinicalSurfaceItemCount,
   complianceExportBusy,
   contractsPreviewOpen,
   detail,
@@ -240,7 +304,6 @@ function usePatientProfileTabContent({
     canViewContracts,
     canViewDocuments,
     canViewInvoices,
-    hasClinicalSurface,
   } = profileControls;
   const editAction = canEditPatientProfile ? openProfileEditor : undefined;
 
@@ -296,10 +359,6 @@ function usePatientProfileTabContent({
 
   return (
     <div className="space-y-6 mt-4 min-h-[400px]">
-      <WorkspaceSectionIntro
-        title={t.patient_profile_identity_and_communication}
-        description={t.patient_profile_core_identity_contact_channels_address_insurance_and_emergency_c}
-      />
       <div className="grid gap-4 xl:grid-cols-2">
         <FormSection title={t.patient_profile_personal_data}>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -359,10 +418,6 @@ function usePatientProfileTabContent({
         </FormSection>
       </div>
 
-      <WorkspaceSectionIntro
-        title={t.patient_profile_compliance_and_legal_status}
-        description={t.patient_profile_contract_readiness_required_confirmations_and_patient_legal_note}
-      />
       <FormSection
         title={
           <span className="inline-flex items-center gap-2">
@@ -379,45 +434,70 @@ function usePatientProfileTabContent({
           ) : null
         }
       >
-        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-          <div className="flex flex-col gap-1.5 rounded-xl border border-border/50 bg-muted/25 px-4 py-3 xl:col-span-2">
-            <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-              {t.patient_profile_contract_status}
-            </span>
-            <p className="text-base font-semibold text-foreground">
-              {patientDetailStatusLabel(legalStatus.contractStatus)}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {legalStatusCompletion.completed}/{legalStatusCompletion.total} {t.patient_profile_done}
-            </p>
-          </div>
+        <div className="grid gap-y-4 overflow-hidden rounded-xl border border-border px-3 pb-4 pt-4 md:grid-cols-2 xl:grid-cols-4 [&>article:not(:last-child):not(:nth-child(4n))_.admin-inline-metric-separator]:xl:block">
+          <AdminInlineMetric
+            icon={ShieldCheck}
+            label={t.patient_profile_contract_status}
+            value={patientDetailStatusLabel(legalStatus.contractStatus)}
+            description={l("Vertragsfreigabe.", "Готовность договора.", "Contract readiness.")}
+            tone="sky"
+          />
+          <AdminInlineMetric
+            icon={CheckCircle2}
+            label={t.patient_profile_done}
+            value={`${legalStatusCompletion.completed}/${legalStatusCompletion.total}`}
+            description={l("Pflichtpunkte.", "Обязательные пункты.", "Required checks.")}
+            tone="emerald"
+          />
+          <AdminInlineMetric
+            icon={ClipboardCheck}
+            label={l("Compliance", "Комплаенс", "Compliance")}
+            value={legalStatus.complianceCompleted ? t.common_completed : t.common_pending}
+            description={l("Interne Freigabe.", "Внутреннее подтверждение.", "Internal approval.")}
+            tone={legalStatus.complianceCompleted ? "emerald" : "amber"}
+          />
+          <AdminInlineMetric
+            icon={NotebookText}
+            label={t.patient_profile_notes}
+            value={legalStatus.notes ? l("Ja", "Есть", "Yes") : l("Nein", "Нет", "No")}
+            description={l("Rechtsnotiz.", "Правовая заметка.", "Legal note.")}
+            tone="slate"
+          />
+        </div>
+
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
           {legalStatusChecklist.map((item) => (
-            <div key={item.key} className="flex flex-col gap-1.5 rounded-xl border border-border/50 bg-card px-4 py-3">
-              <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-                {item.label}
-              </span>
-              <Badge
-                variant="outline"
-                className={cn(
-                  "rounded-full text-[10px] w-fit",
-                  item.done
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                    : "border-amber-200 bg-amber-50 text-amber-700",
-                )}
-              >
-                {item.done ? t.common_completed : t.common_pending}
-              </Badge>
-            </div>
+            <ProfileDetailTile
+              key={item.key}
+              label={item.label}
+              value={item.done ? t.common_completed : t.common_pending}
+              description={l(
+                "Bestätigung im Profil.",
+                "Подтверждение в профиле.",
+                "Profile confirmation.",
+              )}
+            >
+              {item.done ? (
+                <CheckCircle2 className="size-4 text-emerald-600" />
+              ) : (
+                <AlertTriangle className="size-4 text-amber-600" />
+              )}
+            </ProfileDetailTile>
           ))}
         </div>
 
         {legalStatus.notes ? (
-          <div className="flex flex-col gap-1.5 rounded-xl border border-border/50 bg-muted/25 px-4 py-3">
-            <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-              {t.patient_profile_notes}
-            </span>
-            <p className="whitespace-pre-wrap text-sm text-foreground">{legalStatus.notes}</p>
-          </div>
+          <ProfileRecordShell
+            aside={
+              <Badge variant="outline" className="rounded-full border-sky-200 bg-sky-50 text-sky-700">
+                {t.patient_profile_notes}
+              </Badge>
+            }
+          >
+            <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">
+              {legalStatus.notes}
+            </p>
+          </ProfileRecordShell>
         ) : null}
 
         <div className="flex flex-wrap gap-2">
@@ -430,7 +510,11 @@ function usePatientProfileTabContent({
               disabled={complianceExportBusy}
               onClick={() => void handleExportPatientCompliance()}
             >
-              {complianceExportBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+              {complianceExportBusy ? (
+                <LoaderCircle className="size-3.5 animate-spin" />
+              ) : (
+                <FileText className="size-3.5" />
+              )}
               {t.patient_profile_dsgvo_export}
             </Button>
           ) : null}
@@ -439,9 +523,10 @@ function usePatientProfileTabContent({
               type="button"
               variant="outline"
               size="sm"
-              className="h-8 rounded-lg"
+              className="h-8 rounded-lg gap-1.5"
               onClick={() => staffGo(`/admin/compliance?patient=${id}`)}
             >
+              <ShieldCheck className="size-3.5" />
               {t.patient_profile_open_dsgvo_workspace}
             </Button>
           ) : null}
@@ -450,9 +535,10 @@ function usePatientProfileTabContent({
               type="button"
               variant="outline"
               size="sm"
-              className="h-8 rounded-lg"
+              className="h-8 rounded-lg gap-1.5"
               onClick={() => handleDocumentsPreviewOpenChange(true)}
             >
+              <FileText className="size-3.5" />
               {t.patient_profile_open_documents}
             </Button>
           ) : null}
@@ -461,9 +547,10 @@ function usePatientProfileTabContent({
               type="button"
               variant="outline"
               size="sm"
-              className="h-8 rounded-lg"
+              className="h-8 rounded-lg gap-1.5"
               onClick={() => handleContractsPreviewOpenChange(true)}
             >
+              <ClipboardList className="size-3.5" />
               {t.patient_profile_open_contracts}
             </Button>
           ) : null}
@@ -472,9 +559,10 @@ function usePatientProfileTabContent({
               type="button"
               variant="outline"
               size="sm"
-              className="h-8 rounded-lg"
+              className="h-8 rounded-lg gap-1.5"
               onClick={() => handleInvoicesPreviewOpenChange(true)}
             >
+              <FileText className="size-3.5" />
               {t.patient_profile_open_invoices}
             </Button>
           ) : null}
@@ -544,14 +632,6 @@ function usePatientProfileTabContent({
         </Suspense>
       ) : null}
 
-      {hasClinicalSurface ? (
-        <WorkspaceSectionIntro
-          title={t.patient_profile_clinical_surface}
-          description={t.patient_profile_warnings_vitals_clinical_log_orders_and_risk_assessments_for_the}
-          accessory={<CountBadge>{clinicalSurfaceItemCount}</CountBadge>}
-        />
-      ) : null}
-
       {canManagePatientVitals || detail.clinical_warnings || vitalsHistory.length > 0 ? (
         <div className="space-y-6">
           <FormSection
@@ -604,38 +684,82 @@ function usePatientProfileTabContent({
             ) : null}
 
             {vitalsHistory.length > 0 ? (
-              <div className="space-y-3 max-h-[540px] overflow-y-auto pr-1">
-                {vitalsHistory.map((item) => (
-                  <div key={item.id} className="rounded-xl border border-border/50 bg-card px-4 py-3">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-medium text-foreground">
-                          {formatDateTime(item.measured_at, t.common_not_set)}
-                        </p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {t.patient_profile_recorded_by} {item.recorded_by_name ?? t.common_unknown}
-                        </p>
-                      </div>
-                      <div className="flex flex-col items-end gap-0.5 text-xs text-muted-foreground">
-                        {item.bp_systolic != null && item.bp_diastolic != null ? (
-                          <span>
-                            RR {formatVitalNumber(item.bp_systolic, { maximumFractionDigits: 0 })}/
-                            {formatVitalNumber(item.bp_diastolic, { maximumFractionDigits: 0 })}
+              <div className="max-h-[540px] overflow-y-auto rounded-xl border border-border bg-card">
+                {vitalsHistory.map((item) => {
+                  const vitalMetrics = [
+                    item.bp_systolic != null && item.bp_diastolic != null
+                      ? {
+                          label: l("RR", "АД", "BP"),
+                          value: `${formatVitalNumber(item.bp_systolic, { maximumFractionDigits: 0 }) ?? t.common_not_set}/${
+                            formatVitalNumber(item.bp_diastolic, { maximumFractionDigits: 0 }) ?? t.common_not_set
+                          }`,
+                        }
+                      : null,
+                    item.heart_rate != null
+                      ? {
+                          label: l("Herzfrequenz", "ЧСС", "Heart rate"),
+                          value: formatVitalNumber(item.heart_rate, { maximumFractionDigits: 0 }) ?? t.common_not_set,
+                        }
+                      : null,
+                    item.weight_kg != null
+                      ? {
+                          label: l("Gewicht", "Вес", "Weight"),
+                          value: `${formatVitalNumber(item.weight_kg) ?? t.common_not_set} kg`,
+                        }
+                      : null,
+                    item.height_cm != null
+                      ? {
+                          label: l("Groesse", "Рост", "Height"),
+                          value: `${formatVitalNumber(item.height_cm) ?? t.common_not_set} cm`,
+                        }
+                      : null,
+                    item.bmi != null
+                      ? {
+                          label: "BMI",
+                          value: formatVitalNumber(item.bmi) ?? t.common_not_set,
+                        }
+                      : null,
+                  ].filter((metric): metric is { label: string; value: string } => Boolean(metric));
+
+                  return (
+                    <div
+                      key={item.id}
+                      className="grid gap-3 border-b border-border/60 px-4 py-3 last:border-b-0 md:grid-cols-[minmax(0,1fr)_minmax(220px,auto)] md:items-center"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                          <p className="text-sm font-medium text-foreground">
+                            {formatDateTime(item.measured_at, t.common_not_set)}
+                          </p>
+                          <span className="size-1 rounded-full bg-muted-foreground/35" />
+                          <span className="text-xs text-muted-foreground">
+                            {t.patient_profile_recorded_by} {item.recorded_by_name ?? t.common_unknown}
                           </span>
+                        </div>
+                        {item.notes ? (
+                          <p className="mt-1.5 whitespace-pre-wrap text-xs leading-5 text-muted-foreground">
+                            {item.notes}
+                          </p>
                         ) : null}
-                        {item.heart_rate != null ? (
-                          <span>HF {formatVitalNumber(item.heart_rate, { maximumFractionDigits: 0 })}</span>
-                        ) : null}
-                        {item.weight_kg != null ? <span>{formatVitalNumber(item.weight_kg)} kg</span> : null}
-                        {item.height_cm != null ? <span>{formatVitalNumber(item.height_cm)} cm</span> : null}
-                        {item.bmi != null ? <span>BMI {formatVitalNumber(item.bmi)}</span> : null}
+                      </div>
+                      <div className="flex min-w-0 flex-wrap gap-1.5 md:justify-end">
+                        {vitalMetrics.length > 0 ? (
+                          vitalMetrics.map((metric) => (
+                            <span
+                              key={metric.label}
+                              className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/25 px-2 py-1 text-xs text-muted-foreground"
+                            >
+                              <span>{metric.label}</span>
+                              <span className="font-medium text-foreground">{metric.value}</span>
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-xs text-muted-foreground">{t.common_not_set}</span>
+                        )}
                       </div>
                     </div>
-                    {item.notes ? (
-                      <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{item.notes}</p>
-                    ) : null}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : null}
           </FormSection>
@@ -662,33 +786,53 @@ function usePatientProfileTabContent({
           {cardEntries.length === 0 ? (
             <EmptyCell>{t.patient_profile_no_clinical_card_log_entries_have_been_recorded_for_this_patient}</EmptyCell>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-3">
               {cardEntries.slice(0, 6).map((entry) => (
-                <div key={entry.id} className="rounded-xl border border-border/50 bg-card px-4 py-3 space-y-2.5">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <p className="text-[13px] text-foreground">
-                      <span className="font-medium">{formatDateTime(entry.entry_date, t.common_not_set)}</span>
-                      <span className="text-muted-foreground"> · {entry.author_name ?? t.common_unknown}</span>
-                    </p>
-                    <Badge variant="outline" className={cn("rounded-full", patientCardEntryCategoryBadgeClass(entry.category))}>
-                      {patientCardEntryCategoryLabel(entry.category)}
-                    </Badge>
-                  </div>
-                  {entry.source ? (
-                    <div className="flex flex-col gap-1">
-                      <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-                        {t.patient_profile_source}
-                      </span>
-                      <p className="text-[13px] text-foreground">{entry.source}</p>
+                <article
+                  key={entry.id}
+                  className="rounded-xl border border-border bg-card"
+                >
+                  <div className="grid gap-4 p-4 md:grid-cols-[minmax(0,1fr)_180px]">
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <span className="h-px w-8 bg-border" />
+                        <Badge
+                          variant="outline"
+                          className={cn("rounded-full text-[10px]", patientCardEntryCategoryBadgeClass(entry.category))}
+                        >
+                          {patientCardEntryCategoryLabel(entry.category)}
+                        </Badge>
+                        {entry.source ? (
+                          <Badge
+                            variant="outline"
+                            className="rounded-full border-0 bg-[#f9fdff] px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
+                          >
+                            {t.patient_profile_source}:{" "}
+                            <span className="ml-1 font-semibold text-foreground">{entry.source}</span>
+                          </Badge>
+                        ) : null}
+                      </div>
+
+                      <p className="mt-3 whitespace-pre-wrap text-sm font-medium leading-6 text-foreground">
+                        {entry.content}
+                      </p>
                     </div>
-                  ) : null}
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-                      {t.patient_profile_content}
-                    </span>
-                    <p className="whitespace-pre-wrap text-[13px] text-foreground">{entry.content}</p>
+
+                    <div className="flex flex-col justify-between gap-4 border-l border-dashed border-border pl-4">
+                      <div>
+                        <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                          {l("Eintrag", "Запись", "Entry")}
+                        </span>
+                        <p className="mt-2 text-sm font-semibold leading-5 text-foreground">
+                          {formatDateTime(entry.entry_date, t.common_not_set)}
+                        </p>
+                        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                          {entry.author_name ?? t.common_unknown}
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                </div>
+                </article>
               ))}
             </div>
           )}
@@ -726,80 +870,100 @@ function usePatientProfileTabContent({
           {medicalOrders.length === 0 ? (
             <EmptyCell>{t.patient_profile_no_medical_orders_have_been_recorded_for_this_patient_yet}</EmptyCell>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-3">
               {medicalOrders.map((order) => (
-                <div key={order.id} className="rounded-xl border border-border/50 bg-card px-4 py-3 space-y-2.5">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <p className="text-[13px] text-foreground">
-                      <span className="font-medium">{formatDateTime(order.order_date, t.common_not_set)}</span>
-                      <span className="text-muted-foreground"> · {t.patient_profile_ordered_by} {order.ordered_by_name ?? t.common_unknown}</span>
-                    </p>
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "rounded-full",
-                        statusBadgeClasses[order.status] ?? "border-border/60 bg-muted/25 text-muted-foreground",
-                      )}
-                    >
-                      {patientDetailStatusLabel(order.status)}
-                    </Badge>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-                      {t.patient_profile_title}
-                    </span>
-                    <p className="text-[13px] text-foreground">{order.title}</p>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-                      {t.patient_profile_type}
-                    </span>
-                    <p className="text-[13px] text-foreground">
-                      {patientMedicalOrderTypeLabel(order.order_type)}
-                      {order.due_date ? ` · ${t.patient_profile_due} ${order.due_date}` : ""}
-                    </p>
-                  </div>
-                  {order.source ? (
-                    <div className="flex flex-col gap-1">
-                      <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-                        {t.patient_profile_source}
-                      </span>
-                      <p className="text-[13px] text-foreground">{order.source}</p>
+                <article
+                  key={order.id}
+                  className="rounded-xl border border-border bg-card"
+                >
+                  <div className="grid gap-4 p-4 md:grid-cols-[minmax(0,1fr)_180px]">
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <span className="h-px w-8 bg-border" />
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "rounded-full text-[10px]",
+                            statusBadgeClasses[order.status] ?? "border-border/60 bg-muted/25 text-muted-foreground",
+                          )}
+                        >
+                          {patientDetailStatusLabel(order.status)}
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className="rounded-full border-0 bg-[#f9fdff] px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
+                        >
+                          {patientMedicalOrderTypeLabel(order.order_type)}
+                        </Badge>
+                      </div>
+
+                      <h3 className="mt-3 text-base font-semibold leading-6 text-foreground">
+                        {order.title}
+                      </h3>
+                      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1.5 text-xs leading-5">
+                        <span className="inline-flex items-baseline gap-1">
+                          <span className="text-muted-foreground">{t.patient_profile_ordered_by}</span>
+                          <span className="font-medium text-foreground">
+                            {order.ordered_by_name ?? t.common_unknown}
+                          </span>
+                        </span>
+                        {order.due_date ? (
+                          <span className="inline-flex items-baseline gap-1">
+                            <span className="text-muted-foreground">{t.patient_profile_due}</span>
+                            <span className="font-medium tabular-nums text-foreground">{order.due_date}</span>
+                          </span>
+                        ) : null}
+                        {order.source ? (
+                          <span className="inline-flex min-w-0 items-baseline gap-1">
+                            <span className="shrink-0 text-muted-foreground">{t.patient_profile_source}</span>
+                            <span className="min-w-0 break-words font-medium text-foreground">{order.source}</span>
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+                        {order.instructions}
+                      </p>
                     </div>
-                  ) : null}
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-                      {t.patient_profile_instructions}
-                    </span>
-                    <p className="whitespace-pre-wrap text-[13px] text-foreground">{order.instructions}</p>
-                  </div>
-                  {canManagePatientMedicalOrders && order.status === "active" ? (
-                    <div className="flex flex-wrap justify-end gap-2 pt-1">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 rounded-lg gap-1.5"
-                        disabled={medicalOrderActionId === order.id}
-                        onClick={() => void handleUpdatePatientMedicalOrderStatus(order.id, "completed")}
-                      >
-                        {medicalOrderActionId === order.id ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-                        {t.patient_profile_complete}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 rounded-lg gap-1.5 border-rose-200 text-rose-700 hover:bg-rose-50"
-                        disabled={medicalOrderActionId === order.id}
-                        onClick={() => void handleUpdatePatientMedicalOrderStatus(order.id, "cancelled")}
-                      >
-                        {medicalOrderActionId === order.id ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-                        {t.patient_profile_cancel}
-                      </Button>
+
+                    <div className="flex flex-col justify-between gap-4 border-l border-dashed border-border pl-4">
+                      <div>
+                        <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                          {l("Datum der Anordnung", "Дата назначения", "Order date")}
+                        </span>
+                        <p className="mt-2 text-sm font-semibold leading-5 text-foreground">
+                          {formatDateTime(order.order_date, t.common_not_set)}
+                        </p>
+                      </div>
+
+                      {canManagePatientMedicalOrders && order.status === "active" ? (
+                        <div className="flex flex-col gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="justify-center rounded-lg"
+                            disabled={medicalOrderActionId === order.id}
+                            onClick={() => void handleUpdatePatientMedicalOrderStatus(order.id, "completed")}
+                          >
+                            {medicalOrderActionId === order.id ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+                            {t.patient_profile_complete}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="justify-center rounded-lg"
+                            disabled={medicalOrderActionId === order.id}
+                            onClick={() => void handleUpdatePatientMedicalOrderStatus(order.id, "cancelled")}
+                          >
+                            {medicalOrderActionId === order.id ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+                            {t.patient_profile_cancel}
+                          </Button>
+                        </div>
+                      ) : null}
                     </div>
-                  ) : null}
-                </div>
+                  </div>
+                </article>
               ))}
             </div>
           )}
@@ -837,53 +1001,95 @@ function usePatientProfileTabContent({
           {riskScores.length === 0 ? (
             <EmptyCell>{t.patient_profile_no_risk_scores_have_been_recorded_for_this_patient_yet}</EmptyCell>
           ) : (
-            <div className="space-y-2">
-              {riskScores.map((score) => (
-                <div key={score.id} className="rounded-xl border border-border/50 bg-card px-4 py-3 space-y-2.5">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <p className="text-[13px] text-foreground">
-                      <span className="font-medium">{formatDateTime(score.computed_at, t.common_not_set)}</span>
-                      <span className="text-muted-foreground"> · {t.patient_profile_recorded_by} {score.recorded_by_name ?? t.common_unknown}</span>
-                    </p>
-                    <Badge variant="outline" className="rounded-full">
-                      {formatVitalNumber(score.score_value)}
-                      {score.scale_max != null ? ` / ${formatVitalNumber(score.scale_max)}` : ""}
-                    </Badge>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-                      {t.patient_profile_type}
-                    </span>
-                    <p className="text-[13px] text-foreground">{patientRiskScoreTypeLabel(score.score_type)}</p>
-                  </div>
-                  {score.source ? (
-                    <div className="flex flex-col gap-1">
-                      <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-                        {t.patient_profile_source}
-                      </span>
-                      <p className="text-[13px] text-foreground">{score.source}</p>
+            <div className="space-y-3">
+              {riskScores.map((score) => {
+                const scoreValue = formatVitalNumber(score.score_value) ?? t.common_not_set;
+                const scaleValue = score.scale_max != null ? formatVitalNumber(score.scale_max) : null;
+
+                return (
+                  <article
+                    key={score.id}
+                    className="rounded-xl border border-border bg-card"
+                  >
+                    <div className="grid gap-4 p-4 md:grid-cols-[minmax(0,1fr)_180px]">
+                      <div className="min-w-0">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <span className="h-px w-8 bg-border" />
+                          <Badge
+                            variant="outline"
+                            className="rounded-full border-0 bg-[#f9fdff] px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
+                          >
+                            {l("Risikobewertung", "Риск-оценка", "Risk assessment")}
+                          </Badge>
+                        </div>
+
+                        <h3 className="mt-3 text-base font-semibold leading-6 text-foreground">
+                          {patientRiskScoreTypeLabel(score.score_type)}
+                        </h3>
+                        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1.5 text-xs leading-5">
+                          <span className="inline-flex items-baseline gap-1">
+                            <span className="text-muted-foreground">{t.patient_profile_recorded_by}</span>
+                            <span className="font-medium text-foreground">
+                              {score.recorded_by_name ?? t.common_unknown}
+                            </span>
+                          </span>
+                          {score.source ? (
+                            <span className="inline-flex min-w-0 items-baseline gap-1">
+                              <span className="shrink-0 text-muted-foreground">{t.patient_profile_source}</span>
+                              <span className="min-w-0 break-words font-medium text-foreground">{score.source}</span>
+                            </span>
+                          ) : null}
+                        </div>
+
+                        {score.interpretation ? (
+                          <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+                            {score.interpretation}
+                          </p>
+                        ) : null}
+
+                        {score.inputs ? (
+                          <details className="mt-3 rounded-lg border border-border/60">
+                            <summary className="cursor-pointer list-none px-3 py-2 text-xs font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
+                              {t.patient_profile_inputs}
+                            </summary>
+                            <pre className="overflow-x-auto whitespace-pre-wrap border-t border-border/60 px-3 py-2 text-[12px] text-foreground">
+                              {JSON.stringify(score.inputs, null, 2)}
+                            </pre>
+                          </details>
+                        ) : null}
+                      </div>
+
+                      <div className="flex flex-col justify-between gap-4 border-l border-dashed border-border pl-4">
+                        <div>
+                          <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                            {l("Risikowert", "Оценка риска", "Risk score")}
+                          </span>
+                          <p className="mt-2 text-lg font-semibold leading-none text-foreground">
+                            {scoreValue}
+                            {scaleValue ? (
+                              <span className="text-sm font-medium text-muted-foreground"> / {scaleValue}</span>
+                            ) : null}
+                          </p>
+                          {scaleValue ? (
+                            <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                              {l("Skala", "Шкала", "Scale")} {scaleValue}
+                            </p>
+                          ) : null}
+                        </div>
+
+                        <div>
+                          <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                            {l("Berechnet", "Дата расчета", "Computed")}
+                          </span>
+                          <p className="mt-2 text-sm font-semibold leading-5 text-foreground">
+                            {formatDateTime(score.computed_at, t.common_not_set)}
+                          </p>
+                        </div>
+                      </div>
                     </div>
-                  ) : null}
-                  {score.interpretation ? (
-                    <div className="flex flex-col gap-1">
-                      <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-                        {t.patient_profile_interpretation}
-                      </span>
-                      <p className="whitespace-pre-wrap text-[13px] text-foreground">{score.interpretation}</p>
-                    </div>
-                  ) : null}
-                  {score.inputs ? (
-                    <div className="flex flex-col gap-1">
-                      <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-                        {t.patient_profile_inputs}
-                      </span>
-                      <pre className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-[12px] text-foreground overflow-x-auto whitespace-pre-wrap">
-                        {JSON.stringify(score.inputs, null, 2)}
-                      </pre>
-                    </div>
-                  ) : null}
-                </div>
-              ))}
+                  </article>
+                );
+              })}
             </div>
           )}
         </FormSection>
@@ -899,11 +1105,6 @@ function usePatientProfileTabContent({
           />
         </Suspense>
       ) : null}
-
-      <WorkspaceSectionIntro
-        title={t.patient_profile_notes_and_context}
-        description={t.patient_profile_free_form_context_for_operational_notes_that_do_not_belong_in_cl}
-      />
 
       <FormSection
         title={t.patients_notes}
