@@ -2555,82 +2555,143 @@ function useOrdersPageContent() {
       </div>
 
       {canManageDebt ? (
-        <SectionCard
-          title={l("Debt-Management-Queue", "Очередь debt-management")}
-          description={l(
-            "Auftrage, die durch uberfallige Forderungen oder einen offenen Debt-Workflow blockiert sind.",
-            "Заказы, заблокированные просроченной задолженностью или открытым debt-workflow.",
-          )}
-        >
-          {debtQueueError ? (
-            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-              {debtQueueError}
+        <section className="rounded-xl border border-border bg-card p-6">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h2 className={tokens.text.sectionTitle}>
+                {titleWithDot(
+                  l(
+                    "Orders blocked by overdue receivables or an open debt workflow",
+                    "Заказы, заблокированные просроченной задолженностью или открытым debt-workflow",
+                  ),
+                )}
+              </h2>
+              <p className={cn(tokens.text.muted, "mt-2 max-w-3xl")}>
+                {l(
+                  "Auftrage, die durch uberfallige Forderungen oder einen offenen Debt-Workflow blockiert sind.",
+                  "Заказы, заблокированные просроченной задолженностью или открытым debt-workflow.",
+                )}
+              </p>
             </div>
-          ) : debtQueueLoading ? (
-            <div className="rounded-2xl border border-border px-4 py-5 text-sm text-muted-foreground">
-              <LoaderCircle className="mb-2 size-4 animate-spin" />
-              {l(
-                "Debt-Management-Queue wird geladen...",
-                "Загрузка очереди debt-management...",
-              )}
-            </div>
-          ) : debtQueue.length === 0 ? (
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
-              {l(
-                "Aktuell gibt es keine offenen Debt-Management-Falle.",
-                "Сейчас нет открытых кейсов debt-management.",
-              )}
-            </div>
-          ) : (
-            <div className="grid gap-4 xl:grid-cols-3">
-              {debtQueue.slice(0, 6).map((item) => (
-                <button
-                  key={item.order_id}
-                  type="button"
-                  onClick={() => openOrder(item.order_id, item.patient_id)}
-                  className="rounded-2xl border border-border p-4 text-left transition hover:-translate-y-0.5 hover:border-border"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="font-mono text-xs font-semibold tracking-[0.16em] text-muted-foreground">
+            {!debtQueueLoading && !debtQueueError ? (
+              <Badge variant="outline" className="rounded-full">
+                {debtQueue.length}
+              </Badge>
+            ) : null}
+          </div>
+
+          <div className="mt-5">
+            {debtQueueError ? (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                {debtQueueError}
+              </div>
+            ) : debtQueueLoading ? (
+              <div className="flex items-center gap-2 rounded-xl border border-border/70 bg-muted/20 px-4 py-5 text-sm text-muted-foreground">
+                <LoaderCircle className="size-4 animate-spin" />
+                {l(
+                  "Debt-Management-Queue wird geladen...",
+                  "Загрузка очереди debt-management...",
+                )}
+              </div>
+            ) : debtQueue.length === 0 ? (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                {l(
+                  "Aktuell gibt es keine offenen Debt-Management-Falle.",
+                  "Сейчас нет открытых кейсов debt-management.",
+                )}
+              </div>
+            ) : (
+              <div className="space-y-3 pl-6">
+                {debtQueue.slice(0, 6).map((item, index, items) => (
+                  <div
+                    key={item.order_id}
+                    className={cn(
+                      "relative",
+                      index < items.length - 1 &&
+                        "before:absolute before:-bottom-5 before:-left-4 before:top-3 before:w-px before:bg-border",
+                    )}
+                  >
+                    <span className="absolute -left-[1.125rem] top-1.5 z-10 size-2 rounded-full bg-muted-foreground ring-4 ring-background" />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className={tokens.text.sectionTitle}>
                         {item.order_number}
                       </div>
-                      <div className="mt-2 text-sm font-semibold text-foreground">
+                      <span className="text-sm font-medium text-foreground">
                         {item.patient_name}
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {item.patient_code}
-                      </div>
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {formatDateTimeLabel(item.updated_at ?? item.next_review_at)}
+                      </span>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "rounded-full",
+                          statusClassName(item.effective_status),
+                        )}
+                      >
+                        {debtStatusLabel(item.effective_status)}
+                      </Badge>
                     </div>
-                    <Badge
-                      variant="outline"
-                      className="rounded-full border-amber-200 bg-amber-50 text-amber-700"
+
+                    <button
+                      type="button"
+                      onClick={() => openOrder(item.order_id, item.patient_id)}
+                      className="group mt-2 w-full overflow-hidden rounded-2xl border border-border text-left transition-colors hover:border-primary/40"
                     >
-                      {debtStatusLabel(item.effective_status)}
-                    </Badge>
+                      <div className="grid gap-0 sm:grid-cols-[minmax(0,1fr)_220px]">
+                        <div className="px-4 py-3">
+                          <div className="max-w-xl text-xs leading-snug text-muted-foreground">
+                            {item.blocking_reason
+                              ? localizedBlockingReason(item.blocking_reason)
+                              : l("Offener Debt-Workflow", "Открытый debt-workflow")}
+                          </div>
+                          {item.note ? (
+                            <div className="mt-2 max-w-xl text-xs leading-snug text-muted-foreground">
+                              {item.note}
+                            </div>
+                          ) : null}
+                          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                            <span>
+                              {l("Uberfallig", "Просрочено")}:{" "}
+                              <span className="font-medium text-foreground">
+                                {item.overdue_invoice_count}
+                              </span>
+                            </span>
+                            <span>
+                              {l("Owner", "Ответственный")}:{" "}
+                              <span className="font-medium text-foreground">
+                                {item.owner_name ?? l("Nicht zugewiesen", "Не назначено")}
+                              </span>
+                            </span>
+                            <span>
+                              {l("Review", "Ревью")}:{" "}
+                              <span className="font-medium text-foreground">
+                                {formatDateTimeLabel(item.next_review_at)}
+                              </span>
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="relative border-t border-border px-4 py-3 sm:border-t-0 sm:pl-5 sm:before:absolute sm:before:bottom-3 sm:before:left-0 sm:before:top-3 sm:before:border-l sm:before:border-dashed sm:before:border-border">
+                          <div className="space-y-2 text-xs leading-tight">
+                            <div>
+                              <div className="text-muted-foreground">
+                                {l("Saldo", "Сальдо")}
+                              </div>
+                              <div className="mt-1 text-2xl font-semibold leading-none text-foreground">
+                                {formatMoney(item.outstanding_balance)}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </button>
                   </div>
-                  <div className="mt-4 space-y-2 text-sm text-muted-foreground">
-                    <div>
-                      {item.blocking_reason
-                        ? localizedBlockingReason(item.blocking_reason)
-                        : l("Offener Debt-Workflow", "Открытый debt-workflow")}
-                    </div>
-                    <div>
-                      {item.overdue_invoice_count}{" "}
-                      {l("uberfallig", "просрочено")} /{" "}
-                      {formatMoney(item.outstanding_balance)}
-                    </div>
-                    <div>
-                      {l("Owner", "Ответственный")}:{" "}
-                      {item.owner_name ?? l("Nicht zugewiesen", "Не назначено")} /{" "}
-                      {l("Review", "ревью")} {formatDateTimeLabel(item.next_review_at)}
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </SectionCard>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
       ) : null}
 
       <div className="overflow-hidden rounded-xl border border-border bg-card">

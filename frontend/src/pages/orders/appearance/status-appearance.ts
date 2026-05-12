@@ -71,6 +71,17 @@ export function statusClassName(status: string) {
       return "border-emerald-200 bg-emerald-100 text-emerald-700";
     case "paused":
       return "border-amber-200 bg-amber-100 text-amber-700";
+    case "review_required":
+    case "awaiting_payment":
+      return "border-amber-200 bg-amber-100 text-amber-700";
+    case "payment_plan":
+      return "border-sky-200 bg-sky-100 text-sky-700";
+    case "escalated":
+      return "border-rose-200 bg-rose-100 text-rose-700";
+    case "cleared":
+      return "border-emerald-200 bg-emerald-100 text-emerald-700";
+    case "not_required":
+      return "border-slate-200 bg-slate-100 text-slate-700";
     case "completed":
       return "border-sky-200 bg-sky-100 text-sky-700";
     case "cancelled":
