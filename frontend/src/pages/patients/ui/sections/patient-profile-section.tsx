@@ -111,31 +111,51 @@ type LegalStatusChecklistItem = {
 function ProfileDetailTile({
   label,
   value,
-  description,
+  done,
   children,
 }: {
   label: ReactNode;
   value: ReactNode;
-  description?: ReactNode;
+  done: boolean;
   children?: ReactNode;
 }) {
   return (
-    <article className="rounded-lg bg-white px-3 py-2 text-xs shadow-sm ring-1 ring-border/40">
+    <article
+      className={cn(
+        "group relative min-h-[136px] overflow-hidden rounded-xl border border-border bg-white px-4 py-3 transition-colors hover:border-zinc-300",
+      )}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[11px] font-medium leading-tight text-muted-foreground">
+          <span className="block h-px w-8 bg-border" />
+          <p className="mt-3 line-clamp-2 text-sm font-semibold leading-5 text-foreground">
             {label}
           </p>
-          <p className="mt-1 text-[13px] font-medium leading-5 text-foreground">
-            {value}
-          </p>
-          {description ? (
-            <p className="mt-0.5 line-clamp-2 text-[11px] leading-tight text-muted-foreground">
-              {description}
-            </p>
-          ) : null}
         </div>
-        {children ? <div className="shrink-0">{children}</div> : null}
+        {children ? (
+          <div
+            className={cn(
+              "flex size-8 shrink-0 items-center justify-center rounded-lg bg-white",
+              done ? "text-emerald-700" : "text-amber-700",
+            )}
+          >
+            {children}
+          </div>
+        ) : null}
+      </div>
+      <div className="absolute bottom-3 left-4 right-4 flex items-center gap-2">
+        <span className="h-px min-w-6 flex-1 bg-border/70" />
+        <Badge
+          variant="outline"
+          className={cn(
+            "h-6 rounded-full px-2 text-[10px]",
+            done
+              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+              : "border-amber-200 bg-amber-50 text-amber-700",
+          )}
+        >
+          {value}
+        </Badge>
       </div>
     </article>
   );
@@ -627,22 +647,26 @@ function usePatientProfileTabContent({
           />
         </div>
 
+        <div className="flex items-center gap-2" aria-hidden>
+          <span className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-border" />
+          <span className="size-1.5 rounded-full bg-orange-400" />
+          <span className="size-1.5 rounded-full bg-orange-300" />
+          <span className="size-1.5 rounded-full bg-orange-200" />
+          <span className="h-px flex-1 bg-gradient-to-r from-border via-border to-transparent" />
+        </div>
+
         <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
           {legalStatusChecklist.map((item) => (
             <ProfileDetailTile
               key={item.key}
               label={item.label}
               value={item.done ? t.common_completed : t.common_pending}
-              description={l(
-                "Bestätigung im Profil.",
-                "Подтверждение в профиле.",
-                "Profile confirmation.",
-              )}
+              done={item.done}
             >
               {item.done ? (
-                <CheckCircle2 className="size-4 text-emerald-600" />
+                <CheckCircle2 className="size-4" />
               ) : (
-                <AlertTriangle className="size-4 text-amber-600" />
+                <AlertTriangle className="size-4" />
               )}
             </ProfileDetailTile>
           ))}
