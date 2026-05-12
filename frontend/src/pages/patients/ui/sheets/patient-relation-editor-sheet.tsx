@@ -11,9 +11,14 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { toast } from "@/components/ui/toast";
-import { checkboxClass, inputClass, selectClass } from "@/components/ui-shell";
+import {
+  Field as FormField,
+  Section as FormSection,
+  checkboxClass,
+  inputClass,
+  selectClass,
+} from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 
 import { usePatientLookupOptions } from "../../data/use-patient-lookup-options";
@@ -137,7 +142,9 @@ function PatientRelationEditorSheet({
   onSaved,
   onError,
 }: PatientRelationEditorSheetProps) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const l = (de: string, ru: string, en: string) =>
+    lang === "de" ? de : lang === "ru" ? ru : en;
   const [relationState, dispatchRelationState] = useReducer(
     relationEditorReducer,
     undefined,
@@ -245,7 +252,7 @@ function PatientRelationEditorSheet({
           ? t.patient_relation_title_edit
           : t.patient_relation_title_add
       }
-      bodyClassName="px-4 py-4 space-y-4"
+      bodyClassName="px-4 py-4 space-y-3"
       footer={
         <PatientRelationEditorFooter
           busy={busy}
@@ -254,173 +261,152 @@ function PatientRelationEditorSheet({
         />
       }
     >
-      <div className="flex flex-col gap-1.5">
-        <Label
-          className="text-[11.5px] font-medium text-muted-foreground leading-tight"
+      <FormSection title={l("Patientenbezug", "Связанный пациент", "Linked patient")}>
+        <FormField
+          label={t.patient_relation_search_existing}
           htmlFor="relation-patient-search"
         >
-          {t.patient_relation_search_existing}
-        </Label>
-        <Input
-          id="relation-patient-search"
-          value={patientSearch}
-          onChange={(event) =>
-            dispatchRelationState({ patientSearch: event.target.value })
-          }
-          className={inputClass}
-          placeholder={t.patient_relation_search_placeholder}
-        />
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <Label
-          className="text-[11.5px] font-medium text-muted-foreground leading-tight"
-          htmlFor="relation-linked-patient"
-        >
-          {t.patient_relation_link_patient}
-        </Label>
-        <NativeComboboxSelect
-          id="relation-linked-patient"
-          className={selectClass}
-          value={form.relatedPatientId}
-          onChange={(event) => {
-            const nextPatientId = event.target.value;
-            const selectedPatient =
-              patientOptions.find((option) => option.id === nextPatientId) ?? null;
-            dispatchRelationState((current) => ({
-              patientSearch: selectedPatient
-                ? formatRelatedPatientOption(selectedPatient)
-                : "",
-              form: {
-                ...current.form,
-                relatedPatientId: nextPatientId,
-                relatedName: selectedPatient
-                  ? formatRelatedPatientName(selectedPatient)
-                  : current.form.relatedName,
-              },
-            }));
-          }}
-          disabled={patientOptionsLoading}
-        >
-          <option value="">
-            {t.patient_relation_standalone_contact}
-          </option>
-          {filteredPatientOptions.map((option) => (
-            <option key={option.id} value={option.id}>
-              {formatRelatedPatientOption(option)}
-            </option>
-          ))}
-        </NativeComboboxSelect>
-        <p className="text-[11.5px] leading-tight text-muted-foreground">
-          {patientOptionsLoading
-            ? t.patient_relation_loading_directory
-            : selectedRelatedPatient
-              ? t.patient_relation_linked_sync_hint
-              : t.patient_relation_unlinked_hint}
-        </p>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="flex flex-col gap-1.5">
-          <Label
-            className="text-[11.5px] font-medium text-muted-foreground leading-tight"
-            htmlFor="relation-name"
-          >
-            {t.patient_relation_name}
-          </Label>
           <Input
-            id="relation-name"
-            value={form.relatedName}
+            id="relation-patient-search"
+            value={patientSearch}
             onChange={(event) =>
-              dispatchRelationState((current) => ({
-                form: { ...current.form, relatedName: event.target.value },
-              }))
+              dispatchRelationState({ patientSearch: event.target.value })
             }
             className={inputClass}
-            placeholder={t.patient_relation_name_placeholder}
-            disabled={Boolean(form.relatedPatientId)}
+            placeholder={t.patient_relation_search_placeholder}
           />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label
-            className="text-[11.5px] font-medium text-muted-foreground leading-tight"
-            htmlFor="relation-type"
-          >
-            {t.patient_relation_type_label}
-          </Label>
+        </FormField>
+
+        <FormField
+          label={t.patient_relation_link_patient}
+          htmlFor="relation-linked-patient"
+        >
           <NativeComboboxSelect
-            id="relation-type"
+            id="relation-linked-patient"
             className={selectClass}
-            value={form.relationType}
-            onChange={(event) =>
+            value={form.relatedPatientId}
+            onChange={(event) => {
+              const nextPatientId = event.target.value;
+              const selectedPatient =
+                patientOptions.find((option) => option.id === nextPatientId) ?? null;
               dispatchRelationState((current) => ({
-                form: { ...current.form, relationType: event.target.value },
-              }))
-            }
+                patientSearch: selectedPatient
+                  ? formatRelatedPatientOption(selectedPatient)
+                  : "",
+                form: {
+                  ...current.form,
+                  relatedPatientId: nextPatientId,
+                  relatedName: selectedPatient
+                    ? formatRelatedPatientName(selectedPatient)
+                    : current.form.relatedName,
+                },
+              }));
+            }}
+            disabled={patientOptionsLoading}
           >
-            {RELATION_TYPE_OPTIONS.map((option) => (
-              <option key={option} value={option}>
-                {patientRelationTypeLabel(option)}
+            <option value="">
+              {t.patient_relation_standalone_contact}
+            </option>
+            {filteredPatientOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {formatRelatedPatientOption(option)}
               </option>
             ))}
           </NativeComboboxSelect>
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label
-            className="text-[11.5px] font-medium text-muted-foreground leading-tight"
-            htmlFor="relation-phone"
-          >
-            {t.patient_relation_phone}
-          </Label>
-          <Input
-            id="relation-phone"
-            value={form.phone}
-            onChange={(event) =>
-              dispatchRelationState((current) => ({
-                form: { ...current.form, phone: event.target.value },
-              }))
-            }
-            className={inputClass}
-            placeholder="+49 ..."
-          />
-        </div>
-        <label className="flex items-center gap-2 rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground">
-          <input
-            type="checkbox"
-            className={checkboxClass}
-            checked={form.isEmergencyContact}
-            onChange={(event) =>
-              dispatchRelationState((current) => ({
-                form: {
-                  ...current.form,
-                  isEmergencyContact: event.target.checked,
-                },
-              }))
-            }
-          />
-          {t.patient_relation_emergency_contact}
-        </label>
-      </div>
+          <p className="mt-1.5 text-[11.5px] leading-tight text-muted-foreground">
+            {patientOptionsLoading
+              ? t.patient_relation_loading_directory
+              : selectedRelatedPatient
+                ? t.patient_relation_linked_sync_hint
+                : t.patient_relation_unlinked_hint}
+          </p>
+        </FormField>
+      </FormSection>
 
-      <div className="flex flex-col gap-1.5">
-        <Label
-          className="text-[11.5px] font-medium text-muted-foreground leading-tight"
-          htmlFor="relation-notes"
-        >
-          {t.patient_relation_notes}
-        </Label>
-        <textarea
-          id="relation-notes"
-          className={textareaClassName}
-          value={form.notes}
-          onChange={(event) =>
-            dispatchRelationState((current) => ({
-              form: { ...current.form, notes: event.target.value },
-            }))
-          }
-          placeholder={t.patient_relation_notes_placeholder}
-        />
-      </div>
+      <FormSection title={l("Beziehungsdaten", "Данные связи", "Relation details")}>
+        <div className="grid gap-3 md:grid-cols-2">
+          <FormField label={t.patient_relation_name} htmlFor="relation-name">
+            <Input
+              id="relation-name"
+              value={form.relatedName}
+              onChange={(event) =>
+                dispatchRelationState((current) => ({
+                  form: { ...current.form, relatedName: event.target.value },
+                }))
+              }
+              className={inputClass}
+              placeholder={t.patient_relation_name_placeholder}
+              disabled={Boolean(form.relatedPatientId)}
+            />
+          </FormField>
+
+          <FormField label={t.patient_relation_type_label} htmlFor="relation-type">
+            <NativeComboboxSelect
+              id="relation-type"
+              className={selectClass}
+              value={form.relationType}
+              onChange={(event) =>
+                dispatchRelationState((current) => ({
+                  form: { ...current.form, relationType: event.target.value },
+                }))
+              }
+            >
+              {RELATION_TYPE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {patientRelationTypeLabel(option)}
+                </option>
+              ))}
+            </NativeComboboxSelect>
+          </FormField>
+
+          <FormField label={t.patient_relation_phone} htmlFor="relation-phone">
+            <Input
+              id="relation-phone"
+              value={form.phone}
+              onChange={(event) =>
+                dispatchRelationState((current) => ({
+                  form: { ...current.form, phone: event.target.value },
+                }))
+              }
+              className={inputClass}
+              placeholder="+49 ..."
+            />
+          </FormField>
+
+          <label className="flex min-h-9 items-center gap-2 rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground">
+            <input
+              type="checkbox"
+              className={checkboxClass}
+              checked={form.isEmergencyContact}
+              onChange={(event) =>
+                dispatchRelationState((current) => ({
+                  form: {
+                    ...current.form,
+                    isEmergencyContact: event.target.checked,
+                  },
+                }))
+              }
+            />
+            {t.patient_relation_emergency_contact}
+          </label>
+        </div>
+      </FormSection>
+
+      <FormSection title={l("Zusatzlich", "Дополнительно", "Additional")}>
+        <FormField label={t.patient_relation_notes} htmlFor="relation-notes">
+          <textarea
+            id="relation-notes"
+            className={textareaClassName}
+            value={form.notes}
+            onChange={(event) =>
+              dispatchRelationState((current) => ({
+                form: { ...current.form, notes: event.target.value },
+              }))
+            }
+            placeholder={t.patient_relation_notes_placeholder}
+          />
+        </FormField>
+      </FormSection>
     </PatientSheetScaffold>
   );
 }

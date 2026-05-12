@@ -2,9 +2,12 @@ import { useReducer, useState, type FormEvent } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import { toast } from "@/components/ui/toast";
-import { textareaClass } from "@/components/ui-shell";
+import {
+  Field as FormField,
+  Section as FormSection,
+  textareaClass,
+} from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -105,20 +108,18 @@ function PatientCaveNotesSheetContent({
         </>
       }
     >
-      <p className="text-[12.5px] text-muted-foreground">
-        {l(
-          "Dauerhafte klinische Warnhinweise, die vor Beginn von Koordination oder Behandlung sichtbar bleiben sollen.",
-          "Постоянные клинические предупреждения, которые должны оставаться видимыми до начала координации или лечения.",
-          "Persistent clinical warnings that should stay visible before coordination or treatment starts.",
-        )}
-      </p>
-      <div className="flex flex-col gap-1.5">
-        <Label
-          className="text-[11.5px] font-medium text-muted-foreground leading-tight"
+      <FormSection title={l("Warnhinweise", "Предупреждения", "Warnings")}>
+        <p className="text-[12.5px] text-muted-foreground">
+          {l(
+            "Dauerhafte klinische Warnhinweise, die vor Beginn von Koordination oder Behandlung sichtbar bleiben sollen.",
+            "Постоянные клинические предупреждения, которые должны оставаться видимыми до начала координации или лечения.",
+            "Persistent clinical warnings that should stay visible before coordination or treatment starts.",
+          )}
+        </p>
+        <FormField
+          label={l("CAVE", "CAVE", "CAVE")}
           htmlFor="patient-cave-notes"
         >
-          {l("Warnhinweise", "Предупреждения", "Warnings")}
-        </Label>
         <textarea
           id="patient-cave-notes"
           className={caveTextareaClassName}
@@ -130,7 +131,8 @@ function PatientCaveNotesSheetContent({
             "Allergies, critical contraindications, high-risk conditions...",
           )}
         />
-      </div>
+        </FormField>
+      </FormSection>
     </PatientSheetScaffold>
   );
 }

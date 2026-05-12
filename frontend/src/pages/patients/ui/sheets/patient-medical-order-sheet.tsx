@@ -4,8 +4,9 @@ import { LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
+  Field as FormField,
+  Section as FormSection,
   inputClass,
   selectClass,
   textareaClass,
@@ -147,7 +148,7 @@ export function PatientMedicalOrderSheet({
       maxWidthClassName="sm:max-w-[540px]"
       onSubmit={handleSubmit}
       title={l("Medizinische Anordnung hinzufugen", "Dobavit medicinskoe naznachenie", "Add medical order")}
-      bodyClassName="px-4 py-4 space-y-4"
+      bodyClassName="px-4 py-4 space-y-3"
       footer={
         <>
           <Button
@@ -166,45 +167,48 @@ export function PatientMedicalOrderSheet({
         </>
       }
     >
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="flex flex-col gap-1.5">
-          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-date">
-            {l("Anordnungsdatum", "Data naznacheniya", "Order date")}
-          </Label>
-          <Input
-            id="patient-medical-order-date"
-            type="datetime-local"
-            value={form.orderDate}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, orderDate: event.target.value }))
-            }
-            className={inputClass}
-            required
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-type">
-            {l("Anordnungstyp", "Tip naznacheniya", "Order type")}
-          </Label>
-          <NativeComboboxSelect
-            value={form.orderType}
-
-
-            onChange={(event) => setForm((current) => ({
-                ...current,
-                orderType: (event.target.value ?? ORDER_TYPE_OPTIONS[0]) as OrderType,
-              }))} id="patient-medical-order-type" className={cn("w-full", selectClass)}>
+      <FormSection title={l("Anordnung", "Назначение", "Order")}>
+        <div className="grid gap-3 md:grid-cols-2">
+          <FormField
+            label={l("Anordnungsdatum", "Дата назначения", "Order date")}
+            htmlFor="patient-medical-order-date"
+          >
+            <Input
+              id="patient-medical-order-date"
+              type="datetime-local"
+              value={form.orderDate}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, orderDate: event.target.value }))
+              }
+              className={inputClass}
+              required
+            />
+          </FormField>
+          <FormField
+            label={l("Anordnungstyp", "Тип назначения", "Order type")}
+            htmlFor="patient-medical-order-type"
+          >
+            <NativeComboboxSelect
+              id="patient-medical-order-type"
+              value={form.orderType}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  orderType: (event.target.value ?? ORDER_TYPE_OPTIONS[0]) as OrderType,
+                }))
+              }
+              className={cn("w-full", selectClass)}
+            >
               {ORDER_TYPE_OPTIONS.map((option) => (
                 <option key={option} value={option}>
                   {orderTypeLabel(option, l, t)}
                 </option>
               ))}
             </NativeComboboxSelect>
+          </FormField>
         </div>
-        <div className="flex flex-col gap-1.5 md:col-span-2">
-          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-title">
-            {l("Titel", "Nazvanie", "Title")}
-          </Label>
+
+        <FormField label={l("Titel", "Название", "Title")} htmlFor="patient-medical-order-title">
           <Input
             id="patient-medical-order-title"
             value={form.title}
@@ -212,54 +216,58 @@ export function PatientMedicalOrderSheet({
               setForm((current) => ({ ...current, title: event.target.value }))
             }
             className={inputClass}
-            placeholder={l("Physiotherapie 2x pro Woche", "Fizioterapiya 2 raza v nedelyu", "Physiotherapy 2x per week")}
+            placeholder={l("Physiotherapie 2x pro Woche", "Физиотерапия 2 раза в неделю", "Physiotherapy 2x per week")}
             required
           />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-due-date">
-            {l("Faelligkeitsdatum", "Srok", "Due date")}
-          </Label>
-          <Input
-            id="patient-medical-order-due-date"
-            type="date"
-            value={form.dueDate}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, dueDate: event.target.value }))
-            }
-            className={inputClass}
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-source">
-            {l("Quelle", "Istochnik", "Source")}
-          </Label>
-          <Input
-            id="patient-medical-order-source"
-            value={form.source}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, source: event.target.value }))
-            }
-            className={inputClass}
-            placeholder={l("Arzt, Klinik, Entlassungsbericht", "Vrach, klinika, vypiska", "Doctor, clinic, discharge note")}
-          />
-        </div>
-      </div>
+        </FormField>
+      </FormSection>
 
-      <div className="flex flex-col gap-1.5">
-        <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-instructions">
-          {l("Anweisungen", "Instrukcii", "Instructions")}
-        </Label>
-        <textarea
-          id="patient-medical-order-instructions"
-          className={medicalOrderTextareaClassName}
-          value={form.instructions}
-          onChange={(event) =>
-            setForm((current) => ({ ...current, instructions: event.target.value }))
-          }
-          required
-        />
-      </div>
+      <FormSection title={l("Koordination", "Координация", "Coordination")}>
+        <div className="grid gap-3 md:grid-cols-2">
+          <FormField
+            label={l("Faelligkeitsdatum", "Срок", "Due date")}
+            htmlFor="patient-medical-order-due-date"
+          >
+            <Input
+              id="patient-medical-order-due-date"
+              type="date"
+              value={form.dueDate}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, dueDate: event.target.value }))
+              }
+              className={inputClass}
+            />
+          </FormField>
+          <FormField label={l("Quelle", "Источник", "Source")} htmlFor="patient-medical-order-source">
+            <Input
+              id="patient-medical-order-source"
+              value={form.source}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, source: event.target.value }))
+              }
+              className={inputClass}
+              placeholder={l("Arzt, Klinik, Entlassungsbericht", "Врач, клиника, выписка", "Doctor, clinic, discharge note")}
+            />
+          </FormField>
+        </div>
+      </FormSection>
+
+      <FormSection title={l("Details", "Детали", "Details")}>
+        <FormField
+          label={l("Anweisungen", "Инструкции", "Instructions")}
+          htmlFor="patient-medical-order-instructions"
+        >
+          <textarea
+            id="patient-medical-order-instructions"
+            className={medicalOrderTextareaClassName}
+            value={form.instructions}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, instructions: event.target.value }))
+            }
+            required
+          />
+        </FormField>
+      </FormSection>
     </PatientSheetScaffold>
   );
 }

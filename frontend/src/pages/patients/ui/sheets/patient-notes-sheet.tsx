@@ -2,9 +2,12 @@ import { useReducer, useState, type FormEvent } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import { toast } from "@/components/ui/toast";
-import { textareaClass } from "@/components/ui-shell";
+import {
+  Field as FormField,
+  Section as FormSection,
+  textareaClass,
+} from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -102,13 +105,8 @@ function PatientNotesSheetContent({
         </>
       }
     >
-      <div className="flex flex-col gap-1.5">
-        <Label
-          className="text-[11.5px] font-medium text-muted-foreground leading-tight"
-          htmlFor="patient-notes"
-        >
-          {l("Notizen", "Заметки", "Notes")}
-        </Label>
+      <FormSection title={l("Zusatzlich", "Дополнительно", "Additional")}>
+        <FormField label={l("Notizen", "Заметки", "Notes")} htmlFor="patient-notes">
         <textarea
           id="patient-notes"
           className={notesTextareaClassName}
@@ -120,7 +118,8 @@ function PatientNotesSheetContent({
             "General notes, context, preferences...",
           )}
         />
-      </div>
+        </FormField>
+      </FormSection>
     </PatientSheetScaffold>
   );
 }

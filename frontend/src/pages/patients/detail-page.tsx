@@ -2311,7 +2311,9 @@ function usePatientDetailPageContent() {
         onNotesSheetOpenChange={setNotesSheetOpen}
         onOpenAppointment={(appointmentId) => { staffGo(`/appointments?appointment=${appointmentId}`); }}
         onOpenCase={openCaseWorkspace}
-        onOpenContract={(contractId) => { staffGo(`/contracts?contract=${contractId}`); }}
+        onOpenContract={(contractId) => {
+          window.open(`/contracts?contract=${contractId}`, "_blank", "noopener,noreferrer");
+        }}
         onOpenInvoice={(invoiceId) => { staffGo(`/invoices?invoice=${invoiceId}`); }}
         onOpenOrder={(orderId) => { staffGo(`/orders/${orderId}?patient=${id}`); }}
         onOpenPatient={(patientId) => { staffGo(`/patients/${patientId}`); }}

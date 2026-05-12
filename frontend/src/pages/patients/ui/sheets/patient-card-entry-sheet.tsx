@@ -4,9 +4,13 @@ import { LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { toast } from "@/components/ui/toast";
-import { selectClass, textareaClass } from "@/components/ui-shell";
+import {
+  Field as FormField,
+  Section as FormSection,
+  selectClass,
+  textareaClass,
+} from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
 import { formatUnknownValue, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -150,7 +154,7 @@ function PatientCardEntrySheetContent({
       title={l("Karteneintrag hinzufugen", "Добавить запись в карту", "Add card entry")}
       maxWidthClassName="sm:max-w-[540px]"
       onSubmit={handleSubmit}
-      bodyClassName="px-4 py-4 space-y-4"
+      bodyClassName="px-4 py-4 space-y-3"
       footer={
         <>
           <Button
@@ -169,86 +173,69 @@ function PatientCardEntrySheetContent({
         </>
       }
     >
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="flex flex-col gap-1.5">
-          <Label
-            className="text-[11.5px] font-medium text-muted-foreground leading-tight"
-            htmlFor="patient-card-entry-date"
-          >
-            {l("Eintragsdatum", "Дата записи", "Entry date")}
-          </Label>
-          <Input
-            id="patient-card-entry-date"
-            type="datetime-local"
-            value={form.entryDate}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, entryDate: event.target.value }))
-            }
-            required
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label
-            className="text-[11.5px] font-medium text-muted-foreground leading-tight"
-            htmlFor="patient-card-entry-category"
-          >
-            {l("Kategorie", "Категория", "Category")}
-          </Label>
-          <NativeComboboxSelect
-            value={form.category}
-
-
-            onChange={(event) => setForm((current) => ({
-                ...current,
-                category: (event.target.value ?? CATEGORY_OPTIONS[0]) as CategoryValue,
-              }))} id="patient-card-entry-category" className={cn("w-full", selectClass)}>
+      <FormSection title={l("Eintrag", "Запись", "Entry")}>
+        <div className="grid gap-3 md:grid-cols-2">
+          <FormField label={l("Eintragsdatum", "Дата записи", "Entry date")} htmlFor="patient-card-entry-date">
+            <Input
+              id="patient-card-entry-date"
+              type="datetime-local"
+              value={form.entryDate}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, entryDate: event.target.value }))
+              }
+              required
+            />
+          </FormField>
+          <FormField label={l("Kategorie", "Категория", "Category")} htmlFor="patient-card-entry-category">
+            <NativeComboboxSelect
+              id="patient-card-entry-category"
+              value={form.category}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  category: (event.target.value ?? CATEGORY_OPTIONS[0]) as CategoryValue,
+                }))
+              }
+              className={cn("w-full", selectClass)}
+            >
               {CATEGORY_OPTIONS.map((option) => (
                 <option key={option} value={option}>
                   {categoryLabel(option, l, t)}
                 </option>
               ))}
             </NativeComboboxSelect>
+          </FormField>
         </div>
-      </div>
 
-      <div className="flex flex-col gap-1.5">
-        <Label
-          className="text-[11.5px] font-medium text-muted-foreground leading-tight"
-          htmlFor="patient-card-entry-source"
-        >
-          {l("Quelle", "Источник", "Source")}
-        </Label>
-        <Input
-          id="patient-card-entry-source"
-          value={form.source}
-          onChange={(event) =>
-            setForm((current) => ({ ...current, source: event.target.value }))
-          }
-          placeholder={l(
-            "Patient, Klinik, Arzt, telefonische Nachverfolgung",
-            "Пациент, клиника, врач, follow-up по телефону",
-            "Patient, clinic, doctor, phone follow-up",
-          )}
-        />
-      </div>
+        <FormField label={l("Quelle", "Источник", "Source")} htmlFor="patient-card-entry-source">
+          <Input
+            id="patient-card-entry-source"
+            value={form.source}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, source: event.target.value }))
+            }
+            placeholder={l(
+              "Patient, Klinik, Arzt, telefonische Nachverfolgung",
+              "Пациент, клиника, врач, follow-up по телефону",
+              "Patient, clinic, doctor, phone follow-up",
+            )}
+          />
+        </FormField>
+      </FormSection>
 
-      <div className="flex flex-col gap-1.5">
-        <Label
-          className="text-[11.5px] font-medium text-muted-foreground leading-tight"
-          htmlFor="patient-card-entry-content"
-        >
-          {l("Inhalt", "Содержание", "Content")}
-        </Label>
-        <textarea
-          id="patient-card-entry-content"
-          className={cardEntryTextareaClassName}
-          value={form.content}
-          onChange={(event) =>
-            setForm((current) => ({ ...current, content: event.target.value }))
-          }
-          required
-        />
-      </div>
+      <FormSection title={l("Inhalt", "Содержание", "Content")}>
+        <FormField label={l("Notiz", "Заметка", "Note")} htmlFor="patient-card-entry-content">
+          <textarea
+            id="patient-card-entry-content"
+            className={cardEntryTextareaClassName}
+            value={form.content}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, content: event.target.value }))
+            }
+            required
+          />
+        </FormField>
+      </FormSection>
     </PatientSheetScaffold>
   );
 }

@@ -15,7 +15,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { inputClass, selectClass } from "@/components/ui-shell";
+import {
+  Field as FormField,
+  Section as FormSection,
+  inputClass,
+  selectClass,
+} from "@/components/ui-shell";
 
 import type { DunningEvent } from "../../model/detail-tab-types";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
@@ -202,7 +207,7 @@ export function PatientFinancialDialogs({
     <>
       <PatientSheetScaffold open={contractCreateOpen} onOpenChange={onContractCreateOpenChange} width="narrow" onSubmit={onContractCreateSubmit}
         title={l("Rahmenvertrag erstellen", "Sozdat ramochnyy dogovor", "Create framework contract")}
-        bodyClassName="px-4 py-4 space-y-4"
+        bodyClassName="px-4 py-4 space-y-3"
         footer={
           <ContractCreateFooter
             busy={contractBusy}
@@ -212,25 +217,26 @@ export function PatientFinancialDialogs({
           />
         }
       >
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="contract-status">
-              {l("Status", "Status", "Status")}
-            </Label>
+        <FormSection title={l("Vertrag", "Договор", "Contract")}>
+          <div className="grid gap-3 md:grid-cols-2">
+            <FormField label={l("Status", "Статус", "Status")} htmlFor="contract-status">
             <NativeComboboxSelect
+              id="contract-status"
               value={contractCreateForm.status}
-              onChange={(event) => onContractCreateStatusChange(event.target.value ?? contractCreateForm.status)} id="contract-status" className={selectClass}>
+              onChange={(event) => onContractCreateStatusChange(event.target.value ?? contractCreateForm.status)}
+              className={selectClass}
+            >
                 {contractStatusOptions.map((status) => (
                   <option key={status} value={status}>
                     {patientDetailStatusLabel(status)}
                   </option>
                 ))}
               </NativeComboboxSelect>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="contract-signed-at">
-              {l("Unterzeichnet am", "Podpisano", "Signed at")}
-            </Label>
+            </FormField>
+            <FormField
+              label={l("Unterzeichnet am", "Подписано", "Signed at")}
+              htmlFor="contract-signed-at"
+            >
             <Input
               id="contract-signed-at"
               type="datetime-local"
@@ -238,11 +244,8 @@ export function PatientFinancialDialogs({
               onChange={(event) => onContractCreateSignedAtChange(event.target.value)}
               className={inputClass}
             />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="contract-valid-from">
-              {l("Gueltig ab", "Deystvuet s", "Valid from")}
-            </Label>
+            </FormField>
+            <FormField label={l("Gueltig ab", "Действует с", "Valid from")} htmlFor="contract-valid-from">
             <Input
               id="contract-valid-from"
               type="date"
@@ -250,11 +253,8 @@ export function PatientFinancialDialogs({
               onChange={(event) => onContractCreateValidFromChange(event.target.value)}
               className={inputClass}
             />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="contract-valid-to">
-              {l("Gueltig bis", "Deystvuet do", "Valid to")}
-            </Label>
+            </FormField>
+            <FormField label={l("Gueltig bis", "Действует до", "Valid to")} htmlFor="contract-valid-to">
             <Input
               id="contract-valid-to"
               type="date"
@@ -262,76 +262,92 @@ export function PatientFinancialDialogs({
               onChange={(event) => onContractCreateValidToChange(event.target.value)}
               className={inputClass}
             />
+            </FormField>
           </div>
-        </div>
+        </FormSection>
       </PatientSheetScaffold>
 
-      <Dialog open={Boolean(contractStatusId)} onOpenChange={(open) => { if (!open) onCloseContractStatus(); }}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{l("Vertragsstatus aktualisieren", "Обновить статус договора", "Update contract status")}</DialogTitle>
-            <DialogDescription>
-              {l(
-                "Passen Sie Lebenszyklus und Gültigkeitsdaten an, ohne das Patientenprofil zu verlassen.",
-                "Обновляйте жизненный цикл и даты действия, не выходя из профиля пациента.",
-                "Adjust lifecycle and validity dates without leaving the patient profile.",
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          <form className="space-y-4" onSubmit={onContractStatusSubmit}>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="contract-status-edit">{l("Status", "Статус", "Status")}</Label>
-                <NativeComboboxSelect
-                  value={contractStatusForm.status}
-                  onChange={(event) => onContractStatusValueChange(event.target.value ?? contractStatusForm.status)} id="contract-status-edit" className={selectClass}>
-                    {contractStatusOptions.map((status) => (
-                      <option key={status} value={status}>
-                        {patientDetailStatusLabel(status)}
-                      </option>
-                    ))}
-                  </NativeComboboxSelect>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="contract-signed-at-edit">{l("Unterzeichnet am", "Подписано", "Signed at")}</Label>
-                <Input
-                  id="contract-signed-at-edit"
-                  type="datetime-local"
-                  value={contractStatusForm.signedAt}
-                  onChange={(event) => onContractStatusSignedAtChange(event.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="contract-valid-from-edit">{l("Gültig ab", "Действует с", "Valid from")}</Label>
-                <Input
-                  id="contract-valid-from-edit"
-                  type="date"
-                  value={contractStatusForm.validFrom}
-                  onChange={(event) => onContractStatusValidFromChange(event.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="contract-valid-to-edit">{l("Gültig bis", "Действует до", "Valid to")}</Label>
-                <Input
-                  id="contract-valid-to-edit"
-                  type="date"
-                  value={contractStatusForm.validTo}
-                  onChange={(event) => onContractStatusValidToChange(event.target.value)}
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" className="rounded-xl" onClick={onCloseContractStatus}>
-                {l("Abbrechen", "Отмена", "Cancel")}
-              </Button>
-              <Button type="submit" className="rounded-xl bg-zinc-950 text-white hover:bg-zinc-800" disabled={contractBusy}>
-                {contractBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                {l("Status speichern", "Сохранить статус", "Save status")}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <PatientSheetScaffold
+        open={Boolean(contractStatusId)}
+        onOpenChange={(open) => {
+          if (!open) onCloseContractStatus();
+        }}
+        width="narrow"
+        onSubmit={onContractStatusSubmit}
+        title={l("Vertragsstatus aktualisieren", "Обновить статус договора", "Update contract status")}
+        description={l(
+          "Passen Sie Lebenszyklus und Gültigkeitsdaten an, ohne das Patientenprofil zu verlassen.",
+          "Обновляйте жизненный цикл и даты действия, не выходя из профиля пациента.",
+          "Adjust lifecycle and validity dates without leaving the patient profile.",
+        )}
+        bodyClassName="px-4 py-4 space-y-3"
+        footer={
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg"
+              onClick={onCloseContractStatus}
+            >
+              {l("Abbrechen", "Отмена", "Cancel")}
+            </Button>
+            <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={contractBusy}>
+              {contractBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+              {l("Status speichern", "Сохранить статус", "Save status")}
+            </Button>
+          </>
+        }
+      >
+        <FormSection title={l("Vertrag", "Договор", "Contract")}>
+          <div className="grid gap-3 md:grid-cols-2">
+            <FormField label={l("Status", "Статус", "Status")} htmlFor="contract-status-edit">
+              <NativeComboboxSelect
+                id="contract-status-edit"
+                value={contractStatusForm.status}
+                onChange={(event) => onContractStatusValueChange(event.target.value ?? contractStatusForm.status)}
+                className={selectClass}
+              >
+                {contractStatusOptions.map((status) => (
+                  <option key={status} value={status}>
+                    {patientDetailStatusLabel(status)}
+                  </option>
+                ))}
+              </NativeComboboxSelect>
+            </FormField>
+            <FormField
+              label={l("Unterzeichnet am", "Подписано", "Signed at")}
+              htmlFor="contract-signed-at-edit"
+            >
+              <Input
+                id="contract-signed-at-edit"
+                type="datetime-local"
+                value={contractStatusForm.signedAt}
+                onChange={(event) => onContractStatusSignedAtChange(event.target.value)}
+                className={inputClass}
+              />
+            </FormField>
+            <FormField label={l("Gültig ab", "Действует с", "Valid from")} htmlFor="contract-valid-from-edit">
+              <Input
+                id="contract-valid-from-edit"
+                type="date"
+                value={contractStatusForm.validFrom}
+                onChange={(event) => onContractStatusValidFromChange(event.target.value)}
+                className={inputClass}
+              />
+            </FormField>
+            <FormField label={l("Gültig bis", "Действует до", "Valid to")} htmlFor="contract-valid-to-edit">
+              <Input
+                id="contract-valid-to-edit"
+                type="date"
+                value={contractStatusForm.validTo}
+                onChange={(event) => onContractStatusValidToChange(event.target.value)}
+                className={inputClass}
+              />
+            </FormField>
+          </div>
+        </FormSection>
+      </PatientSheetScaffold>
 
       <Dialog open={Boolean(invoiceManageId)} onOpenChange={onInvoiceManageOpenChange}>
         <DialogContent className="sm:max-w-3xl">

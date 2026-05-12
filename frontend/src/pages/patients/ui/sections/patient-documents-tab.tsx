@@ -8,9 +8,9 @@ import {
   CountBadge,
   EmptyCell,
   Section as FormSection,
-  StatCard,
   TabLoader,
   inputClass as formInputClassName,
+  tokens,
 } from "@/components/ui-shell";
 import { downloadApiFile } from "@/lib/api";
 import {
@@ -63,6 +63,39 @@ type DocumentsOverviewSectionProps = {
   documentCategoryOptions: string[];
 };
 
+function DocumentOverviewTile({
+  label,
+  value,
+  description,
+  groupedLast,
+}: {
+  label: string;
+  value: string | number;
+  description: string;
+  groupedLast?: boolean;
+}) {
+  return (
+    <article className="relative min-h-[68px] min-w-[190px] px-3 py-1">
+      {!groupedLast ? (
+        <span className="absolute right-0 top-1/2 hidden -translate-y-1/2 space-y-1 md:block">
+          <span className="block h-1.5 w-px bg-border" />
+          <span className="block h-1.5 w-px bg-border" />
+          <span className="block h-1.5 w-px bg-border" />
+        </span>
+      ) : null}
+      <p className="text-2xl font-semibold leading-[0.85] text-foreground">
+        {value}
+      </p>
+      <p className="mt-[5px] line-clamp-2 text-[11px] leading-tight text-muted-foreground/75">
+        {description}
+      </p>
+      <p className={cn("mt-0.5 line-clamp-2 text-xs font-medium leading-tight", tokens.text.muted)}>
+        {label}
+      </p>
+    </article>
+  );
+}
+
 function DocumentsOverviewSection({
   l,
   documents,
@@ -75,17 +108,17 @@ function DocumentsOverviewSection({
       title={l("Überblick", "Обзор", "Overview")}
       accessory={<CountBadge>{documents.length} {l("Dateien", "файлов", "files")}</CountBadge>}
     >
-      <div className="grid gap-3 md:grid-cols-3">
-        <StatCard
+      <div className="grid overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 md:grid-cols-3">
+        <DocumentOverviewTile
           label={l("Dokumente gesamt", "Всего документов", "Total documents")}
           value={documents.length}
           description={l(
-            "Alle Dateien, die direkt mit diesem Patienten verknüpft sind.",
-            "Все файлы, напрямую связанные с этим пациентом.",
-            "All files linked directly to this patient.",
+            "Direkt verknüpfte Patientendateien.",
+            "Файлы, привязанные к пациенту.",
+            "Files linked to this patient.",
           )}
         />
-        <StatCard
+        <DocumentOverviewTile
           label={l("Pflichtdokumente erfüllt", "Обязательные документы выполнены", "Required docs fulfilled")}
           value={
             documentAlerts?.configured_rule_count
@@ -93,19 +126,20 @@ function DocumentsOverviewSection({
               : requiredDocumentFulfilledCount
           }
           description={l(
-            "Abdeckung des minimalen Dokumentenpakets für Aufnahme und Compliance.",
-            "Покрытие минимального пакета документов для intake и compliance.",
-            "Coverage of the minimum document pack for intake and compliance.",
+            "Готовность минимального пакета.",
+            "Готовность минимального пакета.",
+            "Minimum pack readiness.",
           )}
         />
-        <StatCard
+        <DocumentOverviewTile
           label={l("Dokumentarten", "Типы документов", "Document types")}
           value={documentCategoryOptions.length}
           description={l(
-            "Wie viele Kategorien aktuell im Profil dieses Patienten vorkommen.",
-            "Сколько категорий документов сейчас присутствует в профиле пациента.",
-            "How many document categories currently appear in this patient profile.",
+            "Kategorien im Profil.",
+            "Категории в профиле.",
+            "Categories in profile.",
           )}
+          groupedLast
         />
       </div>
     </FormSection>

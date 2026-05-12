@@ -3,9 +3,13 @@ import { Check, LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { Label } from "@/components/ui/label";
 import { toast } from "@/components/ui/toast";
-import { selectClass, textareaClass } from "@/components/ui-shell";
+import {
+  Field as FormField,
+  Section as FormSection,
+  selectClass,
+  textareaClass,
+} from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -73,7 +77,9 @@ function PatientLegalStatusSheetContent({
   onOpenChange: (v: boolean) => void;
   onSaved: () => void;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const l = (de: string, ru: string, en: string) =>
+    lang === "de" ? de : lang === "ru" ? ru : en;
   const [form, setForm] = useReducer(legalStatusFormReducer, initial);
   const [busy, setBusy] = useState(false);
 
@@ -119,7 +125,7 @@ function PatientLegalStatusSheetContent({
       title={t.patient_legal_sheet_title}
       maxWidthClassName="sm:max-w-[480px]"
       onSubmit={handleSubmit}
-      bodyClassName="px-4 py-4 space-y-5"
+      bodyClassName="px-4 py-4 space-y-3"
       footer={
         <>
           <Button
@@ -138,31 +144,33 @@ function PatientLegalStatusSheetContent({
         </>
       }
     >
-      <div className="flex flex-col gap-1.5">
-        <Label
-          className="text-[11.5px] font-medium text-muted-foreground leading-tight"
+      <FormSection title={l("Vertrag", "Договор", "Contract")}>
+        <FormField
+          label={t.patient_legal_sheet_contract_status}
           htmlFor="patient-legal-contract-status"
         >
-          {t.patient_legal_sheet_contract_status}
-        </Label>
-        <NativeComboboxSelect
-          value={form.contractStatus}
-
-
-          onChange={(event) => setForm((current) => ({ ...current, contractStatus: event.target.value ?? "not_started" }))} id="patient-legal-contract-status" className={cn("w-full", selectClass)}>
+          <NativeComboboxSelect
+            id="patient-legal-contract-status"
+            value={form.contractStatus}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                contractStatus: event.target.value ?? "not_started",
+              }))
+            }
+            className={cn("w-full", selectClass)}
+          >
             {PATIENT_CONTRACT_STATUS_OPTIONS.map((option) => (
               <option key={option} value={option}>
                 {patientContractStatusLabel(option)}
               </option>
             ))}
           </NativeComboboxSelect>
-      </div>
+        </FormField>
+      </FormSection>
 
-      <div className="flex flex-col gap-2">
-        <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-          {t.patient_legal_sheet_checklist}
-        </span>
-        <div className="flex flex-col divide-y divide-border rounded-lg border border-border">
+      <FormSection title={t.patient_legal_sheet_checklist}>
+        <div className="space-y-2">
           {checklist.map((item) => {
             const active = form[item.key];
             return (
@@ -171,10 +179,10 @@ function PatientLegalStatusSheetContent({
                 type="button"
                 onClick={() => toggle(item.key)}
                 className={cn(
-                  "flex items-center justify-between gap-3 px-3 py-2.5 text-left text-[13px] transition-colors",
+                  "flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left text-[13px] transition-colors",
                   active
-                    ? "bg-emerald-50 text-emerald-900 hover:bg-emerald-100"
-                    : "bg-card text-foreground hover:bg-muted/40",
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-900 hover:bg-emerald-100"
+                    : "border-border/60 bg-card text-foreground hover:bg-muted/40",
                 )}
               >
                 <span>{item.label}</span>
@@ -192,25 +200,21 @@ function PatientLegalStatusSheetContent({
             );
           })}
         </div>
-      </div>
+      </FormSection>
 
-      <div className="flex flex-col gap-1.5">
-        <Label
-          className="text-[11.5px] font-medium text-muted-foreground leading-tight"
-          htmlFor="patient-legal-notes"
-        >
-          {t.patient_legal_sheet_notes}
-        </Label>
-        <textarea
-          id="patient-legal-notes"
-          className={legalNotesTextareaClassName}
-          value={form.notes}
-          onChange={(event) =>
-            setForm((current) => ({ ...current, notes: event.target.value }))
-          }
-          placeholder={t.patient_legal_sheet_notes_placeholder}
-        />
-      </div>
+      <FormSection title={l("Zusatzlich", "Дополнительно", "Additional")}>
+        <FormField label={t.patient_legal_sheet_notes} htmlFor="patient-legal-notes">
+          <textarea
+            id="patient-legal-notes"
+            className={legalNotesTextareaClassName}
+            value={form.notes}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, notes: event.target.value }))
+            }
+            placeholder={t.patient_legal_sheet_notes_placeholder}
+          />
+        </FormField>
+      </FormSection>
     </PatientSheetScaffold>
   );
 }

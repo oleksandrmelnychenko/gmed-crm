@@ -3,6 +3,7 @@ import { ExternalLink, FileSignature, FileText, LoaderCircle, ReceiptText } from
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Section as PreviewSection } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { apiFetch } from "@/lib/api";
@@ -34,6 +35,10 @@ function formatDate(value?: string | null, lang = "ru") {
   } catch {
     return value;
   }
+}
+
+function previewText(lang: string, de: string, ru: string, en: string) {
+  return lang === "de" ? de : lang === "ru" ? ru : en;
 }
 
 type DocumentItem = {
@@ -87,58 +92,61 @@ export function PatientDocumentsPreviewSheet({
       }
       bodyClassName="px-4 py-3 space-y-3"
     >
-      <div className="flex justify-end">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-7 rounded-lg gap-1 text-[12px] text-muted-foreground"
-          onClick={() => {
-            onOpenChange(false);
-            staffGo(`/documents?patient=${patientId}`);
-          }}
-        >
-          {t.patient_preview_full_view}
-          <ExternalLink className="size-3" />
-        </Button>
-      </div>
-
-      {busy ? (
-        <LoadingBlock />
-      ) : items.length === 0 ? (
-        <EmptyBlock text={t.patient_preview_not_recorded} />
-      ) : (
-        <ul className="space-y-2">
-          {items.map((item) => (
-            <li key={item.id}>
-              <button
-                type="button"
-                className="w-full cursor-pointer rounded-lg border border-border bg-card px-3 py-2.5 text-left transition-colors hover:bg-muted/40"
-                onClick={() => {
-                  onOpenChange(false);
-                  staffGo(`/documents?patient=${patientId}&document=${item.id}`);
-                }}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <p className="truncate text-[13px] font-medium text-foreground">
-                    {item.filename}
+      <PreviewSection
+        title={previewText(lang, "Liste", "Список", "List")}
+        accessory={
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 rounded-lg gap-1 text-[12px] text-muted-foreground"
+            onClick={() => {
+              onOpenChange(false);
+              staffGo(`/documents?patient=${patientId}`);
+            }}
+          >
+            {t.patient_preview_full_view}
+            <ExternalLink className="size-3" />
+          </Button>
+        }
+      >
+        {busy ? (
+          <LoadingBlock />
+        ) : items.length === 0 ? (
+          <EmptyBlock text={t.patient_preview_not_recorded} />
+        ) : (
+          <ul className="space-y-2">
+            {items.map((item) => (
+              <li key={item.id}>
+                <button
+                  type="button"
+                  className="w-full cursor-pointer rounded-lg border border-border bg-card px-3 py-2.5 text-left transition-colors hover:bg-muted/40"
+                  onClick={() => {
+                    onOpenChange(false);
+                    staffGo(`/documents?patient=${patientId}&document=${item.id}`);
+                  }}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="truncate text-[13px] font-medium text-foreground">
+                      {item.filename}
+                    </p>
+                    {item.status ? (
+                      <Badge variant="outline" className="shrink-0 rounded-full text-[10px]">
+                        {portalStatusLabel(item.status)}
+                      </Badge>
+                    ) : null}
+                  </div>
+                  <p className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
+                    {formatDate(item.created_at, lang)}
+                    {item.category ? ` | ${documentCategoryLabel(item.category)}` : ""}
+                    {item.uploaded_by_name ? ` | ${item.uploaded_by_name}` : ""}
                   </p>
-                  {item.status ? (
-                    <Badge variant="outline" className="shrink-0 rounded-full text-[10px]">
-                      {portalStatusLabel(item.status)}
-                    </Badge>
-                  ) : null}
-                </div>
-                <p className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
-                  {formatDate(item.created_at, lang)}
-                  {item.category ? ` | ${documentCategoryLabel(item.category)}` : ""}
-                  {item.uploaded_by_name ? ` | ${item.uploaded_by_name}` : ""}
-                </p>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </PreviewSection>
     </PatientSheetScaffold>
   );
 }
@@ -195,57 +203,60 @@ export function PatientContractsPreviewSheet({
       }
       bodyClassName="px-4 py-3 space-y-3"
     >
-      <div className="flex justify-end">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-7 rounded-lg gap-1 text-[12px] text-muted-foreground"
-          onClick={() => {
-            onOpenChange(false);
-            staffGo(`/contracts?patient=${patientId}`);
-          }}
-        >
-          {t.patient_preview_full_view}
-          <ExternalLink className="size-3" />
-        </Button>
-      </div>
-
-      {busy ? (
-        <LoadingBlock />
-      ) : items.length === 0 ? (
-        <EmptyBlock text={t.patient_preview_not_recorded} />
-      ) : (
-        <ul className="space-y-2">
-          {items.map((item) => (
-            <li key={item.id}>
-              <button
-                type="button"
-                className="w-full cursor-pointer rounded-lg border border-border bg-card px-3 py-2.5 text-left transition-colors hover:bg-muted/40"
-                onClick={() => {
-                  onOpenChange(false);
-                  staffGo(`/contracts?patient=${patientId}&contract=${item.id}`);
-                }}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <p className="truncate font-mono text-[13px] font-medium text-foreground">
-                    {item.contract_number}
+      <PreviewSection
+        title={previewText(lang, "Liste", "Список", "List")}
+        accessory={
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 rounded-lg gap-1 text-[12px] text-muted-foreground"
+            onClick={() => {
+              onOpenChange(false);
+              staffGo(`/contracts?patient=${patientId}`);
+            }}
+          >
+            {t.patient_preview_full_view}
+            <ExternalLink className="size-3" />
+          </Button>
+        }
+      >
+        {busy ? (
+          <LoadingBlock />
+        ) : items.length === 0 ? (
+          <EmptyBlock text={t.patient_preview_not_recorded} />
+        ) : (
+          <ul className="space-y-2">
+            {items.map((item) => (
+              <li key={item.id}>
+                <button
+                  type="button"
+                  className="w-full cursor-pointer rounded-lg border border-border bg-card px-3 py-2.5 text-left transition-colors hover:bg-muted/40"
+                  onClick={() => {
+                    onOpenChange(false);
+                    staffGo(`/contracts?patient=${patientId}&contract=${item.id}`);
+                  }}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="truncate font-mono text-[13px] font-medium text-foreground">
+                      {item.contract_number}
+                    </p>
+                    <Badge variant="outline" className="shrink-0 rounded-full text-[10px]">
+                      {portalStatusLabel(item.status)}
+                    </Badge>
+                  </div>
+                  <p className="mt-0.5 text-[11.5px] text-muted-foreground">
+                    {item.signed_at
+                      ? `${t.patient_preview_signed} ${formatDate(item.signed_at, lang)}`
+                      : formatDate(item.created_at, lang)}
+                    {item.valid_from ? ` | ${formatDate(item.valid_from, lang)}-${formatDate(item.valid_to, lang)}` : ""}
                   </p>
-                  <Badge variant="outline" className="shrink-0 rounded-full text-[10px]">
-                    {portalStatusLabel(item.status)}
-                  </Badge>
-                </div>
-                <p className="mt-0.5 text-[11.5px] text-muted-foreground">
-                  {item.signed_at
-                    ? `${t.patient_preview_signed} ${formatDate(item.signed_at, lang)}`
-                    : formatDate(item.created_at, lang)}
-                  {item.valid_from ? ` | ${formatDate(item.valid_from, lang)}-${formatDate(item.valid_to, lang)}` : ""}
-                </p>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </PreviewSection>
     </PatientSheetScaffold>
   );
 }
@@ -303,59 +314,62 @@ export function PatientInvoicesPreviewSheet({
       }
       bodyClassName="px-4 py-3 space-y-3"
     >
-      <div className="flex justify-end">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-7 rounded-lg gap-1 text-[12px] text-muted-foreground"
-          onClick={() => {
-            onOpenChange(false);
-            staffGo(`/invoices?patient=${patientId}`);
-          }}
-        >
-          {t.patient_preview_full_view}
-          <ExternalLink className="size-3" />
-        </Button>
-      </div>
-
-      {busy ? (
-        <LoadingBlock />
-      ) : items.length === 0 ? (
-        <EmptyBlock text={t.patient_preview_not_recorded} />
-      ) : (
-        <ul className="space-y-2">
-          {items.map((item) => (
-            <li key={item.id}>
-              <button
-                type="button"
-                className="w-full cursor-pointer rounded-lg border border-border bg-card px-3 py-2.5 text-left transition-colors hover:bg-muted/40"
-                onClick={() => {
-                  onOpenChange(false);
-                  staffGo(`/invoices?patient=${patientId}&invoice=${item.id}`);
-                }}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <p className="font-mono text-[13px] font-medium text-foreground">
-                    {item.invoice_number}
+      <PreviewSection
+        title={previewText(lang, "Liste", "Список", "List")}
+        accessory={
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 rounded-lg gap-1 text-[12px] text-muted-foreground"
+            onClick={() => {
+              onOpenChange(false);
+              staffGo(`/invoices?patient=${patientId}`);
+            }}
+          >
+            {t.patient_preview_full_view}
+            <ExternalLink className="size-3" />
+          </Button>
+        }
+      >
+        {busy ? (
+          <LoadingBlock />
+        ) : items.length === 0 ? (
+          <EmptyBlock text={t.patient_preview_not_recorded} />
+        ) : (
+          <ul className="space-y-2">
+            {items.map((item) => (
+              <li key={item.id}>
+                <button
+                  type="button"
+                  className="w-full cursor-pointer rounded-lg border border-border bg-card px-3 py-2.5 text-left transition-colors hover:bg-muted/40"
+                  onClick={() => {
+                    onOpenChange(false);
+                    staffGo(`/invoices?patient=${patientId}&invoice=${item.id}`);
+                  }}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="font-mono text-[13px] font-medium text-foreground">
+                      {item.invoice_number}
+                    </p>
+                    <Badge variant="outline" className="shrink-0 rounded-full text-[10px]">
+                      {portalStatusLabel(item.status)}
+                    </Badge>
+                  </div>
+                  <p className="mt-0.5 text-[11.5px] text-muted-foreground">
+                    {formatDate(item.issued_at, lang)}
+                    {item.invoice_type ? ` | ${invoiceTypeLabel(item.invoice_type)}` : ""}
+                    {item.total_gross ? ` | ${formatPortalCurrency(item.total_gross)}` : ""}
+                    {item.balance_due && item.balance_due !== "0.00"
+                      ? ` | ${t.patient_preview_due} ${formatPortalCurrency(item.balance_due)}`
+                      : ""}
                   </p>
-                  <Badge variant="outline" className="shrink-0 rounded-full text-[10px]">
-                    {portalStatusLabel(item.status)}
-                  </Badge>
-                </div>
-                <p className="mt-0.5 text-[11.5px] text-muted-foreground">
-                  {formatDate(item.issued_at, lang)}
-                  {item.invoice_type ? ` | ${invoiceTypeLabel(item.invoice_type)}` : ""}
-                  {item.total_gross ? ` | ${formatPortalCurrency(item.total_gross)}` : ""}
-                  {item.balance_due && item.balance_due !== "0.00"
-                    ? ` | ${t.patient_preview_due} ${formatPortalCurrency(item.balance_due)}`
-                    : ""}
-                </p>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </PreviewSection>
     </PatientSheetScaffold>
   );
 }

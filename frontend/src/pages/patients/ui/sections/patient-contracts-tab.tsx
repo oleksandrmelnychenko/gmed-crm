@@ -5,8 +5,8 @@ import {
   CountBadge,
   EmptyCell,
   Section as FormSection,
-  StatCard,
   TabLoader,
+  tokens,
 } from "@/components/ui-shell";
 import { cn } from "@/lib/utils";
 
@@ -36,6 +36,47 @@ type PatientContractsTabProps = {
   formatDateTime: DateTimeFormatter;
   isContractExpiringSoon: (contract: ContractItem) => boolean;
 };
+
+function ContractOverviewTile({
+  label,
+  value,
+  description,
+  groupedLast,
+}: {
+  label: string;
+  value: string | number;
+  description: string;
+  groupedLast?: boolean;
+}) {
+  return (
+    <article className="relative min-h-[68px] min-w-[190px] px-3 py-1">
+      {!groupedLast ? (
+        <span className="absolute right-0 top-1/2 hidden -translate-y-1/2 space-y-1 md:block">
+          <span className="block h-1.5 w-px bg-border" />
+          <span className="block h-1.5 w-px bg-border" />
+          <span className="block h-1.5 w-px bg-border" />
+        </span>
+      ) : null}
+      <p className="text-2xl font-semibold leading-[0.85] text-foreground">
+        {value}
+      </p>
+      <p className="mt-[5px] line-clamp-2 text-[11px] leading-tight text-muted-foreground/75">
+        {description}
+      </p>
+      <p className={cn("mt-0.5 line-clamp-2 text-xs font-medium leading-tight", tokens.text.muted)}>
+        {label}
+      </p>
+    </article>
+  );
+}
+
+function contractAccentClass(status: string) {
+  if (status === "signed" || status === "active") return "bg-emerald-500";
+  if (status === "sent") return "bg-sky-500";
+  if (status === "expired" || status === "terminated" || status === "cancelled") return "bg-rose-500";
+  if (status === "draft") return "bg-zinc-400";
+  return "bg-sky-500";
+}
 
 export function PatientContractsTab({
   l,
@@ -71,33 +112,34 @@ export function PatientContractsTab({
         title={l("Portfolio-Überblick", "Обзор портфеля", "Portfolio overview")}
         accessory={<CountBadge>{contracts.length} {l("Verträge", "договоров", "contracts")}</CountBadge>}
       >
-        <div className="grid gap-3 md:grid-cols-3">
-          <StatCard
+        <div className="grid overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 md:grid-cols-3">
+          <ContractOverviewTile
             label={l("Aktiv oder unterzeichnet", "Активные или подписанные", "Active or signed")}
             value={contractSignedCount}
             description={l(
-              "Verträge, die bereits wirksam sind oder unterzeichnet wurden.",
-              "Договоры, которые уже вступили в силу или были подписаны.",
-              "Contracts that are already effective or have been signed.",
+              "Wirksame oder signierte Verträge.",
+              "Подписанные и активные договоры.",
+              "Effective or signed contracts.",
             )}
           />
-          <StatCard
+          <ContractOverviewTile
             label={l("In Vorbereitung", "В подготовке", "In preparation")}
             value={contractPendingCount}
             description={l(
-              "Entwürfe oder versandte Verträge, die noch nicht finalisiert wurden.",
-              "Черновики или отправленные договоры, которые ещё не финализированы.",
-              "Draft or sent contracts that still need to be finalized.",
+              "Entwürfe und versandte Verträge.",
+              "Черновики и отправленные договоры.",
+              "Draft and sent contracts.",
             )}
           />
-          <StatCard
+          <ContractOverviewTile
             label={l("Laufen bald ab", "Скоро истекают", "Expiring soon")}
             value={contractExpiringSoonCount}
             description={l(
-              "Verträge mit Enddatum innerhalb der nächsten 30 Tage.",
-              "Договоры, у которых срок действия заканчивается в ближайшие 30 дней.",
-              "Contracts with an end date in the next 30 days.",
+              "Enddatum in den nächsten 30 Tagen.",
+              "Истекают в ближайшие 30 дней.",
+              "Ending in the next 30 days.",
             )}
+            groupedLast
           />
         </div>
       </FormSection>
@@ -127,64 +169,88 @@ export function PatientContractsTab({
             {l("Für diesen Patienten wurde noch kein Vertrag angelegt.", "Для этого пациента пока не создано ни одного договора.", "No contract has been created for this patient yet.")}
           </EmptyCell>
         ) : (
-          <div className="grid gap-2 md:grid-cols-2">
+          <div className="space-y-3">
             {contracts.map((contract) => (
-              <div
+              <article
                 key={contract.id}
-                className="rounded-xl border border-border/50 bg-card px-4 py-3 space-y-2.5"
+                className="rounded-xl border border-border bg-card"
               >
-                <div className="flex items-center justify-between gap-3">
-                  <span className="font-mono text-xs text-muted-foreground">{contract.contract_number}</span>
-                  <Badge
-                    variant="outline"
-                    className={cn("rounded-full text-[10px]", statusColors[contract.status] ?? "")}
-                  >
-                    {statusLabel(contract.status)}
-                  </Badge>
-                </div>
-                <div className="grid gap-1 text-sm text-muted-foreground">
-                  <p>{l("Unterzeichnet", "Подписано", "Signed")}: {formatDateTime(contract.signed_at, commonNotSet)}</p>
-                  <p>{l("Gültig ab", "Действует с", "Valid from")}: {formatDate(contract.valid_from, commonNotSet)}</p>
-                  <p>{l("Gültig bis", "Действует до", "Valid to")}: {formatDate(contract.valid_to, commonNotSet)}</p>
-                </div>
-                {contract.valid_to ? (
-                  <Badge
-                    variant="outline"
+                <div className="relative overflow-hidden p-4">
+                  <span
                     className={cn(
-                      "rounded-full text-[10px] w-fit",
-                      isContractExpiringSoon(contract)
-                        ? "border-amber-200 bg-amber-50 text-amber-700"
-                        : "border-border/60 bg-muted/25 text-muted-foreground",
+                      "absolute left-0 top-4 h-12 w-1 rounded-r-full",
+                      contractAccentClass(contract.status),
                     )}
-                  >
-                    {isContractExpiringSoon(contract)
-                      ? l("Läuft bald ab", "Скоро истекает", "Expiring soon")
-                      : l("Gültigkeitsfenster gesetzt", "Срок действия задан", "Validity window set")}
-                  </Badge>
-                ) : null}
-                <div className="flex flex-wrap gap-2 pt-1">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-8 rounded-lg"
-                    onClick={() => onOpenContract(contract.id)}
-                  >
-                    {l("Öffnen", "Открыть", "Open")}
-                  </Button>
-                  {canManageContracts ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-8 rounded-lg"
-                      onClick={() => onEditContractStatus(contract)}
-                    >
-                      {l("Status aktualisieren", "Обновить статус", "Update status")}
-                    </Button>
-                  ) : null}
+                  />
+                  <div className="grid gap-4 pl-3 md:grid-cols-[minmax(0,1fr)_180px]">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="h-px w-8 bg-border" />
+                        <Badge
+                          variant="outline"
+                          className={cn("rounded-full text-[10px]", statusColors[contract.status] ?? "")}
+                        >
+                          {statusLabel(contract.status)}
+                        </Badge>
+                      </div>
+                      <h3 className="mt-2 font-mono text-lg font-semibold leading-none text-foreground">
+                        {contract.contract_number}
+                      </h3>
+                      <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                        {[
+                          `${l("Unterzeichnet", "Подписано", "Signed")}: ${formatDateTime(contract.signed_at, commonNotSet)}`,
+                          `${l("Gültig ab", "Действует с", "Valid from")}: ${formatDate(contract.valid_from, commonNotSet)}`,
+                          `${l("Gültig bis", "Действует до", "Valid to")}: ${formatDate(contract.valid_to, commonNotSet)}`,
+                        ].join(" - ")}
+                      </p>
+                      {contract.valid_to ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "rounded-full",
+                              isContractExpiringSoon(contract)
+                                ? "border-amber-200 bg-amber-50 text-amber-700"
+                                : "border-border/60 bg-muted/25 text-muted-foreground",
+                            )}
+                          >
+                            {isContractExpiringSoon(contract)
+                              ? l("Läuft bald ab", "Скоро истекает", "Expiring soon")
+                              : l("Gültigkeit gesetzt", "Срок задан", "Validity set")}
+                          </Badge>
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="flex flex-col justify-between gap-4 border-l border-dashed border-border pl-4">
+                      <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                        {l("Vertrag", "Договор", "Contract")}
+                      </span>
+                      <div className="flex flex-col gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="justify-center rounded-lg"
+                          onClick={() => onOpenContract(contract.id)}
+                        >
+                          {l("Öffnen", "Открыть", "Open")}
+                        </Button>
+                        {canManageContracts ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="justify-center rounded-lg"
+                            onClick={() => onEditContractStatus(contract)}
+                          >
+                            {l("Status aktualisieren", "Обновить статус", "Update status")}
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              </article>
             ))}
           </div>
         )}

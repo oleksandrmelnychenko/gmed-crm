@@ -9,18 +9,15 @@ import {
 } from "react";
 
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { toast } from "@/components/ui/toast";
-import { checkboxClass, selectClass } from "@/components/ui-shell";
+import {
+  Field as FormField,
+  Section as FormSection,
+  checkboxClass,
+  inputClass,
+  selectClass,
+} from "@/components/ui-shell";
 
 import { uploadPatientDocument } from "../../data/patient-detail-mutations";
 import type {
@@ -33,6 +30,7 @@ import {
   blankDocumentUploadForm,
   type DocumentUploadFormState,
 } from "../../model/sheet-forms";
+import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 const DOCUMENT_STATUS_OPTIONS: DocumentStatus[] = ["draft", "active", "archived"];
 const DOCUMENT_VISIBILITY_OPTIONS: DocumentVisibility[] = [
@@ -137,212 +135,229 @@ function PatientDocumentUploadDialog({
   );
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>
-            {l(
-              "Patientendokument hochladen",
-              "Загрузить документ пациента",
-              "Upload patient document"
-            )}
-          </DialogTitle>
-          <DialogDescription>
-            {l(
-              "Hier hochgeladene Dateien werden direkt mit diesem Patienten verknüpft und können auch einem Auftrag oder Termin zugeordnet werden.",
-              "Загруженные здесь файлы привязываются напрямую к пациенту и также могут быть связаны с заказом или приёмом.",
-              "Files uploaded here are linked directly to this patient and can also be attached to an order or appointment."
-            )}
-          </DialogDescription>
-        </DialogHeader>
-        <form className="space-y-4" onSubmit={handleSubmit}>
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="document-file">{l("Datei", "Файл", "File")}</Label>
-              <Input id="document-file" type="file" onChange={handleFileChange} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="document-name">
-                {l("Anzeigename", "Отображаемое имя", "Display name")}
-              </Label>
-              <Input
-                id="document-name"
-                value={form.autoName}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, autoName: event.target.value }))
-                }
-                placeholder={l(
-                  "Optionaler sichtbarer Name für den Patienten",
-                  "Необязательное имя для отображения пациенту",
-                  "Optional patient-facing name"
-                )}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="document-art">{l("Typ", "Тип", "Type")}</Label>
-              <Input
-                id="document-art"
-                value={form.art}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, art: event.target.value }))
-                }
-                placeholder="report"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="document-category">{l("Kategorie", "Категория", "Category")}</Label>
-              <Input
-                id="document-category"
-                value={form.category}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, category: event.target.value }))
-                }
-                placeholder="medical"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="document-status">{l("Status", "Статус", "Status")}</Label>
-              <NativeComboboxSelect
-                id="document-status"
-                className={selectClass}
-                value={form.status}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    status: event.target.value as DocumentStatus,
-                  }))
-                }
-              >
-                {DOCUMENT_STATUS_OPTIONS.map((status) => (
-                  <option key={status} value={status}>
-                    {statusLabel(status)}
-                  </option>
-                ))}
-              </NativeComboboxSelect>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="document-visibility">
-                {l("Sichtbarkeit", "Видимость", "Visibility")}
-              </Label>
-              <NativeComboboxSelect
-                id="document-visibility"
-                className={selectClass}
-                value={form.visibility}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    visibility: event.target.value as DocumentVisibility,
-                  }))
-                }
-              >
-                {DOCUMENT_VISIBILITY_OPTIONS.map((visibility) => (
-                  <option key={visibility} value={visibility}>
-                    {visibility === "internal"
-                      ? l("Intern", "Внутреннее", "Internal")
-                      : visibility === "released_internal"
-                        ? l("Intern freigegeben", "Внутренне опубликовано", "Released internal")
-                        : visibility === "released_external"
-                          ? l("Extern freigegeben", "Внешне опубликовано", "Released external")
-                          : l("Für Patienten sichtbar", "Видно пациенту", "Patient visible")}
-                  </option>
-                ))}
-              </NativeComboboxSelect>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="document-order">{l("Auftrag", "Заказ", "Order")}</Label>
-              <NativeComboboxSelect
-                id="document-order"
-                className={selectClass}
-                value={form.orderId}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, orderId: event.target.value }))
-                }
-              >
-                <option value="">
-                  {l("Keine Auftragsverknüpfung", "Без привязки к заказу", "No order link")}
-                </option>
-                {orders.map((order) => (
-                  <option key={order.id} value={order.id}>
-                    {order.order_number}
-                  </option>
-                ))}
-              </NativeComboboxSelect>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="document-appointment">{l("Termin", "Приём", "Appointment")}</Label>
-              <NativeComboboxSelect
-                id="document-appointment"
-                className={selectClass}
-                value={form.appointmentId}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    appointmentId: event.target.value,
-                  }))
-                }
-              >
-                <option value="">
-                  {l("Keine Terminverknüpfung", "Без привязки к приёму", "No appointment link")}
-                </option>
-                {appointments.map((appointment) => (
-                  <option key={appointment.id} value={appointment.id}>
-                    {appointment.title} · {formatDate(appointment.date)}
-                  </option>
-                ))}
-              </NativeComboboxSelect>
-            </div>
-            <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-3 py-2 text-sm text-foreground">
-              <input
-                type="checkbox"
-                className={checkboxClass}
-                checked={form.isMedical}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    isMedical: event.target.checked,
-                  }))
-                }
-              />
-              {l("Medizinisches Dokument", "Медицинский документ", "Medical document")}
-            </label>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="document-notes">{l("Notizen", "Заметки", "Notes")}</Label>
-            <textarea
-              id="document-notes"
-              className={textareaClassName}
-              value={form.notes}
+    <PatientSheetScaffold
+      open={open}
+      onOpenChange={onOpenChange}
+      width="form-heavy"
+      onSubmit={handleSubmit}
+      title={l(
+        "Patientendokument hochladen",
+        "Загрузить документ пациента",
+        "Upload patient document",
+      )}
+      description={l(
+        "Hier hochgeladene Dateien werden direkt mit diesem Patienten verknuepft und koennen auch einem Auftrag oder Termin zugeordnet werden.",
+        "Загруженные здесь файлы привязываются напрямую к пациенту и также могут быть связаны с заказом или приёмом.",
+        "Files uploaded here are linked directly to this patient and can also be attached to an order or appointment.",
+      )}
+      bodyClassName="px-4 py-4 space-y-3"
+      footer={
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-lg"
+            onClick={() => onOpenChange(false)}
+          >
+            {l("Abbrechen", "Отмена", "Cancel")}
+          </Button>
+          <Button
+            type="submit"
+            size="sm"
+            className="h-8 rounded-lg gap-1.5"
+            disabled={busy}
+          >
+            {busy ? <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" /> : null}
+            {l("Dokument hochladen", "Загрузить документ", "Upload document")}
+          </Button>
+        </>
+      }
+    >
+      <FormSection title={l("Datei", "Файл", "File")}>
+        <div className="grid gap-3 md:grid-cols-2">
+          <FormField label={l("Datei", "Файл", "File")} htmlFor="document-file">
+            <Input
+              id="document-file"
+              type="file"
+              className={inputClass}
+              onChange={handleFileChange}
+            />
+          </FormField>
+          <FormField
+            label={l("Anzeigename", "Отображаемое имя", "Display name")}
+            htmlFor="document-name"
+          >
+            <Input
+              id="document-name"
+              value={form.autoName}
               onChange={(event) =>
-                setForm((current) => ({ ...current, notes: event.target.value }))
+                setForm((current) => ({ ...current, autoName: event.target.value }))
               }
+              className={inputClass}
               placeholder={l(
-                "Optionale Verarbeitungs- oder Sichtbarkeitsnotizen",
-                "Необязательные заметки по обработке или видимости",
-                "Optional processing or visibility notes"
+                "Optionaler sichtbarer Name fuer den Patienten",
+                "Необязательное имя для отображения пациенту",
+                "Optional patient-facing name",
               )}
             />
-          </div>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              className="rounded-xl"
-              onClick={() => onOpenChange(false)}
+          </FormField>
+        </div>
+      </FormSection>
+
+      <FormSection title={l("Dokument", "Документ", "Document")}>
+        <div className="grid gap-3 md:grid-cols-2">
+          <FormField label={l("Typ", "Тип", "Type")} htmlFor="document-art">
+            <Input
+              id="document-art"
+              value={form.art}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, art: event.target.value }))
+              }
+              className={inputClass}
+              placeholder="report"
+            />
+          </FormField>
+          <FormField label={l("Kategorie", "Категория", "Category")} htmlFor="document-category">
+            <Input
+              id="document-category"
+              value={form.category}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, category: event.target.value }))
+              }
+              className={inputClass}
+              placeholder="medical"
+            />
+          </FormField>
+          <FormField label={l("Status", "Статус", "Status")} htmlFor="document-status">
+            <NativeComboboxSelect
+              id="document-status"
+              className={selectClass}
+              value={form.status}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  status: event.target.value as DocumentStatus,
+                }))
+              }
             >
-              {l("Abbrechen", "Отмена", "Cancel")}
-            </Button>
-            <Button
-              type="submit"
-              className="rounded-xl bg-zinc-950 text-white hover:bg-zinc-800"
-              disabled={busy}
+              {DOCUMENT_STATUS_OPTIONS.map((status) => (
+                <option key={status} value={status}>
+                  {statusLabel(status)}
+                </option>
+              ))}
+            </NativeComboboxSelect>
+          </FormField>
+          <FormField
+            label={l("Sichtbarkeit", "Видимость", "Visibility")}
+            htmlFor="document-visibility"
+          >
+            <NativeComboboxSelect
+              id="document-visibility"
+              className={selectClass}
+              value={form.visibility}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  visibility: event.target.value as DocumentVisibility,
+                }))
+              }
             >
-              {busy ? <span className="mr-2 size-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : null}
-              {l("Dokument hochladen", "Загрузить документ", "Upload document")}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+              {DOCUMENT_VISIBILITY_OPTIONS.map((visibility) => (
+                <option key={visibility} value={visibility}>
+                  {visibility === "internal"
+                    ? l("Intern", "Внутреннее", "Internal")
+                    : visibility === "released_internal"
+                      ? l("Intern freigegeben", "Внутренне опубликовано", "Released internal")
+                      : visibility === "released_external"
+                        ? l("Extern freigegeben", "Внешне опубликовано", "Released external")
+                        : l("Fuer Patienten sichtbar", "Видно пациенту", "Patient visible")}
+                </option>
+              ))}
+            </NativeComboboxSelect>
+          </FormField>
+        </div>
+
+        <label className="flex min-h-9 items-center gap-3 rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground">
+          <input
+            type="checkbox"
+            className={checkboxClass}
+            checked={form.isMedical}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                isMedical: event.target.checked,
+              }))
+            }
+          />
+          {l("Medizinisches Dokument", "Медицинский документ", "Medical document")}
+        </label>
+      </FormSection>
+
+      <FormSection title={l("Kontext", "Контекст", "Context")}>
+        <div className="grid gap-3 md:grid-cols-2">
+          <FormField label={l("Auftrag", "Заказ", "Order")} htmlFor="document-order">
+            <NativeComboboxSelect
+              id="document-order"
+              className={selectClass}
+              value={form.orderId}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, orderId: event.target.value }))
+              }
+            >
+              <option value="">
+                {l("Keine Auftragsverknuepfung", "Без привязки к заказу", "No order link")}
+              </option>
+              {orders.map((order) => (
+                <option key={order.id} value={order.id}>
+                  {order.order_number}
+                </option>
+              ))}
+            </NativeComboboxSelect>
+          </FormField>
+          <FormField label={l("Termin", "Приём", "Appointment")} htmlFor="document-appointment">
+            <NativeComboboxSelect
+              id="document-appointment"
+              className={selectClass}
+              value={form.appointmentId}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  appointmentId: event.target.value,
+                }))
+              }
+            >
+              <option value="">
+                {l("Keine Terminverknuepfung", "Без привязки к приёму", "No appointment link")}
+              </option>
+              {appointments.map((appointment) => (
+                <option key={appointment.id} value={appointment.id}>
+                  {appointment.title} · {formatDate(appointment.date)}
+                </option>
+              ))}
+            </NativeComboboxSelect>
+          </FormField>
+        </div>
+      </FormSection>
+
+      <FormSection title={l("Zusatzlich", "Дополнительно", "Additional")}>
+        <FormField label={l("Notizen", "Заметки", "Notes")} htmlFor="document-notes">
+          <textarea
+            id="document-notes"
+            className={textareaClassName}
+            value={form.notes}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, notes: event.target.value }))
+            }
+            placeholder={l(
+              "Optionale Verarbeitungs- oder Sichtbarkeitsnotizen",
+              "Необязательные заметки по обработке или видимости",
+              "Optional processing or visibility notes",
+            )}
+          />
+        </FormField>
+      </FormSection>
+    </PatientSheetScaffold>
   );
 }
 

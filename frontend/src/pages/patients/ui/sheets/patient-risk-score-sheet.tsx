@@ -4,8 +4,9 @@ import { LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
+  Field as FormField,
+  Section as FormSection,
   inputClass,
   selectClass,
   textareaClass,
@@ -169,7 +170,7 @@ export function PatientRiskScoreSheet({
       maxWidthClassName="sm:max-w-[540px]"
       onSubmit={handleSubmit}
       title={l("Risikoscore hinzufugen", "Dobavit risk-skor", "Add risk score")}
-      bodyClassName="px-4 py-4 space-y-4"
+      bodyClassName="px-4 py-4 space-y-3"
       footer={
         <>
           <Button
@@ -188,74 +189,70 @@ export function PatientRiskScoreSheet({
         </>
       }
     >
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="flex flex-col gap-1.5">
-          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-computed-at">
-            {l("Berechnet am", "Rasschitano", "Computed at")}
-          </Label>
-          <Input
-            id="patient-risk-score-computed-at"
-            type="datetime-local"
-            value={form.computedAt}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, computedAt: event.target.value }))
-            }
-            className={inputClass}
-            required
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-type">
-            {l("Score-Typ", "Tip skora", "Score type")}
-          </Label>
-          <NativeComboboxSelect
-            value={form.scoreType}
-
-
-            onChange={(event) => setForm((current) => ({
-                ...current,
-                scoreType: (event.target.value ?? SCORE_TYPE_OPTIONS[0]) as ScoreType,
-              }))} id="patient-risk-score-type" className={cn("w-full", selectClass)}>
+      <FormSection title={l("Score", "Скор", "Score")}>
+        <div className="grid gap-3 md:grid-cols-2">
+          <FormField
+            label={l("Berechnet am", "Рассчитано", "Computed at")}
+            htmlFor="patient-risk-score-computed-at"
+          >
+            <Input
+              id="patient-risk-score-computed-at"
+              type="datetime-local"
+              value={form.computedAt}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, computedAt: event.target.value }))
+              }
+              className={inputClass}
+              required
+            />
+          </FormField>
+          <FormField label={l("Score-Typ", "Тип скора", "Score type")} htmlFor="patient-risk-score-type">
+            <NativeComboboxSelect
+              id="patient-risk-score-type"
+              value={form.scoreType}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  scoreType: (event.target.value ?? SCORE_TYPE_OPTIONS[0]) as ScoreType,
+                }))
+              }
+              className={cn("w-full", selectClass)}
+            >
               {SCORE_TYPE_OPTIONS.map((option) => (
                 <option key={option} value={option}>
                   {scoreTypeLabel(option, l, t)}
                 </option>
               ))}
             </NativeComboboxSelect>
+          </FormField>
+          <FormField label={l("Wert", "Значение", "Score value")} htmlFor="patient-risk-score-value">
+            <Input
+              id="patient-risk-score-value"
+              inputMode="decimal"
+              value={form.scoreValue}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, scoreValue: event.target.value }))
+              }
+              className={inputClass}
+              required
+            />
+          </FormField>
+          <FormField label={l("Skalen-Max", "Макс. шкалы", "Scale max")} htmlFor="patient-risk-score-scale-max">
+            <Input
+              id="patient-risk-score-scale-max"
+              inputMode="decimal"
+              value={form.scaleMax}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, scaleMax: event.target.value }))
+              }
+              className={inputClass}
+            />
+          </FormField>
         </div>
-        <div className="flex flex-col gap-1.5">
-          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-value">
-            {l("Wert", "Znachenie", "Score value")}
-          </Label>
-          <Input
-            id="patient-risk-score-value"
-            inputMode="decimal"
-            value={form.scoreValue}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, scoreValue: event.target.value }))
-            }
-            className={inputClass}
-            required
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-scale-max">
-            {l("Skalen-Max", "Maks shkaly", "Scale max")}
-          </Label>
-          <Input
-            id="patient-risk-score-scale-max"
-            inputMode="decimal"
-            value={form.scaleMax}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, scaleMax: event.target.value }))
-            }
-            className={inputClass}
-          />
-        </div>
-        <div className="flex flex-col gap-1.5 md:col-span-2">
-          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-source">
-            {l("Quelle", "Istochnik", "Source")}
-          </Label>
+      </FormSection>
+
+      <FormSection title={l("Interpretation", "Интерпретация", "Interpretation")}>
+        <FormField label={l("Quelle", "Источник", "Source")} htmlFor="patient-risk-score-source">
           <Input
             id="patient-risk-score-source"
             value={form.source}
@@ -264,37 +261,38 @@ export function PatientRiskScoreSheet({
             }
             className={inputClass}
           />
-        </div>
-      </div>
+        </FormField>
+        <FormField
+          label={l("Interpretation", "Интерпретация", "Interpretation")}
+          htmlFor="patient-risk-score-interpretation"
+        >
+          <textarea
+            id="patient-risk-score-interpretation"
+            className={riskScoreTextareaClassName}
+            value={form.interpretation}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, interpretation: event.target.value }))
+            }
+          />
+        </FormField>
+      </FormSection>
 
-      <div className="flex flex-col gap-1.5">
-        <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-interpretation">
-          {l("Interpretation", "Interpretaciya", "Interpretation")}
-        </Label>
-        <textarea
-          id="patient-risk-score-interpretation"
-          className={riskScoreTextareaClassName}
-          value={form.interpretation}
-          onChange={(event) =>
-            setForm((current) => ({ ...current, interpretation: event.target.value }))
-          }
-        />
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-inputs">
-          {l("Eingaben (JSON)", "Vhodnye dannye (JSON)", "Inputs (JSON)")}
-        </Label>
-        <textarea
-          id="patient-risk-score-inputs"
-          className={riskScoreTextareaClassName}
-          value={form.inputsJson}
-          onChange={(event) =>
-            setForm((current) => ({ ...current, inputsJson: event.target.value }))
-          }
-          placeholder='{"age": 72, "bmi": 27}'
-        />
-      </div>
+      <FormSection title={l("Zusatzlich", "Дополнительно", "Additional")}>
+        <FormField
+          label={l("Eingaben (JSON)", "Входные данные (JSON)", "Inputs (JSON)")}
+          htmlFor="patient-risk-score-inputs"
+        >
+          <textarea
+            id="patient-risk-score-inputs"
+            className={riskScoreTextareaClassName}
+            value={form.inputsJson}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, inputsJson: event.target.value }))
+            }
+            placeholder='{"age": 72, "bmi": 27}'
+          />
+        </FormField>
+      </FormSection>
     </PatientSheetScaffold>
   );
 }

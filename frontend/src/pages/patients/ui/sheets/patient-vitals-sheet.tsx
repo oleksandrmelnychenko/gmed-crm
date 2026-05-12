@@ -4,8 +4,9 @@ import { LoaderCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
+  Field as FormField,
+  Section as FormSection,
   inputClass,
   textareaClass,
 } from "@/components/ui-shell";
@@ -154,7 +155,7 @@ export function PatientVitalsSheet({
           ) : null}
         </span>
       }
-      bodyClassName="px-4 py-4 space-y-4"
+      bodyClassName="px-4 py-4 space-y-3"
       footer={
         <>
           <Button
@@ -173,11 +174,11 @@ export function PatientVitalsSheet({
         </>
       }
     >
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="flex flex-col gap-1.5 md:col-span-2">
-          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-measured-at">
-            {l("Gemessen am", "Izmereno", "Measured at")}
-          </Label>
+      <FormSection title={l("Messung", "Измерение", "Measurement")}>
+        <FormField
+          label={l("Gemessen am", "Измерено", "Measured at")}
+          htmlFor="patient-vitals-measured-at"
+        >
           <Input
             id="patient-vitals-measured-at"
             type="datetime-local"
@@ -188,115 +189,122 @@ export function PatientVitalsSheet({
             className={inputClass}
             required
           />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-bp-systolic">
-            {l("RR systolisch", "Sistolicheskoe AD", "BP systolic")}
-          </Label>
-          <Input
-            id="patient-vitals-bp-systolic"
-            inputMode="decimal"
-            value={form.bpSystolic}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, bpSystolic: event.target.value }))
-            }
-            className={inputClass}
-            placeholder="mmHg"
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-bp-diastolic">
-            {l("RR diastolisch", "Diastolicheskoe AD", "BP diastolic")}
-          </Label>
-          <Input
-            id="patient-vitals-bp-diastolic"
-            inputMode="decimal"
-            value={form.bpDiastolic}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, bpDiastolic: event.target.value }))
-            }
-            className={inputClass}
-            placeholder="mmHg"
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-heart-rate">
-            {l("Herzfrequenz", "ChSS", "Heart rate")}
-          </Label>
-          <Input
-            id="patient-vitals-heart-rate"
-            inputMode="numeric"
-            value={form.heartRate}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, heartRate: event.target.value }))
-            }
-            className={inputClass}
-            placeholder="bpm"
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-weight">
-            {l("Gewicht (kg)", "Ves (kg)", "Weight (kg)")}
-          </Label>
-          <Input
-            id="patient-vitals-weight"
-            inputMode="decimal"
-            value={form.weightKg}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, weightKg: event.target.value }))
-            }
-            className={inputClass}
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-height">
-            {l("Groesse (cm)", "Rost (cm)", "Height (cm)")}
-          </Label>
-          <Input
-            id="patient-vitals-height"
-            inputMode="decimal"
-            value={form.heightCm}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, heightCm: event.target.value }))
-            }
-            className={inputClass}
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-bmi">
-            {l("BMI (optional)", "BMI (opcionalno)", "BMI (optional)")}
-          </Label>
-          <Input
-            id="patient-vitals-bmi"
-            inputMode="decimal"
-            value={form.bmi}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, bmi: event.target.value }))
-            }
-            className={inputClass}
-            placeholder={bmiPreview != null ? formatBmi(bmiPreview) : ""}
-          />
-        </div>
-      </div>
+        </FormField>
 
-      <div className="flex flex-col gap-1.5">
-        <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-notes">
-          {l("Notizen", "Zametki", "Notes")}
-        </Label>
-        <textarea
-          id="patient-vitals-notes"
-          className={vitalsTextareaClassName}
-          value={form.notes}
-          onChange={(event) =>
-            setForm((current) => ({ ...current, notes: event.target.value }))
-          }
-          placeholder={l(
-            "Klinischer Kontext, Beobachtungen, Umstaende.",
-            "Klinicheskiy kontekst, nablyudeniya, obstoyatelstva.",
-            "Clinical context, observations, circumstances.",
-          )}
-        />
-      </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <FormField
+            label={l("RR systolisch", "АД систолическое", "BP systolic")}
+            htmlFor="patient-vitals-bp-systolic"
+          >
+            <Input
+              id="patient-vitals-bp-systolic"
+              inputMode="decimal"
+              value={form.bpSystolic}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, bpSystolic: event.target.value }))
+              }
+              className={inputClass}
+              placeholder="mmHg"
+            />
+          </FormField>
+          <FormField
+            label={l("RR diastolisch", "АД диастолическое", "BP diastolic")}
+            htmlFor="patient-vitals-bp-diastolic"
+          >
+            <Input
+              id="patient-vitals-bp-diastolic"
+              inputMode="decimal"
+              value={form.bpDiastolic}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, bpDiastolic: event.target.value }))
+              }
+              className={inputClass}
+              placeholder="mmHg"
+            />
+          </FormField>
+          <FormField
+            label={l("Herzfrequenz", "ЧСС", "Heart rate")}
+            htmlFor="patient-vitals-heart-rate"
+          >
+            <Input
+              id="patient-vitals-heart-rate"
+              inputMode="numeric"
+              value={form.heartRate}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, heartRate: event.target.value }))
+              }
+              className={inputClass}
+              placeholder="bpm"
+            />
+          </FormField>
+        </div>
+      </FormSection>
+
+      <FormSection title={l("Anthropometrie", "Антропометрия", "Anthropometry")}>
+        <div className="grid gap-3 md:grid-cols-3">
+          <FormField
+            label={l("Gewicht (kg)", "Вес (кг)", "Weight (kg)")}
+            htmlFor="patient-vitals-weight"
+          >
+            <Input
+              id="patient-vitals-weight"
+              inputMode="decimal"
+              value={form.weightKg}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, weightKg: event.target.value }))
+              }
+              className={inputClass}
+            />
+          </FormField>
+          <FormField
+            label={l("Groesse (cm)", "Рост (см)", "Height (cm)")}
+            htmlFor="patient-vitals-height"
+          >
+            <Input
+              id="patient-vitals-height"
+              inputMode="decimal"
+              value={form.heightCm}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, heightCm: event.target.value }))
+              }
+              className={inputClass}
+            />
+          </FormField>
+          <FormField
+            label={l("BMI (optional)", "BMI (опционально)", "BMI (optional)")}
+            htmlFor="patient-vitals-bmi"
+          >
+            <Input
+              id="patient-vitals-bmi"
+              inputMode="decimal"
+              value={form.bmi}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, bmi: event.target.value }))
+              }
+              className={inputClass}
+              placeholder={bmiPreview != null ? formatBmi(bmiPreview) : ""}
+            />
+          </FormField>
+        </div>
+      </FormSection>
+
+      <FormSection title={l("Zusatzlich", "Дополнительно", "Additional")}>
+        <FormField label={l("Notizen", "Заметки", "Notes")} htmlFor="patient-vitals-notes">
+          <textarea
+            id="patient-vitals-notes"
+            className={vitalsTextareaClassName}
+            value={form.notes}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, notes: event.target.value }))
+            }
+            placeholder={l(
+              "Klinischer Kontext, Beobachtungen, Umstaende.",
+              "Клинический контекст, наблюдения, обстоятельства.",
+              "Clinical context, observations, circumstances.",
+            )}
+          />
+        </FormField>
+      </FormSection>
     </PatientSheetScaffold>
   );
 }
