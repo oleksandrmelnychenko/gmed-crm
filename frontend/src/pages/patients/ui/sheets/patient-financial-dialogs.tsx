@@ -4,16 +4,7 @@ import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
   Field as FormField,
@@ -349,116 +340,136 @@ export function PatientFinancialDialogs({
         </FormSection>
       </PatientSheetScaffold>
 
-      <Dialog open={Boolean(invoiceManageId)} onOpenChange={onInvoiceManageOpenChange}>
-        <DialogContent className="sm:max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>{l("Rechnung verwalten", "Управлять счётом", "Manage invoice")}</DialogTitle>
-            <DialogDescription>
-              {l(
-                "Aktualisieren Sie den Billing-Status und setzen Sie den Mahnprozess direkt aus dem Patientenprofil fort.",
-                "Обновляйте статус billing и продолжайте процесс напоминаний прямо из профиля пациента.",
-                "Update billing status and continue dunning flow directly from the patient profile.",
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-5">
-            <form className="space-y-4" onSubmit={onInvoiceStatusSubmit}>
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="invoice-status-edit">{l("Status", "Статус", "Status")}</Label>
-                  <NativeComboboxSelect
-                    value={invoiceStatusForm.status}
-                    onChange={(event) => onInvoiceStatusValueChange(event.target.value ?? invoiceStatusForm.status)} id="invoice-status-edit" className={selectClass}>
-                      {invoiceStatusOptions.map((status) => (
-                        <option key={status} value={status}>
-                          {patientDetailStatusLabel(status)}
-                        </option>
-                      ))}
-                    </NativeComboboxSelect>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="invoice-due-date-edit">{l("Fälligkeitsdatum", "Срок", "Due date")}</Label>
-                  <Input
-                    id="invoice-due-date-edit"
-                    type="date"
-                    value={invoiceStatusForm.dueDate}
-                    onChange={(event) => onInvoiceDueDateChange(event.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="invoice-paid-amount-edit">{l("Bezahlter Betrag", "Оплаченная сумма", "Paid amount")}</Label>
-                  <Input
-                    id="invoice-paid-amount-edit"
-                    value={invoiceStatusForm.paidAmount}
-                    onChange={(event) => onInvoicePaidAmountChange(event.target.value)}
-                    placeholder="0.00"
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="invoice-notes-edit">{l("Notizen", "Заметки", "Notes")}</Label>
-                <textarea
-                  id="invoice-notes-edit"
-                  className={textareaClassName}
-                  value={invoiceStatusForm.notes}
-                  onChange={(event) => onInvoiceNotesChange(event.target.value)}
-                  placeholder={l("Billing-Notizen oder Details zur Zahlungsbestätigung", "Заметки по billing или детали подтверждения оплаты", "Billing notes or payment confirmation details")}
-                />
-              </div>
-              <div className="flex justify-end">
-                <Button type="submit" className="rounded-xl bg-zinc-950 text-white hover:bg-zinc-800" disabled={invoiceBusy}>
-                  {invoiceBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                  {l("Rechnung speichern", "Сохранить счёт", "Save invoice")}
-                </Button>
-              </div>
-            </form>
-
-            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-zinc-950">Mahnwesen</p>
-                  <p className="mt-1 text-xs text-zinc-500">
-                    {l("Verfolgen Sie versendete Mahnungen und eskalieren Sie überfällige Rechnungen.", "Отслеживайте отправленные напоминания и эскалируйте просроченные счета.", "Track sent reminders and escalate overdue invoices.")}
-                  </p>
-                </div>
-                {canManageInvoices && nextDunningLevel(dunningEvents) ? (
-                  <Button
-                    type="button"
-                    className="rounded-xl bg-zinc-950 text-white hover:bg-zinc-800"
-                    onClick={() => void onCreateDunning()}
-                    disabled={dunningBusy}
-                  >
-                    {dunningBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                    {l("Senden", "Отправить", "Send")} {nextDunningLevel(dunningEvents)}
-                  </Button>
-                ) : null}
-              </div>
-              <div className="mt-4 space-y-2">
-                <Label htmlFor="dunning-note">{l("Mahnhinweis", "Заметка по напоминанию", "Reminder note")}</Label>
-                <textarea
-                  id="dunning-note"
-                  className={textareaClassName}
-                  value={dunningNote}
-                  onChange={(event) => onDunningNoteChange(event.target.value)}
-                  placeholder={l("Optionale Notiz für den Billing-Verlauf", "Необязательная заметка для trail биллинга", "Optional note for billing trail")}
-                />
-              </div>
-              <DunningEventsList
-                dunningEvents={dunningEvents}
-                formatDateTime={formatDateTime}
-                formatMoney={formatMoney}
-                l={l}
+      <PatientSheetScaffold
+        open={Boolean(invoiceManageId)}
+        onOpenChange={onInvoiceManageOpenChange}
+        width="form-heavy"
+        onSubmit={onInvoiceStatusSubmit}
+        title={l("Rechnung verwalten", "Управлять счётом", "Manage invoice")}
+        description={l(
+          "Aktualisieren Sie den Billing-Status und setzen Sie den Mahnprozess direkt aus dem Patientenprofil fort.",
+          "Обновляйте статус billing и продолжайте процесс напоминаний прямо из профиля пациента.",
+          "Update billing status and continue dunning flow directly from the patient profile.",
+        )}
+        bodyClassName="px-4 py-4 space-y-3"
+        footer={
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg"
+              onClick={onCloseInvoiceManager}
+            >
+              {l("Schließen", "Закрыть", "Close")}
+            </Button>
+            <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={invoiceBusy}>
+              {invoiceBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+              {l("Rechnung speichern", "Сохранить счёт", "Save invoice")}
+            </Button>
+          </>
+        }
+      >
+        <FormSection title={l("Rechnung", "Счёт", "Invoice")}>
+          <div className="grid gap-3 md:grid-cols-2">
+            <FormField label={l("Status", "Статус", "Status")} htmlFor="invoice-status-edit">
+              <NativeComboboxSelect
+                id="invoice-status-edit"
+                value={invoiceStatusForm.status}
+                onChange={(event) => onInvoiceStatusValueChange(event.target.value ?? invoiceStatusForm.status)}
+                className={selectClass}
+              >
+                {invoiceStatusOptions.map((status) => (
+                  <option key={status} value={status}>
+                    {patientDetailStatusLabel(status)}
+                  </option>
+                ))}
+              </NativeComboboxSelect>
+            </FormField>
+            <FormField label={l("Fälligkeitsdatum", "Срок", "Due date")} htmlFor="invoice-due-date-edit">
+              <Input
+                id="invoice-due-date-edit"
+                type="date"
+                value={invoiceStatusForm.dueDate}
+                onChange={(event) => onInvoiceDueDateChange(event.target.value)}
+                className={inputClass}
               />
-            </div>
-
-            <DialogFooter>
-              <Button type="button" variant="outline" className="rounded-xl" onClick={onCloseInvoiceManager}>
-                {l("Schließen", "Закрыть", "Close")}
-              </Button>
-            </DialogFooter>
+            </FormField>
+            <FormField label={l("Bezahlter Betrag", "Оплаченная сумма", "Paid amount")} htmlFor="invoice-paid-amount-edit">
+              <Input
+                id="invoice-paid-amount-edit"
+                value={invoiceStatusForm.paidAmount}
+                onChange={(event) => onInvoicePaidAmountChange(event.target.value)}
+                className={inputClass}
+                placeholder="0.00"
+              />
+            </FormField>
           </div>
-        </DialogContent>
-      </Dialog>
+        </FormSection>
+
+        <FormSection title={l("Zusatzlich", "Дополнительно", "Additional")}>
+          <FormField label={l("Notizen", "Заметки", "Notes")} htmlFor="invoice-notes-edit">
+            <textarea
+              id="invoice-notes-edit"
+              className={textareaClassName}
+              value={invoiceStatusForm.notes}
+              onChange={(event) => onInvoiceNotesChange(event.target.value)}
+              placeholder={l(
+                "Billing-Notizen oder Details zur Zahlungsbestätigung",
+                "Заметки по billing или детали подтверждения оплаты",
+                "Billing notes or payment confirmation details",
+              )}
+            />
+          </FormField>
+        </FormSection>
+
+        <FormSection
+          title={l("Mahnwesen", "Напоминания", "Dunning")}
+          accessory={
+            canManageInvoices && nextDunningLevel(dunningEvents) ? (
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 rounded-lg gap-1.5"
+                onClick={() => void onCreateDunning()}
+                disabled={dunningBusy}
+              >
+                {dunningBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+                {l("Senden", "Отправить", "Send")} {nextDunningLevel(dunningEvents)}
+              </Button>
+            ) : null
+          }
+        >
+          <p className="text-xs leading-5 text-muted-foreground">
+            {l(
+              "Verfolgen Sie versendete Mahnungen und eskalieren Sie überfällige Rechnungen.",
+              "Отслеживайте отправленные напоминания и эскалируйте просроченные счета.",
+              "Track sent reminders and escalate overdue invoices.",
+            )}
+          </p>
+          <div className="mt-3">
+            <FormField label={l("Mahnhinweis", "Заметка по напоминанию", "Reminder note")} htmlFor="dunning-note">
+              <textarea
+                id="dunning-note"
+                className={textareaClassName}
+                value={dunningNote}
+                onChange={(event) => onDunningNoteChange(event.target.value)}
+                placeholder={l(
+                  "Optionale Notiz für den Billing-Verlauf",
+                  "Необязательная заметка для trail биллинга",
+                  "Optional note for billing trail",
+                )}
+              />
+            </FormField>
+          </div>
+          <DunningEventsList
+            dunningEvents={dunningEvents}
+            formatDateTime={formatDateTime}
+            formatMoney={formatMoney}
+            l={l}
+          />
+        </FormSection>
+      </PatientSheetScaffold>
     </>
   );
 }

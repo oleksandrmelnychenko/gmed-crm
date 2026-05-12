@@ -7,6 +7,21 @@ import {
   type SetStateAction,
 } from "react";
 
+import {
+  Banknote,
+  ChevronDown,
+  CircleDollarSign,
+  Download,
+  Plus,
+  ReceiptText,
+  RotateCcw,
+  TrendingDown,
+  TrendingUp,
+  TriangleAlert,
+  WalletCards,
+} from "lucide-react";
+
+import { AdminInlineMetric, AdminToolbar } from "@/components/admin-page-patterns";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,7 +33,6 @@ import {
   EmptyCell,
   Field,
   Section as FormSection,
-  StatCard,
   TabLoader,
   inputClass,
   selectClass,
@@ -35,6 +49,7 @@ import type {
   PatientServicePackageItem,
   OrderItem,
 } from "../../model/detail-tab-types";
+import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 import { WorkspaceSectionIntro } from "../shared/workspace-primitives";
 import {
   patientInvoiceLedgerCategoryLabel,
@@ -197,6 +212,12 @@ function buildPackageGroups(servicePackages: PatientServicePackageItem[]) {
     {
       packageName: string;
       status: string;
+      orderNumber: string | null;
+      startsOn: string | null;
+      endsOn: string | null;
+      payerName: string | null;
+      payerRelationship: string | null;
+      notes: string | null;
       items: PatientServicePackageItem[];
     }
   >();
@@ -205,6 +226,12 @@ function buildPackageGroups(servicePackages: PatientServicePackageItem[]) {
     const current = packageGroups.get(item.patient_service_package_id) ?? {
       packageName: item.package_name,
       status: item.status,
+      orderNumber: item.order_number ?? null,
+      startsOn: item.starts_on ?? null,
+      endsOn: item.ends_on ?? null,
+      payerName: item.payer_contact_name ?? null,
+      payerRelationship: item.payer_contact_relationship ?? null,
+      notes: item.notes ?? null,
       items: [],
     };
     current.items.push(item);
@@ -219,6 +246,14 @@ function moneyNumeric(value?: string | null) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function invoiceAccentClass(status: string) {
+  if (status === "paid") return "bg-emerald-500";
+  if (status === "overdue" || status === "cancelled") return "bg-rose-500";
+  if (status === "partially_paid") return "bg-amber-500";
+  if (status === "draft") return "bg-zinc-400";
+  return "bg-sky-500";
+}
+
 async function downloadPatientLedgerExport(patientId: string, query: URLSearchParams) {
   await downloadApiFile(
     `/patients/${patientId}/financial-ledger/export?${query.toString()}`,
@@ -227,6 +262,7 @@ async function downloadPatientLedgerExport(patientId: string, query: URLSearchPa
 }
 
 function usePatientInvoicesTabContent({
+  l,
   commonNotSet,
   tabLoading,
   invoices,
@@ -371,6 +407,11 @@ function usePatientInvoicesTabContent({
           ? nextValue(current.approvalBusyKey)
           : nextValue,
     }));
+  };
+  const closeConsumeSheet = () => {
+    setConsumeTargetId("");
+    setConsumeForm(BLANK_CONSUMPTION_FORM);
+    setConsumeError("");
   };
 
   const financeQuery = useMemo(() => {
@@ -529,6 +570,8 @@ function usePatientInvoicesTabContent({
 
   const effectiveServicePackages = refreshedServicePackages ?? servicePackages;
   const packageGroupItems = buildPackageGroups(effectiveServicePackages);
+  const consumeTargetGroup =
+    packageGroupItems.find(([id]) => id === consumeTargetId)?.[1] ?? null;
   const assignedPackageIds = new Set(
     effectiveServicePackages.map((item) => item.package_id),
   );
@@ -569,8 +612,12 @@ function usePatientInvoicesTabContent({
             {financeError}
           </Banner>
         ) : null}
-        <div className="mb-4 grid gap-3 rounded-xl border border-border/50 bg-muted/20 px-4 py-3 md:grid-cols-2 xl:grid-cols-5">
-          <Field label={t.patient_invoices_from} htmlFor="profitability-from">
+        <AdminToolbar className="mb-4 items-start gap-2 rounded-xl bg-card/70 p-3 shadow-none">
+          <Field
+            label={t.patient_invoices_from}
+            htmlFor="profitability-from"
+            className="min-w-[150px] flex-[1_1_150px]"
+          >
             <Input
               id="profitability-from"
               type="date"
@@ -585,7 +632,11 @@ function usePatientInvoicesTabContent({
               disabled={financeBusy}
             />
           </Field>
-          <Field label={t.patient_invoices_to} htmlFor="profitability-to">
+          <Field
+            label={t.patient_invoices_to}
+            htmlFor="profitability-to"
+            className="min-w-[150px] flex-[1_1_150px]"
+          >
             <Input
               id="profitability-to"
               type="date"
@@ -600,7 +651,11 @@ function usePatientInvoicesTabContent({
               disabled={financeBusy}
             />
           </Field>
-          <Field label={t.patient_invoices_order} htmlFor="profitability-order">
+          <Field
+            label={t.patient_invoices_order}
+            htmlFor="profitability-order"
+            className="min-w-[190px] flex-[1.2_1_190px]"
+          >
             <NativeComboboxSelect
               id="profitability-order"
               value={financeFilters.orderId || "__all__"}
@@ -621,7 +676,11 @@ function usePatientInvoicesTabContent({
               ))}
             </NativeComboboxSelect>
           </Field>
-          <Field label={t.patient_invoices_package} htmlFor="profitability-package">
+          <Field
+            label={t.patient_invoices_package}
+            htmlFor="profitability-package"
+            className="min-w-[220px] flex-[1.4_1_220px]"
+          >
             <NativeComboboxSelect
               id="profitability-package"
               value={financeFilters.packageId || "__all__"}
@@ -642,19 +701,20 @@ function usePatientInvoicesTabContent({
               ))}
             </NativeComboboxSelect>
           </Field>
-          <div className="flex items-end gap-2">
+          <div className="ml-auto flex shrink-0 items-start gap-2 pt-[18px]">
             <Button
               type="button"
               variant="outline"
-              className="h-9 rounded-lg"
+              className="h-9 rounded-lg gap-1.5"
               onClick={() => setFinanceFilters({ from: "", to: "", orderId: "", packageId: "" })}
               disabled={financeBusy}
             >
+              <RotateCcw className="size-3.5" />
               {t.patient_invoices_reset}
             </Button>
             <Button
               type="button"
-              className="h-9 rounded-lg"
+              className="h-9 rounded-lg gap-1.5"
               onClick={() =>
                 patientId
                   ? void downloadPatientLedgerExport(patientId, financeQuery).catch((error) =>
@@ -666,58 +726,72 @@ function usePatientInvoicesTabContent({
               }
               disabled={!patientId || financeBusy}
             >
+              <Download className="size-3.5" />
               {t.patient_invoices_export}
             </Button>
           </div>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <StatCard
+        </AdminToolbar>
+        <div className="grid gap-y-4 overflow-hidden rounded-xl border border-border px-3 pb-4 pt-4 md:grid-cols-2 xl:grid-cols-4 [&>article:not(:last-child):not(:nth-child(4n))_.admin-inline-metric-separator]:xl:block">
+          <AdminInlineMetric
+            icon={CircleDollarSign}
             label={t.patient_invoices_gross_revenue}
             value={formatMoney(revenueGross)}
             description={t.patient_invoices_gross_revenue_description}
+            tone="sky"
           />
-          <StatCard
+          <AdminInlineMetric
+            icon={ReceiptText}
             label={t.patient_invoices_open_invoices}
             value={invoiceOpenCount}
             description={t.patient_invoices_open_invoices_description}
+            tone="slate"
           />
-          <StatCard
+          <AdminInlineMetric
+            icon={WalletCards}
             label={t.patient_invoices_outstanding_amount}
             value={formatMoney(openBalance)}
             description={t.patient_invoices_outstanding_amount_description}
+            tone="amber"
           />
-          <StatCard
+          <AdminInlineMetric
+            icon={Banknote}
             label={t.patient_invoices_paid}
             value={formatMoney(paidAmount)}
             description={t.patient_invoices_paid_description}
+            tone="emerald"
           />
-          <StatCard
+          <AdminInlineMetric
+            icon={TriangleAlert}
             label={t.patient_invoices_overdue_amount}
             value={formatMoney(overdueAmount)}
             description={t.patient_invoices_overdue_amount_description}
+            tone="rose"
           />
           {effectiveFinancialSummary?.margin_visible ? (
             <>
-              <StatCard
+              <AdminInlineMetric
+                icon={TrendingDown}
                 label={t.patient_invoices_gross_expenses}
                 value={formatMoney(effectiveFinancialSummary.expenses_gross)}
                 description={t.patient_invoices_visible_ceo_billing}
+                tone="slate"
               />
-              <StatCard
+              <AdminInlineMetric
+                icon={TrendingUp}
                 label={t.patient_invoices_net_margin}
                 value={formatMoney(effectiveFinancialSummary.margin_net)}
                 description={`${effectiveFinancialSummary.margin_percent ?? "0"}%`}
+                tone="emerald"
               />
             </>
           ) : (
-            <div className="rounded-xl border border-dashed border-border/60 bg-muted/25 px-4 py-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                {t.patient_invoices_margin_hidden}
-              </p>
-              <p className="mt-2 text-sm text-muted-foreground">
-                {t.patient_invoices_margin_hidden_description}
-              </p>
-            </div>
+            <AdminInlineMetric
+              icon={TrendingUp}
+              label={t.patient_invoices_margin_hidden}
+              value={commonNotSet}
+              description={t.patient_invoices_margin_hidden_description}
+              tone="slate"
+            />
           )}
         </div>
 
@@ -741,6 +815,321 @@ function usePatientInvoicesTabContent({
         ) : null}
       </FormSection>
 
+      <PatientSheetScaffold
+        open={assignOpen && canManageInvoices}
+        onOpenChange={(open) => setAssignOpen(open)}
+        width="form-heavy"
+        onSubmit={handleAssignPackage}
+        title={t.patient_invoices_assign_package}
+        bodyClassName="px-4 py-4 space-y-3"
+        footer={
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg"
+              onClick={() => setAssignOpen(false)}
+              disabled={assignBusy}
+            >
+              {t.patient_invoices_cancel}
+            </Button>
+            <Button
+              type="submit"
+              size="sm"
+              className="h-8 rounded-lg"
+              disabled={assignBusy || !assignForm.packageId}
+            >
+              {t.patient_invoices_assign}
+            </Button>
+          </>
+        }
+      >
+        {assignError ? (
+          <Banner tone="error" withIcon>
+            {assignError}
+          </Banner>
+        ) : null}
+
+        <FormSection title={t.patient_invoices_package}>
+          <div className="grid gap-3 md:grid-cols-2">
+            <Field label={t.patient_invoices_package} htmlFor="assign-package-id">
+              <NativeComboboxSelect
+                id="assign-package-id"
+                value={assignForm.packageId || "__empty__"}
+                onChange={(event) =>
+                  setAssignForm((current) => ({
+                    ...current,
+                    packageId:
+                      event.target.value === "__empty__" ? "" : event.target.value,
+                  }))
+                }
+                className={selectClass}
+                disabled={assignBusy}
+              >
+                <option value="__empty__">
+                  {t.patient_invoices_choose_package}
+                </option>
+                {assignablePackages.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </NativeComboboxSelect>
+            </Field>
+            <Field label={t.patient_invoices_order} htmlFor="assign-package-order">
+              <NativeComboboxSelect
+                id="assign-package-order"
+                value={assignForm.orderId || "__none__"}
+                onChange={(event) =>
+                  setAssignForm((current) => ({
+                    ...current,
+                    orderId: event.target.value === "__none__" ? "" : event.target.value,
+                  }))
+                }
+                className={selectClass}
+                disabled={assignBusy}
+              >
+                <option value="__none__">{t.patient_invoices_no_order_link}</option>
+                {patientOrders.map((order) => (
+                  <option key={order.id} value={order.id}>
+                    {order.order_number}
+                  </option>
+                ))}
+              </NativeComboboxSelect>
+            </Field>
+            <Field label={t.patient_invoices_starts} htmlFor="assign-package-starts">
+              <Input
+                id="assign-package-starts"
+                type="date"
+                value={assignForm.startsOn}
+                onChange={(event) =>
+                  setAssignForm((current) => ({
+                    ...current,
+                    startsOn: event.target.value,
+                  }))
+                }
+                className={inputClass}
+                disabled={assignBusy}
+              />
+            </Field>
+            <Field label={t.patient_invoices_ends} htmlFor="assign-package-ends">
+              <Input
+                id="assign-package-ends"
+                type="date"
+                value={assignForm.endsOn}
+                onChange={(event) =>
+                  setAssignForm((current) => ({
+                    ...current,
+                    endsOn: event.target.value,
+                  }))
+                }
+                className={inputClass}
+                disabled={assignBusy}
+              />
+            </Field>
+          </div>
+        </FormSection>
+
+        <FormSection title={t.patient_invoices_payer}>
+          <div className="grid gap-3 md:grid-cols-2">
+            <Field label={t.patient_invoices_payer} htmlFor="assign-package-payer">
+              <Input
+                id="assign-package-payer"
+                value={assignForm.payerName}
+                onChange={(event) =>
+                  setAssignForm((current) => ({
+                    ...current,
+                    payerName: event.target.value,
+                  }))
+                }
+                className={inputClass}
+                disabled={assignBusy}
+              />
+            </Field>
+            <Field
+              label={t.patient_invoices_relationship}
+              htmlFor="assign-package-relationship"
+            >
+              <Input
+                id="assign-package-relationship"
+                value={assignForm.payerRelationship}
+                onChange={(event) =>
+                  setAssignForm((current) => ({
+                    ...current,
+                    payerRelationship: event.target.value,
+                  }))
+                }
+                className={inputClass}
+                disabled={assignBusy}
+              />
+            </Field>
+          </div>
+        </FormSection>
+
+        <FormSection title={l("Zusatzlich", "Дополнительно", "Additional")}>
+          <Field label={t.patient_invoices_notes} htmlFor="assign-package-notes">
+            <textarea
+              id="assign-package-notes"
+              value={assignForm.notes}
+              onChange={(event) =>
+                setAssignForm((current) => ({
+                  ...current,
+                  notes: event.target.value,
+                }))
+              }
+              className={textareaClass}
+              rows={3}
+              disabled={assignBusy}
+            />
+          </Field>
+        </FormSection>
+      </PatientSheetScaffold>
+
+      <PatientSheetScaffold
+        open={Boolean(consumeTargetId) && canManageInvoices}
+        onOpenChange={(open) => {
+          if (!open) closeConsumeSheet();
+        }}
+        width="form-heavy"
+        onSubmit={handleConsumePackage}
+        title={t.patient_invoices_record_consumption}
+        bodyClassName="px-4 py-4 space-y-3"
+        footer={
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg"
+              onClick={closeConsumeSheet}
+              disabled={consumeBusy}
+            >
+              {t.patient_invoices_cancel}
+            </Button>
+            <Button
+              type="submit"
+              size="sm"
+              className="h-8 rounded-lg"
+              disabled={consumeBusy || !consumeTargetId}
+            >
+              {t.patient_invoices_record}
+            </Button>
+          </>
+        }
+      >
+        {consumeError ? (
+          <Banner tone="error" withIcon>
+            {consumeError}
+          </Banner>
+        ) : null}
+
+        <FormSection title={l("Verbrauch", "Использование", "Consumption")}>
+          <div className="grid gap-3 md:grid-cols-2">
+            <Field label={t.patient_invoices_item} htmlFor="consume-package-item">
+              <NativeComboboxSelect
+                id="consume-package-item"
+                value={consumeForm.packageItemId || "__summary__"}
+                onChange={(event) =>
+                  setConsumeForm((current) => ({
+                    ...current,
+                    packageItemId:
+                      event.target.value === "__summary__"
+                        ? ""
+                        : event.target.value,
+                  }))
+                }
+                className={selectClass}
+                disabled={consumeBusy}
+              >
+                <option value="__summary__">
+                  {t.patient_invoices_package_summary}
+                </option>
+                {consumeTargetGroup?.items.reduce<ReactNode[]>((options, item) => {
+                  if (!item.package_item_id) {
+                    return options;
+                  }
+                  options.push(
+                    <option key={item.package_item_id} value={item.package_item_id}>
+                      {item.description}
+                    </option>,
+                  );
+                  return options;
+                }, []) ?? []}
+              </NativeComboboxSelect>
+            </Field>
+            <Field label={t.patient_invoices_order} htmlFor="consume-package-order">
+              <NativeComboboxSelect
+                id="consume-package-order"
+                value={consumeForm.orderId || "__none__"}
+                onChange={(event) =>
+                  setConsumeForm((current) => ({
+                    ...current,
+                    orderId: event.target.value === "__none__" ? "" : event.target.value,
+                  }))
+                }
+                className={selectClass}
+                disabled={consumeBusy}
+              >
+                <option value="__none__">{t.patient_invoices_no_order}</option>
+                {patientOrders.map((order) => (
+                  <option key={order.id} value={order.id}>
+                    {order.order_number}
+                  </option>
+                ))}
+              </NativeComboboxSelect>
+            </Field>
+            <Field label={t.patient_invoices_order_service_id} htmlFor="consume-order-service-id">
+              <Input
+                id="consume-order-service-id"
+                value={consumeForm.orderLeistungId}
+                onChange={(event) =>
+                  setConsumeForm((current) => ({
+                    ...current,
+                    orderLeistungId: event.target.value,
+                  }))
+                }
+                className={inputClass}
+                disabled={consumeBusy}
+                placeholder={t.patient_invoices_optional_uuid}
+              />
+            </Field>
+            <Field label={t.patient_invoices_quantity} htmlFor="consume-package-quantity">
+              <Input
+                id="consume-package-quantity"
+                value={consumeForm.quantity}
+                onChange={(event) =>
+                  setConsumeForm((current) => ({
+                    ...current,
+                    quantity: event.target.value,
+                  }))
+                }
+                className={inputClass}
+                disabled={consumeBusy}
+              />
+            </Field>
+          </div>
+        </FormSection>
+
+        <FormSection title={l("Zusatzlich", "Дополнительно", "Additional")}>
+          <Field label={t.patient_invoices_consumption_note} htmlFor="consume-package-note">
+            <textarea
+              id="consume-package-note"
+              value={consumeForm.notes}
+              onChange={(event) =>
+                setConsumeForm((current) => ({
+                  ...current,
+                  notes: event.target.value,
+                }))
+              }
+              className={textareaClass}
+              rows={3}
+              disabled={consumeBusy}
+            />
+          </Field>
+        </FormSection>
+      </PatientSheetScaffold>
+
       <FormSection
         title={t.patient_invoices_service_packages}
         accessory={
@@ -752,7 +1141,7 @@ function usePatientInvoicesTabContent({
                 variant={assignOpen ? "default" : "outline"}
                 size="sm"
                 className="h-8 rounded-lg"
-                onClick={() => setAssignOpen((current) => !current)}
+                onClick={() => setAssignOpen(true)}
                 disabled={!patientId}
               >
                 {t.patient_invoices_assign_package}
@@ -761,150 +1150,6 @@ function usePatientInvoicesTabContent({
           </div>
         }
       >
-        {assignOpen && canManageInvoices ? (
-          <form
-            className="mb-4 rounded-xl border border-border/50 bg-card px-4 py-3"
-            onSubmit={handleAssignPackage}
-          >
-            {assignError ? (
-              <Banner tone="error" withIcon>
-                {assignError}
-              </Banner>
-            ) : null}
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <Field label={t.patient_invoices_package}>
-                <NativeComboboxSelect
-                  value={assignForm.packageId || "__empty__"}
-                  onChange={(event) =>
-                    setAssignForm((current) => ({
-                      ...current,
-                      packageId:
-                        event.target.value === "__empty__" ? "" : event.target.value,
-                    }))
-                  }
-                  className={selectClass}
-                  disabled={assignBusy}
-                >
-                  <option value="__empty__">
-                    {t.patient_invoices_choose_package}
-                  </option>
-                  {assignablePackages.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
-                    </option>
-                  ))}
-                </NativeComboboxSelect>
-              </Field>
-              <Field label={t.patient_invoices_order}>
-                <NativeComboboxSelect
-                  value={assignForm.orderId || "__none__"}
-                  onChange={(event) =>
-                    setAssignForm((current) => ({
-                      ...current,
-                      orderId: event.target.value === "__none__" ? "" : event.target.value,
-                    }))
-                  }
-                  className={selectClass}
-                  disabled={assignBusy}
-                >
-                  <option value="__none__">{t.patient_invoices_no_order_link}</option>
-                  {patientOrders.map((order) => (
-                    <option key={order.id} value={order.id}>
-                      {order.order_number}
-                    </option>
-                  ))}
-                </NativeComboboxSelect>
-              </Field>
-              <Field label={t.patient_invoices_starts}>
-                <Input
-                  type="date"
-                  value={assignForm.startsOn}
-                  onChange={(event) =>
-                    setAssignForm((current) => ({
-                      ...current,
-                      startsOn: event.target.value,
-                    }))
-                  }
-                  className={inputClass}
-                  disabled={assignBusy}
-                />
-              </Field>
-              <Field label={t.patient_invoices_ends}>
-                <Input
-                  type="date"
-                  value={assignForm.endsOn}
-                  onChange={(event) =>
-                    setAssignForm((current) => ({
-                      ...current,
-                      endsOn: event.target.value,
-                    }))
-                  }
-                  className={inputClass}
-                  disabled={assignBusy}
-                />
-              </Field>
-              <Field label={t.patient_invoices_payer}>
-                <Input
-                  value={assignForm.payerName}
-                  onChange={(event) =>
-                    setAssignForm((current) => ({
-                      ...current,
-                      payerName: event.target.value,
-                    }))
-                  }
-                  className={inputClass}
-                  disabled={assignBusy}
-                />
-              </Field>
-              <Field label={t.patient_invoices_relationship}>
-                <Input
-                  value={assignForm.payerRelationship}
-                  onChange={(event) =>
-                    setAssignForm((current) => ({
-                      ...current,
-                      payerRelationship: event.target.value,
-                    }))
-                  }
-                  className={inputClass}
-                  disabled={assignBusy}
-                />
-              </Field>
-              <Field label={t.patient_invoices_notes} className="md:col-span-2">
-                <textarea
-                  value={assignForm.notes}
-                  onChange={(event) =>
-                    setAssignForm((current) => ({
-                      ...current,
-                      notes: event.target.value,
-                    }))
-                  }
-                  className={textareaClass}
-                  rows={2}
-                  disabled={assignBusy}
-                />
-              </Field>
-            </div>
-            <div className="mt-3 flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9 rounded-lg"
-                onClick={() => setAssignOpen(false)}
-                disabled={assignBusy}
-              >
-                {t.patient_invoices_cancel}
-              </Button>
-              <Button
-                type="submit"
-                className="h-9 rounded-lg"
-                disabled={assignBusy || !assignForm.packageId}
-              >
-                {t.patient_invoices_assign}
-              </Button>
-            </div>
-          </form>
-        ) : null}
-
         {tabLoading ? (
           <TabLoader />
         ) : packageGroupItems.length === 0 ? (
@@ -912,272 +1157,242 @@ function usePatientInvoicesTabContent({
             {t.patient_invoices_no_service_package}
           </EmptyCell>
         ) : (
-          <div className="space-y-3">
-            {packageGroupItems.map(([id, group]) => (
-              <div
-                key={id}
-                className="rounded-xl border border-border/50 bg-card px-4 py-3"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold text-foreground">
-                      {group.packageName}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {group.items.length} {t.patient_invoices_items_suffix}
-                    </p>
-                  </div>
-                  <Badge
-                    variant="outline"
-                    className={cn("rounded-full text-[10px]", statusColors[group.status] ?? "")}
-                  >
-                    {statusLabel(group.status)}
-                  </Badge>
-                </div>
-                <div className="mt-3 grid gap-2 md:grid-cols-2">
-                  {group.items.map((item) => (
-                    <div
-                      key={item.package_item_id ?? `${id}:summary`}
-                      className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-sm"
-                    >
-                      <p className="font-medium text-foreground">
-                        {item.description ?? t.patient_invoices_package_summary}
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {t.patient_invoices_included}:{" "}
-                        {item.included_quantity} {item.unit_label ?? ""} /{" "}
-                        {t.patient_invoices_used}: {item.used_quantity} /{" "}
-                        {t.patient_invoices_remaining}:{" "}
-                        {item.remaining_quantity}
-                      </p>
-                      {moneyValueNumber(item.overage_quantity) > 0 ||
-                      item.requires_patient_approval ? (
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {moneyValueNumber(item.overage_quantity) > 0 ? (
-                            <Badge
-                              variant="outline"
-                              className="rounded-full border-amber-200 bg-amber-50 text-[10px] text-amber-700"
-                            >
-                              {t.patient_invoices_overage}:{" "}
-                              {item.overage_quantity}
-                            </Badge>
-                          ) : null}
-                          {moneyNumeric(item.pending_overage_quantity) > 0 ? (
-                            <Badge
-                              variant="outline"
-                              className="rounded-full border-orange-200 bg-orange-50 text-[10px] text-orange-700"
-                            >
-                              {t.patient_invoices_pending}:{" "}
-                              {item.pending_overage_quantity}
-                            </Badge>
-                          ) : null}
-                          {moneyNumeric(item.approved_overage_quantity) > 0 ? (
-                            <Badge
-                              variant="outline"
-                              className="rounded-full border-emerald-200 bg-emerald-50 text-[10px] text-emerald-700"
-                            >
-                              {t.patient_invoices_approved}:{" "}
-                              {item.approved_overage_quantity}
-                            </Badge>
-                          ) : null}
-                          {item.requires_patient_approval ? (
-                            <Badge
-                              variant="outline"
-                              className="rounded-full border-sky-200 bg-sky-50 text-[10px] text-sky-700"
-                            >
-                              {t.patient_invoices_patient_approval}
-                            </Badge>
-                          ) : null}
-                        </div>
-                      ) : null}
-                      {canManageInvoices && moneyNumeric(item.pending_overage_quantity) > 0 ? (
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-7 rounded-lg"
-                            disabled={
-                              approvalBusyKey ===
-                              `${item.patient_service_package_id}:${item.package_item_id ?? "summary"}:approved`
-                            }
-                            onClick={() =>
-                              void handleOverageDecision(
-                                item.patient_service_package_id,
-                                item.package_item_id,
-                                "approved",
-                              )
-                            }
-                          >
-                            {t.patient_invoices_approve_overage}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 rounded-lg text-rose-700"
-                            disabled={
-                              approvalBusyKey ===
-                              `${item.patient_service_package_id}:${item.package_item_id ?? "summary"}:declined`
-                            }
-                            onClick={() =>
-                              void handleOverageDecision(
-                                item.patient_service_package_id,
-                                item.package_item_id,
-                                "declined",
-                              )
-                            }
-                          >
-                            {t.patient_invoices_decline}
-                          </Button>
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-                {canManageInvoices ? (
-                  <div className="mt-3 rounded-xl border border-border/50 bg-muted/20 p-3">
-                    {consumeError && consumeTargetId === id ? (
-                      <Banner tone="error" withIcon>
-                        {consumeError}
-                      </Banner>
-                    ) : null}
-                    {consumeTargetId === id ? (
-                      <form className="grid gap-3 md:grid-cols-2 xl:grid-cols-5" onSubmit={handleConsumePackage}>
-                        <Field label={t.patient_invoices_item}>
-                          <NativeComboboxSelect
-                            value={consumeForm.packageItemId || "__summary__"}
-                            onChange={(event) =>
-                              setConsumeForm((current) => ({
-                                ...current,
-                                packageItemId:
-                                  event.target.value === "__summary__"
-                                    ? ""
-                                    : event.target.value,
-                              }))
-                            }
-                            className={selectClass}
-                            disabled={consumeBusy}
-                          >
-                            <option value="__summary__">
-                              {t.patient_invoices_package_summary}
-                            </option>
-                            {group.items.reduce<ReactNode[]>((options, item) => {
-                              if (!item.package_item_id) {
-                                return options;
-                              }
-                              options.push(
-                                <option key={item.package_item_id} value={item.package_item_id}>
-                                  {item.description}
-                                </option>,
-                              );
-                              return options;
-                            }, [])}
-                          </NativeComboboxSelect>
-                        </Field>
-                        <Field label={t.patient_invoices_order}>
-                          <NativeComboboxSelect
-                            value={consumeForm.orderId || "__none__"}
-                            onChange={(event) =>
-                              setConsumeForm((current) => ({
-                                ...current,
-                                orderId:
-                                  event.target.value === "__none__" ? "" : event.target.value,
-                              }))
-                            }
-                            className={selectClass}
-                            disabled={consumeBusy}
-                          >
-                            <option value="__none__">{t.patient_invoices_no_order}</option>
-                            {patientOrders.map((order) => (
-                              <option key={order.id} value={order.id}>
-                                {order.order_number}
-                              </option>
-                            ))}
-                          </NativeComboboxSelect>
-                        </Field>
-                        <Field label={t.patient_invoices_order_service_id}>
-                          <Input
-                            value={consumeForm.orderLeistungId}
-                            onChange={(event) =>
-                              setConsumeForm((current) => ({
-                                ...current,
-                                orderLeistungId: event.target.value,
-                              }))
-                            }
-                            className={inputClass}
-                            disabled={consumeBusy}
-                            placeholder={t.patient_invoices_optional_uuid}
-                          />
-                        </Field>
-                        <Field label={t.patient_invoices_quantity}>
-                          <Input
-                            value={consumeForm.quantity}
-                            onChange={(event) =>
-                              setConsumeForm((current) => ({
-                                ...current,
-                                quantity: event.target.value,
-                              }))
-                            }
-                            className={inputClass}
-                            disabled={consumeBusy}
-                          />
-                        </Field>
-                        <div className="flex items-end gap-2">
-                          <Button
-                            type="submit"
-                            className="h-9 rounded-lg"
-                            disabled={consumeBusy}
-                          >
-                            {t.patient_invoices_record}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="h-9 rounded-lg"
-                            onClick={() => {
-                              setConsumeTargetId("");
-                              setConsumeForm(BLANK_CONSUMPTION_FORM);
-                            }}
-                            disabled={consumeBusy}
-                          >
-                            {t.patient_invoices_cancel}
-                          </Button>
-                        </div>
-                        <Field label={t.patient_invoices_consumption_note} className="md:col-span-2 xl:col-span-5">
-                          <textarea
-                            value={consumeForm.notes}
-                            onChange={(event) =>
-                              setConsumeForm((current) => ({
-                                ...current,
-                                notes: event.target.value,
-                              }))
-                            }
-                            className={textareaClass}
-                            rows={2}
-                            disabled={consumeBusy}
-                          />
-                        </Field>
-                      </form>
-                    ) : (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 rounded-lg"
-                        onClick={() => {
-                          setConsumeTargetId(id);
-                          setConsumeForm(BLANK_CONSUMPTION_FORM);
-                          setConsumeError("");
-                        }}
+          <div className="space-y-0">
+            {packageGroupItems.map(([id, group]) => {
+              const dateRange = [group.startsOn, group.endsOn].filter(Boolean).join(" - ");
+              const payerLabel = [group.payerName, group.payerRelationship].filter(Boolean).join(" / ");
+
+              return (
+                <details key={id} className="group relative pl-9">
+                  <summary className="relative grid cursor-pointer list-none gap-2 rounded-lg p-3 pr-12 transition hover:bg-[#f9fdff] group-open:bg-[#f9fdff] group-open:ring-1 group-open:ring-border/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                    <div className="absolute -left-9 bottom-0 top-0 flex w-8 items-start justify-center pt-3">
+                      <span
+                        className={cn(
+                          "inline-flex size-7 shrink-0 items-center justify-center rounded-full transition-colors",
+                          group.status === "active"
+                            ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+                            : "bg-slate-50 text-slate-500 ring-1 ring-slate-200",
+                        )}
                       >
-                        {t.patient_invoices_record_consumption}
-                      </Button>
-                    )}
+                        <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
+                      </span>
+                    </div>
+
+                    {canManageInvoices ? (
+                      <div
+                        role="presentation"
+                        className="absolute right-3 top-3 z-20"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                        }}
+                        onKeyDown={(event) => event.stopPropagation()}
+                      >
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          className="size-7 rounded-full bg-white text-muted-foreground shadow-sm ring-1 ring-border/60 hover:bg-[#f9fdff] hover:text-foreground"
+                          onClick={() => {
+                            setConsumeTargetId(id);
+                            setConsumeForm(BLANK_CONSUMPTION_FORM);
+                            setConsumeError("");
+                          }}
+                          aria-label={t.patient_invoices_record_consumption}
+                          title={t.patient_invoices_record_consumption}
+                        >
+                          <Plus className="size-3.5" />
+                        </Button>
+                      </div>
+                    ) : null}
+
+                    <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+                      <div className="min-w-0">
+                        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                          <p className="max-w-full truncate text-[15px] font-semibold leading-5 text-foreground">
+                            {group.packageName}
+                          </p>
+                          {group.orderNumber ? (
+                            <>
+                              <span className="size-1 rounded-full bg-muted-foreground/35" />
+                              <span className="font-mono text-xs text-muted-foreground">
+                                {group.orderNumber}
+                              </span>
+                            </>
+                          ) : null}
+                          {dateRange ? (
+                            <>
+                              <span className="size-1 rounded-full bg-muted-foreground/35" />
+                              <span className="text-xs tabular-nums text-muted-foreground">
+                                {dateRange}
+                              </span>
+                            </>
+                          ) : null}
+                        </div>
+                        <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                          <span>
+                            {group.items.length} {t.patient_invoices_items_suffix}
+                          </span>
+                          {payerLabel ? (
+                            <>
+                              <span className="size-1 rounded-full bg-muted-foreground/35" />
+                              <span className="max-w-[320px] truncate">
+                                {t.patient_invoices_payer}:{" "}
+                                <span className="font-medium text-foreground">
+                                  {payerLabel}
+                                </span>
+                              </span>
+                            </>
+                          ) : null}
+                          {group.notes ? (
+                            <>
+                              <span className="size-1 rounded-full bg-muted-foreground/35" />
+                              <span className="max-w-[420px] truncate">
+                                {group.notes}
+                              </span>
+                            </>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="flex min-w-0 flex-wrap justify-start gap-1.5 lg:max-w-[520px] lg:justify-end lg:pr-1">
+                        <Badge
+                          variant="outline"
+                          className={cn("rounded-full text-[10px]", statusColors[group.status] ?? "")}
+                        >
+                          {statusLabel(group.status)}
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className="rounded-full border-0 bg-white px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
+                        >
+                          {t.patient_invoices_included}:{" "}
+                          <span className="ml-1 font-semibold text-foreground">
+                            {group.items.reduce(
+                              (sum, item) => sum + moneyNumeric(item.included_quantity),
+                              0,
+                            )}
+                          </span>
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className="rounded-full border-0 bg-white px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
+                        >
+                          {t.patient_invoices_used}:{" "}
+                          <span className="ml-1 font-semibold text-foreground">
+                            {group.items.reduce(
+                              (sum, item) => sum + moneyNumeric(item.used_quantity),
+                              0,
+                            )}
+                          </span>
+                        </Badge>
+                      </div>
+                    </div>
+                  </summary>
+
+                  <div aria-hidden="true" className="ml-20 flex h-3 items-center px-3">
+                    <span className="h-px w-12 bg-gradient-to-r from-transparent via-border/70 to-border/70" />
+                    <span className="size-1.5 rounded-full bg-border" />
+                    <span className="h-px flex-1 bg-gradient-to-r from-border/70 to-transparent" />
                   </div>
-                ) : null}
-              </div>
-            ))}
+                  <div className="mb-2 ml-20 overflow-hidden rounded-lg bg-[#fbfdff] p-2 shadow-sm">
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {group.items.map((item) => (
+                        <div
+                          key={item.package_item_id ?? `${id}:summary`}
+                          className="rounded-md bg-white px-3 py-2 text-xs shadow-sm ring-1 ring-border/40"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <p className="min-w-0 truncate font-medium text-foreground">
+                              {item.description ?? t.patient_invoices_package_summary}
+                            </p>
+                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                              {item.included_quantity} {item.unit_label ?? ""}
+                            </span>
+                          </div>
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                            <span>
+                              {t.patient_invoices_used}:{" "}
+                              <span className="font-medium text-foreground">
+                                {item.used_quantity}
+                              </span>
+                            </span>
+                            <span>
+                              {t.patient_invoices_remaining}:{" "}
+                              <span className="font-medium text-foreground">
+                                {item.remaining_quantity}
+                              </span>
+                            </span>
+                            {moneyValueNumber(item.overage_quantity) > 0 ? (
+                              <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700">
+                                {t.patient_invoices_overage}: {item.overage_quantity}
+                              </span>
+                            ) : null}
+                            {moneyNumeric(item.pending_overage_quantity) > 0 ? (
+                              <span className="rounded-full bg-orange-50 px-2 py-0.5 font-medium text-orange-700">
+                                {t.patient_invoices_pending}: {item.pending_overage_quantity}
+                              </span>
+                            ) : null}
+                            {moneyNumeric(item.approved_overage_quantity) > 0 ? (
+                              <span className="rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700">
+                                {t.patient_invoices_approved}: {item.approved_overage_quantity}
+                              </span>
+                            ) : null}
+                            {item.requires_patient_approval ? (
+                              <span className="rounded-full bg-sky-50 px-2 py-0.5 font-medium text-sky-700">
+                                {t.patient_invoices_patient_approval}
+                              </span>
+                            ) : null}
+                          </div>
+                          {canManageInvoices && moneyNumeric(item.pending_overage_quantity) > 0 ? (
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-7 rounded-lg"
+                                disabled={
+                                  approvalBusyKey ===
+                                  `${item.patient_service_package_id}:${item.package_item_id ?? "summary"}:approved`
+                                }
+                                onClick={() =>
+                                  void handleOverageDecision(
+                                    item.patient_service_package_id,
+                                    item.package_item_id,
+                                    "approved",
+                                  )
+                                }
+                              >
+                                {t.patient_invoices_approve_overage}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 rounded-lg text-rose-700"
+                                disabled={
+                                  approvalBusyKey ===
+                                  `${item.patient_service_package_id}:${item.package_item_id ?? "summary"}:declined`
+                                }
+                                onClick={() =>
+                                  void handleOverageDecision(
+                                    item.patient_service_package_id,
+                                    item.package_item_id,
+                                    "declined",
+                                  )
+                                }
+                              >
+                                {t.patient_invoices_decline}
+                              </Button>
+                            </div>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+
+                  </div>
+                </details>
+              );
+            })}
           </div>
         )}
       </FormSection>
@@ -1195,43 +1410,71 @@ function usePatientInvoicesTabContent({
         ) : (
           <div className="space-y-2">
             {ledgerEntries.slice(0, 12).map((entry) => (
-              <div
+              <article
                 key={entry.id}
-                className="grid gap-2 rounded-xl border border-border/50 bg-card px-4 py-3 text-sm md:grid-cols-[120px_minmax(0,1fr)_160px]"
+                className="overflow-hidden rounded-xl border border-border bg-card"
               >
-                <div className="text-xs text-muted-foreground">
-                  {formatDate(entry.entry_date)}
-                </div>
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge
-                      variant="outline"
+                <div className="grid gap-3 px-4 py-3 text-sm md:grid-cols-[96px_minmax(0,1fr)_180px] md:items-center">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                      {formatDate(entry.entry_date)}
+                    </span>
+                    <span
                       className={cn(
-                        "rounded-full text-[10px]",
+                        "h-1.5 w-1.5 rounded-full",
                         entry.direction === "revenue" || entry.direction === "income"
-                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                          : "border-rose-200 bg-rose-50 text-rose-700",
+                          ? "bg-emerald-500"
+                          : "bg-rose-500",
+                      )}
+                    />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "rounded-full text-[10px]",
+                          entry.direction === "revenue" || entry.direction === "income"
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-rose-200 bg-rose-50 text-rose-700",
+                        )}
+                      >
+                        {patientInvoiceLedgerDirectionLabel(entry.direction)}
+                      </Badge>
+                      <Badge
+                        variant="outline"
+                        className="rounded-full border-0 bg-[#f9fdff] px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+                      >
+                        {patientInvoiceLedgerCategoryLabel(entry.category)}
+                      </Badge>
+                    </div>
+                    <p className="mt-2 truncate font-medium text-foreground">
+                      {entry.description}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {[entry.order_number, entry.invoice_number, entry.external_invoice_number]
+                        .filter(Boolean)
+                        .join(" / ")}
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-muted/20 px-3 py-2 text-right">
+                    <p
+                      className={cn(
+                        "text-base font-semibold tabular-nums leading-none",
+                        entry.direction === "revenue" || entry.direction === "income"
+                          ? "text-emerald-700"
+                          : "text-rose-700",
                       )}
                     >
-                      {patientInvoiceLedgerDirectionLabel(entry.direction)}
-                    </Badge>
-                    <span className="truncate font-medium text-foreground">
-                      {entry.description}
-                    </span>
+                      {entry.direction === "expense" ? "-" : "+"}
+                      {formatMoney(entry.amount_gross, entry.currency)}
+                    </p>
+                    <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                      {entry.currency}
+                    </p>
                   </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {patientInvoiceLedgerCategoryLabel(entry.category)}
-                    {entry.order_number ? ` / ${entry.order_number}` : ""}
-                    {entry.invoice_number ? ` / ${entry.invoice_number}` : ""}
-                    {entry.external_invoice_number
-                      ? ` / ${entry.external_invoice_number}`
-                      : ""}
-                  </p>
                 </div>
-                <div className="text-right font-semibold tabular-nums text-foreground">
-                  {formatMoney(entry.amount_gross, entry.currency)}
-                </div>
-              </div>
+              </article>
             ))}
           </div>
         )}
@@ -1248,116 +1491,144 @@ function usePatientInvoicesTabContent({
             {t.patient_invoices_no_invoices}
           </EmptyCell>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {invoices.map((invoice) => (
-              <div
+              <article
                 key={invoice.id}
-                className="space-y-2.5 rounded-xl border border-border/50 bg-card px-4 py-3"
+                className="rounded-xl border border-border bg-card"
               >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-xs text-muted-foreground">
-                      {invoice.invoice_number}
-                    </span>
-                    <Badge
-                      variant="outline"
-                      className={cn("rounded-full text-[10px]", statusColors[invoice.status] ?? "")}
-                    >
-                      {statusLabel(invoice.status)}
-                    </Badge>
-                  </div>
-                  <p className="text-xs text-muted-foreground/80">
-                    {formatDateTime(invoice.issued_at)}
-                  </p>
-                </div>
-                <div className="grid gap-1 text-sm text-muted-foreground md:grid-cols-2 xl:grid-cols-4">
-                  <p>
-                    {t.patient_invoices_type}:{" "}
-                    {invoiceTypeLabel(invoice.invoice_type)}
-                  </p>
-                  <p>
-                    {t.patient_invoices_total}:{" "}
-                    {formatMoney(invoice.total_gross)}
-                  </p>
-                  <p>
-                    {t.patient_invoices_paid}:{" "}
-                    {formatMoney(invoice.paid_amount)}
-                  </p>
-                  <p>
-                    {t.patient_invoices_open}:{" "}
-                    {formatMoney(invoice.balance_due)}
-                  </p>
-                  <p>
-                    {t.patient_invoices_due}:{" "}
-                    {formatDate(invoice.due_date, commonNotSet)}
-                  </p>
-                  <p>
-                    {t.patient_invoices_order}:{" "}
-                    {invoice.order_number ?? commonNotSet}
-                  </p>
-                  <p>
-                    {t.patient_invoices_quote}:{" "}
-                    {invoice.quote_number ?? commonNotSet}
-                  </p>
-                  <p>
-                    {t.patient_invoices_patient_view}:{" "}
-                    {invoice.portal_visibility?.visible_to_patient
-                      ? invoice.portal_visibility.amounts_visible_to_patient
-                        ? t.patient_invoices_amounts_visible
-                        : t.patient_invoices_amounts_hidden
-                      : t.patient_invoices_hidden}
-                  </p>
-                  <p>
-                    {t.patient_invoices_payer}:{" "}
-                    {invoice.payer?.contact_name ??
-                      invoice.payer?.contact_relationship ??
-                      commonNotSet}
-                  </p>
-                </div>
-                {invoice.portal_visibility &&
-                !invoice.portal_visibility.amounts_visible_to_patient ? (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                    {t.patient_invoices_patient_preview_hidden}
-                  </div>
-                ) : null}
-                {moneyValueNumber(invoice.balance_due) > 0 ? (
-                  <Badge
-                    variant="outline"
+                <div className="relative overflow-hidden p-4">
+                  <span
                     className={cn(
-                      "w-fit rounded-full text-[10px]",
-                      invoice.status === "overdue"
-                        ? "border-rose-200 bg-rose-50 text-rose-700"
-                        : "border-amber-200 bg-amber-50 text-amber-700",
+                      "absolute left-0 top-4 h-12 w-1 rounded-r-full",
+                      invoiceAccentClass(invoice.status),
                     )}
-                  >
-                    {invoice.status === "overdue"
-                      ? t.patient_invoices_needs_urgent_followup
-                      : t.patient_invoices_balance_outstanding}
-                  </Badge>
-                ) : null}
-                <div className="flex flex-wrap gap-2 pt-1">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-8 rounded-lg"
-                    onClick={() => onOpenInvoice(invoice.id)}
-                  >
-                    {t.patient_invoices_open}
-                  </Button>
-                  {canManageInvoices ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-8 rounded-lg"
-                      onClick={() => onManageInvoice(invoice)}
-                    >
-                      {t.patient_invoices_manage_billing}
-                    </Button>
-                  ) : null}
+                  />
+                  <div className="grid gap-4 pl-3 md:grid-cols-[minmax(0,1fr)_190px]">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="h-px w-8 bg-border" />
+                        <Badge
+                          variant="outline"
+                          className={cn("rounded-full text-[10px]", statusColors[invoice.status] ?? "")}
+                        >
+                          {statusLabel(invoice.status)}
+                        </Badge>
+                      </div>
+
+                      <h3 className="mt-2 font-mono text-lg font-semibold leading-none text-foreground">
+                        {invoice.invoice_number}
+                      </h3>
+
+                      <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                        {[
+                          invoiceTypeLabel(invoice.invoice_type),
+                          formatDateTime(invoice.issued_at),
+                          `${t.patient_invoices_due}: ${formatDate(invoice.due_date, commonNotSet)}`,
+                          invoice.order_number ? `${t.patient_invoices_order}: ${invoice.order_number}` : "",
+                          invoice.quote_number ? `${t.patient_invoices_quote}: ${invoice.quote_number}` : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" - ")}
+                      </p>
+
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Badge
+                          variant="outline"
+                          className="rounded-full border-0 bg-white px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
+                        >
+                          {t.patient_invoices_total}:{" "}
+                          <span className="ml-1 font-semibold text-foreground">
+                            {formatMoney(invoice.total_gross)}
+                          </span>
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className="rounded-full border-0 bg-white px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
+                        >
+                          {t.patient_invoices_paid}:{" "}
+                          <span className="ml-1 font-semibold text-foreground">
+                            {formatMoney(invoice.paid_amount)}
+                          </span>
+                        </Badge>
+                        {moneyValueNumber(invoice.balance_due) > 0 ? (
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "rounded-full text-[10px]",
+                              invoice.status === "overdue"
+                                ? "border-rose-200 bg-rose-50 text-rose-700"
+                                : "border-amber-200 bg-amber-50 text-amber-700",
+                            )}
+                          >
+                            {invoice.status === "overdue"
+                              ? t.patient_invoices_needs_urgent_followup
+                              : t.patient_invoices_balance_outstanding}
+                          </Badge>
+                        ) : null}
+                        <Badge
+                          variant="outline"
+                          className="rounded-full border-0 bg-[#f9fdff] px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+                        >
+                          {t.patient_invoices_patient_view}:{" "}
+                          <span className="ml-1 font-semibold text-foreground">
+                            {invoice.portal_visibility?.visible_to_patient
+                              ? invoice.portal_visibility.amounts_visible_to_patient
+                                ? t.patient_invoices_amounts_visible
+                                : t.patient_invoices_amounts_hidden
+                              : t.patient_invoices_hidden}
+                          </span>
+                        </Badge>
+                      </div>
+
+                      {invoice.portal_visibility &&
+                      !invoice.portal_visibility.amounts_visible_to_patient ? (
+                        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                          {t.patient_invoices_patient_preview_hidden}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="flex flex-col justify-between gap-4 border-l border-dashed border-border pl-4">
+                      <div>
+                        <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                          {t.patient_invoices_open}
+                        </span>
+                        <p className="mt-2 text-lg font-semibold leading-none text-foreground">
+                          {formatMoney(invoice.balance_due)}
+                        </p>
+                        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                          {invoice.payer?.contact_name ??
+                            invoice.payer?.contact_relationship ??
+                            commonNotSet}
+                        </p>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="justify-center rounded-lg"
+                          onClick={() => onOpenInvoice(invoice.id)}
+                        >
+                          {t.patient_invoices_open}
+                        </Button>
+                        {canManageInvoices ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="justify-center rounded-lg"
+                            onClick={() => onManageInvoice(invoice)}
+                          >
+                            {t.patient_invoices_manage_billing}
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              </article>
             ))}
           </div>
         )}

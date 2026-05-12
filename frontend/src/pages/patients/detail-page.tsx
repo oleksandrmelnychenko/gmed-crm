@@ -2314,7 +2314,9 @@ function usePatientDetailPageContent() {
         onOpenContract={(contractId) => {
           window.open(`/contracts?contract=${contractId}`, "_blank", "noopener,noreferrer");
         }}
-        onOpenInvoice={(invoiceId) => { staffGo(`/invoices?invoice=${invoiceId}`); }}
+        onOpenInvoice={(invoiceId) => {
+          window.open(`/invoices?invoice=${invoiceId}`, "_blank", "noopener,noreferrer");
+        }}
         onOpenOrder={(orderId) => { staffGo(`/orders/${orderId}?patient=${id}`); }}
         onOpenPatient={(patientId) => { staffGo(`/patients/${patientId}`); }}
         onOpenProfileEditor={openProfileEditor}
