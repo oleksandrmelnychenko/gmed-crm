@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { tokens } from "@/components/ui-shell";
+import { uiText } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 type PanelProps = {
@@ -70,7 +71,7 @@ export function Field({ label, children, required, hint }: FieldProps) {
         {required ? (
           <span
             aria-hidden
-            title="Required"
+            title={uiText("case_ws_required")}
             className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]"
           />
         ) : null}

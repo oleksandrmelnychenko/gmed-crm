@@ -160,11 +160,7 @@ function useAppointmentReportSectionContent({
       onError(
         error instanceof Error
           ? error.message
-          : appointmentText(
-              "Bericht konnte nicht eingereicht werden.",
-              "Не удалось отправить отчёт.",
-              "Failed to submit report",
-            ),
+          : appointmentText("appointments_failed_to_submit_report"),
       );
     } finally {
       dispatchReportState({ busyAction: "" });
@@ -183,11 +179,7 @@ function useAppointmentReportSectionContent({
       onError(
         error instanceof Error
           ? error.message
-          : appointmentText(
-              "Bericht konnte nicht freigegeben werden.",
-              "Не удалось согласовать отчёт.",
-              "Failed to approve report",
-            ),
+          : appointmentText("appointments_failed_to_approve_report"),
       );
     } finally {
       dispatchReportState({ busyAction: "" });
@@ -210,11 +202,7 @@ function useAppointmentReportSectionContent({
       onError(
         error instanceof Error
           ? error.message
-          : appointmentText(
-              "Bericht konnte nicht zurückgewiesen werden.",
-              "Не удалось отклонить отчёт.",
-              "Failed to reject report",
-            ),
+          : appointmentText("appointments_failed_to_reject_report"),
       );
     } finally {
       dispatchReportState({ busyAction: "" });
@@ -229,25 +217,13 @@ function useAppointmentReportSectionContent({
         : "warning";
   const canOpenReportEditor = canSubmitInterpreterReport || showReportReviewActions;
   const reportEditorTitle = showReportReviewActions
-    ? appointmentText(
-        "Review-Entscheidung",
-        "Решение по проверке",
-        "Review decision",
-      )
+    ? appointmentText("appointments_review_decision")
     : canResubmitRejectedReport
-      ? appointmentText(
-          "Bericht überarbeiten",
-          "Доработать отчёт",
-          "Revise report",
-        )
-      : appointmentText(
-          "Bericht einreichen",
-          "Отправить отчёт",
-          "Submit report",
-        );
+      ? appointmentText("appointments_revise_report")
+      : appointmentText("appointments_submit_report");
   const reportOpenButtonLabel = showReportReviewActions
-    ? appointmentText("Review öffnen", "Открыть review", "Open review")
-    : appointmentText("Bericht öffnen", "Открыть отчёт", "Open report");
+    ? appointmentText("appointments_open_review")
+    : appointmentText("appointments_open_report");
 
   return (
     <div className="space-y-4">
@@ -261,7 +237,7 @@ function useAppointmentReportSectionContent({
               </StatusBadge>
             ) : (
               <CountBadge>
-                {appointmentText("Nicht eingereicht", "Не отправлен", "Not submitted")}
+                {appointmentText("appointments_not_submitted")}
               </CountBadge>
             )}
             {canOpenReportEditor ? (
@@ -285,10 +261,10 @@ function useAppointmentReportSectionContent({
           <>
             <div className="grid gap-3 xl:grid-cols-3">
               <StatCard
-                label={appointmentText("Dolmetscher", "Переводчик", "Interpreter")}
+                label={appointmentText("appointments_interpreter")}
                 value={
                   detailReport.interpreter_name ??
-                  appointmentText("Nicht festgelegt", "Не указано", "Not set")
+                  appointmentText("appointments_not_set")
                 }
                 description={`${t.appointments_report_submitted_prefix} ${formatDateTimeLabel(detailReport.created_at)}`}
               />
@@ -316,11 +292,7 @@ function useAppointmentReportSectionContent({
                 }
                 description={
                   reportReviewMeta ||
-                  appointmentText(
-                    "Noch keine Review-Metadaten.",
-                    "Метаданные проверки пока отсутствуют.",
-                    "No review metadata recorded yet.",
-                  )
+                  appointmentText("appointments_no_review_metadata_recorded_yet")
                 }
               />
             </div>
@@ -356,21 +328,13 @@ function useAppointmentReportSectionContent({
                 <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs opacity-80">
                   {detailReport.billing_service_key ? (
                     <span>
-                      {appointmentText(
-                        "Katalogschlüssel",
-                        "Ключ каталога",
-                        "Catalog key",
-                      )}
+                      {appointmentText("appointments_catalog_key")}
                       : {detailReport.billing_service_key}
                     </span>
                   ) : null}
                   {detailReport.billing_leistung_id ? (
                     <span>
-                      {appointmentText(
-                        "Auftragsposition",
-                        "Строка заказа",
-                        "Order line",
-                      )}
+                      {appointmentText("appointments_order_line")}
                       : {detailReport.billing_leistung_id}
                     </span>
                   ) : null}
@@ -380,7 +344,7 @@ function useAppointmentReportSectionContent({
 
             <div className={cn("py-4", appointmentPreviewInfoCardClassName)}>
               <p className={tokens.text.label}>
-                {appointmentText("Berichtstext", "Текст отчёта", "Report text")}
+                {appointmentText("appointments_report_text")}
               </p>
               {detailReport.report_text ? (
                 <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-foreground">
@@ -388,22 +352,14 @@ function useAppointmentReportSectionContent({
                 </p>
               ) : (
                 <p className="mt-2 text-sm text-muted-foreground">
-                  {appointmentText(
-                    "Kein Freitext-Bericht eingereicht.",
-                    "Свободный текст отчёта не отправлен.",
-                    "No free-text report submitted.",
-                  )}
+                  {appointmentText("appointments_no_free_text_report_submitted")}
                 </p>
               )}
             </div>
           </>
         ) : (
           <EmptyCell>
-            {appointmentText(
-              "Für diesen Termin liegt noch kein Dolmetscherbericht vor.",
-              "Для этого приёма пока нет отчёта переводчика.",
-              "No interpreter report has been submitted for this appointment yet.",
-            )}
+            {appointmentText("appointments_no_interpreter_report_has_been_submitted_for_this_appoin")}
           </EmptyCell>
         )}
       </Section>
@@ -415,16 +371,8 @@ function useAppointmentReportSectionContent({
           title={reportEditorTitle}
           description={
             showReportReviewActions
-              ? appointmentText(
-                  "Prüfen Sie Stunden und Bericht direkt im Kontext dieses Termins.",
-                  "Проверьте часы и текст отчёта прямо в контексте этого приёма.",
-                  "Review the hours and report directly in the context of this appointment.",
-                )
-              : appointmentText(
-                  "Pflegen Sie Stunden und Freitextbericht direkt im rechten Bearbeitungsbereich dieses Termins.",
-                  "Заполняйте часы и текстовый отчёт прямо в правой панели редактирования этого приёма.",
-                  "Manage hours and free-text report directly in this appointment's right-side editor.",
-                )
+              ? appointmentText("appointments_review_the_hours_and_report_directly_in_the_context_of_t")
+              : appointmentText("appointments_manage_hours_and_free_text_report_directly_in_this_appoi")
           }
           onSubmit={
             canSubmitInterpreterReport ? handleReportSubmit : (event) => event.preventDefault()
@@ -452,11 +400,7 @@ function useAppointmentReportSectionContent({
                   {busyAction === "report-reject" ? (
                     <LoaderCircle className="size-3.5 animate-spin" />
                   ) : null}
-                  {appointmentText(
-                    "Zur Überarbeitung zurückgeben",
-                    "Вернуть на доработку",
-                    "Return for revision",
-                  )}
+                  {appointmentText("appointments_return_for_revision")}
                 </Button>
               ) : null}
               {showReportReviewActions && canApproveReport ? (
@@ -470,11 +414,7 @@ function useAppointmentReportSectionContent({
                   {busyAction === "report-approve" ? (
                     <LoaderCircle className="size-3.5 animate-spin" />
                   ) : null}
-                  {appointmentText(
-                    "Stunden und Bericht freigeben",
-                    "Согласовать часы и отчёт",
-                    "Approve hours and report",
-                  )}
+                  {appointmentText("appointments_approve_hours_and_report")}
                 </Button>
               ) : null}
               {canSubmitInterpreterReport ? (
@@ -488,11 +428,7 @@ function useAppointmentReportSectionContent({
                     <LoaderCircle className="size-3.5 animate-spin" />
                   ) : null}
                   {canResubmitRejectedReport
-                    ? appointmentText(
-                        "Bericht erneut einreichen",
-                        "Повторно отправить отчёт",
-                        "Resubmit report",
-                      )
+                    ? appointmentText("appointments_resubmit_report")
                     : t.common_save}
                 </Button>
               ) : null}
@@ -501,11 +437,7 @@ function useAppointmentReportSectionContent({
         >
           {canResubmitRejectedReport ? (
             <Banner tone="warning" withIcon>
-              {appointmentText(
-                "Der letzte Bericht wurde zurückgegeben. Passen Sie Stunden oder Text an und reichen Sie ihn erneut zur Freigabe ein.",
-                "Последний отчёт вернули на доработку. Обновите часы или текст и отправьте его повторно на согласование.",
-                "The latest report was returned. Update the hours or text and resubmit it for approval.",
-              )}
+              {appointmentText("appointments_the_latest_report_was_returned_update_the_hours_or_text")}
             </Banner>
           ) : null}
 
@@ -552,15 +484,11 @@ function useAppointmentReportSectionContent({
             <>
               <div className={cn("rounded-xl px-4 py-3", tokens.surface.mutedCard)}>
                 <p className={tokens.text.label}>
-                  {appointmentText("Bericht", "Отчёт", "Report")}
+                  {appointmentText("appointments_report")}
                 </p>
                 <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">
                   {detailReport?.report_text ||
-                    appointmentText(
-                      "Kein Freitext-Bericht eingereicht.",
-                      "Свободный текст отчёта не отправлен.",
-                      "No free-text report submitted.",
-                    )}
+                    appointmentText("appointments_no_free_text_report_submitted")}
                 </p>
               </div>
               <Field label={tr.patients_notes}>

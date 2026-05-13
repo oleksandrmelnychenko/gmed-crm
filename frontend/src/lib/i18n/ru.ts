@@ -2,12 +2,14 @@ import type { TranslationShape as Translations } from "./translations-shape";
 import { adminSystemRu } from "./catalogs/admin-system";
 import { casesClinicalRu } from "./catalogs/cases-clinical";
 import { clinicalRu } from "./catalogs/clinical";
+import { extractedUiRu } from "./catalogs/extracted-ui";
 import { operationsRu } from "./catalogs/operations";
 import { patientsPortalRu } from "./catalogs/patients-portal";
 import { revenueRu } from "./catalogs/revenue";
 import { sharedCoreRu } from "./catalogs/shared";
 
 export const ru = {
+  uiText: extractedUiRu,
   app_name: "GMED CONSOLE",
   app_subtitle: "Управление медицинским туризмом",
   app_not_found_title: "Страница не найдена",

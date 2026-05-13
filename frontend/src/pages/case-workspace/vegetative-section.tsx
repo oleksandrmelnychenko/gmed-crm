@@ -3,7 +3,7 @@ import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useLang } from "@/lib/i18n";
+import { t as translateCatalog, useLang } from "@/lib/i18n";
 
 import { type VegetativeForm, useCaseWorkspace } from "./context";
 import {
@@ -14,10 +14,9 @@ import {
   textareaBaseClassName,
 } from "./primitives";
 
-function tri(lang: string, de: string, ru: string, en: string) {
-  if (lang === "de") return de;
-  if (lang === "ru") return ru;
-  return en;
+function tri(lang: string, key: string) {
+  const catalog = translateCatalog(lang === "de" ? "de" : "ru");
+  return catalog.uiText[key] ?? key;
 }
 
 function hydrateVegetative(
@@ -115,18 +114,13 @@ function VegetativeSectionForm({
 
   return (
     <Panel
-      title={tri(lang, "Vegetative Anamnese", "Вегетативный анамнез", "Vegetative")}
-      description={tri(
-        lang,
-        "Appetit, Gewicht, Körpergröße und vegetative Veränderungen.",
-        "Аппетит, вес, рост и вегетативные изменения.",
-        "Appetite, weight, height, and vegetative changes.",
-      )}
+      title={tri(lang, "case_ws_vegetative")}
+      description={tri(lang, "case_ws_appetite_weight_height_and_vegetative_changes")}
     >
       <form onSubmit={handleSubmit} className="space-y-5">
         {sectionError ? <Banner tone="error">{sectionError}</Banner> : null}
 
-        <Field label={tri(lang, "Appetit / Durst", "Аппетит / жажда", "Appetite / thirst")}>
+        <Field label={tri(lang, "case_ws_appetite_thirst")}>
           <textarea
             value={form.appetit_durst}
             onChange={(event) => update("appetit_durst", event.target.value)}
@@ -138,8 +132,8 @@ function VegetativeSectionForm({
 
         <div className="grid gap-4 md:grid-cols-2">
           <Field
-            label={tri(lang, "Körpergröße (cm)", "Рост (см)", "Height (cm)")}
-            hint={tri(lang, "Zahl, z. B. 176", "Число, например 176", "Number, e.g. 176")}
+            label={tri(lang, "case_ws_height_cm")}
+            hint={tri(lang, "case_ws_number_e_g_176")}
           >
             <Input
               value={form.koerpergroesse}
@@ -150,8 +144,8 @@ function VegetativeSectionForm({
             />
           </Field>
           <Field
-            label={tri(lang, "Gewicht (kg)", "Вес (кг)", "Weight (kg)")}
-            hint={tri(lang, "Zahl, z. B. 78.5", "Число, например 78.5", "Number, e.g. 78.5")}
+            label={tri(lang, "case_ws_weight_kg")}
+            hint={tri(lang, "case_ws_number_e_g_78_5")}
           >
             <Input
               value={form.gewicht}
@@ -164,12 +158,7 @@ function VegetativeSectionForm({
         </div>
 
         <Field
-          label={tri(
-            lang,
-            "Gewichtsveränderung",
-            "Изменение веса",
-            "Weight change",
-          )}
+          label={tri(lang, "case_ws_weight_change")}
         >
           <textarea
             value={form.gewichtsveraenderung}
@@ -181,12 +170,7 @@ function VegetativeSectionForm({
         </Field>
 
         <Field
-          label={tri(
-            lang,
-            "Grund / Kontext",
-            "Причина / контекст",
-            "Reason / context",
-          )}
+          label={tri(lang, "case_ws_reason_context")}
         >
           <textarea
             value={form.grund}
@@ -204,7 +188,7 @@ function VegetativeSectionForm({
             disabled={busy || !canEdit}
           >
             {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-            {tri(lang, "Abschnitt speichern", "Сохранить раздел", "Save section")}
+            {tri(lang, "case_ws_save_section")}
           </Button>
         </div>
       </form>

@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import type { CaseItem } from "../../model/detail-tab-types";
 
 type PatientCasesDictionary = {
-  cases_title?: string;
+  cases_title: string;
   common_not_set: string;
 };
 
@@ -39,7 +39,7 @@ export function PatientCasesTab({
   return (
     <TabsContent value="cases" className="space-y-4 mt-4 min-h-[400px]">
       <FormSection
-        title={t.cases_title ?? "Cases"}
+        title={t.cases_title}
         accessory={<CountBadge>{cases.length}</CountBadge>}
       >
         {tabLoading ? (

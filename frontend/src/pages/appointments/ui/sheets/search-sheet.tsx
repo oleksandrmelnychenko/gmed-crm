@@ -136,11 +136,7 @@ function SearchSheet({
         </NativeComboboxSelect>
       </Field>
       <Field
-        label={appointmentText(
-          "Versorgungspfad",
-          "Траектория лечения",
-          "Care path",
-        )}
+        label={appointmentText("appointments_care_path")}
       >
         <NativeComboboxSelect
           value={filters.carePathKind}
@@ -244,7 +240,7 @@ function SearchSheet({
       <Field
         label={
           tr.role_interpreter ??
-          appointmentText("Dolmetscher", "Переводчик", "Interpreter")
+          appointmentText("appointments_interpreter")
         }
       >
         <NativeComboboxSelect

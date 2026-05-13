@@ -418,11 +418,8 @@ export type PortalFeedbackSummary = {
   clinic_ranking: PortalFeedbackRanking[];
 };
 
-function portalText(de: string, ru: string, en: string) {
-  const lang = getLang();
-  if (lang === "de") return de;
-  if (lang === "ru") return ru;
-  return en;
+function portalText(key: string) {
+  return translateCatalog(getLang()).uiText[key] ?? key;
 }
 
 type PortalLocale = "de-DE" | "en-GB" | "ru-RU";
@@ -950,7 +947,7 @@ function openBlobPreview(blob: Blob) {
   const previewWindow = window.open(url, "_blank", "noopener,noreferrer");
   if (!previewWindow) {
     URL.revokeObjectURL(url);
-    throw new Error(portalText("Bitte Pop-ups für die PDF-Vorschau zulassen.", "Разрешите всплывающие окна для предварительного просмотра PDF.", "Allow pop-ups to preview the PDF."));
+    throw new Error(portalText("patients_portal_allow_pop_ups_to_preview_the_pdf"));
   }
 
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);

@@ -57,7 +57,7 @@ import {
   patientInvoiceServiceTypeLabel,
 } from "../../model/portal-shared";
 
-type LocalizeFn = (de: string, ru: string, en: string) => string;
+type LocalizeFn = (key: string) => string;
 type StatusLabelFn = (status: string) => string;
 type DateFormatter = (value?: string | null, fallback?: string) => string;
 type DateTimeFormatter = (value?: string | null, fallback?: string) => string;
@@ -969,7 +969,7 @@ function usePatientInvoicesTabContent({
           </div>
         </FormSection>
 
-        <FormSection title={l("Zusatzlich", "Дополнительно", "Additional")}>
+        <FormSection title={l("patients_additional")}>
           <Field label={t.patient_invoices_notes} htmlFor="assign-package-notes">
             <textarea
               id="assign-package-notes"
@@ -1026,7 +1026,7 @@ function usePatientInvoicesTabContent({
           </Banner>
         ) : null}
 
-        <FormSection title={l("Verbrauch", "Использование", "Consumption")}>
+        <FormSection title={l("patients_consumption")}>
           <div className="grid gap-3 md:grid-cols-2">
             <Field label={t.patient_invoices_item} htmlFor="consume-package-item">
               <NativeComboboxSelect
@@ -1113,7 +1113,7 @@ function usePatientInvoicesTabContent({
           </div>
         </FormSection>
 
-        <FormSection title={l("Zusatzlich", "Дополнительно", "Additional")}>
+        <FormSection title={l("patients_additional")}>
           <Field label={t.patient_invoices_consumption_note} htmlFor="consume-package-note">
             <textarea
               id="consume-package-note"

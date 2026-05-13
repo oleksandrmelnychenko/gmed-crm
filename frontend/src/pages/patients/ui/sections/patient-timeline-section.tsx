@@ -28,7 +28,7 @@ import {
 } from "../../model/detail-model";
 import { WorkspaceSectionIntro } from "../shared/workspace-primitives";
 
-type LocalizeFn = (de: string, ru: string, en: string) => string;
+type LocalizeFn = (key: string) => string;
 type StatusLabelFn = (status: string) => string;
 type DateTimeFormatter = (value?: string | null, fallback?: string) => string;
 
@@ -109,30 +109,30 @@ function TimelineStatsOverview({
     <div className="grid gap-y-4 overflow-hidden rounded-xl border border-border px-3 pb-4 pt-4 md:grid-cols-2 xl:grid-cols-4 [&>article:not(:last-child):not(:nth-child(4n))_.admin-inline-metric-separator]:xl:block">
       <AdminInlineMetric
         icon={Activity}
-        label={l("Ereignisse gesamt", "Всего событий", "Total events")}
+        label={l("patients_total_events")}
         value={timelineSummary.total}
-        description={l("Alle Touchpoints.", "Все точки касания.", "All touchpoints.")}
+        description={l("patients_all_touchpoints")}
         tone="sky"
       />
       <AdminInlineMetric
         icon={ListChecks}
-        label={l("Offene Punkte", "Открытые пункты", "Open items")}
+        label={l("patients_open_items")}
         value={timelineSummary.open}
-        description={l("Brauchen Nachverfolgung.", "Требуют сопровождения.", "Need follow-up.")}
+        description={l("patients_need_follow_up")}
         tone="amber"
       />
       <AdminInlineMetric
         icon={Clock3}
-        label={l("Letzte 30 Tage", "Последние 30 дней", "Last 30 days")}
+        label={l("patients_last_30_days")}
         value={timelineSummary.recent}
-        description={l("Aktuelle Bewegung.", "Недавняя активность.", "Recent movement.")}
+        description={l("patients_recent_movement")}
         tone="emerald"
       />
       <AdminInlineMetric
         icon={Layers3}
-        label={l("Aktive Bereiche", "Активные направления", "Domains active")}
+        label={l("patients_domains_active")}
         value={timelineSummary.entityCounts.length}
-        description={l("Workstreams im Profil.", "Workstreams в профиле.", "Profile workstreams.")}
+        description={l("patients_profile_workstreams")}
         tone="slate"
       />
     </div>
@@ -189,25 +189,21 @@ export function PatientTimelineTab({
         <TabLoader />
       ) : timeline.length === 0 ? (
         <EmptyCell>
-          {l("Für diesen Patienten wurden noch keine Timeline-Ereignisse erfasst.", "Для этого пациента пока не зарегистрировано событий таймлайна.", "No timeline events have been recorded for this patient yet.")}
+          {l("patients_no_timeline_events_have_been_recorded_for_this_patient_y")}
         </EmptyCell>
       ) : (
         <>
           <WorkspaceSectionIntro
-            title={l("Timeline-Cockpit", "Панель таймлайна", "Timeline cockpit")}
-            description={l(
-              "Alle patientenbezogenen Ereignisse mit URL-synchronisierten Filtern für Navigation, Back/Forward und Deep Links.",
-              "Все события по пациенту с фильтрами, синхронизированными с URL, для навигации, back/forward и deep-link.",
-              "All patient events with URL-synced filters for navigation, back/forward and deep links.",
-            )}
+            title={l("patients_timeline_cockpit")}
+            description={l("patients_all_patient_events_with_url_synced_filters_for_navigatio")}
             accessory={<CountBadge>{filteredTimeline.length}</CountBadge>}
           />
 
           <TimelineStatsOverview l={l} timelineSummary={timelineSummary} />
 
           <FormSection
-            title={l("Timeline-Filter", "Фильтры таймлайна", "Timeline filters")}
-            accessory={<CountBadge>{filteredTimeline.length} {l("Treffer", "совпадений", "matches")}</CountBadge>}
+            title={l("patients_timeline_filters")}
+            accessory={<CountBadge>{filteredTimeline.length} {l("patients_matches")}</CountBadge>}
           >
             <div className="flex flex-wrap gap-1.5">
               <Button
@@ -217,7 +213,7 @@ export function PatientTimelineTab({
                 className="h-6 rounded-full px-2.5 text-[11px]"
                 onClick={() => onTimelineEntityFilterChange("all")}
               >
-                {l("Alle", "Все", "All")}
+                {l("patients_all")}
                 <span className="text-muted-foreground/60 text-[6px] leading-none align-middle">●</span>
                 {timelineTotal}
               </Button>
@@ -247,7 +243,7 @@ export function PatientTimelineTab({
                 </NativeComboboxSelect>
               <NativeComboboxSelect value={timelineCategoryFilter}
                 onChange={(event) => onTimelineCategoryFilterChange(event.target.value ?? "all")} className={cn("w-full", formInputClassName)}>
-                  <option value="all">{l("Alle Kategorien", "Все категории", "All categories")}</option>
+                  <option value="all">{l("patients_all_categories")}</option>
                   {timelineCategoryOptions.map((category) => (
                     <option key={category} value={category}>
                       {localizeTimelineCategory(category, l)}
@@ -256,7 +252,7 @@ export function PatientTimelineTab({
                 </NativeComboboxSelect>
               <NativeComboboxSelect value={timelineSourceFilter}
                 onChange={(event) => onTimelineSourceFilterChange(event.target.value ?? "all")} className={cn("w-full", formInputClassName)}>
-                  <option value="all">{l("Alle Quellen", "Все источники", "All sources")}</option>
+                  <option value="all">{l("patients_all_sources")}</option>
                   {timelineSourceOptions.map((source) => (
                     <option key={source} value={source}>
                       {localizeTimelineSource(source, l)}
@@ -277,7 +273,7 @@ export function PatientTimelineTab({
                   className="h-9 rounded-lg"
                   onClick={onResetTimelineFilters}
                 >
-                  {l("Filter zurücksetzen", "Сбросить фильтры", "Reset filters")}
+                  {l("patients_reset_filters")}
                 </Button>
               ) : null}
             </div>
@@ -285,17 +281,17 @@ export function PatientTimelineTab({
 
           {filteredTimeline.length === 0 ? (
             <EmptyCell>
-              {l("Keine Zeitachsen-Ereignisse entsprechen den aktuellen Filtern.", "Текущим фильтрам не соответствует ни одно событие таймлайна.", "No timeline events match the current filters.")}
+              {l("patients_no_timeline_events_match_the_current_filters")}
             </EmptyCell>
           ) : (
             <FormSection
-              title={l("Ereignisse", "События", "Events")}
+              title={l("patients_events")}
               accessory={
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground">
-                    {l("Angezeigt", "Показаны", "Showing")} {timelineTotal === 0 ? 0 : timelineOffset + 1}-
+                    {l("patients_showing_2")} {timelineTotal === 0 ? 0 : timelineOffset + 1}-
                     {timelineTotal === 0 ? 0 : Math.min(timelineOffset + timeline.length, timelineTotal)}{" "}
-                    {l("von", "из", "of")} {timelineTotal}
+                    {l("documents_of")} {timelineTotal}
                   </span>
                   <Button
                     type="button"
@@ -305,7 +301,7 @@ export function PatientTimelineTab({
                     disabled={timelineOffset === 0}
                     onClick={() => onTimelineOffsetChange(Math.max(0, timelineOffset - timelineLimit))}
                   >
-                    {l("Zurück", "Назад", "Previous")}
+                    {l("patients_previous")}
                   </Button>
                   <Button
                     type="button"
@@ -315,7 +311,7 @@ export function PatientTimelineTab({
                     disabled={!timelineHasNextPage}
                     onClick={() => onTimelineOffsetChange(timelineOffset + timelineLimit)}
                   >
-                    {l("Weiter", "Далее", "Next")}
+                    {l("patients_next")}
                   </Button>
                 </div>
               }

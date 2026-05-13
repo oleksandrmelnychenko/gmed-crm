@@ -57,7 +57,7 @@ type PatientDocumentUploadDialogProps = {
   onError: (message: string) => void;
 };
 
-type Localize = (de: string, ru: string, en: string) => string;
+type Localize = (key: string) => string;
 type DocumentUploadFormSetter = Dispatch<SetStateAction<DocumentUploadFormState>>;
 
 function PatientDocumentUploadDialog({
@@ -66,7 +66,6 @@ function PatientDocumentUploadDialog({
   orders,
   appointments,
   dictionary,
-  lang,
   textareaClassName,
   statusLabel,
   formatDate,
@@ -76,8 +75,7 @@ function PatientDocumentUploadDialog({
 }: PatientDocumentUploadDialogProps) {
   const [form, setForm] = useState<DocumentUploadFormState>(blankDocumentUploadForm);
   const [busy, setBusy] = useState(false);
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const l = (key: string) => dictionary[key] ?? key;
 
   useEffect(() => {
     if (!open) {
@@ -145,16 +143,8 @@ function PatientDocumentUploadDialog({
       onOpenChange={onOpenChange}
       width="form-heavy"
       onSubmit={handleSubmit}
-      title={l(
-        "Patientendokument hochladen",
-        "Загрузить документ пациента",
-        "Upload patient document",
-      )}
-      description={l(
-        "Hier hochgeladene Dateien werden direkt mit diesem Patienten verknuepft und koennen auch einem Auftrag oder Termin zugeordnet werden.",
-        "Загруженные здесь файлы привязываются напрямую к пациенту и также могут быть связаны с заказом или приёмом.",
-        "Files uploaded here are linked directly to this patient and can also be attached to an order or appointment.",
-      )}
+      title={l("patients_upload_patient_document")}
+      description={l("patients_files_uploaded_here_are_linked_directly_to_this_patient")}
       bodyClassName="px-4 py-4 space-y-3"
       footer={
         <DocumentUploadFooter
@@ -205,7 +195,7 @@ function DocumentUploadFooter({ busy, l, onCancel }: DocumentUploadFooterProps) 
         className="h-8 rounded-lg"
         onClick={onCancel}
       >
-        {l("Abbrechen", "Отмена", "Cancel")}
+        {l("patients_cancel")}
       </Button>
       <Button
         type="submit"
@@ -214,7 +204,7 @@ function DocumentUploadFooter({ busy, l, onCancel }: DocumentUploadFooterProps) 
         disabled={busy}
       >
         {busy ? <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" /> : null}
-        {l("Dokument hochladen", "Загрузить документ", "Upload document")}
+        {l("patients_upload_document")}
       </Button>
     </>
   );
@@ -234,9 +224,9 @@ function DocumentFileSection({
   setForm,
 }: DocumentFileSectionProps) {
   return (
-    <FormSection title={l("Datei", "Файл", "File")}>
+    <FormSection title={l("patients_file")}>
       <div className="grid gap-3 md:grid-cols-2">
-        <FormField label={l("Datei", "Файл", "File")} htmlFor="document-file">
+        <FormField label={l("patients_file")} htmlFor="document-file">
           <Input
             id="document-file"
             type="file"
@@ -245,7 +235,7 @@ function DocumentFileSection({
           />
         </FormField>
         <FormField
-          label={l("Anzeigename", "Отображаемое имя", "Display name")}
+          label={l("patients_display_name")}
           htmlFor="document-name"
         >
           <Input
@@ -255,11 +245,7 @@ function DocumentFileSection({
               setForm((current) => ({ ...current, autoName: event.target.value }))
             }
             className={inputClass}
-            placeholder={l(
-              "Optionaler sichtbarer Name fuer den Patienten",
-              "Необязательное имя для отображения пациенту",
-              "Optional patient-facing name",
-            )}
+            placeholder={l("patients_optional_patient_facing_name")}
           />
         </FormField>
       </div>
@@ -280,13 +266,13 @@ function documentVisibilityLabel(
 ): string {
   switch (visibility) {
     case "internal":
-      return l("Intern", "Внутреннее", "Internal");
+      return l("patients_internal_2");
     case "released_internal":
-      return l("Intern freigegeben", "Внутренне опубликовано", "Released internal");
+      return l("patients_released_internal");
     case "released_external":
-      return l("Extern freigegeben", "Внешне опубликовано", "Released external");
+      return l("patients_released_external");
     case "patient_visible":
-      return l("Fuer Patienten sichtbar", "Видно пациенту", "Patient visible");
+      return l("patients_patient_visible");
   }
 }
 
@@ -297,9 +283,9 @@ function DocumentDetailsSection({
   statusLabel,
 }: DocumentDetailsSectionProps) {
   return (
-    <FormSection title={l("Dokument", "Документ", "Document")}>
+    <FormSection title={l("patients_document")}>
       <div className="grid gap-3 md:grid-cols-2">
-        <FormField label={l("Typ", "Тип", "Type")} htmlFor="document-art">
+        <FormField label={l("patients_type")} htmlFor="document-art">
           <Input
             id="document-art"
             value={form.art}
@@ -307,10 +293,10 @@ function DocumentDetailsSection({
               setForm((current) => ({ ...current, art: event.target.value }))
             }
             className={inputClass}
-            placeholder="report"
+            placeholder={l("patients_document_art_placeholder")}
           />
         </FormField>
-        <FormField label={l("Kategorie", "Категория", "Category")} htmlFor="document-category">
+        <FormField label={l("patients_category")} htmlFor="document-category">
           <Input
             id="document-category"
             value={form.category}
@@ -318,10 +304,10 @@ function DocumentDetailsSection({
               setForm((current) => ({ ...current, category: event.target.value }))
             }
             className={inputClass}
-            placeholder="medical"
+            placeholder={l("patients_document_category_placeholder")}
           />
         </FormField>
-        <FormField label={l("Status", "Статус", "Status")} htmlFor="document-status">
+        <FormField label={l("patients_status")} htmlFor="document-status">
           <NativeComboboxSelect
             id="document-status"
             className={selectClass}
@@ -341,7 +327,7 @@ function DocumentDetailsSection({
           </NativeComboboxSelect>
         </FormField>
         <FormField
-          label={l("Sichtbarkeit", "Видимость", "Visibility")}
+          label={l("patients_visibility")}
           htmlFor="document-visibility"
         >
           <NativeComboboxSelect
@@ -376,7 +362,7 @@ function DocumentDetailsSection({
             }))
           }
         />
-        {l("Medizinisches Dokument", "Медицинский документ", "Medical document")}
+        {l("patients_medical_document")}
       </label>
     </FormSection>
   );
@@ -400,9 +386,9 @@ function DocumentContextSection({
   setForm,
 }: DocumentContextSectionProps) {
   return (
-    <FormSection title={l("Kontext", "Контекст", "Context")}>
+    <FormSection title={l("patients_context")}>
       <div className="grid gap-3 md:grid-cols-2">
-        <FormField label={l("Auftrag", "Заказ", "Order")} htmlFor="document-order">
+        <FormField label={l("patients_order")} htmlFor="document-order">
           <NativeComboboxSelect
             id="document-order"
             className={selectClass}
@@ -412,7 +398,7 @@ function DocumentContextSection({
             }
           >
             <option value="">
-              {l("Keine Auftragsverknuepfung", "Без привязки к заказу", "No order link")}
+              {l("patients_no_order_link")}
             </option>
             {orders.map((order) => (
               <option key={order.id} value={order.id}>
@@ -421,7 +407,7 @@ function DocumentContextSection({
             ))}
           </NativeComboboxSelect>
         </FormField>
-        <FormField label={l("Termin", "Приём", "Appointment")} htmlFor="document-appointment">
+        <FormField label={l("patients_appointment")} htmlFor="document-appointment">
           <NativeComboboxSelect
             id="document-appointment"
             className={selectClass}
@@ -434,7 +420,7 @@ function DocumentContextSection({
             }
           >
             <option value="">
-              {l("Keine Terminverknuepfung", "Без привязки к приёму", "No appointment link")}
+              {l("patients_no_appointment_link")}
             </option>
             {appointments.map((appointment) => (
               <option key={appointment.id} value={appointment.id}>
@@ -462,8 +448,8 @@ function DocumentAdditionalSection({
   textareaClassName,
 }: DocumentAdditionalSectionProps) {
   return (
-    <FormSection title={l("Zusatzlich", "Дополнительно", "Additional")}>
-      <FormField label={l("Notizen", "Заметки", "Notes")} htmlFor="document-notes">
+    <FormSection title={l("patients_additional")}>
+      <FormField label={l("appointments_notes")} htmlFor="document-notes">
         <textarea
           id="document-notes"
           className={textareaClassName}
@@ -471,11 +457,7 @@ function DocumentAdditionalSection({
           onChange={(event) =>
             setForm((current) => ({ ...current, notes: event.target.value }))
           }
-          placeholder={l(
-            "Optionale Verarbeitungs- oder Sichtbarkeitsnotizen",
-            "Необязательные заметки по обработке или видимости",
-            "Optional processing or visibility notes",
-          )}
+          placeholder={l("patients_optional_processing_or_visibility_notes")}
         />
       </FormField>
     </FormSection>

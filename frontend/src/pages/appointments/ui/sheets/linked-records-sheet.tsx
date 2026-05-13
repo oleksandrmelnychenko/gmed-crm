@@ -48,22 +48,22 @@ function linkedStatusLabel(value: unknown, translations: Translations) {
   if (value === undefined || value === null || value === "") return "";
   const status = String(value);
   const labels: Record<string, string> = {
-    active: appointmentText("Aktiv", "Активно", "Active"),
-    approved: appointmentText("Genehmigt", "Одобрено", "Approved"),
-    archived: appointmentText("Archiviert", "Архивировано", "Archived"),
-    cancelled: appointmentText("Abgesagt", "Отменено", "Cancelled"),
-    closed: appointmentText("Geschlossen", "Закрыто", "Closed"),
-    completed: appointmentText("Abgeschlossen", "Завершено", "Completed"),
-    confirmed: appointmentText("Bestätigt", "Подтверждено", "Confirmed"),
-    draft: appointmentText("Entwurf", "Черновик", "Draft"),
-    in_progress: appointmentText("In Bearbeitung", "В работе", "In progress"),
-    open: appointmentText("Offen", "Открыто", "Open"),
-    pending: appointmentText("Ausstehend", "Ожидает", "Pending"),
-    planned: appointmentText("Geplant", "Запланировано", "Planned"),
-    ready: appointmentText("Bereit", "Готово", "Ready"),
-    rejected: appointmentText("Abgelehnt", "Отклонено", "Rejected"),
-    released: appointmentText("Freigegeben", "Опубликовано", "Released"),
-    sent: appointmentText("Versendet", "Отправлено", "Sent"),
+    active: appointmentText("appointments_active_2"),
+    approved: appointmentText("appointments_approved_2"),
+    archived: appointmentText("appointments_archived"),
+    cancelled: appointmentText("appointments_cancelled"),
+    closed: appointmentText("appointments_closed"),
+    completed: appointmentText("appointments_completed"),
+    confirmed: appointmentText("appointments_confirmed"),
+    draft: appointmentText("appointments_draft"),
+    in_progress: appointmentText("appointments_in_progress"),
+    open: appointmentText("appointments_open_2"),
+    pending: appointmentText("appointments_pending_3"),
+    planned: appointmentText("appointments_planned"),
+    ready: appointmentText("appointments_ready"),
+    rejected: appointmentText("appointments_rejected_2"),
+    released: appointmentText("appointments_released"),
+    sent: appointmentText("appointments_sent"),
   };
   return labels[status] ?? formatUnknownValue(status, translations);
 }
@@ -72,14 +72,14 @@ function linkedTypeLabel(value: unknown, translations: Translations) {
   if (value === undefined || value === null || value === "") return "";
   const type = String(value);
   const labels: Record<string, string> = {
-    administrative: appointmentText("Administrativ", "Административный", "Administrative"),
-    billing: appointmentText("Abrechnung", "Биллинг", "Billing"),
-    document: appointmentText("Dokument", "Документ", "Document"),
-    internal: appointmentText("Intern", "Внутренний", "Internal"),
-    medical: appointmentText("Medizinisch", "Медицинский", "Medical"),
-    non_medical: appointmentText("Nicht-medizinisch", "Немедицинский", "Non-medical"),
-    provider: appointmentText("Leistungserbringer", "Провайдер", "Provider"),
-    service: appointmentText("Leistung", "Услуга", "Service"),
+    administrative: appointmentText("appointments_administrative"),
+    billing: appointmentText("appointments_billing"),
+    document: appointmentText("appointments_document"),
+    internal: appointmentText("appointments_internal"),
+    medical: appointmentText("appointments_medical_2"),
+    non_medical: appointmentText("appointments_non_medical_2"),
+    provider: appointmentText("appointments_provider"),
+    service: appointmentText("appointments_service"),
   };
   return labels[type] ?? formatUnknownValue(type, translations);
 }
@@ -88,15 +88,15 @@ function linkedCategoryLabel(value: unknown, translations: Translations) {
   if (value === undefined || value === null || value === "") return "";
   const category = String(value);
   const labels: Record<string, string> = {
-    administrative: appointmentText("Administrativ", "Административный", "Administrative"),
-    clinical: appointmentText("Klinisch", "Клинический", "Clinical"),
-    contract: appointmentText("Vertrag", "Договор", "Contract"),
-    document: appointmentText("Dokument", "Документ", "Document"),
-    imaging: appointmentText("Bildgebung", "Визуализация", "Imaging"),
-    invoice: appointmentText("Rechnung", "Счет", "Invoice"),
-    lab: appointmentText("Labor", "Лаборатория", "Lab"),
-    medical: appointmentText("Medizinisch", "Медицинский", "Medical"),
-    portal: appointmentText("Portal", "Портал", "Portal"),
+    administrative: appointmentText("appointments_administrative"),
+    clinical: appointmentText("appointments_clinical_3"),
+    contract: appointmentText("appointments_contract"),
+    document: appointmentText("appointments_document"),
+    imaging: appointmentText("appointments_imaging"),
+    invoice: appointmentText("appointments_invoice"),
+    lab: appointmentText("appointments_lab"),
+    medical: appointmentText("appointments_medical_2"),
+    portal: appointmentText("appointments_portal"),
   };
   return labels[category] ?? formatUnknownValue(category, translations);
 }
@@ -116,11 +116,7 @@ function LinkedRecordsSheet({
     if (loading) {
       return (
         <div className="flex items-center justify-center py-10 text-sm text-muted-foreground">
-          {appointmentText(
-            "Verknupfte Daten werden geladen…",
-            "Загрузка связанных данных…",
-            "Loading linked records…",
-          )}
+          {appointmentText("appointments_loading_linked_records")}
         </div>
       );
     }
@@ -132,11 +128,7 @@ function LinkedRecordsSheet({
     if (!payload || (Array.isArray(payload) && payload.length === 0)) {
       return (
         <EmptyCell>
-          {appointmentText(
-            "Keine verknupften Daten gefunden.",
-            "Связанные данные не найдены.",
-            "No linked records found.",
-          )}
+          {appointmentText("appointments_no_linked_records_found")}
         </EmptyCell>
       );
     }
@@ -147,7 +139,7 @@ function LinkedRecordsSheet({
         kind === "patient"
           ? [
               {
-                label: appointmentText("Name", "Имя", "Name"),
+                label: appointmentText("appointments_name_2"),
                 value: readLinkedPreviewValue(record, [
                   "name",
                   "full_name",
@@ -159,11 +151,11 @@ function LinkedRecordsSheet({
                 value: readLinkedPreviewValue(record, ["patient_id", "id"]),
               },
               {
-                label: "PID",
+                label: appointmentText("documents_pid_fallback"),
                 value: readLinkedPreviewValue(record, ["pid"]),
               },
               {
-                label: appointmentText("Telefon", "Телефон", "Phone"),
+                label: appointmentText("appointments_phone"),
                 value: readLinkedPreviewValue(record, [
                   "phone",
                   "phone_number",
@@ -178,7 +170,7 @@ function LinkedRecordsSheet({
           : kind === "order"
             ? [
                 {
-                  label: appointmentText("Auftrag", "Заказ", "Order"),
+                  label: appointmentText("appointments_order"),
                   value: readLinkedPreviewValue(record, [
                     "order_number",
                     "number",
@@ -186,22 +178,22 @@ function LinkedRecordsSheet({
                   ]),
                 },
                 {
-                  label: appointmentText("Status", "Статус", "Status"),
+                  label: appointmentText("appointments_status"),
                   value: linkedStatusLabel(readLinkedPreviewRawValue(record, ["status"]), t),
                 },
                 {
-                  label: appointmentText("Typ", "Тип", "Type"),
+                  label: appointmentText("appointments_type"),
                   value: linkedTypeLabel(readLinkedPreviewRawValue(record, ["order_type", "type"]), t),
                 },
                 {
-                  label: appointmentText("Patient", "Пациент", "Patient"),
+                  label: appointmentText("appointments_patient"),
                   value: readLinkedPreviewValue(record, [
                     "patient_name",
                     "patient_id",
                   ]),
                 },
                 {
-                  label: appointmentText("Erstellt", "Создано", "Created"),
+                  label: appointmentText("appointments_created"),
                   value: readLinkedPreviewValue(record, [
                     "created_at",
                     "updated_at",
@@ -210,30 +202,26 @@ function LinkedRecordsSheet({
               ]
             : [
                 {
-                  label: appointmentText("Name", "Название", "Name"),
+                  label: appointmentText("appointments_name"),
                   value: readLinkedPreviewValue(record, ["name"]),
                 },
                 {
-                  label: appointmentText("Typ", "Тип", "Type"),
+                  label: appointmentText("appointments_type"),
                   value: linkedTypeLabel(
                     readLinkedPreviewRawValue(record, ["provider_type", "type"]),
                     t,
                   ),
                 },
                 {
-                  label: appointmentText("Stadt", "Город", "City"),
+                  label: appointmentText("appointments_city"),
                   value: readLinkedPreviewValue(record, ["address_city", "city"]),
                 },
                 {
-                  label: appointmentText(
-                    "Fachbereich",
-                    "Специализация",
-                    "Specialty",
-                  ),
+                  label: appointmentText("appointments_specialty"),
                   value: readLinkedPreviewValue(record, ["fachbereich", "specialty"]),
                 },
                 {
-                  label: appointmentText("Adresse", "Адрес", "Address"),
+                  label: appointmentText("appointments_address"),
                   value: readLinkedPreviewValue(record, [
                     "address",
                     "address_line1",
@@ -298,11 +286,9 @@ function LinkedRecordsSheet({
         })}
         {hiddenCount > 0 ? (
           <p className="pt-1 text-xs text-muted-foreground">
-            {appointmentText(
-              `+${hiddenCount} weitere`,
-              `+${hiddenCount} еще`,
-              `+${hiddenCount} more`,
-            )}
+            {appointmentText("appointments_hidden_more_count", {
+              count: hiddenCount,
+            })}
           </p>
         ) : null}
       </div>

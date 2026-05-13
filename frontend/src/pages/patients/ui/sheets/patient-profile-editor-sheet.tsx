@@ -40,7 +40,7 @@ type PatientProfileEditorSheetProps = {
   open: boolean;
   patientId: string | undefined;
   detail: PatientDetail | null;
-  dictionary: Record<string, string>;
+  dictionary: Record<string, string> & { uiText?: Record<string, string> };
   lang: string;
   statusLabel: (status: string) => string;
   onOpenChange: (open: boolean) => void;
@@ -58,7 +58,7 @@ function PatientProfileEditorSheet(props: PatientProfileEditorSheetProps) {
 }
 
 type PatientProfileEditorFormSectionsProps = {
-  dictionary: Record<string, string>;
+  dictionary: Record<string, string> & { uiText?: Record<string, string> };
   form: PatientEditFormState;
   statusLabel: (status: string) => string;
   updateField: <K extends keyof PatientEditFormState>(field: K, value: PatientEditFormState[K]) => void;
@@ -121,7 +121,10 @@ function PatientProfileEditorFormSections({
                   <Input
                     value={form.languages}
                     onChange={(event) => updateField("languages", event.target.value)}
-                    placeholder="de, uk, en"
+                    placeholder={
+                      dictionary.uiText?.patients_languages_placeholder ??
+                      "patients_languages_placeholder"
+                    }
                     className={formInputClassName}
                   />
                 </FormField>

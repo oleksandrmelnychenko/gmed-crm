@@ -18,12 +18,8 @@ function AppointmentSnapshotSection({
 }) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const summaryTitle = appointmentText(
-    "Status und Zuständigkeiten",
-    "Статус и ответственные",
-    "Status and responsibilities",
-  );
-  const orderLabel = appointmentText("Auftrag", "Заказ", "Order");
+  const summaryTitle = appointmentText("appointments_status_and_responsibilities");
+  const orderLabel = appointmentText("appointments_order");
   const snapshotCards = [
     {
       label: t.orders_phase,

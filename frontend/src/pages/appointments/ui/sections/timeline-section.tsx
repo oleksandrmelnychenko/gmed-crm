@@ -100,22 +100,14 @@ function AppointmentTimelineSection({
     "followup",
     "concierge",
   ] as const;
-  const matchesLabel = appointmentText("Treffer", "совпадений", "matches");
-  const eventsLabel = appointmentText("Ereignisse", "события", "events");
-  const emptyLabel = appointmentText(
-    "Für diesen Termin gibt es noch keine Timeline-Ereignisse.",
-    "Для этого приёма пока нет событий таймлайна.",
-    "No timeline events have been recorded for this appointment yet.",
-  );
-  const noMatchesLabel = appointmentText(
-    "Ни одно событие не соответствует текущему фильтру.",
-    "Текущему фильтру не соответствует ни одно событие.",
-    "No timeline events match the current filter.",
-  );
+  const matchesLabel = appointmentText("appointments_matches");
+  const eventsLabel = appointmentText("appointments_events");
+  const emptyLabel = appointmentText("appointments_no_timeline_events_have_been_recorded_for_this_appointme");
+  const noMatchesLabel = appointmentText("appointments_no_timeline_events_match_the_current_filter");
 
   return (
     <Section
-      title={appointmentText("Timeline", "Таймлайн", "Timeline")}
+      title={appointmentText("appointments_timeline_2")}
       accessory={
         <CountBadge>
           {visibleTimelineEvents.length} {eventsLabel}
@@ -133,7 +125,7 @@ function AppointmentTimelineSection({
             onClick={() => setTimelineFilter(filter)}
           >
             {filter === "all"
-              ? appointmentText("Alle", "Все", "All")
+              ? appointmentText("appointments_all")
               : appointmentTimelineKindLabel(filter)}
             <span className="text-muted-foreground/60 text-[6px] leading-none align-middle">
               ●

@@ -77,7 +77,7 @@ export function PainSection() {
                 variant="outline"
                 className="rounded-full border-rose-200 bg-rose-50 text-[11px] font-semibold text-rose-700"
               >
-                NRS {item.nrs_aktuell}
+                {t.uiText.cases_pain_nrs_label} {item.nrs_aktuell}
               </Badge>
             ) : null}
             {item.seit_wann ? (

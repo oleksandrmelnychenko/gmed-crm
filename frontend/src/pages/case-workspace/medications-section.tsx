@@ -19,6 +19,7 @@ import {
 } from "@/lib/api/clinical";
 import {
   formatEnumLabelFromKeys,
+  uiText,
   useLang,
   type Lang,
   type Translations,
@@ -216,10 +217,7 @@ function formatCatalogMessage(
 }
 
 function medicationDrugMatchNote(lang: Lang) {
-  if (lang === "de") {
-    return "Aus der Arzneimittel-Referenzsuche ausgewählt.";
-  }
-  return "Выбрано из справочника препаратов.";
+  return uiText("cases_medications_drug_match_note", lang);
 }
 
 type MedicationCardContentProps = {
@@ -591,7 +589,7 @@ function MedicationReferenceWorkspace({
                   value={drugSearchQuery}
                   onChange={(event) => setDrugSearchQuery(event.target.value)}
                   className={inputBaseClassName}
-                  placeholder="Atorvastatin, Sortis, C10AA05"
+                  placeholder={t.uiText.cases_medications_drug_search_placeholder}
                 />
               </Field>
               <Field label={t.cases_medications_country}>
@@ -599,7 +597,7 @@ function MedicationReferenceWorkspace({
                   value={drugSearchCountry}
                   onChange={(event) => setDrugSearchCountry(event.target.value)}
                   className={inputBaseClassName}
-                  placeholder="DE"
+                  placeholder={t.uiText.cases_medications_country_placeholder}
                 />
               </Field>
               <div className="flex items-end">
@@ -740,7 +738,7 @@ function MedicationReferenceWorkspace({
               }}
               className={textareaBaseClassName}
               rows={4}
-              placeholder="Sortis,DE,Atorvastatin,20 mg,tablet,Pfizer,C10AA05"
+              placeholder={t.uiText.cases_medications_import_placeholder}
             />
             <div className="flex justify-end">
               <button

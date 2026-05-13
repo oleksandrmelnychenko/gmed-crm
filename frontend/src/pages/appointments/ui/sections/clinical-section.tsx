@@ -60,11 +60,7 @@ function AppointmentClinicalSection({
   onRefresh,
   onError,
 }: AppointmentClinicalSectionProps) {
-  const clinicalEmpty = appointmentText(
-    "Für diesen Termin sind keine klinischen Blöcke verfügbar.",
-    "Для этого приёма нет клинических блоков.",
-    "No clinical surfaces are available for this appointment.",
-  );
+  const clinicalEmpty = appointmentText("appointments_no_clinical_surfaces_are_available_for_this_appointment");
   const showClinicalIncomingSection =
     !detail.is_blocked &&
     permissions.canManageChecklist &&
@@ -97,92 +93,44 @@ function AppointmentClinicalSection({
   return (
     <>
       <AppointmentWorkspaceSectionIntro
-        title={appointmentText(
-          "Klinische Oberfläche",
-          "Клинический блок",
-          "Clinical surface",
-        )}
-        description={appointmentText(
-          "Eingehende medizinische Daten, Befunde und Dolmetscherbericht direkt im Termin-Kontext.",
-          "Входящие медицинские данные, заключения и отчёт переводчика прямо в контексте приёма.",
-          "Incoming medical data, findings and interpreter reporting in the appointment context.",
-        )}
+        title={appointmentText("appointments_clinical_surface")}
+        description={appointmentText("appointments_incoming_medical_data_findings_and_interpreter_reporting")}
         accessory={<CountBadge>{clinicalSurfaceItemCount}</CountBadge>}
       />
 
       {hasClinicalContent ? (
         <>
           <Section
-            title={appointmentText(
-              "Klinische Übersicht",
-              "Клиническая сводка",
-              "Clinical summary",
-            )}
+            title={appointmentText("appointments_clinical_summary")}
             accessory={<CountBadge>{clinicalOpenCount}</CountBadge>}
           >
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               <StatCard
-                label={appointmentText(
-                  "Intake offen",
-                  "Открытый intake",
-                  "Open intake",
-                )}
+                label={appointmentText("appointments_open_intake")}
                 value={incomingDataOpenCount}
-                description={appointmentText(
-                  "Checklistenpunkte für Eingangsdaten.",
-                  "Пункты чек-листа по входящим данным.",
-                  "Checklist items for incoming data.",
-                )}
+                description={appointmentText("appointments_checklist_items_for_incoming_data")}
               />
               <StatCard
-                label={appointmentText(
-                  "Befunde offen",
-                  "Открытые заключения",
-                  "Open findings",
-                )}
+                label={appointmentText("appointments_open_findings")}
                 value={findingsOpenCount}
-                description={appointmentText(
-                  "Punkte rund um Arztbrief und Befunde.",
-                  "Пункты по Arztbrief и заключениям.",
-                  "Items related to Arztbrief and findings.",
-                )}
+                description={appointmentText("appointments_items_related_to_arztbrief_and_findings")}
               />
               <StatCard
-                label={appointmentText(
-                  "Follow-up-Last",
-                  "Нагрузка follow-up",
-                  "Follow-up load",
-                )}
+                label={appointmentText("appointments_follow_up_load")}
                 value={clinicalFollowUpCount}
-                description={appointmentText(
-                  "Reminder und Aufgaben im klinischen Flow.",
-                  "Напоминания и задачи в клиническом flow.",
-                  "Reminders and tasks in the clinical flow.",
-                )}
+                description={appointmentText("appointments_reminders_and_tasks_in_the_clinical_flow")}
               />
               <StatCard
-                label={appointmentText(
-                  "Bericht",
-                  "Отчёт",
-                  "Report",
-                )}
+                label={appointmentText("appointments_report")}
                 value={
                   detailReport
                     ? reportApprovalLabel(detailReport.approval_status)
-                    : appointmentText(
-                        "Offen",
-                        "Ожидается",
-                        "Pending",
-                      )
+                    : appointmentText("appointments_pending")
                 }
                 description={
                   detailReport
                     ? `${detailReport.hours} h`
-                    : appointmentText(
-                        "Noch nicht eingereicht.",
-                        "Пока не отправлен.",
-                        "Not submitted yet.",
-                      )
+                    : appointmentText("appointments_not_submitted_yet")
                 }
               />
             </div>
@@ -233,11 +181,7 @@ function AppointmentClinicalSection({
         </>
       ) : (
         <Section
-          title={appointmentText(
-            "Klinische Oberfläche",
-            "Клинический блок",
-            "Clinical surface",
-          )}
+          title={appointmentText("appointments_clinical_surface")}
         >
           <EmptyCell>{clinicalEmpty}</EmptyCell>
         </Section>

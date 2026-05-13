@@ -4,6 +4,7 @@ import { ru } from "./ru";
 import type { AdminSystemTranslations } from "./catalogs/admin-system";
 import type { CasesClinicalTranslations } from "./catalogs/cases-clinical";
 import type { ClinicalTranslations } from "./catalogs/clinical";
+import type { ExtractedUiTranslations } from "./catalogs/extracted-ui";
 import type { OperationsTranslations } from "./catalogs/operations";
 import type { PatientsPortalTranslations } from "./catalogs/patients-portal";
 import type { RevenueTranslations } from "./catalogs/revenue";
@@ -14,6 +15,7 @@ export interface Translations
     AdminSystemTranslations,
     CasesClinicalTranslations,
     ClinicalTranslations,
+    ExtractedUiTranslations,
     OperationsTranslations,
     PatientsPortalTranslations,
     RevenueTranslations {
@@ -1400,6 +1402,25 @@ export function t(lang: Lang): Translations {
     case "ru":
       return ru;
   }
+}
+
+export type UiTextValues = Record<string, string | number | boolean | null | undefined>;
+
+export function formatUiText(template: string, values?: UiTextValues): string {
+  if (!values) return template;
+
+  return Object.entries(values).reduce(
+    (text, [key, value]) => text.replaceAll(`{${key}}`, String(value ?? "")),
+    template,
+  );
+}
+
+export function uiText(
+  key: string,
+  lang: Lang = getLang(),
+  values?: UiTextValues,
+): string {
+  return formatUiText(t(lang).uiText[key] ?? key, values);
 }
 
 export type EnumLabelMap = Partial<Record<string, string>>;

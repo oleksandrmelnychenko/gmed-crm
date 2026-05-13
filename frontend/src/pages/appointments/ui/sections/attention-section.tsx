@@ -9,21 +9,9 @@ function AppointmentAttentionSection({
 }: {
   attention: AppointmentAttentionItem;
 }) {
-  const title = appointmentText(
-    "Operativer Follow-up offen",
-    "Открыт операционный follow-up",
-    "Operational follow-up open",
-  );
-  const subtitle = appointmentText(
-    "Dieser Termin hat noch offene operative Folgepunkte.",
-    "У этого приёма остались незакрытые операционные follow-up пункты.",
-    "This appointment still has unresolved operational follow-up.",
-  );
-  const nextCheckpointLabel = appointmentText(
-    "Nächster Prüfpunkt",
-    "Следующая контрольная точка",
-    "Next due checkpoint",
-  );
+  const title = appointmentText("appointments_operational_follow_up_open");
+  const subtitle = appointmentText("appointments_this_appointment_still_has_unresolved_operational_follow");
+  const nextCheckpointLabel = appointmentText("appointments_next_due_checkpoint");
 
   return (
     <section className="space-y-3 rounded-xl p-3.5 border border-border/50 bg-card/40">

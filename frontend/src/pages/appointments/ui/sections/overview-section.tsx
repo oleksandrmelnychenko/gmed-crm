@@ -112,7 +112,7 @@ function AppointmentOverviewSection({
         {detail.interpreter_response ? (
           <span className="rounded-full border border-border/60 bg-muted/25 px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
             {(tr.role_interpreter ??
-              appointmentText("Dolmetscher", "Переводчик", "Interpreter"))}{" "}
+              appointmentText("appointments_interpreter"))}{" "}
             {responseLabel(detail.interpreter_response)}
           </span>
         ) : null}
@@ -277,7 +277,7 @@ function AppointmentOverviewSection({
                         {recurringLineageSplitLabel(item, t)}
                       </span>
                       <span className="text-xs text-sky-700">
-                        {item.first_date} to {item.last_date}
+                        {item.first_date} {t.uiText.common_to_separator} {item.last_date}
                       </span>
                       {item.series_id !== detail.id ? (
                         <button

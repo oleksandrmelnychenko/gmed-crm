@@ -1,6 +1,7 @@
 import { startTransition, useEffect, useReducer } from "react";
 
 import { apiFetch } from "@/lib/api";
+import { uiText } from "@/lib/i18n";
 
 import type { PatientTimelineItem, PatientTimelineRangeFilter } from "../model/detail-model";
 import type {
@@ -348,7 +349,7 @@ export function usePatientDetailTabData({
         }
       } catch (error: unknown) {
         if (signal.aborted) return;
-        const message = error instanceof Error ? error.message : "Failed to load patient tab data";
+        const message = error instanceof Error ? error.message : uiText("patients_error_load_tab_data");
         startTransition(() => {
           dispatchTabData({
             type: "settle",

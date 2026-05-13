@@ -1,12 +1,11 @@
-import { useLang } from "@/lib/i18n";
+import { t as translateCatalog, useLang } from "@/lib/i18n";
 
 import { type NeurologyAssessment, useCaseWorkspace } from "./context";
 import { SpecialtySection } from "./specialty-section";
 
-function tri(lang: string, de: string, ru: string, en: string) {
-  if (lang === "de") return de;
-  if (lang === "ru") return ru;
-  return en;
+function tri(lang: string, key: string) {
+  const catalog = translateCatalog(lang === "de" ? "de" : "ru");
+  return catalog.uiText[key] ?? key;
 }
 
 const BLANK: NeurologyAssessment = {
@@ -36,13 +35,8 @@ export function NeurologySection() {
 
   return (
     <SpecialtySection<NeurologyAssessment>
-      title={tri(lang, "Neurologie", "Неврология", "Neurology")}
-      description={tri(
-        lang,
-        "Neurologische Leitsymptome und Diagnostik-Historie.",
-        "Неврологические симптомы и история диагностики.",
-        "Neurological signs and diagnostic history.",
-      )}
+      title={tri(lang, "case_ws_neurology")}
+      description={tri(lang, "case_ws_neurological_signs_and_diagnostic_history")}
       blankValue={BLANK}
       rawValue={detail?.neurology}
       busy={sectionBusy === "neurology"}
@@ -51,59 +45,39 @@ export function NeurologySection() {
       save={saveNeurology}
       revisionKey={detail?.updated_at ?? detail?.id ?? ""}
       booleanFlags={[
-        { key: "headache", labels: { de: "Kopfschmerz", ru: "Головная боль", en: "Headache" } },
-        { key: "dizziness", labels: { de: "Schwindel", ru: "Головокружение", en: "Dizziness" } },
+        { key: "headache", label: tri(lang, "case_ws_headache") },
+        { key: "dizziness", label: tri(lang, "case_ws_dizziness") },
         {
           key: "sensory_changes",
-          labels: {
-            de: "Sensibilitätsstörung",
-            ru: "Нарушения чувствительности",
-            en: "Sensory changes",
-          },
+          label: tri(lang, "case_ws_sensory_changes"),
         },
-        { key: "weakness", labels: { de: "Kraftminderung", ru: "Слабость", en: "Weakness" } },
+        { key: "weakness", label: tri(lang, "case_ws_weakness") },
         {
           key: "seizure_history",
-          labels: { de: "Anfälle in der Anamnese", ru: "Приступы в анамнезе", en: "Seizure history" },
+          label: tri(lang, "case_ws_seizure_history"),
         },
         {
           key: "gait_balance_issues",
-          labels: {
-            de: "Gang- / Gleichgewichtsstörung",
-            ru: "Нарушения походки / равновесия",
-            en: "Gait / balance issues",
-          },
+          label: tri(lang, "case_ws_gait_balance_issues"),
         },
       ]}
       textFields={[
         {
           key: "prior_neuro_imaging",
-          labels: {
-            de: "Vorherige neuroradiologische Bildgebung",
-            ru: "Предыдущая нейровизуализация",
-            en: "Prior neuro imaging",
-          },
+          label: tri(lang, "case_ws_prior_neuro_imaging"),
         },
         {
           key: "prior_neurology_workup",
-          labels: {
-            de: "Frühere neurologische Diagnostik",
-            ru: "Предыдущее неврологическое обследование",
-            en: "Prior neurology workup",
-          },
+          label: tri(lang, "case_ws_prior_neurology_workup"),
         },
         {
           key: "cognitive_changes",
-          labels: {
-            de: "Kognitive / sprachliche Veränderungen",
-            ru: "Когнитивные / речевые изменения",
-            en: "Cognitive / speech changes",
-          },
+          label: tri(lang, "case_ws_cognitive_speech_changes"),
         },
-        { key: "red_flags", labels: { de: "Warnzeichen", ru: "Красные флаги", en: "Red flags" } },
+        { key: "red_flags", label: tri(lang, "case_ws_red_flags_2") },
         {
           key: "notes",
-          labels: { de: "Neurologische Notizen", ru: "Неврологические заметки", en: "Neurology notes" },
+          label: tri(lang, "case_ws_neurology_notes"),
           rows: 4,
         },
       ]}

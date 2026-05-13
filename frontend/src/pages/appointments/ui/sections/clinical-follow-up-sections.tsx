@@ -84,13 +84,13 @@ const clinicalTextareaClassName = appointmentTextareaControlClassName;
 function checklistPhaseLabel(phase: string) {
   switch (phase) {
     case "preparation":
-      return appointmentText("Vorbereitung", "Подготовка", "Preparation");
+      return appointmentText("appointments_preparation");
     case "execution":
-      return appointmentText("Durchführung", "Выполнение", "Execution");
+      return appointmentText("appointments_execution");
     case "followup":
-      return appointmentText("Nachbereitung", "После визита", "Follow-up");
+      return appointmentText("appointments_follow_up_2");
     default:
-      return appointmentText("Unbekannte Phase", "Неизвестная фаза", "Unknown phase");
+      return appointmentText("appointments_unknown_phase");
   }
 }
 
@@ -224,28 +224,14 @@ function useAppointmentIncomingDataSectionContent({
   const openChecklistCount = checklist.filter((item) => !item.is_completed).length;
   const intakeStateLabel =
     openChecklistCount === 0 && checklist.length > 0
-      ? appointmentText("Intake bereit", "Интейк готов", "Intake clear")
-      : appointmentText(
-          `${openChecklistCount} offen`,
-          `${openChecklistCount} открыто`,
-          `${openChecklistCount} open`,
-        );
+      ? appointmentText("appointments_intake_clear")
+      : appointmentText("appointments_open_count", {
+          count: openChecklistCount,
+        });
   const followUpItemCount = reminders.length + tasks.length;
-  const caseUpdateLabel = appointmentText(
-    "Fallaktualisierung erforderlich",
-    "Нужно обновление кейса",
-    "Case update required",
-  );
-  const patientFollowUpLabel = appointmentText(
-    "Patienten-Follow-up erforderlich",
-    "Нужен фоллоу-ап с пациентом",
-    "Patient follow-up required",
-  );
-  const intakeComposerTitle = appointmentText(
-    "Intake-Follow-up anlegen",
-    "Создать intake follow-up",
-    "Create intake follow-up",
-  );
+  const caseUpdateLabel = appointmentText("appointments_case_update_required");
+  const patientFollowUpLabel = appointmentText("appointments_patient_follow_up_required");
+  const intakeComposerTitle = appointmentText("appointments_create_intake_follow_up");
 
   useEffect(() => {
     dispatchIncomingState({
@@ -271,11 +257,7 @@ function useAppointmentIncomingDataSectionContent({
       onError(
         error instanceof Error
           ? error.message
-          : appointmentText(
-              "Element konnte nicht abgeschlossen werden.",
-              "Не удалось завершить элемент.",
-              "Failed to complete item",
-            ),
+          : appointmentText("appointments_failed_to_complete_item"),
       );
     } finally {
       setActionBusy("");
@@ -288,9 +270,16 @@ function useAppointmentIncomingDataSectionContent({
     if (!assignee) return;
 
     const draftParts = [
-      `Incoming data intake: ${detail.patient_pid} · ${detail.title}`,
-      `Source: ${incomingDataSourceLabel(form.source)}`,
-      `Category: ${incomingDataCategoryLabel(form.category)}`,
+      appointmentText("appointments_incoming_data_chat_title", {
+        patientPid: detail.patient_pid,
+        title: detail.title,
+      }),
+      appointmentText("appointments_description_source", {
+        source: incomingDataSourceLabel(form.source),
+      }),
+      appointmentText("appointments_description_category", {
+        category: incomingDataCategoryLabel(form.category),
+      }),
       form.requiresCaseUpdate ? caseUpdateLabel : "",
       form.requiresPatientFollowUp ? patientFollowUpLabel : "",
       form.notes.trim() || "",
@@ -309,15 +298,35 @@ function useAppointmentIncomingDataSectionContent({
     event.preventDefault();
     if (!form.assigneeId || !form.dueAt) return;
 
-    const title = `${INCOMING_DATA_PREFIX} ${incomingDataCategoryLabel(
-      form.category,
-    )} from ${incomingDataSourceLabel(form.source)}`;
+    const title = `${INCOMING_DATA_PREFIX} ${appointmentText(
+      "appointments_incoming_data_followup_title",
+      {
+        category: incomingDataCategoryLabel(form.category),
+        source: incomingDataSourceLabel(form.source),
+      },
+    )}`;
     const description = [
-      detail.provider_name ? `Clinic: ${detail.provider_name}` : "",
-      detail.doctor_name ? `Doctor: ${detail.doctor_name}` : "",
-      `Appointment: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}`,
-      `Source: ${incomingDataSourceLabel(form.source)}`,
-      `Category: ${incomingDataCategoryLabel(form.category)}`,
+      detail.provider_name
+        ? appointmentText("appointments_description_clinic", {
+            clinic: detail.provider_name,
+          })
+        : "",
+      detail.doctor_name
+        ? appointmentText("appointments_description_doctor", {
+            doctor: detail.doctor_name,
+          })
+        : "",
+      appointmentText("appointments_description_appointment", {
+        patientPid: detail.patient_pid,
+        title: detail.title,
+        slot: slotLabel(detail),
+      }),
+      appointmentText("appointments_description_source", {
+        source: incomingDataSourceLabel(form.source),
+      }),
+      appointmentText("appointments_description_category", {
+        category: incomingDataCategoryLabel(form.category),
+      }),
       form.requiresCaseUpdate ? caseUpdateLabel : "",
       form.requiresPatientFollowUp ? patientFollowUpLabel : "",
       form.notes.trim() || "",
@@ -325,12 +334,12 @@ function useAppointmentIncomingDataSectionContent({
       .filter(Boolean)
       .join("\n");
     const checklistItems = [
-      `${INCOMING_DATA_CHECKLIST_PREFIX} Review and categorize incoming data`,
+      `${INCOMING_DATA_CHECKLIST_PREFIX} ${appointmentText("appointments_incoming_data_checklist_review")}`,
       form.requiresCaseUpdate
-        ? `${INCOMING_DATA_CHECKLIST_PREFIX} Apply update to case/anamnesis`
+        ? `${INCOMING_DATA_CHECKLIST_PREFIX} ${appointmentText("appointments_incoming_data_checklist_apply_update")}`
         : "",
       form.requiresPatientFollowUp
-        ? `${INCOMING_DATA_CHECKLIST_PREFIX} Patient follow-up after data triage`
+        ? `${INCOMING_DATA_CHECKLIST_PREFIX} ${appointmentText("appointments_incoming_data_checklist_patient_followup")}`
         : "",
     ].filter(Boolean);
 
@@ -395,71 +404,43 @@ function useAppointmentIncomingDataSectionContent({
   return (
     <div className="space-y-4">
       <Section
-        title={appointmentText(
-          "Eingehende medizinische Daten",
-          "Входящие медицинские данные",
-          "Incoming medical data",
-        )}
+        title={appointmentText("appointments_incoming_medical_data")}
         accessory={<CountBadge>{intakeStateLabel}</CountBadge>}
       >
         <p className="text-sm text-muted-foreground">
-          {appointmentText(
-            "Erfassen Sie neue medizinische Updates von Patienten, Ärzten, Dolmetschern oder Kliniken, die noch triagiert und in den Fall übernommen werden müssen.",
-            "Фиксируйте новые медицинские обновления от пациентов, врачей, переводчиков или клиник, которые ещё нужно протриажить и внести в кейс.",
-            "Capture new medical updates from patients, doctors, interpreters or clinics that still need triage and case updates.",
-          )}
+          {appointmentText("appointments_capture_new_medical_updates_from_patients_doctors_interp")}
         </p>
         <div className="grid gap-3 md:grid-cols-3">
           <StatCard
-            label={appointmentText("Checkliste", "Чек-лист", "Checklist")}
+            label={appointmentText("appointments_checklist")}
             value={checklist.length}
             description={
               checklist.length === 0
-                ? appointmentText(
-                    "Noch nicht gestartet",
-                    "Ещё не запущен",
-                    "Not started yet",
-                  )
+                ? appointmentText("appointments_not_started_yet")
                 : intakeStateLabel
             }
           />
           <StatCard
-            label={appointmentText("Reminder", "Напоминания", "Reminders")}
+            label={appointmentText("appointments_reminders")}
             value={reminders.length}
-            description={appointmentText(
-              "Zeitfenster für Triage und Verarbeitung.",
-              "Сроки для триажа и обработки.",
-              "Timing for triage and processing.",
-            )}
+            description={appointmentText("appointments_timing_for_triage_and_processing")}
           />
           <StatCard
-            label={appointmentText("Aufgaben", "Задачи", "Tasks")}
+            label={appointmentText("appointments_tasks")}
             value={tasks.length}
-            description={appointmentText(
-              "Operative Verantwortung für Kategorisierung und Fall-Update.",
-              "Операционная ответственность за категоризацию и обновление кейса.",
-              "Operational ownership for categorization and case updates.",
-            )}
+            description={appointmentText("appointments_operational_ownership_for_categorization_and_case_update")}
           />
         </div>
       </Section>
 
       <div className="space-y-4">
         <Section
-          title={appointmentText(
-            "Intake-Checkliste",
-            "Чек-лист intake",
-            "Intake checklist",
-          )}
+          title={appointmentText("appointments_intake_checklist")}
           accessory={<CountBadge>{checklist.length}</CountBadge>}
         >
           {checklist.length === 0 ? (
             <EmptyCell>
-              {appointmentText(
-                "Für diesen Termin wurde noch keine Intake-Checkliste angelegt.",
-                "Для этого приёма пока не создан intake-чек-лист.",
-                "No intake checklist has been created for this appointment yet.",
-              )}
+              {appointmentText("appointments_no_intake_checklist_has_been_created_for_this_appointmen")}
             </EmptyCell>
           ) : (
             <div className="space-y-2">
@@ -484,11 +465,7 @@ function useAppointmentIncomingDataSectionContent({
                   </div>
                   {item.is_completed ? (
                     <StatusBadge tone="success">
-                      {appointmentText(
-                        "Abgeschlossen",
-                        "Завершено",
-                        "Completed",
-                      )}{" "}
+                      {appointmentText("appointments_completed")}{" "}
                       {formatDateTimeLabel(item.completed_at)}
                     </StatusBadge>
                   ) : (
@@ -503,7 +480,7 @@ function useAppointmentIncomingDataSectionContent({
                       {actionBusy === `check:${item.id}` ? (
                         <LoaderCircle className="size-4 animate-spin" />
                       ) : null}
-                      {appointmentText("Abschließen", "Завершить", "Complete")}
+                      {appointmentText("appointments_complete")}
                     </Button>
                   )}
                 </div>
@@ -513,11 +490,7 @@ function useAppointmentIncomingDataSectionContent({
         </Section>
 
         <Section
-          title={appointmentText(
-            "Reminder und Aufgaben",
-            "Напоминания и задачи",
-            "Reminders and tasks",
-          )}
+          title={appointmentText("appointments_reminders_and_tasks")}
           accessory={
             <div className="flex items-center gap-2">
               <CountBadge>{followUpItemCount}</CountBadge>
@@ -534,11 +507,7 @@ function useAppointmentIncomingDataSectionContent({
         >
           {followUpItemCount === 0 ? (
             <EmptyCell>
-              {appointmentText(
-                "Für diesen Termin gibt es noch keine Reminder oder Aufgaben im Intake-Flow.",
-                "Для этого приёма пока нет напоминаний или задач в intake-flow.",
-                "No reminders or tasks exist in this intake flow yet.",
-              )}
+              {appointmentText("appointments_no_reminders_or_tasks_exist_in_this_intake_flow_yet")}
             </EmptyCell>
           ) : (
             <div className="space-y-2">
@@ -557,7 +526,7 @@ function useAppointmentIncomingDataSectionContent({
                       </p>
                     </div>
                     <CountBadge>
-                      {appointmentText("Reminder", "Напоминание", "Reminder")}
+                      {appointmentText("appointments_reminder")}
                     </CountBadge>
                   </div>
                   {item.description ? (
@@ -613,11 +582,7 @@ function useAppointmentIncomingDataSectionContent({
           }
         }}
         title={intakeComposerTitle}
-        description={appointmentText(
-          "Erstellen Sie Reminder, Checklistenpunkte und bei Bedarf eine verknüpfte Aufgabe direkt aus dem Termin.",
-          "Создавайте напоминания, пункты чек-листа и при необходимости связанную задачу прямо из приёма.",
-          "Create reminders, checklist items and, if needed, a linked task directly from the appointment.",
-        )}
+        description={appointmentText("appointments_create_reminders_checklist_items_and_if_needed_a_linked")}
         onSubmit={handleSubmit}
         footer={
           <>
@@ -639,11 +604,7 @@ function useAppointmentIncomingDataSectionContent({
               {submitBusy ? (
                 <LoaderCircle className="size-3.5 animate-spin" />
               ) : null}
-              {appointmentText(
-                "Intake-Flow starten",
-                "Запустить intake-flow",
-                "Start intake flow",
-              )}
+              {appointmentText("appointments_start_intake_flow")}
             </Button>
           </>
         }
@@ -651,11 +612,7 @@ function useAppointmentIncomingDataSectionContent({
         <div
           className={cn("text-sm text-muted-foreground", appointmentSoftPanelClassName)}
         >
-          {appointmentText(
-            "Alle Änderungen werden direkt am Termin gespeichert und danach sofort in der klinischen Übersicht angezeigt.",
-            "Все изменения сохраняются прямо в приёме и сразу отображаются в клиническом блоке.",
-            "All changes are saved directly on the appointment and shown immediately in the clinical view.",
-          )}
+          {appointmentText("appointments_all_changes_are_saved_directly_on_the_appointment_and_sh")}
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
@@ -737,7 +694,7 @@ function useAppointmentIncomingDataSectionContent({
               ))}
             </NativeComboboxSelect>
           </Field>
-          <Field label={appointmentText("Fällig am", "Срок", "Due at")}>
+          <Field label={appointmentText("appointments_due_at")}>
             <Input
               type="datetime-local"
               value={form.dueAt}
@@ -769,11 +726,7 @@ function useAppointmentIncomingDataSectionContent({
           <AppointmentClinicalToggleCard
             checked={form.requiresCaseUpdate}
             title={caseUpdateLabel}
-            description={appointmentText(
-              "Erzeugt einen separaten Checklistenschritt zur Übernahme in Fall oder Anamnese.",
-              "Создаёт отдельный шаг чек-листа для переноса в кейс или анамнез.",
-              "Creates a separate checklist step to apply the update to the case or anamnesis.",
-            )}
+            description={appointmentText("appointments_creates_a_separate_checklist_step_to_apply_the_update_to")}
             onChange={(checked) =>
               setForm((current) => ({
                 ...current,
@@ -784,11 +737,7 @@ function useAppointmentIncomingDataSectionContent({
           <AppointmentClinicalToggleCard
             checked={form.requiresPatientFollowUp}
             title={patientFollowUpLabel}
-            description={appointmentText(
-              "Erzeugt einen separaten Schritt für die Rückmeldung an den Patienten nach der Datentriage.",
-              "Добавляет отдельный шаг для связи с пациентом после триажа данных.",
-              "Adds a separate step to contact the patient after data triage.",
-            )}
+            description={appointmentText("appointments_adds_a_separate_step_to_contact_the_patient_after_data_t")}
             onChange={(checked) =>
               setForm((current) => ({
                 ...current,
@@ -801,16 +750,8 @@ function useAppointmentIncomingDataSectionContent({
         <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
           <AppointmentClinicalToggleCard
             checked={form.createTask}
-            title={appointmentText(
-              "Zusätzliche Aufgabe erstellen",
-              "Создать дополнительную задачу",
-              "Create linked task",
-            )}
-            description={appointmentText(
-              "Legt zusätzlich eine verknüpfte operative Aufgabe für den Verantwortlichen an.",
-              "Дополнительно создаёт связанную операционную задачу для ответственного.",
-              "Also creates a linked operational task for the assignee.",
-            )}
+            title={appointmentText("appointments_create_linked_task")}
+            description={appointmentText("appointments_also_creates_a_linked_operational_task_for_the_assignee")}
             onChange={(checked) =>
               setForm((current) => ({
                 ...current,
@@ -819,11 +760,7 @@ function useAppointmentIncomingDataSectionContent({
             }
           />
           <Field
-            label={appointmentText(
-              "Aufgabenpriorität",
-              "Приоритет задачи",
-              "Task priority",
-            )}
+            label={appointmentText("appointments_task_priority")}
           >
             <NativeComboboxSelect
               value={form.taskPriority}
@@ -854,11 +791,7 @@ function useAppointmentIncomingDataSectionContent({
             disabled={!form.assigneeId}
             onClick={openChatDraft}
           >
-            {appointmentText(
-              "Chat-Entwurf öffnen",
-              "Открыть черновик чата",
-              "Open chat draft",
-            )}
+            {appointmentText("appointments_open_chat_draft")}
           </Button>
         </div>
       </AppointmentEditorSheet>
@@ -947,32 +880,14 @@ function useAppointmentFindingsSectionContent({
   const openChecklistCount = checklist.filter((item) => !item.is_completed).length;
   const findingsStateLabel =
     openChecklistCount === 0 && checklist.length > 0
-      ? appointmentText(
-          "Follow-up bereit",
-          "Фоллоу-ап готов",
-          "Follow-up ready",
-        )
-      : appointmentText(
-          `${openChecklistCount} offen`,
-          `${openChecklistCount} открыто`,
-          `${openChecklistCount} open`,
-        );
+      ? appointmentText("appointments_follow_up_ready")
+      : appointmentText("appointments_open_count", {
+          count: openChecklistCount,
+        });
   const followUpItemCount = reminders.length + tasks.length;
-  const translationRequiredLabel = appointmentText(
-    "Schriftliche Übersetzung erforderlich",
-    "Нужен письменный перевод",
-    "Written translation required",
-  );
-  const sendToPatientLabel = appointmentText(
-    "Paket an Patienten senden",
-    "Отправить пакет пациенту",
-    "Send package to patient",
-  );
-  const findingsComposerTitle = appointmentText(
-    "Befund-Follow-up anlegen",
-    "Создать follow-up по заключениям",
-    "Create findings follow-up",
-  );
+  const translationRequiredLabel = appointmentText("appointments_written_translation_required");
+  const sendToPatientLabel = appointmentText("appointments_send_package_to_patient");
+  const findingsComposerTitle = appointmentText("appointments_create_findings_follow_up");
 
   useEffect(() => {
     dispatchFindingsState({
@@ -998,11 +913,7 @@ function useAppointmentFindingsSectionContent({
       onError(
         error instanceof Error
           ? error.message
-          : appointmentText(
-              "Element konnte nicht abgeschlossen werden.",
-              "Не удалось завершить элемент.",
-              "Failed to complete item",
-            ),
+          : appointmentText("appointments_failed_to_complete_item"),
       );
     } finally {
       setActionBusy("");
@@ -1015,10 +926,23 @@ function useAppointmentFindingsSectionContent({
     if (!assignee) return;
 
     const draftParts = [
-      `Findings follow-up: ${detail.patient_pid} · ${detail.title}`,
-      `Expected: ${findingsArtifactLabel(form.artifact)}`,
-      detail.provider_name ? `Clinic: ${detail.provider_name}` : "",
-      detail.doctor_name ? `Doctor: ${detail.doctor_name}` : "",
+      appointmentText("appointments_findings_chat_title", {
+        patientPid: detail.patient_pid,
+        title: detail.title,
+      }),
+      appointmentText("appointments_findings_chat_expected", {
+        artifact: findingsArtifactLabel(form.artifact),
+      }),
+      detail.provider_name
+        ? appointmentText("appointments_description_clinic", {
+            clinic: detail.provider_name,
+          })
+        : "",
+      detail.doctor_name
+        ? appointmentText("appointments_description_doctor", {
+            doctor: detail.doctor_name,
+          })
+        : "",
       form.translationRequired ? translationRequiredLabel : "",
       form.sendToPatient ? sendToPatientLabel : "",
       form.notes.trim() || "",
@@ -1040,9 +964,21 @@ function useAppointmentFindingsSectionContent({
     const artifactLabel = findingsArtifactLabel(form.artifact);
     const title = `${FINDINGS_FOLLOW_UP_PREFIX} ${artifactLabel}`;
     const description = [
-      detail.provider_name ? `Clinic: ${detail.provider_name}` : "",
-      detail.doctor_name ? `Doctor: ${detail.doctor_name}` : "",
-      `Appointment: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}`,
+      detail.provider_name
+        ? appointmentText("appointments_description_clinic", {
+            clinic: detail.provider_name,
+          })
+        : "",
+      detail.doctor_name
+        ? appointmentText("appointments_description_doctor", {
+            doctor: detail.doctor_name,
+          })
+        : "",
+      appointmentText("appointments_description_appointment", {
+        patientPid: detail.patient_pid,
+        title: detail.title,
+        slot: slotLabel(detail),
+      }),
       form.translationRequired ? translationRequiredLabel : "",
       form.sendToPatient ? sendToPatientLabel : "",
       form.notes.trim() || "",
@@ -1050,13 +986,17 @@ function useAppointmentFindingsSectionContent({
       .filter(Boolean)
       .join("\n");
     const checklistItems = [
-      `${FINDINGS_CHECKLIST_PREFIX} Await ${artifactLabel}`,
-      `${FINDINGS_CHECKLIST_PREFIX} Review and categorize ${artifactLabel}`,
+      `${FINDINGS_CHECKLIST_PREFIX} ${appointmentText("appointments_findings_checklist_await", {
+        artifact: artifactLabel,
+      })}`,
+      `${FINDINGS_CHECKLIST_PREFIX} ${appointmentText("appointments_findings_checklist_review", {
+        artifact: artifactLabel,
+      })}`,
       form.translationRequired
-        ? `${FINDINGS_CHECKLIST_PREFIX} Written translation completed`
+        ? `${FINDINGS_CHECKLIST_PREFIX} ${appointmentText("appointments_findings_checklist_translation_completed")}`
         : "",
       form.sendToPatient
-        ? `${FINDINGS_CHECKLIST_PREFIX} Findings package sent to patient`
+        ? `${FINDINGS_CHECKLIST_PREFIX} ${appointmentText("appointments_findings_checklist_sent_to_patient")}`
         : "",
     ].filter(Boolean);
 
@@ -1121,51 +1061,31 @@ function useAppointmentFindingsSectionContent({
   return (
     <div className="space-y-4">
       <Section
-        title={appointmentText(
-          "Arztbrief und schriftliche Befunde",
-          "Arztbrief и письменные заключения",
-          "Arztbrief and written findings",
-        )}
+        title={appointmentText("appointments_arztbrief_and_written_findings")}
         accessory={<CountBadge>{findingsStateLabel}</CountBadge>}
       >
         <p className="text-sm text-muted-foreground">
-          {appointmentText(
-            "Verfolgen Sie ausstehende Befunde, Übersetzungsbedarf und den Versand an Patienten direkt aus dem Termin-Kontext.",
-            "Отслеживайте недостающие заключения, потребность в переводе и отправку пациенту прямо из контекста приёма.",
-            "Track missing findings, translation needs and patient delivery directly from the appointment context.",
-          )}
+          {appointmentText("appointments_track_missing_findings_translation_needs_and_patient_del")}
         </p>
         <div className="grid gap-3 md:grid-cols-3">
           <StatCard
-            label={appointmentText("Checkliste", "Чек-лист", "Checklist")}
+            label={appointmentText("appointments_checklist")}
             value={checklist.length}
             description={
               checklist.length === 0
-                ? appointmentText(
-                    "Noch nicht gestartet",
-                    "Ещё не запущен",
-                    "Not started yet",
-                  )
+                ? appointmentText("appointments_not_started_yet")
                 : findingsStateLabel
             }
           />
           <StatCard
-            label={appointmentText("Reminder", "Напоминания", "Reminders")}
+            label={appointmentText("appointments_reminders")}
             value={reminders.length}
-            description={appointmentText(
-              "Timing für Rückfragen, Übersetzung und Dokumentenhandling.",
-              "Сроки для запросов, перевода и работы с документами.",
-              "Timing for requests, translation and document handling.",
-            )}
+            description={appointmentText("appointments_timing_for_requests_translation_and_document_handling")}
           />
           <StatCard
-            label={appointmentText("Aufgaben", "Задачи", "Tasks")}
+            label={appointmentText("appointments_tasks")}
             value={tasks.length}
-            description={appointmentText(
-              "Operative Verantwortung für Anforderung, Übersetzung und Versand von Befunden.",
-              "Операционная ответственность за запрос, перевод и отправку заключений.",
-              "Operational ownership for requesting, translating and sending findings.",
-            )}
+            description={appointmentText("appointments_operational_ownership_for_requesting_translating_and_sen")}
           />
         </div>
       </Section>
@@ -1173,20 +1093,12 @@ function useAppointmentFindingsSectionContent({
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)]">
         <div className="space-y-4">
           <Section
-            title={appointmentText(
-              "Follow-up-Checkliste",
-              "Чек-лист follow-up",
-              "Follow-up checklist",
-            )}
+            title={appointmentText("appointments_follow_up_checklist")}
             accessory={<CountBadge>{checklist.length}</CountBadge>}
           >
             {checklist.length === 0 ? (
               <EmptyCell>
-                {appointmentText(
-                  "Für diesen Termin wurde noch keine Befund-Checkliste angelegt.",
-                  "Для этого приёма пока не создан чек-лист по заключениям.",
-                  "No findings checklist has been created for this appointment yet.",
-                )}
+                {appointmentText("appointments_no_findings_checklist_has_been_created_for_this_appointm")}
               </EmptyCell>
             ) : (
               <div className="space-y-2">
@@ -1208,11 +1120,7 @@ function useAppointmentFindingsSectionContent({
                     </div>
                     {item.is_completed ? (
                       <StatusBadge tone="success">
-                        {appointmentText(
-                          "Abgeschlossen",
-                          "Завершено",
-                          "Completed",
-                        )}{" "}
+                        {appointmentText("appointments_completed")}{" "}
                         {formatDateTimeLabel(item.completed_at)}
                       </StatusBadge>
                     ) : (
@@ -1227,7 +1135,7 @@ function useAppointmentFindingsSectionContent({
                         {actionBusy === `check:${item.id}` ? (
                           <LoaderCircle className="size-4 animate-spin" />
                         ) : null}
-                        {appointmentText("Abschließen", "Завершить", "Complete")}
+                        {appointmentText("appointments_complete")}
                       </Button>
                     )}
                   </div>
@@ -1237,11 +1145,7 @@ function useAppointmentFindingsSectionContent({
           </Section>
 
           <Section
-            title={appointmentText(
-              "Reminder und Aufgaben",
-              "Напоминания и задачи",
-              "Reminders and tasks",
-            )}
+            title={appointmentText("appointments_reminders_and_tasks")}
             accessory={
               <div className="flex items-center gap-2">
                 <CountBadge>{followUpItemCount}</CountBadge>
@@ -1258,11 +1162,7 @@ function useAppointmentFindingsSectionContent({
           >
             {followUpItemCount === 0 ? (
               <EmptyCell>
-                {appointmentText(
-                  "Für diesen Termin gibt es noch keine Reminder oder Aufgaben im Befund-Follow-up.",
-                  "Для этого приёма пока нет напоминаний или задач в follow-up по заключениям.",
-                  "No reminders or tasks exist in this findings follow-up yet.",
-                )}
+                {appointmentText("appointments_no_reminders_or_tasks_exist_in_this_findings_follow_up_y")}
               </EmptyCell>
             ) : (
               <div className="space-y-2">
@@ -1281,7 +1181,7 @@ function useAppointmentFindingsSectionContent({
                         </p>
                       </div>
                       <CountBadge>
-                        {appointmentText("Reminder", "Напоминание", "Reminder")}
+                        {appointmentText("appointments_reminder")}
                       </CountBadge>
                     </div>
                     {item.description ? (
@@ -1338,11 +1238,7 @@ function useAppointmentFindingsSectionContent({
           }
         }}
         title={findingsComposerTitle}
-        description={appointmentText(
-          "Steuern Sie Anforderung, Übersetzung und Versand von Befunden direkt aus dem Termin.",
-          "Управляйте запросом, переводом и отправкой заключений прямо из приёма.",
-          "Control the request, translation and delivery of findings directly from the appointment.",
-        )}
+        description={appointmentText("appointments_control_the_request_translation_and_delivery_of_findings")}
         onSubmit={handleSubmit}
         footer={
           <>
@@ -1364,11 +1260,7 @@ function useAppointmentFindingsSectionContent({
               {submitBusy ? (
                 <LoaderCircle className="size-3.5 animate-spin" />
               ) : null}
-              {appointmentText(
-                "Follow-up starten",
-                "Запустить follow-up",
-                "Start follow-up",
-              )}
+              {appointmentText("appointments_start_follow_up")}
             </Button>
           </>
         }
@@ -1376,19 +1268,11 @@ function useAppointmentFindingsSectionContent({
         <div
           className={cn("text-sm text-muted-foreground", appointmentSoftPanelClassName)}
         >
-          {appointmentText(
-            "Die erstellten Reminder, Aufgaben und Checklisteneinträge erscheinen sofort im klinischen Befundblock dieses Termins.",
-            "Созданные напоминания, задачи и пункты чек-листа сразу появятся в клиническом блоке заключений этого приёма.",
-            "Created reminders, tasks and checklist items appear immediately in this appointment's findings block.",
-          )}
+          {appointmentText("appointments_created_reminders_tasks_and_checklist_items_appear_immed")}
         </div>
 
         <Field
-          label={appointmentText(
-            "Erwartetes Dokument",
-            "Ожидаемый документ",
-            "Expected document",
-          )}
+          label={appointmentText("appointments_expected_document")}
         >
           <NativeComboboxSelect
             value={form.artifact}
@@ -1429,7 +1313,7 @@ function useAppointmentFindingsSectionContent({
               ))}
             </NativeComboboxSelect>
           </Field>
-          <Field label={appointmentText("Fällig am", "Срок", "Due at")}>
+          <Field label={appointmentText("appointments_due_at")}>
             <Input
               type="datetime-local"
               value={form.dueAt}
@@ -1461,11 +1345,7 @@ function useAppointmentFindingsSectionContent({
           <AppointmentClinicalToggleCard
             checked={form.translationRequired}
             title={translationRequiredLabel}
-            description={appointmentText(
-              "Fügt einen separaten Schritt für die schriftliche Übersetzung hinzu.",
-              "Добавляет отдельный шаг для письменного перевода.",
-              "Adds a separate step for written translation.",
-            )}
+            description={appointmentText("appointments_adds_a_separate_step_for_written_translation")}
             onChange={(checked) =>
               setForm((current) => ({
                 ...current,
@@ -1476,11 +1356,7 @@ function useAppointmentFindingsSectionContent({
           <AppointmentClinicalToggleCard
             checked={form.sendToPatient}
             title={sendToPatientLabel}
-            description={appointmentText(
-              "Plant einen zusätzlichen Schritt für den Versand des Befundpakets an den Patienten.",
-              "Планирует дополнительный шаг для отправки пакета заключений пациенту.",
-              "Plans an additional step to send the findings package to the patient.",
-            )}
+            description={appointmentText("appointments_plans_an_additional_step_to_send_the_findings_package_to")}
             onChange={(checked) =>
               setForm((current) => ({
                 ...current,
@@ -1493,16 +1369,8 @@ function useAppointmentFindingsSectionContent({
         <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
           <AppointmentClinicalToggleCard
             checked={form.createTask}
-            title={appointmentText(
-              "Zusätzliche Aufgabe erstellen",
-              "Создать дополнительную задачу",
-              "Create linked task",
-            )}
-            description={appointmentText(
-              "Legt zusätzlich eine verknüpfte operative Aufgabe für das Befund-Follow-up an.",
-              "Дополнительно создаёт связанную операционную задачу для follow-up по заключениям.",
-              "Also creates a linked operational task for findings follow-up.",
-            )}
+            title={appointmentText("appointments_create_linked_task")}
+            description={appointmentText("appointments_also_creates_a_linked_operational_task_for_findings_foll")}
             onChange={(checked) =>
               setForm((current) => ({
                 ...current,
@@ -1511,11 +1379,7 @@ function useAppointmentFindingsSectionContent({
             }
           />
           <Field
-            label={appointmentText(
-              "Aufgabenpriorität",
-              "Приоритет задачи",
-              "Task priority",
-            )}
+            label={appointmentText("appointments_task_priority")}
           >
             <NativeComboboxSelect
               value={form.taskPriority}
@@ -1546,11 +1410,7 @@ function useAppointmentFindingsSectionContent({
             disabled={!form.assigneeId}
             onClick={openChatDraft}
           >
-            {appointmentText(
-              "Chat-Entwurf öffnen",
-              "Открыть черновик чата",
-              "Open chat draft",
-            )}
+            {appointmentText("appointments_open_chat_draft")}
           </Button>
         </div>
       </AppointmentEditorSheet>

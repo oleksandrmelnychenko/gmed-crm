@@ -347,7 +347,7 @@ function FeedbackReviewHeaderVariants({ item, t }: { item: PortalFeedbackItem; t
         {feedbackSourceDisplay(item.source, t)}
       </Badge>
       <Badge variant="outline" className="rounded-full">
-        NPS {item.nps_score} - {npsBandLabel(item.nps_score)}
+        {t.uiText.feedback_nps_label} {item.nps_score} - {npsBandLabel(item.nps_score)}
       </Badge>
     </>
   );
@@ -574,7 +574,7 @@ function feedbackCard(item: PortalFeedbackItem, t: Translations, withInternal = 
           <div className="mt-5 grid gap-3 xl:grid-cols-2">
             <div className="grid gap-2 rounded-xl bg-card p-3">
               <FeedbackSummaryLine label={t.feedback_overall} value={String(item.overall_score)} />
-              <FeedbackSummaryLine label="PM" value={item.patient_manager_score ? String(item.patient_manager_score) : notRated} />
+              <FeedbackSummaryLine label={t.uiText.feedback_pm_label} value={item.patient_manager_score ? String(item.patient_manager_score) : notRated} />
               <FeedbackSummaryLine label={t.feedback_interpreter} value={item.interpreter_score ? String(item.interpreter_score) : notRated} />
               <FeedbackSummaryLine label={t.feedback_concierge} value={item.concierge_score ? String(item.concierge_score) : notRated} />
               <FeedbackSummaryLine label={t.feedback_treatment} value={item.treatment_score ? String(item.treatment_score) : notRated} />
@@ -995,7 +995,7 @@ function PatientFeedbackWorkspace() {
       },
       {
         id: "nps",
-        label: "NPS",
+        label: t.uiText.feedback_nps_label,
         accessor: (row) => row.nps_score,
         sortable: true,
         width: 110,
@@ -1448,7 +1448,7 @@ function useStaffFeedbackWorkspaceContent() {
       },
       {
         id: "nps",
-        label: "NPS",
+        label: t.uiText.feedback_nps_label,
         accessor: (row) => row.nps_score,
         filterType: "number",
         group: "scores",

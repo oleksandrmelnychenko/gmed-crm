@@ -131,7 +131,7 @@ function buildScheduleForm(
   currentUserId?: string,
 ): RequestScheduleFormState {
   const patientLabel =
-    item.patient_name || item.patient_pid || appointmentText("Patient", "Пациент", "Patient");
+    item.patient_name || item.patient_pid || appointmentText("appointments_patient");
   return {
     title: `${appointmentTypeLabel(item.appointment_type)} · ${patientLabel}`,
     date: item.preferred_date_from || item.preferred_date_to || currentDateInput(),
@@ -147,15 +147,15 @@ function buildScheduleForm(
 function requestStatusLabel(status: AppointmentRequestStatus) {
   switch (status) {
     case "requested":
-      return appointmentText("Angefragt", "Запрошено", "Requested");
+      return appointmentText("appointments_requested");
     case "approved":
-      return appointmentText("Freigegeben", "Согласовано", "Approved");
+      return appointmentText("appointments_approved");
     case "rejected":
-      return appointmentText("Abgelehnt", "Отклонено", "Rejected");
+      return appointmentText("appointments_rejected_2");
     case "converted":
-      return appointmentText("Geplant", "Запланировано", "Scheduled");
+      return appointmentText("appointments_scheduled");
     case "cancelled":
-      return appointmentText("Abgebrochen", "Отменено", "Cancelled");
+      return appointmentText("appointments_cancelled_2");
   }
 }
 
@@ -180,7 +180,7 @@ function preferredWindowLabel(item: AppointmentRequestItem) {
     ? item.preferred_time_of_day.replace("_", " ")
     : "";
 
-  let dateLabel = appointmentText("Flexibles Datum", "Гибкая дата", "Flexible date");
+  let dateLabel = appointmentText("appointments_flexible_date");
   if (from && to && from !== to) {
     dateLabel = `${from} - ${to}`;
   } else if (from || to) {
@@ -247,11 +247,11 @@ function useQueueSheetContent({
     event.preventDefault();
     if (!scheduleForm) return;
     if (!scheduleForm.title.trim()) {
-      setScheduleError(appointmentText("Titel ist erforderlich.", "Нужно указать название.", "Title is required."));
+      setScheduleError(appointmentText("appointments_title_is_required"));
       return;
     }
     if (!scheduleForm.date) {
-      setScheduleError(appointmentText("Datum ist erforderlich.", "Нужно указать дату.", "Date is required."));
+      setScheduleError(appointmentText("appointments_date_is_required"));
       return;
     }
     setScheduleError("");
@@ -287,7 +287,7 @@ function useQueueSheetContent({
       {appointmentRequestsLoading ? (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <LoaderCircle className="size-3.5 animate-spin" />
-          {appointmentText("Portal-Anfragen werden geladen", "Загрузка запросов портала", "Loading portal requests")}
+          {appointmentText("appointments_loading_portal_requests")}
         </div>
       ) : null}
       {appointmentRequestsError ? (
@@ -299,7 +299,7 @@ function useQueueSheetContent({
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold text-foreground">
-              {appointmentText("Portal-Anfragen", "Запросы портала", "Portal requests")}
+              {appointmentText("appointments_portal_requests")}
             </h2>
             <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
               {appointmentRequests.length}
@@ -311,7 +311,7 @@ function useQueueSheetContent({
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-foreground">
                     {item.patient_pid ? `${item.patient_pid} · ` : ""}
-                    {item.patient_name || appointmentText("Patient", "Пациент", "Patient")}
+                    {item.patient_name || appointmentText("appointments_patient")}
                   </p>
                   <p className="truncate text-xs text-muted-foreground">
                     {appointmentTypeLabel(item.appointment_type, tr)} · {carePathKindLabel(item.care_path_kind)}
@@ -355,7 +355,7 @@ function useQueueSheetContent({
                     ) : (
                       <CheckCircle2 className="size-3.5" />
                     )}
-                    {appointmentText("Freigeben", "Согласовать", "Approve")}
+                    {appointmentText("appointments_approve")}
                   </Button>
                   <Button
                     type="button"
@@ -370,7 +370,7 @@ function useQueueSheetContent({
                     ) : (
                       <XCircle className="size-3.5" />
                     )}
-                    {appointmentText("Ablehnen", "Отклонить", "Reject")}
+                    {appointmentText("appointments_reject")}
                   </Button>
                 </div>
               ) : null}
@@ -384,7 +384,7 @@ function useQueueSheetContent({
                       <div className="grid gap-3 md:grid-cols-2">
                         <label className="flex flex-col gap-1.5 md:col-span-2">
                           <span className="text-[11.5px] font-medium leading-tight text-muted-foreground">
-                            {appointmentText("Titel", "Название", "Title")}
+                            {appointmentText("appointments_title")}
                           </span>
                           <Input
                             value={scheduleForm.title}
@@ -400,7 +400,7 @@ function useQueueSheetContent({
                         </label>
                         <label className="flex flex-col gap-1.5">
                           <span className="text-[11.5px] font-medium leading-tight text-muted-foreground">
-                            {appointmentText("Datum", "Дата", "Date")}
+                            {appointmentText("appointments_date")}
                           </span>
                           <Input
                             type="date"
@@ -418,7 +418,7 @@ function useQueueSheetContent({
                         <div className="grid grid-cols-2 gap-2">
                           <label className="flex flex-col gap-1.5">
                             <span className="text-[11.5px] font-medium leading-tight text-muted-foreground">
-                              {appointmentText("Start", "Начало", "Start")}
+                              {appointmentText("appointments_start")}
                             </span>
                             <Input
                               type="time"
@@ -435,7 +435,7 @@ function useQueueSheetContent({
                           </label>
                           <label className="flex flex-col gap-1.5">
                             <span className="text-[11.5px] font-medium leading-tight text-muted-foreground">
-                              {appointmentText("Ende", "Конец", "End")}
+                              {appointmentText("appointments_end")}
                             </span>
                             <Input
                               type="time"
@@ -476,7 +476,7 @@ function useQueueSheetContent({
                         </label>
                         <label className="flex flex-col gap-1.5">
                           <span className="text-[11.5px] font-medium leading-tight text-muted-foreground">
-                            {tr.role_interpreter ?? appointmentText("Dolmetscher", "Переводчик", "Interpreter")}
+                            {tr.role_interpreter ?? appointmentText("appointments_interpreter")}
                           </span>
                           <NativeComboboxSelect
                             value={scheduleForm.interpreterId}
@@ -499,7 +499,7 @@ function useQueueSheetContent({
                         </label>
                         <label className="flex flex-col gap-1.5 md:col-span-2">
                           <span className="text-[11.5px] font-medium leading-tight text-muted-foreground">
-                            {appointmentText("Ort", "Место", "Location")}
+                            {appointmentText("appointments_location_2")}
                           </span>
                           <Input
                             value={scheduleForm.location}
@@ -515,7 +515,7 @@ function useQueueSheetContent({
                         </label>
                         <label className="flex flex-col gap-1.5 md:col-span-2">
                           <span className="text-[11.5px] font-medium leading-tight text-muted-foreground">
-                            {appointmentText("Notizen", "Заметки", "Notes")}
+                            {appointmentText("appointments_notes_2")}
                           </span>
                           <textarea
                             value={scheduleForm.notes}
@@ -533,7 +533,7 @@ function useQueueSheetContent({
                       </div>
                       {item.requested_provider_name || item.requested_doctor_name ? (
                         <p className="text-xs text-muted-foreground">
-                          {appointmentText("Provider aus Anfrage", "Провайдер из запроса", "Requested provider")}: {[item.requested_provider_name, item.requested_doctor_name].filter(Boolean).join(" · ")}
+                          {appointmentText("appointments_requested_provider")}: {[item.requested_provider_name, item.requested_doctor_name].filter(Boolean).join(" · ")}
                         </p>
                       ) : null}
                       {scheduleError ? (
@@ -551,7 +551,7 @@ function useQueueSheetContent({
                           {requestActionBusy === requestConvertActionKey(item.id) ? (
                             <LoaderCircle className="size-3.5 animate-spin" />
                           ) : null}
-                          {appointmentText("Termin planen", "Запланировать приём", "Schedule appointment")}
+                          {appointmentText("appointments_schedule_appointment")}
                         </Button>
                         <Button
                           type="button"
@@ -575,7 +575,7 @@ function useQueueSheetContent({
                       onClick={() => openScheduleForm(item)}
                     >
                       <Clock3 className="size-3.5" />
-                      {appointmentText("Termin planen", "Запланировать приём", "Schedule appointment")}
+                      {appointmentText("appointments_schedule_appointment")}
                     </Button>
                   )}
                 </div>
@@ -590,7 +590,7 @@ function useQueueSheetContent({
         <div className="space-y-3">
           {hasAppointmentRequests ? (
             <h2 className="text-sm font-semibold text-foreground">
-              {appointmentText("Termin-Queue", "Очередь приёмов", "Appointment queue")}
+              {appointmentText("appointments_appointment_queue")}
             </h2>
           ) : null}
           {items.map((item) => (

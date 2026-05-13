@@ -1,5 +1,7 @@
 ﻿import { useMemo, useState, type FormEvent } from "react";
 
+import type { ReactNode } from "react";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -77,8 +79,10 @@ type OrderServiceGroupWizardProps = {
   providerDoctors: Record<string, DoctorOption[]>;
   creating?: boolean;
   error?: string | null;
+  embedded?: boolean;
   onLoadProviderDoctors?: (providerId: string) => void | Promise<void>;
   onCreate: (input: CreateOrderServiceGroupInput) => void | Promise<void>;
+  onCreated?: () => void;
 };
 
 let wizardParticipantSequence = 0;
@@ -155,138 +159,198 @@ export function OrderServiceGroupPanel({
   const generatedLineCount = group.generated_line_count ?? 0;
   const duplicateCount = preview?.skip_duplicate_count ?? generatedLineCount;
   const generateCount = preview?.generate_count ?? Math.max(0, previewCount - generatedLineCount);
+  const previewLines = preview?.lines ?? [];
 
   return (
-    <Section
-      title={t.orders_service_group_split_title}
-      accessory={<CountBadge>{previewCount} {t.orders_service_group_participants}</CountBadge>}
-    >
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-foreground">
-            {group.group_title}
-          </h3>
-          <p className={tokens.text.muted}>
+    <article className="rounded-xl border border-border bg-card p-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h3 className="max-w-full truncate text-base font-semibold text-foreground">
+              {group.group_title || t.orders_service_group_split_title}
+            </h3>
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">
             {formatCountMessage(t.orders_service_group_summary, previewCount)}
           </p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <Badge variant="outline" className="rounded-full">
-              {serviceGroupStatusLabel(group.status, t)}
-            </Badge>
-            <Badge variant="outline" className="rounded-full">
-              {group.quantity} x {group.unit_price} {group.currency}
-            </Badge>
-            <Badge variant="outline" className="rounded-full">
-              {t.orders_service_group_vat} {group.vat_rate}%
-            </Badge>
-            <Badge variant="outline" className="rounded-full">
-              {generatedLineCount} {t.orders_service_group_generated}
-            </Badge>
-            {duplicateCount > 0 ? (
-              <Badge variant="outline" className="rounded-full border-amber-200 bg-amber-50 text-amber-700">
-                {duplicateCount} {t.orders_service_group_duplicate_safe}
-              </Badge>
-            ) : null}
-          </div>
         </div>
-        {onGenerate ? (
-          <div className="flex flex-col items-start gap-2 md:items-end">
-            <label className="flex items-center gap-2 text-xs text-muted-foreground">
-              <input
-                type="checkbox"
-                checked={overrideDuplicates}
-                onChange={(event) => setOverrideDuplicates(event.target.checked)}
-              />
-              {t.orders_service_group_regenerate_existing}
-            </label>
-            <Button
-              type="button"
-              size="sm"
-              className="rounded-lg"
-              disabled={generating || previewCount === 0 || (!overrideDuplicates && generateCount === 0)}
-              onClick={() => onGenerate(overrideDuplicates)}
+
+        <div className="flex flex-wrap gap-2 lg:justify-end">
+          <Badge variant="outline" className="rounded-full bg-background">
+            {serviceGroupStatusLabel(group.status, t)}
+          </Badge>
+          {duplicateCount > 0 ? (
+            <Badge
+              variant="outline"
+              className="rounded-full border-amber-200 bg-amber-50 text-amber-700"
             >
-              {generating
-                ? t.orders_service_group_generating
-                : overrideDuplicates
-                  ? t.orders_service_group_regenerate_lines
-                  : t.orders_service_group_generate_new_lines}
-            </Button>
-          </div>
+              {duplicateCount} {t.orders_service_group_duplicate_safe}
+            </Badge>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(min(100%,220px),1fr))] gap-x-8 gap-y-1">
+        <PanelSummaryLine
+          label={t.orders_service_group_quantity}
+          value={`${group.quantity} x ${group.unit_price} ${group.currency}`}
+        />
+        <PanelSummaryLine
+          label={t.orders_service_group_vat}
+          value={`${group.vat_rate}%`}
+        />
+        <PanelSummaryLine
+          label={t.orders_service_group_participants}
+          value={previewCount}
+        />
+        <PanelSummaryLine
+          label={t.orders_service_group_generated}
+          value={generatedLineCount}
+        />
+        {preview ? (
+          <>
+            <PanelSummaryLine
+              label={t.orders_service_group_preview_generate_metric}
+              value={preview.generate_count}
+            />
+            <PanelSummaryLine
+              label={t.orders_service_group_preview_update_metric}
+              value={preview.update_count}
+            />
+            <PanelSummaryLine
+              label={t.orders_service_group_preview_skip_duplicates_metric}
+              value={preview.skip_duplicate_count}
+            />
+          </>
         ) : null}
       </div>
 
-      {error ? <Banner tone="error" withIcon>{error}</Banner> : null}
-
-      {preview ? (
-        <div className="grid gap-3 md:grid-cols-3">
-          <PreviewMetric label={t.orders_service_group_preview_generate_metric} value={preview.generate_count} />
-          <PreviewMetric label={t.orders_service_group_preview_update_metric} value={preview.update_count} />
-          <PreviewMetric label={t.orders_service_group_preview_skip_duplicates_metric} value={preview.skip_duplicate_count} />
+      {onGenerate ? (
+        <div className="mt-4 flex flex-col gap-3 border-t border-border pt-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={overrideDuplicates}
+              onChange={(event) => setOverrideDuplicates(event.target.checked)}
+            />
+            {t.orders_service_group_regenerate_existing}
+          </label>
+          <Button
+            type="button"
+            size="sm"
+            className="h-auto min-h-7 w-full whitespace-normal rounded-lg text-center 2xl:w-auto"
+            disabled={
+              generating ||
+              previewCount === 0 ||
+              (!overrideDuplicates && generateCount === 0)
+            }
+            onClick={() => onGenerate(overrideDuplicates)}
+          >
+            {generating
+              ? t.orders_service_group_generating
+              : overrideDuplicates
+                ? t.orders_service_group_regenerate_lines
+                : t.orders_service_group_generate_new_lines}
+          </Button>
         </div>
       ) : null}
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {(preview?.lines ?? []).length > 0
-          ? preview?.lines.map((line, index) => (
-              <article
+      {error ? <Banner tone="error" withIcon>{error}</Banner> : null}
+
+      <div className="mt-4 space-y-3">
+        {previewLines.length > 0
+          ? previewLines.map((line, index) => (
+              <ServiceGroupLineRow
                 key={line.participant_id}
-                className="rounded-xl border border-border/50 bg-card/60 px-4 py-3"
-              >
-                <LineHeader
-                  doctorName={line.doctor_name}
-                  providerName={line.provider_name}
-                  actionLabel={lineActionLabel(line.action, index, t)}
-                />
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {line.description}
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {line.quantity} x {line.unit_price} {line.currency} - {t.orders_service_group_vat} {line.vat_rate}%
-                </p>
-                {line.existing_leistung_id ? (
-                  <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800">
-                    {t.orders_service_group_existing_line}: {line.existing_leistung_id}
-                  </p>
-                ) : (
-                  <p className="mt-2 rounded-lg border border-dashed border-border/60 bg-muted/25 px-2.5 py-1 text-[11px] text-muted-foreground">
-                    {t.orders_service_group_preview_new_line_hint}
-                  </p>
-                )}
-              </article>
+                doctorName={line.doctor_name}
+                providerName={line.provider_name}
+                actionLabel={lineActionLabel(line.action, index, t)}
+                detail={line.description}
+                amount={`${line.quantity} x ${line.unit_price} ${line.currency} - ${t.orders_service_group_vat} ${line.vat_rate}%`}
+                noticeLabel={
+                  line.existing_leistung_id
+                    ? t.orders_service_group_existing_line
+                    : t.orders_service_group_preview_new_line_hint
+                }
+                noticeValue={line.existing_leistung_id ?? undefined}
+                noticeTone={line.existing_leistung_id ? "amber" : "muted"}
+              />
             ))
           : group.participants.map((participant, index) => (
-              <article
+              <ServiceGroupLineRow
                 key={participant.id ?? `${participant.doctor_id}:${index}`}
-                className="rounded-xl border border-border/50 bg-card/60 px-4 py-3"
-              >
-                <LineHeader
-                  doctorName={participant.doctor_name ?? participant.doctor_id}
-                  providerName={participant.provider_name ?? participant.provider_id}
-                  actionLabel={lineActionLabel(
-                    participant.generated_leistung_id ? "skip_duplicate" : "generate",
-                    index,
-                    t,
-                  )}
-                />
-                {participant.role_label ? (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    {participant.role_label}
-                  </p>
-                ) : null}
-                {participant.generated_leistung_id ? (
-                  <p className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700">
-                    {t.orders_service_group_generated_line}: {participant.generated_leistung_id}
-                  </p>
-                ) : (
-                  <p className="mt-2 rounded-lg border border-dashed border-border/60 bg-muted/25 px-2.5 py-1 text-[11px] text-muted-foreground">
-                    {t.orders_service_group_preview_participant_line_hint}
-                  </p>
+                doctorName={participant.doctor_name ?? participant.doctor_id}
+                providerName={participant.provider_name ?? participant.provider_id}
+                actionLabel={lineActionLabel(
+                  participant.generated_leistung_id ? "skip_duplicate" : "generate",
+                  index,
+                  t,
                 )}
-              </article>
+                detail={participant.role_label || t.orders_service_group_preview_participant_line_hint}
+                amount={`${group.quantity} x ${group.unit_price} ${group.currency} - ${t.orders_service_group_vat} ${group.vat_rate}%`}
+                noticeLabel={
+                  participant.generated_leistung_id
+                    ? t.orders_service_group_generated_line
+                    : t.orders_service_group_preview_participant_line_hint
+                }
+                noticeValue={participant.generated_leistung_id ?? undefined}
+                noticeTone={participant.generated_leistung_id ? "emerald" : "muted"}
+              />
             ))}
       </div>
-    </Section>
+    </article>
+  );
+}
+
+function PanelSummaryLine({
+  label,
+  value,
+}: {
+  label: string;
+  value: ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-lg py-2">
+      <span className="min-w-0 text-sm text-muted-foreground">{label}</span>
+      <span className="h-px min-w-4 flex-1 bg-border/70" />
+      <span className="min-w-0 max-w-[50%] break-words text-right text-sm font-semibold leading-tight text-foreground">
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function SheetSectionCard({
+  title,
+  description,
+  action,
+  children,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border border-border bg-card p-6">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
+          {description ? <p className={tokens.text.muted}>{description}</p> : null}
+        </div>
+        {action ? <div className="shrink-0">{action}</div> : null}
+      </div>
+      <div className="mt-5">{children}</div>
+    </section>
+  );
+}
+
+function titleWithDot(title: ReactNode) {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+      <span>{title}</span>
+    </span>
   );
 }
 
@@ -295,10 +359,13 @@ export function OrderServiceGroupWizard({
   providerDoctors,
   creating = false,
   error,
+  embedded = false,
   onLoadProviderDoctors,
   onCreate,
+  onCreated,
 }: OrderServiceGroupWizardProps) {
   const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<WizardForm>(createBlankWizardForm);
   const [localError, setLocalError] = useState("");
@@ -366,7 +433,206 @@ export function OrderServiceGroupWizard({
       return;
     }
     setForm(createBlankWizardForm());
-    setOpen(false);
+    if (embedded) {
+      onCreated?.();
+    } else {
+      setOpen(false);
+    }
+  }
+
+  const formMarkup = (
+    <form onSubmit={(event) => void handleSubmit(event)} className="space-y-4">
+      {(error || localError) ? (
+        <Banner tone="error" withIcon>{error ?? localError}</Banner>
+      ) : null}
+      <SheetSectionCard title={l("orders_basis")}>
+        <div className="grid gap-3 md:grid-cols-4">
+          <Field label={t.orders_service_group_title} className="md:col-span-2">
+            <Input
+              value={form.group_title}
+              onChange={(event) => setForm((current) => ({ ...current, group_title: event.target.value }))}
+              className={inputClass}
+              placeholder={t.orders_service_group_title_placeholder}
+            />
+          </Field>
+          <Field label={t.orders_service_group_service_date}>
+            <Input
+              type="date"
+              value={form.service_date}
+              onChange={(event) => setForm((current) => ({ ...current, service_date: event.target.value }))}
+              className={inputClass}
+            />
+          </Field>
+          <Field label={t.orders_service_group_description}>
+            <Input
+              value={form.description}
+              onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
+              className={inputClass}
+            />
+          </Field>
+        </div>
+      </SheetSectionCard>
+
+      <SheetSectionCard title={l("orders_kosten")}>
+        <div className="grid gap-3 md:grid-cols-4">
+          <Field label={t.orders_service_group_quantity}>
+            <Input
+              value={form.quantity}
+              onChange={(event) => setForm((current) => ({ ...current, quantity: event.target.value }))}
+              className={inputClass}
+            />
+          </Field>
+          <Field label={t.orders_service_group_unit_price}>
+            <Input
+              value={form.unit_price}
+              onChange={(event) => setForm((current) => ({ ...current, unit_price: event.target.value }))}
+              className={inputClass}
+            />
+          </Field>
+          <Field label={t.orders_service_group_vat_percent}>
+            <Input
+              value={form.vat_rate}
+              onChange={(event) => setForm((current) => ({ ...current, vat_rate: event.target.value }))}
+              className={inputClass}
+            />
+          </Field>
+          <Field label={t.orders_service_group_currency}>
+            <Input
+              value={form.currency}
+              onChange={(event) => setForm((current) => ({ ...current, currency: event.target.value }))}
+              className={inputClass}
+            />
+          </Field>
+        </div>
+      </SheetSectionCard>
+
+      <SheetSectionCard
+        title={t.orders_service_group_doctors}
+        description={formatCountMessage(
+          t.orders_service_group_wizard_preview_summary,
+          selectedDoctorCount,
+        )}
+        action={
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="rounded-lg"
+            onClick={() =>
+              setForm((current) => ({
+                ...current,
+                participants: [...current.participants, createBlankParticipant()],
+              }))
+            }
+          >
+            {t.orders_service_group_add_doctor}
+          </Button>
+        }
+      >
+        <div className="space-y-2">
+          {form.participants.map((participant, index) => {
+            const doctors = participant.provider_id
+              ? providerDoctors[participant.provider_id] ?? []
+              : [];
+            return (
+              <div
+                key={participant.clientKey}
+                className="grid gap-2 rounded-xl border border-border/50 bg-card/70 p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]"
+              >
+                <Field label={t.orders_service_group_provider}>
+                  <NativeComboboxSelect
+                    value={participant.provider_id}
+                    onChange={(event) => {
+                      const providerId = event.target.value;
+                      updateParticipant(index, {
+                        provider_id: providerId,
+                        doctor_id: "",
+                      });
+                      if (providerId) void onLoadProviderDoctors?.(providerId);
+                    }}
+                    className={selectClass}
+                  >
+                    <option value="">{t.orders_service_group_select_provider}</option>
+                    {providers.map((provider) => (
+                      <option key={provider.id} value={provider.id}>
+                        {provider.name}
+                      </option>
+                    ))}
+                  </NativeComboboxSelect>
+                </Field>
+                <Field label={t.orders_service_group_doctor}>
+                  <NativeComboboxSelect
+                    value={participant.doctor_id}
+                    onChange={(event) =>
+                      updateParticipant(index, { doctor_id: event.target.value })
+                    }
+                    className={selectClass}
+                    disabled={!participant.provider_id}
+                  >
+                    <option value="">{t.orders_service_group_select_doctor}</option>
+                    {doctors.map((doctor) => (
+                      <option key={doctor.id} value={doctor.id}>
+                        {doctor.name}{doctor.fachbereich ? ` - ${doctor.fachbereich}` : ""}
+                      </option>
+                    ))}
+                  </NativeComboboxSelect>
+                </Field>
+                <Field label={t.orders_service_group_role_label}>
+                  <Input
+                    value={participant.role_label}
+                    onChange={(event) =>
+                      updateParticipant(index, { role_label: event.target.value })
+                    }
+                    className={inputClass}
+                    placeholder={t.orders_service_group_role_placeholder}
+                  />
+                </Field>
+                <div className="flex items-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="rounded-lg"
+                    disabled={form.participants.length === 1}
+                    onClick={() =>
+                      setForm((current) => ({
+                        ...current,
+                        participants: current.participants.filter(
+                          (_, participantIndex) => participantIndex !== index,
+                        ),
+                      }))
+                    }
+                  >
+                    {t.orders_service_group_remove}
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </SheetSectionCard>
+
+      <SheetSectionCard title={t.orders_service_group_preview}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className={tokens.text.muted}>
+            {formatCountMessage(t.orders_service_group_wizard_preview_summary, selectedDoctorCount)}
+          </p>
+          <CountBadge>
+            {duplicateDoctorCount > 0 ? t.orders_service_group_duplicates : t.orders_service_group_ready}
+          </CountBadge>
+        </div>
+      </SheetSectionCard>
+
+      <div className="flex justify-end">
+        <Button type="submit" className="rounded-lg" disabled={creating}>
+          {creating ? t.orders_service_group_creating : t.orders_service_group_save_preview}
+        </Button>
+      </div>
+    </form>
+  );
+
+  if (embedded) {
+    return formMarkup;
   }
 
   return (
@@ -387,223 +653,78 @@ export function OrderServiceGroupWizard({
       <p className={tokens.text.muted}>
         {t.orders_service_group_wizard_steps}
       </p>
-      {!open ? null : (
-        <form onSubmit={(event) => void handleSubmit(event)} className="space-y-4">
-          {(error || localError) ? (
-            <Banner tone="error" withIcon>{error ?? localError}</Banner>
-          ) : null}
-          <div className="grid gap-3 md:grid-cols-4">
-            <Field label={t.orders_service_group_title} className="md:col-span-2">
-              <Input
-                value={form.group_title}
-                onChange={(event) => setForm((current) => ({ ...current, group_title: event.target.value }))}
-                className={inputClass}
-                placeholder={t.orders_service_group_title_placeholder}
-              />
-            </Field>
-            <Field label={t.orders_service_group_service_date}>
-              <Input
-                type="date"
-                value={form.service_date}
-                onChange={(event) => setForm((current) => ({ ...current, service_date: event.target.value }))}
-                className={inputClass}
-              />
-            </Field>
-            <Field label={t.orders_service_group_currency}>
-              <Input
-                value={form.currency}
-                onChange={(event) => setForm((current) => ({ ...current, currency: event.target.value }))}
-                className={inputClass}
-              />
-            </Field>
-          </div>
-          <div className="grid gap-3 md:grid-cols-4">
-            <Field label={t.orders_service_group_quantity}>
-              <Input
-                value={form.quantity}
-                onChange={(event) => setForm((current) => ({ ...current, quantity: event.target.value }))}
-                className={inputClass}
-              />
-            </Field>
-            <Field label={t.orders_service_group_unit_price}>
-              <Input
-                value={form.unit_price}
-                onChange={(event) => setForm((current) => ({ ...current, unit_price: event.target.value }))}
-                className={inputClass}
-              />
-            </Field>
-            <Field label={t.orders_service_group_vat_percent}>
-              <Input
-                value={form.vat_rate}
-                onChange={(event) => setForm((current) => ({ ...current, vat_rate: event.target.value }))}
-                className={inputClass}
-              />
-            </Field>
-            <Field label={t.orders_service_group_description}>
-              <Input
-                value={form.description}
-                onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
-                className={inputClass}
-              />
-            </Field>
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <h4 className="text-sm font-semibold text-foreground">{t.orders_service_group_doctors}</h4>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="rounded-lg"
-                onClick={() =>
-                  setForm((current) => ({
-                    ...current,
-                    participants: [...current.participants, createBlankParticipant()],
-                  }))
-                }
-              >
-                {t.orders_service_group_add_doctor}
-              </Button>
-            </div>
-            {form.participants.map((participant, index) => {
-              const doctors = participant.provider_id
-                ? providerDoctors[participant.provider_id] ?? []
-                : [];
-              return (
-                <div
-                  key={participant.clientKey}
-                  className="grid gap-2 rounded-xl border border-border/50 bg-muted/20 p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]"
-                >
-                  <Field label={t.orders_service_group_provider}>
-                    <NativeComboboxSelect
-                      value={participant.provider_id}
-                      onChange={(event) => {
-                        const providerId = event.target.value;
-                        updateParticipant(index, {
-                          provider_id: providerId,
-                          doctor_id: "",
-                        });
-                        if (providerId) void onLoadProviderDoctors?.(providerId);
-                      }}
-                      className={selectClass}
-                    >
-                      <option value="">{t.orders_service_group_select_provider}</option>
-                      {providers.map((provider) => (
-                        <option key={provider.id} value={provider.id}>
-                          {provider.name}
-                        </option>
-                      ))}
-                    </NativeComboboxSelect>
-                  </Field>
-                  <Field label={t.orders_service_group_doctor}>
-                    <NativeComboboxSelect
-                      value={participant.doctor_id}
-                      onChange={(event) =>
-                        updateParticipant(index, { doctor_id: event.target.value })
-                      }
-                      className={selectClass}
-                      disabled={!participant.provider_id}
-                    >
-                      <option value="">{t.orders_service_group_select_doctor}</option>
-                      {doctors.map((doctor) => (
-                        <option key={doctor.id} value={doctor.id}>
-                          {doctor.name}{doctor.fachbereich ? ` - ${doctor.fachbereich}` : ""}
-                        </option>
-                      ))}
-                    </NativeComboboxSelect>
-                  </Field>
-                  <Field label={t.orders_service_group_role_label}>
-                    <Input
-                      value={participant.role_label}
-                      onChange={(event) =>
-                        updateParticipant(index, { role_label: event.target.value })
-                      }
-                      className={inputClass}
-                      placeholder={t.orders_service_group_role_placeholder}
-                    />
-                  </Field>
-                  <div className="flex items-end">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="rounded-lg"
-                      disabled={form.participants.length === 1}
-                      onClick={() =>
-                        setForm((current) => ({
-                          ...current,
-                          participants: current.participants.filter(
-                            (_, participantIndex) => participantIndex !== index,
-                          ),
-                        }))
-                      }
-                    >
-                      {t.orders_service_group_remove}
-                    </Button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="rounded-xl border border-border/50 bg-card/60 px-4 py-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h4 className="text-sm font-semibold text-foreground">{t.orders_service_group_preview}</h4>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {formatCountMessage(t.orders_service_group_wizard_preview_summary, selectedDoctorCount)}
-                </p>
-              </div>
-              <CountBadge>
-                {duplicateDoctorCount > 0 ? t.orders_service_group_duplicates : t.orders_service_group_ready}
-              </CountBadge>
-            </div>
-          </div>
-
-          <div className="flex justify-end">
-            <Button type="submit" className="rounded-lg" disabled={creating}>
-              {creating ? t.orders_service_group_creating : t.orders_service_group_save_preview}
-            </Button>
-          </div>
-        </form>
-      )}
+      {!open ? null : formMarkup}
     </Section>
   );
 }
 
-function LineHeader({
+function ServiceGroupLineRow({
   doctorName,
   providerName,
   actionLabel,
+  detail,
+  amount,
+  noticeLabel,
+  noticeValue,
+  noticeTone,
 }: {
   doctorName: string;
   providerName: string;
   actionLabel: string;
+  detail: ReactNode;
+  amount: ReactNode;
+  noticeLabel: ReactNode;
+  noticeValue?: ReactNode;
+  noticeTone: "amber" | "emerald" | "muted";
 }) {
-  return (
-    <div className="flex items-start justify-between gap-3">
-      <div className="min-w-0">
-        <p className="truncate text-sm font-semibold text-foreground">
-          {doctorName}
-        </p>
-        <p className="truncate text-xs text-muted-foreground">{providerName}</p>
-      </div>
-      <Badge variant="outline" className="rounded-full">
-        {actionLabel}
-      </Badge>
-    </div>
-  );
-}
+  const noticeClassName =
+    noticeTone === "amber"
+      ? "border-amber-200 bg-amber-50 text-amber-800"
+      : noticeTone === "emerald"
+        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+        : "border-border bg-background text-muted-foreground";
 
-function PreviewMetric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl border border-border/50 bg-muted/20 px-3 py-2">
-      <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-        {label}
-      </p>
-      <p className="mt-1 text-lg font-semibold text-foreground">{value}</p>
-    </div>
+    <article className="rounded-xl border border-border bg-background/70 p-3">
+      <div className="flex flex-col gap-2 2xl:flex-row 2xl:items-start 2xl:justify-between">
+        <div className="min-w-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <h4 className="min-w-0 max-w-full truncate text-sm font-semibold text-foreground">
+              {doctorName}
+            </h4>
+            <span className="size-1 rounded-full bg-muted-foreground/35" />
+            <p className="min-w-0 max-w-full truncate text-xs text-muted-foreground">
+              {providerName}
+            </p>
+          </div>
+        </div>
+        <Badge variant="outline" className="w-fit shrink-0 rounded-full bg-card">
+          {actionLabel}
+        </Badge>
+      </div>
+
+      <div className="mt-3 rounded-lg border border-border/70 bg-card px-3 py-2">
+        <p className="break-words text-xs leading-snug text-muted-foreground">
+          {detail}
+        </p>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <span className="inline-flex max-w-full items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs font-semibold text-foreground">
+          <span className="text-muted-foreground">{amount}</span>
+        </span>
+        <span
+          className={`inline-flex max-w-full items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium ${noticeClassName}`}
+        >
+          <span className="min-w-0 truncate">{noticeLabel}</span>
+          {noticeValue ? (
+            <code className="min-w-0 max-w-[11rem] truncate font-mono text-[11px]">
+              {noticeValue}
+            </code>
+          ) : null}
+        </span>
+      </div>
+    </article>
   );
 }
 

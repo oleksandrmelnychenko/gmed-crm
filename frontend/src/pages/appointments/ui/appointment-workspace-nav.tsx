@@ -25,26 +25,7 @@ type WorkspaceItem = {
 export function AppointmentWorkspaceNav() {
   const [searchParams] = useSearchParams();
   const { t } = useLang();
-  const l = (_de: string, _ru: string, en: string) => {
-    switch (en) {
-      case "Overview":
-        return t.appointments_workspace_nav_overview;
-      case "Timeline":
-        return t.appointments_workspace_nav_timeline;
-      case "Coordination":
-        return t.appointments_workspace_nav_coordination;
-      case "Clinical":
-        return t.appointments_workspace_nav_clinical;
-      case "Workflow":
-        return t.appointments_workspace_nav_workflow;
-      case "Services":
-        return t.appointments_workspace_nav_services;
-      case "Notes":
-        return t.appointments_workspace_nav_notes;
-      default:
-        return en;
-    }
-  };
+  const l = (key: string) => t.uiText[key] ?? key;
 
   const appointmentId = searchParams.get("appointment");
   const currentTab = normalizeAppointmentWorkspaceTab(
@@ -54,37 +35,37 @@ export function AppointmentWorkspaceNav() {
   const items: WorkspaceItem[] = [
     {
       key: "overview",
-      label: l("Überblick", "Обзор", "Overview"),
+      label: l("appointments_overview"),
       icon: CalendarClock,
     },
     {
       key: "timeline",
-      label: l("Timeline", "Таймлайн", "Timeline"),
+      label: l("appointments_timeline"),
       icon: History,
     },
     {
       key: "coordination",
-      label: l("Koordination", "Координация", "Coordination"),
+      label: l("appointments_coordination"),
       icon: Waypoints,
     },
     {
       key: "clinical",
-      label: l("Klinik", "Клиника", "Clinical"),
+      label: l("appointments_clinical_2"),
       icon: FileHeart,
     },
     {
       key: "workflow",
-      label: l("Arbeitsablauf", "Рабочий процесс", "Workflow"),
+      label: l("appointments_workflow_2"),
       icon: ClipboardList,
     },
     {
       key: "services",
-      label: l("Services", "Сервисы", "Services"),
+      label: l("appointments_services"),
       icon: ReceiptText,
     },
     {
       key: "notes",
-      label: l("Notizen", "Заметки", "Notes"),
+      label: l("appointments_notes"),
       icon: NotebookPen,
     },
   ];

@@ -77,9 +77,8 @@ function PatientLegalStatusSheetContent({
   onOpenChange: (v: boolean) => void;
   onSaved: () => void;
 }) {
-  const { t, lang } = useLang();
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
   const [form, setForm] = useReducer(legalStatusFormReducer, initial);
   const [busy, setBusy] = useState(false);
 
@@ -144,7 +143,7 @@ function PatientLegalStatusSheetContent({
         </>
       }
     >
-      <FormSection title={l("Vertrag", "Договор", "Contract")}>
+      <FormSection title={l("patients_contract")}>
         <FormField
           label={t.patient_legal_sheet_contract_status}
           htmlFor="patient-legal-contract-status"
@@ -202,7 +201,7 @@ function PatientLegalStatusSheetContent({
         </div>
       </FormSection>
 
-      <FormSection title={l("Zusatzlich", "Дополнительно", "Additional")}>
+      <FormSection title={l("patients_additional")}>
         <FormField label={t.patient_legal_sheet_notes} htmlFor="patient-legal-notes">
           <textarea
             id="patient-legal-notes"

@@ -92,7 +92,7 @@ const LazyPatientNotesSheet = lazy(async () => {
   return { default: mod.PatientNotesSheet };
 });
 
-type LocalizeFn = (de: string, ru: string, en: string) => string;
+type LocalizeFn = (key: string) => string;
 type DateFormatter = (value?: string | null, fallback?: string) => string;
 type DateTimeFormatter = (value?: string | null, fallback?: string) => string;
 type StatusLabelFn = (status: string) => string;
@@ -621,28 +621,28 @@ function usePatientProfileTabContent({
             icon={ShieldCheck}
             label={t.patient_profile_contract_status}
             value={patientDetailStatusLabel(legalStatus.contractStatus)}
-            description={l("Vertragsfreigabe.", "Готовность договора.", "Contract readiness.")}
+            description={l("patients_contract_readiness")}
             tone="sky"
           />
           <AdminInlineMetric
             icon={CheckCircle2}
             label={t.patient_profile_done}
             value={`${legalStatusCompletion.completed}/${legalStatusCompletion.total}`}
-            description={l("Pflichtpunkte.", "Обязательные пункты.", "Required checks.")}
+            description={l("patients_required_checks")}
             tone="emerald"
           />
           <AdminInlineMetric
             icon={ClipboardCheck}
-            label={l("Compliance", "Комплаенс", "Compliance")}
+            label={l("patients_compliance")}
             value={legalStatus.complianceCompleted ? t.common_completed : t.common_pending}
-            description={l("Interne Freigabe.", "Внутреннее подтверждение.", "Internal approval.")}
+            description={l("patients_internal_approval")}
             tone={legalStatus.complianceCompleted ? "emerald" : "amber"}
           />
           <AdminInlineMetric
             icon={NotebookText}
             label={t.patient_profile_notes}
-            value={legalStatus.notes ? l("Ja", "Есть", "Yes") : l("Nein", "Нет", "No")}
-            description={l("Rechtsnotiz.", "Правовая заметка.", "Legal note.")}
+            value={legalStatus.notes ? l("patients_yes") : l("patients_no")}
+            description={l("patients_legal_note")}
             tone="slate"
           />
         </div>
@@ -698,11 +698,7 @@ function usePatientProfileTabContent({
           {canExportPatientCompliance ? (
             <ProfileActionCard
               title={t.patient_profile_dsgvo_export}
-              description={l(
-                "Erstellen Sie einen DSGVO-Export fuer diesen Patienten.",
-                "Сформируйте DSGVO-выгрузку по этому пациенту.",
-                "Generate a DSGVO export for this patient.",
-              )}
+              description={l("patients_generate_a_dsgvo_export_for_this_patient")}
               disabled={complianceExportBusy}
               busy={complianceExportBusy}
               onClick={() => void handleExportPatientCompliance()}
@@ -711,44 +707,28 @@ function usePatientProfileTabContent({
           {canOpenComplianceWorkspace ? (
             <ProfileActionCard
               title={t.patient_profile_open_dsgvo_workspace}
-              description={l(
-                "Oeffnen Sie den Compliance-Bereich mit den Patientendaten.",
-                "Откройте раздел комплаенса с данными этого пациента.",
-                "Open the compliance workspace for this patient.",
-              )}
+              description={l("patients_open_the_compliance_workspace_for_this_patient")}
               onClick={() => window.open(`/admin/compliance?patient=${id}`, "_blank", "noopener,noreferrer")}
             />
           ) : null}
           {canViewDocuments ? (
             <ProfileActionCard
               title={t.patient_profile_open_documents}
-              description={l(
-                "Pruefen Sie die mit dem Patienten verknuepften Dokumente.",
-                "Проверьте документы, связанные с этим пациентом.",
-                "Review documents linked to this patient.",
-              )}
+              description={l("patients_review_documents_linked_to_this_patient")}
               onClick={() => handleDocumentsPreviewOpenChange(true)}
             />
           ) : null}
           {canViewContracts ? (
             <ProfileActionCard
               title={t.patient_profile_open_contracts}
-              description={l(
-                "Oeffnen Sie die Vertraege und Freigaben dieses Patienten.",
-                "Откройте договоры и подтверждения этого пациента.",
-                "Open this patient's contracts and confirmations.",
-              )}
+              description={l("patients_open_this_patient_s_contracts_and_confirmations")}
               onClick={() => handleContractsPreviewOpenChange(true)}
             />
           ) : null}
           {canViewInvoices ? (
             <ProfileActionCard
               title={t.patient_profile_open_invoices}
-              description={l(
-                "Pruefen Sie Rechnungen und Zahlungen zu diesem Patienten.",
-                "Проверьте счета и оплаты этого пациента.",
-                "Review invoices and payments for this patient.",
-              )}
+              description={l("patients_review_invoices_and_payments_for_this_patient")}
               onClick={() => handleInvoicesPreviewOpenChange(true)}
             />
           ) : null}
@@ -852,7 +832,7 @@ function usePatientProfileTabContent({
             accessory={
               <div className="flex items-center gap-2">
                 <Badge variant="outline" className="rounded-full border-border/60 bg-muted/25 text-foreground">
-                  {l(`${vitalsHistory.length} Einträge`, `${vitalsHistory.length} записей`, `${vitalsHistory.length} entries`)}
+                  {vitalsHistory.length} {l("patients_entries_count_label")}
                 </Badge>
                 {canManagePatientVitals ? (
                   <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => handleVitalsSheetOpenChange(true)}>
@@ -875,7 +855,7 @@ function usePatientProfileTabContent({
                   const vitalMetrics = [
                     item.bp_systolic != null && item.bp_diastolic != null
                       ? {
-                          label: l("RR", "АД", "BP"),
+                          label: l("patients_bp"),
                           value: `${formatVitalNumber(item.bp_systolic, { maximumFractionDigits: 0 }) ?? t.common_not_set}/${
                             formatVitalNumber(item.bp_diastolic, { maximumFractionDigits: 0 }) ?? t.common_not_set
                           }`,
@@ -883,25 +863,25 @@ function usePatientProfileTabContent({
                       : null,
                     item.heart_rate != null
                       ? {
-                          label: l("Herzfrequenz", "ЧСС", "Heart rate"),
+                          label: l("patients_heart_rate"),
                           value: formatVitalNumber(item.heart_rate, { maximumFractionDigits: 0 }) ?? t.common_not_set,
                         }
                       : null,
                     item.weight_kg != null
                       ? {
-                          label: l("Gewicht", "Вес", "Weight"),
+                          label: l("patients_weight"),
                           value: `${formatVitalNumber(item.weight_kg) ?? t.common_not_set} kg`,
                         }
                       : null,
                     item.height_cm != null
                       ? {
-                          label: l("Groesse", "Рост", "Height"),
+                          label: l("patients_height"),
                           value: `${formatVitalNumber(item.height_cm) ?? t.common_not_set} cm`,
                         }
                       : null,
                     item.bmi != null
                       ? {
-                          label: "BMI",
+                          label: l("patients_bmi_label"),
                           value: formatVitalNumber(item.bmi) ?? t.common_not_set,
                         }
                       : null,
@@ -958,7 +938,7 @@ function usePatientProfileTabContent({
           accessory={
             <div className="flex items-center gap-2">
               <CountBadge>
-                {l(`${cardEntries.length} Einträge`, `${cardEntries.length} записей`, `${cardEntries.length} entries`)}
+                {cardEntries.length} {l("patients_entries_count_label")}
               </CountBadge>
               {canManagePatientCardEntries ? (
                 <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => handleCardEntrySheetOpenChange(true)}>
@@ -1007,7 +987,7 @@ function usePatientProfileTabContent({
                     <div className="flex flex-col justify-between gap-4 border-l border-dashed border-border pl-4">
                       <div>
                         <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                          {l("Eintrag", "Запись", "Entry")}
+                          {l("patients_entry")}
                         </span>
                         <p className="mt-2 text-sm font-semibold leading-5 text-foreground">
                           {formatDateTime(entry.entry_date, t.common_not_set)}
@@ -1042,7 +1022,7 @@ function usePatientProfileTabContent({
           accessory={
             <div className="flex items-center gap-2">
               <CountBadge>
-                {l(`${medicalOrders.length} Anordnungen`, `${medicalOrders.length} назначений`, `${medicalOrders.length} orders`)}
+                {medicalOrders.length} {l("patients_orders_count_label")}
               </CountBadge>
               {canManagePatientMedicalOrders ? (
                 <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => handleMedicalOrderSheetOpenChange(true)}>
@@ -1114,7 +1094,7 @@ function usePatientProfileTabContent({
                     <div className="flex flex-col justify-between gap-4 border-l border-dashed border-border pl-4">
                       <div>
                         <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                          {l("Datum der Anordnung", "Дата назначения", "Order date")}
+                          {l("patients_order_date")}
                         </span>
                         <p className="mt-2 text-sm font-semibold leading-5 text-foreground">
                           {formatDateTime(order.order_date, t.common_not_set)}
@@ -1173,7 +1153,7 @@ function usePatientProfileTabContent({
           accessory={
             <div className="flex items-center gap-2">
               <CountBadge>
-                {l(`${riskScores.length} Scores`, `${riskScores.length} скоров`, `${riskScores.length} scores`)}
+                {riskScores.length} {l("patients_scores_count_label")}
               </CountBadge>
               {canManagePatientRiskScores ? (
                 <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => handleRiskScoreSheetOpenChange(true)}>
@@ -1205,7 +1185,7 @@ function usePatientProfileTabContent({
                             variant="outline"
                             className="rounded-full border-0 bg-[#f9fdff] px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
                           >
-                            {l("Risikobewertung", "Риск-оценка", "Risk assessment")}
+                            {l("patients_risk_assessment")}
                           </Badge>
                         </div>
 
@@ -1248,7 +1228,7 @@ function usePatientProfileTabContent({
                       <div className="flex flex-col justify-between gap-4 border-l border-dashed border-border pl-4">
                         <div>
                           <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                            {l("Risikowert", "Оценка риска", "Risk score")}
+                            {l("patients_risk_score")}
                           </span>
                           <p className="mt-2 text-lg font-semibold leading-none text-foreground">
                             {scoreValue}
@@ -1258,14 +1238,14 @@ function usePatientProfileTabContent({
                           </p>
                           {scaleValue ? (
                             <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                              {l("Skala", "Шкала", "Scale")} {scaleValue}
+                              {l("patients_scale")} {scaleValue}
                             </p>
                           ) : null}
                         </div>
 
                         <div>
                           <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                            {l("Berechnet", "Дата расчета", "Computed")}
+                            {l("patients_computed")}
                           </span>
                           <p className="mt-2 text-sm font-semibold leading-5 text-foreground">
                             {formatDateTime(score.computed_at, t.common_not_set)}

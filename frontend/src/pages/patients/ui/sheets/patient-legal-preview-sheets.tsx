@@ -37,10 +37,6 @@ function formatDate(value?: string | null, lang = "ru") {
   }
 }
 
-function previewText(lang: string, de: string, ru: string, en: string) {
-  return lang === "de" ? de : lang === "ru" ? ru : en;
-}
-
 type DocumentItem = {
   id: string;
   filename: string;
@@ -93,7 +89,7 @@ export function PatientDocumentsPreviewSheet({
       bodyClassName="px-4 py-3 space-y-3"
     >
       <PreviewSection
-        title={previewText(lang, "Liste", "Список", "List")}
+        title={t.uiText["patients_preview_list"] ?? "patients_preview_list"}
         accessory={
           <Button
             type="button"
@@ -204,7 +200,7 @@ export function PatientContractsPreviewSheet({
       bodyClassName="px-4 py-3 space-y-3"
     >
       <PreviewSection
-        title={previewText(lang, "Liste", "Список", "List")}
+        title={t.uiText["patients_preview_list_2"] ?? "patients_preview_list_2"}
         accessory={
           <Button
             type="button"
@@ -315,7 +311,7 @@ export function PatientInvoicesPreviewSheet({
       bodyClassName="px-4 py-3 space-y-3"
     >
       <PreviewSection
-        title={previewText(lang, "Liste", "Список", "List")}
+        title={t.uiText["patients_preview_list_3"] ?? "patients_preview_list_3"}
         accessory={
           <Button
             type="button"

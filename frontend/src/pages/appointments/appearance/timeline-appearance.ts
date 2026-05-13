@@ -133,15 +133,15 @@ export function appointmentTimelineKindBadgeClassName(
 export function appointmentTimelineKindLabel(kind: AppointmentTimelineKind) {
   switch (kind) {
     case "workflow":
-      return appointmentText("Workflow", "Воркфлоу", "Workflow");
+      return appointmentText("appointments_workflow");
     case "communication":
-      return appointmentText("Kommunikation", "Коммуникация", "Communication");
+      return appointmentText("appointments_communication");
     case "interpreter":
-      return appointmentText("Dolmetscher", "Переводчик", "Interpreter");
+      return appointmentText("appointments_interpreter");
     case "clinical":
-      return appointmentText("Klinisch", "Клиническое", "Clinical");
+      return appointmentText("appointments_clinical");
     case "followup":
-      return appointmentText("Follow-up", "Фоллоу-ап", "Follow-up");
+      return appointmentText("appointments_follow_up");
     case "concierge":
       return "Concierge";
     default:
@@ -152,15 +152,15 @@ export function appointmentTimelineKindLabel(kind: AppointmentTimelineKind) {
 export function appointmentTimelineToneLabel(tone: AppointmentTimelineTone) {
   switch (tone) {
     case "success":
-      return appointmentText("Erledigt", "Готово", "Done");
+      return appointmentText("appointments_done");
     case "warning":
-      return appointmentText("Aufmerksamkeit", "Внимание", "Attention");
+      return appointmentText("appointments_attention");
     case "danger":
-      return appointmentText("Kritisch", "Критично", "Critical");
+      return appointmentText("appointments_critical");
     case "info":
-      return appointmentText("Info", "Инфо", "Info");
+      return appointmentText("appointments_info");
     default:
-      return appointmentText("Geplant", "Запланировано", "Planned");
+      return appointmentText("appointments_planned");
   }
 }
 
@@ -180,9 +180,7 @@ export function appointmentTimelineDateGroupLabel(
 ) {
   const key = appointmentTimelineDateGroupKey(value);
   if (key === "unknown") {
-    if (options.lang === "de") return "Unbekanntes Datum";
-    if (options.lang === "ru") return "Дата не указана";
-    return "Unknown date";
+    return appointmentText("timeline_date_unknown");
   }
 
   const date = new Date(value!);
@@ -202,14 +200,10 @@ export function appointmentTimelineDateGroupLabel(
   );
 
   if (diffInDays === 0) {
-    if (options.lang === "de") return "Heute";
-    if (options.lang === "ru") return "Сегодня";
-    return "Today";
+    return appointmentText("timeline_date_today");
   }
   if (diffInDays === 1) {
-    if (options.lang === "de") return "Gestern";
-    if (options.lang === "ru") return "Вчера";
-    return "Yesterday";
+    return appointmentText("timeline_date_yesterday");
   }
 
   try {

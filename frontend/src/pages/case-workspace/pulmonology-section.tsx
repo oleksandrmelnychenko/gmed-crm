@@ -1,12 +1,11 @@
-import { useLang } from "@/lib/i18n";
+import { t as translateCatalog, useLang } from "@/lib/i18n";
 
 import { type PulmonologyAssessment, useCaseWorkspace } from "./context";
 import { SpecialtySection } from "./specialty-section";
 
-function tri(lang: string, de: string, ru: string, en: string) {
-  if (lang === "de") return de;
-  if (lang === "ru") return ru;
-  return en;
+function tri(lang: string, key: string) {
+  const catalog = translateCatalog(lang === "de" ? "de" : "ru");
+  return catalog.uiText[key] ?? key;
 }
 
 const BLANK: PulmonologyAssessment = {
@@ -36,13 +35,8 @@ export function PulmonologySection() {
 
   return (
     <SpecialtySection<PulmonologyAssessment>
-      title={tri(lang, "Pulmonologie", "Пульмонология", "Pulmonology")}
-      description={tri(
-        lang,
-        "Atemwegsbeschwerden, Raucheranamnese und Therapien.",
-        "Жалобы на дыхание, курительный анамнез и терапия.",
-        "Respiratory complaints, smoking history, and therapies.",
-      )}
+      title={tri(lang, "case_ws_pulmonology")}
+      description={tri(lang, "case_ws_respiratory_complaints_smoking_history_and_therapies")}
       blankValue={BLANK}
       rawValue={detail?.pulmonology}
       busy={sectionBusy === "pulmonology"}
@@ -53,49 +47,37 @@ export function PulmonologySection() {
       booleanFlags={[
         {
           key: "chronic_cough",
-          labels: { de: "Chronischer Husten", ru: "Хронический кашель", en: "Chronic cough" },
+          label: tri(lang, "case_ws_chronic_cough"),
         },
-        { key: "dyspnea", labels: { de: "Dyspnoe", ru: "Одышка", en: "Dyspnea" } },
-        { key: "wheezing", labels: { de: "Pfeifen", ru: "Свистящее дыхание", en: "Wheezing" } },
+        { key: "dyspnea", label: tri(lang, "case_ws_dyspnea") },
+        { key: "wheezing", label: tri(lang, "case_ws_wheezing") },
         {
           key: "chest_tightness",
-          labels: { de: "Thoraxenge", ru: "Стеснение в груди", en: "Chest tightness" },
+          label: tri(lang, "case_ws_chest_tightness"),
         },
-        { key: "hemoptysis", labels: { de: "Hämoptysen", ru: "Кровохарканье", en: "Hemoptysis" } },
+        { key: "hemoptysis", label: tri(lang, "case_ws_hemoptysis") },
       ]}
       textFields={[
         {
           key: "smoking_history",
-          labels: {
-            de: "Raucheranamnese / Pack Years",
-            ru: "Курительный анамнез / пачка-лет",
-            en: "Smoking history / pack years",
-          },
+          label: tri(lang, "case_ws_smoking_history_pack_years"),
         },
         {
           key: "prior_chest_imaging",
-          labels: {
-            de: "Vorherige Thoraxbildgebung",
-            ru: "Предыдущая визуализация грудной клетки",
-            en: "Prior chest imaging",
-          },
+          label: tri(lang, "case_ws_prior_chest_imaging"),
         },
         {
           key: "inhaler_therapy",
-          labels: {
-            de: "Inhalation / Atemtherapie",
-            ru: "Ингаляторы / респираторная терапия",
-            en: "Inhaler / respiratory therapy",
-          },
+          label: tri(lang, "case_ws_inhaler_respiratory_therapy"),
         },
         {
           key: "sleep_apnea_history",
-          labels: { de: "Schlafapnoe-Anamnese", ru: "Апноэ сна в анамнезе", en: "Sleep apnea history" },
+          label: tri(lang, "case_ws_sleep_apnea_history"),
         },
-        { key: "red_flags", labels: { de: "Warnzeichen", ru: "Красные флаги", en: "Red flags" } },
+        { key: "red_flags", label: tri(lang, "case_ws_red_flags_4") },
         {
           key: "notes",
-          labels: { de: "Pulmonologische Notizen", ru: "Пульмонологические заметки", en: "Pulmonology notes" },
+          label: tri(lang, "case_ws_pulmonology_notes"),
           rows: 4,
         },
       ]}

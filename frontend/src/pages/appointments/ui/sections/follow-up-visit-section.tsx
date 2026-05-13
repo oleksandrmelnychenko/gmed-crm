@@ -121,13 +121,10 @@ function useAppointmentFollowUpVisitSectionContent({
 }: AppointmentFollowUpVisitSectionProps) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const appointmentText = (de: string, ru: string, en: string) =>
-    en === "Create follow-up visit"
-      ? t.appointments_follow_up_visit_create
-      : appointmentTextBase(de, ru, en);
+  const appointmentText = (key: string) => t.uiText[key] ?? appointmentTextBase(key);
   const interpreterFieldLabel =
     tr.role_interpreter ??
-    appointmentText("Dolmetscher", "Переводчик", "Interpreter");
+    appointmentText("appointments_interpreter");
   const scheduleWarningLabels = useMemo(
     () => ({
       patients_assign_owner: tr.patients_assign_owner,
@@ -505,11 +502,7 @@ function useAppointmentFollowUpVisitSectionContent({
         </div>
         <div className="grid gap-4 md:grid-cols-2">
           <Field
-            label={appointmentText(
-              "Versorgungspfad",
-              "Траектория лечения",
-              "Care path",
-            )}
+            label={appointmentText("appointments_care_path")}
           >
             <NativeComboboxSelect
               value={form.carePathKind}
@@ -640,11 +633,7 @@ function useAppointmentFollowUpVisitSectionContent({
             disabled={busy || !form.title.trim()}
           >
             {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-            {appointmentText(
-              "Follow-up-Termin erstellen",
-              "Создать follow-up приём",
-              "Create follow-up visit",
-            )}
+            {appointmentText("appointments_create_follow_up_visit")}
           </Button>
         </div>
       </form>

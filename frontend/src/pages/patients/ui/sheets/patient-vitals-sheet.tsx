@@ -84,9 +84,8 @@ export function PatientVitalsSheet({
   onOpenChange: (v: boolean) => void;
   onSaved: () => void;
 }) {
-  const { t, lang } = useLang();
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
   const [form, setForm] = useState<FormState>(blankForm);
   const [busy, setBusy] = useState(false);
 
@@ -103,7 +102,7 @@ export function PatientVitalsSheet({
     event.preventDefault();
     const measuredAt = new Date(form.measuredAt);
     if (Number.isNaN(measuredAt.getTime())) {
-      toast.error(l("Ungueltiges Datum.", "Nekorrektnaya data.", "Invalid date."));
+      toast.error(l("patients_invalid_date_2"));
       return;
     }
     const bmiOverride = parseNumber(form.bmi);
@@ -124,7 +123,7 @@ export function PatientVitalsSheet({
           notes: form.notes.trim() || null,
         }),
       });
-      toast.success(l("Vitalwert gespeichert.", "Pokazatel sohranen.", "Vital measurement saved."));
+      toast.success(l("patients_vital_measurement_saved"));
       onOpenChange(false);
       onSaved();
     } catch (error) {
@@ -143,14 +142,14 @@ export function PatientVitalsSheet({
       title={
         <span className="flex w-full items-center justify-between gap-2">
           <span>
-            {l("Vitalwert erfassen", "Dobavit pokazatel", "Add vital measurement")}
+            {l("patients_add_vital_measurement")}
           </span>
           {bmiPreview != null ? (
             <Badge
               variant="outline"
               className="rounded-full border-sky-200 bg-sky-50 text-[11px] text-sky-700"
             >
-              {l("BMI", "BMI", "BMI")} {formatBmi(bmiPreview)}
+              {l("patients_bmi")} {formatBmi(bmiPreview)}
             </Badge>
           ) : null}
         </span>
@@ -174,9 +173,9 @@ export function PatientVitalsSheet({
         </>
       }
     >
-      <FormSection title={l("Messung", "Измерение", "Measurement")}>
+      <FormSection title={l("patients_measurement")}>
         <FormField
-          label={l("Gemessen am", "Измерено", "Measured at")}
+          label={l("patients_measured_at")}
           htmlFor="patient-vitals-measured-at"
         >
           <Input
@@ -193,7 +192,7 @@ export function PatientVitalsSheet({
 
         <div className="grid gap-3 md:grid-cols-3">
           <FormField
-            label={l("RR systolisch", "АД систолическое", "BP systolic")}
+            label={l("patients_bp_systolic")}
             htmlFor="patient-vitals-bp-systolic"
           >
             <Input
@@ -204,11 +203,11 @@ export function PatientVitalsSheet({
                 setForm((current) => ({ ...current, bpSystolic: event.target.value }))
               }
               className={inputClass}
-              placeholder="mmHg"
+              placeholder={l("patients_pressure_unit_placeholder")}
             />
           </FormField>
           <FormField
-            label={l("RR diastolisch", "АД диастолическое", "BP diastolic")}
+            label={l("patients_bp_diastolic")}
             htmlFor="patient-vitals-bp-diastolic"
           >
             <Input
@@ -219,11 +218,11 @@ export function PatientVitalsSheet({
                 setForm((current) => ({ ...current, bpDiastolic: event.target.value }))
               }
               className={inputClass}
-              placeholder="mmHg"
+              placeholder={l("patients_pressure_unit_placeholder")}
             />
           </FormField>
           <FormField
-            label={l("Herzfrequenz", "ЧСС", "Heart rate")}
+            label={l("patients_heart_rate")}
             htmlFor="patient-vitals-heart-rate"
           >
             <Input
@@ -234,16 +233,16 @@ export function PatientVitalsSheet({
                 setForm((current) => ({ ...current, heartRate: event.target.value }))
               }
               className={inputClass}
-              placeholder="bpm"
+              placeholder={l("patients_heart_rate_unit_placeholder")}
             />
           </FormField>
         </div>
       </FormSection>
 
-      <FormSection title={l("Anthropometrie", "Антропометрия", "Anthropometry")}>
+      <FormSection title={l("patients_anthropometry")}>
         <div className="grid gap-3 md:grid-cols-3">
           <FormField
-            label={l("Gewicht (kg)", "Вес (кг)", "Weight (kg)")}
+            label={l("patients_weight_kg")}
             htmlFor="patient-vitals-weight"
           >
             <Input
@@ -257,7 +256,7 @@ export function PatientVitalsSheet({
             />
           </FormField>
           <FormField
-            label={l("Groesse (cm)", "Рост (см)", "Height (cm)")}
+            label={l("patients_height_cm")}
             htmlFor="patient-vitals-height"
           >
             <Input
@@ -271,7 +270,7 @@ export function PatientVitalsSheet({
             />
           </FormField>
           <FormField
-            label={l("BMI (optional)", "BMI (опционально)", "BMI (optional)")}
+            label={l("patients_bmi_optional")}
             htmlFor="patient-vitals-bmi"
           >
             <Input
@@ -288,8 +287,8 @@ export function PatientVitalsSheet({
         </div>
       </FormSection>
 
-      <FormSection title={l("Zusatzlich", "Дополнительно", "Additional")}>
-        <FormField label={l("Notizen", "Заметки", "Notes")} htmlFor="patient-vitals-notes">
+      <FormSection title={l("patients_additional")}>
+        <FormField label={l("appointments_notes")} htmlFor="patient-vitals-notes">
           <textarea
             id="patient-vitals-notes"
             className={vitalsTextareaClassName}
@@ -297,11 +296,7 @@ export function PatientVitalsSheet({
             onChange={(event) =>
               setForm((current) => ({ ...current, notes: event.target.value }))
             }
-            placeholder={l(
-              "Klinischer Kontext, Beobachtungen, Umstaende.",
-              "Клинический контекст, наблюдения, обстоятельства.",
-              "Clinical context, observations, circumstances.",
-            )}
+            placeholder={l("patients_clinical_context_observations_circumstances")}
           />
         </FormField>
       </FormSection>

@@ -8,24 +8,15 @@ import { cn } from "@/lib/utils";
 
 import { Banner, Field, Panel, textareaBaseClassName } from "./primitives";
 
-function tri(lang: string, de: string, ru: string, en: string) {
-  if (lang === "de") return de;
-  if (lang === "ru") return ru;
-  return en;
-}
-
-type TextFieldLabels = { de: string; ru: string; en: string };
-type TextFieldHint = { de: string; ru: string; en: string };
-
 type SpecialtyBooleanFlag<T> = {
   key: keyof T & string;
-  labels: TextFieldLabels;
+  label: string;
 };
 
 type SpecialtyTextField<T> = {
   key: keyof T & string;
-  labels: TextFieldLabels;
-  hint?: TextFieldHint;
+  label: string;
+  hint?: string;
   rows?: number;
 };
 
@@ -67,7 +58,7 @@ function SpecialtySectionContent<T extends Record<string, unknown>>({
   sectionError,
   canEdit,
 }: SpecialtySectionContentProps<T>) {
-  const { lang, t } = useLang();
+  const { t } = useLang();
 
   const hydrate = useMemo<T>(
     () => ({ ...blankValue, ...(rawValue ?? {}) }) as T,
@@ -154,7 +145,7 @@ function SpecialtySectionContent<T extends Record<string, unknown>>({
                       disabled={!canEdit || busy}
                     />
                     <span className="leading-tight">
-                      {tri(lang, flag.labels.de, flag.labels.ru, flag.labels.en)}
+                      {flag.label}
                     </span>
                   </label>
                 );
@@ -167,12 +158,8 @@ function SpecialtySectionContent<T extends Record<string, unknown>>({
           {textFields.map((field) => (
             <Field
               key={field.key}
-              label={tri(lang, field.labels.de, field.labels.ru, field.labels.en)}
-              hint={
-                field.hint
-                  ? tri(lang, field.hint.de, field.hint.ru, field.hint.en)
-                  : undefined
-              }
+              label={field.label}
+              hint={field.hint}
             >
               <textarea
                 value={(form[field.key] as string | undefined) ?? ""}

@@ -30,31 +30,31 @@ const CARE_PATH_KIND_OPTIONS: CarePathKind[] = [
 
 function typeLabel(
   value: AppointmentKind,
-  l: (de: string, ru: string, en: string) => string,
+  l: (key: string) => string,
 ): string {
   switch (value) {
     case "medical":
-      return l("Medizinisch", "Medicinskiy", "Medical");
+      return l("patients_medical");
     case "non_medical":
-      return l("Nicht-medizinisch", "Nemedicinskiy", "Non-medical");
+      return l("patients_non_medical");
     case "internal":
-      return l("Intern", "Vnutrenniy", "Internal");
+      return l("patients_internal");
   }
 }
 
 function carePathLabel(
   value: CarePathKind,
-  l: (de: string, ru: string, en: string) => string,
+  l: (key: string) => string,
 ): string {
   switch (value) {
     case "regular":
-      return l("Regulaer", "Obychniy", "Regular");
+      return l("patients_regular");
     case "preventive":
-      return l("Praeventiv", "Profilaktika", "Preventive");
+      return l("patients_preventive");
     case "control":
-      return l("Kontrolle", "Kontrol", "Control");
+      return l("patients_control");
     case "followup":
-      return l("Nachsorge", "Nablyudenie", "Follow-up");
+      return l("patients_follow_up");
   }
 }
 
@@ -123,20 +123,19 @@ function PatientAppointmentSheetContent({
   onOpenChange: (value: boolean) => void;
   onSaved: () => void;
 }) {
-  const { t, lang } = useLang();
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
   const [form, setForm] = useState<FormState>(blankForm);
   const [busy, setBusy] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!form.title.trim()) {
-      toast.error(l("Titel ist erforderlich.", "Nazvanie obyazatelno.", "Title required."));
+      toast.error(l("patients_title_required"));
       return;
     }
     if (!form.date) {
-      toast.error(l("Datum ist erforderlich.", "Data obyazatelna.", "Date required."));
+      toast.error(l("patients_date_required"));
       return;
     }
     setBusy(true);
@@ -165,7 +164,7 @@ function PatientAppointmentSheetContent({
           recurrence_until: null,
         }),
       });
-      toast.success(l("Termin erstellt.", "Priyom sozdan.", "Appointment created."));
+      toast.success(l("patients_appointment_created"));
       onOpenChange(false);
       onSaved();
     } catch (error) {
@@ -181,7 +180,7 @@ function PatientAppointmentSheetContent({
       onOpenChange={onOpenChange}
       width="narrow"
       onSubmit={handleSubmit}
-      title={l("Neuer Termin", "Novyy priyom", "New appointment")}
+      title={l("patients_new_appointment")}
       bodyClassName="px-4 py-4 space-y-3"
       footer={
         <>
@@ -201,8 +200,8 @@ function PatientAppointmentSheetContent({
         </>
       }
     >
-      <FormSection title={l("Termin", "Приём", "Appointment")}>
-        <FormField label={l("Titel", "Название", "Title")} htmlFor="patient-appointment-title">
+      <FormSection title={l("patients_appointment")}>
+        <FormField label={l("patients_title")} htmlFor="patient-appointment-title">
           <Input
             id="patient-appointment-title"
             value={form.title}
@@ -215,7 +214,7 @@ function PatientAppointmentSheetContent({
         </FormField>
 
         <div className="grid gap-3 md:grid-cols-2">
-          <FormField label={l("Typ", "Тип", "Type")} htmlFor="patient-appointment-type">
+          <FormField label={l("patients_type")} htmlFor="patient-appointment-type">
             <NativeComboboxSelect
               id="patient-appointment-type"
               value={form.appointmentType}
@@ -237,7 +236,7 @@ function PatientAppointmentSheetContent({
             </NativeComboboxSelect>
           </FormField>
           <FormField
-            label={l("Versorgungspfad", "Траектория лечения", "Care path")}
+            label={l("patients_care_path")}
             htmlFor="patient-appointment-care-path"
           >
             <NativeComboboxSelect
@@ -262,9 +261,9 @@ function PatientAppointmentSheetContent({
         </div>
       </FormSection>
 
-      <FormSection title={l("Zeit und Ort", "Время и место", "Time and place")}>
+      <FormSection title={l("patients_time_and_place")}>
         <div className="grid gap-3 md:grid-cols-3">
-          <FormField label={l("Datum", "Дата", "Date")} htmlFor="patient-appointment-date">
+          <FormField label={l("patients_date")} htmlFor="patient-appointment-date">
             <Input
               id="patient-appointment-date"
               type="date"
@@ -276,7 +275,7 @@ function PatientAppointmentSheetContent({
               required
             />
           </FormField>
-          <FormField label={l("Beginn", "Начало", "Start")} htmlFor="patient-appointment-time-start">
+          <FormField label={l("patients_start")} htmlFor="patient-appointment-time-start">
             <Input
               id="patient-appointment-time-start"
               type="time"
@@ -287,7 +286,7 @@ function PatientAppointmentSheetContent({
               className={inputClass}
             />
           </FormField>
-          <FormField label={l("Ende", "Окончание", "End")} htmlFor="patient-appointment-time-end">
+          <FormField label={l("patients_end")} htmlFor="patient-appointment-time-end">
             <Input
               id="patient-appointment-time-end"
               type="time"
@@ -300,7 +299,7 @@ function PatientAppointmentSheetContent({
           </FormField>
         </div>
 
-        <FormField label={l("Ort", "Место", "Location")} htmlFor="patient-appointment-location">
+        <FormField label={l("patients_location")} htmlFor="patient-appointment-location">
           <Input
             id="patient-appointment-location"
             value={form.location}
@@ -312,8 +311,8 @@ function PatientAppointmentSheetContent({
         </FormField>
       </FormSection>
 
-      <FormSection title={l("Zusatzlich", "Дополнительно", "Additional")}>
-        <FormField label={l("Notizen", "Заметки", "Notes")} htmlFor="patient-appointment-notes">
+      <FormSection title={l("patients_additional")}>
+        <FormField label={l("appointments_notes")} htmlFor="patient-appointment-notes">
           <textarea
             id="patient-appointment-notes"
             className={appointmentTextareaClassName}

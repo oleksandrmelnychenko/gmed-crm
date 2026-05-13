@@ -78,11 +78,11 @@ function AppointmentHandoffSectionContent({
       peer: peer.id,
       name: peer.name,
       role: peer.role,
-      draft: appointmentText(
-        `Termin-Handoff: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}.`,
-        `Хэнд-офф приёма: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}.`,
-        `Appointment handoff: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}.`,
-      ),
+      draft: appointmentText("appointments_handoff_chat_draft", {
+        patientPid: detail.patient_pid,
+        title: detail.title,
+        slot: slotLabel(detail),
+      }),
     });
     staffGo(`/chat?${params.toString()}`);
   }

@@ -131,12 +131,7 @@ function useAppointmentConciergeSectionContent({
 }: AppointmentConciergeSectionProps) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const appointmentText = (_de: string, _ru: string, en: string) =>
-    en === "No provider"
-      ? t.appointments_concierge_no_provider
-      : en === "No concierge"
-        ? t.appointments_concierge_no_concierge
-        : en;
+  const appointmentText = (key: string) => t.uiText[key] ?? key;
 
   const buildCreateForm = useCallback(
     () =>
@@ -386,11 +381,7 @@ function useAppointmentConciergeSectionContent({
                             className={selectClassName}
                           >
                             <option value="">
-                              {appointmentText(
-                                "Kein Anbieter",
-                                "Без провайдера",
-                                "No provider",
-                              )}
+                              {appointmentText("appointments_no_provider")}
                             </option>
                             {nonMedicalProviders.map((provider) => (
                               <option key={provider.id} value={provider.id}>
@@ -410,11 +401,7 @@ function useAppointmentConciergeSectionContent({
                             className={selectClassName}
                           >
                             <option value="">
-                              {appointmentText(
-                                "Ohne Concierge",
-                                "Без concierge",
-                                "No concierge",
-                              )}
+                              {appointmentText("appointments_no_concierge")}
                             </option>
                             {conciergeStaff.map((member) => (
                               <option key={member.id} value={member.id}>
@@ -626,11 +613,7 @@ function useAppointmentConciergeSectionContent({
               className={selectClassName}
             >
               <option value="">
-                {appointmentText(
-                  "Kein Anbieter",
-                  "Без провайдера",
-                  "No provider",
-                )}
+                {appointmentText("appointments_no_provider")}
               </option>
               {nonMedicalProviders.map((provider) => (
                 <option key={provider.id} value={provider.id}>
@@ -651,11 +634,7 @@ function useAppointmentConciergeSectionContent({
               className={selectClassName}
             >
               <option value="">
-                {appointmentText(
-                  "Ohne Concierge",
-                  "Без concierge",
-                  "No concierge",
-                )}
+                {appointmentText("appointments_no_concierge")}
               </option>
               {conciergeStaff.map((member) => (
                 <option key={member.id} value={member.id}>

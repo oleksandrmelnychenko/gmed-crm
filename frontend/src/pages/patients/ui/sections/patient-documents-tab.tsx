@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils";
 import type { DocumentAlerts, DocumentItem } from "../../model/detail-tab-types";
 import { WorkspaceSectionIntro } from "../shared/workspace-primitives";
 
-type LocalizeFn = (de: string, ru: string, en: string) => string;
+type LocalizeFn = (key: string) => string;
 type StatusLabelFn = (status: string) => string;
 type DateFormatter = (value?: string | null, fallback?: string) => string;
 
@@ -105,40 +105,28 @@ function DocumentsOverviewSection({
 }: DocumentsOverviewSectionProps) {
   return (
     <FormSection
-      title={l("Überblick", "Обзор", "Overview")}
-      accessory={<CountBadge>{documents.length} {l("Dateien", "файлов", "files")}</CountBadge>}
+      title={l("appointments_overview")}
+      accessory={<CountBadge>{documents.length} {l("patients_files")}</CountBadge>}
     >
       <div className="grid overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 md:grid-cols-3">
         <DocumentOverviewTile
-          label={l("Dokumente gesamt", "Всего документов", "Total documents")}
+          label={l("patients_total_documents")}
           value={documents.length}
-          description={l(
-            "Direkt verknüpfte Patientendateien.",
-            "Файлы, привязанные к пациенту.",
-            "Files linked to this patient.",
-          )}
+          description={l("patients_files_linked_to_this_patient")}
         />
         <DocumentOverviewTile
-          label={l("Pflichtdokumente erfüllt", "Обязательные документы выполнены", "Required docs fulfilled")}
+          label={l("patients_required_docs_fulfilled")}
           value={
             documentAlerts?.configured_rule_count
               ? `${requiredDocumentFulfilledCount}/${documentAlerts.configured_rule_count}`
               : requiredDocumentFulfilledCount
           }
-          description={l(
-            "Готовность минимального пакета.",
-            "Готовность минимального пакета.",
-            "Minimum pack readiness.",
-          )}
+          description={l("patients_minimum_pack_readiness")}
         />
         <DocumentOverviewTile
-          label={l("Dokumentarten", "Типы документов", "Document types")}
+          label={l("patients_document_types")}
           value={documentCategoryOptions.length}
-          description={l(
-            "Kategorien im Profil.",
-            "Категории в профиле.",
-            "Categories in profile.",
-          )}
+          description={l("patients_categories_in_profile")}
           groupedLast
         />
       </div>
@@ -188,12 +176,8 @@ export function PatientDocumentsTab({
   return (
     <TabsContent value="documents" className="space-y-4 mt-4 min-h-[400px]">
       <WorkspaceSectionIntro
-        title={l("Dokumenten-Cockpit", "Панель документов", "Documents cockpit")}
-        description={l(
-          "Pflichtdokumente, Uploads und Sichtbarkeit für diesen Patienten in einer eigenen Dokumentenzone.",
-          "Обязательные документы, загрузки и видимость по этому пациенту в отдельной зоне документов.",
-          "Required documents, uploads and visibility for this patient in a dedicated document zone.",
-        )}
+        title={l("patients_documents_cockpit")}
+        description={l("patients_required_documents_uploads_and_visibility_for_this_patie")}
         accessory={<CountBadge>{filteredDocuments.length}</CountBadge>}
       />
 
@@ -218,11 +202,10 @@ export function PatientDocumentsTab({
             <div>
               <h4 className="text-sm font-semibold text-foreground">
                 {documentAlerts.document_pack_complete
-                  ? l("Das minimale Dokumentenpaket ist vollständig", "Минимальный пакет документов собран", "Minimum document pack is complete")
-                  : l(
-                      `${documentAlerts.missing_count} erforderliche Dokument${documentAlerts.missing_count === 1 ? "" : "e"} fehlen`,
-                      `Не хватает обязательных документов: ${documentAlerts.missing_count}`,
-                      `${documentAlerts.missing_count} required document${documentAlerts.missing_count === 1 ? "" : "s"} missing`,
+                  ? l("patients_minimum_document_pack_is_complete")
+                  : l("patients_required_documents_missing_count").replace(
+                      "{count}",
+                      String(documentAlerts.missing_count),
                     )}
               </h4>
             </div>
@@ -236,7 +219,7 @@ export function PatientDocumentsTab({
               )}
             >
               {documentAlerts.required_documents.filter((item) => item.fulfilled).length}/
-              {documentAlerts.configured_rule_count} {l("erfüllt", "выполнено", "fulfilled")}
+              {documentAlerts.configured_rule_count} {l("patients_fulfilled")}
             </Badge>
           </div>
           {documentAlerts.missing_count > 0 ? (
@@ -254,18 +237,14 @@ export function PatientDocumentsTab({
           ) : null}
           {documentAlerts.out_of_sync ? (
             <p className="mt-3 text-xs text-muted-foreground">
-              {l(
-                "Das gespeicherte Compliance-Flag für „Dokumentenpaket vollständig“ stimmt nicht mit dem aktuellen Dokumentbestand überein.",
-                "Сохранённый флаг compliance для «пакет документов собран» не совпадает с текущим составом документов.",
-                "The stored compliance flag for “Document pack complete” is not aligned with the current document inventory.",
-              )}
+              {l("patients_the_stored_compliance_flag_for_document_pack_complete_is")}
             </p>
           ) : null}
         </div>
       ) : null}
 
       <FormSection
-        title={l("Dokumente zu diesem Patienten", "Документы этого пациента", "Documents linked to this patient")}
+        title={l("patients_documents_linked_to_this_patient")}
         accessory={
           <div className="flex flex-wrap items-center gap-2">
             <CountBadge>{documents.length}</CountBadge>
@@ -276,7 +255,7 @@ export function PatientDocumentsTab({
                 className="h-8 rounded-lg gap-1.5"
                 onClick={onOpenUpload}
               >
-                {l("Dokument hochladen", "Загрузить документ", "Upload document")}
+                {l("patients_upload_document")}
               </Button>
             ) : null}
           </div>
@@ -284,7 +263,7 @@ export function PatientDocumentsTab({
       >
         {documents.length > 0 ? (
           <FormSection
-            title={l("Filter", "Фильтры", "Filters")}
+            title={l("patients_filters")}
             accessory={
               hasDocumentFilters ? (
                 <Button
@@ -294,7 +273,7 @@ export function PatientDocumentsTab({
                   className="h-8 rounded-lg"
                   onClick={onResetDocumentFilters}
                 >
-                  {l("Filter zurücksetzen", "Сбросить фильтры", "Reset filters")}
+                  {l("patients_reset_filters")}
                 </Button>
               ) : null
             }
@@ -307,7 +286,7 @@ export function PatientDocumentsTab({
                 className="h-8 rounded-full"
                 onClick={() => onDocumentStatusFilterChange("all")}
               >
-                {l("Alle Status", "Все статусы", "All statuses")} · {documents.length}
+                {l("patients_all_statuses")} · {documents.length}
               </Button>
               {documentStatusOptions.map((status) => (
                 <Button
@@ -328,7 +307,7 @@ export function PatientDocumentsTab({
 
 
                 onChange={(event) => onDocumentCategoryFilterChange(event.target.value ?? "all")} className={cn("w-full", formInputClassName)}>
-                  <option value="all">{l("Alle Dokumentarten", "Все типы документов", "All document types")}</option>
+                  <option value="all">{l("patients_all_document_types")}</option>
                   {documentCategoryOptions.map((category) => (
                     <option key={category} value={category}>
                       {localizeDocumentCode(category, l)}
@@ -336,7 +315,7 @@ export function PatientDocumentsTab({
                   ))}
                 </NativeComboboxSelect>
               <div className="flex items-center text-xs text-muted-foreground">
-                {l("Angezeigt", "Показано", "Showing")} {filteredDocuments.length} {l("von", "из", "of")} {documents.length}
+                {l("patients_showing")} {filteredDocuments.length} {l("documents_of")} {documents.length}
               </div>
             </div>
           </FormSection>
@@ -346,11 +325,11 @@ export function PatientDocumentsTab({
           <TabLoader />
         ) : documents.length === 0 ? (
           <EmptyCell>
-            {l("Zu diesem Patienten wurden noch keine Dokumente hochgeladen.", "Для этого пациента пока не загружены документы.", "No documents have been uploaded for this patient yet.")}
+            {l("patients_no_documents_have_been_uploaded_for_this_patient_yet")}
           </EmptyCell>
         ) : filteredDocuments.length === 0 ? (
           <EmptyCell>
-            {l("Kein Dokument entspricht den aktuellen Filtern.", "Текущим фильтрам не соответствует ни один документ.", "No document matches the current filters.")}
+            {l("patients_no_document_matches_the_current_filters")}
           </EmptyCell>
         ) : (
           <>

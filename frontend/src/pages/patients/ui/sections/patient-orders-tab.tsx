@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import type { OrderItem } from "../../model/detail-tab-types";
 
 type PatientOrdersDictionary = {
-  orders_title?: string;
+  orders_title: string;
 };
 
 type PatientOrdersTabProps = {
@@ -40,7 +40,7 @@ export function PatientOrdersTab({
   return (
     <TabsContent value="orders" className="space-y-4 mt-4 min-h-[400px]">
       <FormSection
-        title={t.orders_title ?? "Orders"}
+        title={t.orders_title}
         accessory={<CountBadge>{orders.length}</CountBadge>}
       >
         {tabLoading ? (

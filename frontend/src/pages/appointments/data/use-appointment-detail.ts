@@ -218,11 +218,7 @@ export function useAppointmentDetail({
           detailError:
             error instanceof Error
               ? error.message
-              : appointmentText(
-                "Termin konnte nicht geladen werden.",
-                "Не удалось загрузить приём.",
-                "Failed to load appointment",
-              ),
+              : appointmentText("appointments_failed_to_load_appointment"),
           detailLoading: false,
         });
       }
@@ -317,11 +313,7 @@ export function useAppointmentDetail({
           firstErrorMessage =
             result.reason instanceof Error
               ? result.reason.message
-              : appointmentText(
-                  "Erweiterte Termindaten konnten nicht geladen werden.",
-                  "Не удалось загрузить расширенные данные приёма.",
-                  "Failed to load extended appointment data.",
-                );
+              : appointmentText("appointments_failed_to_load_extended_appointment_data");
         }
 
         switch (group) {

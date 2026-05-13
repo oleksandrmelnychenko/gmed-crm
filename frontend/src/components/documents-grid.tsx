@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef, DensityLevel } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
+import { uiText } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 type DocumentsGridItem = {
@@ -127,7 +128,7 @@ export function DocumentsGrid({
               {item.original_filename ?? unclassifiedLabel}
             </span>
             <span className="text-muted-foreground/60">·</span>
-            <span>v{item.version_number}</span>
+            <span>{uiText("common_version_prefix")}{item.version_number}</span>
             {item.is_latest_version ? (
               <>
                 <span className="text-muted-foreground/60">·</span>

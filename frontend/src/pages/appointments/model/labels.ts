@@ -3,6 +3,8 @@ import {
   formatUnknownValue,
   getLang,
   t as translateCatalog,
+  uiText,
+  type UiTextValues,
   type TranslationKey,
   type Translations,
 } from "@/lib/i18n";
@@ -224,9 +226,12 @@ function unknownAppointmentValue(value: unknown) {
   return formatUnknownValue(value, runtimeTranslations());
 }
 
-export function appointmentText(de: string, ru: string, _en: string) {
-  void _en;
-  return getLang() === "ru" ? ru : de;
+export function appointmentText(key: string, values?: UiTextValues): string;
+export function appointmentText(
+  key: string,
+  values?: UiTextValues,
+) {
+  return uiText(key, getLang(), values);
 }
 
 export function roleLabel(role?: string | null) {
@@ -295,24 +300,20 @@ export function responseLabel(value: InterpreterResponse | string | null | undef
 
 export function attentionIssueLabel(count: number) {
   return count === 1
-    ? appointmentText("offener Punkt", "открытый пункт", "open issue")
-    : appointmentText("offene Punkte", "открытые пункты", "open issues");
+    ? appointmentText("appointments_open_issue")
+    : appointmentText("appointments_open_issues");
 }
 
 export function reportApprovalLabel(status: string) {
   switch (status) {
     case "approved":
-      return appointmentText("Freigegeben", "Согласовано", "Approved");
+      return appointmentText("appointments_approved");
     case "rejected":
-      return appointmentText("Zurückgewiesen", "Отклонено", "Rejected");
+      return appointmentText("appointments_rejected");
     case "pending_review":
-      return appointmentText("Prüfung ausstehend", "Ожидает проверки", "Pending review");
+      return appointmentText("appointments_pending_review");
     case "needs_interpreter_revision":
-      return appointmentText(
-        "Überarbeitung durch Dolmetscher",
-        "Нужна доработка переводчика",
-        "Needs interpreter revision",
-      );
+      return appointmentText("appointments_needs_interpreter_revision");
     default:
       return unknownAppointmentValue(status);
   }

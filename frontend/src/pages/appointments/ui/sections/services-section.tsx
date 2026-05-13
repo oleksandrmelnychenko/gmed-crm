@@ -69,11 +69,7 @@ function AppointmentServicesSection({
   } = serviceAccess;
   const hasServicesContent =
     canShowConciergeSection || canShowBillingHandoffSection;
-  const servicesEmpty = appointmentText(
-    "Für diesen Termin sind keine Service- oder Billing-Blöcke verfügbar.",
-    "Для этого приёма нет сервисных или billing-блоков.",
-    "No service or billing surfaces are available for this appointment.",
-  );
+  const servicesEmpty = appointmentText("appointments_no_service_or_billing_surfaces_are_available_for_this_ap");
 
   if (!hasServicesContent) {
     return (

@@ -1170,7 +1170,7 @@ function useFinanceCatalogPageContent() {
                           }))
                         }
                         className={inputClass}
-                        placeholder="standard_19"
+                        placeholder={t.uiText.finance_catalog_standard_code_placeholder}
                         disabled={createBusy}
                       />
                     </Field>
@@ -1529,7 +1529,7 @@ function useFinanceCatalogPageContent() {
                         }
                         className={inputClass}
                         disabled={packageBusy}
-                        placeholder="premium_care"
+                        placeholder={t.uiText.finance_catalog_package_key_placeholder}
                       />
                     </Field>
                     <Field label={t.finance_catalog_name} htmlFor="package-name">
@@ -1718,7 +1718,7 @@ function useFinanceCatalogPageContent() {
                               }
                               className={inputClass}
                               disabled={packageBusy}
-                              placeholder="interpreter_hours"
+                              placeholder={t.uiText.finance_catalog_service_key_placeholder}
                             />
                           </Field>
                           <Field label={t.finance_catalog_included_quantity}>

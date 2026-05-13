@@ -125,22 +125,14 @@ export function useAppointmentLinkedRecords({
         if (linkedPreviewKind === "order") {
           if (!currentDetail.order_id) {
             throw new Error(
-              appointmentText(
-                "Kein Auftrag mit diesem Termin verknupft.",
-                "Для этого приёма нет связанного заказа.",
-                "No linked order for this appointment.",
-              ),
+              appointmentText("appointments_no_linked_order_for_this_appointment"),
             );
           }
           endpoint = `/orders/${currentDetail.order_id}`;
         } else if (linkedPreviewKind === "provider") {
           if (!currentDetail.provider_id) {
             throw new Error(
-              appointmentText(
-                "Keine Klinik mit diesem Termin verknupft.",
-                "Для этого приёма нет связанной клиники.",
-                "No linked provider for this appointment.",
-              ),
+              appointmentText("appointments_no_linked_provider_for_this_appointment"),
             );
           }
           endpoint = `/providers/${currentDetail.provider_id}`;
@@ -162,11 +154,7 @@ export function useAppointmentLinkedRecords({
           linkedPreviewError:
             error instanceof Error
               ? error.message
-              : appointmentText(
-                "Verknupfte Daten konnten nicht geladen werden.",
-                "Не удалось загрузить связанные данные.",
-                "Failed to load linked records",
-              ),
+              : appointmentText("appointments_failed_to_load_linked_records"),
           linkedPreviewLoading: false,
         });
       }

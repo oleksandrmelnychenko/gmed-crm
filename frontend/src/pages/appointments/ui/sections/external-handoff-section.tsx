@@ -14,7 +14,7 @@ import { LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { checkboxClass } from "@/components/ui-shell";
-import { useLang } from "@/lib/i18n";
+import { formatUiText, useLang, type UiTextValues } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -158,16 +158,8 @@ function useAppointmentExternalHandoffSectionContent({
 }: AppointmentExternalHandoffSectionProps) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const appointmentText = (de: string, ru: string, en: string) => {
-    switch (en) {
-      case "Open internal chat draft":
-        return t.appointments_external_handoff_open_chat;
-      case "Log communication":
-        return t.appointments_external_handoff_log;
-      default:
-        return appointmentTextBase(de, ru, en);
-    }
-  };
+  const appointmentText = (key: string, values?: UiTextValues) =>
+    formatUiText(t.uiText[key] ?? appointmentTextBase(key), values);
   const { staffGo } = useStaffNavigate();
 
   const assigneeIndex = useMemo(
@@ -234,10 +226,24 @@ function useAppointmentExternalHandoffSectionContent({
 
     const targetLabel = communicationTargetLabel(form.target, detail);
     const draftParts = [
-      `External handoff: ${detail.patient_pid} · ${detail.title}`,
-      `${t.patients_assign_owner}: ${targetLabel} · ${communicationDirectionLabel(form.direction)} ${t.appointments_common_via} ${communicationChannelLabel(form.channel)}`,
-      `Slot: ${slotLabel(detail)}`,
-      form.contactName.trim() ? `Contact: ${form.contactName.trim()}` : "",
+      appointmentText("appointments_external_handoff_chat_title", {
+        patientPid: detail.patient_pid,
+        title: detail.title,
+      }),
+      appointmentText("appointments_external_handoff_chat_target", {
+        target: targetLabel,
+        direction: communicationDirectionLabel(form.direction),
+        via: t.appointments_common_via,
+        channel: communicationChannelLabel(form.channel),
+      }),
+      appointmentText("appointments_description_slot", {
+        slot: slotLabel(detail),
+      }),
+      form.contactName.trim()
+        ? appointmentText("appointments_description_contact", {
+            contact: form.contactName.trim(),
+          })
+        : "",
       form.notes.trim() || "",
     ].filter(Boolean);
 
@@ -257,10 +263,25 @@ function useAppointmentExternalHandoffSectionContent({
     const targetLabel = communicationTargetLabel(form.target, detail);
     const handoffTitle = `${EXTERNAL_HANDOFF_PREFIX} ${form.title.trim()}`;
     const descriptionParts = [
-      `${t.patients_assign_owner}: ${targetLabel}`,
-      `${tr.documents_source}: ${communicationDirectionLabel(form.direction)} ${t.appointments_common_via} ${communicationChannelLabel(form.channel)}`,
-      `Appointment: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}`,
-      form.contactName.trim() ? `Contact: ${form.contactName.trim()}` : "",
+      appointmentText("appointments_description_owner", {
+        owner: targetLabel,
+      }),
+      appointmentText("appointments_external_handoff_description_source", {
+        source: tr.documents_source,
+        direction: communicationDirectionLabel(form.direction),
+        via: t.appointments_common_via,
+        channel: communicationChannelLabel(form.channel),
+      }),
+      appointmentText("appointments_description_appointment", {
+        patientPid: detail.patient_pid,
+        title: detail.title,
+        slot: slotLabel(detail),
+      }),
+      form.contactName.trim()
+        ? appointmentText("appointments_description_contact", {
+            contact: form.contactName.trim(),
+          })
+        : "",
       form.notes.trim() || "",
     ].filter(Boolean);
 
@@ -658,11 +679,7 @@ function useAppointmentExternalHandoffSectionContent({
                   }))
                 }
                 placeholder={withEllipsis(
-                  appointmentText(
-                    "Kontaktperson",
-                    "Контактное лицо",
-                    "Contact person",
-                  ),
+                  appointmentText("appointments_contact_person"),
                 )}
                 className={appointmentWhiteInputClassName}
               />
@@ -738,22 +755,14 @@ function useAppointmentExternalHandoffSectionContent({
                 disabled={!form.assigneeId}
                 onClick={openChatDraft}
               >
-                {appointmentText(
-                  "Internen Chatentwurf öffnen",
-                  "Открыть черновик внутреннего чата",
-                  "Open internal chat draft",
-                )}
+                {appointmentText("appointments_open_internal_chat_draft")}
               </Button>
               <Button
                 type="submit"
                 disabled={submitBusy || !form.title.trim()}
               >
                 {submitBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                {appointmentText(
-                  "Kommunikation protokollieren",
-                  "Зафиксировать коммуникацию",
-                  "Log communication",
-                )}
+                {appointmentText("appointments_log_communication")}
               </Button>
             </div>
           </form>

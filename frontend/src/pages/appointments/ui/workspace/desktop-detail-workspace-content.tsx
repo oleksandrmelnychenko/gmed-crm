@@ -234,11 +234,7 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
     return (
       <div className="flex min-h-[320px] items-center justify-center text-muted-foreground">
         <LoaderCircle className="mr-2 size-4 animate-spin" />
-        {appointmentText(
-          "Termin wird geladen",
-          "Загрузка приёма",
-          "Loading appointment",
-        )}
+        {appointmentText("appointments_loading_appointment")}
       </div>
     );
   }
@@ -251,31 +247,15 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
     return (
       <section className={appointmentSectionCardClassName("p-5")}>
         <EmptyState
-          text={appointmentText(
-            "Termin im Kalender oder in der Liste auswahlen.",
-            "Выберите приём в календаре или списке.",
-            "Select an appointment from the calendar or list.",
-          )}
+          text={appointmentText("appointments_select_an_appointment_from_the_calendar_or_list")}
         />
       </section>
     );
   }
 
-  const coordinationEmpty = appointmentText(
-    "Für diesen Termin sind keine Koordinationsflächen verfügbar.",
-    "Для этого приёма нет координационных блоков.",
-    "No coordination surfaces are available for this appointment.",
-  );
-  const workflowEmpty = appointmentText(
-    "Für diesen Termin sind keine Workflow-Blöcke verfügbar.",
-    "Для этого приёма нет workflow-блоков.",
-    "No workflow surfaces are available for this appointment.",
-  );
-  const notesEmpty = appointmentText(
-    "Für diesen Termin sind keine Notizen verfügbar.",
-    "Для этого приёма нет заметок.",
-    "No notes are available for this appointment.",
-  );
+  const coordinationEmpty = appointmentText("appointments_no_coordination_surfaces_are_available_for_this_appointm");
+  const workflowEmpty = appointmentText("appointments_no_workflow_surfaces_are_available_for_this_appointment");
+  const notesEmpty = appointmentText("appointments_no_notes_are_available_for_this_appointment");
 
   const showOverviewDetails = detailTab === "overview";
   const showTimelineTab = detailTab === "timeline";
@@ -338,16 +318,8 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
         extendedResourcesReady ? (
           <Suspense
             fallback={loadingSection(
-              appointmentText(
-                "Koordinationsoberfläche",
-                "Координационный блок",
-                "Coordination surface",
-              ),
-              appointmentText(
-                "Koordinationsbereich wird geladen",
-                "Загрузка coordination-блока",
-                "Loading coordination surface",
-              ),
+              appointmentText("appointments_coordination_surface"),
+              appointmentText("appointments_loading_coordination_surface"),
             )}
           >
             <LazyCoordinationSection
@@ -378,16 +350,8 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
           </Suspense>
         ) : (
           loadingSection(
-            appointmentText(
-              "Koordinationsoberfläche",
-              "Координационный блок",
-              "Coordination surface",
-            ),
-            appointmentText(
-              "Koordinationsdaten werden geladen",
-              "Загрузка coordination-данных",
-              "Loading coordination data",
-            ),
+            appointmentText("appointments_coordination_surface"),
+            appointmentText("appointments_loading_coordination_data"),
           )
         )
       ) : null}
@@ -396,16 +360,8 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
         extendedResourcesReady ? (
           <Suspense
             fallback={loadingSection(
-              appointmentText(
-                "Klinische Oberfläche",
-                "Клинический блок",
-                "Clinical surface",
-              ),
-              appointmentText(
-                "Klinischer Bereich wird geladen",
-                "Загрузка clinical-блока",
-                "Loading clinical surface",
-              ),
+              appointmentText("appointments_clinical_surface"),
+              appointmentText("appointments_loading_clinical_surface"),
             )}
           >
             <LazyClinicalSection
@@ -430,16 +386,8 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
           </Suspense>
         ) : (
           loadingSection(
-            appointmentText(
-              "Klinische Oberfläche",
-              "Клинический блок",
-              "Clinical surface",
-            ),
-            appointmentText(
-              "Klinische Daten werden geladen",
-              "Загрузка clinical-данных",
-              "Loading clinical data",
-            ),
+            appointmentText("appointments_clinical_surface"),
+            appointmentText("appointments_loading_clinical_data"),
           )
         )
       ) : null}
@@ -449,16 +397,8 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
           extendedResourcesReady ? (
             <Suspense
               fallback={loadingSection(
-                appointmentText(
-                  "Workflow-Cockpit",
-                  "Панель workflow",
-                  "Workflow cockpit",
-                ),
-                appointmentText(
-                  "Workflow-Oberfläche wird geladen",
-                  "Загрузка workflow-блока",
-                  "Loading workflow surface",
-                ),
+                appointmentText("appointments_workflow_cockpit"),
+                appointmentText("appointments_loading_workflow_surface"),
               )}
             >
               <LazyWorkflowTab
@@ -499,16 +439,8 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
             </Suspense>
           ) : (
             loadingSection(
-              appointmentText(
-                "Workflow-Cockpit",
-                "Панель workflow",
-                "Workflow cockpit",
-              ),
-              appointmentText(
-                "Workflow-Daten werden geladen",
-                "Загрузка workflow-данных",
-                "Loading workflow data",
-              ),
+              appointmentText("appointments_workflow_cockpit"),
+              appointmentText("appointments_loading_workflow_data"),
             )
           )
         ) : (
@@ -522,16 +454,8 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
         extendedResourcesReady ? (
           <Suspense
             fallback={loadingSection(
-              appointmentText(
-                "Service und Billing",
-                "Сервисы и billing",
-                "Services and billing",
-              ),
-              appointmentText(
-                "Service-Bereich wird geladen",
-                "Загрузка service-блока",
-                "Loading services surface",
-              ),
+              appointmentText("appointments_services_and_billing"),
+              appointmentText("appointments_loading_services_surface"),
             )}
           >
             <LazyServicesSection
@@ -562,16 +486,8 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
           </Suspense>
         ) : (
           loadingSection(
-            appointmentText(
-              "Service und Billing",
-              "Сервисы и billing",
-              "Services and billing",
-            ),
-            appointmentText(
-              "Service-Daten werden geladen",
-              "Загрузка service-данных",
-              "Loading services data",
-            ),
+            appointmentText("appointments_services_and_billing"),
+            appointmentText("appointments_loading_services_data"),
           )
         )
       ) : null}

@@ -34,7 +34,7 @@ import type {
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 import { WorkspaceSectionIntro } from "../shared/workspace-primitives";
 
-type LocalizeFn = (de: string, ru: string, en: string) => string;
+type LocalizeFn = (key: string) => string;
 type StatusLabelFn = (status: string) => string;
 type DateTimeFormatter = (value?: string | null, fallback?: string) => string;
 type RoleLabelFn = (value?: string | null) => string;
@@ -203,9 +203,9 @@ function WorkflowItemForm({
 }: WorkflowItemFormProps) {
   return (
     <div className="space-y-4">
-      <FormSection title={l("Aufgabe", "Задача", "Task")}>
+      <FormSection title={l("patients_task")}>
         <Field
-          label={l("Checklistenpunkt", "Пункт чек-листа", "Checklist item")}
+          label={l("patients_checklist_item")}
           htmlFor="patient-workflow-item-text"
         >
           <Input
@@ -213,20 +213,16 @@ function WorkflowItemForm({
             value={workflowForm.itemText}
             onChange={(event) => onWorkflowItemTextChange(event.target.value)}
             className={formInputClassName}
-            placeholder={l(
-              "Follow-up, PM-Anruf, Concierge-Handoff...",
-              "Follow-up, звонок PM, передача concierge...",
-              "Follow-up, PM call, concierge handoff...",
-            )}
+            placeholder={l("patients_follow_up_pm_call_concierge_handoff")}
             disabled={workflowBusy}
           />
         </Field>
       </FormSection>
 
-      <FormSection title={l("Eigentümer und Frist", "Ответственный и срок", "Owner and due date")}>
+      <FormSection title={l("patients_owner_and_due_date")}>
         <div className="grid gap-3 md:grid-cols-2">
           <Field
-            label={l("Verantwortlich", "Ответственный", "Owner")}
+            label={l("patients_owner")}
             htmlFor="patient-workflow-owner"
           >
             <NativeComboboxSelect
@@ -237,7 +233,7 @@ function WorkflowItemForm({
               disabled={workflowBusy}
             >
               <option value="">
-                {l("Aktueller Benutzer", "Текущий пользователь", "Current user")}
+                {l("patients_current_user")}
               </option>
               {activeWorkflowAssignees.map((item) => (
                 <option key={item.user_id} value={item.user_id}>
@@ -248,7 +244,7 @@ function WorkflowItemForm({
           </Field>
 
           <Field
-            label={l("Priorität", "Приоритет", "Priority")}
+            label={l("patients_priority")}
             htmlFor="patient-workflow-priority"
           >
             <NativeComboboxSelect
@@ -267,7 +263,7 @@ function WorkflowItemForm({
           </Field>
 
           <Field
-            label={l("Fällig am", "Срок до", "Due at")}
+            label={l("patients_due_at")}
             htmlFor="patient-workflow-due"
           >
             <Input
@@ -290,11 +286,11 @@ function WorkflowCreateFooter({ l, workflowBusy, itemText, onCancel }: WorkflowC
   return (
     <>
       <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={onCancel} disabled={workflowBusy}>
-        {l("Abbrechen", "Отмена", "Cancel")}
+        {l("patients_cancel")}
       </Button>
       <Button type="submit" className="h-9 rounded-lg gap-1.5" disabled={workflowBusy || !itemText.trim()}>
         <Plus className="size-3.5" />
-        {l("Hinzufügen", "Добавить", "Add")}
+        {l("patients_add")}
       </Button>
     </>
   );
@@ -319,7 +315,7 @@ function WorkflowCreateSheet({
     <PatientSheetScaffold
       open={createOpen}
       onOpenChange={onOpenChange}
-      title={l("Workflow-Element hinzufügen", "Добавить элемент процесса", "Add workflow item")}
+      title={l("patients_add_workflow_item")}
       width="form-heavy"
       onSubmit={onSubmitWorkflowItem}
       footer={
@@ -414,19 +410,15 @@ function WorkflowIntro({
 }: WorkflowIntroProps) {
   return (
     <WorkspaceSectionIntro
-      title={l("Workflow-Cockpit", "Панель workflow", "Workflow cockpit")}
-      description={l(
-        "Operative Nachverfolgung, Eigentümerschaft und patientenbezogene To-dos in einer eigenen Oberfläche.",
-        "Операционное сопровождение, зоны ответственности и задачи по пациенту в отдельной рабочей зоне.",
-        "Operational follow-through, ownership and patient-bound tasks in a dedicated workspace.",
-      )}
+      title={l("patients_workflow_cockpit")}
+      description={l("patients_operational_follow_through_ownership_and_patient_bound_t")}
       accessory={
         <div className="flex flex-wrap items-center justify-end gap-2">
           <CountBadge>{workflowItemCount}</CountBadge>
           {canManageWorkflowChecklist ? (
             <Button type="button" size="sm" className="h-8 rounded-lg gap-1.5" onClick={onCreateItemClick}>
               <Plus className="size-3.5" />
-              {l("Element hinzufügen", "Добавить элемент", "Add item")}
+              {l("patients_add_item")}
             </Button>
           ) : null}
         </div>
@@ -438,15 +430,11 @@ function WorkflowIntro({
 function WorkflowEmptyState({ l, workflowItemCount }: WorkflowEmptyStateProps) {
   return (
     <FormSection
-      title={l("Live-Checkliste", "Живой чек-лист", "Live checklist")}
+      title={l("patients_live_checklist")}
       accessory={<CountBadge>{workflowItemCount}</CountBadge>}
     >
       <EmptyCell>
-        {l(
-          "Noch keine Workflow-Checkliste für diesen Patienten.",
-          "Чек-лист workflow для этого пациента ещё пуст.",
-          "No patient workflow checklist yet.",
-        )}
+        {l("patients_no_patient_workflow_checklist_yet")}
       </EmptyCell>
     </FormSection>
   );
@@ -461,40 +449,40 @@ function WorkflowOverview({
 }: WorkflowOverviewProps) {
   return (
     <FormSection
-      title={l("Operativer Überblick", "Операционный обзор", "Operational overview")}
+      title={l("patients_operational_overview")}
       accessory={
         <CountBadge>
-          {workflowChecklistGroups.length} {l("Gruppen", "групп", "groups")}
+          {workflowChecklistGroups.length} {l("patients_groups")}
         </CountBadge>
       }
     >
       <div className="grid gap-y-4 overflow-hidden rounded-xl border border-border px-3 pb-4 pt-4 md:grid-cols-2 xl:grid-cols-4 [&>article:not(:last-child):not(:nth-child(4n))_.admin-inline-metric-separator]:xl:block">
         <AdminInlineMetric
           icon={ListChecks}
-          label={l("Offene Punkte", "Открытые пункты", "Open items")}
+          label={l("patients_open_items")}
           value={workflowChecklist.open_count}
-          description={l("Aktive Aufgaben.", "Активные задачи.", "Active tasks.")}
+          description={l("patients_active_tasks")}
           tone="sky"
         />
         <AdminInlineMetric
           icon={CheckCircle2}
-          label={l("Abgeschlossen", "Завершено", "Completed")}
+          label={l("patients_completed")}
           value={workflowChecklist.completed_count}
-          description={l("Geschlossene Punkte.", "Закрытые пункты.", "Closed items.")}
+          description={l("patients_closed_items")}
           tone="emerald"
         />
         <AdminInlineMetric
           icon={Clock3}
-          label={l("Überfällig", "Просрочено", "Overdue")}
+          label={l("patients_overdue")}
           value={overdueCount}
-          description={l("Fällige offene Punkte.", "Открытые задачи со сроком.", "Due open tasks.")}
+          description={l("patients_due_open_tasks")}
           tone="amber"
         />
         <AdminInlineMetric
           icon={UserRound}
-          label={l("Verantwortliche", "Ответственные", "Owners")}
+          label={l("patients_owners")}
           value={ownerCount}
-          description={l("Aktive Rollen oder Nutzer.", "Активные роли или пользователи.", "Active roles or users.")}
+          description={l("patients_active_roles_or_users")}
           tone="slate"
         />
       </div>
@@ -509,10 +497,10 @@ function WorkflowChecklistSection({
 }: WorkflowChecklistSectionProps) {
   return (
     <FormSection
-      title={l("Live-Checkliste", "Живой чек-лист", "Live checklist")}
+      title={l("patients_live_checklist")}
       accessory={
         <CountBadge>
-          {workflowChecklistGroups.length} {l("Gruppen", "групп", "groups")}
+          {workflowChecklistGroups.length} {l("patients_groups")}
         </CountBadge>
       }
     >
@@ -573,20 +561,20 @@ function WorkflowGroupSummary({
             <p className="max-w-full truncate text-[15px] font-semibold leading-5 text-foreground">{group.label}</p>
             <span className="size-1 rounded-full bg-muted-foreground/35" />
             <span className="text-xs tabular-nums text-muted-foreground">
-              {openItems} {l("offen", "открыто", "open")} / {group.items.length}{" "}
-              {l("gesamt", "всего", "total")}
+              {openItems} {l("patients_open_2")} / {group.items.length}{" "}
+              {l("patients_total")}
             </span>
           </div>
           <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1">
               <ClipboardList className="size-3.5 shrink-0 text-muted-foreground/65" />
-              {group.items.length} {l("Einträge", "записей", "items")}
+              {group.items.length} {l("patients_items")}
             </span>
             {completedItems > 0 ? (
               <>
                 <span className="size-1 rounded-full bg-muted-foreground/35" />
                 <span>
-                  {completedItems} {l("abgeschlossen", "завершено", "completed")}
+                  {completedItems} {l("patients_completed_2")}
                 </span>
               </>
             ) : null}
@@ -602,13 +590,13 @@ function WorkflowGroupSummary({
                 : "border-emerald-200 bg-emerald-50 text-emerald-700",
             )}
           >
-            {groupIsActive ? l("In Arbeit", "В работе", "In progress") : l("Fertig", "Готово", "Done")}
+            {groupIsActive ? l("patients_in_progress") : l("patients_done")}
           </Badge>
           <Badge
             variant="outline"
             className="rounded-full border-0 bg-white px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
           >
-            {l("Offen", "Открыто", "Open")}:{" "}
+            {l("patients_open_3")}:{" "}
             <span className="ml-1 font-semibold text-foreground">{openItems}</span>
           </Badge>
         </div>
@@ -689,13 +677,13 @@ function WorkflowChecklistItemCard({
             </span>
             <span className="size-1 rounded-full bg-muted-foreground/35" />
             <span>
-              {l("Erstellt", "Создано", "Created")}: {formatDateTime(item.created_at, commonNotSet)}
+              {l("patients_created")}: {formatDateTime(item.created_at, commonNotSet)}
             </span>
             {item.completed_at ? (
               <>
                 <span className="size-1 rounded-full bg-muted-foreground/35" />
                 <span>
-                  {l("Abgeschlossen", "Завершено", "Completed")}:{" "}
+                  {l("patients_completed")}:{" "}
                   {formatDateTime(item.completed_at, commonNotSet)}
                 </span>
               </>
@@ -712,7 +700,7 @@ function WorkflowChecklistItemCard({
             onClick={() => void onCompleteWorkflowItem(item.id)}
           >
             <CheckCircle2 className="size-3.5" />
-            {l("Abschließen", "Завершить", "Complete")}
+            {l("patients_complete")}
           </Button>
         ) : null}
       </div>

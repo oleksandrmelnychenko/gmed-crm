@@ -1,7 +1,7 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { useLang } from "@/lib/i18n";
+import { t as translateCatalog, useLang } from "@/lib/i18n";
 
 import { CaseItemList } from "./case-item-list";
 import {
@@ -16,10 +16,9 @@ import {
   textareaBaseClassName,
 } from "./primitives";
 
-function tri(lang: string, de: string, ru: string, en: string) {
-  if (lang === "de") return de;
-  if (lang === "ru") return ru;
-  return en;
+function tri(lang: string, key: string) {
+  const catalog = translateCatalog(lang === "de" ? "de" : "ru");
+  return catalog.uiText[key] ?? key;
 }
 
 function doctorOptionLabel(doctor: CaseWorkspaceDoctor) {
@@ -51,13 +50,8 @@ export function SurgeriesSection() {
 
   return (
     <CaseItemList<OperationItem>
-      title={tri(lang, "Operationen", "Операции", "Surgeries")}
-      description={tri(
-        lang,
-        "Vergangene Eingriffe und operative Behandlungen.",
-        "Прошлые вмешательства и операции.",
-        "Past procedures and surgical treatments.",
-      )}
+      title={tri(lang, "case_ws_surgeries")}
+      description={tri(lang, "case_ws_past_procedures_and_surgical_treatments")}
       items={detail?.operationen ?? []}
       blankItem={BLANK}
       cloneItem={(item) => ({
@@ -73,34 +67,19 @@ export function SurgeriesSection() {
       sectionError={sectionError}
       canEdit={permissions.canEdit}
       sheetTitle={{
-        create: tri(lang, "Neue Operation", "Новая операция", "New surgery"),
-        edit: tri(lang, "Operation bearbeiten", "Редактировать операцию", "Edit surgery"),
+        create: tri(lang, "case_ws_new_surgery"),
+        edit: tri(lang, "case_ws_edit_surgery"),
       }}
       sheetWidth="wide"
-      emptyTitle={tri(
-        lang,
-        "Keine Operationen erfasst.",
-        "Операций пока нет.",
-        "No surgeries recorded yet.",
-      )}
-      addFirstLabel={tri(
-        lang,
-        "Erste Operation hinzufügen",
-        "Добавить первую запись",
-        "Add first entry",
-      )}
-      missingPrimaryMessage={tri(
-        lang,
-        "Bitte den Grund angeben.",
-        "Укажите причину.",
-        "Please enter the reason.",
-      )}
+      emptyTitle={tri(lang, "case_ws_no_surgeries_recorded_yet")}
+      addFirstLabel={tri(lang, "case_ws_add_first_entry_2")}
+      missingPrimaryMessage={tri(lang, "case_ws_please_enter_the_reason")}
       cardContent={(item) => (
         <>
           <div className="flex items-center gap-2">
             <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
             <p className="truncate text-sm font-medium text-foreground">
-              {item.grund || tri(lang, "Ohne Grund", "Без причины", "Untitled")}
+              {item.grund || tri(lang, "case_ws_untitled_2")}
             </p>
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -131,7 +110,7 @@ export function SurgeriesSection() {
       formContent={({ form, setForm, updateField, disabled }) => (
         <>
           <div className="grid gap-4 md:grid-cols-2">
-            <Field label={tri(lang, "Datum", "Дата", "Date")}>
+            <Field label={tri(lang, "case_ws_date")}>
               <Input
                 type="date"
                 value={form.datum ?? ""}
@@ -141,7 +120,7 @@ export function SurgeriesSection() {
               />
             </Field>
             <Field
-              label={tri(lang, "Grund", "Причина", "Reason")}
+              label={tri(lang, "case_ws_reason")}
               required
             >
               <Input
@@ -153,13 +132,8 @@ export function SurgeriesSection() {
             </Field>
           </div>
           <Field
-            label={tri(lang, "Arzt aus Register", "Врач из реестра", "Doctor registry")}
-            hint={tri(
-              lang,
-              "Auswahl füllt auch das Freitext-Feld unten.",
-              "Выбор также заполняет поле ниже.",
-              "Selecting also fills the free-text field below.",
-            )}
+            label={tri(lang, "case_ws_doctor_registry")}
+            hint={tri(lang, "case_ws_selecting_also_fills_the_free_text_field_below")}
           >
             <NativeComboboxSelect
               value={form.arzt_id ?? ""}
@@ -184,13 +158,8 @@ export function SurgeriesSection() {
             </NativeComboboxSelect>
           </Field>
           <Field
-            label={tri(lang, "Freitext Arzt", "Наименование врача", "Doctor label")}
-            hint={tri(
-              lang,
-              "Altbestand oder manuelle Angabe.",
-              "Устаревшие данные или ручной ввод.",
-              "Legacy or manual fallback.",
-            )}
+            label={tri(lang, "case_ws_doctor_label")}
+            hint={tri(lang, "case_ws_legacy_or_manual_fallback")}
           >
             <Input
               value={form.arzt ?? ""}
@@ -199,7 +168,7 @@ export function SurgeriesSection() {
               disabled={disabled}
             />
           </Field>
-          <Field label={tri(lang, "Notiz", "Заметка", "Note")}>
+          <Field label={tri(lang, "case_ws_note")}>
             <textarea
               value={form.notiz ?? ""}
               onChange={(event) => updateField("notiz", event.target.value)}

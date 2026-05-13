@@ -19,11 +19,11 @@ function AppointmentLinksSection({
   const { t } = useLang();
   const previewButtonClass =
     "h-8 rounded-lg gap-1.5 border-orange-500 bg-orange-500 px-3 text-xs font-medium text-white transition-colors hover:cursor-pointer hover:border-orange-600 hover:bg-orange-600";
-  const patientLabel = appointmentText("Patient", "Пациент", "Patient");
-  const orderLabel = appointmentText("Auftrag", "Заказ", "Order");
-  const clinicLabel = appointmentText("Klinik", "Клиника", "Clinic");
-  const documentsLabel = appointmentText("Dokumente", "Документы", "Documents");
-  const casesLabel = appointmentText("Fälle", "Кейсы", "Cases");
+  const patientLabel = appointmentText("appointments_patient");
+  const orderLabel = appointmentText("appointments_order");
+  const clinicLabel = appointmentText("appointments_clinic");
+  const documentsLabel = appointmentText("appointments_documents");
+  const casesLabel = appointmentText("appointments_cases");
   const linkedCount =
     3 + Number(Boolean(detail.order_id)) + Number(Boolean(detail.provider_id));
 

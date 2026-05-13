@@ -73,7 +73,7 @@ import {
 } from "@/components/ui/sheet";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { formatUnknownValue, getLang, t as translateCatalog, useLang } from "@/lib/i18n";
+import { formatUnknownValue, getLang, t as translateCatalog, uiText, useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { PatientDocumentsPage } from "@/pages/patients/portal-documents-page";
@@ -186,16 +186,15 @@ function formatRoleLabel(role?: string | null) {
 
 function formatLanguageLabel(language?: string | null) {
   const normalized = normalizeTemplateLanguage(language) ?? language?.trim().toLowerCase();
-  const isRu = getLang() === "ru";
   switch (normalized) {
     case "de":
-      return isRu ? "Немецкий" : "Deutsch";
+      return uiText("documents_language_de");
     case "en":
-      return isRu ? "Английский" : "Englisch";
+      return uiText("documents_language_en");
     case "uk":
-      return isRu ? "Украинский" : "Ukrainisch";
+      return uiText("documents_language_uk");
     case "ru":
-      return isRu ? "Русский" : "Russisch";
+      return uiText("documents_language_ru");
     default:
       return language ? formatUnknownValue(language, runtimeTranslations()) : runtimeTranslations().common_not_set;
   }
@@ -203,21 +202,20 @@ function formatLanguageLabel(language?: string | null) {
 
 function formatSensitivityLabel(value?: string | null) {
   const normalized = value?.trim().toLowerCase();
-  const isRu = getLang() === "ru";
   switch (normalized) {
     case "general":
-      return isRu ? "Общие данные" : "Allgemeine Daten";
+      return uiText("documents_sensitivity_general");
     case "patient identity":
     case "patient_identity":
-      return isRu ? "Данные пациента" : "Patientendaten";
+      return uiText("documents_sensitivity_patient_identity");
     case "medical":
-      return isRu ? "Медицинские данные" : "Medizinische Daten";
+      return uiText("documents_sensitivity_medical");
     case "financial":
-      return isRu ? "Финансовые данные" : "Finanzdaten";
+      return uiText("documents_sensitivity_financial");
     case "internal":
-      return isRu ? "Внутренние данные" : "Interne Daten";
+      return uiText("documents_sensitivity_internal");
     case "service":
-      return isRu ? "Сервисные данные" : "Servicedaten";
+      return uiText("documents_sensitivity_service");
     default:
       return value ? formatUnknownValue(value, runtimeTranslations()) : runtimeTranslations().common_not_set;
   }
@@ -225,23 +223,22 @@ function formatSensitivityLabel(value?: string | null) {
 
 function formatShareChannelLabel(channel?: string | null) {
   const normalized = channel?.trim().toLowerCase();
-  const isRu = getLang() === "ru";
   switch (normalized) {
     case "email":
-      return isRu ? "Эл. почта" : "E-Mail";
+      return uiText("documents_share_channel_email");
     case "phone":
-      return isRu ? "Телефон" : "Telefon";
+      return uiText("documents_share_channel_phone");
     case "portal":
     case "patient_portal":
-      return isRu ? "Портал пациента" : "Patientenportal";
+      return uiText("documents_share_channel_patient_portal");
     case "postal_mail":
-      return isRu ? "Почта" : "Postversand";
+      return uiText("documents_share_channel_postal_mail");
     case "fax":
-      return isRu ? "Факс" : "Fax";
+      return uiText("documents_share_channel_fax");
     case "whatsapp":
-      return "WhatsApp";
+      return uiText("documents_share_channel_whatsapp");
     case "other":
-      return isRu ? "Другой канал" : "Anderer Kanal";
+      return uiText("documents_share_channel_other");
     default:
       return channel ? formatUnknownValue(channel, runtimeTranslations()) : runtimeTranslations().common_not_set;
   }
@@ -281,20 +278,19 @@ function formatDocumentSourceLabel(
 
 function formatExtractionMethodLabel(method?: string | null) {
   const normalized = method?.trim().toLowerCase();
-  const isRu = getLang() === "ru";
   switch (normalized) {
     case "html_text":
-      return isRu ? "HTML-текст" : "HTML-Text";
+      return uiText("documents_extraction_method_html_text");
     case "pdf_text":
-      return isRu ? "PDF-текст" : "PDF-Text";
+      return uiText("documents_extraction_method_pdf_text");
     case "text_utf8":
-      return isRu ? "UTF-8 текст" : "UTF-8-Text";
+      return uiText("documents_extraction_method_text_utf8");
     case "windows_ocr":
-      return isRu ? "OCR Windows" : "Windows-OCR";
+      return uiText("documents_extraction_method_windows_ocr");
     case "tesseract_cli":
-      return "Tesseract OCR";
+      return uiText("documents_extraction_method_tesseract_cli");
     case "ocr_unavailable":
-      return isRu ? "OCR недоступен" : "OCR nicht verfügbar";
+      return uiText("documents_extraction_method_ocr_unavailable");
     default:
       return method ? formatUnknownValue(method, runtimeTranslations()) : runtimeTranslations().common_not_set;
   }
@@ -316,39 +312,23 @@ function formatDateTime(value?: string | null) {
   }
 }
 
-function formatGenerateDocumentError(error: unknown, l: (de: string, ru: string, en: string) => string) {
+function formatGenerateDocumentError(error: unknown, l: (key: string) => string) {
   const message = error instanceof Error ? error.message : "";
 
   if (message.includes("Treatment plan template requires at least one appointment")) {
-    return l(
-      "Der Behandlungsplan braucht mindestens einen Termin im ausgewählten Scope.",
-      "Для плана лечения нужен минимум один приём в выбранном scope.",
-      "Для плану лікування потрібен мінімум один прийом у вибраному scope.",
-    );
+    return l("documents_scope");
   }
 
   if (message.includes("Medication summary template requires at least one case")) {
-    return l(
-      "Die Medikamentenübersicht braucht mindestens einen Fall im ausgewählten Scope.",
-      "Для сводки медикаментов нужен минимум один кейс в выбранном scope.",
-      "Для медикаментозної зводки потрібен мінімум один кейс у вибраному scope.",
-    );
+    return l("documents_scope_2");
   }
 
   if (message.includes("Medication summary template requires recorded medication")) {
-    return l(
-      "Die Medikamentenübersicht braucht dokumentierte Medikamente im ausgewählten Scope.",
-      "Для сводки медикаментов нужны записанные медикаменты в выбранном scope.",
-      "Для медикаментозної зводки потрібні записані медикаменти у вибраному scope.",
-    );
+    return l("documents_scope_3");
   }
 
   if (message.includes("Framework contract template requires an existing framework contract")) {
-    return l(
-      "Der Rahmenvertrag braucht einen bestehenden Vertrag im ausgewählten Scope.",
-      "Для рамочного договора нужен существующий договор в выбранном scope.",
-      "Для рамкового договору потрібен наявний договір у вибраному scope.",
-    );
+    return l("documents_scope_4");
   }
 
   return message;
@@ -537,65 +517,42 @@ function StaffDocumentsPage({
   routeMode = "documents",
 }: StaffDocumentsPageProps) {
   const { user } = useAuth();
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const { staffGo } = useStaffNavigate();
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const l = (key: string) => t.uiText[key] ?? key;
   const [searchParams] = useSearchParams();
-  const text =
-    lang === "de"
-      ? {
-          allPatients: "Alle Patienten",
-          allStatuses: "Alle Status",
-          allVisibility: "Alle Sichtbarkeiten",
-          allCategories: "Alle Kategorien",
-          resetFilters: "Filter zurücksetzen",
-          selectedDocuments: (count: number) =>
-            `${count} Dokument${count === 1 ? "" : "e"} ausgewählt`,
-          current: "aktuell",
-          historical: "historisch",
-          needsCategorization: "Kategorisierung erforderlich",
-          suggested: (art: string, category: string) =>
-            `Vorgeschlagen: ${art} · ${category}`,
-          suggestedClassification: "Vorgeschlagene Klassifikation:",
-          newVersion: "Neue Version",
-          pidFallback: "PID",
-          uploadDescription:
-            "Datei jetzt speichern und klassifizieren oder die Triage in der Intake-Queue abschließen lassen.",
-          completedAt: (value: string) => ` · abgeschlossen ${value}`,
-          revokedBadge: "Widerrufen",
-          translatedByWorkspace: (name: string) => ` · Workspace ${name}`,
-          noAccessTitle: "Dokumentenbereich",
-          noAccessText: "Diese Rolle hat keinen Zugriff auf Dokumenten-Workflows.",
-          versionOf: (current: number, total: number) => `v${current} von ${total}`,
-          visibilityHeader: "Sichtbarkeit",
-        }
-      : {
-          allPatients: "Все пациенты",
-          allStatuses: "Все статусы",
-          allVisibility: "Все уровни видимости",
-          allCategories: "Все категории",
-          resetFilters: "Сбросить фильтры",
-          selectedDocuments: (count: number) =>
-            `${count} документ${count === 1 ? "" : count < 5 ? "а" : "ов"} выбрано`,
-          current: "текущая",
-          historical: "историческая",
-          needsCategorization: "Требуется категоризация",
-          suggested: (art: string, category: string) =>
-            `Предложено: ${art} · ${category}`,
-          suggestedClassification: "Предлагаемая классификация:",
-          newVersion: "Новая версия",
-          pidFallback: "PID",
-          uploadDescription:
-            "Сохраните и классифицируйте файл сейчас или дайте intake-queue завершить триаж.",
-          completedAt: (value: string) => ` · завершено ${value}`,
-          revokedBadge: "Отозвано",
-          translatedByWorkspace: (name: string) => ` · workspace ${name}`,
-          noAccessTitle: "Раздел документов",
-          noAccessText: "У этой роли нет доступа к документным workflow.",
-          versionOf: (current: number, total: number) => `v${current} из ${total}`,
-          visibilityHeader: "Видимость",
-        };
+  const text = {
+    allPatients: l("documents_all_patients_filter"),
+    allStatuses: l("documents_all_statuses_filter"),
+    allVisibility: l("documents_all_visibility_filter"),
+    allCategories: l("documents_all_categories_filter"),
+    resetFilters: l("documents_reset_filters"),
+    selectedDocuments: (count: number) =>
+      l("documents_selected_documents_count").replace("{count}", String(count)),
+    current: l("documents_current_badge"),
+    historical: l("documents_historical_badge"),
+    needsCategorization: l("documents_needs_categorization_badge"),
+    suggested: (art: string, category: string) =>
+      l("documents_suggested_line")
+        .replace("{art}", art)
+        .replace("{category}", category),
+    suggestedClassification: l("documents_suggested_classification_label"),
+    newVersion: l("documents_new_version"),
+    pidFallback: l("documents_pid_fallback"),
+    uploadDescription: l("documents_upload_description_staff"),
+    completedAt: (value: string) =>
+      l("documents_completed_at_inline").replace("{value}", value),
+    revokedBadge: l("documents_revoked_badge"),
+    translatedByWorkspace: (name: string) =>
+      l("documents_translated_by_workspace_inline").replace("{name}", name),
+    noAccessTitle: l("documents_no_access_title_staff"),
+    noAccessText: l("documents_no_access_text_staff"),
+    versionOf: (current: number, total: number) =>
+      l("documents_version_of")
+        .replace("{current}", String(current))
+        .replace("{total}", String(total)),
+    visibilityHeader: l("documents_visibility_header"),
+  };
   const documentsFailedLoadDocumentsText = t.documents_failed_load_documents;
   const documentsFailedLoadIntakeQueueText = t.documents_failed_load_intake_queue;
   const documentsFailedLoadDocumentText = t.documents_failed_load_document;
@@ -1950,11 +1907,7 @@ function StaffDocumentsPage({
 
       {isIntakeRoute && !canManageIntake ? (
         <Banner tone="warning">
-          {l(
-            "Diese Rolle kann die Intake-Dokumentenwarteschlange nicht verwalten.",
-            "Эта роль не может управлять очередью intake документов.",
-            "Ця роль не може керувати чергою intake документів.",
-          )}
+          {l("documents_intake")}
         </Banner>
       ) : null}
 
@@ -3568,11 +3521,7 @@ function StaffDocumentsPage({
                           }}
                         >
                           <FileText className="size-3.5" />
-                          {l(
-                            "Metadaten bearbeiten",
-                            "\u0420\u0435\u0434\u0430\u043a\u0442\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u043c\u0435\u0442\u0430\u0434\u0430\u043d\u043d\u044b\u0435",
-                            "\u0420\u0435\u0434\u0430\u0433\u0443\u0432\u0430\u0442\u0438 \u043c\u0435\u0442\u0430\u0434\u0430\u043d\u0456",
-                          )}
+                          {l("documents_text")}
                         </Button>
                       ) : null}
                     </div>
@@ -3608,7 +3557,7 @@ function StaffDocumentsPage({
                   <div className="grid xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_310px]">
                     <DocumentMetaPanel
                       className="border-b border-slate-200/70 xl:border-b-0 xl:border-r"
-                      title={l("Verkn\u00fcpfungen", "\u0421\u0432\u044f\u0437\u0438", "Links")}
+                      title={l("documents_links")}
                     >
                       <DocumentMetaHighlight
                         label={t.orders_patient}
@@ -3638,18 +3587,10 @@ function StaffDocumentsPage({
 
                     <DocumentMetaPanel
                       className="border-b border-slate-200/70 xl:border-b-0 xl:border-r"
-                      title={l(
-                        "Klassifikation",
-                        "\u041a\u043b\u0430\u0441\u0441\u0438\u0444\u0438\u043a\u0430\u0446\u0438\u044f",
-                        "Classification",
-                      )}
+                      title={l("documents_classification")}
                     >
                       <DocumentMetaHighlight
-                        label={l(
-                          "Dokumenttyp",
-                          "\u0422\u0438\u043f \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u0430",
-                          "Document type",
-                        )}
+                        label={l("documents_document_type")}
                         value={detail.art ? localizeDocumentCode(detail.art, l) : t.common_not_set}
                       >
                         <div className="mt-4 space-y-2.5">
@@ -3677,10 +3618,10 @@ function StaffDocumentsPage({
                           </span>
                           <p className="mt-1 flex min-w-0 items-baseline gap-1.5">
                             <span className="text-2xl font-semibold leading-7 tracking-tight text-foreground">
-                              v{detail.version_number}
+                              {l("common_version_prefix")}{detail.version_number}
                             </span>
                             <span className="text-xs font-medium text-muted-foreground">
-                              {l("von", "из", "of")} {detail.version_count}
+                              {l("documents_of")} {detail.version_count}
                             </span>
                           </p>
                         </div>
@@ -3761,7 +3702,7 @@ function StaffDocumentsPage({
                                   : "border-border/60 bg-background text-foreground",
                               )}
                             >
-                              v{version.version_number}
+                              {l("common_version_prefix")}{version.version_number}
                             </span>
                           </div>
 
@@ -3789,11 +3730,7 @@ function StaffDocumentsPage({
                                   variant="outline"
                                   className="rounded-full border-violet-200 bg-violet-50 text-[10px] text-violet-700"
                                 >
-                                  {l(
-                                    "Ge\u00f6ffnet",
-                                    "\u041e\u0442\u043a\u0440\u044b\u0442\u0430",
-                                    "Open",
-                                  )}
+                                  {l("documents_open")}
                                 </Badge>
                               ) : null}
                               <Badge
@@ -4225,7 +4162,7 @@ function StaffDocumentsPage({
                                         <>
                                           <span className="size-1 rounded-full bg-muted-foreground/35" />
                                           <span>
-                                            Workspace:{" "}
+                                            {l("documents_workspace_label")}{" "}
                                             <span className="font-medium text-foreground">
                                               {request.translated_by_name}
                                             </span>
@@ -4912,7 +4849,7 @@ function StaffDocumentsPage({
 }
 
 type DocumentsPageTranslations = ReturnType<typeof runtimeTranslations>;
-type DocumentsLocalizer = (de: string, ru: string, en: string) => string;
+type DocumentsLocalizer = (key: string) => string;
 type DocumentsPageText = {
   pidFallback: string;
   suggested: (art: string, category: string) => string;
@@ -5187,7 +5124,7 @@ function DocumentTranslationRequestsTable({
           request.patient_name || request.patient_pid ? (
             <div className="min-w-0">
               <span className="font-mono text-[11px] text-muted-foreground">
-                {request.patient_pid ?? "PID"}
+                {request.patient_pid ?? t.uiText.documents_pid_fallback}
               </span>
               <div className="truncate text-xs text-foreground">
                 {request.patient_name ?? t.common_not_set}

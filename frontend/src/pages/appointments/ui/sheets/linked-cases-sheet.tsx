@@ -60,11 +60,7 @@ function LinkedCasesSheet({
             loading ? t.patients_syncing : `${items.length} ${t.patients_records}`
           }
           loading={loading}
-          loadingLabel={appointmentText(
-            "Falle werden geladen",
-            "Загрузка кейсов",
-            "Loading cases",
-          )}
+          loadingLabel={appointmentText("appointments_loading_cases")}
           error={error}
           renderError={(message) => <Banner tone="error" withIcon>{message}</Banner>}
           items={items}
@@ -75,11 +71,7 @@ function LinkedCasesSheet({
           }}
           emptyState={
             <EmptyCell>
-              {appointmentText(
-                "Keine Falle fur diesen Patienten.",
-                "Для этого пациента нет кейсов.",
-                "No cases for this patient.",
-              )}
+              {appointmentText("appointments_no_cases_for_this_patient")}
             </EmptyCell>
           }
           reasonLabel={t.cases_reason}

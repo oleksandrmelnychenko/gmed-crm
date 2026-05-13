@@ -53,9 +53,8 @@ function PatientNotesSheetContent({
   onOpenChange: (v: boolean) => void;
   onSaved: () => void;
 }) {
-  const { t, lang } = useLang();
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
   const [value, setValue] = useReducer((_current: string, next: string) => next, initial);
   const [busy, setBusy] = useState(false);
 
@@ -69,7 +68,7 @@ function PatientNotesSheetContent({
           notes: value.trim() || null,
         }),
       });
-      toast.success(l("Notizen gespeichert.", "Заметки сохранены.", "Notes saved."));
+      toast.success(l("patients_notes_saved"));
       onOpenChange(false);
       onSaved();
     } catch (error) {
@@ -83,7 +82,7 @@ function PatientNotesSheetContent({
     <PatientSheetScaffold
       open={open}
       onOpenChange={onOpenChange}
-      title={l("Notizen bearbeiten", "Редактировать заметки", "Edit notes")}
+      title={l("patients_edit_notes")}
       width="narrow"
       onSubmit={handleSubmit}
       bodyClassName="px-4 py-4 space-y-3"
@@ -105,18 +104,14 @@ function PatientNotesSheetContent({
         </>
       }
     >
-      <FormSection title={l("Zusatzlich", "Дополнительно", "Additional")}>
-        <FormField label={l("Notizen", "Заметки", "Notes")} htmlFor="patient-notes">
+      <FormSection title={l("patients_additional")}>
+        <FormField label={l("appointments_notes")} htmlFor="patient-notes">
         <textarea
           id="patient-notes"
           className={notesTextareaClassName}
           value={value}
           onChange={(event) => setValue(event.target.value)}
-          placeholder={l(
-            "Allgemeine Notizen, Kontext, Praferenzen...",
-            "Общие заметки, контекст, предпочтения...",
-            "General notes, context, preferences...",
-          )}
+          placeholder={l("patients_general_notes_context_preferences")}
         />
         </FormField>
       </FormSection>

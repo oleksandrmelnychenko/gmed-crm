@@ -29,7 +29,7 @@ const LazyPatientFinancialDialogs = lazy(async () => {
   return { default: mod.PatientFinancialDialogs };
 });
 
-type LocalizeFn = (de: string, ru: string, en: string) => string;
+type LocalizeFn = (key: string) => string;
 type StatusLabelFn = (status: string) => string;
 type DateFormatter = (value?: string | null, fallback?: string) => string;
 type DateTimeFormatter = (value?: string | null, fallback?: string) => string;

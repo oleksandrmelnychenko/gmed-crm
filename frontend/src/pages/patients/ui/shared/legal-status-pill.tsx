@@ -7,26 +7,23 @@ import {
 } from "../../model/legal-status";
 
 export function LegalStatusPill({ status }: { status: PatientLegalStatus }) {
-  const { lang } = useLang();
-  const lp = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const { t } = useLang();
+  const lp = (key: string) => t.uiText[key] ?? key;
   const completion = getPatientLegalStatusCompletion(status);
 
   let kind: "complete" | "partial" | "none";
   let text: string;
   if (status.complianceCompleted) {
     kind = "complete";
-    text = lp("Bereit", "Готов", "Ready");
+    text = lp("patients_legal_status_ready");
   } else if (completion.completed === 0) {
     kind = "none";
-    text = lp("Nicht begonnen", "Не начат", "Not started");
+    text = lp("patients_legal_status_not_started");
   } else {
     kind = "partial";
-    text = `${completion.completed}/${completion.total} ${lp(
-      "erledigt",
-      "выполнено",
-      "done"
-    )}`;
+    text = lp("patients_legal_status_done_count")
+      .replace("{completed}", String(completion.completed))
+      .replace("{total}", String(completion.total));
   }
 
   const pillClass = {

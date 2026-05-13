@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 type PatientsShortcutsDialogProps = {
   open: boolean;
   closeLabel: string;
-  t: Record<string, string>;
+  t: Record<string, string> & { uiText?: Record<string, string> };
   onClose: () => void;
 };
 
@@ -37,21 +37,31 @@ export function PatientsShortcutsDialog({
             {t.patients_shortcuts_focus_search}
           </li>
           <li>
-            <kbd className="rounded border border-border px-1.5 py-0.5">Up</kbd>{" "}
+            <kbd className="rounded border border-border px-1.5 py-0.5">
+              {t.uiText?.keyboard_key_up ?? "keyboard_key_up"}
+            </kbd>{" "}
             /{" "}
-            <kbd className="rounded border border-border px-1.5 py-0.5">Down</kbd>{" "}
+            <kbd className="rounded border border-border px-1.5 py-0.5">
+              {t.uiText?.keyboard_key_down ?? "keyboard_key_down"}
+            </kbd>{" "}
             {t.patients_shortcuts_navigate_rows}
           </li>
           <li>
-            <kbd className="rounded border border-border px-1.5 py-0.5">Enter</kbd>{" "}
+            <kbd className="rounded border border-border px-1.5 py-0.5">
+              {t.uiText?.keyboard_key_enter ?? "keyboard_key_enter"}
+            </kbd>{" "}
             {t.patients_shortcuts_open_split_pane}
           </li>
           <li>
-            <kbd className="rounded border border-border px-1.5 py-0.5">Shift</kbd>{" "}
+            <kbd className="rounded border border-border px-1.5 py-0.5">
+              {t.uiText?.keyboard_key_shift ?? "keyboard_key_shift"}
+            </kbd>{" "}
             + {t.patients_shortcuts_multi_sort}
           </li>
           <li>
-            <kbd className="rounded border border-border px-1.5 py-0.5">Esc</kbd>{" "}
+            <kbd className="rounded border border-border px-1.5 py-0.5">
+              {t.uiText?.keyboard_key_esc ?? "keyboard_key_esc"}
+            </kbd>{" "}
             {t.patients_shortcuts_close_pane}
           </li>
         </ul>

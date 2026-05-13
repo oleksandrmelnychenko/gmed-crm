@@ -11,7 +11,7 @@ import {
 
 import type { RelationItem } from "../../model/detail-tab-types";
 
-type Localize = (de: string, ru: string, en: string) => string;
+type Localize = (key: string) => string;
 
 type PatientRelationsTabProps = {
   canManageRelations: boolean;
@@ -41,11 +41,7 @@ export function PatientRelationsTab({
   return (
     <TabsContent value="relations" className="mt-4 min-h-[400px]">
       <FormSection
-        title={l(
-          "Beziehungen und Notfallkontakte",
-          "Связи и экстренные контакты",
-          "Relations and emergency contacts",
-        )}
+        title={l("patients_relations_and_emergency_contacts")}
         accessory={
           canManageRelations ? (
             <Button
@@ -55,7 +51,7 @@ export function PatientRelationsTab({
               onClick={onCreateRelation}
             >
               <Plus className="size-3.5" />
-              {l("Neue Beziehung", "Новая связь", "New relation")}
+              {l("patients_new_relation")}
             </Button>
           ) : null
         }
@@ -63,7 +59,7 @@ export function PatientRelationsTab({
         {tabLoading ? (
           <TabLoader />
         ) : relations.length === 0 ? (
-          <EmptyCell>{l("Noch nicht erfasst.", "Не зафиксировано.", "Not recorded yet.")}</EmptyCell>
+          <EmptyCell>{l("patients_not_recorded_yet")}</EmptyCell>
         ) : (
           <div className="grid gap-2 md:grid-cols-2">
             {relations.map((relation) => (
@@ -84,7 +80,7 @@ export function PatientRelationsTab({
                         variant="outline"
                         className="rounded-full bg-rose-50 border-rose-200 text-rose-700 text-[10px]"
                       >
-                        {l("Notfall", "Экстренно", "Emergency")}
+                        {l("patients_emergency")}
                       </Badge>
                     ) : null}
                   </div>
@@ -111,7 +107,7 @@ export function PatientRelationsTab({
                         className="h-8 rounded-lg"
                         onClick={() => onOpenPatient(relation.related_patient_id as string)}
                       >
-                        {l("Patient öffnen", "Открыть пациента", "Open patient")}
+                        {l("patients_open_patient")}
                       </Button>
                     ) : null}
                     {canManageRelations ? (
@@ -123,7 +119,7 @@ export function PatientRelationsTab({
                           className="h-8 rounded-lg"
                           onClick={() => onEditRelation(relation)}
                         >
-                          {l("Bearbeiten", "Редактировать", "Edit")}
+                          {l("patients_edit")}
                         </Button>
                         <Button
                           type="button"
@@ -132,7 +128,7 @@ export function PatientRelationsTab({
                           className="h-8 rounded-lg border-rose-200 text-rose-700 hover:bg-rose-50"
                           onClick={() => onDeleteRelation(relation.id)}
                         >
-                          {l("Löschen", "Удалить", "Delete")}
+                          {l("patients_delete")}
                         </Button>
                       </>
                     ) : null}

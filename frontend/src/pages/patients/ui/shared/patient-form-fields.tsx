@@ -23,13 +23,12 @@ export function PatientFormFields({
   onChange,
   includeBirthAndGender = false,
 }: PatientFormFieldsProps) {
-  const { t, lang } = useLang();
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
 
   return (
     <div className="space-y-3">
-      <FormSection title={l("Persönliche Daten", "Личные данные", "Personal data")}>
+      <FormSection title={l("patients_personal_data")}>
         <div className="grid gap-3 md:grid-cols-3">
           <Field label={t.patients_title_field}>
             <Input
@@ -104,7 +103,7 @@ export function PatientFormFields({
           />
         </Field>
 
-        <Field label={l("Funktionslabels", "Функциональные метки", "Functional labels")}>
+        <Field label={l("patients_functional_labels")}>
           <FunctionalLabelChips
             value={form.functionalLabels}
             onChange={(next) => onChange("functionalLabels", next)}
@@ -112,7 +111,7 @@ export function PatientFormFields({
         </Field>
       </FormSection>
 
-      <FormSection title={l("Kontakt", "Контакты", "Contact")}>
+      <FormSection title={l("patients_contact")}>
         <div className="grid gap-3 md:grid-cols-3">
           <Field label={t.patients_phone_primary}>
             <Input
@@ -139,7 +138,7 @@ export function PatientFormFields({
         </div>
       </FormSection>
 
-      <FormSection title={l("Adresse", "Адрес", "Address")}>
+      <FormSection title={l("patients_address")}>
         <Field label={t.patients_address_street}>
           <Input
             value={form.addressStreet}
@@ -173,7 +172,7 @@ export function PatientFormFields({
         </div>
       </FormSection>
 
-      <FormSection title={l("Versicherung", "Страхование", "Insurance")}>
+      <FormSection title={l("patients_insurance")}>
         <div className="grid gap-3 md:grid-cols-3">
           <Field label={t.patients_insurance_provider}>
             <Input
@@ -202,7 +201,7 @@ export function PatientFormFields({
         </div>
       </FormSection>
 
-      <FormSection title={l("Notfallkontakt", "Экстренный контакт", "Emergency contact")}>
+      <FormSection title={l("patients_emergency_contact")}>
         <div className="grid gap-3 md:grid-cols-3">
           <Field label={t.patients_emergency_name}>
             <Input

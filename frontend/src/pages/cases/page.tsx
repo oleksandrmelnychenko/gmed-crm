@@ -750,15 +750,8 @@ function runtimeLocale() {
   }
 }
 
-function caseText(de: string, ru: string, _en: string) {
-  switch (getLang()) {
-    case "ru":
-      return ru;
-    case "de":
-      return de;
-    default:
-      return _en;
-  }
+function caseText(key: string) {
+  return runtimeTranslations().uiText[key] ?? key;
 }
 
 function formatCatalogMessage(
@@ -1710,11 +1703,7 @@ function useCasesPageContent({
           setSnippetsError(
             bannerText(
               error,
-              caseText(
-                "Textbausteine konnten nicht geladen werden",
-                "Не удалось загрузить текстовые шаблоны",
-                "Failed to load text snippets",
-              ),
+              caseText("cases_failed_to_load_text_snippets"),
             ),
           );
         }
@@ -1795,11 +1784,7 @@ function useCasesPageContent({
           setListError(
             bannerText(
               error,
-              caseText(
-                "Fälle konnten nicht geladen werden",
-                "Не удалось загрузить кейсы",
-                "Failed to load cases",
-              ),
+              caseText("cases_failed_to_load_cases"),
             ),
           );
         }
@@ -1966,11 +1951,7 @@ function useCasesPageContent({
           setDetailError(
             bannerText(
               error,
-              caseText(
-                "Fall konnte nicht geladen werden",
-                "Не удалось загрузить кейс",
-                "Failed to load case",
-              ),
+              caseText("cases_failed_to_load_case"),
             ),
           );
         }
@@ -2059,11 +2040,7 @@ function useCasesPageContent({
       setCreateError(
         bannerText(
           error,
-          caseText(
-            "Fall konnte nicht erstellt werden",
-            "Не удалось создать кейс",
-            "Failed to create case",
-          ),
+          caseText("cases_failed_to_create_case"),
         ),
       );
     } finally {
@@ -2138,11 +2115,7 @@ function useCasesPageContent({
       setSnippetSaveError(
         bannerText(
           error,
-          caseText(
-            "Textbaustein konnte nicht gespeichert werden",
-            "Не удалось сохранить текстовый шаблон",
-            "Failed to save text snippet",
-          ),
+          caseText("cases_failed_to_save_text_snippet"),
         ),
       );
     } finally {
@@ -2217,11 +2190,7 @@ function useCasesPageContent({
     await runSectionSave(
       "medikamente",
       () => confirmMedicationExpiry(detail.id, medicationId),
-      caseText(
-        "Prüfung des Ablaufs der Medikamentengültigkeit konnte nicht bestätigt werden",
-        "Не удалось подтвердить проверку окончания срока действия лекарства",
-        "Failed to confirm medication expiry review",
-      ),
+      caseText("cases_failed_to_confirm_medication_expiry_review"),
     );
   }
 
@@ -2686,11 +2655,7 @@ function useCasesPageContent({
         >
           <AdminSheetScaffold
             title={detail?.case_id ?? selectedSummary?.case_id ?? t.cases_title}
-            description={caseText(
-              "Vollständiger Verlauf und strukturierter Anamnese-Editor für den ausgewählten Patientenfall.",
-              "Полный нарратив и структурированный редактор анамнеза для выбранного кейса пациента.",
-              "Full narrative and structured anamnesis editor for the selected patient case.",
-            )}
+            description={caseText("cases_full_narrative_and_structured_anamnesis_editor_for_the_s")}
             className="h-full"
           >
             {detailBusy ? (
@@ -3446,19 +3411,11 @@ function useCasesPageContent({
                 </Panel>
 
                 <Panel
-                  title={caseText("Gastroenterologischer Teilbereich", "Гастроэнтерологический блок", "Gastroenterology sub-flow")}
+                  title={caseText("cases_gastroenterology_sub_flow")}
                   description={
                     gastroenterologyTriggered
-                      ? caseText(
-                          "Fachspezifischer Pfad für gastroenterologische Symptome, Stuhlveränderungen und endoskopische Vorbefunde.",
-                          "Специализированный блок для гастроэнтерологических симптомов, изменений стула и данных прежней эндоскопии.",
-                          "Specialty branch for gastroenterology-related symptoms, bowel changes and prior endoscopy context.",
-                        )
-                      : caseText(
-                          "Aktivieren, wenn Symptome oder Überweisung auf Gastroenterologie hinweisen.",
-                          "Включайте, если симптомы или направление указывают на гастроэнтерологию.",
-                          "Enable when symptoms or referral indicate gastroenterology.",
-                        )
+                      ? caseText("cases_specialty_branch_for_gastroenterology_related_symptoms_b")
+                      : caseText("cases_enable_when_symptoms_or_referral_indicate_gastroenterolo")
                   }
                 >
                   <form onSubmit={handleSaveGastroenterology} className="space-y-4">
@@ -3478,15 +3435,15 @@ function useCasesPageContent({
                             }))
                           }
                         />
-                        {caseText("Gastroenterologie relevant", "Показания к гастроэнтерологии", "Gastroenterology relevant")}
+                        {caseText("cases_gastroenterology_relevant")}
                       </label>
                       {[
-                        ["abdominal_pain", caseText("Bauchschmerz", "Боль в животе", "Abdominal pain")],
-                        ["reflux", caseText("Reflux", "Рефлюкс", "Reflux")],
-                        ["nausea", caseText("Übelkeit", "Тошнота", "Nausea")],
-                        ["diarrhea", caseText("Durchfall", "Диарея", "Diarrhea")],
-                        ["constipation", caseText("Verstopfung", "Запор", "Constipation")],
-                        ["gi_bleeding", caseText("GI-Blutung", "ЖКТ-кровотечение", "GI bleeding")],
+                        ["abdominal_pain", caseText("cases_abdominal_pain")],
+                        ["reflux", caseText("cases_reflux")],
+                        ["nausea", caseText("cases_nausea")],
+                        ["diarrhea", caseText("cases_diarrhea")],
+                        ["constipation", caseText("cases_constipation")],
+                        ["gi_bleeding", caseText("cases_gi_bleeding")],
                       ].map(([key, label]) => (
                         <label
                           key={key}
@@ -3510,7 +3467,7 @@ function useCasesPageContent({
                       ))}
                     </div>
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <Field label={caseText("Vorherige Endoskopie / Koloskopie", "Предыдущая эндоскопия / колоноскопия", "Prior endoscopy / colonoscopy")}>
+                      <Field label={caseText("cases_prior_endoscopy_colonoscopy")}>
                         <Input
                           value={gastroenterology.prior_endoscopy}
                           onChange={(event) =>
@@ -3522,7 +3479,7 @@ function useCasesPageContent({
                           className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
-                      <Field label={caseText("Veränderungen der Stuhlgewohnheiten", "Изменения стула", "Bowel habit changes")}>
+                      <Field label={caseText("cases_bowel_habit_changes")}>
                         <Input
                           value={gastroenterology.bowel_habits}
                           onChange={(event) =>
@@ -3534,7 +3491,7 @@ function useCasesPageContent({
                           className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
-                      <Field label={caseText("Leber- / hepatobiliäre Vorgeschichte", "Печёночно-билиарный анамнез", "Liver / hepatobiliary history")}>
+                      <Field label={caseText("cases_liver_hepatobiliary_history")}>
                         <Input
                           value={gastroenterology.liver_history}
                           onChange={(event) =>
@@ -3546,7 +3503,7 @@ function useCasesPageContent({
                           className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
-                      <Field label={caseText("Nahrungsmittelunverträglichkeiten / Auslöser", "Пищевая непереносимость / триггеры", "Food intolerance / triggers")}>
+                      <Field label={caseText("cases_food_intolerance_triggers")}>
                         <Input
                           value={gastroenterology.food_intolerance}
                           onChange={(event) =>
@@ -3558,7 +3515,7 @@ function useCasesPageContent({
                           className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
-                      <Field label={caseText("Warnzeichen", "Красные флаги", "Red flags")}>
+                      <Field label={caseText("cases_red_flags")}>
                         <Input
                           value={gastroenterology.red_flags}
                           onChange={(event) =>
@@ -3571,7 +3528,7 @@ function useCasesPageContent({
                         />
                       </Field>
                     </div>
-                    <Field label={caseText("Gastroenterologische Notizen", "Гастроэнтерологические заметки", "Gastroenterology notes")}>
+                    <Field label={caseText("cases_gastroenterology_notes")}>
                       <textarea
                         value={gastroenterology.notes}
                         onChange={(event) =>
@@ -3595,26 +3552,18 @@ function useCasesPageContent({
                         {sectionBusy === "gastroenterology" ? (
                           <LoaderCircle className="size-4 animate-spin" />
                         ) : null}
-                        {caseText("Gastroenterologie speichern", "Сохранить гастроэнтерологию", "Save gastroenterology")}
+                        {caseText("cases_save_gastroenterology")}
                       </Button>
                     </div>
                   </form>
                 </Panel>
 
                 <Panel
-                  title={caseText("Orthopädischer Teilbereich", "Ортопедический блок", "Orthopedics sub-flow")}
+                  title={caseText("cases_orthopedics_sub_flow")}
                   description={
                     orthopedicsTriggered
-                      ? caseText(
-                          "Fachspezifischer Pfad für muskuloskelettale Schmerzen, Mobilitätseinschränkungen und traumabezogene Vorgeschichte.",
-                          "Специализированный блок для болей опорно-двигательного аппарата, ограничений подвижности и травматологического анамнеза.",
-                          "Specialty branch for musculoskeletal pain, mobility issues and trauma-related context.",
-                        )
-                      : caseText(
-                          "Aktivieren, wenn Symptome oder Überweisung auf Orthopädie hinweisen.",
-                          "Включайте, если симптомы или направление указывают на ортопедию.",
-                          "Enable when symptoms or referral indicate orthopedics.",
-                        )
+                      ? caseText("cases_specialty_branch_for_musculoskeletal_pain_mobility_issue")
+                      : caseText("cases_enable_when_symptoms_or_referral_indicate_orthopedics")
                   }
                 >
                   <form onSubmit={handleSaveOrthopedics} className="space-y-4">
@@ -3634,13 +3583,13 @@ function useCasesPageContent({
                             }))
                           }
                         />
-                        {caseText("Orthopädie relevant", "Показания к ортопедии", "Orthopedics relevant")}
+                        {caseText("cases_orthopedics_relevant")}
                       </label>
                       {[
-                        ["joint_pain", caseText("Gelenkschmerz", "Боль в суставах", "Joint pain")],
-                        ["back_pain", caseText("Rücken- / Wirbelsäulenschmerz", "Боль в спине / позвоночнике", "Back / spine pain")],
-                        ["mobility_limitation", caseText("Mobilitätseinschränkung", "Ограничение подвижности", "Mobility limitation")],
-                        ["trauma_history", caseText("Traumaanamnese", "Травматологический анамнез", "Trauma history")],
+                        ["joint_pain", caseText("cases_joint_pain")],
+                        ["back_pain", caseText("cases_back_spine_pain")],
+                        ["mobility_limitation", caseText("cases_mobility_limitation")],
+                        ["trauma_history", caseText("cases_trauma_history")],
                       ].map(([key, label]) => (
                         <label
                           key={key}
@@ -3662,7 +3611,7 @@ function useCasesPageContent({
                       ))}
                     </div>
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <Field label={caseText("Vorherige Bildgebung", "Предыдущая визуализация", "Prior imaging")}>
+                      <Field label={caseText("cases_prior_imaging")}>
                         <Input
                           value={orthopedics.prior_imaging}
                           onChange={(event) =>
@@ -3674,7 +3623,7 @@ function useCasesPageContent({
                           className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
-                      <Field label={caseText("Hilfsmittel / Implantate", "Средства поддержки / импланты", "Assistive devices / implants")}>
+                      <Field label={caseText("cases_assistive_devices_implants")}>
                         <Input
                           value={orthopedics.assistive_devices}
                           onChange={(event) =>
@@ -3686,7 +3635,7 @@ function useCasesPageContent({
                           className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
-                      <Field label={caseText("Physiotherapie- / Reha-Vorgeschichte", "Физиотерапия / реабилитация в анамнезе", "Physiotherapy / rehab history")}>
+                      <Field label={caseText("cases_physiotherapy_rehab_history")}>
                         <Input
                           value={orthopedics.physiotherapy_history}
                           onChange={(event) =>
@@ -3698,7 +3647,7 @@ function useCasesPageContent({
                           className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
-                      <Field label={caseText("Schmerzauslöser / Belastungsmuster", "Триггеры боли / характер нагрузки", "Pain triggers / load pattern")}>
+                      <Field label={caseText("cases_pain_triggers_load_pattern")}>
                         <Input
                           value={orthopedics.pain_triggers}
                           onChange={(event) =>
@@ -3710,7 +3659,7 @@ function useCasesPageContent({
                           className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
-                      <Field label={caseText("Warnzeichen", "Красные флаги", "Red flags")}>
+                      <Field label={caseText("cases_red_flags")}>
                         <Input
                           value={orthopedics.red_flags}
                           onChange={(event) =>
@@ -3723,7 +3672,7 @@ function useCasesPageContent({
                         />
                       </Field>
                     </div>
-                    <Field label={caseText("Orthopädische Notizen", "Ортопедические заметки", "Orthopedics notes")}>
+                    <Field label={caseText("cases_orthopedics_notes")}>
                       <textarea
                         value={orthopedics.notes}
                         onChange={(event) =>
@@ -3745,26 +3694,18 @@ function useCasesPageContent({
                         {sectionBusy === "orthopedics" ? (
                           <LoaderCircle className="size-4 animate-spin" />
                         ) : null}
-                        {caseText("Orthopädie speichern", "Сохранить ортопедию", "Save orthopedics")}
+                        {caseText("cases_save_orthopedics")}
                       </Button>
                     </div>
                   </form>
                 </Panel>
 
                 <Panel
-                  title={caseText("Neurologischer Teilbereich", "Неврологический блок", "Neurology sub-flow")}
+                  title={caseText("cases_neurology_sub_flow")}
                   description={
                     neurologyTriggered
-                      ? caseText(
-                          "Fachspezifischer Pfad für Kopfschmerzen, Schwindel, neurologische Defizite und frühere neurologische Diagnostik.",
-                          "Специализированный блок для головной боли, головокружения, неврологического дефицита и прежней неврологической диагностики.",
-                          "Specialty branch for headache, dizziness, neurologic deficits and prior neuro workup.",
-                        )
-                      : caseText(
-                          "Aktivieren, wenn Symptome oder Überweisung auf Neurologie hinweisen.",
-                          "Включайте, если симптомы или направление указывают на неврологию.",
-                          "Enable when symptoms or referral indicate neurology.",
-                        )
+                      ? caseText("cases_specialty_branch_for_headache_dizziness_neurologic_defic")
+                      : caseText("cases_enable_when_symptoms_or_referral_indicate_neurology")
                   }
                 >
                   <form onSubmit={handleSaveNeurology} className="space-y-4">
@@ -3784,15 +3725,15 @@ function useCasesPageContent({
                             }))
                           }
                         />
-                        {caseText("Neurologie relevant", "Показания к неврологии", "Neurology relevant")}
+                        {caseText("cases_neurology_relevant")}
                       </label>
                       {[
-                        ["headache", caseText("Kopfschmerz", "Головная боль", "Headache")],
-                        ["dizziness", caseText("Schwindel / Vertigo", "Головокружение / вертиго", "Dizziness / vertigo")],
-                        ["sensory_changes", caseText("Sensibilitätsveränderungen", "Нарушения чувствительности", "Sensory changes")],
-                        ["weakness", caseText("Schwäche", "Слабость", "Weakness")],
-                        ["seizure_history", caseText("Krampfanamnese", "Судорожный анамнез", "Seizure history")],
-                        ["gait_balance_issues", caseText("Gang- / Gleichgewichtsstörung", "Нарушение походки / равновесия", "Gait / balance issues")],
+                        ["headache", caseText("cases_headache")],
+                        ["dizziness", caseText("cases_dizziness_vertigo")],
+                        ["sensory_changes", caseText("cases_sensory_changes")],
+                        ["weakness", caseText("cases_weakness")],
+                        ["seizure_history", caseText("cases_seizure_history")],
+                        ["gait_balance_issues", caseText("cases_gait_balance_issues")],
                       ].map(([key, label]) => (
                         <label
                           key={key}
@@ -3814,7 +3755,7 @@ function useCasesPageContent({
                       ))}
                     </div>
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <Field label={caseText("Vorherige neuroradiologische Bildgebung", "Предыдущая нейровизуализация", "Prior neuro imaging")}>
+                      <Field label={caseText("cases_prior_neuro_imaging")}>
                         <Input
                           value={neurology.prior_neuro_imaging}
                           onChange={(event) =>
@@ -3826,7 +3767,7 @@ function useCasesPageContent({
                           className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
-                      <Field label={caseText("Frühere neurologische Diagnostik", "Предыдущее неврологическое обследование", "Prior neurology workup")}>
+                      <Field label={caseText("cases_prior_neurology_workup")}>
                         <Input
                           value={neurology.prior_neurology_workup}
                           onChange={(event) =>
@@ -3838,7 +3779,7 @@ function useCasesPageContent({
                           className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
-                      <Field label={caseText("Kognitive / sprachliche Veränderungen", "Когнитивные / речевые изменения", "Cognitive / speech changes")}>
+                      <Field label={caseText("cases_cognitive_speech_changes")}>
                         <Input
                           value={neurology.cognitive_changes}
                           onChange={(event) =>
@@ -3850,7 +3791,7 @@ function useCasesPageContent({
                           className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
-                      <Field label={caseText("Warnzeichen", "Красные флаги", "Red flags")}>
+                      <Field label={caseText("cases_red_flags")}>
                         <Input
                           value={neurology.red_flags}
                           onChange={(event) =>
@@ -3863,7 +3804,7 @@ function useCasesPageContent({
                         />
                       </Field>
                     </div>
-                    <Field label={caseText("Neurologische Notizen", "Неврологические заметки", "Neurology notes")}>
+                    <Field label={caseText("cases_neurology_notes")}>
                       <textarea
                         value={neurology.notes}
                         onChange={(event) =>
@@ -3885,26 +3826,18 @@ function useCasesPageContent({
                         {sectionBusy === "neurology" ? (
                           <LoaderCircle className="size-4 animate-spin" />
                         ) : null}
-                        {caseText("Neurologie speichern", "Сохранить неврологию", "Save neurology")}
+                        {caseText("cases_save_neurology")}
                       </Button>
                     </div>
                   </form>
                 </Panel>
 
                 <Panel
-                  title={caseText("Pneumologischer Teilbereich", "Пульмонологический блок", "Pulmonology sub-flow")}
+                  title={caseText("cases_pulmonology_sub_flow")}
                   description={
                     pulmonologyTriggered
-                      ? caseText(
-                          "Fachspezifischer Pfad für respiratorische Symptome, chronischen Husten und frühere Thoraxdiagnostik.",
-                          "Специализированный блок для респираторных симптомов, хронического кашля и прежней диагностики грудной клетки.",
-                          "Specialty branch for respiratory symptoms, chronic cough and prior chest workup.",
-                        )
-                      : caseText(
-                          "Aktivieren, wenn Symptome oder Überweisung auf Pneumologie hinweisen.",
-                          "Включайте, если симптомы или направление указывают на пульмонологию.",
-                          "Enable when symptoms or referral indicate pulmonology.",
-                        )
+                      ? caseText("cases_specialty_branch_for_respiratory_symptoms_chronic_cough")
+                      : caseText("cases_enable_when_symptoms_or_referral_indicate_pulmonology")
                   }
                 >
                   <form onSubmit={handleSavePulmonology} className="space-y-4">
@@ -3924,14 +3857,14 @@ function useCasesPageContent({
                             }))
                           }
                         />
-                        {caseText("Pneumologie relevant", "Показания к пульмонологии", "Pulmonology relevant")}
+                        {caseText("cases_pulmonology_relevant")}
                       </label>
                       {[
-                        ["chronic_cough", caseText("Chronischer Husten", "Хронический кашель", "Chronic cough")],
-                        ["dyspnea", caseText("Dyspnoe / Kurzatmigkeit", "Одышка / нехватка воздуха", "Dyspnea / shortness of breath")],
-                        ["wheezing", caseText("Giemen", "Свистящее дыхание", "Wheezing")],
-                        ["chest_tightness", caseText("Brustenge", "Стеснение в груди", "Chest tightness")],
-                        ["hemoptysis", caseText("Hämoptyse", "Кровохарканье", "Hemoptysis")],
+                        ["chronic_cough", caseText("cases_chronic_cough")],
+                        ["dyspnea", caseText("cases_dyspnea_shortness_of_breath")],
+                        ["wheezing", caseText("cases_wheezing")],
+                        ["chest_tightness", caseText("cases_chest_tightness")],
+                        ["hemoptysis", caseText("cases_hemoptysis")],
                       ].map(([key, label]) => (
                         <label
                           key={key}
@@ -3953,7 +3886,7 @@ function useCasesPageContent({
                       ))}
                     </div>
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <Field label={caseText("Raucheranamnese / Pack Years", "Курительный анамнез / пачка-лет", "Smoking history / pack years")}>
+                      <Field label={caseText("cases_smoking_history_pack_years")}>
                         <Input
                           value={pulmonology.smoking_history}
                           onChange={(event) =>
@@ -3965,7 +3898,7 @@ function useCasesPageContent({
                           className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
-                      <Field label={caseText("Vorherige Thoraxbildgebung", "Предыдущая визуализация грудной клетки", "Prior chest imaging")}>
+                      <Field label={caseText("cases_prior_chest_imaging")}>
                         <Input
                           value={pulmonology.prior_chest_imaging}
                           onChange={(event) =>
@@ -3977,7 +3910,7 @@ function useCasesPageContent({
                           className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
-                      <Field label={caseText("Inhalation / Atemtherapie", "Ингаляторы / респираторная терапия", "Inhaler / respiratory therapy")}>
+                      <Field label={caseText("cases_inhaler_respiratory_therapy")}>
                         <Input
                           value={pulmonology.inhaler_therapy}
                           onChange={(event) =>
@@ -3989,7 +3922,7 @@ function useCasesPageContent({
                           className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
-                      <Field label={caseText("Schlafapnoe- / CPAP-Anamnese", "Анамнез апноэ сна / CPAP", "Sleep apnea / CPAP history")}>
+                      <Field label={caseText("cases_sleep_apnea_cpap_history")}>
                         <Input
                           value={pulmonology.sleep_apnea_history}
                           onChange={(event) =>
@@ -4001,7 +3934,7 @@ function useCasesPageContent({
                           className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
-                      <Field label={caseText("Warnzeichen", "Красные флаги", "Red flags")}>
+                      <Field label={caseText("cases_red_flags")}>
                         <Input
                           value={pulmonology.red_flags}
                           onChange={(event) =>
@@ -4014,7 +3947,7 @@ function useCasesPageContent({
                         />
                       </Field>
                     </div>
-                    <Field label={caseText("Pneumologische Notizen", "Пульмонологические заметки", "Pulmonology notes")}>
+                    <Field label={caseText("cases_pulmonology_notes")}>
                       <textarea
                         value={pulmonology.notes}
                         onChange={(event) =>
@@ -4036,26 +3969,18 @@ function useCasesPageContent({
                         {sectionBusy === "pulmonology" ? (
                           <LoaderCircle className="size-4 animate-spin" />
                         ) : null}
-                        {caseText("Pneumologie speichern", "Сохранить пульмонологию", "Save pulmonology")}
+                        {caseText("cases_save_pulmonology")}
                       </Button>
                     </div>
                   </form>
                 </Panel>
 
                 <Panel
-                  title={caseText("Urologischer Teilbereich", "Урологический блок", "Urology sub-flow")}
+                  title={caseText("cases_urology_sub_flow")}
                   description={
                     urologyTriggered
-                      ? caseText(
-                          "Fachspezifischer Pfad für urologische Symptome, Harnverhalt und frühere urologische Diagnostik.",
-                          "Специализированный блок для урологических симптомов, задержки мочи и предыдущего урологического обследования.",
-                          "Specialty branch for urinary symptoms, retention and prior urology workup.",
-                        )
-                      : caseText(
-                          "Aktivieren, wenn Symptome oder Überweisung auf Urologie hinweisen.",
-                          "Включайте, если симптомы или направление указывают на урологию.",
-                          "Enable when symptoms or referral indicate urology.",
-                        )
+                      ? caseText("cases_specialty_branch_for_urinary_symptoms_retention_and_prio")
+                      : caseText("cases_enable_when_symptoms_or_referral_indicate_urology")
                   }
                 >
                   <form onSubmit={handleSaveUrology} className="space-y-4">
@@ -4075,15 +4000,15 @@ function useCasesPageContent({
                             }))
                           }
                         />
-                        {caseText("Urologie relevant", "Показания к урологии", "Urology relevant")}
+                        {caseText("cases_urology_relevant")}
                       </label>
                       {[
-                        ["dysuria", caseText("Dysurie / Brennen", "Дизурия / жжение", "Dysuria / burning")],
-                        ["hematuria", caseText("Hämaturie", "Гематурия", "Hematuria")],
-                        ["flank_pain", caseText("Flankenschmerz", "Боль в боку", "Flank pain")],
-                        ["urinary_frequency", caseText("Häufiges Wasserlassen", "Частое мочеиспускание", "Urinary frequency")],
-                        ["urinary_retention", caseText("Harnverhalt", "Задержка мочи", "Urinary retention")],
-                        ["incontinence", caseText("Inkontinenz", "Недержание", "Incontinence")],
+                        ["dysuria", caseText("cases_dysuria_burning")],
+                        ["hematuria", caseText("cases_hematuria")],
+                        ["flank_pain", caseText("cases_flank_pain")],
+                        ["urinary_frequency", caseText("cases_urinary_frequency")],
+                        ["urinary_retention", caseText("cases_urinary_retention")],
+                        ["incontinence", caseText("cases_incontinence")],
                       ].map(([key, label]) => (
                         <label
                           key={key}
@@ -4105,7 +4030,7 @@ function useCasesPageContent({
                       ))}
                     </div>
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <Field label={caseText("Frühere urologische Diagnostik", "Предыдущее урологическое обследование", "Prior urology workup")}>
+                      <Field label={caseText("cases_prior_urology_workup")}>
                         <Input
                           value={urology.prior_urology_workup}
                           onChange={(event) =>
@@ -4117,7 +4042,7 @@ function useCasesPageContent({
                           className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
-                      <Field label={caseText("Katheter- / Instrumentationsanamnese", "Катетеризация / инструментальные вмешательства в анамнезе", "Catheter / instrumentation history")}>
+                      <Field label={caseText("cases_catheter_instrumentation_history")}>
                         <Input
                           value={urology.catheter_history}
                           onChange={(event) =>
@@ -4129,7 +4054,7 @@ function useCasesPageContent({
                           className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
-                      <Field label={caseText("Stein- / Nierenkolikanamnese", "Анамнез камней / почечной колики", "Stone / renal colic history")}>
+                      <Field label={caseText("cases_stone_renal_colic_history")}>
                         <Input
                           value={urology.stone_history}
                           onChange={(event) =>
@@ -4141,7 +4066,7 @@ function useCasesPageContent({
                           className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
-                      <Field label={caseText("Warnzeichen", "Красные флаги", "Red flags")}>
+                      <Field label={caseText("cases_red_flags")}>
                         <Input
                           value={urology.red_flags}
                           onChange={(event) =>
@@ -4154,7 +4079,7 @@ function useCasesPageContent({
                         />
                       </Field>
                     </div>
-                    <Field label={caseText("Urologische Notizen", "Урологические заметки", "Urology notes")}>
+                    <Field label={caseText("cases_urology_notes")}>
                       <textarea
                         value={urology.notes}
                         onChange={(event) =>
@@ -4176,7 +4101,7 @@ function useCasesPageContent({
                         {sectionBusy === "urology" ? (
                           <LoaderCircle className="size-4 animate-spin" />
                         ) : null}
-                        {caseText("Urologie speichern", "Сохранить урологию", "Save urology")}
+                        {caseText("cases_save_urology")}
                       </Button>
                     </div>
                   </form>
@@ -4195,7 +4120,7 @@ function useCasesPageContent({
                     <div className="flex justify-end border-t border-border/70 pt-4">
                       <Button type="submit" className="h-9 rounded-lg px-3.5" disabled={sectionBusy === "vegetative" || !permissions.canEdit}>
                         {sectionBusy === "vegetative" ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                        {caseText("Vegetative Anamnese speichern", "Сохранить вегетативный анамнез", "Save vegetative")}
+                        {caseText("cases_save_vegetative")}
                       </Button>
                     </div>
                   </form>
@@ -4210,19 +4135,15 @@ function useCasesPageContent({
                     <div className="flex justify-end border-t border-border/70 pt-4">
                       <Button type="submit" className="h-9 rounded-lg px-3.5" disabled={sectionBusy === "impfstatus" || !permissions.canEdit}>
                         {sectionBusy === "impfstatus" ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                        {caseText("Impfstatus speichern", "Сохранить вакцинацию", "Save vaccination")}
+                        {caseText("cases_save_vaccination")}
                       </Button>
                     </div>
                   </form>
                 </Panel>
 
                 <Panel
-                  title={caseText("Klinische Historie", "Клиническая история", "Clinical history")}
-                  description={caseText(
-                    "Append-only-Abschnittshistorie mit Aufbewahrungsmetadaten für Audit und Prüfung.",
-                    "История разделов без перезаписи с метаданными хранения для аудита и проверки.",
-                    "Append-only section history with retention metadata for audit and review.",
-                  )}
+                  title={caseText("cases_clinical_history")}
+                  description={caseText("cases_append_only_section_history_with_retention_metadata_for")}
                 >
                   {detail.history?.length ? (
                     <div className="space-y-3">
@@ -4251,7 +4172,7 @@ function useCasesPageContent({
                           <div className="mt-3 grid gap-3 md:grid-cols-2">
                             <div className="rounded-xl border border-border bg-white p-3">
                               <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                {caseText("Vorher", "Было", "Previous")}
+                                {caseText("cases_previous")}
                               </div>
                               <p className="mt-2 break-words font-mono text-xs text-foreground">
                                 {historyValuePreview(entry.old_value)}
@@ -4259,7 +4180,7 @@ function useCasesPageContent({
                             </div>
                             <div className="rounded-xl border border-border bg-white p-3">
                               <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                {caseText("Neu", "Стало", "New")}
+                                {caseText("cases_new")}
                               </div>
                               <p className="mt-2 break-words font-mono text-xs text-foreground">
                                 {historyValuePreview(entry.new_value)}
@@ -4271,19 +4192,15 @@ function useCasesPageContent({
                     </div>
                   ) : (
                     <EmptyPanel
-                      title={caseText("Noch keine klinischen Revisionen", "Клинических ревизий пока нет", "No clinical revisions yet")}
-                      text={caseText(
-                        "Für diesen Fall liegt derzeit noch keine persistierte Abschnittshistorie vor.",
-                        "Для этого кейса пока нет сохранённой истории разделов.",
-                        "The case has no persisted section history at the moment.",
-                      )}
+                      title={caseText("cases_no_clinical_revisions_yet")}
+                      text={caseText("cases_the_case_has_no_persisted_section_history_at_the_moment")}
                     />
                   )}
                 </Panel>
               </>
             ) : (
               <div className="flex min-h-[320px] items-center justify-center text-sm text-muted-foreground">
-                {caseText("Wählen Sie einen Fall aus der Liste aus.", "Выберите кейс из списка.", "Select a case from the roster.")}
+                {caseText("cases_select_a_case_from_the_roster")}
               </div>
             )}
           </AdminSheetScaffold>
@@ -4405,7 +4322,7 @@ function ItemEditorSection({
 }: ItemEditorSectionProps) {
   const hasContent = Array.isArray(children) ? children.length > 0 : Boolean(children);
   const populated = count > 0;
-  const itemsLabel = caseText("Einträge", "записей", "items");
+  const itemsLabel = caseText("cases_items");
   return (
     <Panel
       title={title}
@@ -4450,7 +4367,7 @@ function ItemEditorSection({
             disabled={busy || !canEdit}
           >
             {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-            {caseText("Abschnitt speichern", "Сохранить раздел", "Save section")}
+            {caseText("cases_save_section")}
           </Button>
         </div>
       </form>

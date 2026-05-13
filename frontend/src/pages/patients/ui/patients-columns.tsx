@@ -7,6 +7,7 @@ import {
   normalizeFunctionalLabel,
 } from "./shared/patient-form-primitives";
 import type { ColumnDef, FilterOption } from "@/components/data-table/types";
+import { formatUiText } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import { computeAge, patientDisplayName, type PatientSummary } from "../model/list-model";
@@ -26,43 +27,67 @@ function formatShortDate(value?: string | null): string {
   }
 }
 
-function formatRelativeDate(value?: string | null, now: Date = new Date()): string {
+type PatientColumnTranslations = Record<string, string> & {
+  uiText?: Record<string, string>;
+};
+
+function patientColumnText(
+  tr: PatientColumnTranslations,
+  key: string,
+  values?: Record<string, string | number | boolean | null | undefined>,
+) {
+  return formatUiText(tr.uiText?.[key] ?? key, values);
+}
+
+function translatedOrUiText(
+  tr: PatientColumnTranslations,
+  key: string,
+  fallbackKey = key,
+) {
+  return tr[key] ?? patientColumnText(tr, fallbackKey);
+}
+
+function formatRelativeDate(
+  value: string | null | undefined,
+  tr: PatientColumnTranslations,
+  now: Date = new Date(),
+): string {
   if (!value) return "";
   const then = new Date(value);
   if (!Number.isFinite(then.getTime())) return value;
   const diffMs = now.getTime() - then.getTime();
   const days = Math.floor(diffMs / (24 * 60 * 60 * 1000));
   if (days < 0) return formatShortDate(value);
-  if (days === 0) return "today";
-  if (days < 7) return `${days}d ago`;
-  if (days < 30) return `${Math.floor(days / 7)}w ago`;
-  if (days < 365) return `${Math.floor(days / 30)}mo ago`;
-  return `${Math.floor(days / 365)}y ago`;
+  if (days === 0) return patientColumnText(tr, "relative_time_today");
+  if (days < 7) return patientColumnText(tr, "relative_time_days_ago", { count: days });
+  if (days < 30) return patientColumnText(tr, "relative_time_weeks_ago", { count: Math.floor(days / 7) });
+  if (days < 365) return patientColumnText(tr, "relative_time_months_ago", { count: Math.floor(days / 30) });
+  return patientColumnText(tr, "relative_time_years_ago", { count: Math.floor(days / 365) });
 }
 
-function genderText(value: string | null | undefined, tr: Record<string, string>): string {
+function genderText(value: string | null | undefined, tr: PatientColumnTranslations): string {
   switch (value) {
     case "male":
-      return tr.gender_male ?? "Male";
+      return translatedOrUiText(tr, "gender_male", "patients_gender_male");
     case "female":
-      return tr.gender_female ?? "Female";
+      return translatedOrUiText(tr, "gender_female", "patients_gender_female");
     case "diverse":
-      return tr.gender_diverse ?? "Diverse";
+      return translatedOrUiText(tr, "gender_diverse", "patients_gender_diverse");
     default:
       return tr.common_not_set ?? "—";
   }
 }
 
-function insuranceText(value: string | null | undefined, tr: Record<string, string>): string {
+function insuranceText(value: string | null | undefined, tr: PatientColumnTranslations): string {
   switch (value) {
     case "private":
-      return tr.insurance_private ?? "Private";
+      return translatedOrUiText(tr, "insurance_private", "patients_insurance_private");
     case "public":
-      return tr.insurance_public ?? "Public";
+      return translatedOrUiText(tr, "insurance_public", "patients_insurance_public");
     case "self_pay":
-      return tr.insurance_self_pay ?? "Self-pay";
+      return translatedOrUiText(tr, "insurance_self_pay", "patients_insurance_self_pay");
     case "foreign":
-      return tr.insurance_foreign ?? "Foreign";
+      return translatedOrUiText(tr, "insurance_foreign", "patients_insurance_foreign");
     default:
       return tr.common_not_set ?? "—";
   }
@@ -117,17 +142,28 @@ export const DEFAULT_PATIENT_HIDDEN_COLUMNS: string[] = [
 export const DEFAULT_PATIENT_FROZEN_COLUMNS: string[] = ["no", "patient"];
 export const MAX_PATIENT_FROZEN_COLUMNS = 4;
 
-export const PATIENT_COLUMN_GROUPS: Record<string, string> = {
-  identity: "Identity",
-  contact: "Contact",
-  insurance: "Insurance",
-  metadata: "Metadata",
-  relations: "Relations",
-  audit: "Audit",
+const PATIENT_COLUMN_GROUP_KEYS: Record<string, string> = {
+  identity: "patients_column_group_identity",
+  contact: "patients_column_group_contact",
+  insurance: "patients_column_group_insurance",
+  metadata: "patients_column_group_metadata",
+  relations: "patients_column_group_relations",
+  audit: "patients_column_group_audit",
 };
 
+export function patientColumnGroupLabels(
+  tr: PatientColumnTranslations,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(PATIENT_COLUMN_GROUP_KEYS).map(([group, key]) => [
+      group,
+      patientColumnText(tr, key),
+    ]),
+  );
+}
+
 export function buildPatientColumns(
-  tr: Record<string, string>,
+  tr: PatientColumnTranslations,
   rows: readonly PatientSummary[] = [],
 ): ColumnDef<PatientSummary>[] {
   const dyn = deriveDynamicOptions(rows);
@@ -135,7 +171,7 @@ export function buildPatientColumns(
   const cols: ColumnDef<PatientSummary>[] = [
     {
       id: "no",
-      label: tr.patients_col_no ?? "No.",
+      label: translatedOrUiText(tr, "patients_col_no"),
       accessor: (p: PatientSummary) => p.patient_id,
       filterType: "text",
       sortable: true,
@@ -152,12 +188,12 @@ export function buildPatientColumns(
     },
     {
       id: "status",
-      label: tr.patients_col_status ?? "Status",
+      label: translatedOrUiText(tr, "patients_col_status"),
       accessor: (p: PatientSummary) => (p.is_active ? "active" : "inactive"),
       filterType: "enum",
       filterOptions: [
-        { value: "active", label: tr.common_active ?? "Active" },
-        { value: "inactive", label: tr.common_inactive ?? "Inactive" },
+        { value: "active", label: translatedOrUiText(tr, "common_active") },
+        { value: "inactive", label: translatedOrUiText(tr, "common_inactive") },
       ],
       sortable: true,
       defaultVisible: true,
@@ -167,7 +203,7 @@ export function buildPatientColumns(
     },
     {
       id: "patient",
-      label: tr.patients_col_patient ?? "Patient",
+      label: translatedOrUiText(tr, "patients_col_patient"),
       accessor: (p: PatientSummary) => patientDisplayName(p),
       filterType: "text",
       sortable: true,
@@ -187,7 +223,7 @@ export function buildPatientColumns(
     },
     {
       id: "age",
-      label: tr.patients_col_age ?? "Age",
+      label: translatedOrUiText(tr, "patients_col_age"),
       accessor: (p: PatientSummary) => computeAge(p.birth_date),
       filterType: "number",
       sortable: true,
@@ -205,14 +241,14 @@ export function buildPatientColumns(
     },
     {
       id: "insurance",
-      label: tr.patients_insurance_type ?? "Insurance",
+      label: translatedOrUiText(tr, "patients_insurance_type"),
       accessor: (p: PatientSummary) => p.insurance_type,
       filterType: "enum",
       filterOptions: [
-        { value: "private", label: tr.insurance_private ?? "Private" },
-        { value: "public", label: tr.insurance_public ?? "Public" },
-        { value: "self_pay", label: tr.insurance_self_pay ?? "Self-pay" },
-        { value: "foreign", label: tr.insurance_foreign ?? "Foreign" },
+        { value: "private", label: translatedOrUiText(tr, "insurance_private", "patients_insurance_private") },
+        { value: "public", label: translatedOrUiText(tr, "insurance_public", "patients_insurance_public") },
+        { value: "self_pay", label: translatedOrUiText(tr, "insurance_self_pay", "patients_insurance_self_pay") },
+        { value: "foreign", label: translatedOrUiText(tr, "insurance_foreign", "patients_insurance_foreign") },
       ],
       sortable: true,
       searchable: true,
@@ -234,7 +270,7 @@ export function buildPatientColumns(
     },
     {
       id: "insurance_provider",
-      label: tr.patients_insurance_provider ?? "Insurance provider",
+      label: translatedOrUiText(tr, "patients_insurance_provider"),
       accessor: (p: PatientSummary) => p.insurance_provider,
       filterType: "enum",
       filterOptions: dyn.insuranceProviders,
@@ -252,7 +288,7 @@ export function buildPatientColumns(
     },
     {
       id: "phone_primary",
-      label: tr.patients_phone_primary ?? "Phone",
+      label: translatedOrUiText(tr, "patients_phone_primary"),
       accessor: (p: PatientSummary) => p.phone_primary,
       filterType: "text",
       sortable: true,
@@ -268,7 +304,7 @@ export function buildPatientColumns(
     },
     {
       id: "email",
-      label: tr.patients_email ?? "Email",
+      label: translatedOrUiText(tr, "patients_email"),
       accessor: (p: PatientSummary) => p.email,
       filterType: "text",
       sortable: true,
@@ -287,7 +323,7 @@ export function buildPatientColumns(
     },
     {
       id: "birth_date",
-      label: tr.patients_birth_date ?? "Birth date",
+      label: translatedOrUiText(tr, "patients_birth_date"),
       accessor: (p: PatientSummary) => p.birth_date,
       filterType: "date",
       sortable: true,
@@ -301,13 +337,13 @@ export function buildPatientColumns(
     },
     {
       id: "gender",
-      label: tr.patients_gender ?? "Gender",
+      label: translatedOrUiText(tr, "patients_gender"),
       accessor: (p: PatientSummary) => p.gender,
       filterType: "enum",
       filterOptions: [
-        { value: "male", label: tr.gender_male ?? "Male" },
-        { value: "female", label: tr.gender_female ?? "Female" },
-        { value: "diverse", label: tr.gender_diverse ?? "Diverse" },
+        { value: "male", label: translatedOrUiText(tr, "gender_male", "patients_gender_male") },
+        { value: "female", label: translatedOrUiText(tr, "gender_female", "patients_gender_female") },
+        { value: "diverse", label: translatedOrUiText(tr, "gender_diverse", "patients_gender_diverse") },
       ],
       sortable: true,
       width: 100,
@@ -322,7 +358,7 @@ export function buildPatientColumns(
     },
     {
       id: "nationality",
-      label: tr.patients_nationality ?? "Nationality",
+      label: translatedOrUiText(tr, "patients_nationality"),
       accessor: (p: PatientSummary) => p.nationality,
       filterType: "multi_enum",
       filterOptions: dyn.nationalities,
@@ -340,7 +376,7 @@ export function buildPatientColumns(
     },
     {
       id: "residence_country",
-      label: tr.patients_residence_country ?? "Residence",
+      label: translatedOrUiText(tr, "patients_residence_country"),
       accessor: (p: PatientSummary) => p.residence_country,
       filterType: "multi_enum",
       filterOptions: dyn.nationalities,
@@ -358,7 +394,7 @@ export function buildPatientColumns(
     },
     {
       id: "languages",
-      label: tr.patients_languages ?? "Languages",
+      label: translatedOrUiText(tr, "patients_languages"),
       accessor: (p: PatientSummary) => p.languages,
       filterType: "tag_array",
       filterOptions: dyn.languages,
@@ -375,7 +411,7 @@ export function buildPatientColumns(
     },
     {
       id: "functional_labels",
-      label: tr.patients_functional_labels ?? "Labels",
+      label: translatedOrUiText(tr, "patients_functional_labels"),
       accessor: (p: PatientSummary) => p.functional_labels,
       filterType: "tag_array",
       filterOptions: dyn.labels,
@@ -396,7 +432,7 @@ export function buildPatientColumns(
     },
     {
       id: "created_at",
-      label: tr.patients_created_at ?? "Created",
+      label: translatedOrUiText(tr, "patients_created_at"),
       accessor: (p: PatientSummary) => p.created_at,
       filterType: "date",
       sortable: true,
@@ -405,7 +441,7 @@ export function buildPatientColumns(
       group: "audit",
       render: (p: PatientSummary) => (
         <span className="tabular-nums text-[11px] text-muted-foreground">
-          {formatRelativeDate(p.created_at)}
+          {formatRelativeDate(p.created_at, tr)}
         </span>
       ),
     },
@@ -568,7 +604,7 @@ function StatusPill({ active, tr }: StatusPillProps) {
           active ? "bg-emerald-500" : "bg-rose-500",
         )}
       />
-      {active ? tr.common_active ?? "Active" : tr.common_inactive ?? "Inactive"}
+      {active ? translatedOrUiText(tr, "common_active") : translatedOrUiText(tr, "common_inactive")}
     </span>
   );
 }

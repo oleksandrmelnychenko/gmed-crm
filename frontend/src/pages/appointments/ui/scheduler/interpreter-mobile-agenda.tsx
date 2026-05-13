@@ -146,11 +146,7 @@ function MobileAgendaCard({
     item.provider_name ||
     item.location ||
     item.owner_name ||
-    appointmentText(
-      "Operativer Slot",
-      "Operativer Slot",
-      "Operational slot",
-    );
+    appointmentText("appointments_operational_slot");
 
   return (
     <div className={appointmentMobileAgendaCardClassName}>
@@ -195,7 +191,7 @@ function MobileAgendaCard({
       <div className="mt-3 flex flex-wrap gap-2">
         {item.interpreter_response ? (
           <span className={appointmentMobileAgendaInfoBadgeClassName}>
-            {appointmentText("Dolmetscher", "Переводчик", "Interpreter")} {responseLabel(item.interpreter_response)}
+            {appointmentText("appointments_interpreter")} {responseLabel(item.interpreter_response)}
           </span>
         ) : null}
         {item.recurrence_frequency ? (
@@ -205,11 +201,7 @@ function MobileAgendaCard({
         ) : null}
         {item.is_blocked ? (
           <span className={appointmentMobileAgendaWarningBadgeClassName}>
-            {appointmentText(
-              "Blockierte Sicht",
-              "Blockierte Sicht",
-              "Blocked visibility",
-            )}
+            {appointmentText("appointments_blocked_visibility")}
           </span>
         ) : null}
       </div>
@@ -222,7 +214,7 @@ function MobileAgendaCard({
           className="rounded-2xl"
           onClick={onOpen}
         >
-          {appointmentText("Open", "Open", "Open")}
+          {appointmentText("appointments_open")}
         </Button>
       </div>
     </div>
@@ -345,9 +337,9 @@ export function InterpreterMobileAgenda({
                   {section.label}
                 </h2>
                 <p className="text-xs text-muted-foreground">
-                  {section.itemCount} {appointmentText("Termine", "приемы", "appointments")}
+                  {section.itemCount} {appointmentText("appointments_appointments")}
                   {section.pendingResponseCount > 0
-                    ? ` - ${section.pendingResponseCount} ${appointmentText("warten auf Antwort", "ожидают ответа", "pending responses")}`
+                    ? ` - ${section.pendingResponseCount} ${appointmentText("appointments_pending_responses")}`
                     : ""}
                 </p>
               </div>

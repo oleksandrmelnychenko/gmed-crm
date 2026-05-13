@@ -21,11 +21,7 @@ function AppointmentTextPanel({
       </p>
       <p className="mt-2 text-sm leading-6 text-foreground">
         {text?.trim() ||
-          appointmentText(
-            "Noch keine Notizen erfasst.",
-            "Заметки пока не зафиксированы.",
-            "No notes captured yet.",
-          ) ||
+          appointmentText("appointments_no_notes_captured_yet") ||
           t.patients_notes}
       </p>
     </div>

@@ -1,4 +1,9 @@
-import type { Translations } from "@/lib/i18n";
+import {
+  formatUiText,
+  getLang,
+  t as translateCatalog,
+  type Translations,
+} from "@/lib/i18n";
 import type {
   AppointmentPermissions,
   AppointmentTimelineEvent,
@@ -328,13 +333,14 @@ function toneFromCommunicationStatus(
 }
 
 function communicationTargetLabel(entry: TimelineCommunicationEntry) {
+  const dictionary = translateCatalog(getLang());
   switch (entry.target_type) {
     case "doctor":
-      return entry.doctor_name || "Doctor";
+      return entry.doctor_name || dictionary.common_doctor;
     case "service_provider":
-      return entry.provider_name || "Service provider";
+      return entry.provider_name || dictionary.common_provider;
     default:
-      return entry.provider_name || "Clinic";
+      return entry.provider_name || dictionary.common_provider;
   }
 }
 
@@ -361,7 +367,7 @@ const INTERPRETER_MOBILE_AGENDA_DATE_FORMATTER = new Intl.DateTimeFormat("en-GB"
 function formatInterpreterMobileAgendaDateLabel(
   date: string,
   todayDate: string,
-  todayLabel = "Today",
+  todayLabel = translateCatalog(getLang()).dash_patients_today,
 ) {
   if (date === todayDate) return todayLabel;
   try {
@@ -387,7 +393,7 @@ export function buildInterpreterMobileAgendaSections<
 >(
   items: T[],
   todayDate: string,
-  todayLabel = "Today",
+  todayLabel = translateCatalog(getLang()).dash_patients_today,
 ): InterpreterMobileAgendaSection<T>[] {
   const grouped = new Map<string, T[]>();
   const sorted = items
@@ -513,29 +519,44 @@ export function buildAppointmentTimelineEvents(args: {
     communications,
   } = args;
   if (!detail) return [] as AppointmentTimelineEvent[];
+  const dictionary = translateCatalog(getLang());
+  const ui = (
+    key: string,
+    values?: Record<string, string | number | boolean | null | undefined>,
+  ) => formatUiText(dictionary.uiText[key] ?? key, values);
   const labels = {
-    appointments_timeline_appointment_created: "Appointment created",
-    appointments_timeline_scheduled_slot: "Scheduled slot",
-    appointments_timeline_interpreter_pending: "Interpreter pending",
-    appointments_timeline_interpreter_assigned: "Interpreter assigned",
-    appointments_timeline_interpreter_accepted: "Interpreter accepted",
-    appointments_timeline_interpreter_declined: "Interpreter declined",
-    appointments_timeline_interpreter_discussion: "Interpreter in discussion",
-    appointments_timeline_checklist_completed: "Checklist completed",
-    appointments_timeline_checklist_pending: "Checklist pending",
-    appointments_timeline_external_response_logged: "External response logged",
+    appointments_timeline_appointment_created:
+      dictionary.appointments_timeline_appointment_created,
+    appointments_timeline_scheduled_slot:
+      dictionary.appointments_timeline_scheduled_slot,
+    appointments_timeline_interpreter_pending:
+      dictionary.appointments_timeline_interpreter_pending,
+    appointments_timeline_interpreter_assigned:
+      dictionary.appointments_timeline_interpreter_assigned,
+    appointments_timeline_interpreter_accepted:
+      dictionary.appointments_timeline_interpreter_accepted,
+    appointments_timeline_interpreter_declined:
+      dictionary.appointments_timeline_interpreter_declined,
+    appointments_timeline_interpreter_discussion:
+      dictionary.appointments_timeline_interpreter_discussion,
+    appointments_timeline_checklist_completed:
+      dictionary.appointments_timeline_checklist_completed,
+    appointments_timeline_checklist_pending:
+      dictionary.appointments_timeline_checklist_pending,
+    appointments_timeline_external_response_logged:
+      dictionary.appointments_timeline_external_response_logged,
     appointments_timeline_external_communication_cancelled:
-      "External communication cancelled",
+      dictionary.appointments_timeline_external_communication_cancelled,
     appointments_timeline_external_communication_closed:
-      "External communication closed",
+      dictionary.appointments_timeline_external_communication_closed,
     appointments_timeline_interpreter_report_submitted:
-      "Interpreter report submitted",
+      dictionary.appointments_timeline_interpreter_report_submitted,
     appointments_timeline_interpreter_report_approved:
-      "Interpreter report approved",
+      dictionary.appointments_timeline_interpreter_report_approved,
     appointments_timeline_interpreter_report_rejected:
-      "Interpreter report rejected",
+      dictionary.appointments_timeline_interpreter_report_rejected,
     appointments_timeline_concierge_transfer_completed:
-      CONCIERGE_TRANSFER_COMPLETED_TEXT,
+      dictionary.appointments_timeline_concierge_transfer_completed,
     ...args.labels,
   };
 
@@ -554,8 +575,16 @@ export function buildAppointmentTimelineEvents(args: {
       title: labels.appointments_timeline_scheduled_slot,
       detail: [
         buildSlotLabel(detail),
-        detail.provider_name ? `Clinic: ${detail.provider_name}` : "",
-        detail.doctor_name ? `Doctor: ${detail.doctor_name}` : "",
+        detail.provider_name
+          ? ui("appointments_description_clinic", {
+              clinic: detail.provider_name,
+            })
+          : "",
+        detail.doctor_name
+          ? ui("appointments_description_doctor", {
+              doctor: detail.doctor_name,
+            })
+          : "",
       ]
         .filter(Boolean)
         .join(" · "),

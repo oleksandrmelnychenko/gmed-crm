@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 
 import {
   PATIENT_LABEL_FORMAT_OPTIONS,
+  patientLabelFormatLabel,
   type PatientLabelFormatId,
   type PatientTimelineItem,
   type PatientTimelineRangeFilter,
@@ -157,7 +158,7 @@ function preloadPatientWorkspaceTab(tab: string) {
   }
 }
 
-type LocalizeFn = (de: string, ru: string, en: string) => string;
+type LocalizeFn = (key: string) => string;
 type DateFormatter = (value?: string | null, fallback?: string) => string;
 type DateTimeFormatter = (value?: string | null, fallback?: string) => string;
 type MoneyFormatter = (value?: string | null, currency?: string) => string;
@@ -606,8 +607,8 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               isActive={detail.is_active}
               activeLabel={t.common_active}
               inactiveLabel={t.common_inactive}
-              toggleActiveLabel={l("Patient deaktivieren", "Деактивировать пациента", "Deactivate patient")}
-              toggleInactiveLabel={l("Patient aktivieren", "Активировать пациента", "Activate patient")}
+              toggleActiveLabel={l("patients_deactivate_patient")}
+              toggleInactiveLabel={l("patients_activate_patient")}
               onToggle={onTogglePatientActivation}
             />
             {detail.functional_labels?.map((label) => (
@@ -634,7 +635,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
             }} className="h-9 rounded-lg bg-card text-[13px] gap-1.5 w-auto">
               {PATIENT_LABEL_FORMAT_OPTIONS.map((option) => (
                 <option key={option.id} value={option.id}>
-                  {option.label}
+                  {patientLabelFormatLabel(option)}
                 </option>
               ))}
             </NativeComboboxSelect>
@@ -642,7 +643,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
         {canEditPatientProfile ? (
           <Button size="sm" className="h-9 rounded-lg gap-1.5 px-3.5" onClick={onOpenProfileEditor}>
             <SquarePen className="size-3.5" />
-            {l("Profil bearbeiten", "Редактировать профиль", "Edit profile")}
+            {l("patients_edit_profile")}
           </Button>
         ) : null}
       </div>

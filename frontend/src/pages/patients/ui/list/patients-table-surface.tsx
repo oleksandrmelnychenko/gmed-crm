@@ -107,11 +107,11 @@ export function PatientsTableSurface({
           frozenColumns.length >= maxFrozenColumns
         }
         columnHeaderContextMenuLabels={{
-          column: tr.table_columns ?? "Column",
-          freeze: tr.table_columns_freeze ?? "Freeze column",
-          unfreeze: tr.table_columns_unfreeze ?? "Unfreeze column",
-          frozen: tr.table_columns_frozen ?? "Frozen",
-          freezeLimitReached: tr.table_columns_freeze_limit ?? "Freeze limit reached",
+          column: tr.table_columns,
+          freeze: tr.table_columns_freeze,
+          unfreeze: tr.table_columns_unfreeze,
+          frozen: tr.table_columns_frozen,
+          freezeLimitReached: tr.table_columns_freeze_limit,
         }}
         density={density}
         rowId={(patient) => patient.id}

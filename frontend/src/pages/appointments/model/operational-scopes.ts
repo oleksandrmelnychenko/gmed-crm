@@ -55,58 +55,38 @@ export function operationalScopeReason(
   switch (scope) {
     case "owned_by_me":
       return item.owner_role
-        ? `${tr?.patients_assign_owner ?? appointmentText("Zustandig", "Куратор", "Owner")} · ${roleLabel(item.owner_role)}`
-        : appointmentText("Bei mir", "Мои", "Owned by me");
+        ? `${tr?.patients_assign_owner ?? appointmentText("appointments_owner")} · ${roleLabel(item.owner_role)}`
+        : appointmentText("appointments_owned_by_me");
     case "needs_attention":
       return (
         attentionIndex?.get(item.id)?.reasons[0] ||
         (tr?.common_error ??
-          appointmentText(
-            "Operative Nachverfolgung erforderlich",
-            "Нужно операционное действие",
-            "Operational follow-up required",
-          ))
+          appointmentText("appointments_operational_follow_up_required"))
       );
     case "pending_interpreter":
       return item.interpreter_name
         ? `${item.interpreter_name} · ${responseLabel(item.interpreter_response ?? "pending")}`
-        : appointmentText(
-            "Dolmetscher ausstehend",
-            "Ожидается переводчик",
-            "Interpreter pending",
-          );
+        : appointmentText("appointments_interpreter_pending");
     case "my_interpreter_queue":
       return item.interpreter_response === "pending"
-        ? appointmentText("Antwort ausstehend", "Нужен ответ", "Response required")
+        ? appointmentText("appointments_response_required")
         : item.status === "completed"
-          ? appointmentText("Slot abgeschlossen", "Слот завершён", "Completed slot")
-          : appointmentText(
-              "Zugewiesener Dolmetscher-Slot",
-              "Назначенный слот переводчика",
-              "Assigned interpreter slot",
-            );
+          ? appointmentText("appointments_completed_slot")
+          : appointmentText("appointments_assigned_interpreter_slot");
     case "concierge_flow":
       return (
         item.provider_name ||
-        appointmentText(
-          "Nicht-medizinischer Servicefluss",
-          "Поток немедицинского сервиса",
-          "Non-medical service flow",
-        )
+        appointmentText("appointments_non_medical_service_flow")
       );
     case "blocked_medical":
       return userRole === "concierge"
-        ? appointmentText(
-            "Medizinischer Slot als blockiert angezeigt",
-            "Медицинский слот показан как заблокированный",
-            "Medical slot shown as blocked",
-          )
-        : appointmentText("Blockierter Slot", "Заблокированный слот", "Blocked slot");
+        ? appointmentText("appointments_medical_slot_shown_as_blocked")
+        : appointmentText("appointments_blocked_slot");
     case "all":
       return (
         item.owner_name ||
         item.provider_name ||
-        (tr?.appointments_title ?? appointmentText("Termin", "Приём", "Appointment"))
+        (tr?.appointments_title ?? appointmentText("appointments_appointment"))
       );
   }
 }
@@ -119,20 +99,20 @@ export function operationalScopeOptions(
     {
       id: "all",
       label:
-        tr.providers_all ?? appointmentText("Alle sichtbar", "Все видимые", "All visible"),
+        tr.providers_all ?? appointmentText("appointments_all_visible"),
     },
   ];
 
   if (role && role !== "interpreter") {
     options.push({
       id: "owned_by_me",
-      label: appointmentText("Bei mir", "Мои", "Owned by me"),
+      label: appointmentText("appointments_owned_by_me"),
     });
   }
   if (role) {
     options.push({
       id: "needs_attention",
-      label: appointmentText("Braucht Aufmerksamkeit", "Требует внимания", "Needs attention"),
+      label: appointmentText("appointments_needs_attention"),
     });
   }
   if (
@@ -142,37 +122,25 @@ export function operationalScopeOptions(
   ) {
     options.push({
       id: "pending_interpreter",
-      label: appointmentText(
-        "Dolmetscher ausstehend",
-        "Ожидается переводчик",
-        "Pending interpreter",
-      ),
+      label: appointmentText("appointments_pending_interpreter"),
     });
   }
   if (role === "teamlead_interpreter" || role === "interpreter") {
     options.push({
       id: "my_interpreter_queue",
-      label: appointmentText(
-        "Dolmetscher-Warteschlange",
-        "Очередь переводчика",
-        "Interpreter queue",
-      ),
+      label: appointmentText("appointments_interpreter_queue"),
     });
   }
   if (role === "ceo" || role === "patient_manager" || role === "concierge") {
     options.push({
       id: "concierge_flow",
-      label: appointmentText("Concierge-Flow", "Поток concierge", "Concierge flow"),
+      label: appointmentText("appointments_concierge_flow"),
     });
   }
   if (role === "concierge") {
     options.push({
       id: "blocked_medical",
-      label: appointmentText(
-        "Blockierte Medizin-Slots",
-        "Заблокированные медслоты",
-        "Blocked medical",
-      ),
+      label: appointmentText("appointments_blocked_medical"),
     });
   }
 

@@ -25,9 +25,8 @@ export function PatientWorkspaceNav() {
   const [searchParams] = useSearchParams();
   const id = routeId ?? searchParams.get("patient") ?? undefined;
   const { user } = useAuth();
-  const { t, lang } = useLang();
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
 
   const canViewOperationalSurface = canViewPatientOperationalSurface(user?.role);
   const canViewDocuments = canViewPatientDocumentsSurface(user?.role);
@@ -70,21 +69,21 @@ export function PatientWorkspaceNav() {
     canViewOperationalSurface
       ? {
           key: "cases",
-          label: l("Fälle", "Кейсы", "Cases"),
+          label: l("patients_cases"),
           icon: FileHeart,
         }
       : null,
     canViewOperationalSurface
       ? {
           key: "orders",
-          label: l("Aufträge", "Заказы", "Orders"),
+          label: l("patients_orders"),
           icon: ClipboardList,
         }
       : null,
     canViewOperationalSurface
       ? {
           key: "appointments",
-          label: l("Termine", "Приёмы", "Appointments"),
+          label: l("patients_appointments"),
           icon: CalendarClock,
         }
       : null,

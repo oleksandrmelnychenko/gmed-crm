@@ -2,6 +2,7 @@ import {
   formatUnknownValue,
   getLang,
   t as translateCatalog,
+  uiText,
   useLang,
 } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -32,41 +33,29 @@ export function parseFunctionalLabels(value: string): string[] {
 type FunctionalLabelLang = "de" | "ru" | "en";
 
 type FunctionalLabelMeta = {
-  de: string;
-  ru: string;
-  en: string;
+  labelKey: string;
   className: string;
 };
 
 const FUNCTIONAL_LABEL_META: Record<string, FunctionalLabelMeta> = {
   vip: {
-    de: "VIP",
-    ru: "VIP",
-    en: "VIP",
+    labelKey: "patients_functional_label_vip",
     className: "border-amber-300 bg-amber-50 text-amber-800",
   },
   high_risk: {
-    de: "Hohes Risiko",
-    ru: "Высокий риск",
-    en: "High risk",
+    labelKey: "patients_functional_label_high_risk",
     className: "border-rose-300 bg-rose-50 text-rose-700",
   },
   mobility_support: {
-    de: "Mobilitätshilfe",
-    ru: "Помощь с мобильностью",
-    en: "Mobility support",
+    labelKey: "patients_functional_label_mobility_support",
     className: "border-sky-300 bg-sky-50 text-sky-700",
   },
   fall_risk: {
-    de: "Sturzrisiko",
-    ru: "Риск падения",
-    en: "Fall risk",
+    labelKey: "patients_functional_label_fall_risk",
     className: "border-orange-300 bg-orange-50 text-orange-700",
   },
   complex_coordination: {
-    de: "Komplexe Koordination",
-    ru: "Сложная координация",
-    en: "Complex coordination",
+    labelKey: "patients_functional_label_complex_coordination",
     className: "border-violet-300 bg-violet-50 text-violet-700",
   },
 };
@@ -81,11 +70,8 @@ export function humanizeFunctionalLabel(
 ): string {
   const normalized = normalizeFunctionalLabel(value);
   const meta = FUNCTIONAL_LABEL_META[normalized];
-  if (meta) return meta[lang] ?? meta.ru;
-  const translations =
-    lang === "en"
-      ? { common_unknown: "Unknown", common_unknown_value: "Unknown value" }
-      : translateCatalog(lang === "de" ? "de" : "ru");
+  if (meta) return uiText(meta.labelKey, lang === "de" ? "de" : "ru");
+  const translations = translateCatalog(lang === "de" ? "de" : "ru");
   return formatUnknownValue(value, translations);
 }
 

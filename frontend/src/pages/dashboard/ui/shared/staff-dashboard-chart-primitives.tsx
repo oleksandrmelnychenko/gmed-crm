@@ -261,7 +261,7 @@ export function ServiceMixTable({
               {row.item_count}
             </div>
             <div className="w-[120px] shrink-0 text-right text-[12px] font-medium tabular-nums text-foreground">
-              EUR {row.gross_total}
+              {translateCatalog(getLang()).uiText.common_currency_eur} {row.gross_total}
             </div>
           </div>
         );
@@ -309,7 +309,7 @@ export function OrdersValuedBars({
               {item.count} {translateCatalog(getLang()).dash_order_count_suffix}
             </div>
             <div className="w-[110px] shrink-0 text-right text-[12.5px] font-medium tabular-nums text-foreground">
-              EUR {value.toLocaleString()}
+              {translateCatalog(getLang()).uiText.common_currency_eur} {value.toLocaleString()}
             </div>
           </div>
         );

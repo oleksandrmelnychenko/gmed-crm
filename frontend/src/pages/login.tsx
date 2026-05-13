@@ -226,7 +226,7 @@ export function LoginPage() {
                   id="email"
                   type="email"
                   autoComplete="email"
-                  placeholder="name@gmed.de"
+                  placeholder={tr.uiText.login_email_example_placeholder}
                   value={email}
                   onChange={(e) =>
                     dispatchLoginState((current) => ({

@@ -16,21 +16,17 @@ export function ConflictPanel({
   const items = [
     ...conflicts.patient_conflicts.map((item) => ({
       ...item,
-      scope: appointmentText("Patient", "Пациент", "Patient"),
+      scope: appointmentText("appointments_patient"),
     })),
     ...conflicts.interpreter_conflicts.map((item) => ({
       ...item,
-      scope: appointmentText("Dolmetscher", "Переводчик", "Interpreter"),
+      scope: appointmentText("appointments_interpreter"),
     })),
   ].slice(0, 6);
   if (!conflicts.has_conflicts) {
     return (
       <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-        {appointmentText(
-          "Für dieses Zeitfenster wurden keine Patienten- oder Dolmetscherüberschneidungen gefunden.",
-          "Для этого слота не найдено пересечений по пациенту или переводчику.",
-          "No patient or interpreter overlaps detected for the current slot.",
-        )}
+        {appointmentText("appointments_no_patient_or_interpreter_overlaps_detected_for_the_curr")}
       </div>
     );
   }
@@ -42,11 +38,7 @@ export function ConflictPanel({
           <p className="font-semibold">
             {conflicts.patient_conflict_count +
               conflicts.interpreter_conflict_count}{" "}
-            {appointmentText(
-              "Überschneidung(en) erkannt",
-              "Обнаружены пересечения",
-              "Overlap(s) detected",
-            )}
+            {appointmentText("appointments_overlap_s_detected")}
           </p>
           <div className="mt-3 space-y-2">
             {items.map((item) => (
@@ -87,11 +79,7 @@ export function ScheduleWarningsPanel({
         <ShieldAlert className="mt-0.5 size-4 shrink-0" />
         <div className="min-w-0">
           <p className="font-semibold">
-            {appointmentText(
-              "Lokaler Termindruck erkannt",
-              "Обнаружен локальный конфликт расписания",
-              "Local schedule pressure detected",
-            )}
+            {appointmentText("appointments_local_schedule_pressure_detected")}
           </p>
           <div className="mt-3 space-y-2">
             {warnings.map((warning) => (

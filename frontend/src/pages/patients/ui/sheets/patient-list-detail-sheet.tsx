@@ -191,9 +191,9 @@ function PatientProfileSection({
   canEdit,
   onChange,
 }: PatientProfileSectionProps) {
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
+  const l = (key: string) => t.uiText[key] ?? key;
   const legalStatusSummary = getPatientLegalStatusSummary(
     normalizePatientLegalStatus(detail.legal_status),
   );
@@ -202,7 +202,7 @@ function PatientProfileSection({
     <div className="space-y-3">
       <section className="space-y-3 rounded-xl border border-border/60 bg-card p-3.5">
         <div className="text-sm font-semibold text-foreground">
-          {l("Identifikation", "Идентификация", "Identification")}
+          {l("patients_identification")}
         </div>
         <div className="grid gap-3 md:grid-cols-3">
           <div className="space-y-1">
@@ -224,11 +224,7 @@ function PatientProfileSection({
 
       {!canEdit ? (
         <p className="text-[12px] text-muted-foreground italic">
-          {l(
-            "Diese Rolle hat nur Lesezugriff auf Patientendemografie.",
-            "Эта роль имеет доступ только для чтения.",
-            "This role has read-only access to patient demographics.",
-          )}
+          {l("patients_this_role_has_read_only_access_to_patient_demographics")}
         </p>
       ) : null}
     </div>

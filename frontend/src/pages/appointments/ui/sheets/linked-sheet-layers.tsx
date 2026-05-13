@@ -101,13 +101,9 @@ export function LinkedPatientSheetLayer({
         <AppointmentPreviewSheetLoadingState
           open={open}
           onOpenChange={onOpenChange}
-          title={appointmentText("Patient", "Пациент", "Patient")}
+          title={appointmentText("appointments_patient")}
           maxWidthClassName="sm:max-w-[860px]"
-          loadingLabel={appointmentText(
-            "Patient wird geladen",
-            "Загрузка пациента",
-            "Loading patient",
-          )}
+          loadingLabel={appointmentText("appointments_loading_patient")}
         />
       }
     >
@@ -139,11 +135,7 @@ export function LinkedProviderSheetLayer({
           onOpenChange={onOpenChange}
           title={detail?.name || fallbackTitle}
           maxWidthClassName="sm:max-w-[920px]"
-          loadingLabel={appointmentText(
-            "Anbieter wird geladen",
-            "Загрузка провайдера",
-            "Loading provider",
-          )}
+          loadingLabel={appointmentText("appointments_loading_provider")}
         />
       }
     >
@@ -181,18 +173,10 @@ export function LinkedCasesSheetLayer({
         <AppointmentPreviewSheetLoadingState
           open={open}
           onOpenChange={onOpenChange}
-          title={appointmentText("Cases", "Кейсы", "Cases")}
-          description={appointmentText(
-            "Fallkontext wird geladen",
-            "Загрузка контекста кейсов",
-            "Loading case context",
-          )}
+          title={appointmentText("appointments_cases_2")}
+          description={appointmentText("appointments_loading_case_context")}
           maxWidthClassName="sm:max-w-[980px]"
-          loadingLabel={appointmentText(
-            "Falle werden geladen",
-            "Загрузка кейсов",
-            "Loading cases",
-          )}
+          loadingLabel={appointmentText("appointments_loading_cases")}
         />
       }
     >
@@ -227,19 +211,11 @@ export function LinkedDocumentsSheetLayer({
         <AppointmentPreviewSheetLoadingState
           open={open}
           onOpenChange={onOpenChange}
-          title={appointmentText("Dokumente", "Документы", "Documents")}
-          description={appointmentText(
-            "Dokumente aus dem aktuellen Termin-Kontext.",
-            "Документы из контекста текущего приёма.",
-            "Documents from the current appointment context.",
-          )}
+          title={appointmentText("appointments_documents")}
+          description={appointmentText("appointments_documents_from_the_current_appointment_context")}
           maxWidthClassName="sm:max-w-[760px]"
           bodyClassName="px-4 pb-6 pt-4"
-          loadingLabel={appointmentText(
-            "Dokumente werden geladen",
-            "Загрузка документов",
-            "Loading documents",
-          )}
+          loadingLabel={appointmentText("appointments_loading_documents")}
         />
       }
     >
@@ -277,11 +253,7 @@ export function LinkedRecordsSheetLayer({
           title={title}
           maxWidthClassName="sm:max-w-[540px]"
           bodyClassName="px-4 pb-6 pt-4"
-          loadingLabel={appointmentText(
-            "Verknupfte Daten werden geladen…",
-            "Загрузка связанных данных…",
-            "Loading linked records…",
-          )}
+          loadingLabel={appointmentText("appointments_loading_linked_records")}
         />
       }
     >

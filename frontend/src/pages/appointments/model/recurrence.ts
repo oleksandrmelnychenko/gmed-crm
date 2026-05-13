@@ -12,27 +12,30 @@ export function recurrenceCadenceLabel(item: {
   recurrence_interval: number | null;
 }) {
   if (!item.recurrence_frequency) {
-    return appointmentText("Einmaliger Termin", "Разовый приём", "One-time appointment");
+    return appointmentText("appointments_one_time_appointment");
   }
   const interval = item.recurrence_interval ?? 1;
   if (item.recurrence_frequency === "daily") {
     return appointmentText(
-      interval === 1 ? "Jeden Tag" : `Alle ${interval} Tage`,
-      interval === 1 ? "Каждый день" : `Каждые ${interval} дней`,
-      `Every ${interval} ${interval === 1 ? "day" : "days"}`,
+      interval === 1
+        ? "appointments_recurrence_daily_one"
+        : "appointments_recurrence_daily_many",
+      { interval },
     );
   }
   if (item.recurrence_frequency === "weekly") {
     return appointmentText(
-      interval === 1 ? "Jede Woche" : `Alle ${interval} Wochen`,
-      interval === 1 ? "Каждую неделю" : `Каждые ${interval} недель`,
-      `Every ${interval} ${interval === 1 ? "week" : "weeks"}`,
+      interval === 1
+        ? "appointments_recurrence_weekly_one"
+        : "appointments_recurrence_weekly_many",
+      { interval },
     );
   }
   return appointmentText(
-    interval === 1 ? "Jeden Monat" : `Alle ${interval} Monate`,
-    interval === 1 ? "Каждый месяц" : `Каждые ${interval} месяцев`,
-    `Every ${interval} ${interval === 1 ? "month" : "months"}`,
+    interval === 1
+      ? "appointments_recurrence_monthly_one"
+      : "appointments_recurrence_monthly_many",
+    { interval },
   );
 }
 

@@ -112,13 +112,13 @@ const textareaClassName = appointmentTextareaControlClassName;
 function checklistPhaseLabel(phase: string) {
   switch (phase) {
     case "preparation":
-      return appointmentText("Vorbereitung", "Подготовка", "Preparation");
+      return appointmentText("appointments_preparation");
     case "execution":
-      return appointmentText("Durchführung", "Выполнение", "Execution");
+      return appointmentText("appointments_execution");
     case "followup":
-      return appointmentText("Nachbereitung", "После визита", "Follow-up");
+      return appointmentText("appointments_follow_up_2");
     default:
-      return appointmentText("Unbekannte Phase", "Неизвестная фаза", "Unknown phase");
+      return appointmentText("appointments_unknown_phase");
   }
 }
 
@@ -170,59 +170,27 @@ function AppointmentWorkflowOverviewSection({
 }: AppointmentWorkflowOverviewSectionProps) {
   return (
     <Section
-      title={appointmentText(
-        "Operativer Überblick",
-        "Операционный обзор",
-        "Operational overview",
-      )}
+      title={appointmentText("appointments_operational_overview")}
       accessory={<CountBadge>{workflowSummary.openIssueCount}</CountBadge>}
     >
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <StatCard
-          label={appointmentText(
-            "Offene Punkte",
-            "Открытые пункты",
-            "Open issues",
-          )}
+          label={appointmentText("appointments_open_issues_2")}
           value={workflowSummary.openIssueCount}
-          description={appointmentText(
-            "Checklisten, Reminder und Aufgaben mit offener Nachverfolgung.",
-            "Чек-листы, напоминания и задачи с открытым follow-up.",
-            "Checklist, reminder and task items still requiring follow-up.",
-          )}
+          description={appointmentText("appointments_checklist_reminder_and_task_items_still_requiring_follow")}
         />
         <StatCard
-          label={appointmentText(
-            "Checklisten-Fortschritt",
-            "Прогресс чек-листа",
-            "Checklist progress",
-          )}
+          label={appointmentText("appointments_checklist_progress")}
           value={checklistProgressValue}
-          description={appointmentText(
-            "Abgeschlossene gegen alle appointment-gebundenen Schritte.",
-            "Завершённые против всех шагов, привязанных к приёму.",
-            "Completed versus total appointment-bound workflow steps.",
-          )}
+          description={appointmentText("appointments_completed_versus_total_appointment_bound_workflow_steps")}
         />
         <StatCard
-          label={appointmentText(
-            "Follow-up-Warteschlange",
-            "Очередь follow-up",
-            "Follow-up queue",
-          )}
+          label={appointmentText("appointments_follow_up_queue")}
           value={workflowSummary.followUpQueueCount}
-          description={appointmentText(
-            "Offene Aufgaben plus ausstehende Erinnerungen.",
-            "Открытые задачи плюс ожидающие напоминания.",
-            "Open tasks plus pending reminders.",
-          )}
+          description={appointmentText("appointments_open_tasks_plus_pending_reminders")}
         />
         <StatCard
-          label={appointmentText(
-            "Dolmetscher-Gate",
-            "Гейт переводчика",
-            "Interpreter gate",
-          )}
+          label={appointmentText("appointments_interpreter_gate")}
           value={interpreterGateValue}
           description={interpreterGateDescription}
         />
@@ -232,11 +200,7 @@ function AppointmentWorkflowOverviewSection({
         <Banner tone="warning" withIcon>
           <div className="space-y-1">
             <p className="font-medium">
-              {appointmentText(
-                "Vor dem Abschluss bleiben noch operative Blocker offen.",
-                "Перед закрытием остаются открытые операционные блокеры.",
-                "Operational blockers remain before closure.",
-              )}
+              {appointmentText("appointments_operational_blockers_remain_before_closure")}
             </p>
             {completionWarnings.map((warning) => (
               <p key={warning}>{warning}</p>
@@ -322,41 +286,25 @@ function AppointmentWorkflowTab({
 
   const checklistProgressValue = checklistItems.length
     ? `${workflowSummary.checklistCompletedCount}/${checklistItems.length}`
-    : appointmentText("Keine", "Нет", "None");
+    : appointmentText("appointments_none");
   const interpreterGateValue =
     workflowSummary.interpreterGate === "not_required"
-      ? appointmentText("Nicht erforderlich", "Не требуется", "Not required")
+      ? appointmentText("appointments_not_required")
       : workflowSummary.interpreterGate === "ready"
-        ? appointmentText("Freigegeben", "Согласовано", "Approved")
-        : appointmentText("Ausstehend", "Ожидается", "Pending");
+        ? appointmentText("appointments_approved")
+        : appointmentText("appointments_pending_2");
   const interpreterGateDescription =
     workflowSummary.interpreterGate === "not_required"
-      ? appointmentText(
-          "Kein Dolmetscher für diesen Termin verknüpft.",
-          "Для этого приёма переводчик не привязан.",
-          "No interpreter linked to this appointment.",
-        )
+      ? appointmentText("appointments_no_interpreter_linked_to_this_appointment")
       : detailReport
         ? reportApprovalLabel(detailReport.approval_status)
-        : appointmentText(
-            "Bericht oder Freigabe noch ausstehend.",
-            "Отчёт или согласование ещё ожидается.",
-            "Report or approval is still pending.",
-          );
+        : appointmentText("appointments_report_or_approval_is_still_pending");
 
   return (
     <>
       <AppointmentWorkspaceSectionIntro
-        title={appointmentText(
-          "Workflow-Cockpit",
-          "Панель workflow",
-          "Workflow cockpit",
-        )}
-        description={appointmentText(
-          "Abschluss, Slot-Logistik und operative Nachverfolgung in einem appointment-zentrierten Workspace.",
-          "Закрытие, логистика слота и операционный follow-up в одном workspace приёма.",
-          "Closure, slot logistics and operational follow-up in one appointment-centered workspace.",
-        )}
+        title={appointmentText("appointments_workflow_cockpit")}
+        description={appointmentText("appointments_closure_slot_logistics_and_operational_follow_up_in_one")}
         accessory={<CountBadge>{workflowSummary.visibleSurfaceCount}</CountBadge>}
       />
 
@@ -369,19 +317,11 @@ function AppointmentWorkflowTab({
       />
       {showTransitionLane ? (
         <Section
-          title={appointmentText(
-            "Abschluss & Status",
-            "Закрытие и статус",
-            "Closure and status",
-          )}
+          title={appointmentText("appointments_closure_and_status")}
           accessory={<CountBadge>{workflowSummary.transitionSurfaceCount}</CountBadge>}
         >
           <p className={tokens.text.muted}>
-            {appointmentText(
-              "Finalisiere den Slot, plane Standard-Follow-up und steuere Statusänderungen über den aktuellen Termin oder die Serie.",
-              "Закрой слот, запланируй стандартный follow-up и управляй сменой статуса для текущего приёма или серии.",
-              "Close the slot, schedule standard follow-up and control status changes for the current appointment or its series.",
-            )}
+            {appointmentText("appointments_close_the_slot_schedule_standard_follow_up_and_control_s")}
           </p>
           <div className="grid gap-4 xl:grid-cols-2">
             {showCompletionSection ? (
@@ -415,19 +355,11 @@ function AppointmentWorkflowTab({
 
       {showLogisticsLane ? (
         <Section
-          title={appointmentText(
-            "Terminlogistik",
-            "Логистика приёма",
-            "Appointment logistics",
-          )}
+          title={appointmentText("appointments_appointment_logistics")}
           accessory={<CountBadge>{workflowSummary.logisticsSurfaceCount}</CountBadge>}
         >
           <p className={tokens.text.muted}>
-            {appointmentText(
-              "Halte Slot, Zuständigkeiten und Dolmetscherbesetzung im selben Workflow-Kontext synchron.",
-              "Держи слот, ответственных и назначение переводчика синхронизированными в одном workflow-контексте.",
-              "Keep the slot, ownership and interpreter staffing aligned in the same workflow context.",
-            )}
+            {appointmentText("appointments_keep_the_slot_ownership_and_interpreter_staffing_aligned")}
           </p>
           <div className="grid gap-4 xl:grid-cols-2">
             {showScheduleSection ? editAppointmentSection : null}
@@ -448,19 +380,11 @@ function AppointmentWorkflowTab({
 
       {showBacklogLane ? (
         <Section
-          title={appointmentText(
-            "Operativer Backlog",
-            "Операционный backlog",
-            "Operational backlog",
-          )}
+          title={appointmentText("appointments_operational_backlog")}
           accessory={<CountBadge>{workflowSummary.backlogSurfaceCount}</CountBadge>}
         >
           <p className={tokens.text.muted}>
-            {appointmentText(
-              "Arbeite checklisten, Erinnerungen und appointment-verknüpfte Aufgaben in einer durchgehenden Bearbeitungsschicht ab.",
-              "Закрывай чек-листы, напоминания и привязанные к приёму задачи в одном непрерывном operational layer.",
-              "Work through checklist items, reminders and appointment-linked tasks in one continuous operational layer.",
-            )}
+            {appointmentText("appointments_work_through_checklist_items_reminders_and_appointment_l")}
           </p>
           <div className="space-y-4">
             {showChecklistSection ? (
@@ -653,11 +577,7 @@ function AppointmentInterpreterSection({
           message:
             error instanceof Error
               ? error.message
-              : appointmentText(
-                  "Failed to load interpreter suggestions.",
-                  "Failed to load interpreter suggestions.",
-                  "Failed to load interpreter suggestions.",
-                ),
+              : appointmentText("appointments_failed_to_load_interpreter_suggestions"),
         });
       });
 
@@ -687,7 +607,7 @@ function AppointmentInterpreterSection({
           message:
             error instanceof Error
               ? error.message
-              : "Failed to load interpreter history.",
+              : appointmentText("appointments_error_load_interpreter_history"),
         });
       });
 
@@ -715,7 +635,7 @@ function AppointmentInterpreterSection({
       onError(
         error instanceof Error
           ? error.message
-          : "Failed to save interpreter preference.",
+          : appointmentText("appointments_error_save_interpreter_preference"),
       );
     } finally {
       dispatchInterpreterState({
@@ -742,11 +662,7 @@ function AppointmentInterpreterSection({
       onError(
         error instanceof Error
           ? error.message
-          : appointmentText(
-              "Dolmetscher konnte nicht zugewiesen werden.",
-              "Не удалось назначить переводчика.",
-              "Failed to assign interpreter",
-            ),
+          : appointmentText("appointments_failed_to_assign_interpreter"),
       );
     } finally {
       dispatchInterpreterState({ type: "patch", value: { busyAction: "" } });
@@ -771,11 +687,7 @@ function AppointmentInterpreterSection({
       onError(
         error instanceof Error
           ? error.message
-          : appointmentText(
-              "Antwort konnte nicht gesendet werden.",
-              "Не удалось отправить ответ.",
-              "Failed to submit response",
-            ),
+          : appointmentText("appointments_failed_to_submit_response"),
       );
     } finally {
       dispatchInterpreterState({ type: "patch", value: { busyAction: "" } });
@@ -787,11 +699,7 @@ function AppointmentInterpreterSection({
       {canAssign && !detail.is_blocked ? (
         <section className={appointmentSectionCardClassName("p-5")}>
           <h3 className="text-sm font-semibold text-zinc-950">
-            {appointmentText(
-              "Dolmetscherbesetzung",
-              "Назначение переводчика",
-              "Interpreter assignment",
-            )}
+            {appointmentText("appointments_interpreter_assignment")}
           </h3>
           <form
             onSubmit={handleAssignInterpreter}
@@ -824,11 +732,7 @@ function AppointmentInterpreterSection({
                 {busyAction === "assign" ? (
                   <LoaderCircle className="size-4 animate-spin" />
                 ) : null}
-                {appointmentText(
-                  "Dolmetscher zuweisen",
-                  "Назначить переводчика",
-                  "Assign interpreter",
-                )}
+                {appointmentText("appointments_assign_interpreter")}
               </Button>
             </div>
           </form>
@@ -858,11 +762,7 @@ function AppointmentInterpreterSection({
       {canRespond && detail.interpreter_id === currentUserId ? (
         <section className={appointmentSectionCardClassName("p-5")}>
           <h3 className="text-sm font-semibold text-zinc-950">
-            {appointmentText(
-              "Dolmetscherantwort",
-              "Ответ переводчика",
-              "Interpreter response",
-            )}
+            {appointmentText("appointments_interpreter_response")}
           </h3>
           <div className="mt-4 flex flex-wrap gap-2">
             {INTERPRETER_RESPONSE_OPTIONS.map((value) => (
@@ -988,11 +888,7 @@ function AppointmentChecklistSection({
       onError(
         error instanceof Error
           ? error.message
-          : appointmentText(
-              "Checklisteneintrag konnte nicht hinzugefügt werden.",
-              "Не удалось добавить пункт чек-листа.",
-              "Failed to add checklist item",
-            ),
+          : appointmentText("appointments_failed_to_add_checklist_item"),
       );
     } finally {
       setSubmitBusy(false);
@@ -1011,11 +907,7 @@ function AppointmentChecklistSection({
       onError(
         error instanceof Error
           ? error.message
-          : appointmentText(
-              "Element konnte nicht abgeschlossen werden.",
-              "Не удалось завершить элемент.",
-              "Failed to complete item",
-            ),
+          : appointmentText("appointments_failed_to_complete_item"),
       );
     } finally {
       setCompletingId("");
@@ -1025,16 +917,12 @@ function AppointmentChecklistSection({
   return (
     <section className={appointmentSectionCardClassName("p-5")}>
       <h3 className="text-sm font-semibold text-zinc-950">
-        {appointmentText("Checkliste", "Чек-лист", "Checklist")}
+        {appointmentText("appointments_checklist")}
       </h3>
       <div className="mt-4 space-y-3">
         {items.length === 0 ? (
           <EmptyState
-            text={appointmentText(
-              "Für diesen Termin gibt es noch keine Workflow-Schritte.",
-              "Для этого приёма ещё нет шагов workflow.",
-              "No workflow steps exist for this appointment yet.",
-            )}
+            text={appointmentText("appointments_no_workflow_steps_exist_for_this_appointment_yet")}
           />
         ) : (
           items.map((item) => (
@@ -1064,11 +952,7 @@ function AppointmentChecklistSection({
                   {completingId === item.id ? (
                     <LoaderCircle className="size-4 animate-spin" />
                   ) : null}
-                  {appointmentText(
-                    "Als erledigt markieren",
-                    "Отметить выполненным",
-                    "Mark complete",
-                  )}
+                  {appointmentText("appointments_mark_complete")}
                 </Button>
               )}
             </div>
@@ -1117,11 +1001,7 @@ function AppointmentChecklistSection({
             disabled={submitBusy || !form.itemText.trim()}
           >
             {submitBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-            {appointmentText(
-              "Checklistenpunkt hinzufügen",
-              "Добавить пункт чек-листа",
-              "Add checklist item",
-            )}
+            {appointmentText("appointments_add_checklist_item")}
           </Button>
         </div>
       </form>
@@ -1178,11 +1058,7 @@ function AppointmentRemindersSection({
       onError(
         error instanceof Error
           ? error.message
-          : appointmentText(
-              "Erinnerung konnte nicht hinzugefügt werden.",
-              "Не удалось добавить напоминание.",
-              "Failed to add reminder",
-            ),
+          : appointmentText("appointments_failed_to_add_reminder"),
       );
     } finally {
       setSubmitBusy(false);
@@ -1201,11 +1077,7 @@ function AppointmentRemindersSection({
       onError(
         error instanceof Error
           ? error.message
-          : appointmentText(
-              "Erinnerung konnte nicht abgeschlossen werden.",
-              "Не удалось завершить напоминание.",
-              "Failed to complete reminder",
-            ),
+          : appointmentText("appointments_failed_to_complete_reminder"),
       );
     } finally {
       setCompletingId("");
@@ -1215,16 +1087,12 @@ function AppointmentRemindersSection({
   return (
     <section className={appointmentSectionCardClassName("p-5")}>
       <h3 className="text-sm font-semibold text-zinc-950">
-        {appointmentText("Erinnerungen", "Напоминания", "Reminders")}
+        {appointmentText("appointments_reminders_2")}
       </h3>
       <div className="mt-4 space-y-3">
         {reminders.length === 0 ? (
           <EmptyState
-            text={appointmentText(
-              "Für diesen Termin gibt es noch keine Erinnerungen.",
-              "Для этого приёма ещё нет напоминаний.",
-              "No reminders exist for this appointment yet.",
-            )}
+            text={appointmentText("appointments_no_reminders_exist_for_this_appointment_yet")}
           />
         ) : (
           reminders.map((item) => (
@@ -1247,11 +1115,7 @@ function AppointmentRemindersSection({
               </div>
               {item.is_completed ? (
                 <span className="text-xs font-medium text-emerald-700">
-                  {appointmentText(
-                    "Abgeschlossen",
-                    "Завершено",
-                    "Completed",
-                  )}{" "}
+                  {appointmentText("appointments_completed")}{" "}
                   {formatDateTimeLabel(item.completed_at)}
                 </span>
               ) : (
@@ -1264,11 +1128,7 @@ function AppointmentRemindersSection({
                   {completingId === item.id ? (
                     <LoaderCircle className="size-4 animate-spin" />
                   ) : null}
-                  {appointmentText(
-                    "Als erledigt markieren",
-                    "Отметить выполненным",
-                    "Mark complete",
-                  )}
+                  {appointmentText("appointments_mark_complete")}
                 </Button>
               )}
             </div>
@@ -1386,96 +1246,58 @@ function AppointmentCompletionReadinessGrid({
         label={casesStatusLabel}
         value={
           openChecklistCount === 0
-            ? appointmentText("Bereit", "Готово", "Ready")
-            : appointmentText(
-                `${openChecklistCount} offen`,
-                `${openChecklistCount} открыто`,
-                `${openChecklistCount} open`,
-              )
+            ? appointmentText("appointments_ready")
+            : appointmentText("appointments_open_count", {
+                count: openChecklistCount,
+              })
         }
         meta={
           openChecklistCount === 0
-            ? appointmentText(
-                "Keine offenen Checklistenpunkte.",
-                "Нет открытых пунктов чек-листа.",
-                "No pending checklist items.",
-              )
-            : appointmentText(
-                "Offene Vorbereitungs- oder Follow-up-Schritte zuerst abschließen.",
-                "Сначала закройте открытые подготовительные или follow-up шаги.",
-                "Finish outstanding preparation or follow-up steps.",
-              )
+            ? appointmentText("appointments_no_pending_checklist_items")
+            : appointmentText("appointments_finish_outstanding_preparation_or_follow_up_steps")
         }
       />
       <ContextCard
-        label={appointmentText("Aufgaben", "Задачи", "Tasks")}
+        label={appointmentText("appointments_tasks")}
         value={
           openTaskCount === 0
-            ? appointmentText("Bereit", "Готово", "Ready")
-            : appointmentText(
-                `${openTaskCount} offen`,
-                `${openTaskCount} открыто`,
-                `${openTaskCount} open`,
-              )
+            ? appointmentText("appointments_ready")
+            : appointmentText("appointments_open_count", {
+                count: openTaskCount,
+              })
         }
         meta={
           openTaskCount === 0
-            ? appointmentText(
-                "Keine offenen operativen Aufgaben.",
-                "Нет открытых операционных задач.",
-                "No open operational tasks.",
-              )
-            : appointmentText(
-                "Aktive PM-, Dolmetscher- oder Concierge-Aufgaben noch abschließen.",
-                "Нужно закрыть активные задачи PM, переводчика или concierge.",
-                "Resolve active PM, interpreter or concierge tasks.",
-              )
+            ? appointmentText("appointments_no_open_operational_tasks")
+            : appointmentText("appointments_resolve_active_pm_interpreter_or_concierge_tasks")
         }
       />
       <ContextCard
-        label={appointmentText("Erinnerungen", "Напоминания", "Reminders")}
-        value={appointmentText(
-          `${pendingReminderCount} ausstehend`,
-          `${pendingReminderCount} ожидает`,
-          `${pendingReminderCount} pending`,
-        )}
+        label={appointmentText("appointments_reminders_2")}
+        value={appointmentText("appointments_pending_reminders_count", {
+          count: pendingReminderCount,
+        })}
         meta={
           pendingReminderCount === 0
-            ? appointmentText(
-                "Keine offenen Erinnerungen.",
-                "Нет открытых напоминаний.",
-                "No outstanding reminders.",
-              )
-            : appointmentText(
-                "Offene Erinnerungen bleiben auch nach dem Abschluss aktiv.",
-                "Ожидающие напоминания остаются активными и после закрытия.",
-                "Pending reminders stay active after closure.",
-              )
+            ? appointmentText("appointments_no_outstanding_reminders")
+            : appointmentText("appointments_pending_reminders_stay_active_after_closure")
         }
       />
       <ContextCard
         label={interpreterLabel}
         value={
           !detail.interpreter_id
-            ? appointmentText("Nicht erforderlich", "Не требуется", "Not required")
+            ? appointmentText("appointments_not_required")
             : interpreterReportReady
-              ? appointmentText("Freigegeben", "Согласовано", "Approved")
-              : appointmentText("Ausstehend", "Ожидается", "Pending")
+              ? appointmentText("appointments_approved")
+              : appointmentText("appointments_pending_2")
         }
         meta={
           !detail.interpreter_id
-            ? appointmentText(
-                "Kein Dolmetscher verknupft.",
-                "Переводчик не привязан.",
-                "No interpreter linked.",
-              )
+            ? appointmentText("appointments_no_interpreter_linked")
             : detailReport
               ? detailReport.approval_status
-              : appointmentText(
-                  "Bericht noch nicht eingereicht.",
-                  "Отчёт ещё не отправлен.",
-                  "No report submitted yet.",
-                )
+              : appointmentText("appointments_no_report_submitted_yet")
         }
       />
     </div>
@@ -1586,27 +1408,19 @@ function AppointmentCompletionSection({
 
       onNotice(
         selectedPresets.length > 0
-          ? appointmentText(
-              `Termin abgeschlossen. ${selectedPresets.length} Follow-up-Erinnerung(en) geplant.`,
-              `Приём завершён. Запланировано ${selectedPresets.length} follow-up напоминаний.`,
-              `Appointment completed. ${selectedPresets.length} follow-up reminder(s) scheduled.`,
-            )
-          : appointmentText(
-              "Termin abgeschlossen.",
-              "Приём завершён.",
-              "Appointment completed.",
-            ),
+          ? appointmentText("appointments_follow_up_reminders_scheduled_notice", {
+              count: selectedPresets.length,
+            })
+          : appointmentText("appointments_appointment_completed"),
       );
       onRefresh();
     } catch (error) {
       if (completed) {
         onError(
           error instanceof Error
-            ? appointmentText(
-                `Termin abgeschlossen, aber Follow-up-Planung fehlgeschlagen: ${error.message}`,
-                `Приём завершён, но планирование follow-up не удалось: ${error.message}`,
-                `Appointment completed, but follow-up scheduling failed: ${error.message}`,
-              )
+            ? appointmentText("appointments_follow_up_scheduling_failed_notice", {
+                message: error.message,
+              })
             : tr.common_error,
         );
         onRefresh();
@@ -1623,23 +1437,15 @@ function AppointmentCompletionSection({
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div>
           <h3 className="text-sm font-semibold text-zinc-950">
-            {appointmentText(
-              "Abschlussbereitschaft",
-              "Готовность к закрытию",
-              "Completion readiness",
-            )}
+            {appointmentText("appointments_completion_readiness")}
           </h3>
           <p className="text-xs text-zinc-500">
-            {appointmentText(
-              "Prüfen Sie operative Blocker, bevor Sie den Termin schließen und das Standard-Follow-up starten.",
-              "Проверьте операционные блокеры перед закрытием приёма и запуском стандартного follow-up.",
-              "Review operational blockers before closing the appointment and launching standard post-care follow-up.",
-            )}
+            {appointmentText("appointments_review_operational_blockers_before_closing_the_appointme")}
           </p>
         </div>
         <span className={appointmentMetaPillClassName}>
           {detail.status === "completed"
-            ? appointmentText("Abgeschlossen", "Завершён", "Completed")
+            ? appointmentText("appointments_completed_2")
             : statusLabel(detail.status)}
         </span>
       </div>
@@ -1796,11 +1602,7 @@ function AppointmentStatusSection({
       onError(
         error instanceof Error
           ? error.message
-          : appointmentText(
-              "Status konnte nicht geändert werden.",
-              "Не удалось изменить статус.",
-              "Failed to change status",
-            ),
+          : appointmentText("appointments_failed_to_change_status"),
       );
     } finally {
       setBusyAction("");
@@ -1867,11 +1669,7 @@ function AppointmentStatusSection({
                   ? t.appointments_cancel_this_and_following
                   : statusRecurrenceScope === "series"
                     ? t.appointments_cancel_whole_series
-                    : appointmentText(
-                        "Diesen Termin absagen",
-                        "Отменить этот приём",
-                        "Cancel this occurrence",
-                      )
+                    : appointmentText("appointments_cancel_this_occurrence")
                 : statusLabel(status)}
             </Button>
           );
@@ -1979,11 +1777,7 @@ function AppointmentTasksSectionContent({
       onError(
         error instanceof Error
           ? error.message
-          : appointmentText(
-              "Aufgabe konnte nicht erstellt werden.",
-              "Не удалось создать задачу.",
-              "Failed to create task",
-            ),
+          : appointmentText("appointments_failed_to_create_task"),
       );
     } finally {
       setSubmitBusy(false);
@@ -2002,11 +1796,7 @@ function AppointmentTasksSectionContent({
       onError(
         error instanceof Error
           ? error.message
-          : appointmentText(
-              "Aufgabe konnte nicht aktualisiert werden.",
-              "Не удалось обновить задачу.",
-              "Failed to update task",
-            ),
+          : appointmentText("appointments_failed_to_update_task"),
       );
     } finally {
       setActionBusy("");
@@ -2018,36 +1808,22 @@ function AppointmentTasksSectionContent({
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div>
           <h3 className="text-sm font-semibold text-zinc-950">
-            {appointmentText(
-              "Operative Aufgaben",
-              "Операционные задачи",
-              "Operational tasks",
-            )}
+            {appointmentText("appointments_operational_tasks")}
           </h3>
           <p className="text-xs text-zinc-500">
-            {appointmentText(
-              "Appointment-gebundenes Follow-up für PM, Teamlead, Dolmetscher und Concierge.",
-              "Привязанный к приёму follow-up для PM, teamlead, переводчика и concierge.",
-              "Appointment-linked follow-up for PM, teamlead, interpreter and concierge.",
-            )}
+            {appointmentText("appointments_appointment_linked_follow_up_for_pm_teamlead_interpreter")}
           </p>
         </div>
         <span className={appointmentMetaPillClassName}>
-          {appointmentText(
-            `${tasks.length} verknüpft`,
-            `${tasks.length} связано`,
-            `${tasks.length} linked`,
-          )}
+          {appointmentText("appointments_linked_count", {
+            count: tasks.length,
+          })}
         </span>
       </div>
       <div className="mt-4 space-y-3">
         {tasks.length === 0 ? (
           <EmptyState
-            text={appointmentText(
-              "Für diesen Termin gibt es noch keine operativen Aufgaben.",
-              "Для этого приёма ещё нет операционных задач.",
-              "No operational tasks exist for this appointment yet.",
-            )}
+            text={appointmentText("appointments_no_operational_tasks_exist_for_this_appointment_yet")}
           />
         ) : (
           tasks.map((task) => (
@@ -2071,11 +1847,9 @@ function AppointmentTasksSectionContent({
                   <p className="mt-1 text-xs text-zinc-500">
                     {task.assigned_to_name} · {roleLabel(task.assigned_to_role)}
                     {task.due_date
-                      ? appointmentText(
-                          ` · Fallig ${formatDateTimeLabel(task.due_date)}`,
-                          ` · Срок ${formatDateTimeLabel(task.due_date)}`,
-                          ` · Due ${formatDateTimeLabel(task.due_date)}`,
-                        )
+                      ? appointmentText("appointments_due_date_suffix", {
+                          date: formatDateTimeLabel(task.due_date),
+                        })
                       : ""}
                   </p>
                   {task.description ? (

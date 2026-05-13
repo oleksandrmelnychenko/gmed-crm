@@ -11,6 +11,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import { uiText, type Lang } from "@/lib/i18n";
+
 export type OrderSectionKey =
   | "overview"
   | "gates"
@@ -28,7 +30,7 @@ export type OrderSectionDefinition = {
   key: OrderSectionKey;
   group: OrderSectionGroup;
   icon: LucideIcon;
-  labels: { de: string; ru: string };
+  labelKey: string;
 };
 
 export const ORDER_WORKSPACE_SECTIONS: readonly OrderSectionDefinition[] = [
@@ -36,55 +38,55 @@ export const ORDER_WORKSPACE_SECTIONS: readonly OrderSectionDefinition[] = [
     key: "overview",
     group: "context",
     icon: FileText,
-    labels: { de: "Ubersicht", ru: "Обзор" },
+    labelKey: "orders_section_overview",
   },
   {
     key: "gates",
     group: "workflow",
     icon: ShieldCheck,
-    labels: { de: "Gates", ru: "Гейты" },
+    labelKey: "orders_section_gates",
   },
   {
     key: "planning",
     group: "workflow",
     icon: CalendarClock,
-    labels: { de: "Planung", ru: "Планирование" },
+    labelKey: "orders_section_planning",
   },
   {
     key: "execution",
     group: "workflow",
     icon: Activity,
-    labels: { de: "Durchfuhrung", ru: "Исполнение" },
+    labelKey: "orders_section_execution",
   },
   {
     key: "followup",
     group: "workflow",
     icon: RefreshCw,
-    labels: { de: "Nachsorge", ru: "Наблюдение" },
+    labelKey: "orders_section_followup",
   },
   {
     key: "phase",
     group: "workflow",
     icon: CheckCircle2,
-    labels: { de: "Phase", ru: "Фаза" },
+    labelKey: "orders_section_phase",
   },
   {
     key: "workflow",
     group: "workflow",
     icon: ClipboardList,
-    labels: { de: "Checkliste", ru: "Чеклист" },
+    labelKey: "orders_section_workflow",
   },
   {
     key: "services",
     group: "commercial",
     icon: Wallet,
-    labels: { de: "Leistungen", ru: "Услуги" },
+    labelKey: "orders_section_services",
   },
   {
     key: "invoices",
     group: "commercial",
     icon: ReceiptText,
-    labels: { de: "Rechnungen", ru: "Счета" },
+    labelKey: "orders_section_invoices",
   },
 ];
 
@@ -105,20 +107,20 @@ export function normalizeOrderSectionKey(
 
 export function orderSectionLabel(
   section: OrderSectionDefinition,
-  lang: string,
+  lang: Lang,
 ): string {
-  return lang === "de" ? section.labels.de : section.labels.ru;
+  return uiText(section.labelKey, lang);
 }
 
 export function orderSectionGroupLabel(
   group: OrderSectionGroup,
-  lang: string,
+  lang: Lang,
 ): string {
   if (group === "context") {
-    return lang === "de" ? "Kontext" : "Контекст";
+    return uiText("orders_section_group_context", lang);
   }
   if (group === "workflow") {
-    return lang === "de" ? "Workflow" : "Workflow";
+    return uiText("orders_section_group_workflow", lang);
   }
-  return lang === "de" ? "Finanzen" : "Финансы";
+  return uiText("orders_section_group_commercial", lang);
 }

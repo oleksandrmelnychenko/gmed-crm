@@ -71,20 +71,20 @@ export function buildLocalScheduleWarnings(
   }> = [
     {
       scope: "owner",
-      label: tr?.patients_assign_owner ?? "Owner",
+      label: tr?.patients_assign_owner ?? appointmentText("appointments_schedule_scope_owner"),
       match: (item) =>
         Boolean(payload.ownerUserId) &&
         item.owner_user_id === payload.ownerUserId,
     },
     {
       scope: "doctor",
-      label: tr?.common_doctor ?? "Doctor",
+      label: tr?.common_doctor ?? appointmentText("appointments_schedule_scope_doctor"),
       match: (item) =>
         Boolean(payload.doctorId) && item.doctor_id === payload.doctorId,
     },
     {
       scope: "clinic",
-      label: tr?.common_provider ?? "Clinic",
+      label: tr?.common_provider ?? appointmentText("appointments_schedule_scope_clinic"),
       match: (item) =>
         Boolean(payload.providerId) && item.provider_id === payload.providerId,
     },
@@ -120,37 +120,30 @@ export function buildScheduleNotice(
   const parts: string[] = [];
   if (conflicts?.patient_conflict_count) {
     parts.push(
-      appointmentText(
-        `${conflicts.patient_conflict_count} Patientenuberschneidung`,
-        `${conflicts.patient_conflict_count} пересечение по пациенту`,
-        `${conflicts.patient_conflict_count} patient overlap`,
-      ),
+      appointmentText("appointments_patient_overlap_count", {
+        count: conflicts.patient_conflict_count,
+      }),
     );
   }
   if (conflicts?.interpreter_conflict_count) {
     parts.push(
-      appointmentText(
-        `${conflicts.interpreter_conflict_count} Dolmetscheruberschneidung`,
-        `${conflicts.interpreter_conflict_count} пересечение по переводчику`,
-        `${conflicts.interpreter_conflict_count} interpreter overlap`,
-      ),
+      appointmentText("appointments_interpreter_overlap_count", {
+        count: conflicts.interpreter_conflict_count,
+      }),
     );
   }
   for (const warning of warnings) {
     const itemCount = warning.items.length;
     parts.push(
-      appointmentText(
-        `${itemCount} Konflikt bei ${warning.label.toLowerCase()}`,
-        `${itemCount} конфликт по ${warning.label.toLowerCase()}`,
-        `${itemCount} ${warning.scope} overlap`,
-      ),
+      appointmentText("appointments_scope_overlap_count", {
+        count: itemCount,
+        scope: warning.label.toLowerCase(),
+      }),
     );
   }
   return parts.length
-    ? appointmentText(
-        `Planungshinweis: ${parts.join(", ")}.`,
-        `Предупреждение по расписанию: ${parts.join(", ")}.`,
-        `Scheduling warning: ${parts.join(", ")}.`,
-      )
+    ? appointmentText("appointments_scheduling_warning", {
+        parts: parts.join(", "),
+      })
     : "";
 }

@@ -6,6 +6,7 @@ import {
   clearApiCache,
   fetchWithApiTimeout,
 } from "@/lib/api";
+import { uiText } from "@/lib/i18n";
 import { clearSecurePersistedState } from "@/lib/secure-persist";
 
 export interface User {
@@ -42,7 +43,7 @@ interface PendingLoginResponse {
 export class PendingLoginError extends Error {
   pendingId: string;
   constructor(pendingId: string, message?: string) {
-    super(message ?? "Login requires admin approval");
+    super(message ?? uiText("auth_login_requires_admin_approval"));
     this.pendingId = pendingId;
   }
 }

@@ -260,9 +260,9 @@ function createProvidersPageFieldPatch<K extends keyof ProvidersPageState>(
 
 function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}) {
   const { user } = useAuth();
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
+  const l = (key: string) => t.uiText[key] ?? key;
   const detailPageMode = Boolean(detailRouteId);
   const providerColumnGroupLabels = useMemo(
     () => ({
@@ -988,7 +988,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           {detailBusy ? (
             <div className="flex min-h-[520px] items-center justify-center text-sm text-muted-foreground">
               <LoaderCircle className="mr-2 size-4 animate-spin" />
-              {l("Anbieter wird geladen", "Загрузка провайдера", "Loading provider")}
+              {l("providers_loading_provider")}
             </div>
           ) : detail ? (
             <div className="flex min-h-0 flex-col">
@@ -1006,7 +1006,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     className="h-9 rounded-lg"
                     onClick={() => staffGo("/providers")}
                   >
-                    {l("Zur Liste", "К списку", "Back to list")}
+                    {l("providers_back_to_list")}
                   </Button>
                   {permissions.canManageRegistry ? (
                     <Button
@@ -1185,7 +1185,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           <AdminInlineMetric icon={Building2} label={t.providers_title} value={metrics.total} tone="sky" />
           <AdminInlineMetric
             icon={UsersRound}
-            label={permissions.forceNonMedical ? l("Services", "Сервисы", "Services") : t.providers_doctors}
+            label={permissions.forceNonMedical ? l("appointments_services") : t.providers_doctors}
             value={permissions.forceNonMedical ? metrics.services : metrics.doctors}
             tone="emerald"
           />
@@ -1197,7 +1197,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           />
           <AdminInlineMetric
             icon={CalendarClock}
-            label={permissions.forceNonMedical ? l("Offene Anfragen", "Открытые запросы", "Open requests") : t.providers_appointments}
+            label={permissions.forceNonMedical ? l("providers_open_requests") : t.providers_appointments}
             value={permissions.forceNonMedical ? metrics.openConciergeRequests : metrics.appointments}
             tone="slate"
           />
@@ -1257,8 +1257,8 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                 type="button"
                 variant="outline"
                 size="icon-sm"
-                title={t.common_refresh ?? "Refresh"}
-                aria-label={t.common_refresh ?? "Refresh"}
+                title={t.common_refresh}
+                aria-label={t.common_refresh}
                 onClick={() => {
                   refreshList();
                   if (detailOpen && selectedId) {
@@ -1272,8 +1272,8 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                 type="button"
                 variant="outline"
                 size="icon-sm"
-                title={t.common_export ?? "Export"}
-                aria-label={t.common_export ?? "Export"}
+                title={t.common_export}
+                aria-label={t.common_export}
                 onClick={exportProviders}
               >
                 <Download className="size-3.5" />
@@ -1366,7 +1366,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             {anyFilterActive ? (
               <Button type="button" variant="ghost" size="sm" onClick={resetFilters}>
                 <X className="size-3.5" />
-                {l("Zurücksetzen", "Сбросить", "Reset")}
+                {l("providers_reset")}
               </Button>
             ) : null}
           </div>
@@ -1388,11 +1388,11 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             frozenColumns.length >= MAX_PROVIDER_FROZEN_COLUMNS
           }
           columnHeaderContextMenuLabels={{
-            column: tr.table_columns ?? "Column",
-            freeze: tr.table_columns_freeze ?? "Freeze column",
-            unfreeze: tr.table_columns_unfreeze ?? "Unfreeze column",
-            frozen: tr.table_columns_frozen ?? "Frozen",
-            freezeLimitReached: tr.table_columns_freeze_limit ?? "Freeze limit reached",
+            column: tr.table_columns,
+            freeze: tr.table_columns_freeze,
+            unfreeze: tr.table_columns_unfreeze,
+            frozen: tr.table_columns_frozen,
+            freezeLimitReached: tr.table_columns_freeze_limit,
           }}
           density={density}
           rowId={(provider) => provider.id}
@@ -1472,7 +1472,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           {detailBusy ? (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
               <LoaderCircle className="mr-2 size-4 animate-spin" />
-              {l("Anbieter wird geladen", "Загрузка провайдера", "Loading provider")}
+              {l("providers_loading_provider")}
             </div>
           ) : detail ? (
             <div className="flex flex-1 min-h-0 flex-col">
@@ -1750,15 +1750,14 @@ function ProviderOverviewSection({
   onOpenPatients: () => void;
   onOpenAppointments: () => void;
 }) {
-  const { t, lang } = useLang();
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
 
   const overviewRows = [
     {
       label:
         detail.provider_type === "non_medical"
-          ? l("Kontakte", "Контакты", "Contacts")
+          ? l("providers_contacts")
           : t.providers_doctors,
       value: detail.doctors.length,
     },
@@ -1771,7 +1770,7 @@ function ProviderOverviewSection({
       value: detail.linked_patients.length,
     },
     {
-      label: l("Aktivität", "Активность", "Activity items"),
+      label: l("providers_activity_items"),
       value: detail.interactions.length,
     },
   ];
@@ -1779,7 +1778,7 @@ function ProviderOverviewSection({
   return (
     <section className="space-y-5 rounded-xl border border-border/50 bg-card/40 p-4">
       <h3 className="text-sm font-semibold text-foreground">
-        {titleWithDot(l("Providerübersicht", "Обзор провайдера", "Provider overview"))}
+        {titleWithDot(l("providers_provider_overview"))}
       </h3>
       <div className="grid items-stretch gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-8">
         <div className="space-y-4">
@@ -1798,14 +1797,10 @@ function ProviderOverviewSection({
             onClick={onOpenPatients}
           >
             <span className="block text-sm font-semibold text-foreground">
-              {l("Patientenlinks", "Связи с пациентами", "Patient links")}
+              {l("providers_patient_links")}
             </span>
             <span className="mt-2 block text-xs leading-snug text-muted-foreground">
-              {l(
-                "Patienten dieses Providers öffnen.",
-                "Откройте пациентов этого провайдера.",
-                "Open patients linked to this provider.",
-              )}
+              {l("providers_open_patients_linked_to_this_provider")}
             </span>
             <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
               <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-tranzinc-y-0.5 group-hover:tranzinc-x-0.5" />
@@ -1817,14 +1812,10 @@ function ProviderOverviewSection({
             onClick={onOpenAppointments}
           >
             <span className="block text-sm font-semibold text-foreground">
-              {l("Termine", "Записи", "Appointments")}
+              {l("providers_appointments")}
             </span>
             <span className="mt-2 block text-xs leading-snug text-muted-foreground">
-              {l(
-                "Termine dieses Providers öffnen.",
-                "Откройте записи этого провайдера.",
-                "Open appointments for this provider.",
-              )}
+              {l("providers_open_appointments_for_this_provider")}
             </span>
             <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
               <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-tranzinc-y-0.5 group-hover:tranzinc-x-0.5" />
@@ -1864,10 +1855,9 @@ function ProviderSheetHero({
   onDeactivate: () => void;
   onDelete: () => void;
 }) {
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const l = (key: string) => t.uiText[key] ?? key;
   const isMedical = detail.provider_type === "medical";
   const metaLine = [
     detail.legal_name && detail.legal_name !== detail.name ? detail.legal_name : null,
@@ -1937,7 +1927,7 @@ function ProviderSheetHero({
         </div>
         <div className="flex flex-col justify-start gap-4 border-t border-dashed border-border/70 pt-3 text-left md:border-l md:border-t-0 md:pl-5 md:pt-0">
           <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
-            {l("Aktionen", "Действия", "Actions")}
+            {l("providers_actions")}
           </p>
           {permissions.canManageRegistry ? (
             <div className="flex flex-col gap-2">
@@ -1952,7 +1942,7 @@ function ProviderSheetHero({
                 {providerActionBusy === "activate" ? (
                   <LoaderCircle className="size-3.5 animate-spin" />
                 ) : null}
-                {l("Aktivieren", "Активировать", "Activate")}
+                {l("providers_activate")}
               </Button>
               <Button
                 type="button"
@@ -1965,7 +1955,7 @@ function ProviderSheetHero({
                 {providerActionBusy === "deactivate" ? (
                   <LoaderCircle className="size-3.5 animate-spin" />
                 ) : null}
-                {l("Deaktivieren", "Деактивировать", "Deactivate")}
+                {l("providers_deactivate")}
               </Button>
               <Button
                 type="button"
@@ -1980,7 +1970,7 @@ function ProviderSheetHero({
                 ) : (
                   <Trash2 className="size-3.5" />
                 )}
-                {l("Löschen", "Удалить", "Delete")}
+                {l("patients_delete")}
               </Button>
             </div>
           ) : null}
@@ -2008,8 +1998,8 @@ function DoctorSection({
   onEdit: (doctor: DoctorSummary) => void;
   onDelete: (doctorId: string, doctorName: string) => void;
 }) {
-  const { t, lang } = useLang();
-  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
 
   return (
     <section className="space-y-3 rounded-xl border border-border/70 bg-card p-3.5">
@@ -2018,7 +2008,7 @@ function DoctorSection({
           <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
           <h3 className="truncate text-sm font-semibold text-foreground">
             {detail.provider_type === "non_medical"
-              ? l("Kontakte", "Контакты", "Contacts")
+              ? l("providers_contacts")
               : t.providers_doctors}
           </h3>
           <span className="shrink-0 text-xs font-medium text-muted-foreground">
@@ -2099,7 +2089,7 @@ function DoctorSection({
                           onEdit(doctor);
                         }}
                       >
-                        {l("Bearbeiten", "Редактировать", "Edit")}
+                        {l("patients_edit")}
                       </Button>
                       <Button
                         type="button"
@@ -2114,7 +2104,7 @@ function DoctorSection({
                         }}
                       >
                         <Trash2 className="size-3.5" />
-                        {l("Löschen", "Удалить", "Delete")}
+                        {l("patients_delete")}
                       </Button>
                     </>
                   ) : null}
@@ -2123,7 +2113,7 @@ function DoctorSection({
 
               <div className="grid border-t border-border bg-muted/10 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_0.5fr_0.5fr]">
                 <div className="border-b border-border px-4 py-3 sm:border-r lg:border-b-0">
-                  <p className="text-xs text-muted-foreground">{l("Lizenz", "Лицензия", "License")}</p>
+                  <p className="text-xs text-muted-foreground">{l("providers_license")}</p>
                   <div className="mt-1 flex flex-wrap items-center gap-2">
                     <span className="text-sm font-semibold text-foreground">
                       {doctor.license_number || t.common_not_set}
@@ -2137,17 +2127,17 @@ function DoctorSection({
                   </div>
                 </div>
                 <div className="border-b border-border px-4 py-3 lg:border-b-0 lg:border-r">
-                  <p className="text-xs text-muted-foreground">{l("Gültig bis", "Действует до", "Valid until")}</p>
+                  <p className="text-xs text-muted-foreground">{l("providers_valid_until")}</p>
                   <p className="mt-1 text-sm font-semibold text-foreground">
                     {compactDate(doctor.licensing_valid_until, t.common_not_set)}
                   </p>
                 </div>
                 <div className="border-b border-border px-4 py-3 sm:border-b-0 sm:border-r">
-                  <p className="text-xs text-muted-foreground">{l("Patienten", "Пациенты", "Patients")}</p>
+                  <p className="text-xs text-muted-foreground">{l("providers_patients")}</p>
                   <p className="mt-1 text-sm font-semibold text-foreground">{doctor.patient_count}</p>
                 </div>
                 <div className="px-4 py-3">
-                  <p className="text-xs text-muted-foreground">{l("Slots", "Слоты", "Slots")}</p>
+                  <p className="text-xs text-muted-foreground">{l("providers_slots")}</p>
                   <p className="mt-1 text-sm font-semibold text-foreground">{doctor.appointment_count}</p>
                 </div>
               </div>
@@ -2173,15 +2163,15 @@ function ServiceSection({
   onEdit: (service: ServiceItem) => void;
   onDelete: (serviceId: string, serviceName: string) => void;
 }) {
-  const { t, lang } = useLang();
-  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
   return (
     <section className="space-y-3 rounded-xl border border-border/70 bg-card p-3.5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
           <h3 className="truncate text-sm font-semibold text-foreground">
-            {l("Servicekatalog", "Каталог сервисов", "Service catalog")}
+            {l("providers_service_catalog")}
           </h3>
           <span className="shrink-0 text-xs font-medium text-muted-foreground">
             {detail.services.length}
@@ -2238,7 +2228,7 @@ function ServiceSection({
                 </div>
 
                 <div className="flex flex-col justify-between gap-2 rounded-xl border border-border/70 px-3 py-2">
-                  <span className="text-xs text-muted-foreground">{l("Preis", "Цена", "Price")}</span>
+                  <span className="text-xs text-muted-foreground">{l("providers_price")}</span>
                   <span className="text-lg font-semibold leading-none text-foreground">
                     {moneyLabel(service.price, service.currency)}
                   </span>
@@ -2253,7 +2243,7 @@ function ServiceSection({
                       className="h-8 w-full justify-center rounded-lg bg-muted/20"
                       onClick={() => onEdit(service)}
                     >
-                      {l("Bearbeiten", "Редактировать", "Edit")}
+                      {l("patients_edit")}
                     </Button>
                     <Button
                       type="button"
@@ -2264,7 +2254,7 @@ function ServiceSection({
                       onClick={() => onDelete(service.id, service.service_name)}
                     >
                       <Trash2 className="size-3.5" />
-                      {l("Löschen", "Удалить", "Delete")}
+                      {l("patients_delete")}
                     </Button>
                   </div>
                 ) : null}
@@ -2282,15 +2272,15 @@ function LinkedPatientsSection({
   onOpenPatient?: (patientId: string) => void;
   onOpenAppointments?: (patientId: string) => void;
 }) {
-  const { t, lang } = useLang();
-  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
   return (
     <section className="space-y-3 rounded-xl border border-border/70 bg-card p-3.5">
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
           <h3 className="truncate text-sm font-semibold text-foreground">
-            {l("Verknüpfte Patienten", "Связанные пациенты", "Linked patients")}
+            {l("providers_linked_patients")}
           </h3>
           <span className="shrink-0 text-xs font-medium text-muted-foreground">
             {detail.linked_patients.length}
@@ -2317,17 +2307,17 @@ function LinkedPatientsSection({
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-foreground">{patientLabel(patient)}</p>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                    {l("Letzte Aktivität", "Последнее взаимодействие", "Last interaction")}: {compactDateTime(patient.last_interaction_at)}
+                    {l("providers_last_interaction")}: {compactDateTime(patient.last_interaction_at)}
                   </p>
                 </div>
 
                 <div className="grid grid-cols-3 overflow-hidden rounded-xl border border-border/70">
                   <div className="border-r border-border px-3 py-2">
-                    <p className="text-xs text-muted-foreground">{l("Termine", "Записи", "Appointments")}</p>
+                    <p className="text-xs text-muted-foreground">{l("providers_appointments")}</p>
                     <p className="mt-1 text-lg font-semibold leading-none text-foreground">{patient.appointment_count}</p>
                   </div>
                   <div className="border-r border-border px-3 py-2">
-                    <p className="text-xs text-muted-foreground">{l("Services", "Сервисы", "Services")}</p>
+                    <p className="text-xs text-muted-foreground">{l("appointments_services")}</p>
                     <p className="mt-1 text-lg font-semibold leading-none text-foreground">{patient.leistung_count}</p>
                   </div>
                   <div className="px-3 py-2">
@@ -2344,7 +2334,7 @@ function LinkedPatientsSection({
                     className="h-8 w-full justify-center rounded-lg bg-muted/20"
                     onClick={() => window.open(`/patients?patient=${patient.id}`, "_blank", "noopener,noreferrer")}
                   >
-                    {l("Patient öffnen", "Открыть пациента", "Open patient")}
+                    {l("patients_open_patient")}
                   </Button>
                   <Button
                     type="button"
@@ -2353,7 +2343,7 @@ function LinkedPatientsSection({
                     className="h-8 w-full justify-center rounded-lg bg-muted/20"
                     onClick={() => window.open(`/appointments?patient=${patient.id}`, "_blank", "noopener,noreferrer")}
                   >
-                    {l("Termine", "Записи", "Appointments")}
+                    {l("providers_appointments")}
                   </Button>
                 </div>
               </div>
@@ -2373,15 +2363,15 @@ function InteractionHistorySection({
   onOpenAppointment?: (appointmentId: string) => void;
   onOpenOrder?: (orderId: string) => void;
 }) {
-  const { t, lang } = useLang();
-  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
   return (
     <section className="space-y-3 rounded-xl border border-border/70 bg-card p-3.5">
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
           <h3 className="truncate text-sm font-semibold text-foreground">
-            {l("Interaktionsverlauf", "История взаимодействий", "Interaction history")}
+            {l("providers_interaction_history")}
           </h3>
           <span className="shrink-0 text-xs font-medium text-muted-foreground">
             {detail.interactions.length}
@@ -2436,22 +2426,22 @@ function InteractionHistorySection({
 
                     <div className="grid gap-3 text-sm md:grid-cols-2">
                       <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-                        <span className="text-xs text-muted-foreground">{l("Patient", "Пациент", "Patient")}</span>
+                        <span className="text-xs text-muted-foreground">{l("orders_patient")}</span>
                         <span className="font-medium text-foreground">{item.patient_name}</span>
                         <span className="text-xs text-muted-foreground">ID</span>
                         <span className="font-medium text-foreground">{item.patient_id}</span>
                       </div>
                       <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-                        <span className="text-xs text-muted-foreground">{l("Arzt", "Врач", "Doctor")}</span>
+                        <span className="text-xs text-muted-foreground">{l("providers_doctor")}</span>
                         <span className="font-medium text-foreground">{item.doctor_name || t.common_not_set}</span>
-                        <span className="text-xs text-muted-foreground">{l("Ort", "Локация", "Location")}</span>
+                        <span className="text-xs text-muted-foreground">{l("providers_location")}</span>
                         <span className="font-medium text-foreground">{item.location || t.common_not_set}</span>
                       </div>
                     </div>
 
                     {item.notes ? (
                       <div className="rounded-xl border border-border/60 px-3 py-2 text-sm leading-6 text-zinc-700">
-                        <span className="mb-1 block text-xs text-muted-foreground">{l("Notiz", "Заметка", "Note")}</span>
+                        <span className="mb-1 block text-xs text-muted-foreground">{l("patients_note")}</span>
                         {item.notes}
                       </div>
                     ) : null}
@@ -2464,7 +2454,7 @@ function InteractionHistorySection({
                       className="h-8 w-full justify-center rounded-lg bg-muted/20"
                       onClick={() => window.open(`/patients?patient=${item.patient_id}`, "_blank", "noopener,noreferrer")}
                     >
-                      {l("Patient", "Пациент", "Patient")}
+                      {l("orders_patient")}
                     </Button>
                     {item.kind === "appointment" ? (
                       <Button
@@ -2474,7 +2464,7 @@ function InteractionHistorySection({
                         className="h-8 w-full justify-center rounded-lg bg-muted/20"
                         onClick={() => window.open(`/appointments?appointment=${item.id}`, "_blank", "noopener,noreferrer")}
                       >
-                        {l("Termin", "Запись", "Appointment")}
+                        {l("providers_appointment")}
                       </Button>
                     ) : null}
                     {item.kind !== "appointment" ? (
@@ -2485,7 +2475,7 @@ function InteractionHistorySection({
                         className="h-8 w-full justify-center rounded-lg bg-muted/20"
                         onClick={() => window.open(`/appointments?patient=${item.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
-                        {l("Termine", "Записи", "Appointments")}
+                        {l("providers_appointments")}
                       </Button>
                     ) : null}
                     {item.order_id ? (
@@ -2496,7 +2486,7 @@ function InteractionHistorySection({
                         className="h-8 w-full justify-center rounded-lg bg-muted/20"
                         onClick={() => window.open(`/orders?order=${item.order_id}`, "_blank", "noopener,noreferrer")}
                       >
-                        {l("Auftrag", "Заказ", "Order")}
+                        {l("patients_order")}
                       </Button>
                     ) : null}
                   </div>
@@ -2523,13 +2513,13 @@ function ProviderFormFields({
   disabled?: boolean;
   grouped?: boolean;
 }) {
-  const { t, lang } = useLang();
-  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
 
   const profileFields = (
     <>
       <div className="grid gap-4 md:grid-cols-3">
-        <Field label={l("Anzeigename", "Отображаемое имя", "Display name")}>
+        <Field label={l("patients_display_name")}>
           <Input
             value={form.name}
             onChange={(event) => onChange("name", event.target.value)}
@@ -2540,12 +2530,12 @@ function ProviderFormFields({
           />
         </Field>
 
-        <Field label={l("Rechtlicher Name", "Юридическое название", "Legal name")}>
+        <Field label={l("providers_legal_name")}>
           <Input
             value={form.legalName}
             onChange={(event) => onChange("legalName", event.target.value)}
             className={shellInputClassName}
-            placeholder={l("Rechtsträger / Vertragsname", "Юридическое лицо / название договора", "Legal entity / contract name")}
+            placeholder={l("providers_legal_entity_contract_name")}
             disabled={disabled}
           />
         </Field>
@@ -2564,12 +2554,12 @@ function ProviderFormFields({
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
-        <Field label={l("Steuer-ID", "Налоговый ID", "Tax ID")}>
+        <Field label={l("providers_tax_id")}>
           <Input
             value={form.taxId}
             onChange={(event) => onChange("taxId", event.target.value)}
             className={shellInputClassName}
-            placeholder={l("USt-IdNr. / Steuer-ID", "VAT / налоговый ID", "VAT / tax ID")}
+            placeholder={l("providers_vat_tax_id")}
             disabled={disabled}
           />
         </Field>
@@ -2589,7 +2579,7 @@ function ProviderFormFields({
             value={form.website}
             onChange={(event) => onChange("website", event.target.value)}
             className={shellInputClassName}
-            placeholder={l("https://...", "https://...", "https://...")}
+            placeholder={l("providers_https")}
             disabled={disabled}
           />
         </Field>
@@ -2669,7 +2659,7 @@ function ProviderFormFields({
           onChange={(event) => onChange("contractText", event.target.value)}
           className={textareaClassName}
           rows={4}
-          placeholder={l('Klartext wird automatisch zu {"summary": "..."} umgewandelt. JSON ist ebenfalls erlaubt.', 'Обычный текст автоматически станет {"summary": "..."}; JSON тоже допустим.', 'Plain text becomes {"summary": "..."} automatically. JSON is accepted too.')}
+          placeholder={l("providers_plain_text_becomes_summary_automatically_json_is_accepte")}
           disabled={disabled}
         />
       </Field>
@@ -2690,16 +2680,16 @@ function ProviderFormFields({
   if (grouped) {
     return (
       <div className="space-y-3">
-        <Section title={l("Profil", "Профиль провайдера", "Provider profile")}>
+        <Section title={l("providers_provider_profile")}>
           {profileFields}
         </Section>
-        <Section title={l("Adresse", "Адрес", "Address")}>
+        <Section title={l("patients_address")}>
           {addressFields}
         </Section>
-        <Section title={l("Kontakt", "Контакты", "Contact")}>
+        <Section title={l("patients_contact")}>
           {contactFields}
         </Section>
-        <Section title={l("Vertrag und Notizen", "Договор и заметки", "Contract and notes")}>
+        <Section title={l("providers_contract_and_notes")}>
           {contractFields}
         </Section>
       </div>
@@ -2723,12 +2713,12 @@ function DoctorFormFields({
   form: DoctorFormState;
   onChange: (field: keyof DoctorFormState, value: string) => void;
 }) {
-  const { t, lang } = useLang();
-  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
 
   return (
     <div className="space-y-3">
-      <Section title={l("Arztprofil", "Профиль врача", "Doctor profile")}>
+      <Section title={l("providers_doctor_profile")}>
         <div className="grid gap-4 md:grid-cols-2">
           <Field label={t.providers_doctors}>
             <Input
@@ -2753,18 +2743,18 @@ function DoctorFormFields({
               className={shellInputClassName}
             />
           </Field>
-          <Field label={l("Sprachen", "Языки", "Languages")}>
+          <Field label={l("providers_languages")}>
             <Input
               value={form.languages}
               onChange={(event) => onChange("languages", event.target.value)}
               className={shellInputClassName}
-              placeholder={l("de, en, uk", "de, en, uk", "de, en, uk")}
+              placeholder={l("providers_de_en_uk")}
             />
           </Field>
         </div>
       </Section>
 
-      <Section title={l("Kontakte", "Контакты", "Contacts")}>
+      <Section title={l("providers_contacts")}>
         <div className="grid gap-4 md:grid-cols-2">
           <Field label={t.field_phone}>
             <Input
@@ -2784,23 +2774,23 @@ function DoctorFormFields({
         </div>
       </Section>
 
-      <Section title={l("Lizenz", "Лицензия", "License")}>
+      <Section title={l("providers_license")}>
         <div className="grid gap-4 md:grid-cols-3">
-          <Field label={l("Lizenznummer", "Номер лицензии", "License number")}>
+          <Field label={l("providers_license_number")}>
             <Input
               value={form.licenseNumber}
               onChange={(event) => onChange("licenseNumber", event.target.value)}
               className={shellInputClassName}
             />
           </Field>
-          <Field label={l("Lizenzland", "Страна лицензии", "Licensing country")}>
+          <Field label={l("providers_licensing_country")}>
             <Input
               value={form.licensingCountry}
               onChange={(event) => onChange("licensingCountry", event.target.value)}
               className={shellInputClassName}
             />
           </Field>
-          <Field label={l("Lizenz gültig bis", "Лицензия действительна до", "License valid until")}>
+          <Field label={l("providers_license_valid_until")}>
             <Input
               type="date"
               value={form.licensingValidUntil}
@@ -2811,7 +2801,7 @@ function DoctorFormFields({
         </div>
       </Section>
 
-      <Section title={l("Notizen", "Заметки", "Notes")}>
+      <Section title={l("appointments_notes")}>
         <Field label={t.providers_notes}>
           <textarea
             value={form.notes}
@@ -2831,11 +2821,11 @@ function ServiceFormFields({
   form: ServiceFormState;
   onChange: (field: keyof ServiceFormState, value: string) => void;
 }) {
-  const { t, lang } = useLang();
-  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
   return (
     <div className="space-y-3">
-      <Section title={l("Service", "Сервис", "Service")}>
+      <Section title={l("providers_service")}>
         <div className="grid gap-4 md:grid-cols-2">
           <Field label={t.providers_service_name}>
             <Input
@@ -2856,7 +2846,7 @@ function ServiceFormFields({
         </div>
       </Section>
 
-      <Section title={l("Kosten", "Стоимость", "Cost")}>
+      <Section title={l("providers_cost")}>
         <div className="grid gap-4 md:grid-cols-2">
           <Field label={t.providers_service_price}>
             <Input
@@ -2879,7 +2869,7 @@ function ServiceFormFields({
         </div>
       </Section>
 
-      <Section title={l("Gültigkeit", "Срок действия", "Validity")}>
+      <Section title={l("providers_validity")}>
         <div className="grid gap-4 md:grid-cols-2">
           <Field label={t.providers_service_valid_from}>
             <Input

@@ -22,7 +22,7 @@ import type { ProviderDetail as ProviderSheetDetail } from "@/pages/providers";
 
 function humanizeLinkedCode(value: string | null | undefined) {
   if (!value) {
-    return appointmentText("Nicht festgelegt", "Не указано", "Not set");
+    return appointmentText("appointments_not_set");
   }
   const parts: string[] = [];
   for (const part of value.split("_")) {
@@ -34,7 +34,7 @@ function humanizeLinkedCode(value: string | null | undefined) {
 }
 
 function linkedProviderAddress(detail: ProviderSheetDetail) {
-  const notSet = appointmentText("Nicht festgelegt", "Не указано", "Not set");
+  const notSet = appointmentText("appointments_not_set");
   const cityLine = [detail.address_zip, detail.address_city]
     .filter(Boolean)
     .join(" ")
@@ -63,51 +63,43 @@ function LinkedProviderOverviewSection({
   const { t } = useLang();
   const providerTypeLabel =
     detail.provider_type === "medical"
-      ? appointmentText("Medizinisch", "Медицинская", "Medical")
-      : appointmentText("Nicht medizinisch", "Немедицинская", "Non-medical");
-  const notSet = appointmentText("Nicht festgelegt", "Не указано", "Not set");
+      ? appointmentText("appointments_medical")
+      : appointmentText("appointments_non_medical");
+  const notSet = appointmentText("appointments_not_set");
 
   return (
     <Section
-      title={appointmentText("Klinikprofil", "Профиль клиники", "Clinic profile")}
+      title={appointmentText("appointments_clinic_profile")}
       accessory={<CountBadge>{providerTypeLabel}</CountBadge>}
     >
       <div className="flex flex-wrap gap-2">
         <StatusBadge tone={detail.is_active ? "success" : "neutral"}>
           {detail.is_active
-            ? appointmentText("Aktiv", "Активна", "Active")
-            : appointmentText("Inaktiv", "Неактивна", "Inactive")}
+            ? appointmentText("appointments_active")
+            : appointmentText("appointments_inactive")}
         </StatusBadge>
         {detail.kooperationsvertrag ? (
           <StatusBadge tone="warning">
-            {appointmentText(
-              "Vertrag verknüpft",
-              "Договор привязан",
-              "Contract linked",
-            )}
+            {appointmentText("appointments_contract_linked")}
           </StatusBadge>
         ) : null}
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <StatCard
-          label={appointmentText("Kontakte", "Контакты", "Contacts")}
+          label={appointmentText("appointments_contacts")}
           value={detail.doctors.length}
         />
         <StatCard
-          label={appointmentText("Services", "Сервисы", "Services")}
+          label={appointmentText("appointments_services_2")}
           value={detail.services.length}
         />
         <StatCard
-          label={appointmentText(
-            "Verknüpfte Patienten",
-            "Связанные пациенты",
-            "Linked patients",
-          )}
+          label={appointmentText("appointments_linked_patients")}
           value={detail.linked_patients.length}
         />
         <StatCard
-          label={appointmentText("Aktivität", "Активность", "Activity")}
+          label={appointmentText("appointments_activity")}
           value={detail.interactions.length}
         />
       </div>
@@ -115,31 +107,31 @@ function LinkedProviderOverviewSection({
       <div className="grid gap-3 md:grid-cols-2">
         <div className={appointmentPreviewInfoCardClassName}>
           <InfoRow
-            label={appointmentText("Name", "Название", "Name")}
+            label={appointmentText("appointments_name")}
             value={detail.name || notSet}
           />
         </div>
         <div className={appointmentPreviewInfoCardClassName}>
           <InfoRow
-            label={appointmentText("Rechtsträger", "Юрлицо", "Legal name")}
+            label={appointmentText("appointments_legal_name")}
             value={detail.legal_name || notSet}
           />
         </div>
         <div className={appointmentPreviewInfoCardClassName}>
           <InfoRow
-            label={appointmentText("Standort", "Локация", "Location")}
+            label={appointmentText("appointments_location")}
             value={linkedProviderAddress(detail)}
           />
         </div>
         <div className={appointmentPreviewInfoCardClassName}>
           <InfoRow
-            label={appointmentText("Fachbereich", "Специализация", "Specialty")}
+            label={appointmentText("appointments_specialty")}
             value={detail.fachbereich || notSet}
           />
         </div>
         <div className={appointmentPreviewInfoCardClassName}>
           <InfoRow
-            label={appointmentText("Telefon", "Телефон", "Phone")}
+            label={appointmentText("appointments_phone")}
             value={detail.phone || notSet}
           />
         </div>
@@ -151,14 +143,14 @@ function LinkedProviderOverviewSection({
       {detail.notes ? (
         <ListItem className="space-y-1">
           <p className={tokens.text.label}>
-            {appointmentText("Notizen", "Заметки", "Notes")}
+            {appointmentText("appointments_notes_2")}
           </p>
           <p className="text-sm leading-6 text-foreground">{detail.notes}</p>
         </ListItem>
       ) : null}
 
       <p className="text-xs text-muted-foreground">
-        {appointmentText("Aktualisiert", "Обновлено", "Updated")}:{" "}
+        {appointmentText("appointments_updated")}:{" "}
         {formatDateTimeLabel(detail.updated_at)}
       </p>
     </Section>
@@ -177,20 +169,12 @@ function LinkedProviderPatientsSection({
   const { t } = useLang();
   return (
     <Section
-      title={appointmentText(
-        "Verknüpfte Patienten",
-        "Связанные пациенты",
-        "Linked patients",
-      )}
+      title={appointmentText("appointments_linked_patients")}
       accessory={<CountBadge>{detail.linked_patients.length}</CountBadge>}
     >
       {detail.linked_patients.length === 0 ? (
         <EmptyCell>
-          {appointmentText(
-            "Für diese Klinik sind noch keine Patienten verknüpft.",
-            "Для этой клиники пока нет связанных пациентов.",
-            "No patients are linked to this clinic yet.",
-          )}
+          {appointmentText("appointments_no_patients_are_linked_to_this_clinic_yet")}
         </EmptyCell>
       ) : (
         <div className="space-y-3">
@@ -205,22 +189,18 @@ function LinkedProviderPatientsSection({
                     {patient.patient_id}
                   </p>
                   <p className="mt-2 text-xs text-muted-foreground">
-                    {appointmentText(
-                      "Letzte Aktivität",
-                      "Последняя активность",
-                      "Last activity",
-                    )}
+                    {appointmentText("appointments_last_activity")}
                     : {formatDateTimeLabel(patient.last_interaction_at)}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <CountBadge>
                     {patient.appointment_count}{" "}
-                    {appointmentText("Termine", "записи", "appointments")}
+                    {appointmentText("appointments_appointments_2")}
                   </CountBadge>
                   <CountBadge>
                     {patient.leistung_count}{" "}
-                    {appointmentText("Services", "сервисы", "services")}
+                    {appointmentText("appointments_services_3")}
                   </CountBadge>
                   <CountBadge>
                     {patient.concierge_count} {t.appointments_linked_concierge}
@@ -235,7 +215,7 @@ function LinkedProviderPatientsSection({
                   className="h-8 rounded-lg"
                   onClick={() => onOpenPatient(patient.id)}
                 >
-                  {appointmentText("Patient", "Пациент", "Patient")}
+                  {appointmentText("appointments_patient")}
                 </Button>
               </div>
             </ListItem>
@@ -257,24 +237,16 @@ function LinkedProviderInteractionsSection({
   onOpenPatient: (patientId: string) => void;
   onOpenAppointment: (appointmentId: string) => void;
 }) {
-  const notSet = appointmentText("Nicht festgelegt", "Не указано", "Not set");
+  const notSet = appointmentText("appointments_not_set");
 
   return (
     <Section
-      title={appointmentText(
-        "Interaktionsverlauf",
-        "История взаимодействий",
-        "Interaction history",
-      )}
+      title={appointmentText("appointments_interaction_history")}
       accessory={<CountBadge>{detail.interactions.length}</CountBadge>}
     >
       {detail.interactions.length === 0 ? (
         <EmptyCell>
-          {appointmentText(
-            "Für diese Klinik gibt es noch keine Interaktionen.",
-            "Для этой клиники пока нет взаимодействий.",
-            "No interactions for this clinic yet.",
-          )}
+          {appointmentText("appointments_no_interactions_for_this_clinic_yet")}
         </EmptyCell>
       ) : (
         <div className="space-y-3">
@@ -310,13 +282,13 @@ function LinkedProviderInteractionsSection({
               <div className="grid gap-3 md:grid-cols-2">
                 <div className={appointmentPreviewInfoCardClassName}>
                   <InfoRow
-                    label={appointmentText("Arzt", "Врач", "Doctor")}
+                    label={appointmentText("appointments_doctor")}
                     value={item.doctor_name || notSet}
                   />
                 </div>
                 <div className={appointmentPreviewInfoCardClassName}>
                   <InfoRow
-                    label={appointmentText("Standort", "Локация", "Location")}
+                    label={appointmentText("appointments_location")}
                     value={item.location || notSet}
                   />
                 </div>
@@ -341,7 +313,7 @@ function LinkedProviderInteractionsSection({
                   className="h-8 rounded-lg"
                   onClick={() => onOpenPatient(item.patient_id)}
                 >
-                  {appointmentText("Patient", "Пациент", "Patient")}
+                  {appointmentText("appointments_patient")}
                 </Button>
                 {item.kind === "appointment" ? (
                   <Button
@@ -351,7 +323,7 @@ function LinkedProviderInteractionsSection({
                     className="h-8 rounded-lg"
                     onClick={() => onOpenAppointment(item.id)}
                   >
-                    {appointmentText("Termin", "Запись", "Appointment")}
+                    {appointmentText("appointments_appointment_3")}
                   </Button>
                 ) : null}
               </div>
@@ -396,11 +368,7 @@ function LinkedProviderSheet({
       {loading ? (
         <div className="flex min-h-[220px] items-center justify-center text-sm text-muted-foreground">
           <LoaderCircle className="mr-2 size-4 animate-spin" />
-          {appointmentText(
-            "Anbieter wird geladen",
-            "Загрузка провайдера",
-            "Loading provider",
-          )}
+          {appointmentText("appointments_loading_provider")}
         </div>
       ) : detail ? (
         <>
@@ -425,11 +393,7 @@ function LinkedProviderSheet({
         <Banner tone="error" withIcon>{error}</Banner>
       ) : (
         <EmptyCell>
-          {appointmentText(
-            "Keine Klinikdaten verfügbar.",
-            "Нет данных клиники.",
-            "No provider data available.",
-          )}
+          {appointmentText("appointments_no_provider_data_available")}
         </EmptyCell>
       )}
     </AppointmentPreviewSheet>

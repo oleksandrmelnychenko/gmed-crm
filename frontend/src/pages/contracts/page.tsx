@@ -1166,7 +1166,12 @@ function useContractsPageContent() {
         sortable: true,
         required: true,
         width: 120,
-        render: (row) => <span className="font-mono text-xs">v{row.version_number}</span>,
+        render: (row) => (
+          <span className="font-mono text-xs">
+            {t.uiText.common_version_prefix}
+            {row.version_number}
+          </span>
+        ),
       },
       {
         id: "status",
@@ -2416,7 +2421,7 @@ function useContractsPageContent() {
                             conditionsText: event.target.value,
                           }))
                         }
-                        placeholder='{"language":"de","jurisdiction":"DE"}'
+                        placeholder={t.uiText.contracts_conditions_placeholder}
                       />
                     </Field>
                   </div>

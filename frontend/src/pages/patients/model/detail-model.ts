@@ -29,7 +29,7 @@ export type PatientLabelFormatId =
 
 export type PatientLabelFormat = {
   id: PatientLabelFormatId;
-  label: string;
+  labelKey: string;
   width_mm: number;
   height_mm: number;
 };
@@ -167,23 +167,28 @@ export const DEFAULT_PATIENT_LABEL_FORMAT_ID: PatientLabelFormatId = "compact-90
 export const PATIENT_LABEL_FORMAT_OPTIONS: PatientLabelFormat[] = [
   {
     id: "compact-90x48",
-    label: "Compact 90 x 48 mm",
+    labelKey: "patients_label_format_compact_90x48",
     width_mm: 90,
     height_mm: 48,
   },
   {
     id: "standard-105x74",
-    label: "Standard 105 x 74 mm",
+    labelKey: "patients_label_format_standard_105x74",
     width_mm: 105,
     height_mm: 74,
   },
   {
     id: "sheet-70x37",
-    label: "Sheet 70 x 37 mm",
+    labelKey: "patients_label_format_sheet_70x37",
     width_mm: 70,
     height_mm: 37,
   },
 ];
+
+export function patientLabelFormatLabel(format: PatientLabelFormat) {
+  const tr = translateCatalog(getLang());
+  return tr.uiText[format.labelKey] ?? format.labelKey;
+}
 
 export function canViewPatientOperationalSurface(role?: string) {
   return PATIENT_OPERATIONAL_SURFACE_ROLES.has(role ?? "");
@@ -531,7 +536,7 @@ export function buildPatientLabelPrintHtml(payload: PatientLabelPayload) {
   </head>
   <body>
     <article class="label">
-      <div class="eyebrow">${escapeHtml(format.label)}</div>
+      <div class="eyebrow">${escapeHtml(patientLabelFormatLabel(format))}</div>
       <div class="patient-id">${escapeHtml(payload.patient_id)}</div>
       <div class="name">${escapeHtml(titleLine || payload.patient_id)}</div>
       <div class="meta">${escapeHtml(metaLine || "DOB not set")}</div>

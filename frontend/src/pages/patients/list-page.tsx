@@ -13,7 +13,7 @@ import {
   DEFAULT_PATIENT_FROZEN_COLUMNS,
   DEFAULT_PATIENT_HIDDEN_COLUMNS,
   MAX_PATIENT_FROZEN_COLUMNS,
-  PATIENT_COLUMN_GROUPS,
+  patientColumnGroupLabels,
 } from "./ui/patients-columns";
 
 import { Button } from "@/components/ui/button";
@@ -158,9 +158,10 @@ function PatientsPageSheets({
 export function PatientsPage() {
   const { user } = useAuth();
   const { t } = useLang();
-  const tr = t as unknown as Record<string, string>;
+  const tr = t as unknown as Record<string, string> & { uiText?: Record<string, string> };
   const { staffGo } = useStaffNavigate();
   const permissions = useMemo(() => patientPermissions(user?.role), [user?.role]);
+  const groupLabels = useMemo(() => patientColumnGroupLabels(tr), [tr]);
   const showStats = true;
   const {
     clearAllFilters,
@@ -333,11 +334,11 @@ export function PatientsPage() {
           deferredSearchPlaceholder={t.common_search}
           density={density}
           doctors={doctors}
-          exportLabel={t.common_export ?? "Export"}
+          exportLabel={t.common_export}
           filterPredicates={filterPredicates}
           filters={filters}
           frozenColumns={frozenColumns}
-          groupLabels={PATIENT_COLUMN_GROUPS}
+          groupLabels={groupLabels}
           hiddenColumns={hiddenColumns}
           lastUpdatedText={lastUpdated ? formatRelativeTime(lastUpdated) : null}
           listBusy={listBusy}
@@ -378,7 +379,7 @@ export function PatientsPage() {
           onShortcutsOpen={openShortcutsDialog}
           onSortChange={setSortStack}
           providers={providers}
-          refreshLabel={t.common_refresh ?? "Refresh"}
+          refreshLabel={t.common_refresh}
           rows={patients}
           searchInputRef={searchInputRef}
           sortStack={sortStack}
@@ -439,7 +440,7 @@ export function PatientsPage() {
       </div>
 
       <PatientsPageSheets
-        closeLabel={t.common_close ?? "Close"}
+        closeLabel={t.common_close}
         createOpen={createOpen}
         dictionary={tr}
         helpOpen={helpOpen}

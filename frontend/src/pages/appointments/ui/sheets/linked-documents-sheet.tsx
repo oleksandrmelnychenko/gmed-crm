@@ -38,33 +38,21 @@ function LinkedDocumentsSheet({
     <AppointmentPreviewSheet
       open={open}
       onOpenChange={onOpenChange}
-      title={appointmentText("Dokumente", "Документы", "Documents")}
-      description={appointmentText(
-        "Dokumente aus dem aktuellen Termin-Kontext.",
-        "Документы из контекста текущего приёма.",
-        "Documents from the current appointment context.",
-      )}
+      title={appointmentText("appointments_documents")}
+      description={appointmentText("appointments_documents_from_the_current_appointment_context")}
       maxWidthClassName="sm:max-w-[760px]"
       bodyClassName="px-4 pb-6 pt-4"
     >
       {loading ? (
         <div className="flex min-h-[220px] items-center justify-center text-sm text-muted-foreground">
           <LoaderCircle className="mr-2 size-4 animate-spin" />
-          {appointmentText(
-            "Dokumente werden geladen",
-            "Загрузка документов",
-            "Loading documents",
-          )}
+          {appointmentText("appointments_loading_documents")}
         </div>
       ) : error ? (
         <Banner tone="error" withIcon>{error}</Banner>
       ) : items.length === 0 ? (
         <EmptyCell>
-          {appointmentText(
-            "Keine Dokumente im aktuellen Kontext.",
-            "В текущем контексте нет документов.",
-            "No documents in this context.",
-          )}
+          {appointmentText("appointments_no_documents_in_this_context")}
         </EmptyCell>
       ) : (
         <DocumentsGrid
@@ -83,19 +71,15 @@ function LinkedDocumentsSheet({
             patient: t.orders_patient,
             category: t.documents_category,
             status: t.users_status,
-            visibility: appointmentText("Sichtbarkeit", "Видимость", "Visibility"),
+            visibility: appointmentText("appointments_visibility"),
             size: t.documents_size,
             uploadedBy: t.documents_uploaded_by,
             unclassified: t.documents_unclassified,
-            current: appointmentText("aktuell", "текущая", "current"),
+            current: appointmentText("appointments_current"),
             pidFallback: "PID",
             notSet: t.common_not_set,
             unknownUploader: t.documents_unknown_uploader,
-            needsCategorization: appointmentText(
-              "Kategorisierung erforderlich",
-              "Требуется категоризация",
-              "Needs categorization",
-            ),
+            needsCategorization: appointmentText("appointments_needs_categorization"),
           }}
           localizeCode={(value) => localizeDocumentCode(value, appointmentText)}
           onSelectionChange={() => undefined}
@@ -107,7 +91,7 @@ function LinkedDocumentsSheet({
           formatStatusLabel={(value) => value}
           formatVisibilityLabel={(value) => value}
           formatSensitivityLabel={() =>
-            appointmentText("Standard", "Стандарт", "Standard")
+            appointmentText("appointments_standard")
           }
           formatFileSize={formatDocumentFileSize}
           formatDateTime={formatDateTime}

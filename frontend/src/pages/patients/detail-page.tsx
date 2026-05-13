@@ -140,33 +140,33 @@ type PatientRiskScoreFormState = {
 };
 
 const PATIENT_CARD_ENTRY_CATEGORY_OPTIONS = [
-  { value: "medical_update", label: "Medical update" },
-  { value: "patient_report", label: "Patient report" },
-  { value: "provider_report", label: "Provider report" },
-  { value: "treatment_note", label: "Treatment note" },
-  { value: "followup_note", label: "Follow-up note" },
-  { value: "warning", label: "Warning" },
-  { value: "other", label: "Other" },
+  { value: "medical_update" },
+  { value: "patient_report" },
+  { value: "provider_report" },
+  { value: "treatment_note" },
+  { value: "followup_note" },
+  { value: "warning" },
+  { value: "other" },
 ] as const;
 
 const PATIENT_MEDICAL_ORDER_TYPE_OPTIONS = [
-  { value: "physiotherapy", label: "Physiotherapy" },
-  { value: "diet", label: "Diet" },
-  { value: "lab_recheck", label: "Lab recheck" },
-  { value: "imaging", label: "Imaging" },
-  { value: "medication_followup", label: "Medication follow-up" },
-  { value: "procedure", label: "Procedure" },
-  { value: "other", label: "Other" },
+  { value: "physiotherapy" },
+  { value: "diet" },
+  { value: "lab_recheck" },
+  { value: "imaging" },
+  { value: "medication_followup" },
+  { value: "procedure" },
+  { value: "other" },
 ] as const;
 
 const PATIENT_RISK_SCORE_TYPE_OPTIONS = [
-  { value: "cha2ds2_vasc", label: "CHA2DS2-VASc" },
-  { value: "has_bled", label: "HAS-BLED" },
-  { value: "framingham", label: "Framingham" },
-  { value: "fall_risk", label: "Fall risk" },
-  { value: "frailty", label: "Frailty" },
-  { value: "nutrition_risk", label: "Nutrition risk" },
-  { value: "other", label: "Other" },
+  { value: "cha2ds2_vasc" },
+  { value: "has_bled" },
+  { value: "framingham" },
+  { value: "fall_risk" },
+  { value: "frailty" },
+  { value: "nutrition_risk" },
+  { value: "other" },
 ] as const;
 
 type ContractStatus = "draft" | "sent" | "signed" | "expired" | "terminated";
@@ -258,10 +258,10 @@ function fmtDateTime(v?: string | null, fb = "") {
 }
 
 function appointmentCarePathKindLabel(value?: string | null) {
-  if (value === "preventive") return patientDetailText("Präventiv", "Профилактика", "Preventive");
-  if (value === "control") return patientDetailText("Kontrolle", "Контроль", "Control");
-  if (value === "followup") return patientDetailText("Nachsorge", "Наблюдение", "Follow-up");
-  return patientDetailText("Regulär", "Стандартный", "Regular");
+  if (value === "preventive") return patientDetailText("patients_detail_preventive");
+  if (value === "control") return patientDetailText("patients_detail_control");
+  if (value === "followup") return patientDetailText("patients_detail_follow_up");
+  return patientDetailText("patients_detail_regular");
 }
 
 function fieldVal(v: string | string[] | null | undefined, fb: string) {
@@ -270,7 +270,7 @@ function fieldVal(v: string | string[] | null | undefined, fb: string) {
 }
 
 function fmtMoney(v?: string | null, currency = "EUR") {
-  if (!v) return patientDetailText("Nicht festgelegt", "Не задано", "Not set");
+  if (!v) return patientDetailText("patients_detail_not_set");
   const numeric = Number(v);
   if (Number.isNaN(numeric)) return `${v} ${currency}`;
   try {
@@ -280,11 +280,8 @@ function fmtMoney(v?: string | null, currency = "EUR") {
   }
 }
 
-function patientDetailText(de: string, ru: string, en: string) {
-  const lang = getLang();
-  if (lang === "de") return de;
-  if (lang === "ru") return ru;
-  return en;
+function patientDetailText(key: string) {
+  return translateCatalog(getLang()).uiText[key] ?? key;
 }
 
 function patientDetailUnknownEnumLabel(value: string | null | undefined) {
@@ -323,11 +320,7 @@ function parseOptionalNumberInput(value: string) {
   const parsed = Number(trimmed.replace(",", "."));
   if (!Number.isFinite(parsed)) {
     throw new Error(
-      patientDetailText(
-        "Geben Sie eine gültige Zahl ein",
-        "Введите корректное число",
-        "Enter a valid number",
-      ),
+      patientDetailText("patients_detail_enter_a_valid_number"),
     );
   }
   return parsed;
@@ -338,11 +331,7 @@ function parseOptionalIntegerInput(value: string) {
   if (parsed == null) return undefined;
   if (!Number.isInteger(parsed)) {
     throw new Error(
-      patientDetailText(
-        "Geben Sie eine ganze Zahl ein",
-        "Введите целое число",
-        "Enter a whole number",
-      ),
+      patientDetailText("patients_detail_enter_a_whole_number"),
     );
   }
   return parsed;
@@ -376,23 +365,23 @@ function roleLbl(v: string | null | undefined, tr: Record<string, string>) {
 function relationTypeLabel(value: string) {
   switch (value) {
     case "spouse":
-      return patientDetailText("Ehepartner", "Супруг(а)", "Spouse");
+      return patientDetailText("patients_detail_spouse");
     case "parent":
-      return patientDetailText("Elternteil", "Родитель", "Parent");
+      return patientDetailText("patients_detail_parent");
     case "child":
-      return patientDetailText("Kind", "Ребёнок", "Child");
+      return patientDetailText("patients_detail_child");
     case "sibling":
-      return patientDetailText("Geschwister", "Брат/сестра", "Sibling");
+      return patientDetailText("patients_detail_sibling");
     case "relative":
-      return patientDetailText("Verwandter", "Родственник", "Relative");
+      return patientDetailText("patients_detail_relative");
     case "guardian":
-      return patientDetailText("Vormund", "Опекун", "Guardian");
+      return patientDetailText("patients_detail_guardian");
     case "caregiver":
-      return patientDetailText("Betreuung", "Опекун/сиделка", "Caregiver");
+      return patientDetailText("patients_detail_caregiver");
     case "friend":
-      return patientDetailText("Freund", "Друг", "Friend");
+      return patientDetailText("patients_detail_friend");
     case "other":
-      return patientDetailText("Sonstiges", "Другое", "Other");
+      return patientDetailText("patients_detail_other");
     default:
       return patientDetailUnknownEnumLabel(value);
   }
@@ -401,15 +390,15 @@ function relationTypeLabel(value: string) {
 function orderPhaseLabel(value: string) {
   switch (value) {
     case "discovery":
-      return patientDetailText("Discovery", "Диагностика потребности", "Discovery");
+      return patientDetailText("patients_detail_discovery");
     case "intake":
-      return patientDetailText("Aufnahme", "Интейк", "Intake");
+      return patientDetailText("patients_detail_intake");
     case "execution":
-      return patientDetailText("Ausführung", "Исполнение", "Execution");
+      return patientDetailText("patients_detail_execution");
     case "closure":
-      return patientDetailText("Abschluss", "Закрытие", "Closure");
+      return patientDetailText("patients_detail_closure");
     case "followup":
-      return patientDetailText("Nachbetreuung", "Наблюдение", "Follow-up");
+      return patientDetailText("patients_detail_follow_up_2");
     default:
       return patientDetailUnknownEnumLabel(value);
   }
@@ -418,13 +407,13 @@ function orderPhaseLabel(value: string) {
 function appointmentTypeLabel(value: string) {
   switch (value) {
     case "consultation":
-      return patientDetailText("Konsultation", "Консультация", "Consultation");
+      return patientDetailText("patients_detail_consultation");
     case "followup":
-      return patientDetailText("Nachsorgetermin", "Повторный приём", "Follow-up");
+      return patientDetailText("patients_detail_follow_up_3");
     case "diagnostics":
-      return patientDetailText("Diagnostik", "Диагностика", "Diagnostics");
+      return patientDetailText("patients_detail_diagnostics");
     case "procedure":
-      return patientDetailText("Eingriff", "Процедура", "Procedure");
+      return patientDetailText("patients_detail_procedure");
     default:
       return patientDetailUnknownEnumLabel(value);
   }
@@ -433,11 +422,11 @@ function appointmentTypeLabel(value: string) {
 function invoiceTypeLabel(value: string) {
   switch (value) {
     case "advance":
-      return patientDetailText("Vorauszahlung", "Аванс", "Advance");
+      return patientDetailText("patients_detail_advance");
     case "interim":
-      return patientDetailText("Zwischenrechnung", "Промежуточный счёт", "Interim");
+      return patientDetailText("patients_detail_interim");
     case "final":
-      return patientDetailText("Abschlussrechnung", "Финальный счёт", "Final");
+      return patientDetailText("patients_detail_final");
     default:
       return patientDetailUnknownEnumLabel(value);
   }
@@ -533,19 +522,19 @@ function blankPatientCardEntryForm(): PatientCardEntryFormState {
 function patientCardEntryCategoryLabel(category: string) {
   switch (category) {
     case "medical_update":
-      return patientDetailText("Medizinisches Update", "Медицинское обновление", "Medical update");
+      return patientDetailText("patients_detail_medical_update");
     case "patient_report":
-      return patientDetailText("Bericht des Patienten", "Сообщение пациента", "Patient report");
+      return patientDetailText("patients_detail_patient_report");
     case "provider_report":
-      return patientDetailText("Bericht der Klinik", "Отчёт провайдера", "Provider report");
+      return patientDetailText("patients_detail_provider_report");
     case "treatment_note":
-      return patientDetailText("Behandlungsnotiz", "Заметка по лечению", "Treatment note");
+      return patientDetailText("patients_detail_treatment_note");
     case "followup_note":
-      return patientDetailText("Nachsorge-Notiz", "Заметка по наблюдению", "Follow-up note");
+      return patientDetailText("patients_detail_follow_up_note");
     case "warning":
-      return patientDetailText("Warnhinweis", "Предупреждение", "Warning");
+      return patientDetailText("patients_detail_warning");
     case "other":
-      return patientDetailText("Sonstiges", "Другое", "Other");
+      return patientDetailText("patients_detail_other_2");
     default:
       return patientDetailUnknownEnumLabel(category);
   }
@@ -584,19 +573,19 @@ function blankPatientMedicalOrderForm(): PatientMedicalOrderFormState {
 function patientMedicalOrderTypeLabel(orderType: string) {
   switch (orderType) {
     case "physiotherapy":
-      return patientDetailText("Physiotherapie", "Физиотерапия", "Physiotherapy");
+      return patientDetailText("patients_detail_physiotherapy");
     case "diet":
-      return patientDetailText("Ernährung", "Диета", "Diet");
+      return patientDetailText("patients_detail_diet");
     case "lab_recheck":
-      return patientDetailText("Laborkontrolle", "Повторный анализ", "Lab recheck");
+      return patientDetailText("patients_detail_lab_recheck");
     case "imaging":
-      return patientDetailText("Bildgebung", "Визуализация", "Imaging");
+      return patientDetailText("patients_detail_imaging");
     case "medication_followup":
-      return patientDetailText("Medikationskontrolle", "Контроль медикации", "Medication follow-up");
+      return patientDetailText("patients_detail_medication_follow_up");
     case "procedure":
-      return patientDetailText("Eingriff", "Процедура", "Procedure");
+      return patientDetailText("patients_detail_procedure_2");
     case "other":
-      return patientDetailText("Sonstiges", "Другое", "Other");
+      return patientDetailText("patients_detail_other_3");
     default:
       return patientDetailUnknownEnumLabel(orderType);
   }
@@ -617,19 +606,19 @@ function blankPatientRiskScoreForm(): PatientRiskScoreFormState {
 function patientRiskScoreTypeLabel(scoreType: string) {
   switch (scoreType) {
     case "cha2ds2_vasc":
-      return "CHA2DS2-VASc";
+      return patientDetailText("patients_label_score_cha2ds2_vasc");
     case "has_bled":
-      return "HAS-BLED";
+      return patientDetailText("patients_label_score_has_bled");
     case "framingham":
-      return "Framingham";
+      return patientDetailText("patients_label_score_framingham");
     case "fall_risk":
-      return patientDetailText("Sturzrisiko", "Риск падения", "Fall risk");
+      return patientDetailText("patients_detail_fall_risk");
     case "frailty":
-      return patientDetailText("Gebrechlichkeit", "Хрупкость", "Frailty");
+      return patientDetailText("patients_detail_frailty");
     case "nutrition_risk":
-      return patientDetailText("Ernährungsrisiko", "Риск питания", "Nutrition risk");
+      return patientDetailText("patients_detail_nutrition_risk");
     case "other":
-      return patientDetailText("Sonstiges", "Другое", "Other");
+      return patientDetailText("patients_detail_other_4");
     default:
       return patientDetailUnknownEnumLabel(scoreType);
   }
@@ -638,9 +627,9 @@ function patientRiskScoreTypeLabel(scoreType: string) {
 function workflowChecklistLabel(key: string) {
   switch (key) {
     case "patient_intake":
-      return patientDetailText("Patientenaufnahme", "Приём пациента", "Patient intake");
+      return patientDetailText("patients_detail_patient_intake");
     case "patient_custom":
-      return patientDetailText("Benutzerdefiniert", "Пользовательское", "Custom");
+      return patientDetailText("patients_detail_custom");
     default:
       return patientDetailUnknownEnumLabel(key);
   }
@@ -649,45 +638,45 @@ function workflowChecklistLabel(key: string) {
 function patientDetailStatusLabel(status: string) {
   switch (status) {
     case "not_started":
-      return patientDetailText("Nicht begonnen", "Не начат", "Not started");
+      return patientDetailText("patients_detail_not_started");
     case "pending":
-      return patientDetailText("Ausstehend", "В ожидании", "Pending");
+      return patientDetailText("patients_detail_pending");
     case "open":
-      return patientDetailText("Offen", "Открыто", "Open");
+      return patientDetailText("patients_detail_open");
     case "in_progress":
-      return patientDetailText("In Bearbeitung", "В работе", "In progress");
+      return patientDetailText("patients_detail_in_progress");
     case "closed":
-      return patientDetailText("Geschlossen", "Закрыто", "Closed");
+      return patientDetailText("patients_detail_closed");
     case "active":
-      return patientDetailText("Aktiv", "Активно", "Active");
+      return patientDetailText("patients_detail_active");
     case "completed":
-      return patientDetailText("Abgeschlossen", "Завершено", "Completed");
+      return patientDetailText("patients_detail_completed");
     case "draft":
-      return patientDetailText("Entwurf", "Черновик", "Draft");
+      return patientDetailText("patients_detail_draft");
     case "sent":
-      return patientDetailText("Gesendet", "Отправлено", "Sent");
+      return patientDetailText("patients_detail_sent");
     case "signed":
-      return patientDetailText("Unterzeichnet", "Подписано", "Signed");
+      return patientDetailText("patients_detail_signed");
     case "overdue":
-      return patientDetailText("Überfällig", "Просрочено", "Overdue");
+      return patientDetailText("patients_detail_overdue");
     case "partially_paid":
-      return patientDetailText("Teilweise bezahlt", "Частично оплачено", "Partially paid");
+      return patientDetailText("patients_detail_partially_paid");
     case "paid":
-      return patientDetailText("Bezahlt", "Оплачено", "Paid");
+      return patientDetailText("patients_detail_paid");
     case "expired":
-      return patientDetailText("Abgelaufen", "Истекло", "Expired");
+      return patientDetailText("patients_detail_expired");
     case "terminated":
-      return patientDetailText("Beendet", "Расторгнуто", "Terminated");
+      return patientDetailText("patients_detail_terminated");
     case "cancelled":
-      return patientDetailText("Storniert", "Отменено", "Cancelled");
+      return patientDetailText("patients_detail_cancelled");
     case "planned":
-      return patientDetailText("Geplant", "Запланировано", "Planned");
+      return patientDetailText("patients_detail_planned");
     case "confirmed":
-      return patientDetailText("Bestätigt", "Подтверждено", "Confirmed");
+      return patientDetailText("patients_detail_confirmed");
     case "submitted":
-      return patientDetailText("Eingereicht", "Отправлено", "Submitted");
+      return patientDetailText("patients_detail_submitted");
     case "archived":
-      return patientDetailText("Archiviert", "В архиве", "Archived");
+      return patientDetailText("patients_detail_archived");
     default:
       return patientDetailUnknownEnumLabel(status);
   }
@@ -696,33 +685,25 @@ function patientDetailStatusLabel(status: string) {
 function priorityLabel(priority: string) {
   switch (priority) {
     case "low":
-      return patientDetailText("Niedrig", "Низкий", "Low");
+      return patientDetailText("patients_detail_low");
     case "normal":
-      return patientDetailText("Normal", "Обычный", "Normal");
+      return patientDetailText("patients_detail_normal");
     case "high":
-      return patientDetailText("Hoch", "Высокий", "High");
+      return patientDetailText("patients_detail_high");
     case "urgent":
-      return patientDetailText("Dringend", "Срочно", "Urgent");
+      return patientDetailText("patients_detail_urgent");
     default:
       return patientDetailUnknownEnumLabel(priority);
   }
 }
 
-function timelineRangeOptions(
-  lang: string,
-): Array<{ value: PatientTimelineRangeFilter; label: string }> {
-  const translate = (de: string, ru: string, en: string) => {
-    if (lang === "de") return de;
-    if (lang === "ru") return ru;
-    return en;
-  };
-
+function timelineRangeOptions(): Array<{ value: PatientTimelineRangeFilter; label: string }> {
   return [
-    { value: "all", label: translate("Gesamter Zeitraum", "Всё время", "All time") },
-    { value: "30d", label: translate("Letzte 30 Tage", "Последние 30 дней", "Last 30 days") },
-    { value: "90d", label: translate("Letzte 90 Tage", "Последние 90 дней", "Last 90 days") },
-    { value: "180d", label: translate("Letzte 180 Tage", "Последние 180 дней", "Last 180 days") },
-    { value: "365d", label: translate("Letzte 365 Tage", "Последние 365 дней", "Last 365 days") },
+    { value: "all", label: patientDetailText("patients_timeline_range_all") },
+    { value: "30d", label: patientDetailText("patients_timeline_range_30d") },
+    { value: "90d", label: patientDetailText("patients_timeline_range_90d") },
+    { value: "180d", label: patientDetailText("patients_timeline_range_180d") },
+    { value: "365d", label: patientDetailText("patients_timeline_range_365d") },
   ];
 }
 
@@ -842,12 +823,10 @@ function timelineDateGroupKey(value?: string | null) {
   return `${year}-${month}-${day}`;
 }
 
-function timelineDateGroupLabel(value: string | null | undefined, lang: string) {
+function timelineDateGroupLabel(value: string | null | undefined) {
   const key = timelineDateGroupKey(value);
   if (key === "unknown") {
-    if (lang === "de") return "Unbekanntes Datum";
-    if (lang === "ru") return "Дата не указана";
-    return "Unknown date";
+    return patientDetailText("timeline_date_unknown");
   }
 
   const date = new Date(value!);
@@ -861,15 +840,11 @@ function timelineDateGroupLabel(value: string | null | undefined, lang: string) 
     left.getDate() === right.getDate();
 
   if (sameDay(date, today)) {
-    if (lang === "de") return "Heute";
-    if (lang === "ru") return "Сегодня";
-    return "Today";
+    return patientDetailText("timeline_date_today");
   }
 
   if (sameDay(date, yesterday)) {
-    if (lang === "de") return "Gestern";
-    if (lang === "ru") return "Вчера";
-    return "Yesterday";
+    return patientDetailText("timeline_date_yesterday");
   }
 
   return fmtDate(value, key);
@@ -1070,8 +1045,7 @@ function usePatientDetailPageContent() {
   const { user } = useAuth();
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const l = (key: string) => t.uiText[key] ?? key;
 
   const [pageState, dispatchPageState] = useReducer(
     patientDetailPageReducer,
@@ -1485,7 +1459,7 @@ function usePatientDetailPageContent() {
 
     for (const item of filteredTimeline) {
       const key = timelineDateGroupKey(item.happened_at);
-      const label = timelineDateGroupLabel(item.happened_at, lang);
+      const label = timelineDateGroupLabel(item.happened_at);
 
       if (!currentGroup || currentGroup.key !== key) {
         currentGroup = { key, label, items: [item] };
@@ -1503,7 +1477,7 @@ function usePatientDetailPageContent() {
     [isTimelineTabActive, timeline]
   );
   const localizedTimelineRangeOptions = useMemo(
-    () => (isTimelineTabActive ? timelineRangeOptions(lang) : []),
+    () => (isTimelineTabActive ? timelineRangeOptions() : []),
     [isTimelineTabActive, lang]
   );
   const timelineHasNextPage = isTimelineTabActive && timelineOffset + timeline.length < timelineTotal;
@@ -2058,7 +2032,7 @@ function usePatientDetailPageContent() {
         id,
         `${detail?.patient_id ?? "patient"}-dsgvo-export.zip`,
       );
-      toast.success(l("DSGVO-Export geladen.", "Экспорт DSGVO загружен.", "DSGVO export downloaded."));
+      toast.success(l("patients_dsgvo_export_downloaded"));
     } catch (error) {
       setTabActionError(
         error instanceof Error ? error.message : t.common_failed_create
@@ -2074,7 +2048,7 @@ function usePatientDetailPageContent() {
 
     const printWindow = window.open("", "_blank", "noopener,noreferrer");
     if (!printWindow) {
-      setTabActionError("Allow pop-ups to print the patient label.");
+      setTabActionError(patientDetailText("patients_error_allow_popups_print_label"));
       return;
     }
 
@@ -2086,7 +2060,7 @@ function usePatientDetailPageContent() {
       printWindow.document.open();
       printWindow.document.write(buildPatientLabelPrintHtml(payload));
       printWindow.document.close();
-      toast.info(l("Etikett geöffnet.", "Наклейка открыта.", "Label opened."));
+      toast.info(l("patients_label_opened"));
     } catch (error) {
       printWindow.close();
       setTabActionError(
@@ -2108,8 +2082,8 @@ function usePatientDetailPageContent() {
     try {
       await updatePatientMedicalOrderLifecycle(id, medicalOrderId, status);
       toast.success(status === "completed"
-        ? l("Anordnung abgeschlossen.", "Назначение завершено.", "Order completed.")
-        : l("Anordnung storniert.", "Назначение отменено.", "Order cancelled."));
+        ? l("patients_order_completed")
+        : l("patients_order_cancelled"));
       reload();
     } catch (error) {
       setTabActionError(error instanceof Error ? error.message : t.common_failed_update);
@@ -2167,10 +2141,9 @@ function usePatientDetailPageContent() {
   };
   const handleRevokeAssignment = (item: PatientAssignment) => {
     const confirmed = window.confirm(
-      l(
-        `Zuordnung für ${item.user_name} widerrufen?`,
-        `Отозвать назначение для ${item.user_name}?`,
-        `Revoke assignment for ${item.user_name}?`,
+      l("patients_revoke_assignment_confirm").replace(
+        "{name}",
+        item.user_name,
       ),
     );
     if (!confirmed) return;
@@ -2240,16 +2213,8 @@ function usePatientDetailPageContent() {
         patientsAssignedByLabel={t.patients_assigned_by}
         usersCreatedLabel={t.users_created}
         emptyCasesLabel={t.cases_no_match}
-        emptyOrdersLabel={l(
-          "Für diesen Patienten gibt es noch keine Aufträge.",
-          "Для этого пациента пока нет заказов.",
-          "No orders have been recorded for this patient yet.",
-        )}
-        emptyAppointmentsLabel={l(
-          "Für diesen Patienten sind noch keine Termine geplant.",
-          "Для этого пациента пока нет приёмов.",
-          "No appointments are scheduled for this patient yet.",
-        )}
+        emptyOrdersLabel={l("patients_no_orders_have_been_recorded_for_this_patient_yet")}
+        emptyAppointmentsLabel={l("patients_no_appointments_are_scheduled_for_this_patient_yet")}
         fieldValue={fieldVal}
         filteredDocuments={filteredDocuments}
         filteredTimeline={filteredTimeline}

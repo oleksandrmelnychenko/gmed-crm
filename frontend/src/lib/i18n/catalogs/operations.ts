@@ -504,9 +504,9 @@ export const operationsRu: OperationsTranslations = {
     "Нужен минимум один врач-участник.",
   orders_service_group_wizard_duplicate_doctor:
     "Врач может быть добавлен в группу услуг только один раз.",
-  orders_service_group_wizard_title: "Мастер услуги на нескольких врачей",
+  orders_service_group_wizard_title: "Группа услуг по врачам",
   orders_service_group_wizard_close: "Закрыть мастер",
-  orders_service_group_wizard_create: "Создать split-группу",
+  orders_service_group_wizard_create: "Создать группу услуг",
   orders_service_group_wizard_steps:
     "Шаг 1: задайте группу. Шаг 2: добавьте врачей. Шаг 3: проверьте предпросмотр. Шаг 4: создайте строки биллинга по участникам.",
   orders_service_group_title: "Название группы",
@@ -954,9 +954,9 @@ export const operationsDe: OperationsTranslations = {
     "Mindestens ein Arzt muss ausgewählt sein.",
   orders_service_group_wizard_duplicate_doctor:
     "Ein Arzt darf nur einmal in der Leistungsgruppe vorkommen.",
-  orders_service_group_wizard_title: "Assistent für mehrere Ärzte",
+  orders_service_group_wizard_title: "Leistungsgruppe nach Ärzten",
   orders_service_group_wizard_close: "Assistent schließen",
-  orders_service_group_wizard_create: "Split-Gruppe erstellen",
+  orders_service_group_wizard_create: "Leistungsgruppe erstellen",
   orders_service_group_wizard_steps:
     "Schritt 1: Gruppe definieren. Schritt 2: Ärzte hinzufügen. Schritt 3: Vorschau prüfen. Schritt 4: teilnehmerbezogene Abrechnungszeilen erzeugen.",
   orders_service_group_title: "Gruppentitel",

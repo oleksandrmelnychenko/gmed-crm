@@ -1,12 +1,11 @@
-import { useLang } from "@/lib/i18n";
+import { t as translateCatalog, useLang } from "@/lib/i18n";
 
 import { type OrthopedicsAssessment, useCaseWorkspace } from "./context";
 import { SpecialtySection } from "./specialty-section";
 
-function tri(lang: string, de: string, ru: string, en: string) {
-  if (lang === "de") return de;
-  if (lang === "ru") return ru;
-  return en;
+function tri(lang: string, key: string) {
+  const catalog = translateCatalog(lang === "de" ? "de" : "ru");
+  return catalog.uiText[key] ?? key;
 }
 
 const BLANK: OrthopedicsAssessment = {
@@ -35,13 +34,8 @@ export function OrthopedicsSection() {
 
   return (
     <SpecialtySection<OrthopedicsAssessment>
-      title={tri(lang, "Orthopädie", "Ортопедия", "Orthopedics")}
-      description={tri(
-        lang,
-        "Bewegungsapparat, Vorgeschichte und Funktionseinschränkungen.",
-        "Опорно-двигательный аппарат, анамнез и ограничения.",
-        "Musculoskeletal history and functional limitations.",
-      )}
+      title={tri(lang, "case_ws_orthopedics")}
+      description={tri(lang, "case_ws_musculoskeletal_history_and_functional_limitations")}
       blankValue={BLANK}
       rawValue={detail?.orthopedics}
       busy={sectionBusy === "orthopedics"}
@@ -50,50 +44,38 @@ export function OrthopedicsSection() {
       save={saveOrthopedics}
       revisionKey={detail?.updated_at ?? detail?.id ?? ""}
       booleanFlags={[
-        { key: "joint_pain", labels: { de: "Gelenkschmerz", ru: "Боль в суставах", en: "Joint pain" } },
-        { key: "back_pain", labels: { de: "Rückenschmerz", ru: "Боль в спине", en: "Back pain" } },
+        { key: "joint_pain", label: tri(lang, "case_ws_joint_pain") },
+        { key: "back_pain", label: tri(lang, "case_ws_back_pain") },
         {
           key: "mobility_limitation",
-          labels: { de: "Bewegungseinschränkung", ru: "Ограничение движений", en: "Mobility limitation" },
+          label: tri(lang, "case_ws_mobility_limitation"),
         },
         {
           key: "trauma_history",
-          labels: { de: "Traumaanamnese", ru: "Травматический анамнез", en: "Trauma history" },
+          label: tri(lang, "case_ws_trauma_history"),
         },
       ]}
       textFields={[
         {
           key: "prior_imaging",
-          labels: { de: "Vorherige Bildgebung", ru: "Предыдущая визуализация", en: "Prior imaging" },
+          label: tri(lang, "case_ws_prior_imaging"),
         },
         {
           key: "assistive_devices",
-          labels: {
-            de: "Hilfsmittel / Implantate",
-            ru: "Средства поддержки / импланты",
-            en: "Assistive devices / implants",
-          },
+          label: tri(lang, "case_ws_assistive_devices_implants"),
         },
         {
           key: "physiotherapy_history",
-          labels: {
-            de: "Physiotherapie- / Reha-Vorgeschichte",
-            ru: "Физиотерапия / реабилитация в анамнезе",
-            en: "Physiotherapy / rehab history",
-          },
+          label: tri(lang, "case_ws_physiotherapy_rehab_history"),
         },
         {
           key: "pain_triggers",
-          labels: {
-            de: "Schmerzauslöser / Belastungsmuster",
-            ru: "Триггеры боли / характер нагрузки",
-            en: "Pain triggers / load pattern",
-          },
+          label: tri(lang, "case_ws_pain_triggers_load_pattern"),
         },
-        { key: "red_flags", labels: { de: "Warnzeichen", ru: "Красные флаги", en: "Red flags" } },
+        { key: "red_flags", label: tri(lang, "case_ws_red_flags_3") },
         {
           key: "notes",
-          labels: { de: "Orthopädische Notizen", ru: "Ортопедические заметки", en: "Orthopedics notes" },
+          label: tri(lang, "case_ws_orthopedics_notes"),
           rows: 4,
         },
       ]}

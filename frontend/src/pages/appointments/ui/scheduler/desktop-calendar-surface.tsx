@@ -202,11 +202,11 @@ export function DesktopCalendarSurface({
   );
   const buttonText = useMemo(
     () => ({
-      today: dictionary.dash_patients_today ?? "Today",
-      month: dictionary.dash_this_month ?? "Month",
-      week: dictionary.dash_this_week ?? "Week",
-      day: dictionary.appointments_date ?? "Day",
-      list: dictionary.providers_all ?? "List",
+      today: dictionary.dash_patients_today,
+      month: dictionary.dash_this_month,
+      week: dictionary.dash_this_week,
+      day: dictionary.appointments_date,
+      list: dictionary.providers_all,
     }),
     [
       dictionary.appointments_date,

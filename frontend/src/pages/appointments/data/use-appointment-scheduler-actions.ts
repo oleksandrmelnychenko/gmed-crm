@@ -138,11 +138,7 @@ export function useAppointmentSchedulerActions({
         const message =
           error instanceof Error
             ? error.message
-            : appointmentText(
-                "Status konnte nicht geändert werden.",
-                "Не удалось изменить статус.",
-                "Failed to change status",
-              );
+            : appointmentText("appointments_failed_to_change_status");
         if (selectedId === appointmentId) {
           onDetailError(message);
         } else {

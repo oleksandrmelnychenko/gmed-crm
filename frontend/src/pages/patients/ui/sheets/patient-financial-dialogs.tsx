@@ -16,7 +16,7 @@ import {
 import type { DunningEvent } from "../../model/detail-tab-types";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
-type LocalizeFn = (de: string, ru: string, en: string) => string;
+type LocalizeFn = (key: string) => string;
 type StatusLabelFn = (status: string) => string;
 type DateTimeFormatter = (value?: string | null, fallback?: string) => string;
 type MoneyFormatter = (value?: string | null, currency?: string) => string;
@@ -106,7 +106,7 @@ function ContractCreateFooter({
       </Button>
       <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={busy}>
         {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-        {l("Vertrag erstellen", "Sozdat dogovor", "Create contract")}
+        {l("patients_create_contract")}
       </Button>
     </>
   );
@@ -128,7 +128,7 @@ function DunningEventsList({
   return (
     <div className="mt-4 space-y-3">
       {dunningEvents.length === 0 ? (
-        <p className="text-sm text-zinc-500">{l("Noch nicht erfasst.", "Не зафиксировано.", "Not recorded yet.")}</p>
+        <p className="text-sm text-zinc-500">{l("patients_not_recorded_yet")}</p>
       ) : (
         dunningEvents.map((event) => (
           <div key={event.id} className="rounded-xl border border-zinc-200 bg-white px-4 py-3">
@@ -139,8 +139,8 @@ function DunningEventsList({
               <span className="text-xs text-zinc-400">{formatDateTime(event.sent_at)}</span>
             </div>
             <div className="mt-2 space-y-1 text-sm text-zinc-600">
-              <p>{l("Offener Betrag", "Сумма к оплате", "Balance due")}: {formatMoney(event.balance_due)}</p>
-              <p>{l("Erstellt von", "Создано", "Created by")}: {event.created_by_name}</p>
+              <p>{l("patients_balance_due")}: {formatMoney(event.balance_due)}</p>
+              <p>{l("patients_created_by")}: {event.created_by_name}</p>
               {event.note ? <p>{event.note}</p> : null}
             </div>
           </div>
@@ -184,7 +184,7 @@ function ContractCreateDialog({
 }: ContractCreateDialogProps) {
   return (
     <PatientSheetScaffold open={contractCreateOpen} onOpenChange={onContractCreateOpenChange} width="narrow" onSubmit={onContractCreateSubmit}
-      title={l("Rahmenvertrag erstellen", "Sozdat ramochnyy dogovor", "Create framework contract")}
+      title={l("patients_create_framework_contract")}
       bodyClassName="px-4 py-4 space-y-3"
       footer={
         <ContractCreateFooter
@@ -195,9 +195,9 @@ function ContractCreateDialog({
         />
       }
     >
-      <FormSection title={l("Vertrag", "Договор", "Contract")}>
+      <FormSection title={l("patients_contract")}>
         <div className="grid gap-3 md:grid-cols-2">
-          <FormField label={l("Status", "Статус", "Status")} htmlFor="contract-status">
+          <FormField label={l("patients_status")} htmlFor="contract-status">
           <NativeComboboxSelect
             id="contract-status"
             value={contractCreateForm.status}
@@ -212,7 +212,7 @@ function ContractCreateDialog({
             </NativeComboboxSelect>
           </FormField>
           <FormField
-            label={l("Unterzeichnet am", "Подписано", "Signed at")}
+            label={l("patients_signed_at")}
             htmlFor="contract-signed-at"
           >
           <Input
@@ -223,7 +223,7 @@ function ContractCreateDialog({
             className={inputClass}
           />
           </FormField>
-          <FormField label={l("Gueltig ab", "Действует с", "Valid from")} htmlFor="contract-valid-from">
+          <FormField label={l("patients_valid_from_2")} htmlFor="contract-valid-from">
           <Input
             id="contract-valid-from"
             type="date"
@@ -232,7 +232,7 @@ function ContractCreateDialog({
             className={inputClass}
           />
           </FormField>
-          <FormField label={l("Gueltig bis", "Действует до", "Valid to")} htmlFor="contract-valid-to">
+          <FormField label={l("patients_valid_to_2")} htmlFor="contract-valid-to">
           <Input
             id="contract-valid-to"
             type="date"
@@ -285,12 +285,8 @@ function ContractStatusDialog({
       }}
       width="narrow"
       onSubmit={onContractStatusSubmit}
-      title={l("Vertragsstatus aktualisieren", "Обновить статус договора", "Update contract status")}
-      description={l(
-        "Passen Sie Lebenszyklus und Gültigkeitsdaten an, ohne das Patientenprofil zu verlassen.",
-        "Обновляйте жизненный цикл и даты действия, не выходя из профиля пациента.",
-        "Adjust lifecycle and validity dates without leaving the patient profile.",
-      )}
+      title={l("patients_update_contract_status")}
+      description={l("patients_adjust_lifecycle_and_validity_dates_without_leaving_the")}
       bodyClassName="px-4 py-4 space-y-3"
       footer={
         <>
@@ -301,18 +297,18 @@ function ContractStatusDialog({
             className="h-8 rounded-lg"
             onClick={onCloseContractStatus}
           >
-            {l("Abbrechen", "Отмена", "Cancel")}
+            {l("patients_cancel")}
           </Button>
           <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={contractBusy}>
             {contractBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-            {l("Status speichern", "Сохранить статус", "Save status")}
+            {l("patients_save_status")}
           </Button>
         </>
       }
     >
-      <FormSection title={l("Vertrag", "Договор", "Contract")}>
+      <FormSection title={l("patients_contract")}>
         <div className="grid gap-3 md:grid-cols-2">
-          <FormField label={l("Status", "Статус", "Status")} htmlFor="contract-status-edit">
+          <FormField label={l("patients_status")} htmlFor="contract-status-edit">
             <NativeComboboxSelect
               id="contract-status-edit"
               value={contractStatusForm.status}
@@ -327,7 +323,7 @@ function ContractStatusDialog({
             </NativeComboboxSelect>
           </FormField>
           <FormField
-            label={l("Unterzeichnet am", "Подписано", "Signed at")}
+            label={l("patients_signed_at")}
             htmlFor="contract-signed-at-edit"
           >
             <Input
@@ -338,7 +334,7 @@ function ContractStatusDialog({
               className={inputClass}
             />
           </FormField>
-          <FormField label={l("Gültig ab", "Действует с", "Valid from")} htmlFor="contract-valid-from-edit">
+          <FormField label={l("patients_valid_from")} htmlFor="contract-valid-from-edit">
             <Input
               id="contract-valid-from-edit"
               type="date"
@@ -347,7 +343,7 @@ function ContractStatusDialog({
               className={inputClass}
             />
           </FormField>
-          <FormField label={l("Gültig bis", "Действует до", "Valid to")} htmlFor="contract-valid-to-edit">
+          <FormField label={l("patients_valid_to")} htmlFor="contract-valid-to-edit">
             <Input
               id="contract-valid-to-edit"
               type="date"
@@ -420,12 +416,8 @@ function InvoiceManagerDialog({
       onOpenChange={onInvoiceManageOpenChange}
       width="form-heavy"
       onSubmit={onInvoiceStatusSubmit}
-      title={l("Rechnung verwalten", "Управлять счётом", "Manage invoice")}
-      description={l(
-        "Aktualisieren Sie den Billing-Status und setzen Sie den Mahnprozess direkt aus dem Patientenprofil fort.",
-        "Обновляйте статус billing и продолжайте процесс напоминаний прямо из профиля пациента.",
-        "Update billing status and continue dunning flow directly from the patient profile.",
-      )}
+      title={l("patients_manage_invoice")}
+      description={l("patients_update_billing_status_and_continue_dunning_flow_directly")}
       bodyClassName="px-4 py-4 space-y-3"
       footer={
         <>
@@ -436,18 +428,18 @@ function InvoiceManagerDialog({
             className="h-8 rounded-lg"
             onClick={onCloseInvoiceManager}
           >
-            {l("Schließen", "Закрыть", "Close")}
+            {l("patients_close")}
           </Button>
           <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={invoiceBusy}>
             {invoiceBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-            {l("Rechnung speichern", "Сохранить счёт", "Save invoice")}
+            {l("patients_save_invoice")}
           </Button>
         </>
       }
     >
-      <FormSection title={l("Rechnung", "Счёт", "Invoice")}>
+      <FormSection title={l("patients_invoice")}>
         <div className="grid gap-3 md:grid-cols-2">
-          <FormField label={l("Status", "Статус", "Status")} htmlFor="invoice-status-edit">
+          <FormField label={l("patients_status")} htmlFor="invoice-status-edit">
             <NativeComboboxSelect
               id="invoice-status-edit"
               value={invoiceStatusForm.status}
@@ -461,7 +453,7 @@ function InvoiceManagerDialog({
               ))}
             </NativeComboboxSelect>
           </FormField>
-          <FormField label={l("Fälligkeitsdatum", "Срок", "Due date")} htmlFor="invoice-due-date-edit">
+          <FormField label={l("patients_due_date")} htmlFor="invoice-due-date-edit">
             <Input
               id="invoice-due-date-edit"
               type="date"
@@ -470,7 +462,7 @@ function InvoiceManagerDialog({
               className={inputClass}
             />
           </FormField>
-          <FormField label={l("Bezahlter Betrag", "Оплаченная сумма", "Paid amount")} htmlFor="invoice-paid-amount-edit">
+          <FormField label={l("patients_paid_amount")} htmlFor="invoice-paid-amount-edit">
             <Input
               id="invoice-paid-amount-edit"
               value={invoiceStatusForm.paidAmount}
@@ -482,24 +474,20 @@ function InvoiceManagerDialog({
         </div>
       </FormSection>
 
-      <FormSection title={l("Zusatzlich", "Дополнительно", "Additional")}>
-        <FormField label={l("Notizen", "Заметки", "Notes")} htmlFor="invoice-notes-edit">
+      <FormSection title={l("patients_additional")}>
+        <FormField label={l("appointments_notes")} htmlFor="invoice-notes-edit">
           <textarea
             id="invoice-notes-edit"
             className={textareaClassName}
             value={invoiceStatusForm.notes}
             onChange={(event) => onInvoiceNotesChange(event.target.value)}
-            placeholder={l(
-              "Billing-Notizen oder Details zur Zahlungsbestätigung",
-              "Заметки по billing или детали подтверждения оплаты",
-              "Billing notes or payment confirmation details",
-            )}
+            placeholder={l("patients_billing_notes_or_payment_confirmation_details")}
           />
         </FormField>
       </FormSection>
 
       <FormSection
-        title={l("Mahnwesen", "Напоминания", "Dunning")}
+        title={l("patients_dunning")}
         accessory={
           canManageInvoices && nextDunningLevel(dunningEvents) ? (
             <Button
@@ -510,30 +498,22 @@ function InvoiceManagerDialog({
               disabled={dunningBusy}
             >
               {dunningBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-              {l("Senden", "Отправить", "Send")} {nextDunningLevel(dunningEvents)}
+              {l("patients_send")} {nextDunningLevel(dunningEvents)}
             </Button>
           ) : null
         }
       >
         <p className="text-xs leading-5 text-muted-foreground">
-          {l(
-            "Verfolgen Sie versendete Mahnungen und eskalieren Sie überfällige Rechnungen.",
-            "Отслеживайте отправленные напоминания и эскалируйте просроченные счета.",
-            "Track sent reminders and escalate overdue invoices.",
-          )}
+          {l("patients_track_sent_reminders_and_escalate_overdue_invoices")}
         </p>
         <div className="mt-3">
-          <FormField label={l("Mahnhinweis", "Заметка по напоминанию", "Reminder note")} htmlFor="dunning-note">
+          <FormField label={l("patients_reminder_note")} htmlFor="dunning-note">
             <textarea
               id="dunning-note"
               className={textareaClassName}
               value={dunningNote}
               onChange={(event) => onDunningNoteChange(event.target.value)}
-              placeholder={l(
-                "Optionale Notiz für den Billing-Verlauf",
-                "Необязательная заметка для trail биллинга",
-                "Optional note for billing trail",
-              )}
+              placeholder={l("patients_optional_note_for_billing_trail")}
             />
           </FormField>
         </div>

@@ -618,7 +618,7 @@ function InvoiceLineCard({ line }: { line: PortalInvoiceLineItem }) {
         <div>
           <p className="text-sm font-semibold text-foreground">{line.description}</p>
           <p className={cn("mt-1", tokens.text.muted)}>
-            {t.portal_invoices_qty} {line.quantity} · {t.portal_invoices_unit} {formatPortalCurrency(line.unit_price)} · VAT {line.vat_rate}%
+            {t.portal_invoices_qty} {line.quantity} · {t.portal_invoices_unit} {formatPortalCurrency(line.unit_price)} · {t.uiText.finance_catalog_vat_label} {line.vat_rate}%
           </p>
         </div>
         <CountBadge>{formatPortalCurrency(line.line_gross)}</CountBadge>

@@ -37,6 +37,7 @@ import {
   blankPackageEndFollowUpForm,
 } from "@/pages/appointments/model/form-factories";
 import {
+  appointmentText,
   roleLabel,
   taskPriorityLabel,
   taskStatusLabel,
@@ -144,9 +145,21 @@ function AppointmentDoctorFollowUpSectionContent({
 
     const followUpTitle = `${DOCTOR_FOLLOW_UP_PREFIX} ${form.title.trim()}`;
     const description = [
-      detail.doctor_name ? `Doctor: ${detail.doctor_name}` : "",
-      detail.provider_name ? `Clinic: ${detail.provider_name}` : "",
-      `Appointment: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}`,
+      detail.doctor_name
+        ? appointmentText("appointments_description_doctor", {
+            doctor: detail.doctor_name,
+          })
+        : "",
+      detail.provider_name
+        ? appointmentText("appointments_description_clinic", {
+            clinic: detail.provider_name,
+          })
+        : "",
+      appointmentText("appointments_description_appointment", {
+        patientPid: detail.patient_pid,
+        title: detail.title,
+        slot: slotLabel(detail),
+      }),
       form.notes.trim() || "",
     ]
       .filter(Boolean)
@@ -459,11 +472,29 @@ function AppointmentPackageEndSectionContent({
 
     const followUpTitle = `${PACKAGE_END_FOLLOW_UP_PREFIX} ${form.title.trim()}`;
     const description = [
-      `Package target end date: ${formatDateLabel(form.packageEndDate)}`,
-      detail.order_id ? `Order: ${detail.order_id}` : "",
-      detail.provider_name ? `Clinic: ${detail.provider_name}` : "",
-      detail.doctor_name ? `Doctor: ${detail.doctor_name}` : "",
-      `Appointment: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}`,
+      appointmentText("appointments_description_package_target_end_date", {
+        date: formatDateLabel(form.packageEndDate),
+      }),
+      detail.order_id
+        ? appointmentText("appointments_description_order", {
+            order: detail.order_id,
+          })
+        : "",
+      detail.provider_name
+        ? appointmentText("appointments_description_clinic", {
+            clinic: detail.provider_name,
+          })
+        : "",
+      detail.doctor_name
+        ? appointmentText("appointments_description_doctor", {
+            doctor: detail.doctor_name,
+          })
+        : "",
+      appointmentText("appointments_description_appointment", {
+        patientPid: detail.patient_pid,
+        title: detail.title,
+        slot: slotLabel(detail),
+      }),
       form.notes.trim() || "",
     ]
       .filter(Boolean)

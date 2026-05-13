@@ -10,51 +10,31 @@ export type PortalDocumentCategoryKey =
 
 export const PORTAL_DOCUMENT_CATEGORY_TABS: Array<{
   key: PortalDocumentCategoryKey;
-  label: { de: string; ru: string; en: string };
+  labelKey: string;
 }> = [
   {
     key: "all",
-    label: { de: "Alle", ru: "Все", en: "All" },
+    labelKey: "portal_documents_category_all",
   },
   {
     key: "correspondence",
-    label: {
-      de: "Korrespondenz",
-      ru: "Переписка",
-      en: "Correspondence",
-    },
+    labelKey: "portal_documents_category_correspondence",
   },
   {
     key: "analyses",
-    label: {
-      de: "Analysen",
-      ru: "Анализы",
-      en: "Analyses",
-    },
+    labelKey: "portal_documents_category_analyses",
   },
   {
     key: "conclusions",
-    label: {
-      de: "Befunde / Schluesse",
-      ru: "Заключения",
-      en: "Conclusions",
-    },
+    labelKey: "portal_documents_category_conclusions",
   },
   {
     key: "invoices",
-    label: {
-      de: "Rechnungen",
-      ru: "Счета",
-      en: "Invoices",
-    },
+    labelKey: "portal_documents_category_invoices",
   },
   {
     key: "translations",
-    label: {
-      de: "Uebersetzungen",
-      ru: "Переводы",
-      en: "Translations",
-    },
+    labelKey: "portal_documents_category_translations",
   },
 ];
 

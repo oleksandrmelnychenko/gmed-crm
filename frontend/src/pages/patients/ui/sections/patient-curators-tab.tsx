@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 
 import type { PatientAssignment, StaffOption } from "../../model/list-model";
 
-type Localize = (de: string, ru: string, en: string) => string;
+type Localize = (key: string) => string;
 
 type PatientCuratorsDictionary = {
   common_active: string;
@@ -116,11 +116,7 @@ export function PatientCuratorsTab({
                     <Button
                       variant="ghost"
                       size="icon-xs"
-                      aria-label={l(
-                        "Zuordnung widerrufen",
-                        "Отозвать назначение",
-                        "Revoke assignment",
-                      )}
+                      aria-label={l("patients_revoke_assignment")}
                       className="rounded-lg text-muted-foreground hover:text-rose-600 hover:bg-rose-50"
                       onClick={() => onRevoke(item)}
                     >
@@ -140,7 +136,7 @@ export function PatientCuratorsTab({
                 htmlFor="patient-curator-assign"
                 className="text-[11.5px] font-medium text-muted-foreground leading-tight"
               >
-                {l("Verantwortliche Person", "Ответственный сотрудник", "Assigned staff member")}
+                {l("patients_assigned_staff_member")}
               </Label>
               <NativeComboboxSelect
                 value={selectedAssignee}

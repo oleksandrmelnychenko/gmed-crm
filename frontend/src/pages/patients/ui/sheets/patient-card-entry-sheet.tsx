@@ -28,24 +28,24 @@ const CATEGORY_OPTIONS = [
 
 function categoryLabel(
   value: string,
-  l: (de: string, ru: string, en: string) => string,
+  l: (key: string) => string,
   translations: { common_unknown: string; common_unknown_value: string },
 ): string {
   switch (value) {
     case "medical_update":
-      return l("Medizinisches Update", "Медицинское обновление", "Medical update");
+      return l("patients_medical_update");
     case "patient_report":
-      return l("Bericht des Patienten", "Сообщение пациента", "Patient report");
+      return l("patients_patient_report");
     case "provider_report":
-      return l("Bericht der Klinik", "Отчет провайдера", "Provider report");
+      return l("patients_provider_report");
     case "treatment_note":
-      return l("Behandlungsnotiz", "Заметка по лечению", "Treatment note");
+      return l("patients_treatment_note");
     case "followup_note":
-      return l("Nachsorge-Notiz", "Заметка по наблюдению", "Follow-up note");
+      return l("patients_follow_up_note");
     case "warning":
-      return l("Warnhinweis", "Предупреждение", "Warning");
+      return l("patients_warning");
     case "other":
-      return l("Sonstiges", "Другое", "Other");
+      return l("patients_other");
     default:
       return formatUnknownValue(value, translations);
   }
@@ -108,9 +108,8 @@ function PatientCardEntrySheetContent({
   onOpenChange: (value: boolean) => void;
   onSaved: () => void;
 }) {
-  const { t, lang } = useLang();
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
   const [form, setForm] = useState<FormState>(blankForm);
   const [busy, setBusy] = useState(false);
 
@@ -118,11 +117,11 @@ function PatientCardEntrySheetContent({
     event.preventDefault();
     const entryDate = new Date(form.entryDate);
     if (Number.isNaN(entryDate.getTime())) {
-      toast.error(l("Ungultiges Datum.", "Некорректная дата.", "Invalid date."));
+      toast.error(l("patients_invalid_date"));
       return;
     }
     if (!form.content.trim()) {
-      toast.error(l("Inhalt ist erforderlich.", "Содержание обязательно.", "Content required."));
+      toast.error(l("patients_content_required"));
       return;
     }
 
@@ -137,7 +136,7 @@ function PatientCardEntrySheetContent({
           content: form.content.trim(),
         }),
       });
-      toast.success(l("Eintrag gespeichert.", "Запись сохранена.", "Entry saved."));
+      toast.success(l("patients_entry_saved"));
       onOpenChange(false);
       onSaved();
     } catch (error) {
@@ -151,7 +150,7 @@ function PatientCardEntrySheetContent({
     <PatientSheetScaffold
       open={open}
       onOpenChange={onOpenChange}
-      title={l("Karteneintrag hinzufugen", "Добавить запись в карту", "Add card entry")}
+      title={l("patients_add_card_entry")}
       maxWidthClassName="sm:max-w-[540px]"
       onSubmit={handleSubmit}
       bodyClassName="px-4 py-4 space-y-3"
@@ -173,9 +172,9 @@ function PatientCardEntrySheetContent({
         </>
       }
     >
-      <FormSection title={l("Eintrag", "Запись", "Entry")}>
+      <FormSection title={l("patients_entry")}>
         <div className="grid gap-3 md:grid-cols-2">
-          <FormField label={l("Eintragsdatum", "Дата записи", "Entry date")} htmlFor="patient-card-entry-date">
+          <FormField label={l("patients_entry_date")} htmlFor="patient-card-entry-date">
             <Input
               id="patient-card-entry-date"
               type="datetime-local"
@@ -186,7 +185,7 @@ function PatientCardEntrySheetContent({
               required
             />
           </FormField>
-          <FormField label={l("Kategorie", "Категория", "Category")} htmlFor="patient-card-entry-category">
+          <FormField label={l("patients_category")} htmlFor="patient-card-entry-category">
             <NativeComboboxSelect
               id="patient-card-entry-category"
               value={form.category}
@@ -207,24 +206,20 @@ function PatientCardEntrySheetContent({
           </FormField>
         </div>
 
-        <FormField label={l("Quelle", "Источник", "Source")} htmlFor="patient-card-entry-source">
+        <FormField label={l("patients_source")} htmlFor="patient-card-entry-source">
           <Input
             id="patient-card-entry-source"
             value={form.source}
             onChange={(event) =>
               setForm((current) => ({ ...current, source: event.target.value }))
             }
-            placeholder={l(
-              "Patient, Klinik, Arzt, telefonische Nachverfolgung",
-              "Пациент, клиника, врач, follow-up по телефону",
-              "Patient, clinic, doctor, phone follow-up",
-            )}
+            placeholder={l("patients_patient_clinic_doctor_phone_follow_up")}
           />
         </FormField>
       </FormSection>
 
-      <FormSection title={l("Inhalt", "Содержание", "Content")}>
-        <FormField label={l("Notiz", "Заметка", "Note")} htmlFor="patient-card-entry-content">
+      <FormSection title={l("patients_content")}>
+        <FormField label={l("patients_note")} htmlFor="patient-card-entry-content">
           <textarea
             id="patient-card-entry-content"
             className={cardEntryTextareaClassName}

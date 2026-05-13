@@ -233,11 +233,11 @@ function renderStaticCalendarEventContent(
 ) {
   const props = arg.event.extendedProps as CalendarEventExtendedProps;
   const statusOrTypeLabel = props.isBlocked
-    ? appointmentText("Blocked", "Blocked", "Blocked")
+    ? appointmentText("appointments_blocked")
     : props.appointmentStatus === "completed"
       ? dictionary.dash_completed
       : props.appointmentStatus === "cancelled"
-        ? dictionary.appointments_status_cancelled ?? "Cancelled"
+        ? dictionary.appointments_status_cancelled
         : appointmentTypeLabel(props.appointmentType, dictionary);
   const secondaryLine = [
     arg.timeText,
@@ -246,9 +246,9 @@ function renderStaticCalendarEventContent(
       props.providerName ||
       props.location ||
       props.ownerName ||
-      appointmentText("Appointment", "Appointment", "Appointment"),
+      appointmentText("appointments_appointment_2"),
     props.interpreterName
-      ? `${appointmentText("Interpreter", "Interpreter", "Interpreter")}: ${props.interpreterName}`
+      ? `${appointmentText("appointments_interpreter_2")}: ${props.interpreterName}`
       : "",
   ]
     .filter((value): value is string => Boolean(value && value.trim()))
@@ -653,19 +653,19 @@ function useStaffAppointmentsPageContent() {
       id: "today",
       label:
         tr.appointments_today ??
-        appointmentText("Heute", "Сегодня", "Today"),
+        appointmentText("appointments_today"),
     },
     {
       id: "week",
       label:
         tr.dash_this_week ??
-        appointmentText("Diese Woche", "Эта неделя", "This week"),
+        appointmentText("appointments_this_week"),
     },
     ...(user?.id
       ? [
           {
             id: "mine" as const,
-            label: appointmentText("Bei mir", "Мои", "Mine"),
+            label: appointmentText("appointments_mine"),
           },
         ]
       : []),
@@ -889,72 +889,46 @@ function useStaffAppointmentsPageContent() {
       billingHandoffReminders.length > 0;
     const billingReadinessWarnings = [
       detail?.interpreter_id && !interpreterReportReady
-        ? appointmentText(
-            "Die Abrechnung wartet auf einen freigegebenen Dolmetscherbericht.",
-            "Биллинг ждёт согласованный отчёт переводчика.",
-            "Billing is waiting for an approved interpreter report.",
-          )
+        ? appointmentText("appointments_billing_is_waiting_for_an_approved_interpreter_report")
         : "",
       detail?.type === "non_medical" && serviceInFlightCount > 0
-        ? appointmentText(
-            `${serviceInFlightCount} Concierge-Leistung(en) sind operativ noch offen.`,
-            `${serviceInFlightCount} concierge-услуг(а) ещё операционно открыты.`,
-            `${serviceInFlightCount} concierge service(s) are still operationally open.`,
-          )
+        ? appointmentText("appointments_concierge_services_operational_open", {
+            count: serviceInFlightCount,
+          })
         : "",
       detail?.type === "non_medical" &&
       detailServices.length > 0 &&
       readyConciergeServices.length === 0 &&
       settledConciergeServices.length === 0
-        ? appointmentText(
-            "Concierge-Leistungen sind noch keinem Billing-Status zugeordnet.",
-            "У concierge-услуг ещё нет статуса биллинга.",
-            "Concierge services are not assigned to a billing status yet.",
-          )
+        ? appointmentText("appointments_concierge_services_are_not_assigned_to_a_billing_status")
         : "",
       billingStaff.length === 0
-        ? appointmentText(
-            "Kein Billing-Team für die Übergabe verfügbar.",
-            "Нет команды биллинга для handoff.",
-            "No billing team is available for handoff.",
-          )
+        ? appointmentText("appointments_no_billing_team_is_available_for_handoff")
         : "",
     ].filter(Boolean);
     const completionWarnings = [
       openChecklistCount > 0
-        ? appointmentText(
-            `${openChecklistCount} Checklistenpunkt(e) sind noch offen.`,
-            `${openChecklistCount} пункт(ов) чек-листа ещё открыты.`,
-            `${openChecklistCount} checklist item(s) are still open.`,
-          )
+        ? appointmentText("appointments_open_checklist_count_warning", {
+            count: openChecklistCount,
+          })
         : "",
       openIncomingDataChecklistCount > 0
-        ? appointmentText(
-            `${openIncomingDataChecklistCount} Intake-Punkt(e) brauchen noch Triage.`,
-            `${openIncomingDataChecklistCount} intake-пункт(ов) ещё ждут triage.`,
-            `${openIncomingDataChecklistCount} incoming data item(s) still need triage.`,
-          )
+        ? appointmentText("appointments_open_incoming_data_count_warning", {
+            count: openIncomingDataChecklistCount,
+          })
         : "",
       openTaskCount > 0
-        ? appointmentText(
-            `${openTaskCount} operative Aufgabe(n) sind noch offen.`,
-            `${openTaskCount} операционных задач(и) ещё открыты.`,
-            `${openTaskCount} operational task(s) are still open.`,
-          )
+        ? appointmentText("appointments_open_operational_task_count_warning", {
+            count: openTaskCount,
+          })
         : "",
       !interpreterReportReady && detail?.interpreter_id
-        ? appointmentText(
-            "Dolmetscherbericht oder Freigabe ist noch ausstehend.",
-            "Отчёт переводчика или согласование ещё ожидается.",
-            "Interpreter report or approval is still pending.",
-          )
+        ? appointmentText("appointments_interpreter_report_or_approval_is_still_pending")
         : "",
       detail?.type === "non_medical" && serviceInFlightCount > 0
-        ? appointmentText(
-            `${serviceInFlightCount} Concierge-Leistung(en) laufen noch.`,
-            `${serviceInFlightCount} concierge-услуг(а) ещё в работе.`,
-            `${serviceInFlightCount} concierge service(s) are still in progress.`,
-          )
+        ? appointmentText("appointments_concierge_services_in_progress_warning", {
+            count: serviceInFlightCount,
+          })
         : "",
     ].filter(Boolean);
 
@@ -1325,16 +1299,8 @@ function useStaffAppointmentsPageContent() {
         clearApiCache("/appointments/requests");
         reportAppointmentsNotice(
           status === "approved"
-            ? appointmentText(
-                "Portal-Anfrage freigegeben.",
-                "Запрос портала согласован.",
-                "Portal request approved.",
-              )
-            : appointmentText(
-                "Portal-Anfrage abgelehnt.",
-                "Запрос портала отклонён.",
-                "Portal request rejected.",
-              ),
+            ? appointmentText("appointments_portal_request_approved")
+            : appointmentText("appointments_portal_request_rejected"),
         );
         refreshAppointments();
       } catch (error) {
@@ -1446,11 +1412,7 @@ function useStaffAppointmentsPageContent() {
         clearApiCache("/appointments");
         clearApiCache("/appointments/requests");
         reportAppointmentsNotice(
-          appointmentText(
-            "Portal-Anfrage als Termin geplant.",
-            "Запрос портала запланирован как приём.",
-            "Portal request scheduled as appointment.",
-          ),
+          appointmentText("appointments_portal_request_scheduled_as_appointment"),
         );
         refreshAppointments();
         openDetailSheet(result.appointment_id);
@@ -1558,11 +1520,7 @@ function useStaffAppointmentsPageContent() {
   if (!permissions.canViewPage) {
     return (
       <div className={appointmentSectionCardClassName("p-8 text-sm text-muted-foreground")}>
-        {appointmentText(
-          "Ihre aktuelle Rolle hat keinen Zugriff auf Termine.",
-          "У вашей текущей роли нет доступа к приёмам.",
-          "Your current role does not have access to appointments.",
-        )}
+        {appointmentText("appointments_your_current_role_does_not_have_access_to_appointments")}
       </div>
     );
   }
@@ -1574,11 +1532,7 @@ function useStaffAppointmentsPageContent() {
           fallback={
             <div className="flex min-h-[320px] items-center justify-center text-muted-foreground">
               <LoaderCircle className="mr-2 size-4 animate-spin" />
-              {appointmentText(
-                "Arbeitsbereich wird geladen",
-                "Загрузка workspace",
-                "Loading workspace",
-              )}
+              {appointmentText("appointments_loading_workspace")}
             </div>
           }
         >
@@ -1656,22 +1610,18 @@ function useStaffAppointmentsPageContent() {
       ) : (
       <div className="space-y-4">
         <AppointmentsPageChrome
-          title={tr.appointments_title ?? "Appointments"}
-          createLabel={tr.appointments_new ?? "New appointment"}
-          refreshTitle={appointmentText("Aktualisieren", "Обновить", "Refresh")}
+          title={t.appointments_title}
+          createLabel={t.appointments_new}
+          refreshTitle={appointmentText("appointments_refresh")}
           canCreate={permissions.canCreate}
           onCreate={() => openCreateSheetFromDate()}
           onRefresh={refreshAppointments}
-          todayLabel={tr.dash_patients_today ?? "Today"}
-          activeLabel={tr.common_active ?? "Active"}
-          pendingLabel={tr.mfa_pending ?? "Pending"}
-          requestLabel={appointmentText(
-            "Portal-Anfragen",
-            "Запросы портала",
-            "Portal requests",
-          )}
-          attentionLabel={tr.common_error ?? "Attention"}
-          totalLabel={tr.providers_all ?? "All"}
+          todayLabel={t.dash_patients_today}
+          activeLabel={t.common_active}
+          pendingLabel={t.mfa_pending}
+          requestLabel={appointmentText("appointments_portal_requests")}
+          attentionLabel={t.common_error}
+          totalLabel={t.providers_all}
           todayAppointments={todayAppointments}
           activeAppointments={activeAppointments}
           pendingInterpreterResponses={pendingInterpreterResponses}
@@ -1687,14 +1637,14 @@ function useStaffAppointmentsPageContent() {
           useMobileAgenda={useInterpreterMobileAgenda}
           mobileAgenda={{
             todayLabel: t.dash_patients_today,
-            pendingLabel: tr.mfa_pending ?? "Pending interpreter",
-            weekLabel: tr.dash_this_week ?? "This week",
+            pendingLabel: t.mfa_pending,
+            weekLabel: t.dash_this_week,
             searchLabel: t.common_search,
             searchPlaceholder: tr.common_search,
             resetLabel: t.common_reset,
-            todayScopeLabel: "Today",
-            weekScopeLabel: "This week",
-            mineScopeLabel: "Mine",
+            todayScopeLabel: t.dash_patients_today,
+            weekScopeLabel: t.dash_this_week,
+            mineScopeLabel: t.uiText.appointments_scope_mine,
             todayAppointments,
             mobileAgendaPendingCount,
             mobileAgendaWeekCount,
@@ -1717,27 +1667,15 @@ function useStaffAppointmentsPageContent() {
             onApplyOperationalScope: applyOperationalScope,
             onResetQuickScopes: resetQuickScopes,
             sections: mobileAgendaSections,
-            emptyText: appointmentText(
-              "Im aktuellen mobilen Scope sind keine Termine vorhanden.",
-              "В текущем мобильном scope нет приёмов.",
-              "No appointments in the current mobile scope.",
-            ),
+            emptyText: appointmentText("appointments_no_appointments_in_the_current_mobile_scope"),
             onOpenDetail: openDetailSheet,
           }}
           filtersDialog={{
             open: filtersModalOpen && shouldRenderFiltersDialog,
             onOpenChange: handleFiltersModalOpenChange,
-            title: appointmentText("Filter", "Фильтры", "Filters"),
-            operationalScopeLabel: appointmentText(
-              "Operativer Bereich",
-              "Операционная область",
-              "Operational scope",
-            ),
-            quickScopeLabel: appointmentText(
-              "Schnellbereich",
-              "Быстрая область",
-              "Quick scope",
-            ),
+            title: appointmentText("appointments_filters"),
+            operationalScopeLabel: appointmentText("appointments_operational_scope"),
+            quickScopeLabel: appointmentText("appointments_quick_scope"),
             activeOperationalScope,
             onApplyOperationalScope: applyOperationalScope,
             selectedOperationalScopeLabel,
@@ -1751,11 +1689,7 @@ function useStaffAppointmentsPageContent() {
           searchSheet={{
             shouldRender: shouldRenderSearchSheet,
             loadingTitle: t.common_search,
-            loadingLabel: appointmentText(
-              "Suchfilter werden geladen",
-              "Загрузка фильтров поиска",
-              "Loading search filters",
-            ),
+            loadingLabel: appointmentText("appointments_loading_search_filters"),
             open: searchModalOpen,
             onOpenChange: handleSearchModalOpenChange,
             filters,
@@ -1773,11 +1707,7 @@ function useStaffAppointmentsPageContent() {
           queueSheet={{
             shouldRender: shouldRenderQueueSheet,
             loadingTitle: t.appointments_title,
-            loadingLabel: appointmentText(
-              "Auftragswarteschlange wird geladen",
-              "Загрузка очереди приёмов",
-              "Loading appointment queue",
-            ),
+            loadingLabel: appointmentText("appointments_loading_appointment_queue"),
             open: queueModalOpen,
             onOpenChange: handleQueueModalOpenChange,
             appointmentsLoading,
@@ -1805,8 +1735,8 @@ function useStaffAppointmentsPageContent() {
             searchPlaceholder: t.common_search.replace(/[.…]+$/u, ""),
             queueLabel:
               appointmentRequests.length > 0
-                ? `${appointmentText("Queue", "Очередь", "Queue")} (${appointmentRequests.length})`
-                : appointmentText("Queue", "Очередь", "Queue"),
+                ? `${appointmentText("appointments_queue")} (${appointmentRequests.length})`
+                : appointmentText("appointments_queue"),
             onOpenFilters: openFiltersModal,
             onOpenSearch: openSearchModal,
             onOpenQueue: openQueueModal,
@@ -1842,11 +1772,7 @@ function useStaffAppointmentsPageContent() {
       <CreateSheetLayer
         open={createOpen}
         title={tr.appointments_new}
-        loadingLabel={appointmentText(
-          "Terminformular wird geladen",
-          "Загрузка формы приёма",
-          "Loading appointment form",
-        )}
+        loadingLabel={appointmentText("appointments_loading_appointment_form")}
         seed={createSeed}
         appointments={appointments}
         patients={patients}
@@ -1932,11 +1858,7 @@ function useStaffAppointmentsPageContent() {
         onOpenChange={handleLinkedPreviewOpenChange}
         title={
           linkedPreviewLabel ||
-          appointmentText(
-            "Verknupfte Daten",
-            "Связанные данные",
-            "Linked records",
-          )
+          appointmentText("appointments_linked_records")
         }
         loading={linkedPreviewLoading}
         error={linkedPreviewError}
@@ -1956,11 +1878,7 @@ function useStaffAppointmentsPageContent() {
           }}
           shouldRenderContent={shouldRenderDetailSheetContent}
           title={tr.appointments_title}
-          loadingLabel={appointmentText(
-            "Detailbereich wird geladen",
-            "Загрузка detail-блока",
-            "Loading detail workspace",
-          )}
+          loadingLabel={appointmentText("appointments_loading_detail_workspace")}
           detailLoading={
             detailLoading ||
             (requiresExtendedDetailResources && detailExtendedLoading)
@@ -2048,11 +1966,7 @@ export function AppointmentsPage() {
         fallback={
           <div className="flex min-h-[320px] items-center justify-center text-muted-foreground">
             <LoaderCircle className="mr-2 size-4 animate-spin" />
-            {appointmentText(
-              "Termine werden geladen…",
-              "Загрузка записей…",
-              "Loading appointments…",
-            )}
+            {appointmentText("appointments_loading_appointments")}
           </div>
         }
       >

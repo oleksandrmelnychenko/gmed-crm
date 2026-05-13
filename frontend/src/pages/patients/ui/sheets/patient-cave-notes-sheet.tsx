@@ -56,9 +56,8 @@ function PatientCaveNotesSheetContent({
   onOpenChange: (v: boolean) => void;
   onSaved: () => void;
 }) {
-  const { t, lang } = useLang();
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
   const [value, setValue] = useReducer((_current: string, next: string) => next, initial);
   const [busy, setBusy] = useState(false);
 
@@ -72,7 +71,7 @@ function PatientCaveNotesSheetContent({
           clinical_warnings: value.trim() || null,
         }),
       });
-      toast.success(l("CAVE-Hinweise gespeichert.", "Заметки CAVE сохранены.", "Cave notes saved."));
+      toast.success(l("patients_cave_notes_saved"));
       onOpenChange(false);
       onSaved();
     } catch (error) {
@@ -86,7 +85,7 @@ function PatientCaveNotesSheetContent({
     <PatientSheetScaffold
       open={open}
       onOpenChange={onOpenChange}
-      title={l("CAVE-Hinweise aktualisieren", "Обновить заметки CAVE", "Update cave notes")}
+      title={l("patients_update_cave_notes")}
       width="narrow"
       onSubmit={handleSubmit}
       bodyClassName="px-4 py-4 space-y-3"
@@ -108,16 +107,12 @@ function PatientCaveNotesSheetContent({
         </>
       }
     >
-      <FormSection title={l("Warnhinweise", "Предупреждения", "Warnings")}>
+      <FormSection title={l("patients_warnings")}>
         <p className="text-[12.5px] text-muted-foreground">
-          {l(
-            "Dauerhafte klinische Warnhinweise, die vor Beginn von Koordination oder Behandlung sichtbar bleiben sollen.",
-            "Постоянные клинические предупреждения, которые должны оставаться видимыми до начала координации или лечения.",
-            "Persistent clinical warnings that should stay visible before coordination or treatment starts.",
-          )}
+          {l("patients_persistent_clinical_warnings_that_should_stay_visible_be")}
         </p>
         <FormField
-          label={l("CAVE", "CAVE", "CAVE")}
+          label={l("patients_cave")}
           htmlFor="patient-cave-notes"
         >
         <textarea
@@ -125,11 +120,7 @@ function PatientCaveNotesSheetContent({
           className={caveTextareaClassName}
           value={value}
           onChange={(event) => setValue(event.target.value)}
-          placeholder={l(
-            "Allergien, kritische Kontraindikationen, Hochrisiko-Vorerkrankungen...",
-            "Аллергии, критические противопоказания, состояния высокого риска...",
-            "Allergies, critical contraindications, high-risk conditions...",
-          )}
+          placeholder={l("patients_allergies_critical_contraindications_high_risk_condition")}
         />
         </FormField>
       </FormSection>

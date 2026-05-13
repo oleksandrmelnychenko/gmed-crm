@@ -158,7 +158,7 @@ function useEditAppointmentSectionContentContent({
   const tr = t as unknown as Record<string, string>;
   const interpreterFieldLabel =
     tr.role_interpreter ??
-    appointmentText("Dolmetscher", "Переводчик", "Interpreter");
+    appointmentText("appointments_interpreter");
   const [{ form, recurrenceScope, doctors, conflicts, error, busy }, dispatchEditState] =
     useReducer(
       editAppointmentSectionReducer,
@@ -347,11 +347,7 @@ function useEditAppointmentSectionContentContent({
       setError(
         submitError instanceof Error
           ? submitError.message
-          : appointmentText(
-              "Terminplan konnte nicht gespeichert werden.",
-              "Не удалось сохранить расписание приёма.",
-              "Failed to save schedule",
-            ),
+          : appointmentText("appointments_failed_to_save_schedule"),
       );
     } finally {
       setBusy(false);
@@ -382,11 +378,7 @@ function useEditAppointmentSectionContentContent({
           />
         </Field>
         <Field
-          label={appointmentText(
-            "Versorgungspfad",
-            "Траектория лечения",
-            "Care path",
-          )}
+          label={appointmentText("appointments_care_path")}
         >
           <NativeComboboxSelect
             value={form.carePathKind}
@@ -566,11 +558,7 @@ function useEditAppointmentSectionContentContent({
             </p>
             <div className="mt-4 grid gap-4 md:grid-cols-2">
               <Field
-                label={appointmentText(
-                  "Wiederholungsrhythmus",
-                  "Частота повторения",
-                  "Repeat frequency",
-                )}
+                label={appointmentText("appointments_repeat_frequency")}
               >
                 <NativeComboboxSelect
                   value={form.repeatFrequency}
@@ -594,11 +582,7 @@ function useEditAppointmentSectionContentContent({
                 </NativeComboboxSelect>
               </Field>
               <Field
-                label={appointmentText(
-                  "Wiederholen alle",
-                  "Повторять каждые",
-                  "Repeat every",
-                )}
+                label={appointmentText("appointments_repeat_every")}
               >
                 <Input
                   inputMode="numeric"
@@ -615,11 +599,7 @@ function useEditAppointmentSectionContentContent({
                 />
               </Field>
               <Field
-                label={appointmentText(
-                  "Anzahl Termine",
-                  "Всего повторов",
-                  "Total occurrences",
-                )}
+                label={appointmentText("appointments_total_occurrences")}
               >
                 <Input
                   inputMode="numeric"
@@ -633,21 +613,13 @@ function useEditAppointmentSectionContentContent({
                   }
                   className={inputClassName}
                   placeholder={withEllipsis(
-                    appointmentText(
-                      "Optional, wenn ein Enddatum gesetzt ist",
-                      "Необязательно, если указана дата окончания",
-                      "Optional when repeat-until is set",
-                    ),
+                    appointmentText("appointments_optional_when_repeat_until_is_set"),
                   )}
                   disabled={recurrenceScope === "single"}
                 />
               </Field>
               <Field
-                label={appointmentText(
-                  "Wiederholen bis",
-                  "Повторять до",
-                  "Repeat until",
-                )}
+                label={appointmentText("appointments_repeat_until")}
               >
                 <Input
                   type="date"

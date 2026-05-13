@@ -161,7 +161,7 @@ function patientDocumentsReducer(
 }
 
 function usePatientDocumentsPageContent() {
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const [documentsState, dispatchDocumentsState] = useReducer(
     patientDocumentsReducer,
     INITIAL_PATIENT_DOCUMENTS_STATE,
@@ -190,11 +190,7 @@ function usePatientDocumentsPageContent() {
     uploads,
     version,
   } = documentsState;
-  const l = useCallback(
-    (de: string, ru: string, en: string) =>
-      lang === "de" ? de : lang === "ru" ? ru : en,
-    [lang],
-  );
+  const l = useCallback((key: string) => t.uiText[key] ?? key, [t]);
 
   useRealtimeSubscription(PORTAL_DOCUMENT_REALTIME_EVENTS, () => {
     clearApiCache("/me/documents");
@@ -471,7 +467,7 @@ function usePatientDocumentsPageContent() {
         <div className="flex flex-wrap gap-2">
           {PORTAL_DOCUMENT_CATEGORY_TABS.map((tab) => {
             const count = categoryCounts.get(tab.key) ?? 0;
-            const label = lang === "de" ? tab.label.de : lang === "ru" ? tab.label.ru : tab.label.en;
+            const label = l(tab.labelKey);
             return (
               <button
                 key={tab.key}

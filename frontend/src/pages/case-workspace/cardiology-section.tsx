@@ -41,45 +41,37 @@ export function CardiologySection() {
       save={saveCardiology}
       revisionKey={detail?.updated_at ?? detail?.id ?? ""}
       booleanFlags={[
-        { key: "chest_pain", labels: { de: t.cases_specialty_chest_pain, ru: t.cases_specialty_chest_pain, en: t.cases_specialty_chest_pain } },
-        { key: "dyspnea", labels: { de: t.cases_specialty_dyspnea, ru: t.cases_specialty_dyspnea, en: t.cases_specialty_dyspnea } },
-        { key: "palpitations", labels: { de: t.cases_specialty_palpitations, ru: t.cases_specialty_palpitations, en: t.cases_specialty_palpitations } },
-        { key: "syncope", labels: { de: t.cases_specialty_syncope, ru: t.cases_specialty_syncope, en: t.cases_specialty_syncope } },
-        { key: "edema", labels: { de: t.cases_specialty_edema, ru: t.cases_specialty_edema, en: t.cases_specialty_edema } },
+        { key: "chest_pain", label: t.cases_specialty_chest_pain },
+        { key: "dyspnea", label: t.cases_specialty_dyspnea },
+        { key: "palpitations", label: t.cases_specialty_palpitations },
+        { key: "syncope", label: t.cases_specialty_syncope },
+        { key: "edema", label: t.cases_specialty_edema },
       ]}
       textFields={[
         {
           key: "known_diagnosis",
-          labels: { de: t.cases_specialty_known_diagnosis, ru: t.cases_specialty_known_diagnosis, en: t.cases_specialty_known_diagnosis },
+          label: t.cases_specialty_known_diagnosis,
         },
         {
           key: "prior_cardiac_workup",
-          labels: {
-            de: t.cases_specialty_prior_cardiac_workup,
-            ru: t.cases_specialty_prior_cardiac_workup,
-            en: t.cases_specialty_prior_cardiac_workup,
-          },
+          label: t.cases_specialty_prior_cardiac_workup,
         },
         {
           key: "cardiovascular_risk_factors",
-          labels: {
-            de: t.cases_specialty_cv_risk_factors,
-            ru: t.cases_specialty_cv_risk_factors,
-            en: t.cases_specialty_cv_risk_factors,
-          },
+          label: t.cases_specialty_cv_risk_factors,
         },
         {
           key: "anticoagulation",
-          labels: { de: t.cases_specialty_anticoagulation, ru: t.cases_specialty_anticoagulation, en: t.cases_specialty_anticoagulation },
+          label: t.cases_specialty_anticoagulation,
         },
         {
           key: "family_history",
-          labels: { de: t.cases_specialty_family_history, ru: t.cases_specialty_family_history, en: t.cases_specialty_family_history },
+          label: t.cases_specialty_family_history,
         },
-        { key: "red_flags", labels: { de: t.cases_specialty_red_flags, ru: t.cases_specialty_red_flags, en: t.cases_specialty_red_flags } },
+        { key: "red_flags", label: t.cases_specialty_red_flags },
         {
           key: "notes",
-          labels: { de: t.cases_specialty_cardiology_notes, ru: t.cases_specialty_cardiology_notes, en: t.cases_specialty_cardiology_notes },
+          label: t.cases_specialty_cardiology_notes,
           rows: 4,
         },
       ]}

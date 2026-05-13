@@ -1088,7 +1088,7 @@ function useChatPageContent() {
                           <div className="min-w-0 flex-1">
                             <p className="text-xs font-medium truncate">{m.attachment_filename}</p>
                             <p className="text-[10px] opacity-70">
-                              {isImage ? "Image" : "File"} - {formatSize(m.attachment_size ?? 0)}
+                              {isImage ? t.uiText.chat_attachment_image : t.uiText.chat_attachment_file} - {formatSize(m.attachment_size ?? 0)}
                             </p>
                           </div>
                           <Download className="size-3.5 shrink-0 opacity-60" />

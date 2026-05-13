@@ -31,24 +31,24 @@ type OrderType = (typeof ORDER_TYPE_OPTIONS)[number];
 
 function orderTypeLabel(
   value: string,
-  l: (de: string, ru: string, en: string) => string,
+  l: (key: string) => string,
   translations: { common_unknown: string; common_unknown_value: string },
 ): string {
   switch (value) {
     case "physiotherapy":
-      return l("Physiotherapie", "Fizioterapiya", "Physiotherapy");
+      return l("patients_physiotherapy");
     case "diet":
-      return l("Ernaehrung", "Dieta", "Diet");
+      return l("patients_diet");
     case "lab_recheck":
-      return l("Laborkontrolle", "Povtornyy analiz", "Lab recheck");
+      return l("patients_lab_recheck");
     case "imaging":
-      return l("Bildgebung", "Vizualizaciya", "Imaging");
+      return l("patients_imaging");
     case "medication_followup":
-      return l("Medikationskontrolle", "Kontrol medikacii", "Medication follow-up");
+      return l("patients_medication_follow_up");
     case "procedure":
-      return l("Eingriff", "Procedura", "Procedure");
+      return l("patients_procedure");
     case "other":
-      return l("Sonstiges", "Drugoe", "Other");
+      return l("patients_other_2");
     default:
       return formatUnknownValue(value, translations);
   }
@@ -92,9 +92,8 @@ export function PatientMedicalOrderSheet({
   onOpenChange: (value: boolean) => void;
   onSaved: () => void;
 }) {
-  const { t, lang } = useLang();
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
   const [form, setForm] = useState<FormState>(blankForm);
   const [busy, setBusy] = useState(false);
 
@@ -106,15 +105,15 @@ export function PatientMedicalOrderSheet({
     event.preventDefault();
     const orderDate = new Date(form.orderDate);
     if (Number.isNaN(orderDate.getTime())) {
-      toast.error(l("Ungueltiges Datum.", "Nekorrektnaya data.", "Invalid date."));
+      toast.error(l("patients_invalid_date_2"));
       return;
     }
     if (!form.title.trim()) {
-      toast.error(l("Titel ist erforderlich.", "Nazvanie obyazatelno.", "Title required."));
+      toast.error(l("patients_title_required"));
       return;
     }
     if (!form.instructions.trim()) {
-      toast.error(l("Anweisungen erforderlich.", "Instrukcii obyazatelny.", "Instructions required."));
+      toast.error(l("patients_instructions_required"));
       return;
     }
 
@@ -131,7 +130,7 @@ export function PatientMedicalOrderSheet({
           source: form.source.trim() || null,
         }),
       });
-      toast.success(l("Anordnung gespeichert.", "Naznachenie sohraneno.", "Order saved."));
+      toast.success(l("patients_order_saved"));
       onOpenChange(false);
       onSaved();
     } catch (error) {
@@ -147,7 +146,7 @@ export function PatientMedicalOrderSheet({
       onOpenChange={onOpenChange}
       maxWidthClassName="sm:max-w-[540px]"
       onSubmit={handleSubmit}
-      title={l("Medizinische Anordnung hinzufugen", "Dobavit medicinskoe naznachenie", "Add medical order")}
+      title={l("patients_add_medical_order")}
       bodyClassName="px-4 py-4 space-y-3"
       footer={
         <>
@@ -167,10 +166,10 @@ export function PatientMedicalOrderSheet({
         </>
       }
     >
-      <FormSection title={l("Anordnung", "Назначение", "Order")}>
+      <FormSection title={l("patients_order_2")}>
         <div className="grid gap-3 md:grid-cols-2">
           <FormField
-            label={l("Anordnungsdatum", "Дата назначения", "Order date")}
+            label={l("patients_order_date_2")}
             htmlFor="patient-medical-order-date"
           >
             <Input
@@ -185,7 +184,7 @@ export function PatientMedicalOrderSheet({
             />
           </FormField>
           <FormField
-            label={l("Anordnungstyp", "Тип назначения", "Order type")}
+            label={l("patients_order_type")}
             htmlFor="patient-medical-order-type"
           >
             <NativeComboboxSelect
@@ -208,7 +207,7 @@ export function PatientMedicalOrderSheet({
           </FormField>
         </div>
 
-        <FormField label={l("Titel", "Название", "Title")} htmlFor="patient-medical-order-title">
+        <FormField label={l("patients_title")} htmlFor="patient-medical-order-title">
           <Input
             id="patient-medical-order-title"
             value={form.title}
@@ -216,16 +215,16 @@ export function PatientMedicalOrderSheet({
               setForm((current) => ({ ...current, title: event.target.value }))
             }
             className={inputClass}
-            placeholder={l("Physiotherapie 2x pro Woche", "Физиотерапия 2 раза в неделю", "Physiotherapy 2x per week")}
+            placeholder={l("patients_physiotherapy_2x_per_week")}
             required
           />
         </FormField>
       </FormSection>
 
-      <FormSection title={l("Koordination", "Координация", "Coordination")}>
+      <FormSection title={l("appointments_coordination")}>
         <div className="grid gap-3 md:grid-cols-2">
           <FormField
-            label={l("Faelligkeitsdatum", "Срок", "Due date")}
+            label={l("patients_due_date_2")}
             htmlFor="patient-medical-order-due-date"
           >
             <Input
@@ -238,7 +237,7 @@ export function PatientMedicalOrderSheet({
               className={inputClass}
             />
           </FormField>
-          <FormField label={l("Quelle", "Источник", "Source")} htmlFor="patient-medical-order-source">
+          <FormField label={l("patients_source")} htmlFor="patient-medical-order-source">
             <Input
               id="patient-medical-order-source"
               value={form.source}
@@ -246,15 +245,15 @@ export function PatientMedicalOrderSheet({
                 setForm((current) => ({ ...current, source: event.target.value }))
               }
               className={inputClass}
-              placeholder={l("Arzt, Klinik, Entlassungsbericht", "Врач, клиника, выписка", "Doctor, clinic, discharge note")}
+              placeholder={l("patients_doctor_clinic_discharge_note")}
             />
           </FormField>
         </div>
       </FormSection>
 
-      <FormSection title={l("Details", "Детали", "Details")}>
+      <FormSection title={l("patients_details")}>
         <FormField
-          label={l("Anweisungen", "Инструкции", "Instructions")}
+          label={l("patients_instructions")}
           htmlFor="patient-medical-order-instructions"
         >
           <textarea

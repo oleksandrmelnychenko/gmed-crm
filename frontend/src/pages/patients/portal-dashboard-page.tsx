@@ -196,7 +196,7 @@ function patientDashboardReducer(
 
 function usePatientDashboardPageContent() {
   const { user } = useAuth();
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const [dashboardState, dispatchDashboardState] = useReducer(
     patientDashboardReducer,
     INITIAL_PATIENT_DASHBOARD_STATE,
@@ -217,11 +217,7 @@ function usePatientDashboardPageContent() {
     services,
     version,
   } = dashboardState;
-  const l = useCallback(
-    (de: string, ru: string, en: string) =>
-      lang === "de" ? de : lang === "ru" ? ru : en,
-    [lang],
-  );
+  const l = useCallback((key: string) => t.uiText[key] ?? key, [t]);
   const greeting = t.portal_dashboard_hello;
   const patientLabel = t.portal_dashboard_patient;
 
@@ -826,7 +822,7 @@ function usePatientDashboardPageContent() {
                         {item.appointment_title || item.provider_name || t.portal_dashboard_general_feedback}
                       </p>
                       <p className={cn("mt-1", tokens.text.muted)}>
-                        NPS {item.nps_score} / {formatPortalDateTime(item.submitted_at)}
+                        {t.uiText.feedback_nps_label} {item.nps_score} / {formatPortalDateTime(item.submitted_at)}
                       </p>
                     </div>
                     <StatusBadge status={item.status} className={feedbackStatusTone(item.status)}>

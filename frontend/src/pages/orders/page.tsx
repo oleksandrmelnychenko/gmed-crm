@@ -12,7 +12,6 @@ import {
 } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import {
-  ArrowLeft,
   ArrowUpRight,
   Building2,
   CalendarClock,
@@ -24,6 +23,7 @@ import {
   RefreshCw,
   Search,
   Stethoscope,
+  UserRound,
   Wallet,
   X,
 } from "lucide-react";
@@ -46,6 +46,7 @@ import {
   Banner,
   Field,
   PageHeader,
+  Section as FormSection,
   StatusBadge,
   checkboxClass,
   inputClass as shellInputClassName,
@@ -55,11 +56,19 @@ import {
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { formatEnumLabel, formatEnumLabelFromKeys, type TranslationKey, useLang } from "@/lib/i18n";
+import {
+  formatEnumLabel,
+  formatEnumLabelFromKeys,
+  formatUiText,
+  type TranslationKey,
+  type UiTextValues,
+  useLang,
+} from "@/lib/i18n";
 import { localizeDocumentCode } from "@/lib/required-document-labels";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
+import { localizeWorkflowItemText } from "@/lib/workflow-labels";
 import {
   createOrderServiceGroup,
   fetchOrderServiceGroup,
@@ -221,6 +230,64 @@ const ORDER_TASK_STATUS_LABEL_KEYS = {
   cancelled: "orders_task_status_cancelled",
 } satisfies Partial<Record<string, TranslationKey>>;
 
+const ORDER_BLOCKING_REASON_LABEL_KEYS: Record<string, string> = {
+  "Billing release is not granted and package coverage is not confirmed":
+    "orders_blocking_billing_release_package_coverage",
+  "Order signatures are still incomplete": "orders_blocking_signatures_incomplete",
+  "Advance invoice exists but payment is still missing":
+    "orders_blocking_advance_invoice_missing_payment",
+  "Treatment plan must be finalized before execution":
+    "orders_blocking_treatment_plan_not_final",
+  "At least one confirmed medical appointment is required":
+    "orders_blocking_medical_appointment_required",
+  "Required non-medical services still need a confirmed booking":
+    "orders_blocking_non_medical_booking_required",
+  "Interpreter is required but not assigned yet":
+    "orders_blocking_interpreter_not_assigned",
+  "Assigned interpreter has not confirmed yet":
+    "orders_blocking_interpreter_not_confirmed",
+  "Interpreter briefing is still pending":
+    "orders_blocking_interpreter_briefing_pending",
+  "Preparation documents still need to be sent":
+    "orders_blocking_preparation_documents_pending",
+  "Patient arrival or execution start is not recorded yet":
+    "orders_blocking_patient_arrival_missing",
+  "Medical execution must be completed and backed by delivered appointments or services":
+    "orders_blocking_medical_execution_incomplete",
+  "Required non-medical services still need execution confirmation":
+    "orders_blocking_non_medical_execution_missing",
+  "Interpreter-supported execution still needs completion or report confirmation":
+    "orders_blocking_interpreter_execution_incomplete",
+  "Execution deviations or incidents must be resolved or marked as not required":
+    "orders_blocking_execution_deviations_unresolved",
+  "Results, Arztbrief or final patient handoff still need to be released":
+    "orders_blocking_results_handoff_unreleased",
+  "Doctor-directed follow-up is required but not scheduled yet":
+    "orders_blocking_doctor_followup_unscheduled",
+  "1-week follow-up is not scheduled yet":
+    "orders_blocking_1w_followup_unscheduled",
+  "1-month follow-up is not scheduled yet":
+    "orders_blocking_1m_followup_unscheduled",
+  "6-month follow-up is not scheduled yet":
+    "orders_blocking_6m_followup_unscheduled",
+  "Package-end follow-up is required but not scheduled yet":
+    "orders_blocking_package_end_followup_unscheduled",
+  "No follow-up reminder, task or appointment has been launched yet":
+    "orders_blocking_no_followup_launched",
+  "Primary contact is missing": "orders_blocking_primary_contact_missing",
+  "Residence or address country is missing": "orders_blocking_country_missing",
+  "Preferred language is missing": "orders_blocking_preferred_language_missing",
+  "Compliance status is not completed": "orders_blocking_compliance_incomplete",
+  "DSGVO/compliance documents are not signed":
+    "orders_blocking_compliance_documents_unsigned",
+  "Identity is not verified": "orders_blocking_identity_unverified",
+  "Valid contract documentation is missing":
+    "orders_blocking_contract_documentation_missing",
+  "Patient is still in debt-management hold": "orders_blocking_debt_hold",
+  "Existing-customer re-check is not required before the first operational order":
+    "orders_blocking_existing_customer_recheck_not_required",
+};
+
 function StatCard({ label, value, description, icon }: StatCardProps) {
   return (
     <div className="rounded-xl border border-border bg-card p-4">
@@ -250,23 +317,20 @@ function SectionCard({
   return (
     <section
       className={cn(
-        "overflow-hidden rounded-xl border border-border bg-card",
+        "rounded-xl border border-border bg-card p-6",
         className,
       )}
     >
-      <div className="flex flex-col gap-3 border-b border-border px-4 py-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="space-y-1">
-          <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-            <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
-            <span>{title}</span>
-          </h2>
+      <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-start 2xl:justify-between">
+        <div>
+          <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
           {description ? (
-            <p className={tokens.text.muted}>{description}</p>
+            <p className={cn(tokens.text.muted, "mt-1")}>{description}</p>
           ) : null}
         </div>
         {action ? <div className="shrink-0">{action}</div> : null}
       </div>
-      <div className="p-4">{children}</div>
+      <div className="mt-5">{children}</div>
     </section>
   );
 }
@@ -306,13 +370,47 @@ function OrderSummaryLine({
 }) {
   return (
     <div className={cn("flex items-center gap-3 rounded-lg py-2", className)}>
-      <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
-      <span className="h-px min-w-6 flex-1 bg-border/70" />
-      <span className="max-w-[48%] text-right text-sm font-semibold leading-tight text-foreground">
+      <span className="min-w-0 text-sm text-muted-foreground">{label}</span>
+      <span className="h-px min-w-4 flex-1 bg-border/70" />
+      <span className="min-w-0 max-w-[50%] break-words text-right text-sm font-semibold leading-tight text-foreground">
         {value}
       </span>
     </div>
   );
+}
+
+function MiniMetric({
+  label,
+  value,
+  className,
+}: {
+  label: string;
+  value: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex min-w-[210px] flex-1 items-center justify-between gap-3 rounded-full border border-border bg-muted/20 px-4 py-2",
+        className,
+      )}
+    >
+      <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+        {label}
+      </span>
+      <span className="min-w-0 max-w-[55%] truncate text-right text-sm font-semibold leading-none text-foreground">
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function orderAccentClass(phase: string, status: string) {
+  if (status === "completed") return "bg-emerald-500";
+  if (status === "cancelled") return "bg-rose-500";
+  if (status === "paused") return "bg-amber-500";
+  if (phase === "execution" || phase === "closure") return "bg-sky-500";
+  return "bg-orange-500";
 }
 
 function EmptyState({ title, description, action }: EmptyStateProps) {
@@ -341,15 +439,6 @@ function titleWithDot(title: ReactNode) {
   );
 }
 
-function eyebrowWithDot(label: ReactNode) {
-  return (
-    <span className={cn("inline-flex items-center gap-2", tokens.text.eyebrow)}>
-      <span aria-hidden className="size-2 rounded-full bg-amber-500" />
-      <span>{label}</span>
-    </span>
-  );
-}
-
 type OrdersPageState = {
   filters: OrdersFilters;
   orders: OrderSummary[];
@@ -367,6 +456,7 @@ type OrdersPageState = {
   serviceGroupsLoading: boolean;
   serviceGroupsError: string | null;
   serviceGroupWizardError: string | null;
+  serviceGroupWizardOpen: boolean;
   serviceGroupCreating: boolean;
   generatingServiceGroupId: string | null;
   workflowChecklist: WorkflowChecklistResponse | null;
@@ -378,6 +468,7 @@ type OrdersPageState = {
   phaseError: string | null;
   approvingLeistungId: string | null;
   workflowBusy: boolean;
+  workflowCreateOpen: boolean;
   workflowForm: WorkflowChecklistFormState;
   processGateBusy: boolean;
   processGateError: string | null;
@@ -456,7 +547,15 @@ function useOrdersPageContent() {
   const activeOrderSection = normalizeOrderSectionKey(searchParams.get("section"));
   const permissions = orderPermissions(user?.role);
   const locale = lang === "de" ? "de-DE" : "ru-RU";
-  const l = useCallback((de: string, ru: string) => (lang === "de" ? de : ru), [lang]);
+  const l = useCallback(
+    (key: string, values?: UiTextValues) =>
+      formatUiText(t.uiText[key] ?? key, values),
+    [t],
+  );
+  const lWorkflow = useCallback(
+    (key: string) => t.uiText[key] ?? key,
+    [t],
+  );
   const orderColumnGroupLabels = useMemo(
     () => ({
       identity: t.operations_column_group_identity,
@@ -474,88 +573,88 @@ function useOrdersPageContent() {
   const normalizeLeistungDescription = useCallback(
     (value: string) =>
       value === "Discovery and provider shortlist"
-        ? l("Bedarfsklärung", "Уточнение потребности")
+        ? l("orders_bedarfsklarung")
         : value,
     [l],
   );
   const phaseLabels = useMemo(
     () => ({
-      discovery: l("Bedarfsklärung", "Уточнение потребности"),
-      intake: l("Aufnahme", "Оформление"),
-      execution: l("Durchführung", "Исполнение"),
-      closure: l("Abschluss", "Закрытие"),
-      followup: l("Nachsorge", "Наблюдение"),
+      discovery: l("orders_bedarfsklarung"),
+      intake: l("orders_aufnahme"),
+      execution: l("orders_durchfuhrung"),
+      closure: l("orders_abschluss"),
+      followup: l("orders_nachsorge"),
     }),
     [l],
   );
   const workflowGroupLabels = useMemo(
     () => ({
       ...phaseLabels,
-      custom: l("Individuell", "Индивидуально"),
+      custom: l("orders_individuell"),
     }),
     [l, phaseLabels],
   );
   const orderStatusLabels = useMemo(
     () => ({
-      active: l("Aktiv", "Активен"),
-      paused: l("Pausiert", "На паузе"),
-      completed: l("Abgeschlossen", "Завершён"),
-      cancelled: l("Storniert", "Отменён"),
+      active: l("orders_aktiv"),
+      paused: l("orders_pausiert"),
+      completed: l("orders_abgeschlossen"),
+      cancelled: l("orders_storniert"),
     }),
     [l],
   );
   const frameworkContractStatusLabels = useMemo(
     () => ({
-      draft: l("Entwurf", "Черновик"),
-      sent: l("Versendet", "Отправлено"),
-      signed: l("Unterzeichnet", "Подписано"),
-      expired: l("Abgelaufen", "Истекло"),
-      terminated: l("Beendet", "Прекращено"),
+      draft: l("orders_entwurf"),
+      sent: l("orders_versendet"),
+      signed: l("orders_unterzeichnet"),
+      expired: l("orders_abgelaufen"),
+      terminated: l("orders_beendet"),
     }),
     [l],
   );
   const debtStatusLabels = useMemo(
     () => ({
-      review_required: l("Review erforderlich", "Требуется ревью"),
-      payment_plan: l("Zahlungsplan", "План оплаты"),
-      awaiting_payment: l("Zahlung ausstehend", "Ожидание оплаты"),
-      escalated: l("Eskaliert", "Эскалировано"),
-      cleared: l("Geklärt", "Снято"),
-      not_required: l("Nicht erforderlich", "Не требуется"),
+      review_required: l("orders_review_erforderlich"),
+      payment_plan: l("orders_zahlungsplan"),
+      awaiting_payment: l("orders_zahlung_ausstehend"),
+      escalated: l("orders_eskaliert"),
+      cleared: l("orders_geklart"),
+      not_required: l("orders_nicht_erforderlich"),
     }),
     [l],
   );
   const billingReleaseLabels = useMemo(
     () => ({
-      pending: l("Ausstehend", "Ожидается"),
-      granted: l("Freigegeben", "Разрешено"),
-      denied: l("Abgelehnt", "Отклонено"),
+      pending: l("orders_ausstehend"),
+      granted: l("orders_freigegeben"),
+      denied: l("orders_abgelehnt"),
     }),
     [l],
   );
   const packageCoverageLabels = useMemo(
     () => ({
-      unknown: l("Unbekannt", "Неизвестно"),
-      covered: l("Abgedeckt", "Покрыто"),
-      not_covered: l("Nicht abgedeckt", "Не покрыто"),
+      unknown: l("orders_unbekannt"),
+      covered: l("orders_abgedeckt"),
+      not_covered: l("orders_nicht_abgedeckt"),
     }),
     [l],
   );
   const roleLabels = useMemo(
     () => ({
       ceo: "CEO",
-      ceo_assistant: l("CEO-Assistenz", "Ассистент CEO"),
-      admin: l("Admin", "Администратор"),
-      assistant: l("CEO-Assistenz", "Ассистент CEO"),
-      patient_manager: l("Patientenmanagement", "Пациент-менеджер"),
-      billing: l("Billing", "Billing"),
-      sales: l("Vertrieb", "Отдел продаж"),
-      it_admin: l("IT-Admin", "IT-администратор"),
-      patient: l("Patient", "Пациент"),
-      concierge: l("Concierge", "Консьерж"),
-      interpreter: l("Dolmetscher", "Переводчик"),
-      teamlead_interpreter: l("Dolmetscher-Teamlead", "Тимлид переводчиков"),
-      debt_owner: l("Debt-Owner", "Ответственный по debt"),
+      ceo_assistant: l("orders_ceo_assistenz"),
+      admin: l("orders_admin"),
+      assistant: l("orders_ceo_assistenz"),
+      patient_manager: l("orders_patientenmanagement"),
+      billing: l("orders_billing"),
+      sales: l("orders_vertrieb"),
+      it_admin: l("orders_it_admin"),
+      patient: l("orders_patient"),
+      concierge: l("orders_concierge"),
+      interpreter: l("orders_dolmetscher"),
+      teamlead_interpreter: l("orders_dolmetscher_teamlead"),
+      debt_owner: l("orders_debt_owner"),
     }),
     [l],
   );
@@ -566,11 +665,11 @@ function useOrdersPageContent() {
   const formatMoney = (value: unknown, currency = "EUR") =>
     formatCurrency(value, currency, locale);
   const formatDateLabel = (value: string | null | undefined) =>
-    formatDate(value, locale, l("Nicht festgelegt", "Не указано"));
+    formatDate(value, locale, l("orders_nicht_festgelegt"));
   const formatDateTimeLabel = (value: string | null | undefined) =>
-    formatDateTime(value, locale, l("Nicht festgelegt", "Не указано"));
+    formatDateTime(value, locale, l("orders_nicht_festgelegt"));
   const formatDateOnlyLabel = (value: string | null | undefined) =>
-    formatDateOnly(value, locale, l("Nicht festgelegt", "Не указано"));
+    formatDateOnly(value, locale, l("orders_nicht_festgelegt"));
   const phaseLabel = (value: string) => labelFor(value, phaseLabels);
   const orderStatusLabel = (value: string) => labelFor(value, orderStatusLabels);
   const frameworkContractStatusLabel = (value: string) =>
@@ -582,230 +681,104 @@ function useOrdersPageContent() {
     labelFor(value, packageCoverageLabels);
   const leistungStatusLabel = (value: string) =>
     labelFor(value, {
-      draft: l("Entwurf", "Черновик"),
-      delivered: l("Erbracht", "Оказано"),
-      approved: l("Freigegeben", "Утверждено"),
-      cancelled: l("Storniert", "Отменено"),
+      draft: l("orders_entwurf"),
+      delivered: l("orders_erbracht"),
+      approved: l("orders_freigegeben_2"),
+      cancelled: l("orders_storniert_2"),
     });
   const externalInvoiceStatusLabel = (value: string) =>
     labelFor(value, {
-      expected: l("Erwartet", "Ожидается"),
-      received: l("Eingegangen", "Получен"),
-      approved: l("Freigegeben", "Утверждён"),
-      paid: l("Bezahlt", "Оплачен"),
-      overdue: l("Überfällig", "Просрочен"),
-      cancelled: l("Storniert", "Отменён"),
+      expected: l("orders_erwartet"),
+      received: l("orders_eingegangen"),
+      approved: l("orders_freigegeben_3"),
+      paid: l("orders_bezahlt"),
+      overdue: l("orders_uberfallig"),
+      cancelled: l("orders_storniert"),
     });
   const treatmentPlanStatusLabel = (value: string) =>
     labelFor(value, {
-      draft: l("Entwurf", "Черновик"),
-      agreed: l("Abgestimmt", "Согласовано"),
-      correction_requested: l("Korrektur angefragt", "Запрошена корректировка"),
-      finalized: l("Finalisiert", "Финализировано"),
+      draft: l("orders_entwurf"),
+      agreed: l("orders_abgestimmt"),
+      correction_requested: l("orders_korrektur_angefragt"),
+      finalized: l("orders_finalisiert"),
     });
   const preparationDocumentStatusLabel = (value: string) =>
     labelFor(value, {
-      pending: l("Dokumente ausstehend", "Документы ожидаются"),
-      sent: l("Dokumente versendet", "Документы отправлены"),
-      not_required: l("Dokumente nicht erforderlich", "Документы не требуются"),
+      pending: l("orders_dokumente_ausstehend"),
+      sent: l("orders_dokumente_versendet"),
+      not_required: l("orders_dokumente_nicht_erforderlich"),
     });
   const interpreterBriefingStatusLabel = (value: string) =>
     labelFor(value, {
-      not_needed: l("Nicht erforderlich", "Не требуется"),
-      pending: l("Briefing ausstehend", "Брифинг ожидается"),
-      completed: l("Briefing abgeschlossen", "Брифинг завершён"),
+      not_needed: l("orders_nicht_erforderlich"),
+      pending: l("orders_briefing_ausstehend"),
+      completed: l("orders_briefing_abgeschlossen"),
     });
   const arrivalStatusLabel = (value: string) =>
     labelFor(value, {
-      pending: l("Ankunft ausstehend", "Прибытие ожидается"),
-      arrived: l("Angekommen", "Прибыл"),
-      not_required: l("Nicht erforderlich", "Не требуется"),
+      pending: l("orders_ankunft_ausstehend"),
+      arrived: l("orders_angekommen"),
+      not_required: l("orders_nicht_erforderlich"),
     });
   const executionStatusLabel = (value: string) =>
     labelFor(value, {
-      pending: l("Ausstehend", "Ожидается"),
-      in_progress: l("In Bearbeitung", "В работе"),
-      completed: l("Abgeschlossen", "Завершено"),
-      not_required: l("Nicht erforderlich", "Не требуется"),
+      pending: l("orders_ausstehend"),
+      in_progress: l("orders_in_bearbeitung"),
+      completed: l("orders_abgeschlossen_2"),
+      not_required: l("orders_nicht_erforderlich"),
     });
   const issueStatusLabel = (value: string) =>
     labelFor(value, {
-      pending: l("Offene Punkte", "Есть открытые вопросы"),
-      monitoring: l("Unter Beobachtung", "Под наблюдением"),
-      resolved: l("Geklärt", "Закрыто"),
-      not_required: l("Keine Punkte", "Нет вопросов"),
+      pending: l("orders_offene_punkte"),
+      monitoring: l("orders_unter_beobachtung"),
+      resolved: l("orders_geklart_2"),
+      not_required: l("orders_keine_punkte"),
     });
   const followupStatusLabel = (value: string) =>
     labelFor(value, {
-      pending: l("Ausstehend", "Ожидается"),
-      scheduled: l("Geplant", "Запланировано"),
-      completed: l("Abgeschlossen", "Завершено"),
-      not_required: l("Nicht erforderlich", "Не требуется"),
+      pending: l("orders_ausstehend"),
+      scheduled: l("orders_geplant"),
+      completed: l("orders_abgeschlossen_2"),
+      not_required: l("orders_nicht_erforderlich"),
     });
   const resultsHandoffStatusLabel = (value: string) =>
     labelFor(value, {
-      pending: l("Ausstehend", "Ожидается"),
-      completed: l("Abgeschlossen", "Завершено"),
-      not_required: l("Nicht erforderlich", "Не требуется"),
+      pending: l("orders_ausstehend"),
+      completed: l("orders_abgeschlossen_2"),
+      not_required: l("orders_nicht_erforderlich"),
     });
   const priorityLabel = (value: string) =>
     labelFor(value, {
-      low: l("Niedrig", "Низкий"),
-      normal: l("Normal", "Обычный"),
-      high: l("Hoch", "Высокий"),
-      urgent: l("Dringend", "Срочный"),
+      low: l("orders_niedrig"),
+      normal: l("orders_normal"),
+      high: l("orders_hoch"),
+      urgent: l("orders_dringend"),
     });
   const transitionKindLabel = (value: string) =>
     labelFor(value, {
-      created: l("Erstellt", "Создано"),
-      phase_change: l("Phasenwechsel", "Смена фазы"),
+      created: l("orders_erstellt"),
+      phase_change: l("orders_phasenwechsel"),
     });
   const roleLabel = (value: string) => labelFor(value, roleLabels);
   const localizedBlockingReason = (reason: string) => {
-    const exact =
-      lang === "de"
-        ? {
-            "Billing release is not granted and package coverage is not confirmed":
-              "Billing-Release fehlt und die Paketdeckung ist nicht bestätigt.",
-            "Order signatures are still incomplete":
-              "Die Auftragssignaturen sind noch nicht vollständig.",
-            "Advance invoice exists but payment is still missing":
-              "Es gibt eine Vorausrechnung, aber die Zahlung fehlt noch.",
-            "Treatment plan must be finalized before execution":
-              "Der Behandlungsplan muss vor der Durchführung finalisiert sein.",
-            "At least one confirmed medical appointment is required":
-              "Mindestens ein bestätigter medizinischer Termin ist erforderlich.",
-            "Required non-medical services still need a confirmed booking":
-              "Erforderliche nicht-medizinische Leistungen brauchen noch eine bestätigte Buchung.",
-            "Interpreter is required but not assigned yet":
-              "Ein Dolmetscher ist erforderlich, aber noch nicht zugewiesen.",
-            "Assigned interpreter has not confirmed yet":
-              "Der zugewiesene Dolmetscher hat noch nicht bestätigt.",
-            "Interpreter briefing is still pending":
-              "Das Dolmetscher-Briefing ist noch ausstehend.",
-            "Preparation documents still need to be sent":
-              "Vorbereitungsunterlagen müssen noch versendet werden.",
-            "Patient arrival or execution start is not recorded yet":
-              "Patientenankunft oder Durchführungsstart sind noch nicht erfasst.",
-            "Medical execution must be completed and backed by delivered appointments or services":
-              "Die medizinische Durchführung muss abgeschlossen und durch erbrachte Termine oder Leistungen belegt sein.",
-            "Required non-medical services still need execution confirmation":
-              "Erforderliche nicht-medizinische Leistungen brauchen noch eine Durchführungsbestätigung.",
-            "Interpreter-supported execution still needs completion or report confirmation":
-              "Dolmetscher-gestützte Durchführung braucht noch Abschluss oder Berichtbestätigung.",
-            "Execution deviations or incidents must be resolved or marked as not required":
-              "Abweichungen oder Vorfälle müssen geklärt oder als nicht erforderlich markiert werden.",
-            "Results, Arztbrief or final patient handoff still need to be released":
-              "Ergebnisse, Arztbrief oder finale Patientenübergabe müssen noch freigegeben werden.",
-            "Doctor-directed follow-up is required but not scheduled yet":
-              "Arztgesteuertes Follow-up ist erforderlich, aber noch nicht terminiert.",
-            "1-week follow-up is not scheduled yet":
-              "Das 1-Wochen-Follow-up ist noch nicht terminiert.",
-            "1-month follow-up is not scheduled yet":
-              "Das 1-Monats-Follow-up ist noch nicht terminiert.",
-            "6-month follow-up is not scheduled yet":
-              "Das 6-Monats-Follow-up ist noch nicht terminiert.",
-            "Package-end follow-up is required but not scheduled yet":
-              "Follow-up zum Paketende ist erforderlich, aber noch nicht terminiert.",
-            "No follow-up reminder, task or appointment has been launched yet":
-              "Es wurde noch keine Follow-up-Erinnerung, Aufgabe oder kein Termin gestartet.",
-            "Primary contact is missing": "Hauptkontakt fehlt.",
-            "Residence or address country is missing":
-              "Wohnsitz- oder Adressland fehlt.",
-            "Preferred language is missing": "Bevorzugte Sprache fehlt.",
-            "Compliance status is not completed":
-              "Der Compliance-Status ist nicht abgeschlossen.",
-            "DSGVO/compliance documents are not signed":
-              "DSGVO-/Compliance-Dokumente sind nicht unterschrieben.",
-            "Identity is not verified": "Die Identität ist nicht verifiziert.",
-            "Valid contract documentation is missing":
-              "Gültige Vertragsdokumentation fehlt.",
-            "Patient is still in debt-management hold":
-              "Der Patient befindet sich noch im Debt-Hold.",
-            "Existing-customer re-check is not required before the first operational order":
-              "Vor dem ersten operativen Auftrag ist kein Bestandskunden-Re-Check erforderlich.",
-          }[reason]
-        : {
-            "Billing release is not granted and package coverage is not confirmed":
-              "Billing release не выдан, и покрытие пакетом не подтверждено.",
-            "Order signatures are still incomplete":
-              "Подписи по заказу ещё не завершены.",
-            "Advance invoice exists but payment is still missing":
-              "Есть авансовый счёт, но оплата ещё не поступила.",
-            "Treatment plan must be finalized before execution":
-              "План лечения должен быть финализирован до исполнения.",
-            "At least one confirmed medical appointment is required":
-              "Нужен минимум один подтверждённый медицинский приём.",
-            "Required non-medical services still need a confirmed booking":
-              "Обязательные немедицинские услуги ещё требуют подтверждённого бронирования.",
-            "Interpreter is required but not assigned yet":
-              "Переводчик требуется, но ещё не назначен.",
-            "Assigned interpreter has not confirmed yet":
-              "Назначенный переводчик ещё не подтвердил участие.",
-            "Interpreter briefing is still pending":
-              "Брифинг переводчика ещё ожидает выполнения.",
-            "Preparation documents still need to be sent":
-              "Подготовительные документы ещё нужно отправить.",
-            "Patient arrival or execution start is not recorded yet":
-              "Прибытие пациента или начало исполнения ещё не зафиксированы.",
-            "Medical execution must be completed and backed by delivered appointments or services":
-              "Медицинская часть должна быть завершена и подтверждена оказанными приёмами или услугами.",
-            "Required non-medical services still need execution confirmation":
-              "Обязательные немедицинские услуги ещё требуют подтверждения исполнения.",
-            "Interpreter-supported execution still needs completion or report confirmation":
-              "Исполнение с участием переводчика ещё требует завершения или подтверждения отчёта.",
-            "Execution deviations or incidents must be resolved or marked as not required":
-              "Отклонения или инциденты исполнения должны быть закрыты или помечены как не требующие действий.",
-            "Results, Arztbrief or final patient handoff still need to be released":
-              "Результаты, Arztbrief или финальная передача пациенту ещё должны быть выпущены.",
-            "Doctor-directed follow-up is required but not scheduled yet":
-              "Follow-up по назначению врача требуется, но ещё не запланирован.",
-            "1-week follow-up is not scheduled yet":
-              "Недельный follow-up ещё не запланирован.",
-            "1-month follow-up is not scheduled yet":
-              "Месячный follow-up ещё не запланирован.",
-            "6-month follow-up is not scheduled yet":
-              "Шестимесячный follow-up ещё не запланирован.",
-            "Package-end follow-up is required but not scheduled yet":
-              "Follow-up по завершению пакета требуется, но ещё не запланирован.",
-            "No follow-up reminder, task or appointment has been launched yet":
-              "Ещё не запущено ни одного напоминания, задачи или приёма по follow-up.",
-            "Primary contact is missing": "Не указан основной контакт.",
-            "Residence or address country is missing":
-              "Не указана страна проживания или адреса.",
-            "Preferred language is missing": "Не указан предпочитаемый язык.",
-            "Compliance status is not completed":
-              "Статус compliance не завершён.",
-            "DSGVO/compliance documents are not signed":
-              "Документы DSGVO/compliance не подписаны.",
-            "Identity is not verified": "Личность не подтверждена.",
-            "Valid contract documentation is missing":
-              "Нет действующего договорного пакета.",
-            "Patient is still in debt-management hold":
-              "Пациент всё ещё находится в debt-hold.",
-            "Existing-customer re-check is not required before the first operational order":
-              "Повторная проверка существующего клиента не требуется перед первым операционным заказом.",
-          }[reason];
-    if (exact) return exact;
+    const exactKey = ORDER_BLOCKING_REASON_LABEL_KEYS[reason];
+    if (exactKey) return l(exactKey);
+
     const executionChecklistMatch = reason.match(
-      /^(\\d+) execution checklist item\\(s\\) remain open$/,
+      /^(\d+) execution checklist item\(s\) remain open$/,
     );
     if (executionChecklistMatch) {
-      const count = Number(executionChecklistMatch[1]);
-      return l(
-        `${count} Punkt(e) der Durchführungs-Checkliste sind noch offen.`,
-        `${count} пункт(ов) чек-листа исполнения ещё открыто.`,
-      );
+      return l("orders_blocking_execution_checklist_open_count", {
+        count: Number(executionChecklistMatch[1]),
+      });
     }
     const missingDocsMatch = reason.match(
-      /^(\\d+) required patient document\\(s\\) are missing$/,
+      /^(\d+) required patient document\(s\) are missing$/,
     );
     if (missingDocsMatch) {
-      const count = Number(missingDocsMatch[1]);
-      return l(
-        `${count} erforderliche Patientendokument(e) fehlen.`,
-        `Не хватает ${count} обязательных документ(ов) пациента.`,
-      );
+      return l("orders_blocking_missing_required_patient_documents_count", {
+        count: Number(missingDocsMatch[1]),
+      });
     }
     return reason;
   };
@@ -830,6 +803,7 @@ function useOrdersPageContent() {
       serviceGroupsLoading: false,
       serviceGroupsError: null,
       serviceGroupWizardError: null,
+      serviceGroupWizardOpen: false,
       serviceGroupCreating: false,
       generatingServiceGroupId: null,
       workflowChecklist: null,
@@ -841,6 +815,7 @@ function useOrdersPageContent() {
       phaseError: null,
       approvingLeistungId: null,
       workflowBusy: false,
+      workflowCreateOpen: false,
       workflowForm: blankWorkflowChecklistForm(),
       processGateBusy: false,
       processGateError: null,
@@ -929,9 +904,11 @@ function useOrdersPageContent() {
     serviceGroupsError,
     serviceGroupsLoading,
     serviceGroupWizardError,
+    serviceGroupWizardOpen,
     workflowAssignments,
     workflowBusy,
     workflowChecklist,
+    workflowCreateOpen,
     workflowForm,
   } = ordersPageState;
   const setOrdersPageField = <K extends keyof OrdersPageState>(
@@ -977,6 +954,8 @@ function useOrdersPageContent() {
   const setServiceGroupWizardError = (
     nextValue: SetStateAction<string | null>,
   ) => setOrdersPageField("serviceGroupWizardError", nextValue);
+  const setServiceGroupWizardOpen = (nextValue: SetStateAction<boolean>) =>
+    setOrdersPageField("serviceGroupWizardOpen", nextValue);
   const setServiceGroupCreating = (nextValue: SetStateAction<boolean>) =>
     setOrdersPageField("serviceGroupCreating", nextValue);
   const setGeneratingServiceGroupId = (
@@ -1003,6 +982,8 @@ function useOrdersPageContent() {
   ) => setOrdersPageField("approvingLeistungId", nextValue);
   const setWorkflowBusy = (nextValue: SetStateAction<boolean>) =>
     setOrdersPageField("workflowBusy", nextValue);
+  const setWorkflowCreateOpen = (nextValue: SetStateAction<boolean>) =>
+    setOrdersPageField("workflowCreateOpen", nextValue);
   const setWorkflowForm = (
     nextValue: SetStateAction<WorkflowChecklistFormState>,
   ) => setOrdersPageField("workflowForm", nextValue);
@@ -1120,7 +1101,7 @@ function useOrdersPageContent() {
   const orderTableColumns: ColumnDef<OrderSummary>[] = [
     {
       id: "order_number",
-      label: l("Auftrag", "Заказ"),
+      label: l("orders_auftrag"),
       accessor: (row) => row.order_number,
       filterType: "text",
       group: "identity",
@@ -1152,7 +1133,7 @@ function useOrdersPageContent() {
     },
     {
       id: "patient_pid",
-      label: "PID",
+      label: l("documents_pid_fallback"),
       accessor: (row) => row.patient_pid,
       filterType: "text",
       group: "identity",
@@ -1199,7 +1180,7 @@ function useOrdersPageContent() {
     },
     {
       id: "created_at",
-      label: l("Erstellt", "Создано"),
+      label: l("orders_erstellt"),
       accessor: (row) => row.created_at,
       filterType: "date",
       group: "audit",
@@ -1213,7 +1194,7 @@ function useOrdersPageContent() {
     },
     {
       id: "total_estimated",
-      label: l("Geschaftsvolumen", "Оценочный объём"),
+      label: l("orders_geschaftsvolumen"),
       accessor: (row) => numberFromUnknown(row.total_estimated) ?? 0,
       filterType: "number",
       group: "finance",
@@ -1236,6 +1217,20 @@ function useOrdersPageContent() {
       gross: sumLeistungTotals(items),
     };
   }, [orderDetail]);
+  const serviceGroupMetrics = useMemo(
+    () => ({
+      total: orderServiceGroups.length,
+      participants: orderServiceGroups.reduce(
+        (sum, group) => sum + (group.participants?.length ?? 0),
+        0,
+      ),
+      generated: orderServiceGroups.reduce(
+        (sum, group) => sum + (group.generated_line_count ?? 0),
+        0,
+      ),
+    }),
+    [orderServiceGroups],
+  );
   const externalInvoiceMetrics = useMemo(() => {
     const items = orderDetail?.external_invoices ?? [];
     return {
@@ -1262,6 +1257,29 @@ function useOrdersPageContent() {
       items: groupItems,
     }));
   }, [t, workflowChecklist, workflowGroupLabels]);
+  const workflowMetrics = useMemo(() => {
+    const items = workflowChecklist?.items ?? [];
+    const ownerKeys = new Set<string>();
+    const now = Date.now();
+    let overdue = 0;
+
+    for (const item of items) {
+      if (item.is_completed) continue;
+      ownerKeys.add(item.owner_user_id ?? item.owner_role);
+
+      if (!item.due_date) continue;
+      const dueTime = Date.parse(item.due_date);
+      if (Number.isFinite(dueTime) && dueTime < now) {
+        overdue += 1;
+      }
+    }
+
+    return {
+      total: items.length,
+      owners: ownerKeys.size,
+      overdue,
+    };
+  }, [workflowChecklist]);
   const nextLifecycleTransition = useMemo(
     () => orderDetail?.lifecycle?.allowed_transitions?.[0] ?? null,
     [orderDetail?.lifecycle],
@@ -1285,7 +1303,7 @@ function useOrdersPageContent() {
     ) {
       items.push({
         user_id: currentOwnerId,
-        user_name: currentOwnerName ?? l("Aktueller Owner", "Текущий ответственный"),
+        user_name: currentOwnerName ?? l("orders_aktueller_owner"),
         user_role: "debt_owner",
         user_active: true,
         revoked_at: null,
@@ -1330,11 +1348,13 @@ function useOrdersPageContent() {
     setServiceGroupPreviews({});
     setServiceGroupsError(null);
     setServiceGroupWizardError(null);
+    setServiceGroupWizardOpen(false);
     setServiceGroupCreating(false);
     setServiceGroupsLoading(false);
     setGeneratingServiceGroupId(null);
     setWorkflowChecklist(null);
     setWorkflowAssignments([]);
+    setWorkflowCreateOpen(false);
     setDetailError(null);
     setPhaseDraft("");
     setProcessGateError(null);
@@ -1532,9 +1552,9 @@ function useOrdersPageContent() {
     setCreateRecheckError(
       error instanceof Error
         ? error.message
-        : "Failed to load patient re-check",
+        : l("orders_error_load_patient_recheck"),
     );
-  }, []);
+  }, [l]);
 
   const finishCreateRecheckLoad = useCallback(() => {
     setCreateRecheckLoading(false);
@@ -1551,10 +1571,10 @@ function useOrdersPageContent() {
 
   const failOrdersLoad = useCallback((error: unknown) => {
     setListError(
-      error instanceof Error ? error.message : "Failed to load orders",
+      error instanceof Error ? error.message : l("orders_error_load_orders"),
     );
     setOrders([]);
-  }, []);
+  }, [l]);
 
   const finishOrdersLoad = useCallback(() => {
     setLoading(false);
@@ -1580,9 +1600,9 @@ function useOrdersPageContent() {
     setDebtQueueError(
       error instanceof Error
         ? error.message
-        : "Failed to load debt-management queue",
+        : l("orders_error_load_debt_queue"),
     );
-  }, []);
+  }, [l]);
 
   const finishDebtQueueLoad = useCallback(() => {
     setDebtQueueLoading(false);
@@ -1642,9 +1662,9 @@ function useOrdersPageContent() {
     setFollowupForm(blankOrderFollowupForm());
     setFollowupError(null);
     setDetailError(
-      error instanceof Error ? error.message : "Failed to load order",
+      error instanceof Error ? error.message : l("orders_error_load_order"),
     );
-  }, []);
+  }, [l]);
 
   const finishOrderDetailLoad = useCallback(() => {
     setDetailLoading(false);
@@ -2007,21 +2027,21 @@ function useOrdersPageContent() {
   async function handleCreateOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!createForm.patientId) {
-      setCreateError("Patient is required");
+      setCreateError(l("orders_error_patient_required"));
       return;
     }
     if (createRecheckLoading) {
-      setCreateError("Existing customer re-check is still loading");
+      setCreateError(l("orders_error_recheck_still_loading"));
       return;
     }
     if (!createRecheck) {
-      setCreateError(createRecheckError ?? "Failed to load patient re-check");
+      setCreateError(createRecheckError ?? l("orders_error_load_patient_recheck"));
       return;
     }
     if (createRecheck?.requires_recheck && !createRecheck.can_create_order) {
       setCreateError(
         createRecheck?.blocking_reasons?.[0] ??
-          "Existing customer re-check is incomplete",
+          l("orders_error_recheck_incomplete"),
       );
       return;
     }
@@ -2040,7 +2060,7 @@ function useOrdersPageContent() {
       triggerReload();
     } catch (error) {
       setCreateError(
-        error instanceof Error ? error.message : "Failed to create order",
+        error instanceof Error ? error.message : l("orders_error_create_order"),
       );
     } finally {
       setCreateSaving(false);
@@ -2056,7 +2076,9 @@ function useOrdersPageContent() {
       phaseDraft !== orderDetail.lifecycle.next_stage
     ) {
       setPhaseError(
-        `Only the next lifecycle phase is allowed: ${orderDetail.lifecycle.next_stage}`,
+        l("orders_error_only_next_lifecycle_phase", {
+          phase: orderDetail.lifecycle.next_stage,
+        }),
       );
       return;
     }
@@ -2068,7 +2090,7 @@ function useOrdersPageContent() {
       triggerReload();
     } catch (error) {
       setPhaseError(
-        error instanceof Error ? error.message : "Failed to update phase",
+        error instanceof Error ? error.message : l("orders_error_update_phase"),
       );
     } finally {
       setPhaseSaving(false);
@@ -2089,7 +2111,7 @@ function useOrdersPageContent() {
       .catch((error: unknown) => {
         setPhaseDraft(orderDetail.phase);
         setPhaseError(
-          error instanceof Error ? error.message : "Failed to advance phase",
+          error instanceof Error ? error.message : l("orders_error_advance_phase"),
         );
       });
   }
@@ -2117,7 +2139,7 @@ function useOrdersPageContent() {
       setProcessGateError(
         error instanceof Error
           ? error.message
-          : "Failed to update debt-management workflow",
+          : l("orders_error_update_debt_workflow"),
       );
     } finally {
       setProcessGateBusy(false);
@@ -2139,7 +2161,7 @@ function useOrdersPageContent() {
       setProcessGateError(
         error instanceof Error
           ? error.message
-          : "Failed to update billing release",
+          : l("orders_error_update_billing_release"),
       );
     } finally {
       setProcessGateBusy(false);
@@ -2161,7 +2183,7 @@ function useOrdersPageContent() {
       setProcessGateError(
         error instanceof Error
           ? error.message
-          : "Failed to update package coverage",
+          : l("orders_error_update_package_coverage"),
       );
     } finally {
       setProcessGateBusy(false);
@@ -2189,7 +2211,7 @@ function useOrdersPageContent() {
       setPlanningError(
         error instanceof Error
           ? error.message
-          : "Failed to update planning/preparation",
+          : l("orders_error_update_planning"),
       );
     } finally {
       setPlanningBusy(false);
@@ -2216,7 +2238,7 @@ function useOrdersPageContent() {
       setExecutionError(
         error instanceof Error
           ? error.message
-          : "Failed to update execution flow",
+          : l("orders_error_update_execution_flow"),
       );
     } finally {
       setExecutionBusy(false);
@@ -2244,7 +2266,7 @@ function useOrdersPageContent() {
       setFollowupError(
         error instanceof Error
           ? error.message
-          : "Failed to update follow-up flow",
+          : l("orders_error_update_followup_flow"),
       );
     } finally {
       setFollowupBusy(false);
@@ -2255,7 +2277,7 @@ function useOrdersPageContent() {
     event.preventDefault();
 
     if (!selectedOrderId) {
-      setLeistungError("Select an order first");
+      setLeistungError(l("orders_error_select_order_first"));
       return;
     }
 
@@ -2264,19 +2286,19 @@ function useOrdersPageContent() {
     const vatRate = Number(leistungForm.vatRate.replace(",", "."));
 
     if (!leistungForm.description.trim()) {
-      setLeistungError("Description is required");
+      setLeistungError(l("orders_error_description_required"));
       return;
     }
     if (!Number.isFinite(quantity) || quantity <= 0) {
-      setLeistungError("Quantity must be a positive number");
+      setLeistungError(l("orders_error_quantity_positive"));
       return;
     }
     if (!Number.isFinite(unitPrice) || unitPrice < 0) {
-      setLeistungError("Unit price must be numeric");
+      setLeistungError(l("orders_error_unit_price_numeric"));
       return;
     }
     if (!Number.isFinite(vatRate) || vatRate < 0) {
-      setLeistungError("VAT must be numeric");
+      setLeistungError(l("orders_error_vat_numeric"));
       return;
     }
 
@@ -2298,7 +2320,7 @@ function useOrdersPageContent() {
       triggerReload();
     } catch (error) {
       setLeistungError(
-        error instanceof Error ? error.message : "Failed to add Leistung",
+        error instanceof Error ? error.message : l("orders_error_add_leistung"),
       );
     } finally {
       setLeistungSaving(false);
@@ -2314,7 +2336,7 @@ function useOrdersPageContent() {
       triggerReload();
     } catch (error) {
       setDetailError(
-        error instanceof Error ? error.message : "Failed to approve Leistung",
+        error instanceof Error ? error.message : l("orders_error_approve_leistung"),
       );
     } finally {
       setApprovingLeistungId(null);
@@ -2343,7 +2365,7 @@ function useOrdersPageContent() {
 
   async function handleCreateServiceGroup(input: CreateOrderServiceGroupInput) {
     if (!selectedOrderId) {
-      setServiceGroupWizardError("Select an order first");
+      setServiceGroupWizardError(l("orders_error_select_order_first"));
       return;
     }
     setServiceGroupCreating(true);
@@ -2368,11 +2390,11 @@ function useOrdersPageContent() {
   ) {
     event.preventDefault();
     if (!selectedOrderId) {
-      setExternalInvoiceError("Select an order first");
+      setExternalInvoiceError(l("orders_error_select_order_first"));
       return;
     }
     if (!externalInvoiceForm.externalInvoiceNumber.trim()) {
-      setExternalInvoiceError("External invoice number is required");
+      setExternalInvoiceError(l("orders_error_external_invoice_number_required"));
       return;
     }
 
@@ -2383,21 +2405,21 @@ function useOrdersPageContent() {
     );
 
     if (!Number.isFinite(amountGross) || amountGross < 0) {
-      setExternalInvoiceError("Gross amount must be numeric");
+      setExternalInvoiceError(l("orders_error_gross_amount_numeric"));
       return;
     }
     if (
       externalInvoiceForm.amountNet.trim() &&
       (!Number.isFinite(amountNet) || amountNet < 0)
     ) {
-      setExternalInvoiceError("Net amount must be numeric");
+      setExternalInvoiceError(l("orders_error_net_amount_numeric"));
       return;
     }
     if (
       externalInvoiceForm.amountVat.trim() &&
       (!Number.isFinite(amountVat) || amountVat < 0)
     ) {
-      setExternalInvoiceError("VAT amount must be numeric");
+      setExternalInvoiceError(l("orders_error_vat_amount_numeric"));
       return;
     }
 
@@ -2423,7 +2445,7 @@ function useOrdersPageContent() {
       setExternalInvoiceError(
         error instanceof Error
           ? error.message
-          : "Failed to create external invoice",
+          : l("orders_error_create_external_invoice"),
       );
     } finally {
       setExternalInvoiceSaving(false);
@@ -2445,7 +2467,7 @@ function useOrdersPageContent() {
       setDetailError(
         error instanceof Error
           ? error.message
-          : "Failed to update external invoice",
+          : l("orders_error_update_external_invoice"),
       );
     } finally {
       setExternalInvoiceUpdatingId(null);
@@ -2455,7 +2477,7 @@ function useOrdersPageContent() {
   async function handleAddWorkflowItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedOrderId || !workflowForm.itemText.trim()) {
-      setDetailError("Checklist item text is required");
+      setDetailError(l("orders_error_checklist_item_text_required"));
       return;
     }
 
@@ -2474,12 +2496,13 @@ function useOrdersPageContent() {
         ...blankWorkflowChecklistForm(),
         ownerUserId: current.ownerUserId,
       }));
+      setWorkflowCreateOpen(false);
       triggerReload();
     } catch (error) {
       setDetailError(
         error instanceof Error
           ? error.message
-          : "Failed to create checklist item",
+          : l("orders_error_create_checklist_item"),
       );
     } finally {
       setWorkflowBusy(false);
@@ -2498,7 +2521,7 @@ function useOrdersPageContent() {
       setDetailError(
         error instanceof Error
           ? error.message
-          : "Failed to complete checklist item",
+          : l("orders_error_complete_checklist_item"),
       );
     } finally {
       setWorkflowBusy(false);
@@ -2579,17 +2602,11 @@ function useOrdersPageContent() {
             <div>
               <h2 className={tokens.text.sectionTitle}>
                 {titleWithDot(
-                  l(
-                    "Orders blocked by overdue receivables or an open debt workflow",
-                    "Заказы, заблокированные просроченной задолженностью или открытым debt-workflow",
-                  ),
+                  l("orders_orders_blocked_by_overdue_receivables_or_an_open_debt_wo"),
                 )}
               </h2>
               <p className={cn(tokens.text.muted, "mt-2 max-w-3xl")}>
-                {l(
-                  "Auftrage, die durch uberfallige Forderungen oder einen offenen Debt-Workflow blockiert sind.",
-                  "Заказы, заблокированные просроченной задолженностью или открытым debt-workflow.",
-                )}
+                {l("orders_auftrage_die_durch_uberfallige_forderungen_oder_einen_of")}
               </p>
             </div>
             {!debtQueueLoading && !debtQueueError ? (
@@ -2607,17 +2624,11 @@ function useOrdersPageContent() {
             ) : debtQueueLoading ? (
               <div className="flex items-center gap-2 rounded-xl border border-border/70 bg-muted/20 px-4 py-5 text-sm text-muted-foreground">
                 <LoaderCircle className="size-4 animate-spin" />
-                {l(
-                  "Debt-Management-Queue wird geladen...",
-                  "Загрузка очереди debt-management...",
-                )}
+                {l("orders_debt_management_queue_wird_geladen")}
               </div>
             ) : debtQueue.length === 0 ? (
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                {l(
-                  "Aktuell gibt es keine offenen Debt-Management-Falle.",
-                  "Сейчас нет открытых кейсов debt-management.",
-                )}
+                {l("orders_aktuell_gibt_es_keine_offenen_debt_management_falle")}
               </div>
             ) : (
               <div className="space-y-3 pl-6">
@@ -2662,7 +2673,7 @@ function useOrdersPageContent() {
                           <div className="max-w-xl text-xs leading-snug text-muted-foreground">
                             {item.blocking_reason
                               ? localizedBlockingReason(item.blocking_reason)
-                              : l("Offener Debt-Workflow", "Открытый debt-workflow")}
+                              : l("orders_offener_debt_workflow")}
                           </div>
                           {item.note ? (
                             <div className="mt-2 max-w-xl text-xs leading-snug text-muted-foreground">
@@ -2671,19 +2682,19 @@ function useOrdersPageContent() {
                           ) : null}
                           <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                             <span>
-                              {l("Uberfallig", "Просрочено")}:{" "}
+                              {l("orders_uberfallig_2")}:{" "}
                               <span className="font-medium text-foreground">
                                 {item.overdue_invoice_count}
                               </span>
                             </span>
                             <span>
-                              {l("Owner", "Ответственный")}:{" "}
+                              {l("orders_owner")}:{" "}
                               <span className="font-medium text-foreground">
-                                {item.owner_name ?? l("Nicht zugewiesen", "Не назначено")}
+                                {item.owner_name ?? l("orders_nicht_zugewiesen")}
                               </span>
                             </span>
                             <span>
-                              {l("Review", "Ревью")}:{" "}
+                              {l("orders_review")}:{" "}
                               <span className="font-medium text-foreground">
                                 {formatDateTimeLabel(item.next_review_at)}
                               </span>
@@ -2695,7 +2706,7 @@ function useOrdersPageContent() {
                           <div className="space-y-2 text-xs leading-tight">
                             <div>
                               <div className="text-muted-foreground">
-                                {l("Saldo", "Сальдо")}
+                                {l("orders_saldo")}
                               </div>
                               <div className="mt-1 text-2xl font-semibold leading-none text-foreground">
                                 {formatMoney(item.outstanding_balance)}
@@ -2939,34 +2950,19 @@ function useOrdersPageContent() {
           showOverlay={!isOrderRouteDetail}
           className={cn(
             isOrderRouteDetail
-              ? "min-h-0 flex-1 rounded-none border-0 bg-transparent p-0 shadow-none sm:max-w-none"
+              ? "min-h-0 flex-1 gap-1 rounded-none border-0 bg-transparent p-0 shadow-none sm:max-w-none"
               : "w-full border-l border-border p-0 sm:max-w-3xl",
           )}
         >
-          {isOrderRouteDetail ? (
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-8 rounded-lg gap-1.5"
-                onClick={closeOrderWorkspace}
-              >
-                <ArrowLeft className="size-4" />
-                {patientContextId ? l("Patient", "Пациент") : tx.orders_title}
-              </Button>
-            </div>
-          ) : null}
           <AdminSheetScaffold
             title={
               orderDetail
                 ? `${orderDetail.order_number} / ${orderDetail.patient_name}`
                 : tx.orders_title
             }
-            description={l(
-              "Vollstandige operative Sicht auf den aktuellen Auftrag inklusive Phasensteuerung und providerbezogener Leistungen.",
-              "Полная операционная картина текущего заказа, включая управление фазой и услугами провайдеров.",
-            )}
+            description={l("orders_vollstandige_operative_sicht_auf_den_aktuellen_auftrag_i")}
+            bodyClassName={isOrderRouteDetail ? "pt-0" : undefined}
+            hideHeader={isOrderRouteDetail}
           >
             {detailLoading ? (
               <div
@@ -2988,7 +2984,86 @@ function useOrdersPageContent() {
                 description={tx.orders_subtitle}
               />
             ) : (
-              <>
+              <div className="space-y-4 rounded-xl p-4">
+                <section className="overflow-hidden rounded-xl border border-border bg-card">
+                  <div className="relative p-4">
+                    <span
+                      className={cn(
+                        "absolute left-0 top-4 h-12 w-1 rounded-r-full",
+                        orderAccentClass(orderDetail.phase, orderDetail.status),
+                      )}
+                    />
+                    <div className="grid gap-4 pl-3 2xl:grid-cols-[minmax(0,1fr)_190px]">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="h-px w-8 bg-border" />
+                          <StatusBadge tone={orderPhaseTone(orderDetail.phase)}>
+                            {phaseLabel(orderDetail.phase)}
+                          </StatusBadge>
+                          <StatusBadge tone={orderStatusTone(orderDetail.status)}>
+                            {orderStatusLabel(orderDetail.status)}
+                          </StatusBadge>
+                        </div>
+                        <h3 className="mt-2 truncate text-lg font-semibold leading-none text-foreground">
+                          {orderDetail.patient_name}
+                        </h3>
+                        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                          {[orderDetail.order_number, orderDetail.patient_pid]
+                            .filter(Boolean)
+                            .join(" - ")}
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Badge variant="outline" className="rounded-full">
+                            {formatMoney(orderDetail.total_actual)}
+                          </Badge>
+                          <Badge variant="outline" className="rounded-full">
+                            {leistungMetrics.total} {tx.providers_services}
+                          </Badge>
+                        </div>
+                      </div>
+                      <div className="flex flex-col justify-between gap-4 border-t border-dashed border-border pt-4 2xl:border-l 2xl:border-t-0 2xl:pl-4 2xl:pt-0">
+                        <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                          {l("orders_context_heading")}
+                        </span>
+                        <div className="flex flex-col gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="justify-center rounded-lg"
+                            onClick={() =>
+                              window.open(
+                                `/patients/${orderDetail.patient_id}?tab=orders`,
+                                "_blank",
+                                "noopener,noreferrer",
+                              )
+                            }
+                          >
+                            <UserRound className="size-3.5" />
+                            {t.orders_patient}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="justify-center rounded-lg"
+                            onClick={() =>
+                              window.open(
+                                `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                                "_blank",
+                                "noopener,noreferrer",
+                              )
+                            }
+                          >
+                            <ArrowUpRight className="size-3.5" />
+                            {l("orders_dokumente")}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
                 {shouldRenderOrderSection("overview") ? (
                   <>
                     <section className="rounded-xl border border-border bg-card p-6">
@@ -3026,7 +3101,7 @@ function useOrdersPageContent() {
                             value={orderStatusLabel(orderDetail.status)}
                           />
                           <OrderSummaryLine
-                            label={l("Aktualisiert", "Обновлено")}
+                            label={l("orders_aktualisiert")}
                             value={formatDateTimeLabel(orderDetail.updated_at)}
                           />
                           <OrderSummaryLine
@@ -3047,10 +3122,11 @@ function useOrdersPageContent() {
                           />
                           <OrderSummaryLine
                             label={tx.providers_services}
-                            value={l(
-                              `${leistungMetrics.total} Positionen / ${leistungMetrics.delivered} erbracht / ${leistungMetrics.approved} freigegeben`,
-                              `${leistungMetrics.total} позиций / ${leistungMetrics.delivered} оказано / ${leistungMetrics.approved} утверждено`,
-                            )}
+                            value={l("orders_leistung_metrics_summary", {
+                              total: leistungMetrics.total,
+                              delivered: leistungMetrics.delivered,
+                              approved: leistungMetrics.approved,
+                            })}
                           />
                         </div>
                         <div className="space-y-3">
@@ -3072,7 +3148,7 @@ function useOrdersPageContent() {
                       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                         <div>
                           <h2 className={tokens.text.sectionTitle}>
-                            {titleWithDot(l("Bedarfsklärung", "Уточнение потребности"))}
+                            {titleWithDot(l("orders_bedarfsklarung"))}
                           </h2>
                         </div>
                       </div>
@@ -3080,48 +3156,33 @@ function useOrdersPageContent() {
                       <div className="mt-5 grid grid-cols-[repeat(auto-fit,minmax(185px,1fr))] gap-3">
                         {[
                           {
-                            label: l("Patient", "Пациент"),
+                            label: l("orders_patient"),
                             description: `${orderDetail.patient_name} (${orderDetail.patient_pid})`,
                             href: `/patients/${orderDetail.patient_id}?tab=orders`,
                           },
                           {
-                            label: l("Fälle", "Кейсы"),
-                            description: l(
-                              "Fallkontext dieses Patienten öffnen.",
-                              "Открыть кейсы этого пациента.",
-                            ),
+                            label: l("orders_falle"),
+                            description: l("orders_fallkontext_dieses_patienten_offnen"),
                             href: `/patients/${orderDetail.patient_id}?tab=cases`,
                           },
                           {
-                            label: l("Termine", "Приёмы"),
-                            description: l(
-                              "Termine dieses Patienten anzeigen.",
-                              "Показать приёмы этого пациента.",
-                            ),
+                            label: l("orders_termine"),
+                            description: l("orders_termine_dieses_patienten_anzeigen"),
                             href: `/appointments?patient=${orderDetail.patient_id}`,
                           },
                           {
-                            label: l("Verträge", "Договоры"),
-                            description: l(
-                              "Angebote und Verträge dieses Auftrags öffnen.",
-                              "Открыть предложения и договоры этого заказа.",
-                            ),
+                            label: l("orders_vertrage"),
+                            description: l("orders_angebote_und_vertrage_dieses_auftrags_offnen"),
                             href: `/contracts?order=${orderDetail.id}&patient=${orderDetail.patient_id}&tab=quotes`,
                           },
                           {
-                            label: l("Rechnungen", "Счета"),
-                            description: l(
-                              "Rechnungen dieses Auftrags anzeigen.",
-                              "Показать счета этого заказа.",
-                            ),
+                            label: l("orders_rechnungen"),
+                            description: l("orders_rechnungen_dieses_auftrags_anzeigen"),
                             href: `/invoices?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
                           },
                           {
-                            label: l("Dokumente", "Документы"),
-                            description: l(
-                              "Dokumente dieses Auftrags anzeigen.",
-                              "Показать документы этого заказа.",
-                            ),
+                            label: l("orders_dokumente"),
+                            description: l("orders_dokumente_dieses_auftrags_anzeigen"),
                             href: `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
                           },
                         ].map((link) => (
@@ -3156,14 +3217,14 @@ function useOrdersPageContent() {
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>
-                          {titleWithDot(l("Prozess-Gates", "Процессные гейты"))}
+                          {titleWithDot(l("orders_prozess_gates"))}
                         </h2>
                       </div>
                     </div>
                     <div className="mt-5 space-y-4">
                       <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
                         <OrderSummaryLine
-                          label={l("Durchfuhrungsfreigabe", "Готовность к исполнению")}
+                          label={l("orders_durchfuhrungsfreigabe")}
                           value={
                             <Badge
                               variant="outline"
@@ -3175,13 +3236,13 @@ function useOrdersPageContent() {
                               )}
                             >
                               {orderDetail.process_gates.execution_ready
-                                ? l("bereit", "готово")
-                                : l("blockiert", "заблокировано")}
+                                ? l("orders_bereit")
+                                : l("orders_blockiert")}
                             </Badge>
                           }
                         />
                         <OrderSummaryLine
-                          label={l("Debt-Workflow", "Debt-workflow")}
+                          label={l("orders_debt_workflow")}
                           value={
                             debtStatusLabel(
                               orderDetail.process_gates.debt_management
@@ -3190,19 +3251,19 @@ function useOrdersPageContent() {
                           }
                         />
                         <OrderSummaryLine
-                          label={l("Billing-Release", "Billing-release")}
+                          label={l("orders_billing_release")}
                           value={billingReleaseLabel(
                             orderDetail.process_gates.billing_release_status,
                           )}
                         />
                         <OrderSummaryLine
-                          label={l("Paketdeckung", "Покрытие пакетом")}
+                          label={l("orders_paketdeckung")}
                           value={packageCoverageLabel(
                             orderDetail.process_gates.package_coverage_status,
                           )}
                         />
                         <OrderSummaryLine
-                          label={l("Debt-Hold", "Debt-hold")}
+                          label={l("orders_debt_hold")}
                           className="md:col-span-2"
                           value={
                             orderDetail.process_gates.debt_management
@@ -3210,8 +3271,8 @@ function useOrdersPageContent() {
                               ? orderDetail.process_gates.debt_management
                                   .blocking_reason
                               : orderDetail.process_gates.debt_hold
-                                ? `${orderDetail.process_gates.overdue_invoice_count} ${l("uberfallige Rechnung(en)", "просроченных счет(ов)")}`
-                                : l("Keine uberfalligen Forderungen", "Нет просроченной задолженности")
+                                ? `${orderDetail.process_gates.overdue_invoice_count} ${l("orders_uberfallige_rechnung_en")}`
+                                : l("orders_keine_uberfalligen_forderungen")
                           }
                         />
                       </div>
@@ -3219,7 +3280,7 @@ function useOrdersPageContent() {
                       {orderDetail.process_gates.blocking_reasons.length > 0 ? (
                         <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                           <div className="font-medium">
-                            {l("Blockierende Grunde", "Блокирующие причины")}
+                            {l("orders_blockierende_grunde")}
                           </div>
                           <ul className="mt-2 space-y-1">
                             {orderDetail.process_gates.blocking_reasons.map(
@@ -3241,16 +3302,13 @@ function useOrdersPageContent() {
                         {canManageDebt ? (
                           <div className="rounded-2xl border border-border p-4">
                             <div className="text-sm font-semibold text-foreground">
-                              {titleWithDot(l("Debt-Management", "Debt-management"))}
+                              {titleWithDot(l("orders_debt_management"))}
                             </div>
                             <div className="mt-1 text-sm text-muted-foreground">
-                              {l(
-                                "Aktiven Debt-Workflow nachverfolgen, Owner zuweisen und den nachsten Review-Punkt setzen.",
-                                "Отслеживать активный debt-workflow, назначать ответственного и ставить следующую точку ревью.",
-                              )}
+                              {l("orders_aktiven_debt_workflow_nachverfolgen_owner_zuweisen_und_d")}
                             </div>
                             <div className="mt-4 grid gap-3">
-                              <Field label={l("Debt-Status", "Статус debt")}>
+                              <Field label={l("orders_debt_status")}>
                                 <NativeComboboxSelect
                                   value={processGateForm.debtStatus}
                                   onChange={(event) =>
@@ -3275,7 +3333,7 @@ function useOrdersPageContent() {
                                   ))}
                                 </NativeComboboxSelect>
                               </Field>
-                              <Field label={l("Owner", "Ответственный")}>
+                              <Field label={l("orders_owner")}>
                                 <NativeComboboxSelect
                                   value={processGateForm.debtOwnerUserId}
                                   onChange={(event) =>
@@ -3287,10 +3345,7 @@ function useOrdersPageContent() {
                                   className={selectClassName}
                                 >
                                   <option value="">
-                                    {l(
-                                      "Aktuellen Owner beibehalten",
-                                      "Оставить текущего ответственного",
-                                    )}
+                                    {l("orders_aktuellen_owner_beibehalten")}
                                   </option>
                                   {debtOwnerOptions.map((item) => (
                                     <option
@@ -3302,7 +3357,7 @@ function useOrdersPageContent() {
                                   ))}
                                 </NativeComboboxSelect>
                               </Field>
-                              <Field label={l("Nachstes Review", "Следующее ревью")}>
+                              <Field label={l("orders_nachstes_review")}>
                                 <Input
                                   type="datetime-local"
                                   value={processGateForm.debtNextReviewAt}
@@ -3315,7 +3370,7 @@ function useOrdersPageContent() {
                                   className={inputClassName}
                                 />
                               </Field>
-                              <Field label={l("Letzter Kontakt", "Последний контакт")}>
+                              <Field label={l("orders_letzter_kontakt")}>
                                 <Input
                                   type="datetime-local"
                                   value={processGateForm.debtLastContactAt}
@@ -3328,7 +3383,7 @@ function useOrdersPageContent() {
                                   className={inputClassName}
                                 />
                               </Field>
-                              <Field label={l("Debt-Notiz", "Заметка по debt-workflow")}>
+                              <Field label={l("orders_debt_notiz")}>
                                 <textarea
                                   value={processGateForm.debtNote}
                                   onChange={(event) =>
@@ -3338,13 +3393,10 @@ function useOrdersPageContent() {
                                     }))
                                   }
                                   className={textareaClassName}
-                                  placeholder={l(
-                                    "Notiz zum Debt-Workflow",
-                                    "Заметка по debt-workflow",
-                                  )}
+                                  placeholder={l("orders_notiz_zum_debt_workflow")}
                                 />
                               </Field>
-                              <Field label={l("Losungsnotiz", "Заметка по решению")}>
+                              <Field label={l("orders_losungsnotiz")}>
                                 <textarea
                                   value={processGateForm.debtResolutionNote}
                                   onChange={(event) =>
@@ -3354,31 +3406,31 @@ function useOrdersPageContent() {
                                     }))
                                   }
                                   className={textareaClassName}
-                                  placeholder={l("Losungsnotiz", "Заметка по решению")}
+                                  placeholder={l("orders_losungsnotiz")}
                                 />
                               </Field>
                               <div className="grid gap-2 rounded-2xl border border-border p-3 text-xs text-muted-foreground">
                                 <div>
-                                  {l("Owner", "Ответственный")}:{" "}
+                                  {l("orders_owner")}:{" "}
                                   {orderDetail.process_gates.debt_management
-                                    ?.owner_name ?? l("Nicht zugewiesen", "Не назначено")}
+                                    ?.owner_name ?? l("orders_nicht_zugewiesen")}
                                 </div>
                                 <div>
-                                  {l("Letzter Kontakt", "Последний контакт")}:{" "}
+                                  {l("orders_letzter_kontakt")}:{" "}
                                   {formatDateTimeLabel(
                                     orderDetail.process_gates.debt_management
                                       ?.last_contact_at,
                                   )}
                                 </div>
                                 <div>
-                                  {l("Nachstes Review", "Следующее ревью")}:{" "}
+                                  {l("orders_nachstes_review")}:{" "}
                                   {formatDateTimeLabel(
                                     orderDetail.process_gates.debt_management
                                       ?.next_review_at,
                                   )}
                                 </div>
                                 <div>
-                                  {l("Erledigt", "Закрыто")}:{" "}
+                                  {l("orders_erledigt")}:{" "}
                                   {formatDateTimeLabel(
                                     orderDetail.process_gates.debt_management
                                       ?.resolved_at,
@@ -3396,10 +3448,7 @@ function useOrdersPageContent() {
                                   {processGateBusy ? (
                                     <LoaderCircle className="mr-2 size-4 animate-spin" />
                                   ) : null}
-                                  {l(
-                                    "Debt-Workflow speichern",
-                                    "Сохранить debt-workflow",
-                                  )}
+                                  {l("orders_debt_workflow_speichern")}
                                 </Button>
                               </div>
                             </div>
@@ -3409,13 +3458,10 @@ function useOrdersPageContent() {
                         {user?.role === "billing" || user?.role === "ceo" ? (
                           <div className="rounded-2xl border border-border p-4">
                             <div className="text-sm font-semibold text-foreground">
-                              {titleWithDot(l("Billing-Release", "Billing-release"))}
+                              {titleWithDot(l("orders_billing_release"))}
                             </div>
                             <div className="mt-1 text-sm text-muted-foreground">
-                              {l(
-                                "Billing entscheidet, ob die Durchfuhrung ausserhalb der Paketdeckung weiterlaufen darf.",
-                                "Биллинг решает, может ли исполнение продолжаться вне покрытия пакетом.",
-                              )}
+                              {l("orders_billing_entscheidet_ob_die_durchfuhrung_ausserhalb_der_p")}
                             </div>
                             <div className="mt-4 space-y-3">
                               <NativeComboboxSelect
@@ -3441,7 +3487,7 @@ function useOrdersPageContent() {
                                   }))
                                 }
                                 className={textareaClassName}
-                                placeholder={l("Billing-Notiz", "Заметка биллинга")}
+                                placeholder={l("orders_billing_notiz")}
                               />
                               <div className="flex justify-end">
                                 <Button
@@ -3454,10 +3500,7 @@ function useOrdersPageContent() {
                                   {processGateBusy ? (
                                     <LoaderCircle className="mr-2 size-4 animate-spin" />
                                   ) : null}
-                                  {l(
-                                    "Billing-Gate speichern",
-                                    "Сохранить billing-gate",
-                                  )}
+                                  {l("orders_billing_gate_speichern")}
                                 </Button>
                               </div>
                             </div>
@@ -3468,13 +3511,10 @@ function useOrdersPageContent() {
                         user?.role === "ceo" ? (
                           <div className="rounded-2xl border border-border p-4">
                             <div className="text-sm font-semibold text-foreground">
-                              {titleWithDot(l("Paketdeckung", "Покрытие пакетом"))}
+                              {titleWithDot(l("orders_paketdeckung"))}
                             </div>
                             <div className="mt-1 text-sm text-muted-foreground">
-                              {l(
-                                "Bestehende Paketdeckung kann Wiederholungsleistungen ohne separates Billing-Release freigeben.",
-                                "Действующее покрытие пакетом может разблокировать повторную работу без отдельного billing-release.",
-                              )}
+                              {l("orders_bestehende_paketdeckung_kann_wiederholungsleistungen_ohn")}
                             </div>
                             <div className="mt-4 space-y-3">
                               <NativeComboboxSelect
@@ -3500,10 +3540,7 @@ function useOrdersPageContent() {
                                   }))
                                 }
                                 className={textareaClassName}
-                                placeholder={l(
-                                  "Notiz zur Paketdeckung",
-                                  "Заметка по покрытию",
-                                )}
+                                placeholder={l("orders_notiz_zur_paketdeckung")}
                               />
                               <div className="flex justify-end">
                                 <Button
@@ -3516,10 +3553,7 @@ function useOrdersPageContent() {
                                   {processGateBusy ? (
                                     <LoaderCircle className="mr-2 size-4 animate-spin" />
                                   ) : null}
-                                  {l(
-                                    "Paket-Gate speichern",
-                                    "Сохранить package-gate",
-                                  )}
+                                  {l("orders_paket_gate_speichern")}
                                 </Button>
                               </div>
                             </div>
@@ -3536,7 +3570,7 @@ function useOrdersPageContent() {
                       <div>
                         <h2 className={tokens.text.sectionTitle}>
                           {titleWithDot(
-                            l("Planung und Vorbereitung", "Планирование и подготовка"),
+                            l("orders_planung_und_vorbereitung"),
                           )}
                         </h2>
                       </div>
@@ -3544,7 +3578,7 @@ function useOrdersPageContent() {
                     <div className="mt-5 space-y-4">
                       <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
                         <OrderSummaryLine
-                          label={l("Planungsfreigabe", "Готовность планирования")}
+                          label={l("orders_planungsfreigabe")}
                           value={
                             <Badge
                               variant="outline"
@@ -3556,13 +3590,13 @@ function useOrdersPageContent() {
                               )}
                             >
                               {orderDetail.planning_preparation.planning_ready
-                                ? l("bereit", "готово")
-                                : l("blockiert", "заблокировано")}
+                                ? l("orders_bereit")
+                                : l("orders_blockiert")}
                             </Badge>
                           }
                         />
                         <OrderSummaryLine
-                          label={l("Behandlungsplan", "План лечения")}
+                          label={l("orders_behandlungsplan")}
                           value={
                             treatmentPlanStatusLabel(
                               orderDetail.planning_preparation
@@ -3571,14 +3605,15 @@ function useOrdersPageContent() {
                           }
                         />
                         <OrderSummaryLine
-                          label={l("Medizinische Termine", "Медицинские записи")}
-                          value={l(
-                            `${orderDetail.planning_preparation.medical_confirmed}/${orderDetail.planning_preparation.medical_total} bestätigt`,
-                            `${orderDetail.planning_preparation.medical_confirmed}/${orderDetail.planning_preparation.medical_total} подтверждено`,
-                          )}
+                          label={l("orders_medizinische_termine")}
+                          value={l("orders_planning_medical_confirmed_summary", {
+                            confirmed:
+                              orderDetail.planning_preparation.medical_confirmed,
+                            total: orderDetail.planning_preparation.medical_total,
+                          })}
                         />
                         <OrderSummaryLine
-                          label={l("Vorbereitungsunterlagen", "Подготовительные документы")}
+                          label={l("orders_vorbereitungsunterlagen")}
                           value={
                             preparationDocumentStatusLabel(
                               orderDetail.planning_preparation
@@ -3587,31 +3622,39 @@ function useOrdersPageContent() {
                           }
                         />
                         <OrderSummaryLine
-                          label={l("Nicht-medizinischer Ablauf", "Немедицинский поток")}
+                          label={l("orders_nicht_medizinischer_ablauf")}
                           value={
                             orderDetail.planning_preparation
                               .non_medical_required
-                              ? l(
-                                  `${orderDetail.planning_preparation.non_medical_confirmed}/${orderDetail.planning_preparation.non_medical_total} bestätigt`,
-                                  `${orderDetail.planning_preparation.non_medical_confirmed}/${orderDetail.planning_preparation.non_medical_total} подтверждено`,
-                                )
-                              : l("Nicht erforderlich", "Не требуется")
+                              ? l("orders_planning_non_medical_confirmed_summary", {
+                                  confirmed:
+                                    orderDetail.planning_preparation
+                                      .non_medical_confirmed,
+                                  total:
+                                    orderDetail.planning_preparation
+                                      .non_medical_total,
+                                })
+                              : l("orders_nicht_erforderlich")
                           }
                         />
                         <OrderSummaryLine
-                          label={l("Dolmetscher", "Переводчик")}
+                          label={l("orders_dolmetscher")}
                           value={
                             orderDetail.planning_preparation
                               .interpreter_required
-                              ? l(
-                                  `${orderDetail.planning_preparation.interpreter_assigned} zugewiesen / ${orderDetail.planning_preparation.interpreter_confirmed} bestätigt`,
-                                  `${orderDetail.planning_preparation.interpreter_assigned} назначено / ${orderDetail.planning_preparation.interpreter_confirmed} принято`,
-                                )
-                              : l("Nicht erforderlich", "Не требуется")
+                              ? l("orders_planning_interpreter_summary", {
+                                  assigned:
+                                    orderDetail.planning_preparation
+                                      .interpreter_assigned,
+                                  confirmed:
+                                    orderDetail.planning_preparation
+                                      .interpreter_confirmed,
+                                })
+                              : l("orders_nicht_erforderlich")
                           }
                         />
                         <OrderSummaryLine
-                          label={l("Dolmetscher-Briefing", "Брифинг переводчика")}
+                          label={l("orders_dolmetscher_briefing")}
                           value={
                             interpreterBriefingStatusLabel(
                               orderDetail.planning_preparation
@@ -3620,18 +3663,15 @@ function useOrdersPageContent() {
                           }
                         />
                         <OrderSummaryLine
-                          label={l("Letzter Meilenstein", "Последний этап")}
+                          label={l("orders_letzter_meilenstein")}
                           value={
                             orderDetail.planning_preparation.plan_finalized_at
-                              ? l("Plan", "План") +
+                              ? l("orders_plan") +
                                 ` ${formatDateTimeLabel(
                                   orderDetail.planning_preparation
                                     .plan_finalized_at,
                                 )}`
-                              : l(
-                                  "Noch kein Planungsmeilenstein",
-                                  "Этапов планирования пока нет",
-                                )
+                              : l("orders_noch_kein_planungsmeilenstein")
                           }
                         />
                       </div>
@@ -3640,7 +3680,7 @@ function useOrdersPageContent() {
                         .length > 0 ? (
                         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                           <div className="font-medium">
-                            {l("Blocker aus der Planung", "Блокеры из планирования")}
+                            {l("orders_blocker_aus_der_planung")}
                           </div>
                           <ul className="mt-2 space-y-1">
                             {orderDetail.planning_preparation.blocking_reasons.map(
@@ -3652,10 +3692,7 @@ function useOrdersPageContent() {
                         </div>
                       ) : (
                         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                          {l(
-                            "Planung und Vorbereitung sind fur die Durchfuhrung vollstandig.",
-                            "Планирование и подготовка полностью готовы к исполнению.",
-                          )}
+                          {l("orders_planung_und_vorbereitung_sind_fur_die_durchfuhrung_volls")}
                         </div>
                       )}
 
@@ -3671,14 +3708,11 @@ function useOrdersPageContent() {
                           <div className="rounded-2xl border border-border p-4">
                             <div className="text-sm font-semibold text-foreground">
                               {titleWithDot(
-                                l("Planungssteuerung", "Управление планированием"),
+                                l("orders_planungssteuerung"),
                               )}
                             </div>
                             <div className="mt-1 text-sm text-muted-foreground">
-                              {l(
-                                "Behandlungsplan fixieren, Bedarf an nicht-medizinischen Leistungen oder Dolmetscher-Support markieren und Vorbereitungsunterlagen steuern.",
-                                "Зафиксировать план лечения, отметить необходимость немедицинских услуг или поддержки переводчика и провести подготовительные документы.",
-                              )}
+                              {l("orders_behandlungsplan_fixieren_bedarf_an_nicht_medizinischen_l")}
                             </div>
                             <div className="mt-4 space-y-3">
                               <NativeComboboxSelect
@@ -3707,10 +3741,7 @@ function useOrdersPageContent() {
                                   }))
                                 }
                                 className={textareaClassName}
-                                placeholder={l(
-                                  "Notiz zum Behandlungsplan",
-                                  "Заметка по плану лечения",
-                                )}
+                                placeholder={l("orders_notiz_zum_behandlungsplan")}
                               />
                               <label className="flex items-center gap-2 text-sm text-foreground">
                                 <input
@@ -3724,10 +3755,7 @@ function useOrdersPageContent() {
                                     }))
                                   }
                                 />
-                                {l(
-                                  "Nicht-medizinische Leistungen sind erforderlich",
-                                  "Немедицинские услуги требуются",
-                                )}
+                                {l("orders_nicht_medizinische_leistungen_sind_erforderlich")}
                               </label>
                               <label className="flex items-center gap-2 text-sm text-foreground">
                                 <input
@@ -3748,7 +3776,7 @@ function useOrdersPageContent() {
                                     }))
                                   }
                                 />
-                                {l("Dolmetscher ist erforderlich", "Переводчик требуется")}
+                                {l("orders_dolmetscher_ist_erforderlich")}
                               </label>
                               <NativeComboboxSelect
                                 value={planningForm.preparationDocumentsStatus}
@@ -3804,10 +3832,7 @@ function useOrdersPageContent() {
                                   {planningBusy ? (
                                     <LoaderCircle className="mr-2 size-4 animate-spin" />
                                   ) : null}
-                                  {l(
-                                    "Planungsstand speichern",
-                                    "Сохранить состояние планирования",
-                                  )}
+                                  {l("orders_planungsstand_speichern")}
                                 </Button>
                               </div>
                             </div>
@@ -3816,48 +3841,27 @@ function useOrdersPageContent() {
                           <div className="rounded-2xl border border-border p-4">
                             <div className="text-sm font-semibold text-foreground">
                               {titleWithDot(
-                                l("Operative Übergabe", "Операционная передача"),
+                                l("orders_operative_ubergabe"),
                               )}
                             </div>
                             <div className="mt-1 text-sm text-muted-foreground">
-                              {l(
-                                "Verknüpfte Arbeitsbereiche nutzen, um medizinische Slots, nicht-medizinische Leistungen, Dolmetscher-Zuweisung und Vorbereitungsunterlagen zu bestätigen.",
-                                "Используйте связанные рабочие пространства, чтобы подтвердить медицинские слоты, немедицинские услуги, назначение переводчика и подготовительные документы.",
-                              )}
+                              {l("orders_verknupfte_arbeitsbereiche_nutzen_um_medizinische_slots")}
                             </div>
                             <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(185px,1fr))] gap-3">
                               {[
                                 {
-                                  label: l(
-                                    "Medizinische und nicht-medizinische Termine",
-                                    "Медицинские и немедицинские приёмы",
-                                  ),
-                                  description: l(
-                                    "Slots und nicht-medizinische Leistungen bestätigen.",
-                                    "Подтвердить слоты и немедицинские услуги.",
-                                  ),
+                                  label: l("orders_medizinische_und_nicht_medizinische_termine"),
+                                  description: l("orders_slots_und_nicht_medizinische_leistungen_bestatigen"),
                                   href: `/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
                                 },
                                 {
-                                  label: l(
-                                    "Vorbereitungsunterlagen",
-                                    "Подготовительные документы",
-                                  ),
-                                  description: l(
-                                    "Unterlagen vor der Durchführung prüfen.",
-                                    "Проверить документы перед исполнением.",
-                                  ),
+                                  label: l("orders_vorbereitungsunterlagen"),
+                                  description: l("orders_unterlagen_vor_der_durchfuhrung_prufen"),
                                   href: `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
                                 },
                                 {
-                                  label: l(
-                                    "Dolmetscher-Zuweisung und Briefing",
-                                    "Назначение переводчика и брифинг",
-                                  ),
-                                  description: l(
-                                    "Zuweisung und Briefingstatus prüfen.",
-                                    "Проверить назначение и статус брифинга.",
-                                  ),
+                                  label: l("orders_dolmetscher_zuweisung_und_briefing"),
+                                  description: l("orders_zuweisung_und_briefingstatus_prufen"),
                                   href: `/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
                                 },
                               ].map((link) => (
@@ -3908,14 +3912,14 @@ function useOrdersPageContent() {
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>
-                          {titleWithDot(l("Durchfuhrung", "Исполнение"))}
+                          {titleWithDot(l("orders_durchfuhrung_2"))}
                         </h2>
                       </div>
                     </div>
                     <div className="mt-5 space-y-4">
                       <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
                         <OrderSummaryLine
-                          label={l("Abschlussreife", "Готовность к закрытию")}
+                          label={l("orders_abschlussreife")}
                           value={
                             <Badge
                               variant="outline"
@@ -3927,63 +3931,79 @@ function useOrdersPageContent() {
                               )}
                             >
                               {orderDetail.execution_flow.closure_ready
-                                ? l("bereit", "готово")
-                                : l("blockiert", "заблокировано")}
+                                ? l("orders_bereit")
+                                : l("orders_blockiert")}
                             </Badge>
                           }
                         />
                         <OrderSummaryLine
-                          label={l("Ankunft", "Прибытие")}
+                          label={l("orders_ankunft")}
                           value={arrivalStatusLabel(
                             orderDetail.execution_flow.arrival_status,
                           )}
                         />
                         <OrderSummaryLine
-                          label={l("Medizinische Durchführung", "Медицинское исполнение")}
+                          label={l("orders_medizinische_durchfuhrung")}
                           className="md:col-span-2"
-                          value={l(
-                            `${executionStatusLabel(orderDetail.execution_flow.medical_execution_status)} · ${orderDetail.execution_flow.medical_completed} Termin(e) / ${orderDetail.execution_flow.delivered_leistungen} Position(en)`,
-                            `${executionStatusLabel(orderDetail.execution_flow.medical_execution_status)} · ${orderDetail.execution_flow.medical_completed} приём(ов) / ${orderDetail.execution_flow.delivered_leistungen} позици(й)`,
-                          )}
+                          value={l("orders_execution_medical_summary", {
+                            status: executionStatusLabel(
+                              orderDetail.execution_flow
+                                .medical_execution_status,
+                            ),
+                            appointments:
+                              orderDetail.execution_flow.medical_completed,
+                            positions:
+                              orderDetail.execution_flow.delivered_leistungen,
+                          })}
                         />
                         <OrderSummaryLine
-                          label={l("Offene Durchführungspunkte", "Открытые пункты исполнения")}
+                          label={l("orders_offene_durchfuhrungspunkte")}
                           value={String(
                             orderDetail.execution_flow
                               .open_execution_checklist_count,
                           )}
                         />
                         <OrderSummaryLine
-                          label={l(
-                            "Nicht-medizinische Durchführung",
-                            "Немедицинское исполнение",
-                          )}
+                          label={l("orders_nicht_medizinische_durchfuhrung")}
                           value={
                             orderDetail.execution_flow.non_medical_required
-                              ? l(
-                                  `${executionStatusLabel(orderDetail.execution_flow.non_medical_execution_status)} · ${orderDetail.execution_flow.non_medical_completed} Termin(e) / ${orderDetail.execution_flow.concierge_completed} Concierge-Leistung(en)`,
-                                  `${executionStatusLabel(orderDetail.execution_flow.non_medical_execution_status)} · ${orderDetail.execution_flow.non_medical_completed} приём(ов) / ${orderDetail.execution_flow.concierge_completed} concierge-услуг`,
-                                )
-                              : l("Nicht erforderlich", "Не требуется")
+                              ? l("orders_execution_non_medical_summary", {
+                                  status: executionStatusLabel(
+                                    orderDetail.execution_flow
+                                      .non_medical_execution_status,
+                                  ),
+                                  appointments:
+                                    orderDetail.execution_flow
+                                      .non_medical_completed,
+                                  services:
+                                    orderDetail.execution_flow
+                                      .concierge_completed,
+                                })
+                              : l("orders_nicht_erforderlich")
                           }
                         />
                         <OrderSummaryLine
-                          label={l("Dolmetscher-Support", "Поддержка переводчика")}
+                          label={l("orders_dolmetscher_support")}
                           value={
                             orderDetail.execution_flow.interpreter_required
-                              ? l(
-                                  `${executionStatusLabel(orderDetail.execution_flow.interpreter_service_status)} · ${orderDetail.execution_flow.approved_interpreter_reports} freigegebene Berichte`,
-                                  `${executionStatusLabel(orderDetail.execution_flow.interpreter_service_status)} · ${orderDetail.execution_flow.approved_interpreter_reports} утверждённых отчётов`,
-                                )
-                              : l("Nicht erforderlich", "Не требуется")
+                              ? l("orders_execution_interpreter_summary", {
+                                  status: executionStatusLabel(
+                                    orderDetail.execution_flow
+                                      .interpreter_service_status,
+                                  ),
+                                  reports:
+                                    orderDetail.execution_flow
+                                      .approved_interpreter_reports,
+                                })
+                              : l("orders_nicht_erforderlich")
                           }
                         />
                         <OrderSummaryLine
-                          label={l("Abweichungen", "Отклонения")}
+                          label={l("orders_abweichungen")}
                           value={issueStatusLabel(orderDetail.execution_flow.issue_status)}
                         />
                         <OrderSummaryLine
-                          label={l("Durchführungsdokumente", "Документы исполнения")}
+                          label={l("orders_durchfuhrungsdokumente")}
                           value={String(
                             orderDetail.execution_flow.execution_documents,
                           )}
@@ -3994,7 +4014,7 @@ function useOrdersPageContent() {
                       0 ? (
                         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                           <div className="font-medium">
-                            {l("Blocker aus der Durchführung", "Блокеры из исполнения")}
+                            {l("orders_blocker_aus_der_durchfuhrung")}
                           </div>
                           <ul className="mt-2 space-y-1">
                             {orderDetail.execution_flow.blocking_reasons.map(
@@ -4006,10 +4026,7 @@ function useOrdersPageContent() {
                         </div>
                       ) : (
                         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                          {l(
-                            "Durchführungsnachweise und operative Übergabe sind für den Abschluss vollständig.",
-                            "Подтверждения исполнения и операционная передача готовы для закрытия.",
-                          )}
+                          {l("orders_durchfuhrungsnachweise_und_operative_ubergabe_sind_fur_d")}
                         </div>
                       )}
 
@@ -4023,14 +4040,11 @@ function useOrdersPageContent() {
                         <div className="rounded-2xl border border-border p-4">
                           <div className="text-sm font-semibold text-foreground">
                             {titleWithDot(
-                              l("Steuerung der Durchführung", "Управление исполнением"),
+                              l("orders_steuerung_der_durchfuhrung"),
                             )}
                           </div>
                           <div className="mt-1 text-sm text-muted-foreground">
-                            {l(
-                              "Ankunft, Leistungsumfang und Klärung von Abweichungen oder Zwischenfällen bestätigen.",
-                              "Подтвердить прибытие, объём оказанных услуг и то, что отклонения исполнения закрыты.",
-                            )}
+                            {l("orders_ankunft_leistungsumfang_und_klarung_von_abweichungen_ode")}
                           </div>
                           <fieldset
                             disabled={!permissions.canManagePhase}
@@ -4149,10 +4163,7 @@ function useOrdersPageContent() {
                                 }))
                               }
                               className={textareaClassName}
-                              placeholder={l(
-                                "Notiz zu Abweichung oder offenem operativen Detail",
-                                "Заметка по отклонению или нерешённой операционной детали",
-                              )}
+                              placeholder={l("orders_notiz_zu_abweichung_oder_offenem_operativen_detail")}
                             />
                             <textarea
                               value={executionForm.executionSummary}
@@ -4163,10 +4174,7 @@ function useOrdersPageContent() {
                                 }))
                               }
                               className={textareaClassName}
-                              placeholder={l(
-                                "Ankunft, Leistungsumfang, Kliniknotizen, Ergebnis ...",
-                                "Прибытие, объём оказанного, заметки клиники, результат услуги...",
-                              )}
+                              placeholder={l("orders_ankunft_leistungsumfang_kliniknotizen_ergebnis")}
                             />
                             <div className="flex justify-end">
                               <Button
@@ -4177,10 +4185,7 @@ function useOrdersPageContent() {
                                   {executionBusy ? (
                                     <LoaderCircle className="mr-2 size-4 animate-spin" />
                                   ) : null}
-                                {l(
-                                  "Durchführungsstand speichern",
-                                  "Сохранить состояние исполнения",
-                                )}
+                                {l("orders_durchfuhrungsstand_speichern")}
                               </Button>
                             </div>
                           </fieldset>
@@ -4189,40 +4194,34 @@ function useOrdersPageContent() {
                         <div className="rounded-2xl border border-border p-4">
                           <div className="text-sm font-semibold text-foreground">
                             {titleWithDot(
-                              l("Nachweise der Durchführung", "Подтверждения исполнения"),
+                              l("orders_nachweise_der_durchfuhrung"),
                             )}
                           </div>
                           <div className="mt-1 text-sm text-muted-foreground">
-                            {l(
-                              "Verknüpfte Arbeitsbereiche nutzen, um die restliche operative Spur zu schließen.",
-                              "Используйте связанные рабочие пространства, чтобы закрыть оставшийся операционный след.",
-                            )}
+                            {l("orders_verknupfte_arbeitsbereiche_nutzen_um_die_restliche_opera")}
                           </div>
                           <div className="mt-4 grid gap-3">
                             <OrderSummaryLine
-                              label={l("Ankunft erfasst", "Прибытие зафиксировано")}
+                              label={l("orders_ankunft_erfasst")}
                               value={formatDateTimeLabel(
                                 orderDetail.execution_flow.arrival_recorded_at,
                               )}
                             />
                             <OrderSummaryLine
-                              label={l("Medizinisch abgeschlossen", "Медицинская часть завершена")}
+                              label={l("orders_medizinisch_abgeschlossen")}
                               value={formatDateTimeLabel(
                                 orderDetail.execution_flow.medical_completed_at,
                               )}
                             />
                             <OrderSummaryLine
-                              label={l(
-                                "Nicht-medizinisch abgeschlossen",
-                                "Немедицинская часть завершена",
-                              )}
+                              label={l("orders_nicht_medizinisch_abgeschlossen")}
                               value={formatDateTimeLabel(
                                 orderDetail.execution_flow
                                 .non_medical_completed_at,
                               )}
                             />
                             <OrderSummaryLine
-                              label={l("Abweichungen geklärt", "Отклонения закрыты")}
+                              label={l("orders_abweichungen_geklart")}
                               value={formatDateTimeLabel(
                                 orderDetail.execution_flow.issues_resolved_at,
                               )}
@@ -4230,27 +4229,18 @@ function useOrdersPageContent() {
                             <div className="grid grid-cols-[repeat(auto-fit,minmax(185px,1fr))] gap-3 pt-2">
                               {[
                                 {
-                                  label: l("Termine", "Приёмы"),
-                                  description: l(
-                                    "Durchführungstermine und Status prüfen.",
-                                    "Проверить приёмы исполнения и статусы.",
-                                  ),
+                                  label: l("orders_termine"),
+                                  description: l("orders_durchfuhrungstermine_und_status_prufen"),
                                   href: `/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
                                 },
                                 {
-                                  label: l("Dokumente", "Документы"),
-                                  description: l(
-                                    "Ausführungsdokumente und Nachweise öffnen.",
-                                    "Открыть документы исполнения и подтверждения.",
-                                  ),
+                                  label: l("orders_dokumente"),
+                                  description: l("orders_ausfuhrungsdokumente_und_nachweise_offnen"),
                                   href: `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
                                 },
                                 {
-                                  label: l("Provider", "Провайдеры"),
-                                  description: l(
-                                    "Provider-Kontext dieses Patienten prüfen.",
-                                    "Проверить контекст провайдеров пациента.",
-                                  ),
+                                  label: l("orders_provider"),
+                                  description: l("orders_provider_kontext_dieses_patienten_prufen"),
                                   href: `/providers?patient=${orderDetail.patient_id}`,
                                 },
                               ].map((link) => (
@@ -4292,14 +4282,14 @@ function useOrdersPageContent() {
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>
-                          {titleWithDot(l("Nachsorge-Ablauf", "Поток follow-up"))}
+                          {titleWithDot(l("orders_nachsorge_ablauf"))}
                         </h2>
                       </div>
                     </div>
                     <div className="mt-5 space-y-4">
                       <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
                         <OrderSummaryLine
-                          label={l("Nachsorge-Freigabe", "Готовность к follow-up")}
+                          label={l("orders_nachsorge_freigabe")}
                           value={
                             <Badge
                               variant="outline"
@@ -4311,33 +4301,39 @@ function useOrdersPageContent() {
                               )}
                             >
                               {orderDetail.followup_flow.followup_ready
-                                ? l("bereit", "готово")
-                                : l("blockiert", "заблокировано")}
+                                ? l("orders_bereit")
+                                : l("orders_blockiert")}
                             </Badge>
                           }
                         />
                         <OrderSummaryLine
-                          label={l("Ergebnisübergabe", "Передача результатов")}
+                          label={l("orders_ergebnisubergabe")}
                           value={resultsHandoffStatusLabel(
                             orderDetail.followup_flow.results_handoff_status,
                           )}
                         />
                         <OrderSummaryLine
-                          label={l("Nachsorge-Aktivität", "Активность follow-up")}
+                          label={l("orders_nachsorge_aktivitat")}
                           className="md:col-span-2"
-                          value={l(
-                            `${orderDetail.followup_flow.followup_appointments_total} Termin(e) / ${orderDetail.followup_flow.followup_1w_reminders + orderDetail.followup_flow.followup_1m_reminders + orderDetail.followup_flow.followup_6m_reminders + orderDetail.followup_flow.package_end_reminders} Erinnerung(en)`,
-                            `${orderDetail.followup_flow.followup_appointments_total} приём(ов) / ${orderDetail.followup_flow.followup_1w_reminders + orderDetail.followup_flow.followup_1m_reminders + orderDetail.followup_flow.followup_6m_reminders + orderDetail.followup_flow.package_end_reminders} напоминани(й)`,
-                          )}
+                          value={l("orders_followup_activity_summary", {
+                            appointments:
+                              orderDetail.followup_flow
+                                .followup_appointments_total,
+                            reminders:
+                              orderDetail.followup_flow.followup_1w_reminders +
+                              orderDetail.followup_flow.followup_1m_reminders +
+                              orderDetail.followup_flow.followup_6m_reminders +
+                              orderDetail.followup_flow.package_end_reminders,
+                          })}
                         />
                         <OrderSummaryLine
-                          label={l("Portal-Freigaben", "Публикации в портале")}
+                          label={l("orders_portal_freigaben")}
                           value={String(
                             orderDetail.followup_flow.results_portal_shares,
                           )}
                         />
                         <OrderSummaryLine
-                          label={l("Arztgesteuert", "По назначению врача")}
+                          label={l("orders_arztgesteuert")}
                           value={
                             followupStatusLabel(
                               orderDetail.followup_flow.doctor_followup_status,
@@ -4345,12 +4341,12 @@ function useOrdersPageContent() {
                           }
                         />
                         <OrderSummaryLine
-                          label="1W / 1M / 6M"
+                          label={l("orders_followup_interval_summary_label")}
                           className="md:col-span-2"
                           value={`${followupStatusLabel(orderDetail.followup_flow.followup_1w_status)} / ${followupStatusLabel(orderDetail.followup_flow.followup_1m_status)} / ${followupStatusLabel(orderDetail.followup_flow.followup_6m_status)}`}
                         />
                         <OrderSummaryLine
-                          label={l("Paketende", "Завершение пакета")}
+                          label={l("orders_paketende")}
                           value={
                             orderDetail.followup_flow.package_end_required
                               ? `${followupStatusLabel(orderDetail.followup_flow.package_end_status)} · ${formatDateOnlyLabel(
@@ -4358,11 +4354,11 @@ function useOrdersPageContent() {
                                     orderDetail.followup_flow
                                       .suggested_package_end_date,
                                 )}`
-                              : l("Nicht erforderlich", "Не требуется")
+                              : l("orders_nicht_erforderlich")
                           }
                         />
                         <OrderSummaryLine
-                          label={l("Abschlussanker", "Якорь закрытия")}
+                          label={l("orders_abschlussanker")}
                           value={formatDateTimeLabel(
                             orderDetail.followup_flow.closure_anchor_at,
                           )}
@@ -4372,10 +4368,7 @@ function useOrdersPageContent() {
                       {orderDetail.followup_flow.blocking_reasons.length > 0 ? (
                         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                           <div className="font-medium">
-                            {l(
-                              "Blocker für den Start der Nachsorge",
-                              "Блокеры запуска follow-up",
-                            )}
+                            {l("orders_blocker_fur_den_start_der_nachsorge")}
                           </div>
                           <ul className="mt-2 space-y-1">
                             {orderDetail.followup_flow.blocking_reasons.map(
@@ -4387,10 +4380,7 @@ function useOrdersPageContent() {
                         </div>
                       ) : (
                         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                          {l(
-                            "Nachsorge-Meilensteine und Übergabe sind für die Post-Care-Phase angestoßen.",
-                            "Этапы follow-up и передача запущены для post-care фазы.",
-                          )}
+                          {l("orders_nachsorge_meilensteine_und_ubergabe_sind_fur_die_post_ca")}
                         </div>
                       )}
 
@@ -4404,14 +4394,11 @@ function useOrdersPageContent() {
                         <div className="rounded-2xl border border-border p-4">
                           <div className="text-sm font-semibold text-foreground">
                             {titleWithDot(
-                              l("Steuerung der Nachsorge", "Управление follow-up"),
+                              l("orders_steuerung_der_nachsorge"),
                             )}
                           </div>
                           <div className="mt-1 text-sm text-muted-foreground">
-                            {l(
-                              "Markieren, welche Meilensteine erforderlich sind und ob die finale Übergabe an den Patienten vollständig ist.",
-                              "Отметьте, какие этапы обязательны и завершена ли финальная передача пациенту.",
-                            )}
+                            {l("orders_markieren_welche_meilensteine_erforderlich_sind_und_ob_d")}
                           </div>
                           <fieldset
                             disabled={!permissions.canManagePhase}
@@ -4494,7 +4481,7 @@ function useOrdersPageContent() {
                               </NativeComboboxSelect>
                             </div>
                             <div className="grid gap-3 md:grid-cols-2">
-                              <Field label={l("Paketende", "Завершение пакета")}>
+                              <Field label={l("orders_paketende")}>
                                 <Input
                                   type="date"
                                   value={followupForm.packageEndDate}
@@ -4507,7 +4494,7 @@ function useOrdersPageContent() {
                                   className={inputClassName}
                                 />
                               </Field>
-                              <Field label={l("Paketende-Status", "Статус завершения пакета")}>
+                              <Field label={l("orders_paketende_status")}>
                                 <NativeComboboxSelect
                                   value={followupForm.packageEndStatus}
                                   onChange={(event) =>
@@ -4519,16 +4506,16 @@ function useOrdersPageContent() {
                                   className={selectClassName}
                                 >
                                   <option value="not_required">
-                                    {l("Paketende nicht erforderlich", "Завершение пакета не требуется")}
+                                    {l("orders_paketende_nicht_erforderlich")}
                                   </option>
                                   <option value="pending">
-                                    {l("Paketende ausstehend", "Завершение пакета ожидается")}
+                                    {l("orders_paketende_ausstehend")}
                                   </option>
                                   <option value="scheduled">
-                                    {l("Paketende geplant", "Завершение пакета запланировано")}
+                                    {l("orders_paketende_geplant")}
                                   </option>
                                   <option value="completed">
-                                    {l("Paketende abgeschlossen", "Завершение пакета завершено")}
+                                    {l("orders_paketende_abgeschlossen")}
                                   </option>
                                 </NativeComboboxSelect>
                               </Field>
@@ -4562,10 +4549,7 @@ function useOrdersPageContent() {
                                 }))
                               }
                               className={textareaClassName}
-                              placeholder={l(
-                                "Patientenkommunikation, Arztbrief-Übergabe, Outreach-Plan ...",
-                                "Коммуникация с пациентом, передача Arztbrief, план outreach...",
-                              )}
+                              placeholder={l("orders_patientenkommunikation_arztbrief_ubergabe_outreach_plan")}
                             />
                             <div className="flex justify-end">
                               <Button
@@ -4576,10 +4560,7 @@ function useOrdersPageContent() {
                                   {followupBusy ? (
                                     <LoaderCircle className="mr-2 size-4 animate-spin" />
                                   ) : null}
-                                {l(
-                                  "Nachsorge-Stand speichern",
-                                  "Сохранить состояние follow-up",
-                                )}
+                                {l("orders_nachsorge_stand_speichern")}
                               </Button>
                             </div>
                           </fieldset>
@@ -4588,43 +4569,37 @@ function useOrdersPageContent() {
                         <div className="rounded-2xl border border-border p-4">
                           <div className="text-sm font-semibold text-foreground">
                             {titleWithDot(
-                              l(
-                              "Empfohlene Meilenstein-Anker",
-                              "Рекомендуемые контрольные даты",
-                            ),
+                              l("orders_empfohlene_meilenstein_anker"),
                             )}
                           </div>
                           <div className="mt-1 text-sm text-muted-foreground">
-                            {l(
-                              "Bestehende Termin-Presets und Portalsichtbarkeit lesen diese auftragsbezogenen Meilensteine aus.",
-                              "Текущие пресеты приёмов и видимость в портале читают эти вехи уровня заказа.",
-                            )}
+                            {l("orders_bestehende_termin_presets_und_portalsichtbarkeit_lesen_d")}
                           </div>
                           <div className="mt-4 space-y-3">
                             <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
                               <OrderSummaryLine
-                                label={l("1-Wochen-Ziel", "Цель на 1 неделю")}
+                                label={l("orders_1_wochen_ziel")}
                                 value={formatDateTimeLabel(
                                   orderDetail.followup_flow
                                     .recommended_followup_1w_at,
                                 )}
                               />
                               <OrderSummaryLine
-                                label={l("1-Monats-Ziel", "Цель на 1 месяц")}
+                                label={l("orders_1_monats_ziel")}
                                 value={formatDateTimeLabel(
                                   orderDetail.followup_flow
                                     .recommended_followup_1m_at,
                                 )}
                               />
                               <OrderSummaryLine
-                                label={l("6-Monats-Ziel", "Цель на 6 месяцев")}
+                                label={l("orders_6_monats_ziel")}
                                 value={formatDateTimeLabel(
                                   orderDetail.followup_flow
                                     .recommended_followup_6m_at,
                                 )}
                               />
                               <OrderSummaryLine
-                                label={l("Paketende-Outreach", "Outreach по завершению пакета")}
+                                label={l("orders_paketende_outreach")}
                                 value={formatDateOnlyLabel(
                                   orderDetail.followup_flow
                                     .recommended_package_end_followup_at,
@@ -4634,27 +4609,18 @@ function useOrdersPageContent() {
                             <div className="grid grid-cols-[repeat(auto-fit,minmax(185px,1fr))] gap-3 pt-2">
                               {[
                                 {
-                                  label: l("Termine", "Приёмы"),
-                                  description: l(
-                                    "Follow-up-Termine und Erinnerungen prüfen.",
-                                    "Проверить follow-up приёмы и напоминания.",
-                                  ),
+                                  label: l("orders_termine"),
+                                  description: l("orders_follow_up_termine_und_erinnerungen_prufen"),
                                   href: `/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
                                 },
                                 {
-                                  label: l("Dokumente", "Документы"),
-                                  description: l(
-                                    "Ergebnisse und Übergabedokumente öffnen.",
-                                    "Открыть результаты и документы передачи.",
-                                  ),
+                                  label: l("orders_dokumente"),
+                                  description: l("orders_ergebnisse_und_ubergabedokumente_offnen"),
                                   href: `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
                                 },
                                 {
-                                  label: l("Patientenprofil", "Профиль пациента"),
-                                  description: l(
-                                    "Patientenprofil im neuen Tab öffnen.",
-                                    "Открыть профиль пациента в новой вкладке.",
-                                  ),
+                                  label: l("orders_patientenprofil"),
+                                  description: l("orders_patientenprofil_im_neuen_tab_offnen"),
                                   href: `/patients/${orderDetail.patient_id}`,
                                 },
                               ].map((link) => (
@@ -4708,7 +4674,7 @@ function useOrdersPageContent() {
                           disabled={Boolean(nextLifecycleTransition?.blocked)}
                         >
                           <ChevronRight className="size-4" />
-                          {l("Weiter zu", "Перевести в")}{" "}
+                          {l("orders_weiter_zu")}{" "}
                           {phaseLabel(orderDetail.lifecycle.next_stage)}
                         </Button>
                       ) : null}
@@ -4717,11 +4683,11 @@ function useOrdersPageContent() {
                     <div className="mt-5 space-y-5">
                       <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
                         <OrderSummaryLine
-                          label={l("Aktuelle Phase", "Текущая фаза")}
+                          label={l("orders_aktuelle_phase")}
                           value={phaseLabel(orderDetail.phase)}
                         />
                         <OrderSummaryLine
-                          label={l("Nächste Phase", "Следующая фаза")}
+                          label={l("orders_nachste_phase")}
                           value={
                             orderDetail.lifecycle?.next_stage
                               ? phaseLabel(orderDetail.lifecycle.next_stage)
@@ -4729,19 +4695,19 @@ function useOrdersPageContent() {
                           }
                         />
                         <OrderSummaryLine
-                          label={l("Seit", "С")}
+                          label={l("orders_seit")}
                           value={formatDateTimeLabel(
                             orderDetail.lifecycle?.stage_entered_at,
                           )}
                         />
                         <OrderSummaryLine
-                          label={l("Übergabe", "Переход")}
+                          label={l("orders_ubergabe")}
                           value={
                             nextLifecycleTransition?.blocked
-                              ? l("Blockiert", "Заблокирован")
+                              ? l("orders_blockiert_2")
                               : orderDetail.lifecycle?.next_stage
-                                ? l("Bereit", "Готов")
-                                : l("Nicht verfügbar", "Недоступен")
+                                ? l("orders_bereit_2")
+                                : l("orders_nicht_verfugbar")
                           }
                         />
                       </div>
@@ -4796,10 +4762,10 @@ function useOrdersPageContent() {
                               </div>
                               <p className="mt-3 text-xs leading-tight text-muted-foreground">
                                 {isCurrent
-                                  ? l("Aktuelle Auftragsphase", "Текущая фаза заказа")
+                                  ? l("orders_aktuelle_auftragsphase")
                                   : isNext
-                                    ? l("Nächster erlaubter Schritt", "Следующий разрешённый шаг")
-                                    : l("Sequenziell gesperrt", "Заблокировано последовательностью")}
+                                    ? l("orders_nachster_erlaubter_schritt")
+                                    : l("orders_sequenziell_gesperrt")}
                               </p>
                             </button>
                           );
@@ -4811,13 +4777,10 @@ function useOrdersPageContent() {
                           <p className="text-sm font-semibold text-foreground">
                             {phaseDraft
                               ? phaseLabel(phaseDraft)
-                              : l("Keine Phase ausgewählt", "Фаза не выбрана")}
+                              : l("orders_keine_phase_ausgewahlt")}
                           </p>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            {l(
-                              "Nur die aktuelle oder nächste Phase kann gespeichert werden.",
-                              "Сохранить можно только текущую или следующую фазу.",
-                            )}
+                            {l("orders_nur_die_aktuelle_oder_nachste_phase_kann_gespeichert_wer")}
                           </p>
                         </div>
                         {permissions.canManagePhase ? (
@@ -4836,14 +4799,14 @@ function useOrdersPageContent() {
                             {phaseSaving ? (
                               <LoaderCircle className="size-4 animate-spin" />
                             ) : null}
-                            {l("Phase speichern", "Сохранить фазу")}
+                            {l("orders_phase_speichern")}
                           </Button>
                         ) : (
                           <Badge
                             variant="outline"
                             className="rounded-full border-border bg-muted/50 text-muted-foreground"
                           >
-                            {l("Billing nur lesend", "Только чтение для биллинга")}
+                            {l("orders_billing_nur_lesend")}
                           </Badge>
                         )}
                       </div>
@@ -4853,7 +4816,7 @@ function useOrdersPageContent() {
                         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
                           <div className="font-medium">
                             {phaseLabel(nextLifecycleTransition.phase)}{" "}
-                            {l("ist blockiert", "заблокирована")}
+                            {l("orders_ist_blockiert")}
                           </div>
                           <ul className="mt-2 space-y-1">
                             {nextLifecycleTransition.reasons.map((reason) => (
@@ -4872,7 +4835,7 @@ function useOrdersPageContent() {
                       {orderDetail.lifecycle?.history?.length ? (
                         <div className="space-y-3">
                           <h3 className={tokens.text.sectionTitle}>
-                            {titleWithDot(l("Historie", "История"))}
+                            {titleWithDot(l("orders_historie"))}
                           </h3>
                           <div className="space-y-3 pl-6">
                             {orderDetail.lifecycle.history.map((event, index) => (
@@ -4903,7 +4866,7 @@ function useOrdersPageContent() {
                                 </div>
                                 <div className="mt-2 rounded-xl border border-border/70 bg-zinc-50/60 px-4 py-3">
                                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                                    <span>{l("Übergang", "Переход")}</span>
+                                    <span>{l("orders_ubergang")}</span>
                                     <span className="h-px min-w-6 flex-1 bg-border/70" />
                                     <span className="font-medium text-foreground">
                                       {transitionKindLabel(event.transition_kind)}
@@ -4925,332 +4888,345 @@ function useOrdersPageContent() {
                 ) : null}
 
                 {shouldRenderOrderSection("workflow") ? (
-                  <SectionCard
-                    title={l("Workflow-Checkliste", "Workflow-чеклист")}
-                    description={l(
-                      "Automatisch erzeugte To-dos fur PM und Concierge zu diesem Auftrag.",
-                      "Автосозданные задачи для PM и concierge по этому заказу.",
-                    )}
-                  >
+                  <section className="rounded-xl border border-border bg-card p-6">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <h2 className={tokens.text.sectionTitle}>
+                        {titleWithDot(l("orders_workflow_checkliste"))}
+                      </h2>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {workflowChecklist ? (
+                          <Badge
+                            variant="outline"
+                            className="rounded-full border-border bg-zinc-50 text-muted-foreground"
+                          >
+                            {workflowMetrics.total} {l("orders_punkte")}
+                          </Badge>
+                        ) : null}
+                        {permissions.canManagePhase ? (
+                          <Button
+                            type="button"
+                            className="rounded-xl"
+                            onClick={() => setWorkflowCreateOpen(true)}
+                          >
+                            <Plus className="size-4" />
+                            {l("orders_punkt_hinzufugen")}
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
                   {workflowChecklist ? (
-                    <div className="space-y-4">
-                      <div className="grid gap-3 md:grid-cols-3">
-                        <DetailField
-                          label={l("Offen", "Открыто")}
+                    <div className="mt-5 space-y-5">
+                      <div className="flex flex-wrap gap-6 rounded-xl border border-border px-4 py-3">
+                        <AdminInlineMetric
+                          icon={ClipboardList}
+                          label={l("orders_aktive_workflow_punkte")}
                           value={String(workflowChecklist.open_count)}
+                          description={l("orders_offen")}
+                          tone="sky"
                         />
-                        <DetailField
-                          label={l("Abgeschlossen", "Завершено")}
+                        <AdminInlineMetric
+                          icon={CheckCircle2}
+                          label={l("orders_erledigte_punkte")}
                           value={String(workflowChecklist.completed_count)}
+                          description={l("orders_abgeschlossen_2")}
+                          tone="emerald"
                         />
-                        <DetailField
-                          label={l("Gruppen", "Группы")}
-                          value={String(workflowChecklistGroups.length)}
+                        <AdminInlineMetric
+                          icon={CalendarClock}
+                          label={l("orders_uberfallig_3")}
+                          value={String(workflowMetrics.overdue)}
+                          description={l("orders_nach_falligkeit")}
+                          tone={workflowMetrics.overdue > 0 ? "amber" : "slate"}
+                        />
+                        <AdminInlineMetric
+                          icon={UserRound}
+                          label={l("orders_owner_im_workflow")}
+                          value={String(workflowMetrics.owners)}
+                          description={l("orders_offene_zustandigkeiten")}
+                          tone="slate"
                         />
                       </div>
 
                       {workflowChecklistGroups.length === 0 ? (
                         <EmptyState
-                          title={l(
-                            "Noch keine Workflow-Punkte",
-                            "Пунктов workflow пока нет",
-                          )}
-                          description={l(
-                            "Checklistenpunkte werden aus der Auftragsphase erzeugt und können manuell ergänzt werden.",
-                            "Пункты чеклиста генерируются из фазы заказа и могут дополняться вручную.",
-                          )}
+                          title={l("orders_noch_keine_workflow_punkte")}
+                          description={l("orders_checklistenpunkte_werden_aus_der_auftragsphase_erzeugt_u")}
                         />
                       ) : (
-                        <div className="space-y-4">
-                          {workflowChecklistGroups.map((group) => (
-                            <div
-                              key={group.key}
-                              className="rounded-2xl border border-border p-4"
-                            >
-                              <div className="flex items-center justify-between gap-3">
-                                <div>
-                                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                                    {group.label}
-                                  </p>
-                                  <p className="mt-1 text-sm text-muted-foreground">
-                                    {
-                                      group.items.filter(
-                                        (item) => !item.is_completed,
-                                      ).length
-                                    }{" "}
-                                    {l("offen", "открыто")} / {group.items.length}{" "}
-                                    {l("gesamt", "всего")}
-                                  </p>
-                                </div>
-                                <Badge
-                                  variant="outline"
-                                  className="rounded-full border-border text-muted-foreground"
-                                >
-                                  {group.items.length} {l("Punkte", "пункт(ов)")}
-                                </Badge>
-                              </div>
-                              <div className="mt-4 space-y-3">
-                                {group.items.map((item) => (
-                                  <div
-                                    key={item.id}
+                        <>
+                          <div className="flex items-center gap-2" aria-hidden>
+                            <span className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-border" />
+                            <span className="size-1.5 rounded-full bg-orange-400" />
+                            <span className="size-1.5 rounded-full bg-orange-300" />
+                            <span className="size-1.5 rounded-full bg-orange-200" />
+                            <span className="h-px flex-1 bg-gradient-to-r from-border via-border to-transparent" />
+                          </div>
+
+                          <div className="space-y-4">
+                            {workflowChecklistGroups.map((group, index) => {
+                              const openItems = group.items.filter(
+                                (item) => !item.is_completed,
+                              ).length;
+                              const completedItems = group.items.length - openItems;
+                              const groupIsActive = openItems > 0;
+
+                              return (
+                                <div key={group.key} className="relative pl-9">
+                                  {index < workflowChecklistGroups.length - 1 ? (
+                                    <span
+                                      aria-hidden
+                                      className="absolute bottom-[-18px] left-[13px] top-11 w-px bg-border/70"
+                                    />
+                                  ) : null}
+                                  <span
+                                    aria-hidden
                                     className={cn(
-                                      "rounded-2xl border p-4",
-                                      item.is_completed
-                                        ? "border-emerald-200 bg-emerald-50/70"
-                                        : "border-border",
+                                      "absolute left-0 top-3 flex size-7 items-center justify-center rounded-full ring-1",
+                                      groupIsActive
+                                        ? "bg-sky-50 text-sky-700 ring-sky-200"
+                                        : "bg-emerald-50 text-emerald-700 ring-emerald-200",
                                     )}
                                   >
-                                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                                    {groupIsActive ? (
+                                      <ClipboardList className="size-3.5" />
+                                    ) : (
+                                      <CheckCircle2 className="size-3.5" />
+                                    )}
+                                  </span>
+
+                                  <div className="rounded-xl border border-border bg-zinc-50/60 p-3">
+                                    <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
                                       <div className="min-w-0">
-                                        <div className="flex flex-wrap items-center gap-2">
-                                          <p className="text-sm font-medium text-foreground">
-                                            {item.item_text}
+                                        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                                          <p className="max-w-full truncate text-[15px] font-semibold leading-5 text-foreground">
+                                            {group.label}
                                           </p>
-                                          <Badge
-                                            variant="outline"
-                                            className={cn(
-                                              "rounded-full text-[10px]",
-                                              priorityBadgeClass(item.priority),
-                                            )}
-                                          >
-                                            {priorityLabel(item.priority)}
-                                          </Badge>
-                                          <Badge
-                                            variant="outline"
-                                            className={cn(
-                                              "rounded-full text-[10px]",
-                                              item.is_completed
-                                                ? "border-emerald-200 bg-emerald-100 text-emerald-800"
-                                                : statusClassName(
-                                                    item.linked_task_status ??
-                                                      "open",
-                                                  ),
-                                            )}
-                                          >
-                                            {item.is_completed
-                                              ? workflowTaskStatusLabel("completed")
-                                              : workflowTaskStatusLabel(item.linked_task_status ?? "open")}
-                                          </Badge>
+                                          <span className="size-1 rounded-full bg-muted-foreground/35" />
+                                          <span className="text-xs tabular-nums text-muted-foreground">
+                                            {openItems} {l("orders_offen_2")} /{" "}
+                                            {group.items.length} {l("orders_gesamt")}
+                                          </span>
                                         </div>
-                                        <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
-                                          <span>
-                                            {l("Verantwortlich", "Ответственный")}:{" "}
-                                            {item.owner_name
-                                              ? `${item.owner_name} · ${roleLabel(item.owner_user_role ?? item.owner_role)}`
-                                              : roleLabel(item.owner_role)}
+                                        <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                                          <span className="inline-flex items-center gap-1">
+                                            <ClipboardList className="size-3.5 shrink-0 text-muted-foreground/65" />
+                                            {group.items.length} {l("orders_eintrage")}
                                           </span>
-                                          <span>
-                                            {l("Fällig", "Срок")}: {formatDateTimeLabel(item.due_date)}
-                                          </span>
-                                          {item.completed_at ? (
-                                            <span>
-                                              {l("Erledigt", "Завершено")}:{" "}
-                                              {formatDateTimeLabel(
-                                                item.completed_at,
-                                              )}
-                                            </span>
+                                          {completedItems > 0 ? (
+                                            <>
+                                              <span className="size-1 rounded-full bg-muted-foreground/35" />
+                                              <span>
+                                                {completedItems}{" "}
+                                                {l("orders_abgeschlossen_3")}
+                                              </span>
+                                            </>
                                           ) : null}
                                         </div>
                                       </div>
-                                      {!item.is_completed ? (
-                                        <Button
-                                          type="button"
+                                      <div className="flex min-w-0 flex-wrap justify-start gap-1.5 lg:justify-end">
+                                        <Badge
                                           variant="outline"
-                                          className="rounded-xl"
-                                          disabled={workflowBusy}
-                                          onClick={() =>
-                                            void handleCompleteWorkflowItem(
-                                              item.id,
-                                            )
-                                          }
+                                          className={cn(
+                                            "rounded-full text-[10px]",
+                                            groupIsActive
+                                              ? "border-sky-200 bg-sky-50 text-sky-700"
+                                              : "border-emerald-200 bg-emerald-50 text-emerald-700",
+                                          )}
                                         >
-                                          {l("Abschließen", "Завершить")}
-                                        </Button>
-                                      ) : null}
+                                          {groupIsActive
+                                            ? l("orders_in_arbeit")
+                                            : l("orders_fertig")}
+                                        </Badge>
+                                        <Badge
+                                          variant="outline"
+                                          className="rounded-full border-0 bg-white px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
+                                        >
+                                          {l("orders_offen")}:{" "}
+                                          <span className="ml-1 font-semibold text-foreground">
+                                            {openItems}
+                                          </span>
+                                        </Badge>
+                                      </div>
+                                    </div>
+
+                                    <div className="mt-3 grid gap-2">
+                                      {group.items.map((item) => {
+                                        const itemStatus = item.is_completed
+                                          ? "completed"
+                                          : item.linked_task_status ?? "open";
+
+                                        return (
+                                          <article
+                                            key={item.id}
+                                            className={cn(
+                                              "rounded-md bg-white px-3 py-2 text-xs shadow-sm ring-1 ring-border/40",
+                                              item.is_completed && "opacity-75",
+                                            )}
+                                          >
+                                            <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                                              <div className="min-w-0">
+                                                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                                  <p className="min-w-0 truncate text-sm font-medium text-foreground">
+                                                    {localizeWorkflowItemText(
+                                                      item.item_key,
+                                                      item.item_text,
+                                                      lWorkflow,
+                                                    )}
+                                                  </p>
+                                                  <Badge
+                                                    variant="outline"
+                                                    className={cn(
+                                                      "rounded-full text-[10px]",
+                                                      priorityBadgeClass(item.priority),
+                                                    )}
+                                                  >
+                                                    {priorityLabel(item.priority)}
+                                                  </Badge>
+                                                  <Badge
+                                                    variant="outline"
+                                                    className={cn(
+                                                      "rounded-full text-[10px]",
+                                                      item.is_completed
+                                                        ? "border-emerald-200 bg-emerald-100 text-emerald-800"
+                                                        : statusClassName(itemStatus),
+                                                    )}
+                                                  >
+                                                    {workflowTaskStatusLabel(itemStatus)}
+                                                  </Badge>
+                                                </div>
+                                                <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+                                                  <span className="inline-flex items-center gap-1">
+                                                    <UserRound className="size-3.5 shrink-0 text-muted-foreground/65" />
+                                                    {item.owner_name
+                                                      ? `${item.owner_name} · ${roleLabel(item.owner_user_role ?? item.owner_role)}`
+                                                      : roleLabel(item.owner_role)}
+                                                  </span>
+                                                  <span className="size-1 rounded-full bg-muted-foreground/35" />
+                                                  <span className="inline-flex items-center gap-1">
+                                                    <CalendarClock className="size-3.5 shrink-0 text-muted-foreground/65" />
+                                                    {formatDateTimeLabel(item.due_date)}
+                                                  </span>
+                                                  <span className="size-1 rounded-full bg-muted-foreground/35" />
+                                                  <span>
+                                                    {l("orders_erstellt")}:{" "}
+                                                    {formatDateTimeLabel(item.created_at)}
+                                                  </span>
+                                                  {item.completed_at ? (
+                                                    <>
+                                                      <span className="size-1 rounded-full bg-muted-foreground/35" />
+                                                      <span>
+                                                        {l("orders_erledigt_2")}:{" "}
+                                                        {formatDateTimeLabel(
+                                                          item.completed_at,
+                                                        )}
+                                                      </span>
+                                                    </>
+                                                  ) : null}
+                                                </div>
+                                              </div>
+                                              {!item.is_completed ? (
+                                                <Button
+                                                  type="button"
+                                                  variant="outline"
+                                                  size="sm"
+                                                  className="h-7 shrink-0 gap-1.5 rounded-lg px-2 text-xs"
+                                                  disabled={workflowBusy}
+                                                  onClick={() =>
+                                                    void handleCompleteWorkflowItem(
+                                                      item.id,
+                                                    )
+                                                  }
+                                                >
+                                                  <CheckCircle2 className="size-3.5" />
+                                                  {l("orders_abschliessen")}
+                                                </Button>
+                                              ) : null}
+                                            </div>
+                                          </article>
+                                        );
+                                      })}
                                     </div>
                                   </div>
-                                ))}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </>
                       )}
-
-                      {permissions.canManagePhase ? (
-                        <form
-                          onSubmit={handleAddWorkflowItem}
-                          className="rounded-2xl border border-border p-4"
-                        >
-                          <div className="grid gap-4 md:grid-cols-2">
-                            <Field
-                              className="md:col-span-2"
-                              htmlFor="order-workflow-item"
-                              label={l("Checklistenpunkt", "Пункт чеклиста")}
-                            >
-                              <Input
-                                id="order-workflow-item"
-                                value={workflowForm.itemText}
-                                onChange={(event) =>
-                                  setWorkflowForm((current) => ({
-                                    ...current,
-                                    itemText: event.target.value,
-                                  }))
-                                }
-                                className={inputClassName}
-                                placeholder={l(
-                                  "Eskalationsanruf, Klinik-Nachverfolgung, Dokumentenübergabe ...",
-                                  "Эскалационный звонок, follow-up с клиникой, передача документа...",
-                                )}
-                              />
-                            </Field>
-                            <Field
-                              htmlFor="order-workflow-owner"
-                              label={l("Verantwortlich", "Ответственный")}
-                            >
-                              <NativeComboboxSelect
-                                id="order-workflow-owner"
-                                className={selectClassName}
-                                value={workflowForm.ownerUserId}
-                                onChange={(event) =>
-                                  setWorkflowForm((current) => ({
-                                    ...current,
-                                    ownerUserId: event.target.value,
-                                  }))
-                                }
-                              >
-                                <option value="">{l("Aktueller Benutzer", "Текущий пользователь")}</option>
-                                {activeWorkflowAssignments.map((item) => (
-                                  <option
-                                    key={item.user_id}
-                                    value={item.user_id}
-                                  >
-                                    {item.user_name} · {roleLabel(item.user_role)}
-                                  </option>
-                                ))}
-                              </NativeComboboxSelect>
-                            </Field>
-                            <Field
-                              htmlFor="order-workflow-priority"
-                              label={l("Priorität", "Приоритет")}
-                            >
-                              <NativeComboboxSelect
-                                id="order-workflow-priority"
-                                className={selectClassName}
-                                value={workflowForm.priority}
-                                onChange={(event) =>
-                                  setWorkflowForm((current) => ({
-                                    ...current,
-                                    priority: event.target.value,
-                                  }))
-                                }
-                              >
-                                {["low", "normal", "high", "urgent"].map(
-                                  (priority) => (
-                                    <option key={priority} value={priority}>
-                                      {priorityLabel(priority)}
-                                    </option>
-                                  ),
-                                )}
-                              </NativeComboboxSelect>
-                            </Field>
-                            <Field
-                              htmlFor="order-workflow-due"
-                              label={l("Fällig am", "Срок")}
-                            >
-                              <Input
-                                id="order-workflow-due"
-                                type="datetime-local"
-                                value={workflowForm.dueDate}
-                                onChange={(event) =>
-                                  setWorkflowForm((current) => ({
-                                    ...current,
-                                    dueDate: event.target.value,
-                                  }))
-                                }
-                                className={inputClassName}
-                              />
-                            </Field>
-                          </div>
-                          <div className="mt-4 flex justify-end">
-                            <Button
-                              type="submit"
-                              disabled={
-                                workflowBusy || !workflowForm.itemText.trim()
-                              }
-                            >
-                              {workflowBusy ? (
-                                <LoaderCircle className="mr-2 size-4 animate-spin" />
-                              ) : null}
-                              {l("Workflow-Punkt hinzufügen", "Добавить пункт workflow")}
-                            </Button>
-                          </div>
-                        </form>
-                      ) : null}
                     </div>
                   ) : (
-                    <EmptyState
-                      title={l(
-                        "Noch keine Workflow-Punkte",
-                        "Пунктов workflow пока нет",
-                      )}
-                      description={l(
-                        "Checklistenpunkte werden aus der aktuellen Phase erzeugt, sobald der Auftragskontext geladen ist.",
-                        "Пункты чеклиста генерируются из текущей фазы после загрузки контекста заказа.",
-                      )}
-                    />
+                    <div className="mt-5">
+                      <EmptyState
+                        title={l("orders_noch_keine_workflow_punkte")}
+                        description={l("orders_checklistenpunkte_werden_aus_der_aktuellen_phase_erzeugt")}
+                      />
+                    </div>
                   )}
-                  </SectionCard>
+                  </section>
                 ) : null}
 
                 {shouldRenderOrderSection("services") ? (
                   <>
-                    <div className="flex flex-wrap gap-6 rounded-xl border border-border px-4 py-3">
-                      <AdminInlineMetric
-                        icon={ClipboardList}
-                        label={eyebrowWithDot(tx.providers_services)}
-                        value={String(leistungMetrics.total)}
-                        description={t.orders_services_metric_total_description}
-                        tone="sky"
-                      />
-                      <AdminInlineMetric
-                        icon={CheckCircle2}
-                        label={eyebrowWithDot(t.orders_services_pending_approval_label)}
-                        value={String(leistungMetrics.delivered)}
-                        description={t.orders_services_pending_approval_description}
-                        tone="amber"
-                      />
-                      <AdminInlineMetric
-                        icon={Wallet}
-                        label={eyebrowWithDot(t.orders_services_approved_label)}
-                        value={String(leistungMetrics.approved)}
-                        description={t.orders_services_approved_description}
-                        tone="emerald"
-                      />
-                      <AdminInlineMetric
-                        icon={Building2}
-                        label={eyebrowWithDot(tx.contracts_total)}
-                        value={formatMoney(leistungMetrics.gross)}
-                        description={t.orders_services_gross_description}
-                        tone="slate"
-                      />
-                    </div>
+                    <SectionCard
+                      title={l("orders_leistungsubersicht")}
+                      description={t.orders_services_section_description}
+                      action={
+                        permissions.canAddLeistung ? (
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              type="button"
+                              className="h-8 rounded-lg px-3"
+                              onClick={() => resetLeistungDialog(true)}
+                            >
+                              <Plus className="size-4" />
+                              {t.orders_add_service}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-8 rounded-lg px-3"
+                              onClick={() => setServiceGroupWizardOpen(true)}
+                            >
+                              <Plus className="size-4" />
+                              {t.orders_service_group_wizard_create}
+                            </Button>
+                          </div>
+                        ) : undefined
+                      }
+                    >
+                      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,230px),1fr))] gap-2">
+                        <MiniMetric
+                          label={tx.providers_services}
+                          value={String(leistungMetrics.total)}
+                        />
+                        <MiniMetric
+                          label={t.orders_services_pending_approval_label}
+                          value={String(leistungMetrics.delivered)}
+                        />
+                        <MiniMetric
+                          label={t.orders_services_approved_label}
+                          value={String(leistungMetrics.approved)}
+                        />
+                        <MiniMetric
+                          label={tx.contracts_total}
+                          value={formatMoney(leistungMetrics.gross)}
+                        />
+                        <MiniMetric
+                          label={t.orders_service_group_split_title}
+                          value={String(serviceGroupMetrics.total)}
+                        />
+                        <MiniMetric
+                          label={t.orders_service_group_participants}
+                          value={String(serviceGroupMetrics.participants)}
+                        />
+                        <MiniMetric
+                          label={t.orders_service_group_generated}
+                          value={String(serviceGroupMetrics.generated)}
+                        />
+                      </div>
+                    </SectionCard>
 
-                    {permissions.canAddLeistung ? (
-                      <OrderServiceGroupWizard
-                        providers={providers}
-                        providerDoctors={providerDoctors}
-                        creating={serviceGroupCreating}
-                        error={serviceGroupWizardError}
-                        onLoadProviderDoctors={(providerId) =>
-                          void ensureProviderDoctors(providerId)
-                        }
-                        onCreate={handleCreateServiceGroup}
-                      />
-                    ) : null}
-
-                    {serviceGroupsLoading ||
-                    serviceGroupsError ||
-                    orderServiceGroups.length > 0 ? (
+                    <SectionCard title={t.orders_service_group_split_title}>
                       <div className="space-y-3">
                         {serviceGroupsError ? (
                           <Banner tone="error" withIcon>
@@ -5282,249 +5258,259 @@ function useOrdersPageContent() {
                             }
                           />
                         ))}
+                        {!serviceGroupsLoading &&
+                        !serviceGroupsError &&
+                        orderServiceGroups.length === 0 ? (
+                          <EmptyState
+                            title={l("orders_keine_servicegruppen")}
+                            description={l("orders_erstellen_sie_eine_gruppe_um_leistungen_aus_beteiligten")}
+                          />
+                        ) : null}
                       </div>
-                    ) : null}
+                    </SectionCard>
 
-                    <SectionCard
-                      title={tx.providers_services}
-                      description={t.orders_services_section_description}
-                      action={
-                        permissions.canAddLeistung ? (
-                          <Button onClick={() => resetLeistungDialog(true)}>
-                            <Plus className="mr-2 size-4" />
-                            {t.orders_add_service}
-                          </Button>
-                        ) : null
-                      }
-                    >
-                  {orderDetail.leistungen.length === 0 ? (
-                    <EmptyState
-                      title={tx.common_not_set}
-                      description={t.orders_services_empty_description}
-                      action={
-                        permissions.canAddLeistung ? (
-                          <Button onClick={() => resetLeistungDialog(true)}>
-                            <Plus className="mr-2 size-4" />
-                            {t.orders_add_service}
-                          </Button>
-                        ) : undefined
-                      }
-                    />
-                  ) : (
-                    <div className="space-y-3">
-                      {orderDetail.leistungen.map((leistung) => (
-                        <div
-                          key={leistung.id}
-                          className="rounded-2xl border border-border p-4"
-                        >
-                          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                            <div className="space-y-3">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <div className="text-base font-semibold text-foreground">
-                                  {normalizeLeistungDescription(leistung.description)}
-                                </div>
-                                <Badge
-                                  variant="outline"
-                                  className={cn(
-                                    "rounded-full",
-                                    statusClassName(leistung.status),
-                                  )}
-                                >
-                                  {leistungStatusLabel(leistung.status)}
-                                </Badge>
-                                {leistung.is_cost_passthrough ? (
-                                  <Badge
-                                    variant="outline"
-                                    className="rounded-full border-violet-200 bg-violet-100 text-violet-700"
-                                  >
-                                    {t.orders_cost_pass_through_badge}
-                                  </Badge>
-                                ) : null}
-                                {leistung.source_interpreter_report_id ? (
-                                  <Badge
-                                    variant="outline"
-                                    className="rounded-full border-emerald-200 bg-emerald-100 text-emerald-700"
-                                  >
-                                    {
-                                      t.orders_auto_billed_from_interpreter_report
-                                    }
-                                  </Badge>
-                                ) : null}
-                                {leistung.source_medical_appointment_id ? (
-                                  <Badge
-                                    variant="outline"
-                                    className="rounded-full border-amber-200 bg-amber-100 text-amber-700"
-                                  >
-                                    {
-                                      t.orders_auto_billed_from_completed_appointment
-                                    }
-                                  </Badge>
-                                ) : null}
-                                {leistung.agency_service_name ||
-                                leistung.agency_service_key ? (
-                                  <Badge
-                                    variant="outline"
-                                    className="rounded-full border-sky-200 bg-sky-100 text-sky-700"
-                                  >
-                                    {leistung.agency_service_name ||
-                                      leistung.agency_service_key}
-                                  </Badge>
-                                ) : null}
-                              </div>
-
-                              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                                <DetailField
-                                  label={t.common_provider}
-                                  value={
-                                    leistung.provider_id ? (
-                                      <button
-                                        type="button"
-                                        className="text-left font-medium text-sky-700 hover:text-sky-800"
-                                        onClick={() =>
-                                          staffGo(
-                                            `/providers?provider=${leistung.provider_id}`,
-                                          )
-                                        }
-                                      >
-                                        {leistung.provider_name ||
-                                          t.orders_open_provider}
-                                      </button>
-                                    ) : (
-                                      leistung.provider_name ||
-                                      t.orders_unlinked
-                                    )
-                                  }
-                                />
-                                <DetailField
-                                  label={t.common_doctor}
-                                  value={
-                                    leistung.provider_id &&
-                                    leistung.doctor_id ? (
-                                      <button
-                                        type="button"
-                                        className="text-left font-medium text-sky-700 hover:text-sky-800"
-                                        onClick={() =>
-                                          staffGo(
-                                            `/appointments?provider=${leistung.provider_id}&doctor=${leistung.doctor_id}`,
-                                          )
-                                        }
-                                      >
-                                        {leistung.doctor_name ||
-                                          t.orders_open_doctor_context}
-                                      </button>
-                                    ) : (
-                                      leistung.doctor_name ||
-                                      t.orders_not_specified
-                                    )
-                                  }
-                                />
-                                <DetailField
-                                  label={t.providers_service_price}
-                                  value={formatNumber(leistung.quantity, locale)}
-                                />
-                                <DetailField
-                                  label={tx.invoices_amount}
-                                  value={formatMoney(
-                                    leistung.unit_price,
-                                    leistung.currency,
-                                  )}
-                                />
-                                <DetailField
-                                  label={t.providers_service_price}
-                                  value={`${formatNumber(leistung.vat_rate, locale)}%`}
-                                />
-                                <DetailField
-                                  label={tx.invoices_total}
-                                  value={formatMoney(
-                                    (numberFromUnknown(leistung.quantity) ??
-                                      0) *
-                                      (numberFromUnknown(leistung.unit_price) ??
-                                        0),
-                                    leistung.currency,
-                                  )}
-                                />
-                                <DetailField
-                                  label={tx.common_active}
-                                  value={formatDateTimeLabel(leistung.delivered_at)}
-                                />
-                                <DetailField
-                                  label={tx.common_active}
-                                  value={formatDateTimeLabel(leistung.approved_at)}
-                                />
-                                <DetailField
-                                  label={t.orders_supporting_document}
-                                  value={
-                                    leistung.external_document_id ? (
-                                      <button
-                                        type="button"
-                                        className="text-left font-medium text-sky-700 hover:text-sky-800"
-                                        onClick={() =>
-                                          staffGo(
-                                            `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
-                                          )
-                                        }
-                                      >
-                                        {leistung.external_document_auto_name ||
-                                          leistung.external_document_filename ||
-                                          t.orders_open_linked_document}
-                                      </button>
-                                    ) : leistung.is_cost_passthrough ? (
-                                      t.orders_supporting_document_auto_link_hint
-                                    ) : (
-                                      t.orders_unlinked
-                                    )
-                                  }
-                                />
-                                <DetailField
-                                  label={t.orders_billing_source}
-                                  value={
-                                    leistung.source_interpreter_report_id
-                                      ? `${t.orders_billing_source_interpreter_report} ${leistung.source_interpreter_report_id}`
-                                      : leistung.source_medical_appointment_id
-                                        ? `${t.orders_billing_source_completed_appointment} ${leistung.source_medical_appointment_id}`
-                                        : t.orders_billing_source_manual
-                                  }
-                                />
-                                <DetailField
-                                  label={t.orders_agency_service}
-                                  value={
-                                    leistung.agency_service_name ||
-                                    leistung.agency_service_key ||
-                                    t.orders_not_catalog_linked
-                                  }
-                                />
-                              </div>
-
-                              {leistung.notes ? (
-                                <div className="rounded-xl border border-border px-4 py-3 text-sm text-muted-foreground">
-                                  {leistung.notes}
-                                </div>
-                              ) : null}
-                            </div>
-
-                            <div className="flex shrink-0 items-start">
-                              {permissions.canApproveLeistung &&
-                              leistung.status === "delivered" ? (
-                                <Button
+                    <SectionCard title={tx.providers_services}>
+                      <div className="space-y-3">
+                        {orderDetail.leistungen.length === 0 ? (
+                          <EmptyState
+                            title={tx.common_not_set}
+                            description={t.orders_services_empty_description}
+                          />
+                        ) : (
+                          orderDetail.leistungen.map((leistung, index) => {
+                            const lineTotal =
+                              (numberFromUnknown(leistung.quantity) ?? 0) *
+                              (numberFromUnknown(leistung.unit_price) ?? 0);
+                            const providerValue = leistung.provider_id ? (
+                              <button
+                                type="button"
+                                className="max-w-full truncate text-right font-semibold text-sky-700 hover:text-sky-800"
+                                onClick={() =>
+                                  window.open(
+                                    `/providers?provider=${leistung.provider_id}`,
+                                    "_blank",
+                                    "noopener,noreferrer",
+                                  )
+                                }
+                              >
+                                {leistung.provider_name || t.orders_open_provider}
+                              </button>
+                            ) : (
+                              leistung.provider_name || t.orders_unlinked
+                            );
+                            const doctorValue =
+                              leistung.provider_id && leistung.doctor_id ? (
+                                <button
+                                  type="button"
+                                  className="max-w-full truncate text-right font-semibold text-sky-700 hover:text-sky-800"
                                   onClick={() =>
-                                    void handleApproveLeistung(leistung.id)
+                                    window.open(
+                                      `/appointments?provider=${leistung.provider_id}&doctor=${leistung.doctor_id}`,
+                                      "_blank",
+                                      "noopener,noreferrer",
+                                    )
                                   }
-                                  disabled={approvingLeistungId === leistung.id}
                                 >
-                                  {approvingLeistungId === leistung.id ? (
-                                    <LoaderCircle className="mr-2 size-4 animate-spin" />
-                                  ) : (
-                                    <CheckCircle2 className="mr-2 size-4" />
-                                  )}
-                                  {t.orders_approve}
-                                </Button>
-                              ) : null}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                                  {leistung.doctor_name ||
+                                    t.orders_open_doctor_context}
+                                </button>
+                              ) : (
+                                leistung.doctor_name || t.orders_not_specified
+                              );
+                            const supportingDocumentValue =
+                              leistung.external_document_id ? (
+                                <button
+                                  type="button"
+                                  className="max-w-full truncate text-right font-semibold text-sky-700 hover:text-sky-800"
+                                  onClick={() =>
+                                    staffGo(
+                                      `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                                    )
+                                  }
+                                >
+                                  {leistung.external_document_auto_name ||
+                                    leistung.external_document_filename ||
+                                    t.orders_open_linked_document}
+                                </button>
+                              ) : leistung.is_cost_passthrough ? (
+                                t.orders_supporting_document_auto_link_hint
+                              ) : (
+                                t.orders_unlinked
+                              );
+
+                            return (
+                              <article
+                                key={leistung.id}
+                                className="overflow-hidden rounded-2xl border border-border bg-card"
+                              >
+                                <div className="grid 2xl:grid-cols-[minmax(0,1fr)_170px]">
+                                  <div className="p-4">
+                                    <div className="flex items-start gap-3">
+                                      <div className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted/30 text-xs font-semibold text-muted-foreground">
+                                        {index + 1}
+                                      </div>
+                                      <div className="min-w-0">
+                                        <h3 className="min-w-0 max-w-full break-words text-sm font-semibold leading-snug text-foreground">
+                                          {normalizeLeistungDescription(
+                                            leistung.description,
+                                          )}
+                                        </h3>
+                                        <div className="mt-2 flex flex-wrap gap-1.5">
+                                          <Badge
+                                            variant="outline"
+                                            className={cn(
+                                              "rounded-full",
+                                              statusClassName(leistung.status),
+                                            )}
+                                          >
+                                            {leistungStatusLabel(leistung.status)}
+                                          </Badge>
+                                        </div>
+                                        <div className="mt-2 flex flex-wrap gap-1.5">
+                                          {leistung.is_cost_passthrough ? (
+                                            <Badge
+                                              variant="outline"
+                                              className="rounded-full border-violet-200 bg-violet-100 text-violet-700"
+                                            >
+                                              {t.orders_cost_pass_through_badge}
+                                            </Badge>
+                                          ) : null}
+                                          {leistung.source_interpreter_report_id ? (
+                                            <Badge
+                                              variant="outline"
+                                              className="rounded-full border-emerald-200 bg-emerald-100 text-emerald-700"
+                                            >
+                                              {
+                                                t.orders_auto_billed_from_interpreter_report
+                                              }
+                                            </Badge>
+                                          ) : null}
+                                          {leistung.source_medical_appointment_id ? (
+                                            <Badge
+                                              variant="outline"
+                                              className="rounded-full border-amber-200 bg-amber-100 text-amber-700"
+                                            >
+                                              {
+                                                t.orders_auto_billed_from_completed_appointment
+                                              }
+                                            </Badge>
+                                          ) : null}
+                                          {leistung.agency_service_name ||
+                                          leistung.agency_service_key ? (
+                                            <Badge
+                                              variant="outline"
+                                              className="rounded-full border-sky-200 bg-sky-100 text-sky-700"
+                                            >
+                                              {leistung.agency_service_name ||
+                                                leistung.agency_service_key}
+                                            </Badge>
+                                          ) : null}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="relative border-t border-border p-4 2xl:border-t-0 2xl:pl-5 2xl:before:absolute 2xl:before:bottom-4 2xl:before:left-0 2xl:before:top-4 2xl:before:border-l 2xl:before:border-dashed 2xl:before:border-border">
+                                    <div className="text-xs text-muted-foreground">
+                                      {tx.invoices_total}
+                                    </div>
+                                    <div className="mt-1 text-xl font-semibold leading-none text-foreground">
+                                      {formatMoney(lineTotal, leistung.currency)}
+                                    </div>
+                                    {permissions.canApproveLeistung &&
+                                    leistung.status === "delivered" ? (
+                                      <Button
+                                        className="mt-4 h-8 w-full rounded-lg"
+                                        onClick={() =>
+                                          void handleApproveLeistung(leistung.id)
+                                        }
+                                        disabled={
+                                          approvingLeistungId === leistung.id
+                                        }
+                                      >
+                                        {approvingLeistungId === leistung.id ? (
+                                          <LoaderCircle className="size-4 animate-spin" />
+                                        ) : (
+                                          <CheckCircle2 className="size-4" />
+                                        )}
+                                        {t.orders_approve}
+                                      </Button>
+                                    ) : null}
+                                  </div>
+                                </div>
+
+                                <div className="grid gap-2 border-t border-border bg-muted/15 p-3 min-[760px]:grid-cols-2">
+                                  <MiniMetric
+                                    label={t.common_provider}
+                                    value={providerValue}
+                                    className="min-[760px]:col-span-2"
+                                  />
+                                  <MiniMetric
+                                    label={t.common_doctor}
+                                    value={doctorValue}
+                                  />
+                                  <MiniMetric
+                                    label={l("orders_menge")}
+                                    value={formatNumber(leistung.quantity, locale)}
+                                  />
+                                  <MiniMetric
+                                    label={l("orders_einzelpreis")}
+                                    value={formatMoney(
+                                      leistung.unit_price,
+                                      leistung.currency,
+                                    )}
+                                  />
+                                  <MiniMetric
+                                    label={l("orders_mwst")}
+                                    value={`${formatNumber(leistung.vat_rate, locale)}%`}
+                                  />
+                                  <MiniMetric
+                                    label={l("orders_erbracht")}
+                                    value={formatDateTimeLabel(
+                                      leistung.delivered_at,
+                                    )}
+                                  />
+                                  <MiniMetric
+                                    label={l("orders_freigegeben_2")}
+                                    value={formatDateTimeLabel(
+                                      leistung.approved_at,
+                                    )}
+                                  />
+                                  <MiniMetric
+                                    label={t.orders_supporting_document}
+                                    value={supportingDocumentValue}
+                                  />
+                                  <MiniMetric
+                                    label={t.orders_agency_service}
+                                    value={
+                                      leistung.agency_service_name ||
+                                      leistung.agency_service_key ||
+                                      t.orders_not_catalog_linked
+                                    }
+                                  />
+                                  <MiniMetric
+                                    label={t.orders_billing_source}
+                                    value={
+                                      leistung.source_interpreter_report_id
+                                        ? `${t.orders_billing_source_interpreter_report} ${leistung.source_interpreter_report_id}`
+                                        : leistung.source_medical_appointment_id
+                                          ? `${t.orders_billing_source_completed_appointment} ${leistung.source_medical_appointment_id}`
+                                          : t.orders_billing_source_manual
+                                    }
+                                    className="min-[760px]:col-span-2"
+                                  />
+                                </div>
+
+                                {leistung.notes ? (
+                                  <div className="border-t border-border px-4 py-3 text-sm leading-snug text-muted-foreground">
+                                    {leistung.notes}
+                                  </div>
+                                ) : null}
+                              </article>
+                            );
+                          })
+                        )}
+                      </div>
                     </SectionCard>
                   </>
                 ) : null}
@@ -5891,9 +5877,156 @@ function useOrdersPageContent() {
                   </div>
                   </SectionCard>
                 ) : null}
-              </>
+              </div>
             )}
           </AdminSheetScaffold>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={serviceGroupWizardOpen} onOpenChange={setServiceGroupWizardOpen}>
+        <SheetContent
+          side="right"
+          className="w-full border-l border-border p-0 sm:max-w-[860px]"
+        >
+          <AdminSheetScaffold
+            title={t.orders_service_group_wizard_title}
+            description={t.orders_service_group_wizard_steps}
+            headerClassName="px-4 py-3"
+            bodyClassName="min-h-0 overscroll-y-contain px-4 py-2 space-y-4"
+          >
+            <OrderServiceGroupWizard
+              embedded
+              providers={providers}
+              providerDoctors={providerDoctors}
+              creating={serviceGroupCreating}
+              error={serviceGroupWizardError}
+              onLoadProviderDoctors={(providerId) =>
+                void ensureProviderDoctors(providerId)
+              }
+              onCreate={handleCreateServiceGroup}
+              onCreated={() => setServiceGroupWizardOpen(false)}
+            />
+          </AdminSheetScaffold>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={workflowCreateOpen} onOpenChange={setWorkflowCreateOpen}>
+        <SheetContent
+          side="right"
+          className="w-full border-l border-border p-0 sm:max-w-[760px]"
+        >
+          <form className="flex h-full flex-col" onSubmit={handleAddWorkflowItem}>
+            <AdminSheetScaffold
+              title={l("orders_neuer_workflow_punkt")}
+              footer={
+                <SheetFormFooter
+                  cancelLabel={t.common_cancel}
+                  submitLabel={l("orders_punkt_hinzufugen")}
+                  submittingLabel={l("orders_wird_hinzugefugt")}
+                  submitting={workflowBusy}
+                  submitDisabled={!workflowForm.itemText.trim()}
+                  onCancel={() => setWorkflowCreateOpen(false)}
+                />
+              }
+              headerClassName="px-4 py-3"
+              bodyClassName="min-h-0 overscroll-y-contain px-4 py-2 space-y-4"
+            >
+              <FormSection title={l("orders_workflow_punkt")}>
+                <Field
+                  label={l("orders_beschreibung")}
+                  htmlFor="order-workflow-item-sheet"
+                >
+                  <Input
+                    id="order-workflow-item-sheet"
+                    value={workflowForm.itemText}
+                    onChange={(event) =>
+                      setWorkflowForm((current) => ({
+                        ...current,
+                        itemText: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                    placeholder={l("orders_eskalationsanruf_klinik_nachverfolgung_dokumentenubergab")}
+                    disabled={workflowBusy}
+                  />
+                </Field>
+              </FormSection>
+
+              <FormSection title={l("orders_zustandigkeit")}>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <Field
+                    htmlFor="order-workflow-owner-sheet"
+                    label={l("orders_verantwortlich")}
+                  >
+                    <NativeComboboxSelect
+                      id="order-workflow-owner-sheet"
+                      className={selectClassName}
+                      value={workflowForm.ownerUserId}
+                      onChange={(event) =>
+                        setWorkflowForm((current) => ({
+                          ...current,
+                          ownerUserId: event.target.value,
+                        }))
+                      }
+                      disabled={workflowBusy}
+                    >
+                      <option value="">
+                        {l("orders_aktueller_benutzer")}
+                      </option>
+                      {activeWorkflowAssignments.map((item) => (
+                        <option key={item.user_id} value={item.user_id}>
+                          {item.user_name} · {roleLabel(item.user_role)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+
+                  <Field
+                    htmlFor="order-workflow-priority-sheet"
+                    label={l("orders_prioritat")}
+                  >
+                    <NativeComboboxSelect
+                      id="order-workflow-priority-sheet"
+                      className={selectClassName}
+                      value={workflowForm.priority}
+                      onChange={(event) =>
+                        setWorkflowForm((current) => ({
+                          ...current,
+                          priority: event.target.value,
+                        }))
+                      }
+                      disabled={workflowBusy}
+                    >
+                      {["low", "normal", "high", "urgent"].map((priority) => (
+                        <option key={priority} value={priority}>
+                          {priorityLabel(priority)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+
+                  <Field
+                    htmlFor="order-workflow-due-sheet"
+                    label={l("orders_fallig_bis")}
+                  >
+                    <Input
+                      id="order-workflow-due-sheet"
+                      type="datetime-local"
+                      value={workflowForm.dueDate}
+                      onChange={(event) =>
+                        setWorkflowForm((current) => ({
+                          ...current,
+                          dueDate: event.target.value,
+                        }))
+                      }
+                      className={inputClassName}
+                      disabled={workflowBusy}
+                    />
+                  </Field>
+                </div>
+              </FormSection>
+            </AdminSheetScaffold>
+          </form>
         </SheetContent>
       </Sheet>
 
@@ -5928,7 +6061,7 @@ function useOrdersPageContent() {
                   </div>
                 ) : null}
 
-                <OrderSheetSection title={l("Grunddaten", "Основные данные")}>
+                <OrderSheetSection title={l("orders_grunddaten")}>
                   <Field label={t.orders_patient}>
                     <NativeComboboxSelect
                       value={createForm.patientId || "__empty__"}
@@ -5957,15 +6090,12 @@ function useOrdersPageContent() {
                 </OrderSheetSection>
 
                 {createForm.patientId ? (
-                  <OrderSheetSection title={l("Re-Check", "Повторная проверка")}>
+                  <OrderSheetSection title={l("orders_re_check")}>
                     <div className="space-y-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <p className="text-sm leading-6 text-muted-foreground">
-                      {l(
-                        "Stammdaten, Compliance, Identitat, Dokumentenpaket, Vertragsstatus und Debt-Hold vor dem Anlegen eines neuen Auftrags prufen.",
-                        "Проверьте базовые данные, compliance, идентификацию, комплект документов, статус договора и debt-hold перед созданием нового заказа.",
-                      )}
+                      {l("orders_stammdaten_compliance_identitat_dokumentenpaket_vertrags")}
                     </p>
                   </div>
                   {createRecheck ? (
@@ -5980,10 +6110,10 @@ function useOrdersPageContent() {
                       )}
                     >
                       {!createRecheck.requires_recheck
-                        ? l("Nicht erforderlich", "Не требуется")
+                        ? l("orders_nicht_erforderlich")
                         : createRecheck.can_create_order
-                          ? l("Bereit fur Auftrag", "Готов к заказу")
-                          : l("Blockiert", "Заблокирован")}
+                          ? l("orders_bereit_fur_auftrag")
+                          : l("orders_blockiert_2")}
                     </Badge>
                   ) : null}
                 </div>
@@ -5991,10 +6121,7 @@ function useOrdersPageContent() {
                 {createRecheckLoading ? (
                   <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
                     <LoaderCircle className="size-4 animate-spin" />
-                    {l(
-                      "Patienten-Re-Check wird geladen...",
-                      "Загрузка повторной проверки пациента...",
-                    )}
+                    {l("orders_patienten_re_check_wird_geladen")}
                   </div>
                 ) : null}
 
@@ -6016,20 +6143,17 @@ function useOrdersPageContent() {
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-sm text-foreground">
                                 {check.key === "base_data"
-                                  ? l("Stammdaten vollstandig", "Базовые данные заполнены")
+                                  ? l("orders_stammdaten_vollstandig")
                                   : check.key === "compliance"
-                                    ? l("Compliance-Dokumente gultig", "Compliance-документы валидны")
+                                    ? l("orders_compliance_dokumente_gultig")
                                     : check.key === "identity"
-                                      ? l("Identitat verifiziert", "Личность подтверждена")
+                                      ? l("orders_identitat_verifiziert")
                                       : check.key === "document_pack"
-                                        ? l(
-                                            "Erforderliche Patientendokumente vollstandig",
-                                            "Обязательные документы пациента собраны",
-                                          )
+                                        ? l("orders_erforderliche_patientendokumente_vollstandig")
                                         : check.key === "contract"
-                                          ? l("Vertragsunterlagen gultig", "Договорные документы валидны")
+                                          ? l("orders_vertragsunterlagen_gultig")
                                           : check.key === "debt_clear"
-                                            ? l("Debt-Hold aufgehoben", "Debt-hold снят")
+                                            ? l("orders_debt_hold_aufgehoben")
                                             : check.label}
                               </span>
                               <Badge
@@ -6041,7 +6165,7 @@ function useOrdersPageContent() {
                               >
                                 {check.passed
                                   ? "OK"
-                                  : l("Aktualisierung notig", "Требует обновления")}
+                                  : l("orders_aktualisierung_notig")}
                               </Badge>
                             </div>
                           </div>
@@ -6051,23 +6175,20 @@ function useOrdersPageContent() {
                       <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
                         {createRecheck.reason
                           ? localizedBlockingReason(createRecheck.reason)
-                          : l(
-                              "Vor dem ersten operativen Auftrag ist kein Bestandskunden-Re-Check erforderlich.",
-                              "Повторная проверка существующего клиента не требуется перед первым операционным заказом.",
-                            )}
+                          : l("orders_vor_dem_ersten_operativen_auftrag_ist_kein_bestandskunde")}
                       </div>
                     )}
 
                     {createRecheck.requires_recheck &&
                     createRecheck.base_data_missing_fields.length ? (
                       <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                        {l("Fehlende Stammdaten", "Не хватает базовых данных")}:{" "}
+                        {l("orders_fehlende_stammdaten")}:{" "}
                         {createRecheck.base_data_missing_fields
                           .map((field) =>
                             recheckMissingFieldLabel(field, {
-                              primary_contact: l("Hauptkontakt", "Основной контакт"),
-                              country: l("Land", "Страна"),
-                              language: l("Bevorzugte Sprache", "Предпочитаемый язык"),
+                              primary_contact: l("orders_hauptkontakt"),
+                              country: l("orders_land"),
+                              language: l("orders_bevorzugte_sprache"),
                             }, t),
                           )
                           .join(", ")}
@@ -6078,7 +6199,7 @@ function useOrdersPageContent() {
                     createRecheck.blocking_reasons.length ? (
                       <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
                         <div className="font-medium">
-                          {l("Blockierende Grunde", "Блокирующие причины")}
+                          {l("orders_blockierende_grunde")}
                         </div>
                         <ul className="mt-2 list-disc space-y-1 pl-5">
                           {createRecheck.blocking_reasons.map((reason) => (
@@ -6088,10 +6209,7 @@ function useOrdersPageContent() {
                       </div>
                     ) : createRecheck.requires_recheck ? (
                       <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-                        {l(
-                          "Der Bestandskunden-Re-Check ist vollstandig. Der Patient kann in einen neuen Auftrag ubergehen.",
-                          "Повторная проверка существующего клиента завершена. Пациент может перейти в новый заказ.",
-                        )}
+                        {l("orders_der_bestandskunden_re_check_ist_vollstandig_der_patient")}
                       </div>
                     ) : null}
 
@@ -6100,48 +6218,35 @@ function useOrdersPageContent() {
                         <div>
                           {createRecheck.requires_recheck &&
                           createRecheck.document_alerts.missing_count > 0
-                            ? l(
-                                `${createRecheck.document_alerts.missing_count} erforderliche Dokument(e) fehlen noch`,
-                                `Ещё не хватает ${createRecheck.document_alerts.missing_count} обязательных документ(ов)`,
-                              )
+                            ? l("orders_recheck_missing_required_documents_count", {
+                                count:
+                                  createRecheck.document_alerts.missing_count,
+                              })
                             : createRecheck.requires_recheck
-                              ? l(
-                                  "Erforderliches Dokumentenpaket ist vollstandig",
-                                  "Обязательный комплект документов собран",
-                                )
-                              : l(
-                                  "Fur Bestandskundendokumente ist noch kein Check erforderlich",
-                                  "Проверка документов существующего клиента пока не требуется",
-                                )}
+                              ? l("orders_erforderliches_dokumentenpaket_ist_vollstandig")
+                              : l("orders_fur_bestandskundendokumente_ist_noch_kein_check_erforder")}
                         </div>
                         <div>
                           {createRecheck.requires_recheck &&
                           createRecheck.debt_hold
-                            ? l(
-                                `${createRecheck.overdue_invoice_count} uberfallige Rechnung(en) halten den Patienten im Debt-Hold`,
-                                `${createRecheck.overdue_invoice_count} просроченных счет(ов) держат пациента в debt-hold`,
-                              )
+                            ? l("orders_recheck_overdue_invoice_debt_hold_count", {
+                                count: createRecheck.overdue_invoice_count,
+                              })
                             : createRecheck.requires_recheck
-                              ? l(
-                                  "Keine uberfalligen Forderungen erkannt",
-                                  "Просроченной задолженности не найдено",
-                                )
-                              : l(
-                                  "Debt-Hold wird gepruft, sobald eine fruhere Kundenhistorie existiert",
-                                  "Debt-hold проверяется, когда уже есть история предыдущего клиента",
-                                )}
+                              ? l("orders_keine_uberfalligen_forderungen_erkannt")
+                              : l("orders_debt_hold_wird_gepruft_sobald_eine_fruhere_kundenhistori")}
                         </div>
                         {createRecheck.requires_recheck &&
                         createRecheck.outstanding_balance ? (
                           <div>
-                            {l("Offener Saldo", "Открытый остаток")}:{" "}
+                            {l("orders_offener_saldo")}:{" "}
                             {formatMoney(createRecheck.outstanding_balance)}
                           </div>
                         ) : null}
                         {createRecheck.requires_recheck &&
                         createRecheck.debt_management?.latest_workflow ? (
                           <div>
-                            {l("Letzter Debt-Workflow", "Последний debt-workflow")}:{" "}
+                            {l("orders_letzter_debt_workflow")}:{" "}
                             {
                               createRecheck.debt_management.latest_workflow
                                 .order_number
@@ -6159,7 +6264,7 @@ function useOrdersPageContent() {
                         ) : null}
                         {createRecheck.latest_framework_contract ? (
                           <div>
-                            {l("Letzter Rahmenvertrag", "Последний рамочный договор")}:{" "}
+                            {l("orders_letzter_rahmenvertrag")}:{" "}
                             {
                               createRecheck.latest_framework_contract
                                 .contract_number
@@ -6170,10 +6275,7 @@ function useOrdersPageContent() {
                           </div>
                         ) : (
                           <div>
-                            {l(
-                              "Noch kein Rahmenvertrag hinterlegt",
-                              "Рамочный договор пока не зафиксирован",
-                            )}
+                            {l("orders_noch_kein_rahmenvertrag_hinterlegt")}
                           </div>
                         )}
                       </div>
@@ -6185,7 +6287,7 @@ function useOrdersPageContent() {
                           staffGo(`/patients?patient=${createForm.patientId}`)
                         }
                       >
-                        {l("Patientenprofil offnen", "Открыть профиль пациента")}
+                        {l("orders_patientenprofil_offnen")}
                       </Button>
                     </div>
                   </div>
@@ -6194,7 +6296,7 @@ function useOrdersPageContent() {
                   </OrderSheetSection>
                 ) : null}
 
-                <OrderSheetSection title={l("Zusätzlich", "Дополнительно")}>
+                <OrderSheetSection title={l("orders_zusatzlich")}>
                   <Field label={t.orders_intake_note}>
                     <textarea
                       value={createForm.needsDescription}
@@ -6217,7 +6319,10 @@ function useOrdersPageContent() {
       </Sheet>
 
       <Sheet open={leistungOpen} onOpenChange={resetLeistungDialog}>
-        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
+        <SheetContent
+          side="right"
+          className="w-full border-l border-border p-0 sm:max-w-[860px]"
+        >
           <form onSubmit={handleAddLeistung} className="flex h-full min-h-0 flex-col">
             <AdminSheetScaffold
               title={t.orders_add_service_title}
@@ -6231,128 +6336,135 @@ function useOrdersPageContent() {
                   onCancel={() => resetLeistungDialog(false)}
                 />
               }
+              headerClassName="px-4 py-3"
+              bodyClassName="min-h-0 overscroll-y-contain px-4 py-2 space-y-4"
             >
             {leistungError ? (
-              <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                {leistungError}
-              </div>
+              <Banner tone="error" withIcon>{leistungError}</Banner>
             ) : null}
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <Field label={t.orders_service_description}>
-                <Input
-                  required
-                  value={leistungForm.description}
-                  onChange={(event) =>
-                    setLeistungForm((current) => ({
-                      ...current,
-                      description: event.target.value,
-                    }))
-                  }
-                  className={inputClassName}
-                />
-              </Field>
-              <Field label={t.orders_service_notes}>
-                <Input
-                  value={leistungForm.notes}
-                  onChange={(event) =>
-                    setLeistungForm((current) => ({
-                      ...current,
-                      notes: event.target.value,
-                    }))
-                  }
-                  className={inputClassName}
-                />
-              </Field>
-            </div>
+            <OrderSheetSection title={l("orders_basis")}>
+              <div className="grid gap-3 md:grid-cols-4">
+                <Field label={t.orders_service_description} className="md:col-span-2">
+                  <Input
+                    required
+                    value={leistungForm.description}
+                    onChange={(event) =>
+                      setLeistungForm((current) => ({
+                        ...current,
+                        description: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </Field>
+                <Field label={t.orders_service_notes} className="md:col-span-2">
+                  <Input
+                    value={leistungForm.notes}
+                    onChange={(event) =>
+                      setLeistungForm((current) => ({
+                        ...current,
+                        notes: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </Field>
+              </div>
+            </OrderSheetSection>
 
-            <div className="grid gap-4 md:grid-cols-3">
-              <Field label={t.orders_service_quantity}>
-                <Input
-                  value={leistungForm.quantity}
-                  onChange={(event) =>
-                    setLeistungForm((current) => ({
-                      ...current,
-                      quantity: event.target.value,
-                    }))
-                  }
-                  className={inputClassName}
-                />
-              </Field>
-              <Field label={t.orders_service_unit_price}>
-                <Input
-                  value={leistungForm.unitPrice}
-                  onChange={(event) =>
-                    setLeistungForm((current) => ({
-                      ...current,
-                      unitPrice: event.target.value,
-                    }))
-                  }
-                  className={inputClassName}
-                />
-              </Field>
-              <Field label={t.orders_service_vat_percent}>
-                <Input
-                  value={leistungForm.vatRate}
-                  onChange={(event) =>
-                    setLeistungForm((current) => ({
-                      ...current,
-                      vatRate: event.target.value,
-                    }))
-                  }
-                  className={inputClassName}
-                />
-              </Field>
-            </div>
+            <OrderSheetSection title={l("orders_kosten")}>
+              <div className="grid gap-3 md:grid-cols-3">
+                <Field label={t.orders_service_quantity}>
+                  <Input
+                    value={leistungForm.quantity}
+                    onChange={(event) =>
+                      setLeistungForm((current) => ({
+                        ...current,
+                        quantity: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </Field>
+                <Field label={t.orders_service_unit_price}>
+                  <Input
+                    value={leistungForm.unitPrice}
+                    onChange={(event) =>
+                      setLeistungForm((current) => ({
+                        ...current,
+                        unitPrice: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </Field>
+                <Field label={t.orders_service_vat_percent}>
+                  <Input
+                    value={leistungForm.vatRate}
+                    onChange={(event) =>
+                      setLeistungForm((current) => ({
+                        ...current,
+                        vatRate: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </Field>
+              </div>
+            </OrderSheetSection>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <Field label={t.orders_service_provider}>
-                <NativeComboboxSelect
-                  value={leistungForm.providerId}
-                  onChange={(event) => {
-                    const providerId = event.target.value;
-                    setLeistungForm((current) => ({
-                      ...current,
-                      providerId,
-                      doctorId: "",
-                    }));
-                  }}
-                  className={selectClassName}
-                >
-                  <option value="">{t.common_provider}</option>
-                  {providers.map((provider) => (
-                    <option key={provider.id} value={provider.id}>
-                      {provider.name}
-                      {provider.address_city
-                        ? ` (${provider.address_city})`
-                        : ""}
-                    </option>
-                  ))}
-                </NativeComboboxSelect>
-              </Field>
-              <Field label={t.orders_service_doctor}>
-                <NativeComboboxSelect
-                  value={leistungForm.doctorId}
-                  onChange={(event) =>
-                    setLeistungForm((current) => ({
-                      ...current,
-                      doctorId: event.target.value,
-                    }))
-                  }
-                  className={selectClassName}
-                  disabled={!leistungForm.providerId}
-                >
-                  <option value="">{t.common_doctor}</option>
-                  {leistungDoctorOptions.map((doctor) => (
-                    <option key={doctor.id} value={doctor.id}>
-                      {doctor.name}
-                      {doctor.fachbereich ? ` (${doctor.fachbereich})` : ""}
-                    </option>
-                  ))}
-                </NativeComboboxSelect>
-              </Field>
-            </div>
+            <OrderSheetSection title={t.orders_service_group_doctors}>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field label={t.orders_service_provider}>
+                  <NativeComboboxSelect
+                    value={leistungForm.providerId}
+                    onChange={(event) => {
+                      const providerId = event.target.value;
+                      setLeistungForm((current) => ({
+                        ...current,
+                        providerId,
+                        doctorId: "",
+                      }));
+                    }}
+                    className={selectClassName}
+                  >
+                    <option value="">{t.common_provider}</option>
+                    {providers.map((provider) => (
+                      <option key={provider.id} value={provider.id}>
+                        {provider.name}
+                        {provider.address_city
+                          ? ` (${provider.address_city})`
+                          : ""}
+                      </option>
+                    ))}
+                  </NativeComboboxSelect>
+                </Field>
+                <Field label={t.orders_service_doctor}>
+                  <NativeComboboxSelect
+                    value={leistungForm.doctorId}
+                    onChange={(event) =>
+                      setLeistungForm((current) => ({
+                        ...current,
+                        doctorId: event.target.value,
+                      }))
+                    }
+                    className={selectClassName}
+                    disabled={!leistungForm.providerId}
+                  >
+                    <option value="">{t.common_doctor}</option>
+                    {leistungDoctorOptions.map((doctor) => (
+                      <option key={doctor.id} value={doctor.id}>
+                        {doctor.name}
+                        {doctor.fachbereich ? ` (${doctor.fachbereich})` : ""}
+                      </option>
+                    ))}
+                  </NativeComboboxSelect>
+                </Field>
+              </div>
+            </OrderSheetSection>
 
+            <OrderSheetSection title={t.orders_supporting_document}>
             <div className={cn("rounded-lg px-4 py-3", tokens.surface.mutedCard)}>
               <label
                 htmlFor="leistung-cost-passthrough"
@@ -6417,6 +6529,7 @@ function useOrdersPageContent() {
                 </p>
               </Field>
             ) : null}
+            </OrderSheetSection>
 
             </AdminSheetScaffold>
           </form>

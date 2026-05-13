@@ -142,9 +142,8 @@ function PatientRelationEditorSheet({
   onSaved,
   onError,
 }: PatientRelationEditorSheetProps) {
-  const { t, lang } = useLang();
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
   const [relationState, dispatchRelationState] = useReducer(
     relationEditorReducer,
     undefined,
@@ -261,7 +260,7 @@ function PatientRelationEditorSheet({
         />
       }
     >
-      <FormSection title={l("Patientenbezug", "Связанный пациент", "Linked patient")}>
+      <FormSection title={l("patients_linked_patient")}>
         <FormField
           label={t.patient_relation_search_existing}
           htmlFor="relation-patient-search"
@@ -323,7 +322,7 @@ function PatientRelationEditorSheet({
         </FormField>
       </FormSection>
 
-      <FormSection title={l("Beziehungsdaten", "Данные связи", "Relation details")}>
+      <FormSection title={l("patients_relation_details")}>
         <div className="grid gap-3 md:grid-cols-2">
           <FormField label={t.patient_relation_name} htmlFor="relation-name">
             <Input
@@ -392,7 +391,7 @@ function PatientRelationEditorSheet({
         </div>
       </FormSection>
 
-      <FormSection title={l("Zusatzlich", "Дополнительно", "Additional")}>
+      <FormSection title={l("patients_additional")}>
         <FormField label={t.patient_relation_notes} htmlFor="relation-notes">
           <textarea
             id="relation-notes"

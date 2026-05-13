@@ -204,11 +204,7 @@ function useAppointmentMobileDetailSheetContentContent({
         {detailLoading ? (
             <div className="flex min-h-[320px] items-center justify-center text-muted-foreground">
               <LoaderCircle className="mr-2 size-4 animate-spin" />
-              {appointmentText(
-                "Termin wird geladen",
-                "Загрузка приёма",
-                "Loading appointment",
-              )}
+              {appointmentText("appointments_loading_appointment")}
             </div>
           ) : detailError ? (
             <div className="pt-5">
@@ -489,11 +485,7 @@ function useAppointmentMobileDetailSheetContentContent({
             </div>
         ) : (
             <div className="flex min-h-[320px] items-center justify-center text-muted-foreground">
-              {appointmentText(
-                "Termin im Kalender oder in der Liste auswahlen.",
-                "Выберите приём в календаре или списке.",
-                "Select an appointment from the calendar or list.",
-              )}
+              {appointmentText("appointments_select_an_appointment_from_the_calendar_or_list")}
             </div>
         )}
       </AdminSheetScaffold>

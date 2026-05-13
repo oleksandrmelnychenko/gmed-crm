@@ -114,21 +114,15 @@ export const INCOMING_DATA_CHECKLIST_PREFIX = "[Incoming data]";
 export const FOLLOW_UP_PRESETS = [
   {
     id: "post_1w",
-    label: "1 week",
     offsetDays: 7,
-    title: "1-week follow-up check-in",
   },
   {
     id: "post_1m",
-    label: "1 month",
     offsetMonths: 1,
-    title: "1-month follow-up check-in",
   },
   {
     id: "post_6m",
-    label: "6 months",
     offsetMonths: 6,
-    title: "6-month follow-up check-in",
   },
 ] as const;
 

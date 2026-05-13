@@ -122,7 +122,7 @@ function useCreateAppointmentSheetContent({
   const tr = t as unknown as Record<string, string>;
   const interpreterFieldLabel =
     tr.role_interpreter ??
-    appointmentText("Dolmetscher", "Переводчик", "Interpreter");
+    appointmentText("appointments_interpreter");
   const [sheetState, dispatchSheetState] = useReducer(
     createAppointmentSheetReducer,
     undefined,
@@ -323,11 +323,7 @@ function useCreateAppointmentSheetContent({
         error:
           submitError instanceof Error
             ? submitError.message
-            : appointmentText(
-              "Termin konnte nicht erstellt werden.",
-              "Не удалось создать приём.",
-              "Failed to create appointment",
-            ),
+            : appointmentText("appointments_failed_to_create_appointment"),
         busy: false,
       });
     }
@@ -379,7 +375,7 @@ function useCreateAppointmentSheetContent({
       <div className="space-y-4">
         {error ? <Banner tone="error" withIcon>{error}</Banner> : null}
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
-                {sectionTitle(appointmentText("Termin und Zeit", "Прием и время", "Appointment and timing"))}
+                {sectionTitle(appointmentText("appointments_appointment_and_timing"))}
                 <div className="grid gap-4 md:grid-cols-3">
                   <Field compact label={t.orders_patient}>
                     <NativeComboboxSelect
@@ -425,11 +421,7 @@ function useCreateAppointmentSheetContent({
                   </Field>
                   <Field
                     compact
-                    label={appointmentText(
-                      "Versorgungspfad",
-                      "Траектория лечения",
-                      "Care path",
-                    )}
+                    label={appointmentText("appointments_care_path")}
                   >
                     <NativeComboboxSelect
                       value={form.carePathKind}
@@ -576,11 +568,7 @@ function useCreateAppointmentSheetContent({
                       </Field>
                       <Field
                         compact
-                        label={appointmentText(
-                          "Anzahl Termine",
-                          "Всего повторов",
-                          "Total occurrences",
-                        )}
+                        label={appointmentText("appointments_total_occurrences")}
                       >
                         <Input
                           type="number"
@@ -598,11 +586,7 @@ function useCreateAppointmentSheetContent({
                       </Field>
                       <Field
                         compact
-                        label={appointmentText(
-                          "Wiederholen bis",
-                          "Повторять до",
-                          "Repeat until",
-                        )}
+                        label={appointmentText("appointments_repeat_until")}
                       >
                         <Input
                           type="date"
@@ -621,7 +605,7 @@ function useCreateAppointmentSheetContent({
                 </div>
         </section>
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
-                {sectionTitle(appointmentText("Provider und Arzt", "Провайдер и врач", "Provider and doctor"))}
+                {sectionTitle(appointmentText("appointments_provider_and_doctor"))}
                 <div className="grid gap-4 md:grid-cols-2">
                   <Field compact label={t.common_provider}>
                     <NativeComboboxSelect
@@ -667,7 +651,7 @@ function useCreateAppointmentSheetContent({
                 </div>
         </section>
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
-                {sectionTitle(appointmentText("Koordination und Notizen", "Координация и заметки", "Coordination and notes"))}
+                {sectionTitle(appointmentText("appointments_coordination_and_notes"))}
                 <div className="grid gap-4 md:grid-cols-2">
                   <Field compact label={t.patients_assign_owner}>
                     <NativeComboboxSelect

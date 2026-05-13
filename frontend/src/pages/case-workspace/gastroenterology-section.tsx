@@ -1,12 +1,11 @@
-import { useLang } from "@/lib/i18n";
+import { t as translateCatalog, useLang } from "@/lib/i18n";
 
 import { type GastroenterologyAssessment, useCaseWorkspace } from "./context";
 import { SpecialtySection } from "./specialty-section";
 
-function tri(lang: string, de: string, ru: string, en: string) {
-  if (lang === "de") return de;
-  if (lang === "ru") return ru;
-  return en;
+function tri(lang: string, key: string) {
+  const catalog = translateCatalog(lang === "de" ? "de" : "ru");
+  return catalog.uiText[key] ?? key;
 }
 
 const BLANK: GastroenterologyAssessment = {
@@ -37,13 +36,8 @@ export function GastroenterologySection() {
 
   return (
     <SpecialtySection<GastroenterologyAssessment>
-      title={tri(lang, "Gastroenterologie", "Гастроэнтерология", "Gastroenterology")}
-      description={tri(
-        lang,
-        "Gastrointestinale Beschwerden und Vorgeschichte.",
-        "Желудочно-кишечные жалобы и анамнез.",
-        "Gastrointestinal complaints and history.",
-      )}
+      title={tri(lang, "case_ws_gastroenterology")}
+      description={tri(lang, "case_ws_gastrointestinal_complaints_and_history")}
       blankValue={BLANK}
       rawValue={detail?.gastroenterology}
       busy={sectionBusy === "gastroenterology"}
@@ -52,54 +46,34 @@ export function GastroenterologySection() {
       save={saveGastroenterology}
       revisionKey={detail?.updated_at ?? detail?.id ?? ""}
       booleanFlags={[
-        { key: "abdominal_pain", labels: { de: "Bauchschmerz", ru: "Боль в животе", en: "Abdominal pain" } },
-        { key: "reflux", labels: { de: "Reflux", ru: "Рефлюкс", en: "Reflux" } },
-        { key: "nausea", labels: { de: "Übelkeit", ru: "Тошнота", en: "Nausea" } },
-        { key: "diarrhea", labels: { de: "Diarrhoe", ru: "Диарея", en: "Diarrhea" } },
-        { key: "constipation", labels: { de: "Obstipation", ru: "Запор", en: "Constipation" } },
-        { key: "gi_bleeding", labels: { de: "GI-Blutung", ru: "ЖК-кровотечение", en: "GI bleeding" } },
+        { key: "abdominal_pain", label: tri(lang, "case_ws_abdominal_pain") },
+        { key: "reflux", label: tri(lang, "case_ws_reflux") },
+        { key: "nausea", label: tri(lang, "case_ws_nausea") },
+        { key: "diarrhea", label: tri(lang, "case_ws_diarrhea") },
+        { key: "constipation", label: tri(lang, "case_ws_constipation") },
+        { key: "gi_bleeding", label: tri(lang, "case_ws_gi_bleeding") },
       ]}
       textFields={[
         {
           key: "prior_endoscopy",
-          labels: {
-            de: "Vorherige Endoskopie / Koloskopie",
-            ru: "Предыдущая эндоскопия / колоноскопия",
-            en: "Prior endoscopy / colonoscopy",
-          },
+          label: tri(lang, "case_ws_prior_endoscopy_colonoscopy"),
         },
         {
           key: "bowel_habits",
-          labels: {
-            de: "Veränderungen der Stuhlgewohnheiten",
-            ru: "Изменения стула",
-            en: "Bowel habit changes",
-          },
+          label: tri(lang, "case_ws_bowel_habit_changes"),
         },
         {
           key: "liver_history",
-          labels: {
-            de: "Leber- / hepatobiliäre Vorgeschichte",
-            ru: "Печёночно-билиарный анамнез",
-            en: "Liver / hepatobiliary history",
-          },
+          label: tri(lang, "case_ws_liver_hepatobiliary_history"),
         },
         {
           key: "food_intolerance",
-          labels: {
-            de: "Nahrungsmittelunverträglichkeiten / Auslöser",
-            ru: "Пищевая непереносимость / триггеры",
-            en: "Food intolerance / triggers",
-          },
+          label: tri(lang, "case_ws_food_intolerance_triggers"),
         },
-        { key: "red_flags", labels: { de: "Warnzeichen", ru: "Красные флаги", en: "Red flags" } },
+        { key: "red_flags", label: tri(lang, "case_ws_red_flags") },
         {
           key: "notes",
-          labels: {
-            de: "Gastroenterologische Notizen",
-            ru: "Гастроэнтерологические заметки",
-            en: "Gastroenterology notes",
-          },
+          label: tri(lang, "case_ws_gastroenterology_notes"),
           rows: 4,
         },
       ]}

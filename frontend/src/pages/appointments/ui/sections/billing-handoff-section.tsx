@@ -128,18 +128,7 @@ function useAppointmentBillingHandoffSectionContentContent({
 }: AppointmentBillingHandoffSectionProps) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const appointmentText = (de: string, ru: string, en: string) => {
-    switch (en) {
-      case "Select billing assignee":
-        return t.appointments_billing_select_assignee;
-      case "Open billing chat draft":
-        return t.appointments_billing_open_chat;
-      case "Create billing handoff":
-        return t.appointments_billing_create_handoff;
-      default:
-        return appointmentTextBase(de, ru, en);
-    }
-  };
+  const appointmentText = appointmentTextBase;
   const { staffGo } = useStaffNavigate();
 
   const buildDefaultForm = useCallback(
@@ -169,14 +158,27 @@ function useAppointmentBillingHandoffSectionContentContent({
     if (!assignee) return;
 
     const draftParts = [
-      `Billing handoff: ${detail.patient_pid} · ${detail.title}`,
-      `Track: ${billingHandoffKindLabel(form.kind)}`,
-      `Slot: ${slotLabel(detail)}`,
+      appointmentText("appointments_billing_chat_title", {
+        patientPid: detail.patient_pid,
+        title: detail.title,
+      }),
+      appointmentText("appointments_description_track", {
+        track: billingHandoffKindLabel(form.kind),
+      }),
+      appointmentText("appointments_description_slot", {
+        slot: slotLabel(detail),
+      }),
       form.kind === "interpreter_hours" && detailReport
-        ? `Interpreter hours: ${detailReport.hours}h · ${reportApprovalLabel(detailReport.approval_status)}`
+        ? appointmentText("appointments_description_interpreter_hours", {
+            hours: detailReport.hours,
+            status: reportApprovalLabel(detailReport.approval_status),
+          })
         : "",
       form.kind === "concierge_settlement"
-        ? `Concierge services: ${readyServices.length} ready · ${settledServices.length} billed/settled`
+        ? appointmentText("appointments_description_concierge_services", {
+            ready: readyServices.length,
+            settled: settledServices.length,
+          })
         : "",
       form.notes.trim() || "",
     ].filter(Boolean);
@@ -197,15 +199,35 @@ function useAppointmentBillingHandoffSectionContentContent({
     const titleSuffix = form.title.trim() || billingHandoffKindLabel(form.kind);
     const handoffTitle = `${BILLING_HANDOFF_PREFIX} ${titleSuffix}`;
     const descriptionParts = [
-      `Track: ${billingHandoffKindLabel(form.kind)}`,
-      `Appointment: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}`,
-      detail.provider_name ? `Clinic: ${detail.provider_name}` : "",
-      detail.doctor_name ? `Doctor: ${detail.doctor_name}` : "",
+      appointmentText("appointments_description_track", {
+        track: billingHandoffKindLabel(form.kind),
+      }),
+      appointmentText("appointments_description_appointment", {
+        patientPid: detail.patient_pid,
+        title: detail.title,
+        slot: slotLabel(detail),
+      }),
+      detail.provider_name
+        ? appointmentText("appointments_description_clinic", {
+            clinic: detail.provider_name,
+          })
+        : "",
+      detail.doctor_name
+        ? appointmentText("appointments_description_doctor", {
+            doctor: detail.doctor_name,
+          })
+        : "",
       form.kind === "interpreter_hours" && detailReport
-        ? `Interpreter hours: ${detailReport.hours}h · ${reportApprovalLabel(detailReport.approval_status)}`
+        ? appointmentText("appointments_description_interpreter_hours", {
+            hours: detailReport.hours,
+            status: reportApprovalLabel(detailReport.approval_status),
+          })
         : "",
       form.kind === "concierge_settlement"
-        ? `Concierge services ready: ${readyServices.length}; billed or settled: ${settledServices.length}`
+        ? appointmentText("appointments_description_concierge_services_detailed", {
+            ready: readyServices.length,
+            settled: settledServices.length,
+          })
         : "",
       form.notes.trim() || "",
     ].filter(Boolean);
@@ -262,20 +284,12 @@ function useAppointmentBillingHandoffSectionContentContent({
     <section className={sectionCardClass}>
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <AppointmentSectionHeading
-          title={appointmentText(
-              "Ubergabe an Abrechnung und Settlement",
-              "Передача в биллинг и расчёты",
-              "Billing and settlement handoff",
-            )}
-          description={appointmentText(
-              "Strukturierte Ubergabe an die Abrechnung, bevor die Dokumentenschicht nachzieht.",
-              "Структурированная передача в биллинг до того, как подключится документный слой.",
-              "Structured transfer to billing before the document layer lands.",
-            )}
+          title={appointmentText("appointments_billing_and_settlement_handoff")}
+          description={appointmentText("appointments_structured_transfer_to_billing_before_the_document_layer")}
         />
         <span className={appointmentMetaPillClassName}>
           {tasks.length + reminders.length}{" "}
-          {appointmentText("verknupft", "связано", "linked")}
+          {appointmentText("appointments_linked")}
         </span>
       </div>
 
@@ -285,71 +299,46 @@ function useAppointmentBillingHandoffSectionContentContent({
           value={
             detail.interpreter_id
               ? interpreterReportReady && detailReport
-                ? appointmentText(
-                    `${detailReport.hours} Std. freigegeben`,
-                    `${detailReport.hours} ч согласовано`,
-                    `${detailReport.hours} h approved`,
-                  )
-                : appointmentText(
-                    "Freigabe ausstehend",
-                    "Ожидает согласования",
-                    "Pending approval",
-                  )
-              : appointmentText("Nicht erforderlich", "Не требуется", "Not required")
+                ? appointmentText("appointments_report_hours_approved", {
+                    hours: detailReport.hours,
+                  })
+                : appointmentText("appointments_pending_approval")
+              : appointmentText("appointments_not_required")
           }
           meta={
             detail.interpreter_id
               ? detailReport
                 ? reportReviewMeta || reportApprovalLabel(detailReport.approval_status)
-                : appointmentText(
-                    "Kein Bericht eingereicht",
-                    "Отчёт не отправлен",
-                    "No report submitted",
-                  )
-              : appointmentText(
-                  "Kein Dolmetscher fur diesen Termin",
-                  "Для этого приёма нет переводчика",
-                  "No interpreter on this appointment",
-                )
+                : appointmentText("appointments_no_report_submitted")
+              : appointmentText("appointments_no_interpreter_on_this_appointment")
           }
         />
         <ContextCard
           label={tr.role_concierge}
           value={
             detail.type === "non_medical"
-              ? appointmentText(
-                  `${readyServices.length} bereit / ${settledServices.length} abgerechnet`,
-                  `${readyServices.length} готово / ${settledServices.length} выставлено`,
-                  `${readyServices.length} ready / ${settledServices.length} billed`,
-                )
-              : appointmentText("Nicht anwendbar", "Не применимо", "Not applicable")
+              ? appointmentText("appointments_billing_services_status_summary", {
+                  ready: readyServices.length,
+                  settled: settledServices.length,
+                })
+              : appointmentText("appointments_not_applicable")
           }
           meta={
             detail.type === "non_medical"
-              ? appointmentText(
-                  `${serviceCount} Leistung(en) verknupft`,
-                  `${serviceCount} услуг(а) связано`,
-                  `${serviceCount} service(s) linked`,
-                )
-              : appointmentText(
-                  "Medizinischer Termin",
-                  "Медицинский приём",
-                  "Medical appointment",
-                )
+              ? appointmentText("appointments_services_linked_count", {
+                  count: serviceCount,
+                })
+              : appointmentText("appointments_medical_appointment")
           }
         />
         <ContextCard
           label={tr.role_billing}
-          value={appointmentText(
-            `${openTasks.length} offene Aufgabe(n)`,
-            `${openTasks.length} открытых задач`,
-            `${openTasks.length} open task(s)`,
-          )}
-          meta={appointmentText(
-            `${reminders.length} Erinnerung(en) verknupft`,
-            `${reminders.length} напоминаний связано`,
-            `${reminders.length} reminder(s) linked`,
-          )}
+          value={appointmentText("appointments_open_tasks_count", {
+            count: openTasks.length,
+          })}
+          meta={appointmentText("appointments_reminders_linked_count", {
+            count: reminders.length,
+          })}
         />
       </div>
 
@@ -367,14 +356,10 @@ function useAppointmentBillingHandoffSectionContentContent({
         <div className={appointmentSoftPanelClassName}>
           <div className="flex items-center justify-between gap-3">
             <AppointmentDotLabel>
-              {appointmentText(
-                "Billing-Erinnerungen",
-                "Напоминания для биллинга",
-                "Billing reminders",
-              )}
+              {appointmentText("appointments_billing_reminders")}
             </AppointmentDotLabel>
             <span className="text-xs text-zinc-500">
-              {reminders.length} {appointmentText("verknupft", "связано", "linked")}
+              {reminders.length} {appointmentText("appointments_linked")}
             </span>
           </div>
           <div className="mt-3 space-y-3">
@@ -402,14 +387,10 @@ function useAppointmentBillingHandoffSectionContentContent({
         <div className={appointmentSoftPanelClassName}>
           <div className="flex items-center justify-between gap-3">
             <AppointmentDotLabel>
-              {appointmentText(
-                "Billing-Aufgaben",
-                "Задачи биллинга",
-                "Billing tasks",
-              )}
+              {appointmentText("appointments_billing_tasks")}
             </AppointmentDotLabel>
             <span className="text-xs text-zinc-500">
-              {tasks.length} {appointmentText("verknupft", "связано", "linked")}
+              {tasks.length} {appointmentText("appointments_linked")}
             </span>
           </div>
           <div className="mt-3 space-y-3">
@@ -433,11 +414,9 @@ function useAppointmentBillingHandoffSectionContentContent({
                   <p className="mt-1 text-xs text-zinc-500">
                     {task.assigned_to_name} · {roleLabel(task.assigned_to_role)}
                     {task.due_date
-                      ? appointmentText(
-                          ` · Fallig ${formatDateTimeLabel(task.due_date)}`,
-                          ` · Срок ${formatDateTimeLabel(task.due_date)}`,
-                          ` · Due ${formatDateTimeLabel(task.due_date)}`,
-                        )
+                      ? appointmentText("appointments_due_date_suffix", {
+                          date: formatDateTimeLabel(task.due_date),
+                        })
                       : ""}
                   </p>
                   {task.description ? (
@@ -492,11 +471,7 @@ function useAppointmentBillingHandoffSectionContentContent({
               required
             >
               <option value="">
-                {appointmentText(
-                  "Billing-Zustandigen auswahlen",
-                  "Выберите ответственного из биллинга",
-                  "Select billing assignee",
-                )}
+                {appointmentText("appointments_select_billing_assignee")}
               </option>
               {billingStaff.map((member) => (
                 <option key={member.id} value={member.id}>
@@ -586,11 +561,7 @@ function useAppointmentBillingHandoffSectionContentContent({
                 disabled={!form.assigneeId}
                 onClick={openBillingChatDraft}
               >
-                {appointmentText(
-                  "Billing-Chatentwurf öffnen",
-                  "Открыть черновик billing-чата",
-                  "Open billing chat draft",
-                )}
+                {appointmentText("appointments_open_billing_chat_draft")}
               </Button>
               <Button
                 type="submit"
@@ -602,11 +573,7 @@ function useAppointmentBillingHandoffSectionContentContent({
                 }
               >
                 {submitBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                {appointmentText(
-                  "Billing-Handoff erstellen",
-                  "Создать billing-handoff",
-                  "Create billing handoff",
-                )}
+                {appointmentText("appointments_create_billing_handoff")}
               </Button>
             </div>
           </div>

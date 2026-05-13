@@ -1996,7 +1996,7 @@ function useStaffInvoicesPageContent() {
                       </div>
                       <div className="flex flex-col justify-between gap-4 border-l border-dashed border-border pl-4">
                         <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                          PDF счёта
+                          {text.previewPdf}
                         </span>
                         <div className="flex flex-col gap-2">
                           <Button

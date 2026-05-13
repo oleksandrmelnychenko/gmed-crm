@@ -1,4 +1,5 @@
 import { toDateTimeLocalInput } from "@/pages/appointments/model/date-time";
+import { appointmentText } from "@/pages/appointments/model/labels";
 import type {
   AppointmentDetail,
   ConciergeServiceDraftState,
@@ -56,9 +57,9 @@ export function buildHandoffStakeholders(
   assignments: PatientAssignment[],
   tr?: Record<string, string>,
 ): HandoffStakeholder[] {
-  const caseBadge = tr?.cases_title ?? "Case assignment";
-  const ownerBadge = tr?.patients_assign_owner ?? "Appointment owner";
-  const interpreterBadge = tr?.role_interpreter ?? "Interpreter";
+  const caseBadge = tr?.cases_title ?? appointmentText("appointments_handoff_case_assignment");
+  const ownerBadge = tr?.patients_assign_owner ?? appointmentText("appointments_handoff_appointment_owner");
+  const interpreterBadge = tr?.role_interpreter ?? appointmentText("appointments_schedule_scope_interpreter");
   const items = new Map<string, HandoffStakeholder>();
   const activeAssignments = assignments.filter(
     (item) => item.user_active && !item.revoked_at,

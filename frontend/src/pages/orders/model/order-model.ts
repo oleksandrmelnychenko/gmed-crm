@@ -23,6 +23,7 @@ import {
   formatUnknownValue,
   getLang,
   t as translateCatalog,
+  uiText,
   type Translations,
 } from "@/lib/i18n";
 
@@ -272,17 +273,17 @@ export function workflowChecklistLabel(
 ) {
   switch (key) {
     case "order_discovery":
-      return labels?.discovery ?? "Discovery";
+      return labels?.discovery ?? uiText("orders_phase_discovery");
     case "order_intake":
-      return labels?.intake ?? "Intake";
+      return labels?.intake ?? uiText("orders_phase_intake");
     case "order_execution":
-      return labels?.execution ?? "Execution";
+      return labels?.execution ?? uiText("orders_phase_execution");
     case "order_closure":
-      return labels?.closure ?? "Closure";
+      return labels?.closure ?? uiText("orders_phase_closure");
     case "order_followup":
-      return labels?.followup ?? "Follow-up";
+      return labels?.followup ?? uiText("orders_phase_followup");
     case "order_custom":
-      return labels?.custom ?? "Custom";
+      return labels?.custom ?? uiText("orders_phase_custom");
     default:
       return unknownValueLabel(key, translations);
   }
@@ -295,11 +296,11 @@ export function recheckMissingFieldLabel(
 ) {
   switch (field) {
     case "primary_contact":
-      return labels?.primary_contact ?? "Primary contact";
+      return labels?.primary_contact ?? uiText("orders_recheck_primary_contact");
     case "country":
-      return labels?.country ?? "Country";
+      return labels?.country ?? uiText("orders_recheck_country");
     case "language":
-      return labels?.language ?? "Preferred language";
+      return labels?.language ?? uiText("orders_recheck_preferred_language");
     default:
       return unknownValueLabel(field, translations);
   }
@@ -313,7 +314,7 @@ export function optString(value: string) {
 export function formatDate(
   value: string | null | undefined,
   locale = "de-DE",
-  emptyLabel = "Nicht festgelegt",
+  emptyLabel = translateCatalog(getLang()).common_not_set,
 ) {
   if (!value) return emptyLabel;
   const date = new Date(`${value}T00:00:00`);

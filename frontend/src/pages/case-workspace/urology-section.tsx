@@ -1,12 +1,11 @@
-import { useLang } from "@/lib/i18n";
+import { t as translateCatalog, useLang } from "@/lib/i18n";
 
 import { type UrologyAssessment, useCaseWorkspace } from "./context";
 import { SpecialtySection } from "./specialty-section";
 
-function tri(lang: string, de: string, ru: string, en: string) {
-  if (lang === "de") return de;
-  if (lang === "ru") return ru;
-  return en;
+function tri(lang: string, key: string) {
+  const catalog = translateCatalog(lang === "de" ? "de" : "ru");
+  return catalog.uiText[key] ?? key;
 }
 
 const BLANK: UrologyAssessment = {
@@ -36,13 +35,8 @@ export function UrologySection() {
 
   return (
     <SpecialtySection<UrologyAssessment>
-      title={tri(lang, "Urologie", "Урология", "Urology")}
-      description={tri(
-        lang,
-        "Urologische Leitsymptome und Vorgeschichte.",
-        "Урологические симптомы и анамнез.",
-        "Urologic signs and history.",
-      )}
+      title={tri(lang, "case_ws_urology")}
+      description={tri(lang, "case_ws_urologic_signs_and_history")}
       blankValue={BLANK}
       rawValue={detail?.urology}
       busy={sectionBusy === "urology"}
@@ -51,44 +45,36 @@ export function UrologySection() {
       save={saveUrology}
       revisionKey={detail?.updated_at ?? detail?.id ?? ""}
       booleanFlags={[
-        { key: "dysuria", labels: { de: "Dysurie", ru: "Дизурия", en: "Dysuria" } },
-        { key: "hematuria", labels: { de: "Hämaturie", ru: "Гематурия", en: "Hematuria" } },
-        { key: "flank_pain", labels: { de: "Flankenschmerz", ru: "Боль в пояснице", en: "Flank pain" } },
+        { key: "dysuria", label: tri(lang, "case_ws_dysuria") },
+        { key: "hematuria", label: tri(lang, "case_ws_hematuria") },
+        { key: "flank_pain", label: tri(lang, "case_ws_flank_pain") },
         {
           key: "urinary_frequency",
-          labels: { de: "Pollakisurie", ru: "Учащённое мочеиспускание", en: "Urinary frequency" },
+          label: tri(lang, "case_ws_urinary_frequency"),
         },
         {
           key: "urinary_retention",
-          labels: { de: "Harnverhalt", ru: "Задержка мочи", en: "Urinary retention" },
+          label: tri(lang, "case_ws_urinary_retention"),
         },
-        { key: "incontinence", labels: { de: "Inkontinenz", ru: "Недержание", en: "Incontinence" } },
+        { key: "incontinence", label: tri(lang, "case_ws_incontinence") },
       ]}
       textFields={[
         {
           key: "prior_urology_workup",
-          labels: {
-            de: "Vorherige urologische Diagnostik",
-            ru: "Предыдущее урологическое обследование",
-            en: "Prior urology workup",
-          },
+          label: tri(lang, "case_ws_prior_urology_workup"),
         },
         {
           key: "catheter_history",
-          labels: {
-            de: "Katheter-/Interventionshistorie",
-            ru: "История катетеров и вмешательств",
-            en: "Catheter / intervention history",
-          },
+          label: tri(lang, "case_ws_catheter_intervention_history"),
         },
         {
           key: "stone_history",
-          labels: { de: "Steinleiden", ru: "Мочекаменная болезнь", en: "Stone disease history" },
+          label: tri(lang, "case_ws_stone_disease_history"),
         },
-        { key: "red_flags", labels: { de: "Warnzeichen", ru: "Красные флаги", en: "Red flags" } },
+        { key: "red_flags", label: tri(lang, "case_ws_red_flags_5") },
         {
           key: "notes",
-          labels: { de: "Urologische Notizen", ru: "Урологические заметки", en: "Urology notes" },
+          label: tri(lang, "case_ws_urology_notes"),
           rows: 4,
         },
       ]}

@@ -24,7 +24,7 @@ const LazyPatientAppointmentSheet = lazy(async () => {
 
 type PatientAppointmentsDictionary = {
   appointments_new: string;
-  appointments_title?: string;
+  appointments_title: string;
 };
 
 type PatientAppointmentsTabProps = {
@@ -77,7 +77,7 @@ export function PatientAppointmentsTab({
   return (
     <TabsContent value="appointments" className="space-y-4 mt-4 min-h-[400px]">
       <FormSection
-        title={t.appointments_title ?? "Appointments"}
+        title={t.appointments_title}
         accessory={
           <div className="flex flex-wrap items-center gap-2">
             <CountBadge>{appointments.length}</CountBadge>

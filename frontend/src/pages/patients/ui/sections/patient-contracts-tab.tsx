@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 import type { ContractItem } from "../../model/detail-tab-types";
 import { WorkspaceSectionIntro } from "../shared/workspace-primitives";
 
-type LocalizeFn = (de: string, ru: string, en: string) => string;
+type LocalizeFn = (key: string) => string;
 type StatusLabelFn = (status: string) => string;
 type DateFormatter = (value?: string | null, fallback?: string) => string;
 type DateTimeFormatter = (value?: string | null, fallback?: string) => string;
@@ -99,53 +99,37 @@ export function PatientContractsTab({
   return (
     <TabsContent value="contracts" className="space-y-4 mt-4 min-h-[400px]">
       <WorkspaceSectionIntro
-        title={l("Vertrags-Cockpit", "Панель договоров", "Contracts cockpit")}
-        description={l(
-          "Lifecycle, Gültigkeit und unmittelbare Pflege von Verträgen, ohne das Patientenprofil zu verlassen.",
-          "Жизненный цикл, сроки действия и быстрое управление договорами без выхода из профиля пациента.",
-          "Lifecycle, validity and direct contract management without leaving the patient profile.",
-        )}
+        title={l("patients_contracts_cockpit")}
+        description={l("patients_lifecycle_validity_and_direct_contract_management_withou")}
         accessory={<CountBadge>{contracts.length}</CountBadge>}
       />
 
       <FormSection
-        title={l("Portfolio-Überblick", "Обзор портфеля", "Portfolio overview")}
-        accessory={<CountBadge>{contracts.length} {l("Verträge", "договоров", "contracts")}</CountBadge>}
+        title={l("patients_portfolio_overview")}
+        accessory={<CountBadge>{contracts.length} {l("patients_contracts")}</CountBadge>}
       >
         <div className="grid overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 md:grid-cols-3">
           <ContractOverviewTile
-            label={l("Aktiv oder unterzeichnet", "Активные или подписанные", "Active or signed")}
+            label={l("patients_active_or_signed")}
             value={contractSignedCount}
-            description={l(
-              "Wirksame oder signierte Verträge.",
-              "Подписанные и активные договоры.",
-              "Effective or signed contracts.",
-            )}
+            description={l("patients_effective_or_signed_contracts")}
           />
           <ContractOverviewTile
-            label={l("In Vorbereitung", "В подготовке", "In preparation")}
+            label={l("patients_in_preparation")}
             value={contractPendingCount}
-            description={l(
-              "Entwürfe und versandte Verträge.",
-              "Черновики и отправленные договоры.",
-              "Draft and sent contracts.",
-            )}
+            description={l("patients_draft_and_sent_contracts")}
           />
           <ContractOverviewTile
-            label={l("Laufen bald ab", "Скоро истекают", "Expiring soon")}
+            label={l("patients_expiring_soon")}
             value={contractExpiringSoonCount}
-            description={l(
-              "Enddatum in den nächsten 30 Tagen.",
-              "Истекают в ближайшие 30 дней.",
-              "Ending in the next 30 days.",
-            )}
+            description={l("patients_ending_in_the_next_30_days")}
             groupedLast
           />
         </div>
       </FormSection>
 
       <FormSection
-        title={l("Verträge dieses Patienten", "Договоры этого пациента", "Contracts for this patient")}
+        title={l("patients_contracts_for_this_patient")}
         accessory={
           <div className="flex flex-wrap items-center gap-2">
             <CountBadge>{contracts.length}</CountBadge>
@@ -156,7 +140,7 @@ export function PatientContractsTab({
                 className="h-8 rounded-lg gap-1.5"
                 onClick={onCreateContract}
               >
-                {l("Neuer Vertrag", "Новый договор", "New contract")}
+                {l("patients_new_contract")}
               </Button>
             ) : null}
           </div>
@@ -166,7 +150,7 @@ export function PatientContractsTab({
           <TabLoader />
         ) : contracts.length === 0 ? (
           <EmptyCell>
-            {l("Für diesen Patienten wurde noch kein Vertrag angelegt.", "Для этого пациента пока не создано ни одного договора.", "No contract has been created for this patient yet.")}
+            {l("patients_no_contract_has_been_created_for_this_patient_yet")}
           </EmptyCell>
         ) : (
           <div className="space-y-3">
@@ -198,9 +182,9 @@ export function PatientContractsTab({
                       </h3>
                       <p className="mt-2 text-xs leading-5 text-muted-foreground">
                         {[
-                          `${l("Unterzeichnet", "Подписано", "Signed")}: ${formatDateTime(contract.signed_at, commonNotSet)}`,
-                          `${l("Gültig ab", "Действует с", "Valid from")}: ${formatDate(contract.valid_from, commonNotSet)}`,
-                          `${l("Gültig bis", "Действует до", "Valid to")}: ${formatDate(contract.valid_to, commonNotSet)}`,
+                          `${l("patients_signed")}: ${formatDateTime(contract.signed_at, commonNotSet)}`,
+                          `${l("patients_valid_from")}: ${formatDate(contract.valid_from, commonNotSet)}`,
+                          `${l("patients_valid_to")}: ${formatDate(contract.valid_to, commonNotSet)}`,
                         ].join(" - ")}
                       </p>
                       {contract.valid_to ? (
@@ -215,15 +199,15 @@ export function PatientContractsTab({
                             )}
                           >
                             {isContractExpiringSoon(contract)
-                              ? l("Läuft bald ab", "Скоро истекает", "Expiring soon")
-                              : l("Gültigkeit gesetzt", "Срок задан", "Validity set")}
+                              ? l("patients_expiring_soon_2")
+                              : l("patients_validity_set")}
                           </Badge>
                         </div>
                       ) : null}
                     </div>
                     <div className="flex flex-col justify-between gap-4 border-l border-dashed border-border pl-4">
                       <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                        {l("Vertrag", "Договор", "Contract")}
+                        {l("patients_contract")}
                       </span>
                       <div className="flex flex-col gap-2">
                         <Button
@@ -233,7 +217,7 @@ export function PatientContractsTab({
                           className="justify-center rounded-lg"
                           onClick={() => onOpenContract(contract.id)}
                         >
-                          {l("Öffnen", "Открыть", "Open")}
+                          {l("patients_open")}
                         </Button>
                         {canManageContracts ? (
                           <Button
@@ -243,7 +227,7 @@ export function PatientContractsTab({
                             className="justify-center rounded-lg"
                             onClick={() => onEditContractStatus(contract)}
                           >
-                            {l("Status aktualisieren", "Обновить статус", "Update status")}
+                            {l("patients_update_status")}
                           </Button>
                         ) : null}
                       </div>
