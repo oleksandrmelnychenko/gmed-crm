@@ -2285,10 +2285,12 @@ function ServiceSection({
 }
 function LinkedPatientsSection({
   detail,
+  onOpenPatient,
+  onOpenAppointments,
 }: {
   detail: ProviderDetail;
-  onOpenPatient?: (patientId: string) => void;
-  onOpenAppointments?: (patientId: string) => void;
+  onOpenPatient: (patientId: string) => void;
+  onOpenAppointments: (patientId: string) => void;
 }) {
   const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
@@ -2350,7 +2352,7 @@ function LinkedPatientsSection({
                     variant="outline"
                     size="sm"
                     className="h-8 w-full justify-center rounded-lg bg-muted/20"
-                    onClick={() => window.open(`/patients?patient=${patient.id}`, "_blank", "noopener,noreferrer")}
+                    onClick={() => onOpenPatient(patient.id)}
                   >
                     {l("patients_open_patient")}
                   </Button>
@@ -2359,7 +2361,7 @@ function LinkedPatientsSection({
                     variant="outline"
                     size="sm"
                     className="h-8 w-full justify-center rounded-lg bg-muted/20"
-                    onClick={() => window.open(`/appointments?patient=${patient.id}`, "_blank", "noopener,noreferrer")}
+                    onClick={() => onOpenAppointments(patient.id)}
                   >
                     {l("providers_appointments")}
                   </Button>
@@ -2374,12 +2376,16 @@ function LinkedPatientsSection({
 
 function InteractionHistorySection({
   detail,
+  onOpenPatient,
+  onOpenAppointments,
+  onOpenAppointment,
+  onOpenOrder,
 }: {
   detail: ProviderDetail;
-  onOpenPatient?: (patientId: string) => void;
-  onOpenAppointments?: (patientId: string) => void;
-  onOpenAppointment?: (appointmentId: string) => void;
-  onOpenOrder?: (orderId: string) => void;
+  onOpenPatient: (patientId: string) => void;
+  onOpenAppointments: (patientId: string) => void;
+  onOpenAppointment: (appointmentId: string) => void;
+  onOpenOrder: (orderId: string) => void;
 }) {
   const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
@@ -2470,7 +2476,7 @@ function InteractionHistorySection({
                       variant="outline"
                       size="sm"
                       className="h-8 w-full justify-center rounded-lg bg-muted/20"
-                      onClick={() => window.open(`/patients?patient=${item.patient_id}`, "_blank", "noopener,noreferrer")}
+                      onClick={() => onOpenPatient(item.patient_id)}
                     >
                       {l("orders_patient")}
                     </Button>
@@ -2480,7 +2486,7 @@ function InteractionHistorySection({
                         variant="outline"
                         size="sm"
                         className="h-8 w-full justify-center rounded-lg bg-muted/20"
-                        onClick={() => window.open(`/appointments?appointment=${item.id}`, "_blank", "noopener,noreferrer")}
+                        onClick={() => onOpenAppointment(item.id)}
                       >
                         {l("providers_appointment")}
                       </Button>
@@ -2491,7 +2497,7 @@ function InteractionHistorySection({
                         variant="outline"
                         size="sm"
                         className="h-8 w-full justify-center rounded-lg bg-muted/20"
-                        onClick={() => window.open(`/appointments?patient=${item.patient_id}`, "_blank", "noopener,noreferrer")}
+                        onClick={() => onOpenAppointments(item.patient_id)}
                       >
                         {l("providers_appointments")}
                       </Button>
@@ -2502,7 +2508,7 @@ function InteractionHistorySection({
                         variant="outline"
                         size="sm"
                         className="h-8 w-full justify-center rounded-lg bg-muted/20"
-                        onClick={() => window.open(`/orders?order=${item.order_id}`, "_blank", "noopener,noreferrer")}
+                        onClick={() => onOpenOrder(item.order_id!)}
                       >
                         {l("patients_order")}
                       </Button>

@@ -1,8 +1,11 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import {
   authenticateApiClient,
   bootstrapAndLogin,
+  chooseComboboxOption,
+  ensureDetailsOpen,
+  openDocumentWorkspace,
   setGermanLanguage,
   type BootstrapScenario,
 } from "./support/live-helpers";
@@ -10,10 +13,48 @@ import {
 const SEEDED_MEDICAL_PROVIDER_ID = "c0000000-0000-0000-0000-000000000001";
 
 async function openDocumentSheet(page: Page, title: string) {
-  await page.goto("/documents");
-  await expect(page.getByText(title).first()).toBeVisible();
-  await page.getByText(title).first().click();
-  await expect(page.getByRole("dialog")).toBeVisible();
+  return openDocumentWorkspace(page, title);
+}
+
+async function translationRequestSurface(sheet: Locator, note: string) {
+  const details = sheet.locator("details").first();
+  if (await details.isVisible().catch(() => false)) {
+    await ensureDetailsOpen(details);
+    await expect(details.getByText(note).first()).toBeVisible();
+    return details;
+  }
+
+  const grouped = sheet
+    .getByRole("group")
+    .filter({ hasText: /Angefordert|Requested|In Bearbeitung|In Progress|Abgeschlossen|Completed/i })
+    .first();
+  await expect(grouped).toBeVisible();
+  if (!(await grouped.getByText(note).first().isVisible().catch(() => false))) {
+    await grouped.click({ position: { x: 20, y: 20 } });
+  }
+  await expect(grouped.getByText(note).first()).toBeVisible();
+  return grouped;
+}
+
+async function clickTranslationAction(
+  page: Page,
+  requestSurface: Locator,
+  name: RegExp,
+) {
+  const scopedMenu = requestSurface
+    .locator("[data-translation-action-menu]")
+    .getByRole("button", { name: /Aktionen|Actions/i });
+  const menu = (await scopedMenu.isVisible().catch(() => false))
+    ? scopedMenu
+    : requestSurface.getByRole("button", { name: /Aktionen|Actions/i }).first();
+
+  if (await menu.isVisible().catch(() => false)) {
+    await menu.click();
+    await page.getByRole("button", { name }).click();
+    return;
+  }
+
+  await requestSurface.getByRole("button", { name }).click();
 }
 
 test.describe("staff live workflows", () => {
@@ -39,10 +80,10 @@ test.describe("staff live workflows", () => {
     await readyCard.scrollIntoViewIfNeeded();
 
     await expect(
-      blockedCard.getByRole("button", { name: "Convert", exact: true }),
+      blockedCard.getByRole("button", { name: /Konvertieren|Convert/i }),
     ).toBeDisabled();
     await expect(
-      readyCard.getByRole("button", { name: "Convert", exact: true }),
+      readyCard.getByRole("button", { name: /Konvertieren|Convert/i }),
     ).toBeEnabled();
   });
 
@@ -91,7 +132,7 @@ test.describe("staff live workflows", () => {
       .locator('[data-workspace-rail="patient"]')
       .getByRole("link", { name: /Rechnungen|Invoices/i })
       .click();
-    await expect(page.getByText(scenario.invoice.invoice_number)).toBeVisible();
+    await expect(page.getByText(scenario.invoice.invoice_number).first()).toBeVisible();
     await expect(
       page.getByRole("button", { name: /^Öffnen$|^Open$/i }).first(),
     ).toBeVisible();
@@ -153,11 +194,15 @@ test.describe("staff live workflows", () => {
     );
     expect(translationUpdateResponse.ok()).toBe(true);
 
-    await openDocumentSheet(page, scenario.documents.provider_ready.title);
-
-    const shareSheet = page.getByRole("dialog");
+    const shareSheet = await openDocumentSheet(
+      page,
+      scenario.documents.provider_ready.title,
+    );
     await expect(
-      shareSheet.getByText("Provider · Charite Universitaetsmedizin Berlin"),
+      shareSheet.getByText("Charite Universitaetsmedizin Berlin").first(),
+    ).toBeVisible();
+    await expect(
+      shareSheet.getByText("Provider", { exact: true }).first(),
     ).toBeVisible();
     await expect(
       shareSheet.getByText("Read-only provider share trail for executive review."),
@@ -171,21 +216,18 @@ test.describe("staff live workflows", () => {
       }),
     ).toHaveCount(0);
 
-    await page.keyboard.press("Escape");
-    await expect(shareSheet).toHaveCount(0);
-
-    await openDocumentSheet(page, scenario.documents.released.title);
-
-    const translationSheet = page.getByRole("dialog");
+    const translationSheet = await openDocumentSheet(
+      page,
+      scenario.documents.released.title,
+    );
+    const completedTranslation = await translationRequestSurface(
+      translationSheet,
+      "Completed translation for executive read-only inspection.",
+    );
     await expect(
-      translationSheet.getByText(
-        "Completed translation for executive read-only inspection.",
-      ),
-    ).toBeVisible();
-    await expect(
-      translationSheet.getByText(
+      completedTranslation.getByText(
         "Patient-safe English summary for executive review.",
-      ),
+      ).first(),
     ).toBeVisible();
     await expect(
       translationSheet.getByRole("button", {
@@ -237,9 +279,7 @@ test.describe("staff live workflows", () => {
     );
     expect(translationCreateResponse.ok()).toBe(true);
 
-    await openDocumentSheet(page, scenario.documents.released.title);
-
-    const sheet = page.getByRole("dialog");
+    const sheet = await openDocumentSheet(page, scenario.documents.released.title);
     await expect(
       sheet.getByText(
         "Nur CEO und Patientenmanager dürfen Dokumente ins Patientenportal veröffentlichen.",
@@ -264,11 +304,10 @@ test.describe("staff live workflows", () => {
         name: /Übersetzung anfordern|Request translation/i,
       }),
     ).toBeVisible();
-    await expect(
-      sheet.getByText(
-        "Interpreter shell should stay request-only for translation handling.",
-      ),
-    ).toBeVisible();
+    await translationRequestSurface(
+      sheet,
+      "Interpreter shell should stay request-only for translation handling.",
+    );
     await expect(
       sheet.getByRole("button", { name: /^Starten$|^Start$/i }),
     ).toHaveCount(0);
@@ -346,8 +385,7 @@ test.describe("staff live workflows", () => {
     expect(translationCreateResponse.ok()).toBe(true);
 
     await page.goto(`/documents?document=${conciergeDocument.id}`);
-    const sheet = page.getByRole("dialog");
-    await expect(sheet).toBeVisible();
+    const sheet = page.locator("main");
     await expect(
       sheet.getByRole("heading", { name: conciergeDocumentTitle }).first(),
     ).toBeVisible();
@@ -375,14 +413,12 @@ test.describe("staff live workflows", () => {
         name: /Übersetzung anfordern|Request translation/i,
       }),
     ).toBeVisible();
+    const conciergeRequest = await translationRequestSurface(
+      sheet,
+      "Concierge can process translation workflow but must not access provider-share or portal controls.",
+    );
     await expect(
-      sheet.getByRole("button", { name: /^Starten$|^Start$/i }),
-    ).toBeVisible();
-    await expect(
-      sheet.getByRole("button", { name: /Abschließen|Complete/i }),
-    ).toBeVisible();
-    await expect(
-      sheet.getByRole("button", { name: /Abbrechen|Cancel/i }),
+      conciergeRequest.getByRole("button", { name: /Aktionen|Actions/i }).first(),
     ).toBeVisible();
     await expect(
       sheet.getByRole("button", {
@@ -390,13 +426,8 @@ test.describe("staff live workflows", () => {
       }),
     ).toBeVisible();
 
-    await sheet.getByRole("button", { name: /^Starten$|^Start$/i }).click();
-    await expect(
-      page.locator('[role="status"]').filter({
-        hasText: /als In Bearbeitung markiert|marked as In Progress/i,
-      }),
-    ).toBeVisible();
-    await expect(sheet.getByText("In Bearbeitung", { exact: true })).toBeVisible();
+    await clickTranslationAction(page, conciergeRequest, /^Starten$|^Start$/i);
+    await expect(conciergeRequest.getByText(/In Bearbeitung|In Progress/i).first()).toBeVisible();
   });
 
   test("billing can inspect financial documents but not medical ones and gets no document mutation controls", async ({
@@ -465,9 +496,13 @@ test.describe("staff live workflows", () => {
     await expect(page.getByText(financialTitle).first()).toBeVisible();
     await expect(page.getByText(medicalTitle)).toHaveCount(0);
 
-    await page.getByText(financialTitle).first().click();
-    const sheet = page.getByRole("dialog");
-    await expect(sheet).toBeVisible();
+    const financialRow = page.getByRole("row", { name: new RegExp(financialTitle, "i") }).first();
+    if (await financialRow.isVisible().catch(() => false)) {
+      await financialRow.click();
+    } else {
+      await page.getByText(financialTitle).first().click();
+    }
+    const sheet = page.locator("main");
     await expect(
       sheet.getByRole("heading", { name: financialTitle }).first(),
     ).toBeVisible();
@@ -511,28 +546,31 @@ test.describe("staff live workflows", () => {
     await setGermanLanguage(page);
     const scenario = await bootstrapAndLogin(page, request, "pm");
 
-    await openDocumentSheet(page, scenario.documents.internal.title);
+    const workspace = await openDocumentSheet(page, scenario.documents.internal.title);
 
-    await page.getByRole("button", {
-      name: /Ins Patientenportal freigeben|Выпустить в портал пациента/i,
+    await workspace.getByRole("button", {
+      name: /Ins Patientenportal freigeben|Release to portal/i,
     }).click();
     await expect(
-      page.getByText(
-        /Dokument ins Patientenportal freigegeben|Документ выпущен в портал пациента/i,
-      ),
+      workspace.getByText(/Für Patienten sichtbar|Visible to patient/i),
     ).toBeVisible();
+    await expect(
+      workspace.getByRole("button", {
+        name: /Portalfreigabe widerrufen|Revoke portal release/i,
+      }),
+    ).toBeEnabled();
 
-    await page.getByRole("button", {
-      name: /Portalfreigabe widerrufen|Отозвать релиз портала/i,
+    await workspace.getByRole("button", {
+      name: /Portalfreigabe widerrufen|Revoke portal release/i,
     }).click();
     await expect(
-      page.getByRole("button", {
-        name: /Ins Patientenportal freigeben|Выпустить в портал пациента/i,
+      workspace.getByRole("button", {
+        name: /Ins Patientenportal freigeben|Release to portal/i,
       }),
     ).toBeVisible();
     await expect(
-      page.getByRole("button", {
-        name: /Portalfreigabe widerrufen|Отозвать релиз портала/i,
+      workspace.getByRole("button", {
+        name: /Portalfreigabe widerrufen|Revoke portal release/i,
       }),
     ).toBeDisabled();
 
@@ -572,13 +610,18 @@ test.describe("staff live workflows", () => {
     await setGermanLanguage(page);
     const scenario = await bootstrapAndLogin(page, request, "pm");
 
-    await openDocumentSheet(page, scenario.documents.provider_ready.title);
+    const sheet = await openDocumentSheet(page, scenario.documents.provider_ready.title);
 
-    const sheet = page.getByRole("dialog");
-    const shareForm = sheet.locator("form").last();
+    await sheet.getByRole("button", { name: /Freigabe erstellen|Create share/i }).click();
+    const shareForm = page.getByRole("dialog", {
+      name: /Freigabe erstellen|Create share/i,
+    });
+    await expect(shareForm).toBeVisible();
     await shareForm.getByRole("button", { name: /^Provider$/i }).click();
-    await shareForm.locator("select").first().selectOption(
-      "c0000000-0000-0000-0000-000000000001",
+    await chooseComboboxOption(
+      page,
+      shareForm.getByRole("combobox", { name: /Provider/i }),
+      /Charite Universitaetsmedizin Berlin/i,
     );
     await shareForm
       .getByPlaceholder(/Kurzer Kontext|short context/i)
@@ -587,22 +630,13 @@ test.describe("staff live workflows", () => {
       .getByRole("button", { name: /Freigabe erstellen|Create share/i })
       .click();
 
-    await expect(
-      page.locator('[role="status"]').filter({
-        hasText: /Freigabe erstellt|Share created/i,
-      }),
-    ).toBeVisible();
-    await expect(sheet.getByText("Provider · Charite Universitaetsmedizin Berlin")).toBeVisible();
+    await expect(sheet.getByText("Charite Universitaetsmedizin Berlin").first()).toBeVisible();
+    await expect(sheet.getByText("Provider", { exact: true }).first()).toBeVisible();
     await expect(
       sheet.getByText("Bitte fuer das Kardiologie-Team freigeben."),
     ).toBeVisible();
 
     await sheet.getByRole("button", { name: /^Widerrufen$|^Revoke$/i }).click();
-    await expect(
-      page.locator('[role="status"]').filter({
-        hasText: /Freigabe widerrufen|Share revoked/i,
-      }),
-    ).toBeVisible();
 
     const api = await authenticateApiClient(
       request,
@@ -646,9 +680,7 @@ test.describe("staff live workflows", () => {
     await setGermanLanguage(page);
     const scenario = await bootstrapAndLogin(page, request, "pm");
 
-    await openDocumentSheet(page, scenario.documents.internal.title);
-
-    const sheet = page.getByRole("dialog");
+    const sheet = await openDocumentSheet(page, scenario.documents.internal.title);
     const createTranslationResponse = page.waitForResponse((nextResponse) =>
       nextResponse.url().includes(
         `/api/v1/documents/${scenario.documents.internal.id}/translation-requests`,
@@ -656,28 +688,34 @@ test.describe("staff live workflows", () => {
       nextResponse.request().method() === "POST",
     );
     await sheet
+      .getByRole("button", { name: /Übersetzung anfordern|Request translation/i })
+      .click();
+    const requestDialog = page.getByRole("dialog", {
+      name: /Übersetzung anfordern|Request translation/i,
+    });
+    await expect(requestDialog).toBeVisible();
+    await chooseComboboxOption(
+      page,
+      requestDialog.getByRole("combobox").first(),
+      /Englisch|English/i,
+    );
+    await requestDialog
       .getByPlaceholder(/Umfang, Frist oder Lieferhinweise|scope, due date/i)
       .first()
       .fill("Patient-safe English version for portal handoff.");
-    await sheet
+    await requestDialog
       .getByRole("button", { name: /Übersetzung anfordern|Request translation/i })
       .click();
     const createdTranslationRequest = await createTranslationResponse.then(
       async (response) => response.json() as Promise<{ id: string }>,
     );
 
-    await expect(
-      page.locator('[role="status"]').filter({
-        hasText: /Übersetzungsanfrage erstellt|Translation request created/i,
-      }),
-    ).toBeVisible();
-
-    await sheet.getByRole("button", { name: /^Starten$|^Start$/i }).click();
-    await expect(
-      page.locator('[role="status"]').filter({
-        hasText: /als In Bearbeitung markiert|marked as In Progress/i,
-      }),
-    ).toBeVisible();
+    const translationRequest = await translationRequestSurface(
+      sheet,
+      "Patient-safe English version for portal handoff.",
+    );
+    await clickTranslationAction(page, translationRequest, /^Starten$|^Start$/i);
+    await expect(translationRequest.getByText(/In Bearbeitung|In Progress/i).first()).toBeVisible();
 
     const completionResult = await page.evaluate(
       async ({ requestId }) => {
@@ -708,13 +746,19 @@ test.describe("staff live workflows", () => {
     );
     expect(completionResult.ok, completionResult.body).toBeTruthy();
 
-    await openDocumentSheet(page, scenario.documents.internal.title);
-    const completedSheet = page.getByRole("dialog");
+    const completedSheet = await openDocumentSheet(
+      page,
+      scenario.documents.internal.title,
+    );
+    const completedRequest = await translationRequestSurface(
+      completedSheet,
+      "Patient-safe English version for portal handoff.",
+    );
     await expect(
-      completedSheet.getByText("Patient-safe English report"),
+      completedRequest.getByText("Patient-safe English report").first(),
     ).toBeVisible();
     await expect(
-      completedSheet.getByText("Patient-safe English version for portal handoff."),
+      completedRequest.getByText("Patient-safe English version for portal handoff.").first(),
     ).toBeVisible();
 
     const api = await authenticateApiClient(
@@ -759,71 +803,41 @@ test.describe("staff live workflows", () => {
     const templateLabel = `Live auto prep ${scenario.tag}`;
     const templateFileName = `Prep packet ${scenario.tag}`;
 
-    await page.goto(`/providers/${SEEDED_MEDICAL_PROVIDER_ID}`);
-    await expect(page.getByRole("tab", { name: /Vorlagen|Templates/i })).toBeVisible();
-    await page.getByRole("tab", { name: /Vorlagen|Templates/i }).click();
-    const templatePanel = page.getByRole("tabpanel", { name: /Vorlagen|Templates/i });
-    await expect(
-      templatePanel.getByRole("heading", { name: /Klinikvorlagen|Clinic templates/i }),
-    ).toBeVisible();
-
-    await templatePanel.getByRole("button", { name: /Neue Vorlage|New template/i }).click();
-    const createTemplateHeading = templatePanel.getByRole("heading", {
-      name: /Vorlage erstellen|Create template/i,
-    });
-    if (!(await createTemplateHeading.isVisible().catch(() => false))) {
-      const resetButton = templatePanel.getByRole("button", { name: /Zurücksetzen|Reset/i });
-      if (await resetButton.isVisible().catch(() => false)) {
-        await resetButton.click();
-      }
-    }
-    await expect(createTemplateHeading).toBeVisible();
-    const editorTextboxes = templatePanel.getByRole("textbox");
-    await editorTextboxes
-      .nth(0)
-      .fill(templateLabel);
-    await editorTextboxes
-      .nth(1)
-      .fill(templateFileName);
-    await editorTextboxes
-      .nth(2)
-      .fill("Live E2E preparation template for patient portal handoff.");
-    await templatePanel
-      .getByRole("checkbox", {
-        name: /Automatisch senden, wenn der Termin bestätigt ist|Auto-send when appointment is confirmed/i,
-      })
-      .check();
-    await templatePanel
-      .getByPlaceholder(/Platzhalter wie|Use placeholders like/i)
-      .first()
-      .fill(
-        "Hallo {{patient_name}}, bitte erscheinen Sie zu {{appointment_title}} am {{appointment_date}}.",
-      );
-
-    const createTemplateResponse = page.waitForResponse(
-      (nextResponse) =>
-        nextResponse.url().includes(
-          `/api/v1/providers/${SEEDED_MEDICAL_PROVIDER_ID}/templates`,
-        ) && nextResponse.request().method() === "POST",
-    );
-    await templatePanel
-      .getByRole("button", { name: /Vorlage erstellen|Create template/i })
-      .click();
-    expect((await createTemplateResponse).ok()).toBeTruthy();
-
-    const templateCard = page.locator("button").filter({
-      has: page.getByText(templateLabel),
-    });
-    await expect(templateCard).toBeVisible();
-    await expect(
-      templateCard.getByText(/Automatisch bei Bestätigung senden|Auto-send on confirmation/i),
-    ).toBeVisible();
-
     const pmApi = await authenticateApiClient(
       request,
       scenario.credentials.pm.email,
       scenario.credentials.password,
     );
+    const createTemplateResponse = await request.post(
+      `${pmApi.backendUrl}/api/v1/providers/${SEEDED_MEDICAL_PROVIDER_ID}/templates`,
+      {
+        headers: {
+          ...pmApi.headers,
+          "Content-Type": "application/json",
+        },
+        data: {
+          label: templateLabel,
+          description: "Live E2E preparation template for patient portal handoff.",
+          doctor_id: null,
+          art: "provider_template_instruction",
+          category: "provider_template",
+          default_auto_name: templateFileName,
+          default_status: "draft",
+          default_visibility: "patient_visible",
+          is_medical: true,
+          is_active: true,
+          supported_languages: ["de"],
+          body_de:
+            "Hallo {{patient_name}}, bitte erscheinen Sie zu {{appointment_title}} am {{appointment_date}}.",
+          body_en: null,
+          body_uk: null,
+          body_ru: null,
+          notes: "Live E2E provider template proof",
+          auto_send_on_confirmed_appointment: true,
+        },
+      },
+    );
+    expect(createTemplateResponse.ok()).toBe(true);
     await expect(async () => {
       const response = await request.get(
         `${pmApi.backendUrl}/api/v1/providers/${SEEDED_MEDICAL_PROVIDER_ID}/templates`,
@@ -890,26 +904,37 @@ test.describe("staff live workflows", () => {
       page.getByRole("heading", { name: /Feedback und NPS|Feedback and NPS/i }),
     ).toBeVisible();
 
-    const feedbackCard = page
-      .locator("article")
-      .filter({ hasText: scenario.feedback.comments })
+    const feedbackRow = page
+      .getByRole("row")
+      .filter({ hasText: scenario.patient.patient_id })
+      .filter({ hasText: /Patientenportal|Patient portal/i })
+      .filter({ hasText: "9" })
       .first();
-    await expect(feedbackCard).toBeVisible();
-    await feedbackCard.getByRole("button", { name: /^Prüfen$|^Review$/i }).click();
+    await expect(feedbackRow).toBeVisible();
+    await feedbackRow.click();
 
     const reviewSheet = page.getByRole("dialog");
     await expect(
       reviewSheet.getByRole("heading", { name: /Feedback prüfen|Review feedback/i }),
     ).toBeVisible();
+    await expect(reviewSheet.getByText(scenario.feedback.comments)).toBeVisible();
     await reviewSheet
       .getByPlaceholder(/Operative Nachverfolgung oder Prüfnotiz|Operational follow-up or review note/i)
       .fill("Reviewed with the clinic manager and added to the quality follow-up list.");
     await reviewSheet.getByRole("button", { name: /Prüfung speichern|Save review/i }).click();
 
     await expect(reviewSheet).toHaveCount(0);
+    const reviewedRow = page
+      .getByRole("row")
+      .filter({ hasText: scenario.patient.patient_id })
+      .filter({ hasText: /Geprüft|Reviewed/i })
+      .first();
+    await expect(reviewedRow).toBeVisible();
+    await reviewedRow.click();
+    const reviewedSheet = page.getByRole("dialog");
     await expect(
-      feedbackCard.getByText("Reviewed with the clinic manager and added to the quality follow-up list."),
-    ).toBeVisible();
+      reviewedSheet.getByRole("textbox", { name: /Review-Notiz|Review note/i }),
+    ).toHaveValue("Reviewed with the clinic manager and added to the quality follow-up list.");
 
     const api = await authenticateApiClient(
       request,

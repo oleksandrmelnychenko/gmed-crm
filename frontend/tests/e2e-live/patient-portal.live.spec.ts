@@ -1,8 +1,9 @@
-import { expect, test, type Locator } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import {
   authenticateApiClient,
   bootstrapAndLogin,
+  chooseComboboxOption,
   ensureLiveBackendHealthy,
   setGermanLanguage,
 } from "./support/live-helpers";
@@ -14,7 +15,7 @@ const MINIMAL_PDF = Buffer.from(
 const SEEDED_MEDICAL_PROVIDER_ID = "c0000000-0000-0000-0000-000000000001";
 
 async function submitPortalFeedback(
-  page: import("@playwright/test").Page,
+  page: Page,
   comment: string,
   improvement: string,
 ) {
@@ -23,6 +24,25 @@ async function submitPortalFeedback(
     .getByPlaceholder(/Was sollte das Team verbessern\?|What should the team improve\?/i)
     .fill(improvement);
   await page.getByRole("button", { name: /Feedback senden|Submit feedback/i }).click();
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+async function openInvoiceDetail(page: Page, invoiceNumber: string) {
+  await page.goto("/invoices");
+  await expect(page.getByText(invoiceNumber).first()).toBeVisible();
+
+  const invoicePattern = new RegExp(escapeRegExp(invoiceNumber), "i");
+  const invoiceButton = page.getByRole("button", { name: invoicePattern }).first();
+  if (await invoiceButton.isVisible().catch(() => false)) {
+    await invoiceButton.click();
+  } else {
+    await page.locator("article").filter({ hasText: invoiceNumber }).first().click();
+  }
+
+  await expect(page.getByRole("heading", { name: invoiceNumber })).toBeVisible();
 }
 
 async function fillMuiDate(container: Locator, value: string, index = 0) {
@@ -67,10 +87,7 @@ test.describe("patient portal live workflows", () => {
     await page.goto("/documents");
     await expect(page.getByText(scenario.documents.released.title)).toBeVisible();
 
-    await page.goto("/invoices");
-    await expect(
-      page.getByRole("heading", { name: scenario.invoice.invoice_number }),
-    ).toBeVisible();
+    await openInvoiceDetail(page, scenario.invoice.invoice_number);
   });
 
   test("patient can upload payment proof from invoice detail", async ({
@@ -80,10 +97,7 @@ test.describe("patient portal live workflows", () => {
     await setGermanLanguage(page);
     const scenario = await bootstrapAndLogin(page, request, "patient");
 
-    await page.goto("/invoices");
-    await expect(
-      page.getByRole("heading", { name: scenario.invoice.invoice_number }),
-    ).toBeVisible();
+    await openInvoiceDetail(page, scenario.invoice.invoice_number);
 
     await page.getByRole("button", { name: /Zahlungsnachweis hochladen|Upload payment proof/i }).click();
     await page
@@ -137,7 +151,11 @@ test.describe("patient portal live workflows", () => {
     await exportRequest;
 
     await page.goto("/privacy");
-    await page.locator("#privacy-type").selectOption("third_party_revoke");
+    await chooseComboboxOption(
+      page,
+      page.locator("#privacy-type"),
+      /Weitergabe an Dritte widerrufen|Revoke third-party sharing/i,
+    );
     await page
       .locator("#privacy-reason")
       .fill("Please stop sharing my records with external providers.");
@@ -354,7 +372,11 @@ test.describe("patient portal live workflows", () => {
     await releasedCard.getByRole("button", { name: /^Herunterladen$|^Download$/i }).click();
     await releasedDownloadRequest;
 
-    await page.getByLabel(/Upload-Typ|Upload type/i).selectOption("insurance_document");
+    await chooseComboboxOption(
+      page,
+      page.locator("#portal-document-upload-kind"),
+      /Versicherungsdokument|Insurance document/i,
+    );
     await page.getByLabel(/Titel|Title/i).fill("Insurance card April");
     await page.getByLabel(/Datei|File/i).setInputFiles({
       name: "insurance-card.pdf",
@@ -557,10 +579,6 @@ test.describe("patient portal live workflows", () => {
     const improvement = "Waiting area signage could be clearer.";
     await submitPortalFeedback(page, comment, improvement);
 
-    const feedbackCard = page.locator("article").filter({
-      hasText: comment,
-    }).first();
-
     const successNotice = page.getByText(/Feedback wurde gesendet\. Vielen Dank\.|Feedback submitted\. Thank you\./i);
     try {
       await expect(successNotice).toBeVisible({ timeout: 10_000 });
@@ -578,10 +596,23 @@ test.describe("patient portal live workflows", () => {
       await expect(successNotice).toBeVisible();
     }
 
-    await expect(feedbackCard).toBeVisible();
-    await expect(
-      feedbackCard.getByText(improvement),
-    ).toBeVisible();
+    const feedbackRow = page
+      .getByRole("row")
+      .filter({ hasText: /Allgemeines Feedback|General feedback/i })
+      .filter({ hasText: "10" })
+      .first();
+    if (await feedbackRow.isVisible().catch(() => false)) {
+      await feedbackRow.click();
+      const detail = page.getByRole("dialog", {
+        name: /Feedback-Detail|Feedback detail/i,
+      });
+      await expect(detail.getByText(comment)).toBeVisible();
+      await expect(detail.getByText(improvement)).toBeVisible();
+    } else {
+      const feedbackCard = page.locator("article").filter({ hasText: comment }).first();
+      await expect(feedbackCard).toBeVisible();
+      await expect(feedbackCard.getByText(improvement)).toBeVisible();
+    }
 
     const api = await authenticateApiClient(
       request,

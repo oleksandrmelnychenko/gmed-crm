@@ -3,6 +3,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
   authenticateApiClient,
   bootstrapAndLogin,
+  chooseComboboxOption,
   setGermanLanguage,
 } from "./support/live-helpers";
 
@@ -13,35 +14,71 @@ function leadCard(page: Page, leadName: string) {
     .first();
 }
 
-async function openLeadDetail(page: Page, leadName: string) {
-  await page.goto("/leads");
+async function openLeadDetail(page: Page, leadName: string, leadId?: string) {
+  await page.goto(leadId ? `/leads?lead=${leadId}` : "/leads");
   const card = leadCard(page, leadName);
   await expect(card).toBeVisible();
-  await card.click();
-  await expect(page.getByRole("dialog")).toBeVisible();
-  return card;
+  if (!leadId) {
+    await card.click();
+  }
+  const detailPane = page
+    .locator("aside")
+    .filter({
+      has: page.getByRole("heading", {
+        name: new RegExp(leadName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
+      }),
+    })
+    .last();
+  await expect(detailPane).toBeVisible();
+  return detailPane;
+}
+
+async function openLeadQualificationPane(
+  page: Page,
+  leadName: string,
+  leadId: string,
+) {
+  const detailPane = await openLeadDetail(page, leadName, leadId);
+  await detailPane
+    .getByRole("button", { name: /Qualifikation|Qualification/i })
+    .click();
+  return detailPane;
 }
 
 function leadConvertButton(page: Page, leadName: string) {
-  return leadCard(page, leadName).getByRole("button", { name: "Convert", exact: true });
+  return leadCard(page, leadName).getByRole("button", { name: /Konvertieren|Convert/i });
 }
 
 async function selectLeadGateOption(
   page: Page,
   sheet: Locator,
-  label: string,
-  option: string,
+  label: RegExp,
+  option: RegExp,
 ) {
   const field = sheet
     .locator("label")
-    .filter({ hasText: new RegExp(`^${label}$`) })
+    .filter({ hasText: label })
     .first()
     .locator("xpath=parent::*");
-  await field.getByRole("combobox").click();
-  await page.getByRole("option", { name: option, exact: true }).click();
+  await chooseComboboxOption(page, field.getByRole("combobox"), option);
 }
 
 async function fillLeadGateDate(sheet: Locator, value: string) {
+  const dateInput = sheet.locator("#lead-gate-date-of-birth");
+  if (await dateInput.count()) {
+    await dateInput.evaluate((node, nextValue) => {
+      const input = node as HTMLInputElement;
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      valueSetter?.call(input, nextValue);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    }, value);
+    return;
+  }
+
   const [year, month, day] = value.split("-");
   await sheet.getByRole("spinbutton", { name: "Year" }).fill(year);
   await sheet.getByRole("spinbutton", { name: "Month" }).fill(month);
@@ -56,27 +93,32 @@ test.describe("lead live workflows", () => {
     await setGermanLanguage(page);
     const scenario = await bootstrapAndLogin(page, request, "pm");
 
-    await openLeadDetail(page, scenario.leads.blocked.name);
-    const detailSheet = page.getByRole("dialog");
-
-    await expect(detailSheet.getByText(/Conversion blocked/i)).toBeVisible();
+    const detailSheet = await openLeadQualificationPane(
+      page,
+      scenario.leads.blocked.name,
+      scenario.leads.blocked.id,
+    );
 
     await fillLeadGateDate(detailSheet, "1991-01-01");
-    await selectLeadGateOption(page, detailSheet, "Legal sex", "female");
-    await selectLeadGateOption(page, detailSheet, "Compliance status", "signed");
+    await selectLeadGateOption(page, detailSheet, /Rechtliches Geschlecht|Legal sex/i, /Weiblich|female/i);
+    await selectLeadGateOption(page, detailSheet, /Compliance-Status|Compliance status/i, /Unterzeichnet|signed/i);
     await detailSheet
       .locator("label")
-      .filter({ hasText: "Healthcare consent available" })
+      .filter({ hasText: /Medizinische Einwilligung liegt vor|Healthcare consent available/i })
       .locator("input")
       .check();
     await detailSheet
       .locator("label")
-      .filter({ hasText: "Privacy practices accepted" })
+      .filter({ hasText: /Datenschutzpraxis akzeptiert|Privacy practices accepted/i })
       .locator("input")
       .check();
-    await detailSheet.getByRole("button", { name: "Save gate data" }).click();
-
-    await expect(detailSheet.getByText(/Conversion ready/i)).toBeVisible();
+    const saveGateResponse = page.waitForResponse(
+      (nextResponse) =>
+        nextResponse.url().includes(`/api/v1/leads/${scenario.leads.blocked.id}/update`) &&
+        nextResponse.request().method() === "POST",
+    );
+    await detailSheet.getByRole("button", { name: /Gate-Daten speichern|Save gate data/i }).click();
+    expect((await saveGateResponse).ok()).toBe(true);
     await page.goto("/leads");
 
     const convertButton = leadConvertButton(page, scenario.leads.blocked.name);
@@ -166,22 +208,31 @@ test.describe("lead live workflows", () => {
     await setGermanLanguage(page);
     const scenario = await bootstrapAndLogin(page, request, "pm");
 
-    await openLeadDetail(page, scenario.leads.ready.name);
-    const detailSheet = page.getByRole("dialog");
+    const detailSheet = await openLeadQualificationPane(
+      page,
+      scenario.leads.ready.name,
+      scenario.leads.ready.id,
+    );
 
-    await detailSheet.getByLabel("Failure reason").fill("No medical fit for current program");
-    await detailSheet.getByLabel("Internal note").fill(
+    await detailSheet.getByLabel(/Fehlergrund|Failure reason/i).fill("No medical fit for current program");
+    await detailSheet.getByLabel(/Interne Notiz|Internal note/i).fill(
       "Archived after PM review in live E2E flow.",
     );
-    await detailSheet.getByRole("button", { name: "Save failed-lead resolution" }).click();
+    const failedFlowResponse = page.waitForResponse(
+      (nextResponse) =>
+        nextResponse.url().includes(`/api/v1/leads/${scenario.leads.ready.id}/failed-flow`) &&
+        nextResponse.request().method() === "POST",
+    );
+    await detailSheet.getByRole("button", { name: /Failed-Lead-Bearbeitung speichern|Save failed-lead resolution/i }).click();
+    expect((await failedFlowResponse).ok()).toBe(true);
 
-    await expect(detailSheet.getByText("Failed lead archived")).toBeVisible();
-    await expect(detailSheet.getByText("qualified -> archived")).toBeVisible();
+    await expect(detailSheet.getByText(/^Archiviert$|^Archived$/i).first()).toBeVisible();
+    await expect(detailSheet.getByText(/^Qualifiziert$|^Qualified$/i).first()).toBeVisible();
     await expect(
       detailSheet.getByText("No medical fit for current program").first(),
     ).toBeVisible();
     await expect(
-      detailSheet.getByRole("button", { name: "Save failed-lead resolution" }),
+      detailSheet.getByRole("button", { name: /Failed-Lead-Bearbeitung speichern|Save failed-lead resolution/i }),
     ).toHaveCount(0);
 
     const api = await authenticateApiClient(
@@ -323,32 +374,42 @@ test.describe("lead live workflows", () => {
     const createdLeadCard = leadCard(page, leadName);
     await expect(createdLeadCard).toBeVisible();
 
-    await createdLeadCard.click();
-    const detailSheet = page.getByRole("dialog");
-    await expect(detailSheet).toBeVisible();
-    await expect(detailSheet.getByText(/Conversion blocked/i)).toBeVisible();
+    const detailSheet = await openLeadQualificationPane(
+      page,
+      leadName,
+      createdLead.id,
+    );
 
     await fillLeadGateDate(detailSheet, "1992-02-02");
-    await selectLeadGateOption(page, detailSheet, "Legal sex", "female");
-    await selectLeadGateOption(page, detailSheet, "Compliance status", "signed");
+    await selectLeadGateOption(page, detailSheet, /Rechtliches Geschlecht|Legal sex/i, /Weiblich|female/i);
+    await selectLeadGateOption(page, detailSheet, /Compliance-Status|Compliance status/i, /Unterzeichnet|signed/i);
     await detailSheet
       .locator("label")
-      .filter({ hasText: "Healthcare consent available" })
+      .filter({ hasText: /Medizinische Einwilligung liegt vor|Healthcare consent available/i })
       .locator("input")
       .check();
     await detailSheet
       .locator("label")
-      .filter({ hasText: "Privacy practices accepted" })
+      .filter({ hasText: /Datenschutzpraxis akzeptiert|Privacy practices accepted/i })
       .locator("input")
       .check();
-    await detailSheet.getByRole("button", { name: "Save gate data" }).click();
-    await expect(detailSheet.getByText(/Qualification ready/i)).toBeVisible();
-    await expect(detailSheet.getByText(/Conversion blocked/i)).toBeVisible();
+    const saveSalesGateResponse = page.waitForResponse(
+      (nextResponse) =>
+        nextResponse.url().includes(`/api/v1/leads/${createdLead.id}/update`) &&
+        nextResponse.request().method() === "POST",
+    );
+    await detailSheet.getByRole("button", { name: /Gate-Daten speichern|Save gate data/i }).click();
+    expect((await saveSalesGateResponse).ok()).toBe(true);
+    await detailSheet
+      .getByRole("button", { name: /Prozess|Process/i })
+      .click();
+    await expect(detailSheet.getByText(/Qualifikation bereit|Qualification ready/i)).toBeVisible();
+    await expect(detailSheet.getByText(/Konvertierung blockiert|Conversion blocked/i)).toBeVisible();
 
     await page.goto("/leads");
     const refreshedLeadCard = leadCard(page, leadName);
     await expect(
-      refreshedLeadCard.getByRole("button", { name: "Qualify", exact: true }),
+      refreshedLeadCard.getByRole("button", { name: /Qualifizieren|Qualify/i }),
     ).toBeVisible();
 
     const qualifyResponse = page.waitForResponse(
@@ -356,13 +417,13 @@ test.describe("lead live workflows", () => {
         nextResponse.url().includes(`/api/v1/leads/${createdLead.id}/qualify`) &&
         nextResponse.request().method() === "POST",
     );
-    await refreshedLeadCard.getByRole("button", { name: "Qualify", exact: true }).click();
+    await refreshedLeadCard.getByRole("button", { name: /Qualifizieren|Qualify/i }).click();
     const qualifiedLeadResponse = await qualifyResponse;
     expect(qualifiedLeadResponse.ok()).toBe(true);
 
-    await expect(refreshedLeadCard.getByText(/Qualified/i)).toBeVisible();
+    await expect(refreshedLeadCard.getByText(/Qualifiziert|Qualified/i)).toBeVisible();
     await expect(
-      refreshedLeadCard.getByRole("button", { name: "Convert", exact: true }),
+      refreshedLeadCard.getByRole("button", { name: /Konvertieren|Convert/i }),
     ).toHaveCount(0);
 
     const leadResponse = await request.get(
@@ -409,7 +470,7 @@ test.describe("lead live workflows", () => {
       page.getByRole("heading", { name: scenario.leads.ready.name, exact: true }),
     ).toHaveCount(0);
     await expect(
-      page.getByRole("button", { name: "Convert", exact: true }),
+      page.getByRole("button", { name: /Konvertieren|Convert/i }),
     ).toHaveCount(0);
 
     const interpreterApi = await authenticateApiClient(

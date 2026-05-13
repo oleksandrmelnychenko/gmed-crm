@@ -51,7 +51,22 @@
       "Bash(git check-ignore *)",
       "Bash(grep -n \"^import { useCallback\\\\|useCallback,\" frontend/src/pages/leads/page.tsx)",
       "Bash(grep -n \"@/lib/api\\\\b\\\\|@/lib/secure-persist\\\\|^import { useCallback\\\\|useCallback,\" frontend/src/pages/providers/page.tsx)",
-      "Bash(grep -n \"@/lib/api\\\\b\\\\|@/lib/secure-persist\\\\|^import { useCallback\\\\|useCallback,\" frontend/src/pages/cases/page.tsx)"
+      "Bash(grep -n \"@/lib/api\\\\b\\\\|@/lib/secure-persist\\\\|^import { useCallback\\\\|useCallback,\" frontend/src/pages/cases/page.tsx)",
+      "Bash(aws --version)",
+      "Bash(aws sts *)",
+      "PowerShell(aws --version)",
+      "PowerShell(aws sts get-caller-identity 2>&1)",
+      "PowerShell(terraform --version 2>&1)",
+      "PowerShell(Get-Command aws -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-Command terraform -ErrorAction SilentlyContinue)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Amazon\\\\AWSCLIV2\\\\aws.exe\" --version 2>&1)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Amazon\\\\AWSCLIV2\\\\aws.exe\" sts get-caller-identity 2>&1)",
+      "PowerShell(Get-Command terraform -ErrorAction SilentlyContinue; Get-ChildItem -Path \"C:\\\\Program Files\\\\\",\"C:\\\\ProgramData\\\\chocolatey\\\\bin\\\\\",\"$env:USERPROFILE\\\\scoop\\\\shims\\\\\",\"$env:LOCALAPPDATA\\\\\" -Filter \"terraform.exe\" -Recurse -ErrorAction SilentlyContinue -Depth 4 | Select-Object -First 5 FullName; where.exe terraform 2>&1)",
+      "PowerShell(winget install --id Hashicorp.Terraform -e --accept-source-agreements --accept-package-agreements --silent 2>&1)",
+      "PowerShell($tf = Get-ChildItem -Path \"C:\\\\Users\\\\$env:USERNAME\\\\AppData\\\\Local\\\\Microsoft\\\\WinGet\\\\Packages\\\\\" -Filter \"terraform.exe\" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName; if \\(-not $tf\\) { $tf = \\(Get-Command terraform -ErrorAction SilentlyContinue\\).Source }; \"TF_PATH=$tf\"; & $tf --version)",
+      "PowerShell($params = @\\(\"/gmed/dev/DATABASE_URL\",\"/gmed/dev/JWT_SECRET\",\"/gmed/dev/MESSAGE_ENCRYPTION_KEYS\",\"/gmed/dev/MESSAGE_ENCRYPTION_KEY_ACTIVE\",\"/gmed/dev/AUDIT_IP_SALT\",\"/gmed/dev/CORS_ORIGIN\"\\); foreach \\($p in $params\\) { $exists = & \"C:\\\\Program Files\\\\Amazon\\\\AWSCLIV2\\\\aws.exe\" ssm get-parameter --name $p --region eu-central-1 --query 'Parameter.Name' --output text 2>$null; if \\($LASTEXITCODE -eq 0\\) { \"EXISTS: $p\" } else { \"MISSING: $p\" } }; \"---\"; \"Public IP of this machine:\"; \\(Invoke-RestMethod -Uri \"https://checkip.amazonaws.com\"\\).Trim\\(\\))",
+      "Bash(git rebase *)",
+      "Bash(xargs grep *)"
     ],
     "additionalDirectories": [
       "C:\\Users\\123\\Downloads\\dev\\frontend",

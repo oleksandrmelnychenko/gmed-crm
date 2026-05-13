@@ -73,8 +73,7 @@ test.describe("case live workflows", () => {
     const snippetEditor = snippetDialog.locator("form").last();
     const snippetTextboxes = snippetEditor.getByRole("textbox");
     await snippetTextboxes.nth(0).fill(snippetLabel);
-    await snippetTextboxes.nth(1).fill("live-e2e");
-    await snippetTextboxes.nth(2).fill(snippetBody);
+    await snippetTextboxes.nth(1).fill(snippetBody);
     await snippetEditor.evaluate((form) => {
       (form.querySelector('button[type="submit"]') as HTMLButtonElement | null)?.click();
     });
@@ -119,7 +118,7 @@ test.describe("case live workflows", () => {
       }>;
       const snippet = snippets.find((item) => item.label === snippetLabel);
       expect(snippet).toBeDefined();
-      expect(snippet!.category).toBe("live-e2e");
+      expect(snippet!.category).toBe("general");
       expect(snippet!.body).toBe(snippetBody);
       expect(snippet!.is_active).toBe(true);
     }).toPass({ timeout: 15_000 });

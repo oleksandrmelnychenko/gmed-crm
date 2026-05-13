@@ -1,11 +1,32 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import {
   authenticateApiClient,
   bootstrapFullSmokeScenario,
+  chooseComboboxOption,
   loginViaApi,
   setGermanLanguage,
 } from "./support/live-helpers";
+
+const sopHeadingName = /SOP (?:&|und) Lernen|SOP (?:&|and) learning/i;
+const contentCreatedNotice =
+  /Inhalt erstellt|Lerninhalt erstellt|Content created|Learning content created/i;
+
+function checkboxInLabel(container: Locator, label: RegExp) {
+  return container
+    .locator("label")
+    .filter({ hasText: label })
+    .locator('input[type="checkbox"]')
+    .first();
+}
+
+function sopRows(container: Page | Locator, title: string) {
+  return container.getByRole("row").filter({ hasText: title });
+}
+
+function sopRow(container: Page | Locator, title: string) {
+  return sopRows(container, title).first();
+}
 
 test.describe("SOP live workflows", () => {
   test("patient manager creates an interpreter SOP, CEO approves it and the interpreter acknowledges it", async ({
@@ -27,30 +48,28 @@ test.describe("SOP live workflows", () => {
     );
     await page.goto("/sops");
     await expect(
-      page.getByRole("heading", { name: /SOP & learning/i }),
+      page.getByRole("heading", { name: sopHeadingName }),
     ).toBeVisible();
 
-    await page.getByRole("button", { name: "New content" }).click();
+    await page.getByRole("button", { name: /Neuer Inhalt|New content/i }).click();
     const createDialog = page.getByRole("dialog");
     await expect(createDialog).toBeVisible();
     const createTextboxes = createDialog.getByRole("textbox");
     await createTextboxes.nth(0).fill(sopTitle);
     await createTextboxes.nth(1).fill(sopSummary);
     await createTextboxes.nth(2).fill(sopBody);
-    await createDialog
-      .getByRole("checkbox", { name: /^(Dolmetscher|Interpreter)$/i })
-      .check();
-    const requiresAckCheckbox = createDialog.getByRole("checkbox", {
-      name: /acknowledgement-relevant/i,
-    });
-    await requiresAckCheckbox.scrollIntoViewIfNeeded();
+    await checkboxInLabel(createDialog, /^(Dolmetscher|Interpreter)$/i).check();
+    const requiresAckCheckbox = checkboxInLabel(
+      createDialog,
+      /Kenntnisnahme erforderlich|Acknowledgement required/i,
+    );
     await requiresAckCheckbox.check();
     await createDialog
       .locator("form")
       .evaluate((form: HTMLFormElement) => form.requestSubmit());
 
     await expect(createDialog).toHaveCount(0);
-    await expect(page.getByText("Learning content created.")).toBeVisible();
+    await expect(page.getByText(contentCreatedNotice)).toBeVisible();
 
     const pmApi = await authenticateApiClient(
       request,
@@ -88,22 +107,26 @@ test.describe("SOP live workflows", () => {
     );
     await ceoPage.goto("/sops");
     await expect(
-      ceoPage.getByRole("heading", { name: /SOP & learning/i }),
+      ceoPage.getByRole("heading", { name: sopHeadingName }),
     ).toBeVisible();
 
-    const reviewQueueCard = ceoPage.locator("article").filter({ hasText: sopTitle }).first();
+    const reviewQueueCard = sopRow(ceoPage, sopTitle);
     await expect(reviewQueueCard).toBeVisible();
-    await reviewQueueCard.getByRole("button", { name: /^Review$/i }).click();
+    await reviewQueueCard.getByRole("button", { name: /Review öffnen|Review/i }).click();
 
     const reviewDialog = ceoPage.getByRole("dialog");
     await expect(reviewDialog).toBeVisible();
-    await reviewDialog.locator("select").first().selectOption("approve");
+    await chooseComboboxOption(
+      ceoPage,
+      reviewDialog.getByRole("combobox").first(),
+      /Genehmigen|Approve/i,
+    );
     await reviewDialog
       .locator("textarea")
       .fill("Approved in live browser flow.");
-    await reviewDialog.getByRole("button", { name: /Save review/i }).click();
+    await reviewDialog.getByRole("button", { name: /Review speichern|Save review/i }).click();
     await expect(reviewDialog).toHaveCount(0);
-    await expect(ceoPage.getByText("Review decision saved.")).toBeVisible();
+    await expect(ceoPage.getByText(/Review-Entscheidung gespeichert|Review decision saved/i)).toBeVisible();
 
     await expect(async () => {
       const response = await request.get(`${pmApi.backendUrl}/api/v1/sops`, {
@@ -122,10 +145,10 @@ test.describe("SOP live workflows", () => {
     }).toPass({ timeout: 15_000 });
 
     await page.goto("/sops");
-    const pmItem = page.locator("article").filter({ hasText: sopTitle }).first();
+    const pmItem = sopRow(page, sopTitle);
     await expect(pmItem).toBeVisible();
-    await pmItem.getByRole("button", { name: /Request ack/i }).click();
-    await expect(page.getByText("Acknowledgement request sent.")).toBeVisible();
+    await pmItem.getByRole("button", { name: /Bestätigung anfordern|Request ack/i }).click();
+    await expect(page.getByText(/Bestätigungsanfrage gesendet|Acknowledgement request sent/i)).toBeVisible();
 
     const interpreterContext = await browser.newContext({ baseURL: baseUrl });
     const interpreterPage = await interpreterContext.newPage();
@@ -137,15 +160,16 @@ test.describe("SOP live workflows", () => {
       scenario.credentials.password,
     );
     await interpreterPage.goto("/sops");
-    const interpreterItem = interpreterPage
-      .locator("article")
-      .filter({ hasText: sopTitle })
-      .first();
+    const interpreterItem = sopRow(interpreterPage, sopTitle);
     await expect(interpreterItem).toBeVisible();
-    await expect(interpreterItem.getByText("My status: pending")).toBeVisible();
-    await interpreterItem.getByRole("button", { name: /^Acknowledge$/i }).click();
-    await expect(interpreterPage.getByText("Acknowledgement recorded.")).toBeVisible();
-    await expect(interpreterItem.getByText("My status: acknowledged")).toBeVisible();
+    await expect(
+      interpreterItem.getByText(/Mein Status:\s*Ausstehend|Ausstehend|My status:\s*pending|pending/i),
+    ).toBeVisible();
+    await interpreterItem.getByRole("button", { name: /Bestätigen|Acknowledge/i }).click();
+    await expect(interpreterPage.getByText(/Bestätigung erfasst|Acknowledgement recorded/i)).toBeVisible();
+    await expect(
+      interpreterItem.getByText(/Mein Status:\s*Bestätigt|Bestätigt|My status:\s*acknowledged|acknowledged/i),
+    ).toBeVisible();
 
     const interpreterApi = await authenticateApiClient(
       request,
@@ -193,14 +217,14 @@ test.describe("SOP live workflows", () => {
     );
     await page.goto("/sops");
     await expect(
-      page.getByRole("heading", { name: /SOP & learning/i }),
+      page.getByRole("heading", { name: sopHeadingName }),
     ).toBeVisible();
 
-    await page.getByRole("button", { name: "New content" }).click();
+    await page.getByRole("button", { name: /Neuer Inhalt|New content/i }).click();
     const createDialog = page.getByRole("dialog");
     await expect(createDialog).toBeVisible();
     await expect(
-      createDialog.getByRole("checkbox", { name: /^(Dolmetscher|Interpreter)$/i }),
+      checkboxInLabel(createDialog, /^(Dolmetscher|Interpreter)$/i),
     ).toBeVisible();
     await expect(
       createDialog.getByRole("checkbox", { name: /Concierge/i }),
@@ -210,32 +234,24 @@ test.describe("SOP live workflows", () => {
     await createTextboxes.nth(0).fill(sopTitle);
     await createTextboxes.nth(1).fill(sopSummary);
     await createTextboxes.nth(2).fill(sopBody);
-    await createDialog
-      .getByRole("checkbox", { name: /^(Dolmetscher|Interpreter)$/i })
-      .check();
-    const requiresAckCheckbox = createDialog.getByRole("checkbox", {
-      name: /acknowledgement-relevant/i,
-    });
-    await createDialog
-      .locator("label")
-      .filter({ hasText: /acknowledgement-relevant/i })
-      .evaluate((label: HTMLLabelElement) => {
-        label.scrollIntoView({ block: "center" });
-        label.click();
-      });
+    await checkboxInLabel(createDialog, /^(Dolmetscher|Interpreter)$/i).check();
+    const requiresAckCheckbox = checkboxInLabel(
+      createDialog,
+      /Kenntnisnahme erforderlich|Acknowledgement required/i,
+    );
+    await requiresAckCheckbox.check();
     await expect(requiresAckCheckbox).toBeChecked();
     await createDialog
       .locator("form")
       .evaluate((form: HTMLFormElement) => form.requestSubmit());
 
     await expect(createDialog).toHaveCount(0);
-    await expect(page.getByText("Learning content created.")).toBeVisible();
+    await expect(page.getByText(contentCreatedNotice)).toBeVisible();
 
-    const teamleadItem = page.locator("article").filter({ hasText: sopTitle }).first();
+    const teamleadItem = sopRow(page, sopTitle);
     await expect(teamleadItem).toBeVisible();
-    await expect(teamleadItem.getByText(/pending approval/i)).toBeVisible();
-    await expect(teamleadItem.getByText(/Patient-manager approval/i)).toBeVisible();
-    await expect(teamleadItem.getByRole("button", { name: /Request ack/i })).toHaveCount(0);
+    await expect(teamleadItem.getByText(/Freigabe ausstehend|pending approval/i)).toBeVisible();
+    await expect(teamleadItem.getByRole("button", { name: /Bestätigung anfordern|Request ack/i })).toHaveCount(0);
 
     const baseUrl = new URL(page.url()).origin;
 
@@ -250,15 +266,13 @@ test.describe("SOP live workflows", () => {
     );
     await ceoPage.goto("/sops");
     await expect(
-      ceoPage.getByRole("heading", { name: /SOP & learning/i }),
+      ceoPage.getByRole("heading", { name: sopHeadingName }),
     ).toBeVisible();
-    const ceoReviewQueueCard = ceoPage
-      .locator("article")
-      .filter({
-        hasText: sopTitle,
-        has: ceoPage.getByRole("button", { name: /^Review$/i }),
-      });
-    await expect(ceoReviewQueueCard).toHaveCount(0);
+    await expect(
+      sopRows(ceoPage, sopTitle).getByRole("button", {
+        name: /Review öffnen|Review/i,
+      }),
+    ).toHaveCount(0);
 
     const interpreterContext = await browser.newContext({ baseURL: baseUrl });
     const interpreterPage = await interpreterContext.newPage();
@@ -271,7 +285,7 @@ test.describe("SOP live workflows", () => {
     );
     await interpreterPage.goto("/sops");
     await expect(
-      interpreterPage.locator("article").filter({ hasText: sopTitle }),
+      sopRows(interpreterPage, sopTitle),
     ).toHaveCount(0);
 
     const pmContext = await browser.newContext({ baseURL: baseUrl });
@@ -285,39 +299,44 @@ test.describe("SOP live workflows", () => {
     );
     await pmPage.goto("/sops");
     await expect(
-      pmPage.getByRole("heading", { name: /SOP & learning/i }),
+      pmPage.getByRole("heading", { name: sopHeadingName }),
     ).toBeVisible();
 
-    const pmReviewQueueCard = pmPage.locator("article").filter({ hasText: sopTitle }).first();
+    const pmReviewQueueCard = sopRow(pmPage, sopTitle);
     await expect(pmReviewQueueCard).toBeVisible();
-    await pmReviewQueueCard.getByRole("button", { name: /^Review$/i }).click();
+    await pmReviewQueueCard.getByRole("button", { name: /Review öffnen|Review/i }).click();
 
     const reviewDialog = pmPage.getByRole("dialog");
     await expect(reviewDialog).toBeVisible();
-    await reviewDialog.locator("select").first().selectOption("approve");
+    await chooseComboboxOption(
+      pmPage,
+      reviewDialog.getByRole("combobox").first(),
+      /Genehmigen|Approve/i,
+    );
     await reviewDialog
       .locator("textarea")
       .fill("Approved by patient manager in live browser flow.");
-    await reviewDialog.getByRole("button", { name: /Save review/i }).click();
+    await reviewDialog.getByRole("button", { name: /Review speichern|Save review/i }).click();
     await expect(reviewDialog).toHaveCount(0);
-    await expect(pmPage.getByText("Review decision saved.")).toBeVisible();
+    await expect(pmPage.getByText(/Review-Entscheidung gespeichert|Review decision saved/i)).toBeVisible();
 
-    const approvedPmItem = pmPage.locator("article").filter({ hasText: sopTitle }).first();
+    const approvedPmItem = sopRow(pmPage, sopTitle);
     await expect(approvedPmItem).toBeVisible();
-    await expect(approvedPmItem.getByText(/^approved$/i)).toBeVisible();
-    await approvedPmItem.getByRole("button", { name: /Request ack/i }).click();
-    await expect(pmPage.getByText("Acknowledgement request sent.")).toBeVisible();
+    await expect(approvedPmItem.getByText(/^Genehmigt$|^approved$/i)).toBeVisible();
+    await approvedPmItem.getByRole("button", { name: /Bestätigung anfordern|Request ack/i }).click();
+    await expect(pmPage.getByText(/Bestätigungsanfrage gesendet|Acknowledgement request sent/i)).toBeVisible();
 
     await interpreterPage.goto("/sops");
-    const interpreterItem = interpreterPage
-      .locator("article")
-      .filter({ hasText: sopTitle })
-      .first();
+    const interpreterItem = sopRow(interpreterPage, sopTitle);
     await expect(interpreterItem).toBeVisible();
-    await expect(interpreterItem.getByText("My status: pending")).toBeVisible();
-    await interpreterItem.getByRole("button", { name: /^Acknowledge$/i }).click();
-    await expect(interpreterPage.getByText("Acknowledgement recorded.")).toBeVisible();
-    await expect(interpreterItem.getByText("My status: acknowledged")).toBeVisible();
+    await expect(
+      interpreterItem.getByText(/Mein Status:\s*Ausstehend|Ausstehend|My status:\s*pending|pending/i),
+    ).toBeVisible();
+    await interpreterItem.getByRole("button", { name: /Bestätigen|Acknowledge/i }).click();
+    await expect(interpreterPage.getByText(/Bestätigung erfasst|Acknowledgement recorded/i)).toBeVisible();
+    await expect(
+      interpreterItem.getByText(/Mein Status:\s*Bestätigt|Bestätigt|My status:\s*acknowledged|acknowledged/i),
+    ).toBeVisible();
 
     await ceoContext.close();
     await interpreterContext.close();

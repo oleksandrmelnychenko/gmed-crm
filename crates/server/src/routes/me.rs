@@ -293,8 +293,8 @@ async fn create_my_privacy_request(
                     "notification.created",
                     Some(notification_id),
                     serde_json::json!({
-                        "entity_type": "privacy_request",
-                        "entity_id": request_id,
+                        "entity_type": "patient",
+                        "entity_id": patient_id,
                     }),
                 )
                 .await;

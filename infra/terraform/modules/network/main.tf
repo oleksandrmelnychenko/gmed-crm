@@ -50,6 +50,11 @@ resource "aws_security_group" "app" {
   description = "App security group"
   vpc_id      = aws_vpc.this.id
 
+  # Environment-level rules manage app-specific ingress ports.
+  lifecycle {
+    ignore_changes = [ingress]
+  }
+
   dynamic "ingress" {
     for_each = length(var.allowed_ssh_cidrs) == 0 ? [] : [1]
     content {

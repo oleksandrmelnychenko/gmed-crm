@@ -64,6 +64,12 @@ async function fillRepeatUntil(editForm: Locator, value: string) {
   await editForm.getByRole("spinbutton", { name: "Day" }).nth(1).fill(day);
 }
 
+async function chooseComboboxValue(page: Page, combobox: Locator, value: string) {
+  await combobox.click();
+  await page.getByPlaceholder(/Suchen|Search|Поиск/i).last().fill(value);
+  await page.keyboard.press("Enter");
+}
+
 async function fillInputFieldByLabel(
   container: Locator,
   label: RegExp,
@@ -131,7 +137,7 @@ test.describe("appointments recurring live workflows", () => {
       name: /Statusänderung anwenden auf/i,
     });
     await expect(statusScopeSelect).toBeVisible();
-    await statusScopeSelect.selectOption("series");
+    await chooseComboboxValue(page, statusScopeSelect, "series");
 
     const cancelWholeSeriesButton = page
       .getByRole("button", { name: /Ganze Serie absagen/i })
@@ -189,7 +195,7 @@ test.describe("appointments recurring live workflows", () => {
       name: /Statusänderung anwenden auf/i,
     });
     await expect(statusScopeSelect).toBeVisible();
-    await expect(statusScopeSelect).toHaveValue("single");
+    await expect(statusScopeSelect).toContainText(/Nur dieser Termin/i);
 
     const cancelSingleButton = page
       .getByRole("button", {
@@ -257,7 +263,7 @@ test.describe("appointments recurring live workflows", () => {
     const titleInput = editForm.getByLabel(/^Titel$/i).first();
     await titleInput.fill(renamedTitle);
 
-    await scheduleScopeSelect.selectOption("series");
+    await chooseComboboxValue(page, scheduleScopeSelect, "series");
 
     await editForm.getByRole("button", { name: /^Speichern$/ }).click();
 
@@ -313,12 +319,14 @@ test.describe("appointments recurring live workflows", () => {
       .filter({ has: scheduleScopeSelect })
       .first();
 
-    await scheduleScopeSelect.selectOption("series");
-    await editForm
-      .getByRole("combobox", {
+    await chooseComboboxValue(page, scheduleScopeSelect, "series");
+    await chooseComboboxValue(
+      page,
+      editForm.getByRole("combobox", {
         name: /Wiederholungsrhythmus|Repeat frequency/i,
-      })
-      .selectOption("weekly");
+      }),
+      "weekly",
+    );
     await fillInputFieldByLabel(
       editForm,
       /Wiederholen alle|Repeat every/i,
@@ -431,7 +439,7 @@ test.describe("appointments recurring live workflows", () => {
       name: /Statusänderung anwenden auf/i,
     });
     await expect(statusScopeSelect).toBeVisible();
-    await statusScopeSelect.selectOption("following");
+    await chooseComboboxValue(page, statusScopeSelect, "following");
 
     const statusSection = page
       .locator("section")

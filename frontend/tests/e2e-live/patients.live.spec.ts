@@ -4,6 +4,7 @@ import {
   authenticateApiClient,
   bootstrapAndLogin,
   bootstrapFullSmokeScenario,
+  chooseComboboxOption,
   loginViaApi,
   setGermanLanguage,
 } from "./support/live-helpers";
@@ -121,14 +122,14 @@ test.describe("patient profile live workflows", () => {
       page,
       scenario.patient.id,
       "invoices",
-      "Rechnungen und Zahlungsnachverfolgung",
+      /Rechnungen und Zahlungs-Follow-up|Rechnungen und Zahlungsnachverfolgung/i,
     );
     await expect(
       page.getByRole("heading", {
-        name: "Rechnungen und Zahlungsnachverfolgung",
+        name: /Rechnungen und Zahlungs-Follow-up|Rechnungen und Zahlungsnachverfolgung/i,
       }),
     ).toBeVisible();
-    await expect(page.getByText(scenario.invoice.invoice_number)).toBeVisible();
+    await expect(page.getByText(scenario.invoice.invoice_number).first()).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Billing verwalten" }),
     ).toHaveCount(0);
@@ -204,9 +205,11 @@ test.describe("patient profile live workflows", () => {
       }),
     ).toBeVisible();
     await relationDialog.getByLabel("Name").fill("Emergency Contact Live");
-    await relationDialog
-      .getByLabel(/Beziehungstyp|Relation type/i)
-      .selectOption("caregiver");
+    await chooseComboboxOption(
+      page,
+      relationDialog.getByRole("combobox", { name: /Beziehungstyp|Relation type/i }),
+      /Betreuungsperson|Betreuer|Caregiver/i,
+    );
     await relationDialog.getByLabel(/Telefon|Phone/i).fill("+49 30 222222");
     await relationDialog
       .locator("label")

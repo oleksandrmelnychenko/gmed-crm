@@ -63,17 +63,17 @@ test.describe("provider registry live workflows", () => {
     }
     await providerRow.click();
 
-    const sheet = page.getByRole("dialog");
+    const sheet = page.locator("main");
     await expect(
       sheet.getByRole("heading", { name: provider.name }).first(),
     ).toBeVisible();
     if (provider.tax_id) {
       await expect(
-        sheet.getByText(new RegExp(`(Steuer-ID|Tax ID)\\s*(·\\s*)?${provider.tax_id}`, "i")).first(),
-      ).toBeVisible();
+        sheet.getByRole("textbox", { name: /Steuer-ID|Tax ID/i }),
+      ).toHaveValue(provider.tax_id);
     }
     await expect(
-      sheet.getByRole("heading", { name: /Anbieterprofil|Provider profile/i }),
+      sheet.getByRole("heading", { name: /Profil|Profile/i }),
     ).toBeVisible();
     await expect(
       sheet.getByRole("heading", { name: /Servicekatalog|Service catalog/i }),
@@ -99,19 +99,18 @@ test.describe("provider registry live workflows", () => {
     await expect(
       page.getByRole("heading", { name: provider.name }).first(),
     ).toBeVisible();
-    await expect(page.getByRole("tab", { name: /^(Vorlagen|Templates)$/i })).toBeVisible();
-
-    await page.getByRole("tab", { name: /^(Doctors|Ärzte)$/i }).click();
+    await expect(
+      page.getByRole("heading", { name: /Profil|Profile/i }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: /Servicekatalog|Service catalog/i }),
+    ).toBeVisible();
     if (provider.doctors.length > 0) {
       await expect(page.getByText(provider.doctors[0]!.name)).toBeVisible();
     }
-
-    await page.getByRole("tab", { name: /^(Services|Leistungen)$/i }).click();
     if (provider.services.length > 0) {
       await expect(page.getByText(provider.services[0]!.service_name)).toBeVisible();
     }
-
-    await page.getByRole("tab", { name: /^(Linked patients|Verknüpfte Patienten)$/i }).click();
     await expect(page.getByText(scenario.patient.name).first()).toBeVisible();
   });
 
@@ -152,7 +151,7 @@ test.describe("provider registry live workflows", () => {
     await expect(providerRow).toBeVisible();
     await providerRow.click();
 
-    const sheet = page.getByRole("dialog");
+    const sheet = page.locator("main");
     await expect(sheet.getByRole("heading", { name: provider.name }).first()).toBeVisible();
     await expect(
       sheet.getByText(/Registeränderungen sind für Ihre Rolle gesperrt|Registry edits are restricted for your role/i),
@@ -175,20 +174,12 @@ test.describe("provider registry live workflows", () => {
       page.getByRole("button", { name: /Delete/i }),
     ).toHaveCount(0);
     await expect(
-      page.getByRole("tab", { name: /^(Vorlagen|Templates)$/i }),
-    ).toBeVisible();
-    await page.getByRole("tab", { name: /^(Vorlagen|Templates)$/i }).click();
-    await expect(
-      page.getByText(/Nur Lesezugriff\. CEO oder Patientenmanager können Klinikvorlagen bearbeiten|Read-only access\. CEO or patient manager can edit clinic templates/i),
-    ).toBeVisible();
-    await expect(
       page.getByRole("button", { name: /Neue Vorlage|New template/i }),
     ).toHaveCount(0);
     await expect(
       page.getByRole("button", { name: /Vorlage speichern|Vorlage erstellen|Save template|Create template/i }),
     ).toHaveCount(0);
 
-    await page.getByRole("tab", { name: /^(Doctors|Ärzte)$/i }).click();
     await expect(
       page.getByRole("button", { name: /^Edit$/i }),
     ).toHaveCount(0);
@@ -196,7 +187,6 @@ test.describe("provider registry live workflows", () => {
       page.getByRole("button", { name: /^Delete$/i }),
     ).toHaveCount(0);
 
-    await page.getByRole("tab", { name: /^(Services|Leistungen)$/i }).click();
     await expect(
       page.getByRole("button", { name: /^Edit$/i }),
     ).toHaveCount(0);

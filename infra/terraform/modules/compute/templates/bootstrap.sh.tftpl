@@ -10,9 +10,12 @@ apt-get install -y --no-install-recommends \
   git \
   jq \
   unzip \
-  docker.io \
-  docker-compose-plugin \
   awscli
+
+# Install Docker (with compose plugin) via the official convenience script
+if ! command -v docker >/dev/null 2>&1; then
+  curl -fsSL https://get.docker.com | sh
+fi
 
 systemctl enable docker
 systemctl start docker
@@ -48,12 +51,12 @@ AUDIT_IP_SALT="$(fetch_ssm "${audit_salt_param}")"
 CORS_ORIGIN="$(fetch_ssm "${cors_origin_param}")"
 
 cat > /opt/gmed/release.env <<EOF
-GMED_DATABASE_URL=${DATABASE_URL}
-GMED_JWT_SECRET=${JWT_SECRET}
-GMED_MESSAGE_ENCRYPTION_KEYS=${MESSAGE_ENCRYPTION_KEYS}
-GMED_MESSAGE_ENCRYPTION_KEY_ACTIVE=${MESSAGE_ENCRYPTION_KEY_ACTIVE}
-GMED_AUDIT_IP_SALT=${AUDIT_IP_SALT}
-GMED_CORS_ORIGIN=${CORS_ORIGIN}
+GMED_DATABASE_URL=$${DATABASE_URL}
+GMED_JWT_SECRET=$${JWT_SECRET}
+GMED_MESSAGE_ENCRYPTION_KEYS=$${MESSAGE_ENCRYPTION_KEYS}
+GMED_MESSAGE_ENCRYPTION_KEY_ACTIVE=$${MESSAGE_ENCRYPTION_KEY_ACTIVE}
+GMED_AUDIT_IP_SALT=$${AUDIT_IP_SALT}
+GMED_CORS_ORIGIN=$${CORS_ORIGIN}
 BACKEND_PORT=${backend_port}
 FRONTEND_PORT=${frontend_port}
 EOF

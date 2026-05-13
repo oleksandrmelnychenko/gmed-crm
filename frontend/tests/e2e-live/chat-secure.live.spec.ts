@@ -259,10 +259,9 @@ test.describe("secure chat live workflows", () => {
         .getByRole("button", { name: new RegExp(scenario.credentials.patient.name, "i") })
         .click();
 
-      await expect(
-        patientPage.getByText(/End-to-end encrypted chat/i),
-      ).toBeVisible();
-      await expect(pmPage.getByText(/End-to-end encrypted chat/i)).toBeVisible();
+      const encryptedChatLabel = /End-to-end encrypted chat|Ende-zu-Ende verschlüsselt/i;
+      await expect(patientPage.getByText(encryptedChatLabel)).toBeVisible();
+      await expect(pmPage.getByText(encryptedChatLabel)).toBeVisible();
 
       await sendEncryptedTextWithRetry(
         patientPage,

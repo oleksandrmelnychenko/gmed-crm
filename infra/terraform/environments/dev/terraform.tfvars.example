@@ -6,12 +6,14 @@ vpc_cidr           = "10.42.0.0/16"
 public_subnet_cidr = "10.42.10.0/24"
 
 # Restrict this to your office/VPN/public IP range.
-allowed_ssh_cidrs = ["203.0.113.10/32"]
-allowed_http_cidrs = ["0.0.0.0/0"]
+allowed_ssh_cidrs      = ["203.0.113.10/32"]
+allowed_http_cidrs     = ["0.0.0.0/0"]
+allowed_frontend_cidrs = null
+allowed_backend_cidrs  = []
 
-instance_type     = "t4g.micro"
-cpu_architecture  = "arm64"
-associate_eip     = true
+instance_type       = "t4g.micro"
+cpu_architecture    = "arm64"
+associate_eip       = true
 root_volume_size_gb = 30
 
 # Optional: if you already have an EC2 key pair.

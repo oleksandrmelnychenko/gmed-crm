@@ -1,4 +1,4 @@
-import type { APIRequestContext, Page } from "@playwright/test";
+import { expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -24,6 +24,52 @@ import {
 
 const LIVE_FRONTEND_BASE_URL =
   process.env.PLAYWRIGHT_LIVE_BASE_URL ?? "http://127.0.0.1:4174";
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function optionNameMatcher(value: string | RegExp) {
+  if (value instanceof RegExp) {
+    return value;
+  }
+
+  return new RegExp(escapeRegExp(value), "i");
+}
+
+export async function chooseComboboxOption(
+  page: Page,
+  combobox: Locator,
+  value: string | RegExp,
+) {
+  await combobox.click();
+  const option = page.getByRole("option", { name: optionNameMatcher(value) }).first();
+  await expect(option).toBeVisible();
+  await option.click();
+}
+
+export async function ensureDetailsOpen(details: Locator) {
+  if (!(await details.evaluate((node) => (node as HTMLDetailsElement).open))) {
+    await details.locator("summary").click();
+  }
+}
+
+export async function openDocumentWorkspace(page: Page, title: string) {
+  await page.goto("/documents");
+  await expect(page.getByText(title).first()).toBeVisible();
+
+  const titlePattern = new RegExp(escapeRegExp(title), "i");
+  const row = page.getByRole("row", { name: titlePattern }).first();
+  if (await row.isVisible().catch(() => false)) {
+    await row.click();
+  } else {
+    await page.getByText(title).first().click();
+  }
+
+  const workspace = page.locator("main");
+  await expect(workspace.getByRole("heading", { name: title }).first()).toBeVisible();
+  return workspace;
+}
 
 export type BootstrapScenario = {
   scenario: string;

@@ -104,17 +104,22 @@ test.describe("feedback live workflows", () => {
     await expect(
       teamleadPage.getByRole("heading", { name: /Feedback und NPS|Feedback and NPS/i }),
     ).toBeVisible();
-    const teamleadInterpreterCard = teamleadPage
-      .locator("article")
-      .filter({ hasText: interpreterComment })
-      .first();
+    const teamleadRows = teamleadPage
+      .getByRole("row")
+      .filter({ hasText: scenario.patient.patient_id });
+    await expect(teamleadRows).toHaveCount(1);
+    const teamleadInterpreterCard = teamleadRows.first();
     await expect(teamleadInterpreterCard).toBeVisible();
+    await expect(teamleadInterpreterCard).toContainText("9");
+    await teamleadInterpreterCard.click();
+    const teamleadDialog = teamleadPage.getByRole("dialog");
     await expect(
-      teamleadPage.locator("article").filter({ hasText: conciergeComment }),
-    ).toHaveCount(0);
-    await expect(
-      teamleadInterpreterCard.getByRole("button", { name: /^(Prüfen|Review)$/i }),
+      teamleadDialog.getByRole("heading", {
+        name: /Feedback prüfen|Review feedback/i,
+      }),
     ).toBeVisible();
+    await expect(teamleadDialog.getByText(interpreterComment)).toBeVisible();
+    await expect(teamleadDialog.getByText(conciergeComment)).toHaveCount(0);
 
     const conciergeContext = await browser.newContext();
     const conciergePage = await conciergeContext.newPage();
@@ -129,17 +134,22 @@ test.describe("feedback live workflows", () => {
     await expect(
       conciergePage.getByRole("heading", { name: /Feedback und NPS|Feedback and NPS/i }),
     ).toBeVisible();
-    const conciergeCard = conciergePage
-      .locator("article")
-      .filter({ hasText: conciergeComment })
-      .first();
+    const conciergeRows = conciergePage
+      .getByRole("row")
+      .filter({ hasText: scenario.patient.patient_id });
+    await expect(conciergeRows).toHaveCount(1);
+    const conciergeCard = conciergeRows.first();
     await expect(conciergeCard).toBeVisible();
+    await expect(conciergeCard).toContainText("8");
+    await conciergeCard.click();
+    const conciergeDialog = conciergePage.getByRole("dialog");
     await expect(
-      conciergePage.locator("article").filter({ hasText: interpreterComment }),
-    ).toHaveCount(0);
-    await expect(
-      conciergeCard.getByRole("button", { name: /^(Prüfen|Review)$/i }),
+      conciergeDialog.getByRole("heading", {
+        name: /Feedback prüfen|Review feedback/i,
+      }),
     ).toBeVisible();
+    await expect(conciergeDialog.getByText(conciergeComment)).toBeVisible();
+    await expect(conciergeDialog.getByText(interpreterComment)).toHaveCount(0);
 
     await teamleadContext.close();
     await conciergeContext.close();

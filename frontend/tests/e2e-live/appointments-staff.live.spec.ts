@@ -3,6 +3,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
   authenticateApiClient,
   bootstrapAndLogin,
+  chooseComboboxOption,
   loginViaApi,
   setGermanLanguage,
   type LiveApiClient,
@@ -80,8 +81,8 @@ const addChecklistItemButtonName =
   /Checklistenpunkt hinzufügen|Add checklist item/i;
 const completeChecklistItemButtonName =
   /Als erledigt markieren|Mark complete/i;
-const acceptedResponseButtonName = /^(Bestatigt|Accepted)$/i;
-const inProgressStatusButtonName = /^(Lauft|In progress)$/i;
+const acceptedResponseButtonName = /^(Angenommen|Accepted)$/i;
+const inProgressStatusButtonName = /^(Läuft|Lauft|In progress)$/i;
 const completedStatusButtonName = /^(Abgeschlossen|Completed)$/i;
 const approveReportButtonName =
   /Stunden und Bericht freigeben|Approve hours and report/i;
@@ -95,20 +96,21 @@ function sectionWithButton(page: Page, name: RegExp) {
   }).last();
 }
 
-async function assignInterpreter(page: Page, interpreterId: string) {
+async function assignInterpreter(page: Page, interpreterName: string) {
   const section = sectionWithButton(page, assignInterpreterButtonName);
   await expect(section).toBeVisible();
-  await section
-    .getByRole("combobox", { name: /Dolmetscher|Interpreter/i })
-    .last()
-    .selectOption(interpreterId);
+  await chooseComboboxOption(
+    page,
+    section.getByRole("combobox", { name: /Dolmetscher|Interpreter/i }).last(),
+    interpreterName,
+  );
   await section.getByRole("button", { name: assignInterpreterButtonName }).click();
 }
 
 async function addChecklistItem(page: Page, itemText: string) {
   const section = sectionWithButton(page, addChecklistItemButtonName);
   await expect(section).toBeVisible();
-  await section.locator("input").first().fill(itemText);
+  await section.locator("input[required]").first().fill(itemText);
   await section.getByRole("button", { name: addChecklistItemButtonName }).click();
   return section;
 }
@@ -132,7 +134,7 @@ test.describe("staff appointments live workflows", () => {
       scenario.appointment.title,
     );
 
-    await assignInterpreter(page, scenario.credentials.interpreter.user_id);
+    await assignInterpreter(page, scenario.credentials.interpreter.name);
     await expect(async () => {
       const detail = await fetchAppointmentDetail(
         request,
@@ -185,10 +187,11 @@ test.describe("staff appointments live workflows", () => {
       .last();
     const doctorFollowUpForm = doctorFollowUpSection.locator("form").first();
     await expect(doctorFollowUpForm).toBeVisible();
-    await doctorFollowUpForm
-      .locator("select")
-      .first()
-      .selectOption(scenario.credentials.pm.user_id);
+    await chooseComboboxOption(
+      page,
+      doctorFollowUpForm.getByRole("combobox").first(),
+      scenario.credentials.pm.name,
+    );
     await fillMuiDateTime(doctorFollowUpForm, futureLocalDateTime(3));
     await doctorFollowUpForm
       .locator("textarea")
@@ -203,11 +206,13 @@ test.describe("staff appointments live workflows", () => {
     );
     await expect(
       doctorFollowUpForm.getByRole("button", {
-        name: "Create doctor follow-up",
+        name: /Ärztliches Follow-up erstellen|Ärztliche Nachsorge erstellen|Create doctor follow-up/i,
       }),
     ).toBeEnabled();
     await doctorFollowUpForm
-      .getByRole("button", { name: "Create doctor follow-up" })
+      .getByRole("button", {
+        name: /Ärztliches Follow-up erstellen|Ärztliche Nachsorge erstellen|Create doctor follow-up/i,
+      })
       .click();
     await expect(async () => {
       const remindersResponse = await request.get(
@@ -336,7 +341,7 @@ test.describe("staff appointments live workflows", () => {
       ).toBe(true);
     }).toPass({ timeout: 15_000 });
 
-    await page.goto(`/orders?order=${scenario.order.id}`);
+    await page.goto(`/orders/${scenario.order.id}?section=services`);
     await expect(
       page.getByText("Organisation der Behandlung").first(),
     ).toBeVisible();
@@ -571,7 +576,7 @@ test.describe("staff appointments live workflows", () => {
       expect(report!.billing_leistung_id).toBeTruthy();
     }).toPass({ timeout: 15_000 });
 
-    await page.goto(`/orders?order=${scenario.order.id}`);
+    await page.goto(`/orders/${scenario.order.id}?section=services`);
     await expect(
       page.getByText("Automatisch aus Dolmetscherbericht abgerechnet"),
     ).toBeVisible();
@@ -632,7 +637,7 @@ test.describe("staff appointments live workflows", () => {
       scenario.appointment.id,
       scenario.appointment.title,
     );
-    await assignInterpreter(page, scenario.credentials.interpreter.user_id);
+    await assignInterpreter(page, scenario.credentials.interpreter.name);
 
     const interpreterContext = await browser.newContext();
     const interpreterPage = await interpreterContext.newPage();

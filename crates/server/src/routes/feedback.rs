@@ -883,8 +883,8 @@ async fn create_feedback_record(
                         "notification.created",
                         Some(notification_id),
                         json!({
-                            "entity_type": "feedback",
-                            "entity_id": feedback_id,
+                            "entity_type": "patient",
+                            "entity_id": patient_id,
                         }),
                     )
                     .await;

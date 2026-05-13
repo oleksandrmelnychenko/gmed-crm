@@ -35,8 +35,25 @@ variable "allowed_ssh_cidrs" {
 
 variable "allowed_http_cidrs" {
   type        = list(string)
-  description = "CIDRs allowed for HTTP/HTTPS"
+  description = "CIDRs allowed for HTTP/HTTPS listener ports"
   default     = ["0.0.0.0/0"]
+}
+
+variable "allowed_frontend_cidrs" {
+  type        = list(string)
+  description = "CIDRs allowed for the public frontend app port. Defaults to allowed_http_cidrs."
+  default     = null
+
+  validation {
+    condition     = var.allowed_frontend_cidrs == null || length(var.allowed_frontend_cidrs) > 0
+    error_message = "allowed_frontend_cidrs must be null or a non-empty CIDR list."
+  }
+}
+
+variable "allowed_backend_cidrs" {
+  type        = list(string)
+  description = "CIDRs allowed for direct backend API access. Leave empty to keep the API private behind the frontend."
+  default     = []
 }
 
 variable "instance_type" {
@@ -89,7 +106,7 @@ variable "app_branch" {
 
 variable "backend_port" {
   type        = number
-  description = "Backend public port"
+  description = "Backend host port"
   default     = 3000
 }
 

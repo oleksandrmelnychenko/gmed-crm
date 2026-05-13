@@ -67,11 +67,12 @@ test.describe("compliance live workflows", () => {
       .click();
     await closeCurrentSheet(page);
 
-    const consentHistory = page.locator("table").first();
-    await expect(
-      consentHistory.getByText(/Weitergabe an Dritte|Third-party sharing/i),
-    ).toBeVisible();
-    await expect(consentHistory.getByText(consentNote)).toBeVisible();
+    const consentHistoryRow = page
+      .getByRole("row")
+      .filter({ hasText: /Weitergabe an Dritte|Third-party sharing/i })
+      .filter({ hasText: consentNote })
+      .first();
+    await expect(consentHistoryRow).toBeVisible();
 
     await page
       .getByRole("button", { name: /Antrag anlegen|Create request/i })
@@ -88,13 +89,14 @@ test.describe("compliance live workflows", () => {
       .click();
     await closeCurrentSheet(page);
 
-    const privacyHistory = page.locator("table").nth(1);
-    await expect(
-      privacyHistory.getByText(
-        /Widerruf der Drittweitergabe|Third-party sharing revoke/i,
-      ),
-    ).toBeVisible();
-    await expect(privacyHistory.getByText(revokeReason)).toBeVisible();
+    const privacyHistoryRow = page
+      .getByRole("row")
+      .filter({
+        hasText: /Widerruf der Drittweitergabe|Third-party sharing revoke/i,
+      })
+      .filter({ hasText: revokeReason })
+      .first();
+    await expect(privacyHistoryRow).toBeVisible();
 
     const queueRow = privacyQueueRow(
       page,

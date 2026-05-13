@@ -7,7 +7,7 @@ data "aws_ami" "ubuntu" {
   filter {
     name = "name"
     values = [
-      "ubuntu/images/hvm-ssd-gp3/ubuntu-jammy-22.04-${var.cpu_architecture}-server-*",
+      "ubuntu/images/hvm-ssd*/ubuntu-jammy-22.04-${var.cpu_architecture}-server-*",
     ]
   }
 
@@ -23,6 +23,10 @@ locals {
   ssm_parameter_arns = [
     for name in values(var.ssm_parameter_names) :
     "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/${trimprefix(name, "/")}"
+  ]
+
+  ssm_kms_key_arns = [
+    "arn:aws:kms:${var.region}:${data.aws_caller_identity.current.account_id}:key/*",
   ]
 }
 
@@ -69,7 +73,15 @@ resource "aws_iam_role_policy" "ssm_secrets_read" {
         Sid      = "DecryptSecureStrings"
         Effect   = "Allow"
         Action   = ["kms:Decrypt"]
-        Resource = "*"
+        Resource = local.ssm_kms_key_arns
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "ssm.${var.region}.amazonaws.com"
+          }
+          "ForAnyValue:StringLike" = {
+            "kms:EncryptionContext:PARAMETER_ARN" = local.ssm_parameter_arns
+          }
+        }
       },
     ]
   })
@@ -96,18 +108,25 @@ resource "aws_instance" "app" {
     delete_on_termination = true
   }
 
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+    instance_metadata_tags      = "disabled"
+  }
+
   user_data = templatefile("${path.module}/templates/bootstrap.sh.tftpl", {
-    aws_region          = var.region
-    app_repo_url        = var.app_repo_url
-    app_branch          = var.app_branch
-    backend_port        = var.backend_port
-    frontend_port       = var.frontend_port
-    database_url_param  = var.ssm_parameter_names.database_url
-    jwt_secret_param    = var.ssm_parameter_names.jwt_secret
-    keys_param          = var.ssm_parameter_names.message_encryption_keys
-    active_key_param    = var.ssm_parameter_names.message_encryption_key_active
-    audit_salt_param    = var.ssm_parameter_names.audit_ip_salt
-    cors_origin_param   = var.ssm_parameter_names.cors_origin
+    aws_region         = var.region
+    app_repo_url       = var.app_repo_url
+    app_branch         = var.app_branch
+    backend_port       = var.backend_port
+    frontend_port      = var.frontend_port
+    database_url_param = var.ssm_parameter_names.database_url
+    jwt_secret_param   = var.ssm_parameter_names.jwt_secret
+    keys_param         = var.ssm_parameter_names.message_encryption_keys
+    active_key_param   = var.ssm_parameter_names.message_encryption_key_active
+    audit_salt_param   = var.ssm_parameter_names.audit_ip_salt
+    cors_origin_param  = var.ssm_parameter_names.cors_origin
   })
 
   tags = merge(var.tags, {

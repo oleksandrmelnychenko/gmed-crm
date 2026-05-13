@@ -31,6 +31,8 @@ This is intended for `dev`/early `stage`. For production, extend with private su
    - to `infra/terraform/environments/dev/terraform.tfvars`
 2. Fill:
    - `allowed_ssh_cidrs`
+   - `allowed_frontend_cidrs` if the frontend app port should differ from `allowed_http_cidrs`
+   - `allowed_backend_cidrs` only if you explicitly need direct backend API access
    - `budget_email`
    - `ssm_parameter_names` to match your account paths
 3. Run:
@@ -61,6 +63,6 @@ The instance role is granted read access to these parameters.
 
 - The bootstrap process clones/pulls the repo and runs:
   - `docker compose -f docker-compose.yml -f docker-compose.release.yml up -d --build`
+- Direct backend ingress is disabled by default. Keep the API behind the frontend/proxy unless a temporary allowlist is required.
 - This keeps infra simple and cheap, but image builds happen on EC2.
 - For the next phase, switch to prebuilt images (ECR/GHCR) to reduce deploy time and variability.
-
