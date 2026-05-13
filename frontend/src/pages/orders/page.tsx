@@ -59,6 +59,7 @@ import { useAuth } from "@/lib/auth";
 import {
   formatEnumLabel,
   formatEnumLabelFromKeys,
+  formatUnknownValue,
   formatUiText,
   type TranslationKey,
   type UiTextValues,
@@ -780,7 +781,7 @@ function useOrdersPageContent() {
         count: Number(missingDocsMatch[1]),
       });
     }
-    return reason;
+    return formatUnknownValue(reason, t);
   };
 
   const [ordersPageState, dispatchOrdersPageState] = useReducer(
