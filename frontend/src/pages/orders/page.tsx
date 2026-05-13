@@ -13,7 +13,6 @@ import {
 import { useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowUpRight,
-  Building2,
   CalendarClock,
   CheckCircle2,
   ChevronRight,
@@ -192,24 +191,12 @@ const ORDER_REALTIME_EVENTS = [
   "workflow_checklist_item.completed",
 ] as const;
 
-type StatCardProps = {
-  label: string;
-  value: string;
-  description: string;
-  icon: ReactNode;
-};
-
 type SectionCardProps = {
   title: string;
   description?: string;
   action?: ReactNode;
   children: ReactNode;
   className?: string;
-};
-
-type DetailFieldProps = {
-  label: string;
-  value: ReactNode;
 };
 
 type EmptyStateProps = {
@@ -289,25 +276,6 @@ const ORDER_BLOCKING_REASON_LABEL_KEYS: Record<string, string> = {
     "orders_blocking_existing_customer_recheck_not_required",
 };
 
-function StatCard({ label, value, description, icon }: StatCardProps) {
-  return (
-    <div className="rounded-xl border border-border bg-card p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="space-y-1">
-          <div className={tokens.text.eyebrow}>{label}</div>
-          <div className="text-xl font-semibold tracking-tight text-foreground">
-            {value}
-          </div>
-        </div>
-        <div className="rounded-xl border border-border bg-muted/30 p-2 text-muted-foreground">
-          {icon}
-        </div>
-      </div>
-      <p className="mt-3 text-xs text-muted-foreground">{description}</p>
-    </div>
-  );
-}
-
 function SectionCard({
   title,
   description,
@@ -348,15 +316,6 @@ function OrderSheetSection({
       <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
       <div className="mt-5 space-y-4">{children}</div>
     </section>
-  );
-}
-
-function DetailField({ label, value }: DetailFieldProps) {
-  return (
-    <div className={cn("rounded-xl p-3", tokens.surface.card)}>
-      <div className={tokens.text.eyebrow}>{label}</div>
-      <div className="mt-2 text-sm text-foreground">{value}</div>
-    </div>
   );
 }
 
@@ -497,6 +456,7 @@ type OrdersPageState = {
   leistungForm: LeistungFormState;
   leistungSaving: boolean;
   leistungError: string | null;
+  externalInvoiceOpen: boolean;
   externalInvoiceForm: ExternalInvoiceFormState;
   externalInvoiceSaving: boolean;
   externalInvoiceError: string | null;
@@ -844,6 +804,7 @@ function useOrdersPageContent() {
       leistungForm: blankLeistungForm(),
       leistungSaving: false,
       leistungError: null,
+      externalInvoiceOpen: false,
       externalInvoiceForm: blankExternalInvoiceForm(),
       externalInvoiceSaving: false,
       externalInvoiceError: null,
@@ -869,6 +830,7 @@ function useOrdersPageContent() {
     executionForm,
     externalInvoiceError,
     externalInvoiceForm,
+    externalInvoiceOpen,
     externalInvoiceSaving,
     externalInvoiceUpdatingId,
     filters,
@@ -1047,6 +1009,8 @@ function useOrdersPageContent() {
     setOrdersPageField("leistungSaving", nextValue);
   const setLeistungError = (nextValue: SetStateAction<string | null>) =>
     setOrdersPageField("leistungError", nextValue);
+  const setExternalInvoiceOpen = (nextValue: SetStateAction<boolean>) =>
+    setOrdersPageField("externalInvoiceOpen", nextValue);
   const setExternalInvoiceForm = (
     nextValue: SetStateAction<ExternalInvoiceFormState>,
   ) => setOrdersPageField("externalInvoiceForm", nextValue);
@@ -1479,6 +1443,15 @@ function useOrdersPageContent() {
       setLeistungError(null);
       setLeistungForm(blankLeistungForm());
       setLeistungSaving(false);
+    }
+  }
+
+  function resetExternalInvoiceDialog(open: boolean) {
+    setExternalInvoiceOpen(open);
+    if (!open) {
+      setExternalInvoiceError(null);
+      setExternalInvoiceForm(blankExternalInvoiceForm());
+      setExternalInvoiceSaving(false);
     }
   }
 
@@ -2440,7 +2413,7 @@ function useOrdersPageContent() {
         status: externalInvoiceForm.status,
         notes: optString(externalInvoiceForm.notes),
       });
-      setExternalInvoiceForm(blankExternalInvoiceForm());
+      resetExternalInvoiceDialog(false);
       triggerReload();
     } catch (error) {
       setExternalInvoiceError(
@@ -5517,370 +5490,436 @@ function useOrdersPageContent() {
                 ) : null}
 
                 {shouldRenderOrderSection("invoices") ? (
-                  <SectionCard
-                    title={t.orders_external_invoices_title}
-                    description={t.orders_external_invoices_description}
-                  >
-                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                    <StatCard
-                      label={t.orders_external_invoices_count_label}
-                      value={String(externalInvoiceMetrics.total)}
-                      description={t.orders_external_invoices_count_description}
-                      icon={<Wallet className="size-4" />}
-                    />
-                    <StatCard
-                      label={t.orders_external_invoices_overdue_label}
-                      value={String(externalInvoiceMetrics.overdue)}
-                      description={t.orders_external_invoices_overdue_description}
-                      icon={<CalendarClock className="size-4" />}
-                    />
-                    <StatCard
-                      label={t.orders_external_invoices_paid_label}
-                      value={String(externalInvoiceMetrics.paid)}
-                      description={t.orders_external_invoices_paid_description}
-                      icon={<CheckCircle2 className="size-4" />}
-                    />
-                    <StatCard
-                      label={t.orders_external_invoices_gross_label}
-                      value={formatMoney(externalInvoiceMetrics.gross)}
-                      description={t.orders_external_invoices_gross_description}
-                      icon={<Building2 className="size-4" />}
-                    />
-                  </div>
-
-                  <div className="mt-5 space-y-5">
-                    {permissions.canManageExternalInvoices ? (
-                      <form
-                        onSubmit={handleCreateExternalInvoice}
-                        className="rounded-2xl border border-border p-4"
-                      >
-                        <div className="flex items-start justify-between gap-4">
-                          <div>
-                            <h3 className="text-sm font-semibold text-foreground">
-                              {titleWithDot(
-                                t.orders_external_invoice_create_title,
-                              )}
-                            </h3>
-                            <p className="mt-1 text-sm text-muted-foreground">
-                              {t.orders_external_invoice_create_description}
-                            </p>
-                          </div>
-                        </div>
-                        {externalInvoiceError ? (
-                          <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                            {externalInvoiceError}
-                          </div>
-                        ) : null}
-                        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                          <Field label={t.orders_external_invoice_number}>
-                            <Input
-                              value={externalInvoiceForm.externalInvoiceNumber}
-                              onChange={(event) =>
-                                setExternalInvoiceForm((current) => ({
-                                  ...current,
-                                  externalInvoiceNumber: event.target.value,
-                                }))
-                              }
-                              className={inputClassName}
-                            />
-                          </Field>
-                          <Field label={t.common_provider}>
-                            <NativeComboboxSelect
-                              value={externalInvoiceForm.providerId}
-                              onChange={(event) =>
-                                setExternalInvoiceForm((current) => ({
-                                  ...current,
-                                  providerId: event.target.value,
-                                }))
-                              }
-                              className={selectClassName}
-                            >
-                              <option value="">{t.common_not_set}</option>
-                              {providers.map((provider) => (
-                                <option key={provider.id} value={provider.id}>
-                                  {provider.name}
-                                </option>
-                              ))}
-                            </NativeComboboxSelect>
-                          </Field>
-                          <Field label={t.orders_external_invoice_date}>
-                            <Input
-                              type="date"
-                              value={externalInvoiceForm.invoiceDate}
-                              onChange={(event) =>
-                                setExternalInvoiceForm((current) => ({
-                                  ...current,
-                                  invoiceDate: event.target.value,
-                                }))
-                              }
-                              className={inputClassName}
-                            />
-                          </Field>
-                          <Field label={t.orders_external_invoice_due_date}>
-                            <Input
-                              type="date"
-                              value={externalInvoiceForm.dueDate}
-                              onChange={(event) =>
-                                setExternalInvoiceForm((current) => ({
-                                  ...current,
-                                  dueDate: event.target.value,
-                                }))
-                              }
-                              className={inputClassName}
-                            />
-                          </Field>
-                          <Field label={t.orders_external_invoice_net}>
-                            <Input
-                              value={externalInvoiceForm.amountNet}
-                              onChange={(event) =>
-                                setExternalInvoiceForm((current) => ({
-                                  ...current,
-                                  amountNet: event.target.value,
-                                }))
-                              }
-                              className={inputClassName}
-                            />
-                          </Field>
-                          <Field label={t.orders_external_invoice_vat}>
-                            <Input
-                              value={externalInvoiceForm.amountVat}
-                              onChange={(event) =>
-                                setExternalInvoiceForm((current) => ({
-                                  ...current,
-                                  amountVat: event.target.value,
-                                }))
-                              }
-                              className={inputClassName}
-                            />
-                          </Field>
-                          <Field label={t.orders_external_invoice_gross}>
-                            <Input
-                              value={externalInvoiceForm.amountGross}
-                              onChange={(event) =>
-                                setExternalInvoiceForm((current) => ({
-                                  ...current,
-                                  amountGross: event.target.value,
-                                }))
-                              }
-                              className={inputClassName}
-                            />
-                          </Field>
-                          <Field label={t.orders_external_invoice_status}>
-                            <NativeComboboxSelect
-                              value={externalInvoiceForm.status}
-                              onChange={(event) =>
-                                setExternalInvoiceForm((current) => ({
-                                  ...current,
-                                  status: event.target
-                                    .value as ExternalInvoiceStatus,
-                                }))
-                              }
-                              className={selectClassName}
-                            >
-                              {EXTERNAL_INVOICE_STATUSES.map((status) => (
-                                <option key={status} value={status}>
-                                  {externalInvoiceStatusLabel(status)}
-                                </option>
-                              ))}
-                            </NativeComboboxSelect>
-                          </Field>
-                          <Field className="md:col-span-2 xl:col-span-4" label={t.patients_notes}>
-                            <textarea
-                              value={externalInvoiceForm.notes}
-                              onChange={(event) =>
-                                setExternalInvoiceForm((current) => ({
-                                  ...current,
-                                  notes: event.target.value,
-                                }))
-                              }
-                              className={textareaClassName}
-                            />
-                          </Field>
-                        </div>
-                        <div className="mt-4 flex justify-end">
+                  <>
+                    <SectionCard
+                      title={t.orders_external_invoices_title}
+                      action={
+                        permissions.canManageExternalInvoices ? (
                           <Button
-                            type="submit"
-                            disabled={externalInvoiceSaving}
+                            type="button"
+                            className="h-8 rounded-lg px-3"
+                            onClick={() => resetExternalInvoiceDialog(true)}
                           >
-                            {externalInvoiceSaving ? (
-                              <LoaderCircle className="mr-2 size-4 animate-spin" />
-                            ) : (
-                              <Plus className="mr-2 size-4" />
-                            )}
-                            {t.orders_external_invoice_add}
+                            <Plus className="size-4" />
+                            {t.orders_external_invoice_create_title}
                           </Button>
-                        </div>
-                      </form>
-                    ) : null}
+                        ) : undefined
+                      }
+                    >
+                      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,230px),1fr))] gap-2">
+                        <MiniMetric
+                          label={t.orders_external_invoices_count_label}
+                          value={String(externalInvoiceMetrics.total)}
+                        />
+                        <MiniMetric
+                          label={t.orders_external_invoices_overdue_label}
+                          value={String(externalInvoiceMetrics.overdue)}
+                        />
+                        <MiniMetric
+                          label={t.orders_external_invoices_paid_label}
+                          value={String(externalInvoiceMetrics.paid)}
+                        />
+                        <MiniMetric
+                          label={t.orders_external_invoices_gross_label}
+                          value={formatMoney(externalInvoiceMetrics.gross)}
+                        />
+                      </div>
+                    </SectionCard>
 
-                    {(orderDetail.external_invoices ?? []).length === 0 ? (
-                      <EmptyState
-                        title={t.orders_external_invoices_empty_title}
-                        description={t.orders_external_invoices_empty_description}
-                      />
-                    ) : (
-                      <div className="space-y-3">
-                        {(orderDetail.external_invoices ?? []).map(
-                          (invoice) => (
-                            <div
-                              key={invoice.id}
-                              className="rounded-2xl border border-border p-4"
-                            >
-                              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                                <div className="space-y-3">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <div className="text-base font-semibold text-foreground">
-                                      {invoice.external_invoice_number}
+                    <SectionCard title={l("orders_rechnungen")}>
+                      {(orderDetail.external_invoices ?? []).length === 0 ? (
+                        <EmptyState
+                          title={t.orders_external_invoices_empty_title}
+                          description={t.orders_external_invoices_empty_description}
+                        />
+                      ) : (
+                        <div className="space-y-3">
+                          {(orderDetail.external_invoices ?? []).map((invoice, index) => {
+                            const invoiceUpdating =
+                              externalInvoiceUpdatingId === invoice.id;
+                            const providerLabel =
+                              invoice.provider_name || t.common_provider;
+                            const providerValue = invoice.provider_id ? (
+                              <button
+                                type="button"
+                                className="max-w-full truncate font-semibold text-sky-700 hover:text-sky-800"
+                                onClick={() =>
+                                  window.open(
+                                    `/providers?provider=${invoice.provider_id}`,
+                                    "_blank",
+                                    "noopener,noreferrer",
+                                  )
+                                }
+                              >
+                                {providerLabel}
+                              </button>
+                            ) : invoice.provider_name ? (
+                              invoice.provider_name
+                            ) : (
+                              t.common_not_set
+                            );
+
+                            return (
+                              <article
+                                key={invoice.id}
+                                className="overflow-hidden rounded-2xl border border-border bg-card"
+                              >
+                                <div className="grid lg:grid-cols-[minmax(0,1fr)_230px]">
+                                  <div className="p-4">
+                                    <div className="flex items-start gap-3">
+                                      <div className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted/30 text-xs font-semibold text-muted-foreground">
+                                        {index + 1}
+                                      </div>
+                                      <div className="min-w-0">
+                                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                          <h3 className="min-w-0 break-words text-sm font-semibold leading-snug text-foreground">
+                                            {invoice.external_invoice_number}
+                                          </h3>
+                                          <Badge
+                                            variant="outline"
+                                            className={cn(
+                                              "rounded-full",
+                                              statusClassName(invoice.status),
+                                            )}
+                                          >
+                                            {externalInvoiceStatusLabel(invoice.status)}
+                                          </Badge>
+                                        </div>
+                                        <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                                          {providerValue}
+                                        </div>
+                                        <p className="mt-2 max-w-2xl text-xs leading-snug text-muted-foreground">
+                                          {t.orders_external_invoice_date}:{" "}
+                                          {formatDateLabel(invoice.invoice_date)}
+                                          {" · "}
+                                          {t.orders_external_invoice_due_date}:{" "}
+                                          {formatDateLabel(invoice.due_date)}
+                                        </p>
+                                      </div>
                                     </div>
-                                    <Badge
-                                      variant="outline"
-                                      className={cn(
-                                        "rounded-full",
-                                        statusClassName(invoice.status),
-                                      )}
-                                    >
-                                      {externalInvoiceStatusLabel(invoice.status)}
-                                    </Badge>
-                                    {invoice.provider_name ? (
-                                      <Badge
-                                        variant="outline"
-                                        className="rounded-full border-sky-200 bg-sky-50 text-sky-700"
-                                      >
-                                        {invoice.provider_name}
-                                      </Badge>
-                                    ) : null}
                                   </div>
-                                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                                    <DetailField
-                                      label={t.orders_external_invoice_date}
-                                      value={formatDateLabel(invoice.invoice_date)}
-                                    />
-                                    <DetailField
-                                      label={t.orders_external_invoice_due_date}
-                                      value={formatDateLabel(invoice.due_date)}
-                                    />
-                                    <DetailField
-                                      label={t.orders_external_invoice_net}
-                                      value={formatMoney(
+
+                                  <div className="relative border-t border-border p-4 lg:border-t-0 lg:pl-5 lg:before:absolute lg:before:bottom-4 lg:before:left-0 lg:before:top-4 lg:before:border-l lg:before:border-dashed lg:before:border-border">
+                                    <div className="space-y-3">
+                                      {permissions.canManageExternalInvoices ? (
+                                        <div className="flex flex-col gap-2">
+                                          {invoice.status !== "approved" ? (
+                                            <Button
+                                              variant="outline"
+                                              size="sm"
+                                              className="h-auto min-h-8 w-full whitespace-normal rounded-lg px-3 text-center"
+                                              onClick={() =>
+                                                void handleUpdateExternalInvoiceStatus(
+                                                  invoice.id,
+                                                  "approved",
+                                                )
+                                              }
+                                              disabled={invoiceUpdating}
+                                            >
+                                              {invoiceUpdating ? (
+                                                <LoaderCircle className="mr-2 size-4 animate-spin" />
+                                              ) : null}
+                                              {externalInvoiceStatusLabel("approved")}
+                                            </Button>
+                                          ) : null}
+                                          {invoice.status !== "paid" ? (
+                                            <Button
+                                              variant="outline"
+                                              size="sm"
+                                              className="h-auto min-h-8 w-full whitespace-normal rounded-lg px-3 text-center"
+                                              onClick={() =>
+                                                void handleUpdateExternalInvoiceStatus(
+                                                  invoice.id,
+                                                  "paid",
+                                                )
+                                              }
+                                              disabled={invoiceUpdating}
+                                            >
+                                              {invoiceUpdating ? (
+                                                <LoaderCircle className="mr-2 size-4 animate-spin" />
+                                              ) : null}
+                                              {externalInvoiceStatusLabel("paid")}
+                                            </Button>
+                                          ) : null}
+                                          {invoice.status !== "cancelled" ? (
+                                            <Button
+                                              variant="outline"
+                                              size="sm"
+                                              className="h-auto min-h-8 w-full whitespace-normal rounded-lg px-3 text-center"
+                                              onClick={() =>
+                                                void handleUpdateExternalInvoiceStatus(
+                                                  invoice.id,
+                                                  "cancelled",
+                                                )
+                                              }
+                                              disabled={invoiceUpdating}
+                                            >
+                                              {invoiceUpdating ? (
+                                                <LoaderCircle className="mr-2 size-4 animate-spin" />
+                                              ) : null}
+                                              {t.orders_external_invoice_cancel}
+                                            </Button>
+                                          ) : null}
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="grid border-t border-border bg-muted/15 sm:grid-cols-2 xl:grid-cols-5">
+                                  <div className="px-4 py-3">
+                                    <div className="text-xs text-muted-foreground">
+                                      {t.orders_external_invoice_net}
+                                    </div>
+                                    <div className="mt-1 text-sm font-semibold text-foreground">
+                                      {formatMoney(
                                         invoice.amount_net,
                                         invoice.currency,
                                       )}
-                                    />
-                                    <DetailField
-                                      label={t.orders_external_invoice_vat}
-                                      value={formatMoney(
+                                    </div>
+                                  </div>
+                                  <div className="border-t border-border px-4 py-3 sm:border-l sm:border-t-0">
+                                    <div className="text-xs text-muted-foreground">
+                                      {t.orders_external_invoice_vat}
+                                    </div>
+                                    <div className="mt-1 text-sm font-semibold text-foreground">
+                                      {formatMoney(
                                         invoice.amount_vat,
                                         invoice.currency,
                                       )}
-                                    />
-                                    <DetailField
-                                      label={t.orders_external_invoice_gross}
-                                      value={formatMoney(
+                                    </div>
+                                  </div>
+                                  <div className="border-t border-border px-4 py-3 xl:border-l xl:border-t-0">
+                                    <div className="text-xs text-muted-foreground">
+                                      {t.orders_external_invoice_gross}
+                                    </div>
+                                    <div className="mt-1 text-sm font-semibold text-foreground">
+                                      {formatMoney(
                                         invoice.amount_gross,
                                         invoice.currency,
                                       )}
-                                    />
-                                    <DetailField
-                                      label={t.orders_external_invoice_received}
-                                      value={formatDateTimeLabel(
-                                        invoice.received_at,
-                                      )}
-                                    />
-                                    <DetailField
-                                      label={t.orders_external_invoice_paid}
-                                      value={formatDateTimeLabel(invoice.paid_at)}
-                                    />
-                                    <DetailField
-                                      label={t.orders_external_invoice_updated}
-                                      value={formatDateTimeLabel(invoice.updated_at)}
-                                    />
-                                  </div>
-                                  {invoice.notes ? (
-                                    <div className="rounded-xl border border-border px-4 py-3 text-sm text-muted-foreground">
-                                      {invoice.notes}
                                     </div>
-                                  ) : null}
+                                  </div>
+                                  <div className="border-t border-border px-4 py-3 sm:border-l xl:border-t-0">
+                                    <div className="text-xs text-muted-foreground">
+                                      {t.orders_external_invoice_received}
+                                    </div>
+                                    <div className="mt-1 text-sm font-semibold text-foreground">
+                                      {formatDateTimeLabel(invoice.received_at)}
+                                    </div>
+                                  </div>
+                                  <div className="border-t border-border px-4 py-3 xl:border-l xl:border-t-0">
+                                    <div className="text-xs text-muted-foreground">
+                                      {t.orders_external_invoice_paid}
+                                    </div>
+                                    <div className="mt-1 text-sm font-semibold text-foreground">
+                                      {formatDateTimeLabel(invoice.paid_at)}
+                                    </div>
+                                  </div>
                                 </div>
 
-                                {permissions.canManageExternalInvoices ? (
-                                  <div className="flex shrink-0 flex-wrap gap-2">
-                                    {invoice.status !== "approved" ? (
-                                      <Button
-                                        variant="outline"
-                                        onClick={() =>
-                                          void handleUpdateExternalInvoiceStatus(
-                                            invoice.id,
-                                            "approved",
-                                          )
-                                        }
-                                        disabled={
-                                          externalInvoiceUpdatingId ===
-                                          invoice.id
-                                        }
-                                      >
-                                        {externalInvoiceUpdatingId ===
-                                        invoice.id ? (
-                                          <LoaderCircle className="mr-2 size-4 animate-spin" />
-                                        ) : null}
-                                        {t.orders_external_invoice_mark_approved}
-                                      </Button>
-                                    ) : null}
-                                    {invoice.status !== "paid" ? (
-                                      <Button
-                                        variant="outline"
-                                        onClick={() =>
-                                          void handleUpdateExternalInvoiceStatus(
-                                            invoice.id,
-                                            "paid",
-                                          )
-                                        }
-                                        disabled={
-                                          externalInvoiceUpdatingId ===
-                                          invoice.id
-                                        }
-                                      >
-                                        {externalInvoiceUpdatingId ===
-                                        invoice.id ? (
-                                          <LoaderCircle className="mr-2 size-4 animate-spin" />
-                                        ) : null}
-                                        {t.orders_external_invoice_mark_paid}
-                                      </Button>
-                                    ) : null}
-                                    {invoice.status !== "cancelled" ? (
-                                      <Button
-                                        variant="outline"
-                                        onClick={() =>
-                                          void handleUpdateExternalInvoiceStatus(
-                                            invoice.id,
-                                            "cancelled",
-                                          )
-                                        }
-                                        disabled={
-                                          externalInvoiceUpdatingId ===
-                                          invoice.id
-                                        }
-                                      >
-                                        {externalInvoiceUpdatingId ===
-                                        invoice.id ? (
-                                          <LoaderCircle className="mr-2 size-4 animate-spin" />
-                                        ) : null}
-                                        {t.orders_external_invoice_cancel}
-                                      </Button>
-                                    ) : null}
+                                {invoice.notes ? (
+                                  <div className="border-t border-border px-4 py-3 text-sm leading-snug text-muted-foreground">
+                                    {invoice.notes}
                                   </div>
                                 ) : null}
-                              </div>
-                            </div>
-                          ),
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  </SectionCard>
+                              </article>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </SectionCard>
+                  </>
                 ) : null}
               </div>
             )}
           </AdminSheetScaffold>
+      </SheetContent>
+      </Sheet>
+
+      <Sheet open={externalInvoiceOpen} onOpenChange={resetExternalInvoiceDialog}>
+        <SheetContent
+          side="right"
+          className="w-full border-l border-border p-0 sm:max-w-[860px]"
+        >
+          <form
+            onSubmit={handleCreateExternalInvoice}
+            className="flex h-full min-h-0 flex-col"
+          >
+            <AdminSheetScaffold
+              title={t.orders_external_invoice_create_title}
+              description={t.orders_external_invoice_create_description}
+              footer={
+                <SheetFormFooter
+                  cancelLabel={t.common_cancel}
+                  submitLabel={t.orders_external_invoice_add}
+                  submittingLabel={t.orders_external_invoice_add}
+                  submitting={externalInvoiceSaving}
+                  submitDisabled={externalInvoiceSaving}
+                  onCancel={() => resetExternalInvoiceDialog(false)}
+                />
+              }
+              headerClassName="px-4 py-3"
+              bodyClassName="min-h-0 overscroll-y-contain px-4 py-2 space-y-4"
+            >
+              {externalInvoiceError ? (
+                <Banner tone="error" withIcon>
+                  {externalInvoiceError}
+                </Banner>
+              ) : null}
+
+              <OrderSheetSection title={l("orders_grunddaten")}>
+                <div className="grid gap-3 md:grid-cols-4">
+                  <Field
+                    label={t.orders_external_invoice_number}
+                    className="md:col-span-2"
+                  >
+                    <Input
+                      value={externalInvoiceForm.externalInvoiceNumber}
+                      onChange={(event) =>
+                        setExternalInvoiceForm((current) => ({
+                          ...current,
+                          externalInvoiceNumber: event.target.value,
+                        }))
+                      }
+                      className={inputClassName}
+                    />
+                  </Field>
+                  <Field label={t.common_provider} className="md:col-span-2">
+                    <NativeComboboxSelect
+                      value={externalInvoiceForm.providerId}
+                      onChange={(event) =>
+                        setExternalInvoiceForm((current) => ({
+                          ...current,
+                          providerId: event.target.value,
+                        }))
+                      }
+                      className={selectClassName}
+                    >
+                      <option value="">{t.common_not_set}</option>
+                      {providers.map((provider) => (
+                        <option key={provider.id} value={provider.id}>
+                          {provider.name}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+                  <Field label={t.orders_external_invoice_date}>
+                    <Input
+                      type="date"
+                      value={externalInvoiceForm.invoiceDate}
+                      onChange={(event) =>
+                        setExternalInvoiceForm((current) => ({
+                          ...current,
+                          invoiceDate: event.target.value,
+                        }))
+                      }
+                      className={inputClassName}
+                    />
+                  </Field>
+                  <Field label={t.orders_external_invoice_due_date}>
+                    <Input
+                      type="date"
+                      value={externalInvoiceForm.dueDate}
+                      onChange={(event) =>
+                        setExternalInvoiceForm((current) => ({
+                          ...current,
+                          dueDate: event.target.value,
+                        }))
+                      }
+                      className={inputClassName}
+                    />
+                  </Field>
+                  <Field label={t.orders_external_invoice_status}>
+                    <NativeComboboxSelect
+                      value={externalInvoiceForm.status}
+                      onChange={(event) =>
+                        setExternalInvoiceForm((current) => ({
+                          ...current,
+                          status: event.target.value as ExternalInvoiceStatus,
+                        }))
+                      }
+                      className={selectClassName}
+                    >
+                      {EXTERNAL_INVOICE_STATUSES.map((status) => (
+                        <option key={status} value={status}>
+                          {externalInvoiceStatusLabel(status)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+                </div>
+              </OrderSheetSection>
+
+              <OrderSheetSection title={l("orders_kosten")}>
+                <div className="grid gap-3 md:grid-cols-4">
+                  <Field label={t.orders_external_invoice_net}>
+                    <Input
+                      value={externalInvoiceForm.amountNet}
+                      onChange={(event) =>
+                        setExternalInvoiceForm((current) => ({
+                          ...current,
+                          amountNet: event.target.value,
+                        }))
+                      }
+                      className={inputClassName}
+                    />
+                  </Field>
+                  <Field label={t.orders_external_invoice_vat}>
+                    <Input
+                      value={externalInvoiceForm.amountVat}
+                      onChange={(event) =>
+                        setExternalInvoiceForm((current) => ({
+                          ...current,
+                          amountVat: event.target.value,
+                        }))
+                      }
+                      className={inputClassName}
+                    />
+                  </Field>
+                  <Field label={t.orders_external_invoice_gross}>
+                    <Input
+                      value={externalInvoiceForm.amountGross}
+                      onChange={(event) =>
+                        setExternalInvoiceForm((current) => ({
+                          ...current,
+                          amountGross: event.target.value,
+                        }))
+                      }
+                      className={inputClassName}
+                    />
+                  </Field>
+                  <Field label={t.orders_service_group_currency}>
+                    <Input
+                      value={externalInvoiceForm.currency}
+                      onChange={(event) =>
+                        setExternalInvoiceForm((current) => ({
+                          ...current,
+                          currency: event.target.value,
+                        }))
+                      }
+                      className={inputClassName}
+                    />
+                  </Field>
+                </div>
+              </OrderSheetSection>
+
+              <OrderSheetSection title={t.patients_notes}>
+                <Field label={t.patients_notes}>
+                  <textarea
+                    value={externalInvoiceForm.notes}
+                    onChange={(event) =>
+                      setExternalInvoiceForm((current) => ({
+                        ...current,
+                        notes: event.target.value,
+                      }))
+                    }
+                    className={textareaClassName}
+                  />
+                </Field>
+              </OrderSheetSection>
+            </AdminSheetScaffold>
+          </form>
         </SheetContent>
       </Sheet>
 
