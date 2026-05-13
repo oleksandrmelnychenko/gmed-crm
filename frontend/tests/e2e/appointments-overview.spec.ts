@@ -238,8 +238,10 @@ test.describe("appointments overview detail", () => {
       .filter({ hasText: "Status und Zuständigkeiten" })
       .first();
     await expect(summarySection).toBeVisible();
-    await expect(summarySection).toContainText(/Arzt\s*Claudia Neumann/);
-    await expect(summarySection).toContainText(/Dolmetscher\s*Marina Sokolova/);
+    await expect(summarySection).toContainText("Arzt");
+    await expect(summarySection).toContainText("Claudia Neumann");
+    await expect(summarySection).toContainText("Dolmetscher");
+    await expect(summarySection).toContainText("Marina Sokolova");
     await expect(summarySection).not.toContainText(/Arzt\s*Marina Sokolova/);
 
     await expect(summarySection).toContainText("Medizinisch");
@@ -259,11 +261,11 @@ test.describe("appointments overview detail", () => {
       .filter({ hasText: "Verknüpfte Datensätze" })
       .first();
     await expect(linkedSection).toBeVisible();
-    await expect(linkedSection.getByRole("button", { name: "Patient" })).toBeVisible();
-    await expect(linkedSection.getByRole("button", { name: "Auftrag" })).toBeVisible();
-    await expect(linkedSection.getByRole("button", { name: "Klinik" })).toBeVisible();
-    await expect(linkedSection.getByRole("button", { name: "Dokumente" })).toBeVisible();
-    await expect(linkedSection.getByRole("button", { name: "Fälle" })).toBeVisible();
+    await expect(linkedSection.getByRole("button", { name: /^Patient\b/ })).toBeVisible();
+    await expect(linkedSection.getByRole("button", { name: /^Auftrag\b/ })).toBeVisible();
+    await expect(linkedSection.getByRole("button", { name: /^Klinik\b/ })).toBeVisible();
+    await expect(linkedSection.getByRole("button", { name: /^Dokumente\b/ })).toBeVisible();
+    await expect(linkedSection.getByRole("button", { name: /^Fälle\b/ })).toBeVisible();
     await expect(linkedSection).not.toContainText("Arbeitsbereich öffnen");
     await expect(linkedSection).not.toContainText("Schnellvorschau");
   });

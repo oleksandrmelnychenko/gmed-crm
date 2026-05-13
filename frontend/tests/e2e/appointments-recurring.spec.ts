@@ -307,6 +307,6 @@ test.describe("appointments recurring flows", () => {
     await cancelWholeSeriesButton.click();
 
     await expect(page.getByText(/^Abgesagt$/).first()).toBeVisible();
-    await expect(page.getByText(/^3 abgesagt$/)).toBeVisible();
+    await expect(page.getByText(/^abgesagt:\s*3$/)).toBeVisible();
   });
 });

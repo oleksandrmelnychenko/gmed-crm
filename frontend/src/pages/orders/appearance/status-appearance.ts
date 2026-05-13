@@ -42,23 +42,6 @@ export function priorityBadgeClass(priority: string) {
   }
 }
 
-export function phaseClassName(phase: string) {
-  switch (phase) {
-    case "discovery":
-      return "border-slate-200 bg-slate-100 text-slate-700";
-    case "intake":
-      return "border-sky-200 bg-sky-100 text-sky-700";
-    case "execution":
-      return "border-amber-200 bg-amber-100 text-amber-700";
-    case "closure":
-      return "border-emerald-200 bg-emerald-100 text-emerald-700";
-    case "followup":
-      return "border-violet-200 bg-violet-100 text-violet-700";
-    default:
-      return "border-slate-200 bg-slate-100 text-slate-700";
-  }
-}
-
 export function recheckBadgeClass(passed: boolean) {
   return passed
     ? "border-emerald-200 bg-emerald-50 text-emerald-700"

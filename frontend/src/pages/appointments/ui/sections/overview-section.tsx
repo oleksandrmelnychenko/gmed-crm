@@ -202,6 +202,10 @@ function AppointmentOverviewSection({
                       label={t.appointments_lineage_completed_short}
                       value={detailCurrentLineageHistory.completed_occurrences}
                     />
+                    <SeriesSummaryBadge
+                      label={t.appointments_lineage_cancelled_short}
+                      value={detailCurrentLineageHistory.cancelled_occurrences}
+                    />
                   </>
                 ) : null}
                 <SeriesSummaryBadge

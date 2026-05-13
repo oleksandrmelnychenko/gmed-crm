@@ -732,7 +732,7 @@ const revenueReportsTextRu: RevenueReportsText = {
       }
 ;
 
-export const revenueReportsText: Record<"de" | "ru", RevenueReportsText> = {
+const revenueReportsText: Record<"de" | "ru", RevenueReportsText> = {
   de: revenueReportsTextDe,
   ru: revenueReportsTextRu,
 };
