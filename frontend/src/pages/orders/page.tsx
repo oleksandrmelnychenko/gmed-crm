@@ -73,7 +73,6 @@ import {
 import {
   orderPhaseTone,
   orderStatusTone,
-  phaseClassName,
   priorityBadgeClass,
   recheckBadgeClass,
   statusClassName,
@@ -296,9 +295,17 @@ function DetailField({ label, value }: DetailFieldProps) {
   );
 }
 
-function OrderSummaryLine({ label, value }: { label: string; value: ReactNode }) {
+function OrderSummaryLine({
+  label,
+  value,
+  className,
+}: {
+  label: string;
+  value: ReactNode;
+  className?: string;
+}) {
   return (
-    <div className="flex items-center gap-3 rounded-lg py-2">
+    <div className={cn("flex items-center gap-3 rounded-lg py-2", className)}>
       <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
       <span className="h-px min-w-6 flex-1 bg-border/70" />
       <span className="max-w-[48%] text-right text-sm font-semibold leading-tight text-foreground">
@@ -3145,16 +3152,17 @@ function useOrdersPageContent() {
                 ) : null}
 
                 {shouldRenderOrderSection("gates") && orderDetail.process_gates ? (
-                  <SectionCard
-                    title={l("Prozess-Gates", "Процессные гейты")}
-                    description={l(
-                      "Finanzseitige Freigaben fur Debt-Hold, Billing-Release und Paketdeckung.",
-                      "Финансовые гейты исполнения по debt-hold, billing-release и покрытию пакетом.",
-                    )}
-                  >
-                    <div className="space-y-4">
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                        <DetailField
+                  <section className="rounded-xl border border-border bg-card p-6">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div>
+                        <h2 className={tokens.text.sectionTitle}>
+                          {titleWithDot(l("Prozess-Gates", "Процессные гейты"))}
+                        </h2>
+                      </div>
+                    </div>
+                    <div className="mt-5 space-y-4">
+                      <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
+                        <OrderSummaryLine
                           label={l("Durchfuhrungsfreigabe", "Готовность к исполнению")}
                           value={
                             <Badge
@@ -3172,8 +3180,30 @@ function useOrdersPageContent() {
                             </Badge>
                           }
                         />
-                        <DetailField
+                        <OrderSummaryLine
+                          label={l("Debt-Workflow", "Debt-workflow")}
+                          value={
+                            debtStatusLabel(
+                              orderDetail.process_gates.debt_management
+                                ?.effective_status ?? "not_required",
+                            )
+                          }
+                        />
+                        <OrderSummaryLine
+                          label={l("Billing-Release", "Billing-release")}
+                          value={billingReleaseLabel(
+                            orderDetail.process_gates.billing_release_status,
+                          )}
+                        />
+                        <OrderSummaryLine
+                          label={l("Paketdeckung", "Покрытие пакетом")}
+                          value={packageCoverageLabel(
+                            orderDetail.process_gates.package_coverage_status,
+                          )}
+                        />
+                        <OrderSummaryLine
                           label={l("Debt-Hold", "Debt-hold")}
+                          className="md:col-span-2"
                           value={
                             orderDetail.process_gates.debt_management
                               ?.blocking_reason
@@ -3183,33 +3213,6 @@ function useOrdersPageContent() {
                                 ? `${orderDetail.process_gates.overdue_invoice_count} ${l("uberfallige Rechnung(en)", "просроченных счет(ов)")}`
                                 : l("Keine uberfalligen Forderungen", "Нет просроченной задолженности")
                           }
-                        />
-                        <DetailField
-                          label={l("Debt-Workflow", "Debt-workflow")}
-                          value={
-                            debtStatusLabel(
-                              orderDetail.process_gates.debt_management
-                                ?.effective_status ?? "not_required",
-                            )
-                          }
-                        />
-                        <DetailField
-                          label={l("Billing-Release", "Billing-release")}
-                          value={billingReleaseLabel(
-                            orderDetail.process_gates.billing_release_status,
-                          )}
-                        />
-                        <DetailField
-                          label={l("Paketdeckung", "Покрытие пакетом")}
-                          value={packageCoverageLabel(
-                            orderDetail.process_gates.package_coverage_status,
-                          )}
-                        />
-                        <DetailField
-                          label={l("Offener Saldo", "Открытый остаток")}
-                          value={formatMoney(
-                            orderDetail.process_gates.outstanding_balance,
-                          )}
                         />
                       </div>
 
@@ -3234,7 +3237,7 @@ function useOrdersPageContent() {
                         </div>
                       ) : null}
 
-                      <div className="grid gap-4 xl:grid-cols-3">
+                      <div className="grid gap-4">
                         {canManageDebt ? (
                           <div className="rounded-2xl border border-border p-4">
                             <div className="text-sm font-semibold text-foreground">
@@ -3524,20 +3527,23 @@ function useOrdersPageContent() {
                         ) : null}
                       </div>
                     </div>
-                  </SectionCard>
+                  </section>
                 ) : null}
 
                 {shouldRenderOrderSection("planning") && orderDetail.planning_preparation ? (
-                  <SectionCard
-                    title={l("Planung und Vorbereitung", "Планирование и подготовка")}
-                    description={l(
-                      "Finalisierung des Behandlungsplans, Terminbuchung, Dolmetscher-Ubergabe und Versand der Vorbereitungsunterlagen vor der Durchfuhrung.",
-                      "Финализация плана лечения, бронирование слотов, передача на переводчика и отправка подготовительных документов до старта исполнения.",
-                    )}
-                  >
-                    <div className="space-y-4">
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                        <DetailField
+                  <section className="rounded-xl border border-border bg-card p-6">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div>
+                        <h2 className={tokens.text.sectionTitle}>
+                          {titleWithDot(
+                            l("Planung und Vorbereitung", "Планирование и подготовка"),
+                          )}
+                        </h2>
+                      </div>
+                    </div>
+                    <div className="mt-5 space-y-4">
+                      <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
+                        <OrderSummaryLine
                           label={l("Planungsfreigabe", "Готовность планирования")}
                           value={
                             <Badge
@@ -3555,7 +3561,7 @@ function useOrdersPageContent() {
                             </Badge>
                           }
                         />
-                        <DetailField
+                        <OrderSummaryLine
                           label={l("Behandlungsplan", "План лечения")}
                           value={
                             treatmentPlanStatusLabel(
@@ -3564,14 +3570,14 @@ function useOrdersPageContent() {
                             )
                           }
                         />
-                        <DetailField
+                        <OrderSummaryLine
                           label={l("Medizinische Termine", "Медицинские записи")}
                           value={l(
                             `${orderDetail.planning_preparation.medical_confirmed}/${orderDetail.planning_preparation.medical_total} bestätigt`,
                             `${orderDetail.planning_preparation.medical_confirmed}/${orderDetail.planning_preparation.medical_total} подтверждено`,
                           )}
                         />
-                        <DetailField
+                        <OrderSummaryLine
                           label={l("Vorbereitungsunterlagen", "Подготовительные документы")}
                           value={
                             preparationDocumentStatusLabel(
@@ -3580,10 +3586,7 @@ function useOrdersPageContent() {
                             )
                           }
                         />
-                      </div>
-
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                        <DetailField
+                        <OrderSummaryLine
                           label={l("Nicht-medizinischer Ablauf", "Немедицинский поток")}
                           value={
                             orderDetail.planning_preparation
@@ -3595,7 +3598,7 @@ function useOrdersPageContent() {
                               : l("Nicht erforderlich", "Не требуется")
                           }
                         />
-                        <DetailField
+                        <OrderSummaryLine
                           label={l("Dolmetscher", "Переводчик")}
                           value={
                             orderDetail.planning_preparation
@@ -3607,7 +3610,7 @@ function useOrdersPageContent() {
                               : l("Nicht erforderlich", "Не требуется")
                           }
                         />
-                        <DetailField
+                        <OrderSummaryLine
                           label={l("Dolmetscher-Briefing", "Брифинг переводчика")}
                           value={
                             interpreterBriefingStatusLabel(
@@ -3616,7 +3619,7 @@ function useOrdersPageContent() {
                             )
                           }
                         />
-                        <DetailField
+                        <OrderSummaryLine
                           label={l("Letzter Meilenstein", "Последний этап")}
                           value={
                             orderDetail.planning_preparation.plan_finalized_at
@@ -3664,7 +3667,7 @@ function useOrdersPageContent() {
 
                       {user?.role === "patient_manager" ||
                       user?.role === "ceo" ? (
-                        <div className="grid gap-4 xl:grid-cols-2">
+                        <div className="grid gap-4">
                           <div className="rounded-2xl border border-border p-4">
                             <div className="text-sm font-semibold text-foreground">
                               {titleWithDot(
@@ -3822,49 +3825,67 @@ function useOrdersPageContent() {
                                 "Используйте связанные рабочие пространства, чтобы подтвердить медицинские слоты, немедицинские услуги, назначение переводчика и подготовительные документы.",
                               )}
                             </div>
-                            <div className="mt-4 grid gap-3">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                className="justify-start rounded-xl"
-                                onClick={() =>
-                                  staffGo(
-                                    `/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
-                                  )
-                                }
-                              >
-                                {l(
-                                  "Medizinische und nicht-medizinische Termine",
-                                  "Медицинские и немедицинские приёмы",
-                                )}
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                className="justify-start rounded-xl"
-                                onClick={() =>
-                                  staffGo(
-                                    `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
-                                  )
-                                }
-                              >
-                                {l("Vorbereitungsunterlagen", "Подготовительные документы")}
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                className="justify-start rounded-xl"
-                                onClick={() =>
-                                  staffGo(
-                                    `/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
-                                  )
-                                }
-                              >
-                                {l(
-                                  "Dolmetscher-Zuweisung und Briefing",
-                                  "Назначение переводчика и брифинг",
-                                )}
-                              </Button>
+                            <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(185px,1fr))] gap-3">
+                              {[
+                                {
+                                  label: l(
+                                    "Medizinische und nicht-medizinische Termine",
+                                    "Медицинские и немедицинские приёмы",
+                                  ),
+                                  description: l(
+                                    "Slots und nicht-medizinische Leistungen bestätigen.",
+                                    "Подтвердить слоты и немедицинские услуги.",
+                                  ),
+                                  href: `/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                                },
+                                {
+                                  label: l(
+                                    "Vorbereitungsunterlagen",
+                                    "Подготовительные документы",
+                                  ),
+                                  description: l(
+                                    "Unterlagen vor der Durchführung prüfen.",
+                                    "Проверить документы перед исполнением.",
+                                  ),
+                                  href: `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                                },
+                                {
+                                  label: l(
+                                    "Dolmetscher-Zuweisung und Briefing",
+                                    "Назначение переводчика и брифинг",
+                                  ),
+                                  description: l(
+                                    "Zuweisung und Briefingstatus prüfen.",
+                                    "Проверить назначение и статус брифинга.",
+                                  ),
+                                  href: `/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                                },
+                              ].map((link) => (
+                                <button
+                                  key={link.label}
+                                  type="button"
+                                  className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                                  onClick={() =>
+                                    window.open(
+                                      link.href,
+                                      "_blank",
+                                      "noopener,noreferrer",
+                                    )
+                                  }
+                                >
+                                  <div className="relative z-10">
+                                    <h3 className="text-sm font-semibold text-foreground">
+                                      {link.label}
+                                    </h3>
+                                    <p className="mt-2 text-xs leading-tight text-muted-foreground">
+                                      {link.description}
+                                    </p>
+                                  </div>
+                                  <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
+                                    <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-tranzinc-y-0.5 group-hover:tranzinc-x-0.5" />
+                                  </span>
+                                </button>
+                              ))}
                               {orderDetail.planning_preparation
                                 .treatment_plan_note ? (
                                 <div className="rounded-xl border border-border px-4 py-3 text-sm text-muted-foreground">
@@ -3879,20 +3900,21 @@ function useOrdersPageContent() {
                         </div>
                       ) : null}
                     </div>
-                  </SectionCard>
+                  </section>
                 ) : null}
 
                 {shouldRenderOrderSection("execution") && orderDetail.execution_flow ? (
-                  <SectionCard
-                    title={l("Durchfuhrung", "Исполнение")}
-                    description={l(
-                      "Ankunft, erbrachte Leistungen, Dolmetscher-Support und Abweichungsbearbeitung vor dem Wechsel in den Abschluss.",
-                      "Прибытие, оказанные услуги, поддержка переводчика и обработка отклонений до перехода заказа в закрытие.",
-                    )}
-                  >
-                    <div className="space-y-4">
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                        <DetailField
+                  <section className="rounded-xl border border-border bg-card p-6">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div>
+                        <h2 className={tokens.text.sectionTitle}>
+                          {titleWithDot(l("Durchfuhrung", "Исполнение"))}
+                        </h2>
+                      </div>
+                    </div>
+                    <div className="mt-5 space-y-4">
+                      <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
+                        <OrderSummaryLine
                           label={l("Abschlussreife", "Готовность к закрытию")}
                           value={
                             <Badge
@@ -3910,30 +3932,28 @@ function useOrdersPageContent() {
                             </Badge>
                           }
                         />
-                        <DetailField
+                        <OrderSummaryLine
                           label={l("Ankunft", "Прибытие")}
                           value={arrivalStatusLabel(
                             orderDetail.execution_flow.arrival_status,
                           )}
                         />
-                        <DetailField
+                        <OrderSummaryLine
                           label={l("Medizinische Durchführung", "Медицинское исполнение")}
+                          className="md:col-span-2"
                           value={l(
                             `${executionStatusLabel(orderDetail.execution_flow.medical_execution_status)} · ${orderDetail.execution_flow.medical_completed} Termin(e) / ${orderDetail.execution_flow.delivered_leistungen} Position(en)`,
                             `${executionStatusLabel(orderDetail.execution_flow.medical_execution_status)} · ${orderDetail.execution_flow.medical_completed} приём(ов) / ${orderDetail.execution_flow.delivered_leistungen} позици(й)`,
                           )}
                         />
-                        <DetailField
+                        <OrderSummaryLine
                           label={l("Offene Durchführungspunkte", "Открытые пункты исполнения")}
                           value={String(
                             orderDetail.execution_flow
                               .open_execution_checklist_count,
                           )}
                         />
-                      </div>
-
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                        <DetailField
+                        <OrderSummaryLine
                           label={l(
                             "Nicht-medizinische Durchführung",
                             "Немедицинское исполнение",
@@ -3947,7 +3967,7 @@ function useOrdersPageContent() {
                               : l("Nicht erforderlich", "Не требуется")
                           }
                         />
-                        <DetailField
+                        <OrderSummaryLine
                           label={l("Dolmetscher-Support", "Поддержка переводчика")}
                           value={
                             orderDetail.execution_flow.interpreter_required
@@ -3958,11 +3978,11 @@ function useOrdersPageContent() {
                               : l("Nicht erforderlich", "Не требуется")
                           }
                         />
-                        <DetailField
+                        <OrderSummaryLine
                           label={l("Abweichungen", "Отклонения")}
                           value={issueStatusLabel(orderDetail.execution_flow.issue_status)}
                         />
-                        <DetailField
+                        <OrderSummaryLine
                           label={l("Durchführungsdokumente", "Документы исполнения")}
                           value={String(
                             orderDetail.execution_flow.execution_documents,
@@ -3999,7 +4019,7 @@ function useOrdersPageContent() {
                         </div>
                       ) : null}
 
-                      <div className="grid gap-4 xl:grid-cols-2">
+                      <div className="grid gap-4">
                         <div className="rounded-2xl border border-border p-4">
                           <div className="text-sm font-semibold text-foreground">
                             {titleWithDot(
@@ -4179,90 +4199,106 @@ function useOrdersPageContent() {
                             )}
                           </div>
                           <div className="mt-4 grid gap-3">
-                            <DetailField
+                            <OrderSummaryLine
                               label={l("Ankunft erfasst", "Прибытие зафиксировано")}
                               value={formatDateTimeLabel(
                                 orderDetail.execution_flow.arrival_recorded_at,
                               )}
                             />
-                            <DetailField
+                            <OrderSummaryLine
                               label={l("Medizinisch abgeschlossen", "Медицинская часть завершена")}
                               value={formatDateTimeLabel(
                                 orderDetail.execution_flow.medical_completed_at,
                               )}
                             />
-                            <DetailField
+                            <OrderSummaryLine
                               label={l(
                                 "Nicht-medizinisch abgeschlossen",
                                 "Немедицинская часть завершена",
                               )}
                               value={formatDateTimeLabel(
                                 orderDetail.execution_flow
-                                  .non_medical_completed_at,
+                                .non_medical_completed_at,
                               )}
                             />
-                            <DetailField
+                            <OrderSummaryLine
                               label={l("Abweichungen geklärt", "Отклонения закрыты")}
                               value={formatDateTimeLabel(
                                 orderDetail.execution_flow.issues_resolved_at,
                               )}
                             />
-                            <div className="flex flex-wrap gap-3 pt-2">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                className="rounded-xl"
-                                onClick={() =>
-                                  staffGo(
-                                    `/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
-                                  )
-                                }
-                              >
-                                {l("Termine", "Приёмы")}
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                className="rounded-xl"
-                                onClick={() =>
-                                  staffGo(
-                                    `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
-                                  )
-                                }
-                              >
-                                {l("Dokumente", "Документы")}
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                className="rounded-xl"
-                                onClick={() =>
-                                  staffGo(
-                                    `/providers?patient=${orderDetail.patient_id}`,
-                                  )
-                                }
-                              >
-                                {l("Provider", "Провайдеры")}
-                              </Button>
+                            <div className="grid grid-cols-[repeat(auto-fit,minmax(185px,1fr))] gap-3 pt-2">
+                              {[
+                                {
+                                  label: l("Termine", "Приёмы"),
+                                  description: l(
+                                    "Durchführungstermine und Status prüfen.",
+                                    "Проверить приёмы исполнения и статусы.",
+                                  ),
+                                  href: `/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                                },
+                                {
+                                  label: l("Dokumente", "Документы"),
+                                  description: l(
+                                    "Ausführungsdokumente und Nachweise öffnen.",
+                                    "Открыть документы исполнения и подтверждения.",
+                                  ),
+                                  href: `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                                },
+                                {
+                                  label: l("Provider", "Провайдеры"),
+                                  description: l(
+                                    "Provider-Kontext dieses Patienten prüfen.",
+                                    "Проверить контекст провайдеров пациента.",
+                                  ),
+                                  href: `/providers?patient=${orderDetail.patient_id}`,
+                                },
+                              ].map((link) => (
+                                <button
+                                  key={link.label}
+                                  type="button"
+                                  className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                                  onClick={() =>
+                                    window.open(
+                                      link.href,
+                                      "_blank",
+                                      "noopener,noreferrer",
+                                    )
+                                  }
+                                >
+                                  <div className="relative z-10">
+                                    <h3 className="text-sm font-semibold text-foreground">
+                                      {link.label}
+                                    </h3>
+                                    <p className="mt-2 text-xs leading-tight text-muted-foreground">
+                                      {link.description}
+                                    </p>
+                                  </div>
+                                  <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
+                                    <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-tranzinc-y-0.5 group-hover:tranzinc-x-0.5" />
+                                  </span>
+                                </button>
+                              ))}
                             </div>
                           </div>
                         </div>
                       </div>
                     </div>
-                  </SectionCard>
+                  </section>
                 ) : null}
 
                 {shouldRenderOrderSection("followup") && orderDetail.followup_flow ? (
-                  <SectionCard
-                    title={l("Nachsorge-Ablauf", "Поток follow-up")}
-                    description={l(
-                      "Post-Care-Meilensteine, Paketende-Outreach und finale Patientenubergabe starten, bevor der Auftrag in die Nachsorge wechselt.",
-                      "Запуск post-care этапов, outreach по завершению пакета и финальная передача пациенту до перехода заказа в follow-up.",
-                    )}
-                  >
-                    <div className="space-y-4">
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                        <DetailField
+                  <section className="rounded-xl border border-border bg-card p-6">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div>
+                        <h2 className={tokens.text.sectionTitle}>
+                          {titleWithDot(l("Nachsorge-Ablauf", "Поток follow-up"))}
+                        </h2>
+                      </div>
+                    </div>
+                    <div className="mt-5 space-y-4">
+                      <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
+                        <OrderSummaryLine
                           label={l("Nachsorge-Freigabe", "Готовность к follow-up")}
                           value={
                             <Badge
@@ -4280,29 +4316,27 @@ function useOrdersPageContent() {
                             </Badge>
                           }
                         />
-                        <DetailField
+                        <OrderSummaryLine
                           label={l("Ergebnisübergabe", "Передача результатов")}
                           value={resultsHandoffStatusLabel(
                             orderDetail.followup_flow.results_handoff_status,
                           )}
                         />
-                        <DetailField
+                        <OrderSummaryLine
                           label={l("Nachsorge-Aktivität", "Активность follow-up")}
+                          className="md:col-span-2"
                           value={l(
                             `${orderDetail.followup_flow.followup_appointments_total} Termin(e) / ${orderDetail.followup_flow.followup_1w_reminders + orderDetail.followup_flow.followup_1m_reminders + orderDetail.followup_flow.followup_6m_reminders + orderDetail.followup_flow.package_end_reminders} Erinnerung(en)`,
                             `${orderDetail.followup_flow.followup_appointments_total} приём(ов) / ${orderDetail.followup_flow.followup_1w_reminders + orderDetail.followup_flow.followup_1m_reminders + orderDetail.followup_flow.followup_6m_reminders + orderDetail.followup_flow.package_end_reminders} напоминани(й)`,
                           )}
                         />
-                        <DetailField
+                        <OrderSummaryLine
                           label={l("Portal-Freigaben", "Публикации в портале")}
                           value={String(
                             orderDetail.followup_flow.results_portal_shares,
                           )}
                         />
-                      </div>
-
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                        <DetailField
+                        <OrderSummaryLine
                           label={l("Arztgesteuert", "По назначению врача")}
                           value={
                             followupStatusLabel(
@@ -4310,11 +4344,12 @@ function useOrdersPageContent() {
                             )
                           }
                         />
-                        <DetailField
+                        <OrderSummaryLine
                           label="1W / 1M / 6M"
+                          className="md:col-span-2"
                           value={`${followupStatusLabel(orderDetail.followup_flow.followup_1w_status)} / ${followupStatusLabel(orderDetail.followup_flow.followup_1m_status)} / ${followupStatusLabel(orderDetail.followup_flow.followup_6m_status)}`}
                         />
-                        <DetailField
+                        <OrderSummaryLine
                           label={l("Paketende", "Завершение пакета")}
                           value={
                             orderDetail.followup_flow.package_end_required
@@ -4326,7 +4361,7 @@ function useOrdersPageContent() {
                               : l("Nicht erforderlich", "Не требуется")
                           }
                         />
-                        <DetailField
+                        <OrderSummaryLine
                           label={l("Abschlussanker", "Якорь закрытия")}
                           value={formatDateTimeLabel(
                             orderDetail.followup_flow.closure_anchor_at,
@@ -4365,7 +4400,7 @@ function useOrdersPageContent() {
                         </div>
                       ) : null}
 
-                      <div className="grid gap-4 xl:grid-cols-2">
+                      <div className="grid gap-4">
                         <div className="rounded-2xl border border-border p-4">
                           <div className="text-sm font-semibold text-foreground">
                             {titleWithDot(
@@ -4458,7 +4493,7 @@ function useOrdersPageContent() {
                                 </option>
                               </NativeComboboxSelect>
                             </div>
-                            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
+                            <div className="grid gap-3 md:grid-cols-2">
                               <Field label={l("Paketende", "Завершение пакета")}>
                                 <Input
                                   type="date"
@@ -4565,225 +4600,328 @@ function useOrdersPageContent() {
                               "Текущие пресеты приёмов и видимость в портале читают эти вехи уровня заказа.",
                             )}
                           </div>
-                          <div className="mt-4 grid gap-3">
-                            <DetailField
-                              label={l("1-Wochen-Ziel", "Цель на 1 неделю")}
-                              value={formatDateTimeLabel(
-                                orderDetail.followup_flow
-                                  .recommended_followup_1w_at,
-                              )}
-                            />
-                            <DetailField
-                              label={l("1-Monats-Ziel", "Цель на 1 месяц")}
-                              value={formatDateTimeLabel(
-                                orderDetail.followup_flow
-                                  .recommended_followup_1m_at,
-                              )}
-                            />
-                            <DetailField
-                              label={l("6-Monats-Ziel", "Цель на 6 месяцев")}
-                              value={formatDateTimeLabel(
-                                orderDetail.followup_flow
-                                  .recommended_followup_6m_at,
-                              )}
-                            />
-                            <DetailField
-                              label={l("Paketende-Outreach", "Outreach по завершению пакета")}
-                              value={formatDateOnlyLabel(
-                                orderDetail.followup_flow
-                                  .recommended_package_end_followup_at,
-                              )}
-                            />
-                            <div className="flex flex-wrap gap-3 pt-2">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                className="rounded-xl"
-                                onClick={() =>
-                                  staffGo(
-                                    `/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
-                                  )
-                                }
-                              >
-                                {l("Termine", "Приёмы")}
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                className="rounded-xl"
-                                onClick={() =>
-                                  staffGo(
-                                    `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
-                                  )
-                                }
-                              >
-                                {l("Dokumente", "Документы")}
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                className="rounded-xl"
-                                onClick={() =>
-                                  staffGo(`/patients/${orderDetail.patient_id}`)
-                                }
-                              >
-                                {l("Patientenprofil", "Профиль пациента")}
-                              </Button>
+                          <div className="mt-4 space-y-3">
+                            <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
+                              <OrderSummaryLine
+                                label={l("1-Wochen-Ziel", "Цель на 1 неделю")}
+                                value={formatDateTimeLabel(
+                                  orderDetail.followup_flow
+                                    .recommended_followup_1w_at,
+                                )}
+                              />
+                              <OrderSummaryLine
+                                label={l("1-Monats-Ziel", "Цель на 1 месяц")}
+                                value={formatDateTimeLabel(
+                                  orderDetail.followup_flow
+                                    .recommended_followup_1m_at,
+                                )}
+                              />
+                              <OrderSummaryLine
+                                label={l("6-Monats-Ziel", "Цель на 6 месяцев")}
+                                value={formatDateTimeLabel(
+                                  orderDetail.followup_flow
+                                    .recommended_followup_6m_at,
+                                )}
+                              />
+                              <OrderSummaryLine
+                                label={l("Paketende-Outreach", "Outreach по завершению пакета")}
+                                value={formatDateOnlyLabel(
+                                  orderDetail.followup_flow
+                                    .recommended_package_end_followup_at,
+                                )}
+                              />
+                            </div>
+                            <div className="grid grid-cols-[repeat(auto-fit,minmax(185px,1fr))] gap-3 pt-2">
+                              {[
+                                {
+                                  label: l("Termine", "Приёмы"),
+                                  description: l(
+                                    "Follow-up-Termine und Erinnerungen prüfen.",
+                                    "Проверить follow-up приёмы и напоминания.",
+                                  ),
+                                  href: `/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                                },
+                                {
+                                  label: l("Dokumente", "Документы"),
+                                  description: l(
+                                    "Ergebnisse und Übergabedokumente öffnen.",
+                                    "Открыть результаты и документы передачи.",
+                                  ),
+                                  href: `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                                },
+                                {
+                                  label: l("Patientenprofil", "Профиль пациента"),
+                                  description: l(
+                                    "Patientenprofil im neuen Tab öffnen.",
+                                    "Открыть профиль пациента в новой вкладке.",
+                                  ),
+                                  href: `/patients/${orderDetail.patient_id}`,
+                                },
+                              ].map((link) => (
+                                <button
+                                  key={link.label}
+                                  type="button"
+                                  className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                                  onClick={() =>
+                                    window.open(
+                                      link.href,
+                                      "_blank",
+                                      "noopener,noreferrer",
+                                    )
+                                  }
+                                >
+                                  <div className="relative z-10">
+                                    <h3 className="text-sm font-semibold text-foreground">
+                                      {link.label}
+                                    </h3>
+                                    <p className="mt-2 text-xs leading-tight text-muted-foreground">
+                                      {link.description}
+                                    </p>
+                                  </div>
+                                  <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
+                                    <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-tranzinc-y-0.5 group-hover:tranzinc-x-0.5" />
+                                  </span>
+                                </button>
+                              ))}
                             </div>
                           </div>
                         </div>
                       </div>
                     </div>
-                  </SectionCard>
+                  </section>
                 ) : null}
 
                 {shouldRenderOrderSection("phase") ? (
-                  <SectionCard
-                    title={tx.orders_phase}
-                    description={l(
-                      "Phasenwechsel laufen sequenziell und werden in der Workflow-Historie protokolliert.",
-                      "Переходы по фазам идут последовательно и сохраняются в истории workflow.",
-                    )}
-                    action={
-                      permissions.canManagePhase &&
+                  <section className="rounded-xl border border-border bg-card p-6">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div>
+                        <h2 className={tokens.text.sectionTitle}>
+                          {titleWithDot(tx.orders_phase)}
+                        </h2>
+                      </div>
+                      {permissions.canManagePhase &&
                       orderDetail.lifecycle?.next_stage ? (
                         <Button
                           variant="outline"
+                          className="h-8 rounded-lg"
                           onClick={() => void handleAdvancePhase()}
                           disabled={Boolean(nextLifecycleTransition?.blocked)}
                         >
-                          <ChevronRight className="mr-2 size-4" />
+                          <ChevronRight className="size-4" />
                           {l("Weiter zu", "Перевести в")}{" "}
                           {phaseLabel(orderDetail.lifecycle.next_stage)}
                         </Button>
-                      ) : null
-                    }
-                  >
-                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto]">
-                    <div className="flex flex-wrap gap-2">
-                      {ORDER_PHASES.map((phase) => {
-                        const isCurrent = orderDetail.phase === phase;
-                        const isNext =
-                          orderDetail.lifecycle?.next_stage === phase;
-                        const disabled =
-                          !permissions.canManagePhase ||
-                          (!isCurrent && !isNext);
-                        return (
-                          <button
-                            key={phase}
-                            type="button"
-                            disabled={disabled}
-                            onClick={() => setPhaseDraft(phase)}
-                            className={cn(
-                              "rounded-full border px-3 py-2 text-sm transition",
-                              phaseDraft === phase
-                                ? phaseClassName(phase)
-                                : "border-border text-muted-foreground hover:border-border",
-                              disabled && "cursor-not-allowed opacity-60",
-                            )}
-                          >
-                            {phaseLabel(phase)}
-                            {isCurrent
-                              ? l(" (aktuell)", " (текущая)")
-                              : isNext
-                                ? l(" (als Nächstes)", " (следующая)")
-                                : ""}
-                          </button>
-                        );
-                      })}
+                      ) : null}
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {permissions.canManagePhase ? (
-                        <Button
-                          onClick={() => void handleSavePhase()}
-                          disabled={
-                            phaseSaving ||
-                            !phaseDraft ||
-                            phaseDraft === orderDetail.phase ||
-                            (orderDetail.lifecycle?.next_stage != null &&
-                              phaseDraft !==
-                                orderDetail.lifecycle.next_stage) ||
-                            Boolean(nextLifecycleTransition?.blocked)
+
+                    <div className="mt-5 space-y-5">
+                      <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
+                        <OrderSummaryLine
+                          label={l("Aktuelle Phase", "Текущая фаза")}
+                          value={phaseLabel(orderDetail.phase)}
+                        />
+                        <OrderSummaryLine
+                          label={l("Nächste Phase", "Следующая фаза")}
+                          value={
+                            orderDetail.lifecycle?.next_stage
+                              ? phaseLabel(orderDetail.lifecycle.next_stage)
+                              : tx.common_not_set
                           }
-                        >
-                          {phaseSaving ? (
-                            <LoaderCircle className="mr-2 size-4 animate-spin" />
-                          ) : null}
-                          {l("Phase speichern", "Сохранить фазу")}
-                        </Button>
-                      ) : (
-                        <Badge
-                          variant="outline"
-                          className="rounded-full border-border bg-muted/50 text-muted-foreground"
-                        >
-                          {l("Billing nur lesend", "Только чтение для биллинга")}
-                        </Badge>
-                      )}
-                    </div>
-                  </div>
-                  {orderDetail.lifecycle?.stage_entered_at ? (
-                    <p className="mt-4 text-sm text-muted-foreground">
-                      {l("Aktuelle Phase seit", "Текущая фаза с")}{" "}
-                      {formatDateTimeLabel(orderDetail.lifecycle.stage_entered_at)}.
-                    </p>
-                  ) : null}
-                  {nextLifecycleTransition?.blocked &&
-                  nextLifecycleTransition.reasons.length > 0 ? (
-                    <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                      <div className="font-medium">
-                        {phaseLabel(nextLifecycleTransition.phase)}{" "}
-                        {l("ist blockiert", "заблокирована")}
+                        />
+                        <OrderSummaryLine
+                          label={l("Seit", "С")}
+                          value={formatDateTimeLabel(
+                            orderDetail.lifecycle?.stage_entered_at,
+                          )}
+                        />
+                        <OrderSummaryLine
+                          label={l("Übergabe", "Переход")}
+                          value={
+                            nextLifecycleTransition?.blocked
+                              ? l("Blockiert", "Заблокирован")
+                              : orderDetail.lifecycle?.next_stage
+                                ? l("Bereit", "Готов")
+                                : l("Nicht verfügbar", "Недоступен")
+                          }
+                        />
                       </div>
-                      <ul className="mt-2 space-y-1">
-                        {nextLifecycleTransition.reasons.map((reason) => (
-                          <li key={reason}>• {localizedBlockingReason(reason)}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                  {phaseError ? (
-                    <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                      {phaseError}
-                    </div>
-                  ) : null}
-                  {orderDetail.lifecycle?.history?.length ? (
-                    <div className="mt-4 space-y-3">
-                      {orderDetail.lifecycle.history.map((event) => (
-                        <div
-                          key={[
-                            event.created_at,
-                            event.from_stage ?? "",
-                            event.to_stage,
-                            event.transition_kind,
-                            event.note ?? "",
-                          ].join("|")}
-                          className="rounded-2xl border border-border px-4 py-3"
-                        >
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-medium text-foreground">
-                                {event.from_stage
-                                  ? `${phaseLabel(event.from_stage)} -> ${phaseLabel(event.to_stage)}`
-                                  : phaseLabel(event.to_stage)}
+
+                      <div className="flex items-center gap-2" aria-hidden>
+                        <span className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-border" />
+                        <span className="size-1.5 rounded-full bg-orange-400" />
+                        <span className="size-1.5 rounded-full bg-orange-300" />
+                        <span className="size-1.5 rounded-full bg-orange-200" />
+                        <span className="h-px flex-1 bg-gradient-to-r from-border via-border to-transparent" />
+                      </div>
+
+                      <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
+                        {ORDER_PHASES.map((phase) => {
+                          const isCurrent = orderDetail.phase === phase;
+                          const isNext = orderDetail.lifecycle?.next_stage === phase;
+                          const disabled =
+                            !permissions.canManagePhase || (!isCurrent && !isNext);
+                          const selected = phaseDraft === phase;
+                          return (
+                            <button
+                              key={phase}
+                              type="button"
+                              disabled={disabled}
+                              onClick={() => setPhaseDraft(phase)}
+                              className={cn(
+                                "relative min-h-[96px] rounded-xl border p-3 pr-10 text-left transition-colors",
+                                selected
+                                  ? "border-orange-200 bg-orange-50/60"
+                                  : "border-border bg-zinc-50/70 hover:border-orange-200 hover:bg-orange-50/40",
+                                disabled && "cursor-not-allowed opacity-60",
+                              )}
+                            >
+                              <span
+                                aria-hidden
+                                className={cn(
+                                  "absolute right-3 top-3 flex size-4 items-center justify-center rounded-full border",
+                                  selected ? "border-orange-500" : "border-border",
+                                )}
+                              >
+                                <span
+                                  className={cn(
+                                    "size-2 rounded-full",
+                                    selected ? "bg-orange-500" : "bg-transparent",
+                                  )}
+                                />
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-semibold text-foreground">
+                                  {phaseLabel(phase)}
+                                </span>
+                              </div>
+                              <p className="mt-3 text-xs leading-tight text-muted-foreground">
+                                {isCurrent
+                                  ? l("Aktuelle Auftragsphase", "Текущая фаза заказа")
+                                  : isNext
+                                    ? l("Nächster erlaubter Schritt", "Следующий разрешённый шаг")
+                                    : l("Sequenziell gesperrt", "Заблокировано последовательностью")}
                               </p>
-                              <p className="mt-1 text-xs uppercase tracking-[0.14em] text-muted-foreground">
-                                {transitionKindLabel(event.transition_kind)}
-                              </p>
-                            </div>
-                            <span className="text-xs text-muted-foreground">
-                              {formatDateTimeLabel(event.created_at)}
-                            </span>
-                          </div>
-                          {event.note ? (
-                            <p className="mt-2 text-sm text-muted-foreground">
-                              {event.note}
-                            </p>
-                          ) : null}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div className="flex flex-col gap-3 rounded-xl border border-border bg-zinc-50/70 p-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-sm font-semibold text-foreground">
+                            {phaseDraft
+                              ? phaseLabel(phaseDraft)
+                              : l("Keine Phase ausgewählt", "Фаза не выбрана")}
+                          </p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {l(
+                              "Nur die aktuelle oder nächste Phase kann gespeichert werden.",
+                              "Сохранить можно только текущую или следующую фазу.",
+                            )}
+                          </p>
                         </div>
-                      ))}
+                        {permissions.canManagePhase ? (
+                          <Button
+                            className="h-9 rounded-lg"
+                            onClick={() => void handleSavePhase()}
+                            disabled={
+                              phaseSaving ||
+                              !phaseDraft ||
+                              phaseDraft === orderDetail.phase ||
+                              (orderDetail.lifecycle?.next_stage != null &&
+                                phaseDraft !== orderDetail.lifecycle.next_stage) ||
+                              Boolean(nextLifecycleTransition?.blocked)
+                            }
+                          >
+                            {phaseSaving ? (
+                              <LoaderCircle className="size-4 animate-spin" />
+                            ) : null}
+                            {l("Phase speichern", "Сохранить фазу")}
+                          </Button>
+                        ) : (
+                          <Badge
+                            variant="outline"
+                            className="rounded-full border-border bg-muted/50 text-muted-foreground"
+                          >
+                            {l("Billing nur lesend", "Только чтение для биллинга")}
+                          </Badge>
+                        )}
+                      </div>
+
+                      {nextLifecycleTransition?.blocked &&
+                      nextLifecycleTransition.reasons.length > 0 ? (
+                        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                          <div className="font-medium">
+                            {phaseLabel(nextLifecycleTransition.phase)}{" "}
+                            {l("ist blockiert", "заблокирована")}
+                          </div>
+                          <ul className="mt-2 space-y-1">
+                            {nextLifecycleTransition.reasons.map((reason) => (
+                              <li key={reason}>• {localizedBlockingReason(reason)}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+
+                      {phaseError ? (
+                        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                          {phaseError}
+                        </div>
+                      ) : null}
+
+                      {orderDetail.lifecycle?.history?.length ? (
+                        <div className="space-y-3">
+                          <h3 className={tokens.text.sectionTitle}>
+                            {titleWithDot(l("Historie", "История"))}
+                          </h3>
+                          <div className="space-y-3 pl-6">
+                            {orderDetail.lifecycle.history.map((event, index) => (
+                              <div
+                                key={[
+                                  event.created_at,
+                                  event.from_stage ?? "",
+                                  event.to_stage,
+                                  event.transition_kind,
+                                  event.note ?? "",
+                                ].join("|")}
+                                className={cn(
+                                  "relative",
+                                  index < (orderDetail.lifecycle?.history?.length ?? 0) - 1 &&
+                                    "before:absolute before:-bottom-5 before:-left-4 before:top-3 before:w-px before:bg-border",
+                                )}
+                              >
+                                <span className="absolute -left-[1.125rem] top-1.5 z-10 size-2 rounded-full bg-muted-foreground ring-4 ring-background" />
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <div className={tokens.text.sectionTitle}>
+                                    {event.from_stage
+                                      ? `${phaseLabel(event.from_stage)} -> ${phaseLabel(event.to_stage)}`
+                                      : phaseLabel(event.to_stage)}
+                                  </div>
+                                  <span className="text-xs text-muted-foreground">
+                                    {formatDateTimeLabel(event.created_at)}
+                                  </span>
+                                </div>
+                                <div className="mt-2 rounded-xl border border-border/70 bg-zinc-50/60 px-4 py-3">
+                                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                    <span>{l("Übergang", "Переход")}</span>
+                                    <span className="h-px min-w-6 flex-1 bg-border/70" />
+                                    <span className="font-medium text-foreground">
+                                      {transitionKindLabel(event.transition_kind)}
+                                    </span>
+                                  </div>
+                                  {event.note ? (
+                                    <p className="mt-2 text-xs leading-snug text-muted-foreground">
+                                      {event.note}
+                                    </p>
+                                  ) : null}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
-                  ) : null}
-                  </SectionCard>
+                  </section>
                 ) : null}
 
                 {shouldRenderOrderSection("workflow") ? (
