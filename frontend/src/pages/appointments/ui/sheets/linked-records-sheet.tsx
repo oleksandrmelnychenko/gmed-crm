@@ -155,7 +155,7 @@ function LinkedRecordsSheet({
                 ]),
               },
               {
-                label: "Patient ID",
+                label: t.appointments_linked_patient_id,
                 value: readLinkedPreviewValue(record, ["patient_id", "id"]),
               },
               {
@@ -171,7 +171,7 @@ function LinkedRecordsSheet({
                 ]),
               },
               {
-                label: "Email",
+                label: t.appointments_linked_email,
                 value: readLinkedPreviewValue(record, ["email"]),
               },
             ]

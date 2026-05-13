@@ -2346,14 +2346,10 @@ function useCasesPageContent({
       <div className="space-y-6">
         <section className={cardClass("p-8")}>
           <h1 className="text-3xl font-semibold tracking-tight text-foreground">
-            {caseText("Fallbereich", "Рабочее пространство кейсов", "Case workspace")}
+            {t.cases_clinical_no_access_title}
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">
-            {caseText(
-              "Die Fallverwaltung ist im Backend derzeit auf die Rollen CEO und Patient Manager beschränkt.",
-              "Управление кейсами в backend сейчас ограничено ролями CEO и Patient Manager.",
-              "Case management is currently limited to CEO and Patient Manager roles in the backend.",
-            )}
+            {t.cases_clinical_no_access_description}
           </p>
         </section>
       </div>
@@ -3360,19 +3356,11 @@ function useCasesPageContent({
                 </ItemEditorSection>
 
                 <Panel
-                  title={caseText("Kardiologischer Teilbereich", "Кардиологический блок", "Cardiology sub-flow")}
+                  title={t.cases_specialty_cardiology_subflow_title}
                   description={
                     cardiologyTriggered
-                      ? caseText(
-                          "Fachspezifischer Pfad für kardiologische Symptome und bereits erfolgte Herzdiagnostik.",
-                          "Специализированный блок для кардиологических симптомов и ранее выполненной кардиодиагностики.",
-                          "Specialty branch for cardiology-related symptoms and prior cardiac workup.",
-                        )
-                      : caseText(
-                          "Aktivieren, wenn Symptome oder Überweisung auf Kardiologie hinweisen.",
-                          "Включайте, если симптомы или направление указывают на кардиологию.",
-                          "Enable when symptoms or referral indicate cardiology.",
-                        )
+                      ? t.cases_specialty_cardiology_active_description
+                      : t.cases_specialty_cardiology_inactive_description
                   }
                 >
                   <form onSubmit={handleSaveCardiology} className="space-y-4">
@@ -3390,14 +3378,14 @@ function useCasesPageContent({
                             }))
                           }
                         />
-                        {caseText("Kardiologie relevant", "Показания к кардиологии", "Cardiology relevant")}
+                        {t.cases_specialty_cardiology_relevant}
                       </label>
                       {[
-                        ["chest_pain", caseText("Brustschmerz", "Боль в груди", "Chest pain")],
-                        ["dyspnea", caseText("Dyspnoe", "Одышка", "Dyspnea")],
-                        ["palpitations", caseText("Palpitationen", "Сердцебиение", "Palpitations")],
-                        ["syncope", caseText("Synkope", "Обмороки", "Syncope")],
-                        ["edema", caseText("Ödeme", "Отеки", "Edema")],
+                        ["chest_pain", t.cases_specialty_chest_pain],
+                        ["dyspnea", t.cases_specialty_dyspnea],
+                        ["palpitations", t.cases_specialty_palpitations],
+                        ["syncope", t.cases_specialty_syncope],
+                        ["edema", t.cases_specialty_edema],
                       ].map(([key, label]) => (
                         <label
                           key={key}
@@ -3419,26 +3407,26 @@ function useCasesPageContent({
                       ))}
                     </div>
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <Field label={caseText("Bekannte Diagnose", "Известный диагноз", "Known diagnosis")}>
+                      <Field label={t.cases_specialty_known_diagnosis}>
                         <Input value={cardiology.known_diagnosis} onChange={(event) => setCardiology((current) => ({ ...current, known_diagnosis: event.target.value }))} className="h-10 rounded-xl bg-muted/20" />
                       </Field>
-                      <Field label={caseText("Vorbefunde (EKG / Echo / Diagnostik)", "Предыдущие ЭКГ / Эхо / обследования", "Prior ECG / echo / workup")}>
+                      <Field label={t.cases_specialty_prior_cardiac_workup}>
                         <Input value={cardiology.prior_cardiac_workup} onChange={(event) => setCardiology((current) => ({ ...current, prior_cardiac_workup: event.target.value }))} className="h-10 rounded-xl bg-muted/20" />
                       </Field>
-                      <Field label={caseText("Antikoagulation", "Антикоагуляция", "Anticoagulation")}>
+                      <Field label={t.cases_specialty_anticoagulation}>
                         <Input value={cardiology.anticoagulation} onChange={(event) => setCardiology((current) => ({ ...current, anticoagulation: event.target.value }))} className="h-10 rounded-xl bg-muted/20" />
                       </Field>
-                      <Field label={caseText("Kardiovaskuläre Risikofaktoren", "Сердечно-сосудистые факторы риска", "CV risk factors")}>
+                      <Field label={t.cases_specialty_cv_risk_factors}>
                         <Input value={cardiology.cardiovascular_risk_factors} onChange={(event) => setCardiology((current) => ({ ...current, cardiovascular_risk_factors: event.target.value }))} className="h-10 rounded-xl bg-muted/20" />
                       </Field>
-                      <Field label={caseText("Familienanamnese", "Семейный анамнез", "Family history")}>
+                      <Field label={t.cases_specialty_family_history}>
                         <Input value={cardiology.family_history} onChange={(event) => setCardiology((current) => ({ ...current, family_history: event.target.value }))} className="h-10 rounded-xl bg-muted/20" />
                       </Field>
-                      <Field label={caseText("Warnzeichen", "Красные флаги", "Red flags")}>
+                      <Field label={t.cases_specialty_red_flags}>
                         <Input value={cardiology.red_flags} onChange={(event) => setCardiology((current) => ({ ...current, red_flags: event.target.value }))} className="h-10 rounded-xl bg-muted/20" />
                       </Field>
                     </div>
-                    <Field label={caseText("Kardiologische Notizen", "Кардиологические заметки", "Cardiology notes")}>
+                    <Field label={t.cases_specialty_cardiology_notes}>
                       <textarea
                         value={cardiology.notes}
                         onChange={(event) =>
@@ -3451,7 +3439,7 @@ function useCasesPageContent({
                     <div className="flex justify-end border-t border-border/70 pt-4">
                       <Button type="submit" className="h-9 rounded-lg px-3.5" disabled={sectionBusy === "cardiology" || !permissions.canEdit}>
                         {sectionBusy === "cardiology" ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                        {caseText("Kardiologie speichern", "Сохранить кардиологию", "Save cardiology")}
+                        {t.cases_specialty_cardiology_save}
                       </Button>
                     </div>
                   </form>

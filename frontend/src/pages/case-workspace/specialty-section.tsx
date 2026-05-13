@@ -67,7 +67,7 @@ function SpecialtySectionContent<T extends Record<string, unknown>>({
   sectionError,
   canEdit,
 }: SpecialtySectionContentProps<T>) {
-  const { lang } = useLang();
+  const { lang, t } = useLang();
 
   const hydrate = useMemo<T>(
     () => ({ ...blankValue, ...(rawValue ?? {}) }) as T,
@@ -92,12 +92,7 @@ function SpecialtySectionContent<T extends Record<string, unknown>>({
 
   const isRelevant = Boolean((form as { is_relevant?: boolean }).is_relevant);
   const relevantInputId = useId();
-  const relevantLabel = tri(
-    lang,
-    "Fachrelevant",
-    "Относится к специальности",
-    "Specialty relevant",
-  );
+  const relevantLabel = t.cases_workspace_specialty_relevant;
 
   return (
     <Panel title={title} description={description}>
@@ -116,15 +111,10 @@ function SpecialtySectionContent<T extends Record<string, unknown>>({
         >
           <div>
             <p className="text-sm font-medium text-foreground">
-              {tri(lang, "Fachrelevant", "Относится к специальности", "Specialty relevant")}
+              {t.cases_workspace_specialty_relevant}
             </p>
             <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-              {tri(
-                lang,
-                "Aktivieren, wenn dieser Fachbereich für den Fall berücksichtigt werden soll.",
-                "Включите, если этот раздел относится к кейсу.",
-                "Enable when this specialty applies to the case.",
-              )}
+              {t.cases_workspace_specialty_relevant_hint}
             </p>
           </div>
           <input
@@ -141,7 +131,7 @@ function SpecialtySectionContent<T extends Record<string, unknown>>({
           <div>
             <p className="mb-2 inline-flex items-center gap-1.5 text-[11.5px] font-medium text-muted-foreground">
               <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
-              {tri(lang, "Leitsymptome", "Ключевые симптомы", "Key signs")}
+              {t.cases_workspace_specialty_key_signs}
             </p>
             <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
               {booleanFlags.map((flag) => {
@@ -202,7 +192,7 @@ function SpecialtySectionContent<T extends Record<string, unknown>>({
             disabled={busy || !canEdit}
           >
             {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-            {tri(lang, "Abschnitt speichern", "Сохранить раздел", "Save section")}
+            {t.cases_workspace_specialty_save}
           </Button>
         </div>
       </form>

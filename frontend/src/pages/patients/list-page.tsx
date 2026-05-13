@@ -146,6 +146,7 @@ function PatientsPageSheets({
           <LazyPatientsShortcutsDialog
             open={helpOpen}
             closeLabel={closeLabel}
+            t={dictionary}
             onClose={onHelpClose}
           />
         </Suspense>
@@ -275,10 +276,10 @@ export function PatientsPage() {
           className={cn("rounded-xl p-8", tokens.surface.softCard)}
         >
           <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">
-            Patient registry
+            {t.patients_no_access_title}
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-7 text-zinc-600">
-            This workspace is available only to staff roles with patient access.
+            {t.patients_no_access_body}
           </p>
         </section>
       </div>

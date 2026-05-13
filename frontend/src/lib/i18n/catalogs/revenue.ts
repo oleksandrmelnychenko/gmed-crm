@@ -1,4 +1,4 @@
-﻿export interface RevenueTranslations {
+export interface RevenueTranslations {
   finance_catalog_title: string;
   finance_catalog_description: string;
   finance_catalog_refresh: string;
@@ -96,6 +96,7 @@
   revenue_common_quantity: string;
   revenue_common_net: string;
   revenue_common_gross: string;
+  revenue_common_patient_id: string;
   revenue_common_updated_at: string;
   revenue_unit_default: string;
   revenue_filter_all_patients: string;
@@ -239,6 +240,485 @@
   revenue_accounting_direction_expense: string;
 }
 
+const revenueReportsTextDe = {
+        accessTitle: "Berichte",
+        accessDescription:
+          "Dieser Arbeitsbereich steht nur für Geschäftsleitung, Assistenz, Patientenmanagement, Abrechnung und Sales zur Verfügung.",
+        loadingWorkspace: "Berichtsarbeitsbereich wird geladen...",
+        analytics: "Analytik",
+        workspaceTitle: "Berichtsarbeitsbereich",
+        workspaceDescription:
+          "Strukturierte Auswertungen nach Kliniken, Ärzten, Patientengeografien und Leistungsarten mit rollenabhängiger Finanzsicht und CSV-Export.",
+        refresh: "Aktualisieren",
+        loadError: "Berichtsarbeitsbereich konnte nicht geladen werden.",
+        exportError: "Bericht konnte nicht exportiert werden.",
+        exportCsv: "Als CSV exportieren",
+        countsOnly: "Nur Mengen",
+        roleScoped: "Rollenabhängig",
+        notRated: "Noch nicht bewertet",
+        noBaseline: "Keine Vergleichsbasis",
+        noResponses: "Keine Antworten",
+        locationNotSet: "Ort nicht angegeben",
+        noRecentActivity: "Keine aktuelle Aktivität",
+        unknown: "Unbekannt",
+        weightedHidden: "Gewichtung ausgeblendet",
+        clearDrillDown: "Drill-down zurücksetzen",
+        drillIntoDoctors: "Zu Ärzten drillen",
+        openProvider: "Anbieter öffnen",
+        financialMetricsVisible: "Finanzkennzahlen sichtbar",
+        countsOnlyMode: "Nur Mengenmodus",
+        sectionLabels: {
+          clinics: "Klinikbericht",
+          countries: "Länderbericht",
+          service_types: "Bericht nach Leistungsarten",
+          medical_providers: "Medizinische Leistungserbringer",
+          provider_costs: "Kostenentwicklung Anbieter",
+          billing_kpis: "Abrechnungs-KPIs",
+          doctors: "Arzt-Drill-down",
+          non_medical_providers: "Nicht-medizinische Anbieter",
+          sales_kpis: "Vertriebs-KPIs",
+        },
+        serviceTypes: {
+          medical: "Medizinisch",
+          non_medical: "Nicht medizinisch",
+          cost_passthrough: "Durchlaufkosten",
+        },
+        summary: {
+          activePatients: "Aktive Patienten",
+          activeOrders: "Aktive Aufträge",
+          activeClinics: "Aktive Kliniken",
+          deliveredServiceItems: "Erbrachte Leistungspositionen",
+          deliveredServiceVolume: "Erbrachtes Leistungsvolumen",
+        },
+        billing: {
+          title: "Abrechnungs-KPI-Scorecard",
+          description:
+            "Rechnungsdurchsatz, Inkassodisziplin und Zahlerstruktur aus dem aktuellen Billing-Modell.",
+          trackedInvoices: (count: number) => `${count} erfasste Rechnungen`,
+          invoices30d: "Rechnungen / 30 T.",
+          openReceivables: "Offene Forderungen",
+          paid14d: "Bezahlt innerhalb von 14 T.",
+          dunningShare: "Mahnquote",
+          avgServiceToInvoice: "Ø Leistung bis Rechnung",
+          selfPayShare: "Selbstzahleranteil",
+          averageInvoiceGross: "Ø Rechnungsbrutto",
+          overdueInvoices: "Überfällige Rechnungen",
+          costPassthroughShare: "Anteil Durchlaufkosten",
+        },
+        sales: {
+          title: "Vertriebs-KPI-Ubersicht",
+          description:
+            "Lead-Dynamik, Konversionsdruck und Wachstum neuer Kliniken aus der CRM-Schicht.",
+          leadCountries: (count: number) => `${count} Lead-Länder`,
+          newLeads30d: "Neue Leads / 30 T.",
+          qualified30d: "Qualifiziert / 30 T.",
+          converted30d: "Konvertiert / 30 T.",
+          leadToPatient: "Lead -> Patient",
+          newPartnerClinicsQuarter: "Neue Partnerkliniken / Quartal",
+          topLeadCountries90d: "Top-Lead-Länder / 90 T.",
+          noLeadGeographyYet: "Noch keine Lead-Geografie vorhanden.",
+        },
+        forecast: {
+          openQuotes: "Offene Angebote",
+          pipelineGross: "Pipeline brutto",
+          milestones30d: "Meilensteine / 30 T.",
+          appointments30d: "Termine / 30 T.",
+          pipelineTitle: "Prognose-Pipeline",
+          pipelineDescription:
+            "Offenes Angebotsvolumen mit einfacher Gewichtung nach Reifegrad und nahem Ablaufdruck.",
+          quotes: (count: number) => `${count} Angebote`,
+          expiring14d: "Läuft aus / 14 T.",
+          grossPipeline: "Pipeline brutto",
+          weighted: "Gewichtet",
+          readModel: "Statusgewichtung",
+          readModelLegend: "Entwurf 25 % / Gesendet 60 % / Angenommen 100 %",
+          quoteStatuses: {
+            draft: "Entwurf",
+            sent: "Gesendet",
+            accepted: "Angenommen",
+            rejected: "Abgelehnt",
+            expired: "Abgelaufen",
+          },
+          statusSummary: (quotes: number, expiring: number) =>
+            `${quotes} Angebote · ${expiring} laufen in 14 Tagen aus`,
+          weightedValue: (value: string) => `${value} gewichtet`,
+          collectionsTitle: "Forderungsprognose",
+          collectionsDescription:
+            "Was bald fällig ist, bereits überfällig ist oder noch im Debt-Management festhängt.",
+          due14d: "Fällig / 14 T.",
+          overdue: "Überfällig",
+          debtWorkflows: "Debt-Workflows",
+          escalationSplit: "Eskaltionsmix",
+          workflowOpenReview: (open: number, review: number) =>
+            `${open} offen / ${review} Review innerhalb von 7 T.`,
+          escalationSplitValue: (plans: number, escalated: number) =>
+            `${plans} Zahlungspläne / ${escalated} eskaliert`,
+          followupTitle: "Nachsorge-Prognose",
+          followupDescription:
+            "Meilensteine, die in den nächsten 30 Tagen auf Basis des aktuellen Follow-up-Status fällig werden.",
+          activeFollowupOrders: "Aktive Nachsorge-Aufträge",
+          oneWeekOneMonthSixMonth: "1W / 1M / 6M",
+          doctorPackageResults: "Arzt / Paketende / Ergebnisse",
+          clinicCapacityTitle: "Klinikauslastung nächste 30 Tage",
+          clinicCapacityDescription:
+            "Vorausschauende Kliniklast aus geplanten/bestätigten Terminen und Follow-up-Bedarf.",
+          clinicCapacityBadge: (clinics: number, appointments: number) =>
+            `${clinics} Kliniken / ${appointments} Termine`,
+          doctors: (count: number) => `${count} Ärzte`,
+          followup30d: "Nachsorge / 30 T.",
+          patients30d: "Patienten / 30 T.",
+          orders30d: "Aufträge / 30 T.",
+        },
+        clinicReport: {
+          title: "Klinikbericht",
+          description:
+            "Medizinische Partnerkliniken nach jüngster Aktivität, erbrachten Leistungen, Antwortgeschwindigkeit und Qualitätsindikatoren aus Feedback und Follow-up-Abschluss.",
+          empty: "Noch keine Daten für den Klinikbericht verfügbar.",
+        },
+        serviceTypeReport: {
+          title: "Bericht nach Leistungsarten",
+          description:
+            "Erbrachtes medizinisches, nicht-medizinisches und durchlaufendes Leistungsvolumen nach Serviceklasse.",
+          empty: "Noch keine Daten zum Bericht nach Leistungsarten verfügbar.",
+        },
+        medicalProviders: {
+          title: "Leistung medizinischer Anbieter",
+          description:
+            "Partnerorientierte Klinikaktivität und Umsatzsicht für Leistungsmix, Patientengeografie und Sales-Vergleiche ohne Patientendetail.",
+          empty: "Noch keine Daten zur Leistung medizinischer Anbieter verfügbar.",
+        },
+        providerCosts: {
+          title: "Kostenentwicklung Anbieter",
+          description:
+            "Historische Entwicklung der Stückkosten nach Klinik und erbrachter Leistung zur Unterstützung von Kalkulationen und Marktvergleichen.",
+          empty: "Noch keine Daten zur Kostenentwicklung verfügbar.",
+        },
+        nonMedicalProviders: {
+          title: "Bericht nicht-medizinische Anbieter",
+          description:
+            "Concierge-orientiertes Partnervolumen über Serviceportfolio, aktuelle Anfragelast, Patientenreichweite und Feedback.",
+          empty: "Noch keine Daten zu nicht-medizinischen Anbietern verfügbar.",
+        },
+        countries: {
+          title: "Länderbericht",
+          description:
+            "Patientengeografie gruppiert nach aktiven Profilen und aktueller Auftragsnachfrage.",
+          empty: "Noch keine Daten für den Länderbericht verfügbar.",
+          summary: (patients: number, orders: number) =>
+            `${patients} aktive Patienten · ${orders} aktive Aufträge`,
+        },
+        doctors: {
+          title: "Arzt-Drill-down",
+          description:
+            "Arztbezogene Aktivität, Patientenreichweite, Antwortgeschwindigkeit und Qualitätssignale aus direktem Feedback und Follow-up-Ausführung. Klinik-Drill-down grenzt auf einen Anbieter ein.",
+          empty: "Für den gewählten Scope sind noch keine Arzt-Drill-down-Daten verfügbar.",
+        },
+        visibility: {
+          title: "Sichtbarkeit",
+          description:
+            "Bereiche und Finanzkennzahlen werden nach aktueller Rolle beschnitten. Diese Seite nutzt bewusst das Backend-Read-Model statt rein clientseitiger Filterung.",
+        },
+        common: {
+          appointments90d: "Termine / 90 T.",
+          patients90d: "Patienten / 90 T.",
+          deliveredItems: "Erbrachte Positionen",
+          doctors: "Ärzte",
+          feedback: "Feedback",
+          feedbackCount: "Anzahl Feedbacks",
+          treatmentScore: "Behandlungsscore",
+          doctorCommunication: "Arztkommunikation",
+          clinicResponseTime: "Klinik-Reaktionszeit",
+          doctorResponseTime: "Arzt-Reaktionszeit",
+          writtenFindings: "Schriftliche Befunde",
+          followupCompletion: "Follow-up-Abschluss",
+          clinicalOutcome: "Klinisches Ergebnis",
+          experienceBundle: "Erlebnisbündel",
+          answeredOpen: (answered: number, open: number) =>
+            `${answered} beantwortet · ${open} offen`,
+          linkedArztbrief: (count: number) => `${count} verknüpfte Arztbriefe`,
+          followupOrders: (done: number, total: number) => `${done}/${total} Aufträge`,
+          yes: "ja",
+          partial: "teilweise",
+          complications: "Komplikationen",
+          org: "Organisation",
+          service: "Service",
+          ambience: "Umfeld",
+          value: "Preis-Leistung",
+          itemsOrdersPatients: (items: number, orders: number, patients: number) =>
+            `${items} Positionen · ${orders} Aufträge · ${patients} Patienten`,
+          ordersDelivered: "Aufträge / erbracht",
+          doctorNetwork: "Ärztenetzwerk",
+          lastActivity: (date: string) => `Letzte Aktivität ${date}`,
+          specialties: "Fachgebiete",
+          serviceMix: "Leistungsmix",
+          patientCountryMix: "Patientenländer",
+          noSpecialtyData: "Keine Fachgebietsdaten",
+          noDeliveredServicesYet: "Noch keine erbrachten Leistungen",
+          noCountryData: "Keine Länderdaten",
+          samples: "Stichproben",
+          latestVsFirst: "Aktuell vs. zuerst",
+          average: "Durchschnitt",
+          observedRange: "Beobachtungszeitraum",
+          latest: "zuletzt",
+          min: "Min.",
+          max: "Max.",
+          services: "Leistungen",
+          location: "Standort",
+          conciergeRequests90d: "Concierge-Anfragen / 90 T.",
+          openRequests: "Offene Anfragen",
+          completed90d: "Abgeschlossen / 90 T.",
+          conciergeScore: "Concierge-Score",
+          feedbackVendors: (feedback: number, vendors: number) =>
+            `${feedback} Feedbacks / ${vendors} Anbieter`,
+        },
+      }
+;
+
+export type RevenueReportsText = typeof revenueReportsTextDe;
+
+const revenueReportsTextRu: RevenueReportsText = {
+        accessTitle: "Отчёты",
+        accessDescription:
+          "Это рабочее пространство доступно только руководству, ассистенту CEO, пациент-менеджерам, биллингу и sales.",
+        loadingWorkspace: "Загрузка рабочего пространства отчётов...",
+        analytics: "Аналитика",
+        workspaceTitle: "Рабочее пространство отчётов",
+        workspaceDescription:
+          "Структурированные отчёты по клиникам, врачам, географии пациентов и типам услуг с ролевой видимостью финансов и экспортом CSV.",
+        refresh: "Обновить",
+        loadError: "Не удалось загрузить рабочее пространство отчётов.",
+        exportError: "Не удалось экспортировать отчёт.",
+        exportCsv: "Экспорт в CSV",
+        countsOnly: "Только количества",
+        roleScoped: "По роли",
+        notRated: "Пока без оценки",
+        noBaseline: "Нет базы сравнения",
+        noResponses: "Нет ответов",
+        locationNotSet: "Локация не указана",
+        noRecentActivity: "Недавней активности нет",
+        unknown: "Неизвестно",
+        weightedHidden: "Взвешенная сумма скрыта",
+        clearDrillDown: "Сбросить drill-down",
+        drillIntoDoctors: "Провалиться к врачам",
+        openProvider: "Открыть провайдера",
+        financialMetricsVisible: "Финансовые метрики видимы",
+        countsOnlyMode: "Режим только количеств",
+        sectionLabels: {
+          clinics: "Отчёт по клиникам",
+          countries: "Отчёт по странам",
+          service_types: "Отчёт по типам услуг",
+          medical_providers: "Медицинские провайдеры",
+          provider_costs: "Динамика стоимости провайдеров",
+          billing_kpis: "KPI биллинга",
+          doctors: "Drill-down по врачам",
+          non_medical_providers: "Немедицинские провайдеры",
+          sales_kpis: "KPI продаж",
+        },
+        serviceTypes: {
+          medical: "Медицинские",
+          non_medical: "Немедицинские",
+          cost_passthrough: "Проходные расходы",
+        },
+        summary: {
+          activePatients: "Активные пациенты",
+          activeOrders: "Активные заказы",
+          activeClinics: "Активные клиники",
+          deliveredServiceItems: "Оказанные позиции услуг",
+          deliveredServiceVolume: "Объём оказанных услуг",
+        },
+        billing: {
+          title: "Сводка KPI биллинга",
+          description:
+            "Пропускная способность счетов, платёжная дисциплина и структура плательщиков из текущей billing-модели.",
+          trackedInvoices: (count: number) => `${count} отслеживаемых счетов`,
+          invoices30d: "Счета / 30 дн.",
+          openReceivables: "Открытая дебиторка",
+          paid14d: "Оплачено за 14 дн.",
+          dunningShare: "Доля претензий",
+          avgServiceToInvoice: "Среднее от услуги до счёта",
+          selfPayShare: "Доля self-pay",
+          averageInvoiceGross: "Средний счёт брутто",
+          overdueInvoices: "Просроченные счета",
+          costPassthroughShare: "Доля проходных расходов",
+        },
+        sales: {
+          title: "Сводка KPI продаж",
+          description:
+            "Динамика лидов, давление по конверсии и рост новых клиник из CRM-слоя.",
+          leadCountries: (count: number) => `${count} стран по лидам`,
+          newLeads30d: "Новые лиды / 30 дн.",
+          qualified30d: "Квалифицировано / 30 дн.",
+          converted30d: "Конвертировано / 30 дн.",
+          leadToPatient: "Лид -> пациент",
+          newPartnerClinicsQuarter: "Новые партнёрские клиники / квартал",
+          topLeadCountries90d: "Топ стран по лидам / 90 дн.",
+          noLeadGeographyYet: "География лидов пока отсутствует.",
+        },
+        forecast: {
+          openQuotes: "Открытые предложения",
+          pipelineGross: "Pipeline брутто",
+          milestones30d: "Вехи / 30 дн.",
+          appointments30d: "Приёмы / 30 дн.",
+          pipelineTitle: "Прогноз воронки",
+          pipelineDescription:
+            "Объём открытых предложений с простой взвешенной оценкой по зрелости и ближайшему сроку истечения.",
+          quotes: (count: number) => `${count} предложений`,
+          expiring14d: "Истекает / 14 дн.",
+          grossPipeline: "Pipeline брутто",
+          weighted: "Взвешено",
+          readModel: "Вес по статусу",
+          readModelLegend: "Черновик 25 % / Отправлено 60 % / Принято 100 %",
+          quoteStatuses: {
+            draft: "Черновик",
+            sent: "Отправлено",
+            accepted: "Принято",
+            rejected: "Отклонено",
+            expired: "Истекло",
+          },
+          statusSummary: (quotes: number, expiring: number) =>
+            `${quotes} предложений · ${expiring} истекают в ближайшие 14 дней`,
+          weightedValue: (value: string) => `${value} взвешено`,
+          collectionsTitle: "Прогноз по взысканиям",
+          collectionsDescription:
+            "Что скоро станет к оплате, уже просрочено или всё ещё находится в debt-management.",
+          due14d: "К оплате / 14 дн.",
+          overdue: "Просрочено",
+          debtWorkflows: "Сценарии взыскания",
+          escalationSplit: "Структура эскалаций",
+          workflowOpenReview: (open: number, review: number) =>
+            `${open} открыто / ${review} review в течение 7 дн.`,
+          escalationSplitValue: (plans: number, escalated: number) =>
+            `${plans} платёжных планов / ${escalated} эскалировано`,
+          followupTitle: "Прогноз сопровождения",
+          followupDescription:
+            "Вехи, которые должны наступить в ближайшие 30 дней на основе текущего состояния follow-up по заказам.",
+          activeFollowupOrders: "Активные заказы сопровождения",
+          oneWeekOneMonthSixMonth: "1н / 1м / 6м",
+          doctorPackageResults: "Врач / окончание пакета / результаты",
+          clinicCapacityTitle: "Загрузка клиник на ближайшие 30 дней",
+          clinicCapacityDescription:
+            "Прогноз нагрузки на клиники по запланированным/подтверждённым приёмам и follow-up спросу.",
+          clinicCapacityBadge: (clinics: number, appointments: number) =>
+            `${clinics} клиник / ${appointments} приёмов`,
+          doctors: (count: number) => `${count} врачей`,
+          followup30d: "Сопровождение / 30 дн.",
+          patients30d: "Пациенты / 30 дн.",
+          orders30d: "Заказы / 30 дн.",
+        },
+        clinicReport: {
+          title: "Отчёт по клиникам",
+          description:
+            "Медицинские партнёрские клиники, ранжированные по недавней активности, оказанным позициям, скорости ответа и качественным сигналам из feedback и завершения follow-up.",
+          empty: "Данных для отчёта по клиникам пока нет.",
+        },
+        serviceTypeReport: {
+          title: "Отчёт по типам услуг",
+          description:
+            "Объём оказанных медицинских, немедицинских и проходных услуг по классам сервисов.",
+          empty: "Данных для отчёта по типам услуг пока нет.",
+        },
+        medicalProviders: {
+          title: "Эффективность медицинских провайдеров",
+          description:
+            "Партнёрский обзор активности клиник и выручки для service mix, географии пациентов и sales-сравнений без детализации по пациентам.",
+          empty: "Данных по медицинским провайдерам пока нет.",
+        },
+        providerCosts: {
+          title: "Динамика стоимости провайдеров",
+          description:
+            "Историческое движение стоимости за единицу по клиникам и оказанным услугам для оценки цен и рыночных сравнений.",
+          empty: "Данных по динамике стоимости пока нет.",
+        },
+        nonMedicalProviders: {
+          title: "Отчёт по немедицинским провайдерам",
+          description:
+            "Concierge-ориентированный объём партнёров по портфелю услуг, текущей нагрузке запросов, охвату пациентов и feedback.",
+          empty: "Данных по немедицинским провайдерам пока нет.",
+        },
+        countries: {
+          title: "Отчёт по странам",
+          description:
+            "География пациентов, сгруппированная по активным профилям и текущему спросу на заказы.",
+          empty: "Данных для отчёта по странам пока нет.",
+          summary: (patients: number, orders: number) =>
+            `${patients} активных пациентов · ${orders} активных заказов`,
+        },
+        doctors: {
+          title: "Drill-down по врачам",
+          description:
+            "Активность врачей, охват пациентов, скорость ответа и качественные сигналы на основе прямого feedback и выполнения follow-up. Drill-down по клинике сужает выборку до одного провайдера.",
+          empty: "Для выбранного scope данных по врачам пока нет.",
+        },
+        visibility: {
+          title: "Видимость",
+          description:
+            "Разделы и финансовые метрики урезаются текущей ролью. Эта страница намеренно использует backend read model, а не только клиентскую фильтрацию.",
+        },
+        common: {
+          appointments90d: "Приёмы / 90 дн.",
+          patients90d: "Пациенты / 90 дн.",
+          deliveredItems: "Оказанные позиции",
+          doctors: "Врачи",
+          feedback: "Отзывы",
+          feedbackCount: "Количество отзывов",
+          treatmentScore: "Оценка лечения",
+          doctorCommunication: "Коммуникация врача",
+          clinicResponseTime: "Скорость ответа клиники",
+          doctorResponseTime: "Скорость ответа врача",
+          writtenFindings: "Письменные заключения",
+          followupCompletion: "Завершение follow-up",
+          clinicalOutcome: "Клинический результат",
+          experienceBundle: "Комплекс впечатлений",
+          answeredOpen: (answered: number, open: number) =>
+            `${answered} отвечено · ${open} открыто`,
+          linkedArztbrief: (count: number) => `${count} связанных Arztbrief`,
+          followupOrders: (done: number, total: number) => `${done}/${total} заказов`,
+          yes: "да",
+          partial: "частично",
+          complications: "осложнения",
+          org: "Организация",
+          service: "Сервис",
+          ambience: "Атмосфера",
+          value: "Цена-качество",
+          itemsOrdersPatients: (items: number, orders: number, patients: number) =>
+            `${items} позиций · ${orders} заказов · ${patients} пациентов`,
+          ordersDelivered: "Заказы / оказано",
+          doctorNetwork: "Сеть врачей",
+          lastActivity: (date: string) => `Последняя активность ${date}`,
+          specialties: "Специализации",
+          serviceMix: "Микс услуг",
+          patientCountryMix: "Страны пациентов",
+          noSpecialtyData: "Нет данных по специализациям",
+          noDeliveredServicesYet: "Оказанных услуг пока нет",
+          noCountryData: "Нет данных по странам",
+          samples: "Выборки",
+          latestVsFirst: "Последнее vs первое",
+          average: "Среднее",
+          observedRange: "Период наблюдения",
+          latest: "последнее",
+          min: "Мин.",
+          max: "Макс.",
+          services: "Услуги",
+          location: "Локация",
+          conciergeRequests90d: "Concierge-запросы / 90 дн.",
+          openRequests: "Открытые запросы",
+          completed90d: "Завершено / 90 дн.",
+          conciergeScore: "Оценка concierge",
+          feedbackVendors: (feedback: number, vendors: number) =>
+            `${feedback} отзывов / ${vendors} поставщиков`,
+        },
+      }
+;
+
+export const revenueReportsText: Record<"de" | "ru", RevenueReportsText> = {
+  de: revenueReportsTextDe,
+  ru: revenueReportsTextRu,
+};
+
+export function getRevenueReportsText(lang: "de" | "ru"): RevenueReportsText {
+  return revenueReportsText[lang];
+}
+
 export const revenueRu: RevenueTranslations = {
   finance_catalog_title: "Финансовый каталог",
   finance_catalog_description:
@@ -341,6 +821,7 @@ export const revenueRu: RevenueTranslations = {
   revenue_common_quantity: "Количество",
   revenue_common_net: "Нетто",
   revenue_common_gross: "Брутто",
+  revenue_common_patient_id: "ID пациента",
   revenue_common_updated_at: "Обновлено",
   revenue_unit_default: "ед.",
   revenue_filter_all_patients: "Все пациенты",
@@ -539,11 +1020,11 @@ export const revenueDe: RevenueTranslations = {
   finance_catalog_edit: "Bearbeiten",
   finance_catalog_service_package_catalog: "Servicepaket-Katalog",
   finance_catalog_new_package: "Neues Paket",
-  finance_catalog_package_basics: "Параметры пакета",
-  finance_catalog_package_pricing: "Цена и НДС",
-  finance_catalog_package_validity: "Период и статус",
-  finance_catalog_package_notes: "Описание пакета",
-  finance_catalog_package_total: "Сумма пакета",
+  finance_catalog_package_basics: "Paketdaten",
+  finance_catalog_package_pricing: "Preis und USt.",
+  finance_catalog_package_validity: "Zeitraum und Status",
+  finance_catalog_package_notes: "Paketbeschreibung",
+  finance_catalog_package_total: "Paketsumme",
   finance_catalog_package_key: "Paketschlüssel",
   finance_catalog_base_net_price: "Basispreis netto",
   finance_catalog_package_vat_profile: "USt.-Profil des Pakets",
@@ -609,6 +1090,7 @@ export const revenueDe: RevenueTranslations = {
   revenue_common_quantity: "Menge",
   revenue_common_net: "Netto",
   revenue_common_gross: "Brutto",
+  revenue_common_patient_id: "Patienten-ID",
   revenue_common_updated_at: "Aktualisiert",
   revenue_unit_default: "Einheit",
   revenue_filter_all_patients: "Alle Patienten",

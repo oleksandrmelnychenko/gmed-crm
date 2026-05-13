@@ -25,6 +25,8 @@ export interface CasesClinicalTranslations {
   cases_clinical_medication_validity_ended: string;
   cases_clinical_medication_notification_sent: string;
   cases_clinical_medication_confirm_expiry_review: string;
+  cases_clinical_no_access_title: string;
+  cases_clinical_no_access_description: string;
 
   cases_clinical_section_overview: string;
   cases_clinical_section_preconditions: string;
@@ -84,6 +86,41 @@ export interface CasesClinicalTranslations {
   cases_workspace_item_submit_create: string;
   cases_workspace_item_submit_edit: string;
   cases_workspace_item_remove: string;
+  cases_workspace_specialty_relevant: string;
+  cases_workspace_specialty_relevant_hint: string;
+  cases_workspace_specialty_key_signs: string;
+  cases_workspace_specialty_save: string;
+
+  cases_allergies_description: string;
+  cases_allergies_sheet_create: string;
+  cases_allergies_sheet_edit: string;
+  cases_allergies_empty_title: string;
+  cases_allergies_empty_hint: string;
+  cases_allergies_add_first: string;
+  cases_allergies_missing_allergen: string;
+  cases_allergies_untitled: string;
+  cases_allergies_reaction: string;
+  cases_allergies_no_reaction: string;
+  cases_allergies_allergen: string;
+
+  cases_specialty_cardiology_subflow_title: string;
+  cases_specialty_cardiology_active_description: string;
+  cases_specialty_cardiology_inactive_description: string;
+  cases_specialty_cardiology_relevant: string;
+  cases_specialty_cardiology_description: string;
+  cases_specialty_cardiology_save: string;
+  cases_specialty_chest_pain: string;
+  cases_specialty_dyspnea: string;
+  cases_specialty_palpitations: string;
+  cases_specialty_syncope: string;
+  cases_specialty_edema: string;
+  cases_specialty_known_diagnosis: string;
+  cases_specialty_prior_cardiac_workup: string;
+  cases_specialty_anticoagulation: string;
+  cases_specialty_cv_risk_factors: string;
+  cases_specialty_family_history: string;
+  cases_specialty_red_flags: string;
+  cases_specialty_cardiology_notes: string;
 
   cases_medications_title: string;
   cases_medications_description: string;
@@ -187,6 +224,9 @@ export interface CasesClinicalTranslations {
 }
 
 export const casesClinicalRu: CasesClinicalTranslations = {
+  cases_clinical_no_access_title: "Рабочее пространство кейсов",
+  cases_clinical_no_access_description:
+    "Управление кейсами в backend сейчас ограничено ролями CEO и Patient Manager.",
   cases_clinical_patient_fallback: "Пациент",
   cases_clinical_history_value_empty: "пусто",
   cases_clinical_loading_case: "Загрузка кейса",
@@ -280,6 +320,47 @@ export const casesClinicalRu: CasesClinicalTranslations = {
   cases_workspace_item_submit_create: "Добавить",
   cases_workspace_item_submit_edit: "Сохранить изменения",
   cases_workspace_item_remove: "Удалить",
+  cases_workspace_specialty_relevant: "Относится к специальности",
+  cases_workspace_specialty_relevant_hint:
+    "Включите, если этот раздел относится к кейсу.",
+  cases_workspace_specialty_key_signs: "Ключевые симптомы",
+  cases_workspace_specialty_save: "Сохранить раздел",
+
+  cases_allergies_description:
+    "Известные аллергии и задокументированные реакции.",
+  cases_allergies_sheet_create: "Новая аллергия",
+  cases_allergies_sheet_edit: "Редактировать аллергию",
+  cases_allergies_empty_title: "Аллергий пока нет.",
+  cases_allergies_empty_hint:
+    "Нажмите «Добавить» - справа откроется окно ввода.",
+  cases_allergies_add_first: "Добавить первую запись",
+  cases_allergies_missing_allergen: "Укажите аллерген.",
+  cases_allergies_untitled: "Без названия",
+  cases_allergies_reaction: "Реакция",
+  cases_allergies_no_reaction: "Реакция не указана",
+  cases_allergies_allergen: "Аллерген",
+
+  cases_specialty_cardiology_subflow_title: "Кардиологический блок",
+  cases_specialty_cardiology_active_description:
+    "Специализированный блок для кардиологических симптомов и ранее выполненной кардиодиагностики.",
+  cases_specialty_cardiology_inactive_description:
+    "Включайте, если симптомы или направление указывают на кардиологию.",
+  cases_specialty_cardiology_relevant: "Показания к кардиологии",
+  cases_specialty_cardiology_description:
+    "Сердечно-сосудистый анамнез и ключевые симптомы.",
+  cases_specialty_cardiology_save: "Сохранить кардиологию",
+  cases_specialty_chest_pain: "Боль в груди",
+  cases_specialty_dyspnea: "Одышка",
+  cases_specialty_palpitations: "Сердцебиение",
+  cases_specialty_syncope: "Обмороки",
+  cases_specialty_edema: "Отеки",
+  cases_specialty_known_diagnosis: "Известный диагноз",
+  cases_specialty_prior_cardiac_workup: "Предыдущие ЭКГ / Эхо / обследования",
+  cases_specialty_anticoagulation: "Антикоагуляция",
+  cases_specialty_cv_risk_factors: "Сердечно-сосудистые факторы риска",
+  cases_specialty_family_history: "Семейный анамнез",
+  cases_specialty_red_flags: "Красные флаги",
+  cases_specialty_cardiology_notes: "Кардиологические заметки",
 
   cases_medications_title: "Медикаменты",
   cases_medications_description:
@@ -437,6 +518,9 @@ export const casesClinicalDe: CasesClinicalTranslations = {
     "Benachrichtigung gesendet {date}.",
   cases_clinical_medication_confirm_expiry_review:
     "Ablaufprüfung bestätigen",
+  cases_clinical_no_access_title: "Fallbereich",
+  cases_clinical_no_access_description:
+    "Die Fallverwaltung ist im Backend derzeit auf die Rollen CEO und Patient Manager beschränkt.",
 
   cases_clinical_section_overview: "Übersicht",
   cases_clinical_section_preconditions: "Vorerkrankungen",
@@ -502,6 +586,47 @@ export const casesClinicalDe: CasesClinicalTranslations = {
   cases_workspace_item_submit_create: "Hinzufügen",
   cases_workspace_item_submit_edit: "Änderungen speichern",
   cases_workspace_item_remove: "Entfernen",
+  cases_workspace_specialty_relevant: "Fachrelevant",
+  cases_workspace_specialty_relevant_hint:
+    "Aktivieren, wenn dieser Fachbereich für den Fall berücksichtigt werden soll.",
+  cases_workspace_specialty_key_signs: "Leitsymptome",
+  cases_workspace_specialty_save: "Abschnitt speichern",
+
+  cases_allergies_description:
+    "Bekannte Allergien und dokumentierte Reaktionen.",
+  cases_allergies_sheet_create: "Neue Allergie",
+  cases_allergies_sheet_edit: "Allergie bearbeiten",
+  cases_allergies_empty_title: "Keine Allergien erfasst.",
+  cases_allergies_empty_hint:
+    "Hinzufügen öffnet das Eingabefenster rechts.",
+  cases_allergies_add_first: "Erste Allergie hinzufügen",
+  cases_allergies_missing_allergen: "Bitte den Allergiename eingeben.",
+  cases_allergies_untitled: "Ohne Namen",
+  cases_allergies_reaction: "Reaktion",
+  cases_allergies_no_reaction: "Keine Reaktion erfasst",
+  cases_allergies_allergen: "Allergen",
+
+  cases_specialty_cardiology_subflow_title: "Kardiologischer Teilbereich",
+  cases_specialty_cardiology_active_description:
+    "Fachspezifischer Pfad für kardiologische Symptome und bereits erfolgte Herzdiagnostik.",
+  cases_specialty_cardiology_inactive_description:
+    "Aktivieren, wenn Symptome oder Überweisung auf Kardiologie hinweisen.",
+  cases_specialty_cardiology_relevant: "Kardiologie relevant",
+  cases_specialty_cardiology_description:
+    "Kardiovaskuläre Anamnese und Leitsymptome.",
+  cases_specialty_cardiology_save: "Kardiologie speichern",
+  cases_specialty_chest_pain: "Brustschmerz",
+  cases_specialty_dyspnea: "Dyspnoe",
+  cases_specialty_palpitations: "Palpitationen",
+  cases_specialty_syncope: "Synkope",
+  cases_specialty_edema: "Ödeme",
+  cases_specialty_known_diagnosis: "Bekannte Diagnose",
+  cases_specialty_prior_cardiac_workup: "Vorbefunde (EKG / Echo / Diagnostik)",
+  cases_specialty_anticoagulation: "Antikoagulation",
+  cases_specialty_cv_risk_factors: "Kardiovaskuläre Risikofaktoren",
+  cases_specialty_family_history: "Familienanamnese",
+  cases_specialty_red_flags: "Warnzeichen",
+  cases_specialty_cardiology_notes: "Kardiologische Notizen",
 
   cases_medications_title: "Medikamente",
   cases_medications_description:

@@ -135,6 +135,10 @@ function formatNextActionKind(kind: string, translations: Translations) {
   return labelKey ? translations[labelKey] : formatUnknownValue(kind, translations);
 }
 
+function formatPortalCountLabel(template: string, count: number) {
+  return template.replace("{count}", String(count));
+}
+
 function portalDocumentValueLabel(
   value: string | null | undefined,
 ) {
@@ -458,10 +462,11 @@ function usePatientDashboardPageContent() {
                   {t.portal_dashboard_required_documents}
                 </p>
                 <p className="mt-2 text-sm font-semibold text-foreground">
-                  {l(
-                    `Es fehlen noch ${documentAlerts.missing_count} Pflichtdokument${documentAlerts.missing_count === 1 ? "" : "e"}.`,
-                    `Еще не хватает ${documentAlerts.missing_count} обязательн${documentAlerts.missing_count === 1 ? "ого документа" : "ых документов"}.`,
-                    `${documentAlerts.missing_count} required document${documentAlerts.missing_count === 1 ? "" : "s"} still missing`,
+                  {formatPortalCountLabel(
+                    documentAlerts.missing_count === 1
+                      ? t.portal_dashboard_missing_required_document_one
+                      : t.portal_dashboard_missing_required_document_many,
+                    documentAlerts.missing_count,
                   )}
                 </p>
                 <p className={cn("mt-1", tokens.text.muted)}>
@@ -600,11 +605,11 @@ function usePatientDashboardPageContent() {
       </section>
 
       <section className="grid gap-4 md:grid-cols-5">
-        <StatCard label={t.portal_dashboard_upcoming_visits} value={upcomingAppointments} description={l(`${releasedDocuments} freigegebene Dokumente`, `${releasedDocuments} опубликованных документа`, `${releasedDocuments} released documents`)} />
-        <StatCard label={t.portal_dashboard_open_service_requests} value={openServiceRequests} description={l(`${services.length} Concierge-Einträge gesamt`, `Всего ${services.length} записей консьерж-сервиса`, `${services.length} total concierge entries`)} />
+        <StatCard label={t.portal_dashboard_upcoming_visits} value={upcomingAppointments} description={formatPortalCountLabel(t.portal_dashboard_released_documents_count, releasedDocuments)} />
+        <StatCard label={t.portal_dashboard_open_service_requests} value={openServiceRequests} description={formatPortalCountLabel(t.portal_dashboard_total_concierge_entries_count, services.length)} />
         <StatCard label={t.portal_dashboard_outstanding_balance} value={outstandingBalance === 0 ? formatPortalCurrency(0) : formatPortalCurrency(outstandingBalance)} />
-        <StatCard label={t.portal_dashboard_open_privacy_requests} value={openRequests} description={l(`${pendingConfirmations} ausstehende Bestätigungen`, `${pendingConfirmations} ожидающих подтверждений`, `${pendingConfirmations} pending confirmations`)} />
-        <StatCard label={t.portal_dashboard_feedback_sent} value={feedback.length} description={l(`${promoterCount} Promotor-Bewertungen`, `${promoterCount} оценок промоутеров`, `${promoterCount} promoter ratings`)} />
+        <StatCard label={t.portal_dashboard_open_privacy_requests} value={openRequests} description={formatPortalCountLabel(t.portal_dashboard_pending_confirmations_count, pendingConfirmations)} />
+        <StatCard label={t.portal_dashboard_feedback_sent} value={feedback.length} description={formatPortalCountLabel(t.portal_dashboard_promoter_ratings_count, promoterCount)} />
       </section>
 
       <section className="grid gap-6 xl:grid-cols-3 2xl:grid-cols-6">

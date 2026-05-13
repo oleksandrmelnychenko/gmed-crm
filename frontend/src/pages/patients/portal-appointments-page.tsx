@@ -1,7 +1,6 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   startTransition,
-  useCallback,
   useEffect,
   useMemo,
   useReducer,
@@ -146,8 +145,12 @@ function portalOrderPhaseLabel(
   return sharedPortalOrderPhaseLabel(value);
 }
 
+function formatPortalCountLabel(template: string, count: number) {
+  return template.replace("{count}", String(count));
+}
+
 function usePatientAppointmentsPageContent() {
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const [pageState, dispatchPageState] = useReducer(
     patientAppointmentsReducer,
     undefined,
@@ -182,11 +185,6 @@ function usePatientAppointmentsPageContent() {
           : nextValue,
     }));
   };
-  const l = useCallback(
-    (de: string, ru: string, en: string) =>
-      lang === "de" ? de : lang === "ru" ? ru : en,
-    [lang],
-  );
 
   useRealtimeSubscription(PORTAL_APPOINTMENT_REALTIME_EVENTS, () => {
     clearApiCache("/me/appointments");
@@ -233,7 +231,7 @@ function usePatientAppointmentsPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [t.portal_appointments_failed_to_load_appointment_workspace, version, l]);
+  }, [t.portal_appointments_failed_to_load_appointment_workspace, version]);
 
   const upcomingAppointments = useMemo(
     () => appointments.filter((item) => item.date >= new Date().toISOString().slice(0, 10)),
@@ -450,7 +448,7 @@ function usePatientAppointmentsPageContent() {
                       label: t.portal_appointments_results_handoff,
                       value: portalStatusLabel(item.results_handoff_status),
                       tone: followupStatusTone(item.results_handoff_status),
-                      hint: l(`${item.results_portal_shares} geteilte Dokumente`, `${item.results_portal_shares} переданных документов`, `${item.results_portal_shares} shared document(s)`),
+                      hint: formatPortalCountLabel(t.portal_appointments_shared_documents_count, item.results_portal_shares),
                     },
                   ];
 

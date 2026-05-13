@@ -113,22 +113,22 @@ export function PatientsListToolbar({
   t,
 }: PatientsListToolbarProps) {
   const operatorLabels = {
-    contains: t.filter_op_contains ?? "contains",
-    does_not_contain: t.filter_op_does_not_contain ?? "does not contain",
-    is_empty: t.filter_op_is_empty ?? "is empty",
-    is_not_empty: t.filter_op_is_not_empty ?? "is not empty",
-    is: t.filter_op_is ?? "is",
-    is_not: t.filter_op_is_not ?? "is not",
-    is_any_of: t.filter_op_is_any_of ?? "is any of",
-    is_none_of: t.filter_op_is_none_of ?? "is none of",
-    has_any: t.filter_op_has_any ?? "has any of",
-    has_all: t.filter_op_has_all ?? "has all of",
-    has_none: t.filter_op_has_none ?? "has none of",
-    before: t.filter_op_before ?? "before",
-    after: t.filter_op_after ?? "after",
-    between: t.filter_op_between ?? "between",
-    last_n_days: t.filter_op_last_n_days ?? "last N days",
-    equals: t.filter_op_equals ?? "equals",
+    contains: t.filter_op_contains,
+    does_not_contain: t.filter_op_does_not_contain,
+    is_empty: t.filter_op_is_empty,
+    is_not_empty: t.filter_op_is_not_empty,
+    is: t.filter_op_is,
+    is_not: t.filter_op_is_not,
+    is_any_of: t.filter_op_is_any_of,
+    is_none_of: t.filter_op_is_none_of,
+    has_any: t.filter_op_has_any,
+    has_all: t.filter_op_has_all,
+    has_none: t.filter_op_has_none,
+    before: t.filter_op_before,
+    after: t.filter_op_after,
+    between: t.filter_op_between,
+    last_n_days: t.filter_op_last_n_days,
+    equals: t.filter_op_equals,
   };
 
   return (
@@ -211,8 +211,8 @@ export function PatientsListToolbar({
             type="button"
             variant="outline"
             size="icon-sm"
-            title="Keyboard shortcuts"
-            aria-label="Keyboard shortcuts"
+            title={t.patients_shortcuts_title}
+            aria-label={t.patients_shortcuts_title}
             onClick={onShortcutsOpen}
           >
             <Info className="size-3.5" />
@@ -233,14 +233,14 @@ export function PatientsListToolbar({
           filters={filterPredicates}
           onChange={onFiltersChange}
           translations={{
-            addFilter: t.table_filter ?? "Filter",
-            clearAll: t.table_sort_clear ?? "Clear",
+            addFilter: t.table_filter,
+            clearAll: t.table_sort_clear,
             searchPlaceholder: t.table_filter_search_fields ?? t.common_search,
-            noFields: t.table_filter_no_fields ?? "No available fields",
-            remove: t.table_filter_remove ?? "Remove filter",
-            valuePlaceholder: t.table_filter_value ?? "Value",
-            yes: t.common_yes ?? "Yes",
-            no: t.common_no ?? "No",
+            noFields: t.table_filter_no_fields,
+            remove: t.table_filter_remove,
+            valuePlaceholder: t.table_filter_value,
+            yes: t.common_yes,
+            no: t.common_no,
             operatorLabels,
           }}
         />
@@ -250,14 +250,14 @@ export function PatientsListToolbar({
           value={sortStack}
           onChange={onSortChange}
           translations={{
-            addSort: t.table_sort_add ?? "Add sort",
-            clearAll: t.table_sort_clear ?? "Clear",
-            ascending: t.table_sort_ascending ?? "Asc",
-            descending: t.table_sort_descending ?? "Desc",
+            addSort: t.table_sort_add,
+            clearAll: t.table_sort_clear,
+            ascending: t.table_sort_ascending,
+            descending: t.table_sort_descending,
             emptyHint: t.common_sort,
-            moveUp: t.table_sort_move_up ?? "Move up",
-            moveDown: t.table_sort_move_down ?? "Move down",
-            remove: t.table_sort_remove ?? "Remove",
+            moveUp: t.table_sort_move_up,
+            moveDown: t.table_sort_move_down,
+            remove: t.table_sort_remove,
           }}
         />
 
@@ -271,26 +271,26 @@ export function PatientsListToolbar({
           defaultFrozen={defaultFrozenColumns}
           maxFrozenColumns={maxFrozenColumns}
           groupLabels={groupLabels}
-          buttonLabel={t.table_columns ?? "Columns"}
-          searchPlaceholder={t.table_columns_search ?? "Search columns"}
+          buttonLabel={t.table_columns}
+          searchPlaceholder={t.table_columns_search}
           resetLabel={t.common_reset}
-          showAllLabel={t.table_columns_show_all ?? "Show all"}
-          hideAllLabel={t.table_columns_hide_all ?? "Hide all"}
-          noMatchLabel={t.table_filter_no_fields ?? "No match"}
-          requiredNoteLabel={t.table_columns_required ?? "required"}
-          freezeLabel={t.table_columns_freeze ?? "Freeze"}
-          unfreezeLabel={t.table_columns_unfreeze ?? "Unfreeze"}
-          frozenNoteLabel={t.table_columns_frozen ?? "frozen"}
+          showAllLabel={t.table_columns_show_all}
+          hideAllLabel={t.table_columns_hide_all}
+          noMatchLabel={t.table_filter_no_fields}
+          requiredNoteLabel={t.table_columns_required}
+          freezeLabel={t.table_columns_freeze}
+          unfreezeLabel={t.table_columns_unfreeze}
+          frozenNoteLabel={t.table_columns_frozen}
         />
 
         <DensityToggle
           value={density}
           onChange={onDensityChange}
-          ariaLabel={t.table_density ?? "Row density"}
+          ariaLabel={t.table_density}
           labels={{
-            comfortable: t.table_density_comfortable ?? "Comfortable",
-            compact: t.table_density_compact ?? "Compact",
-            condensed: t.table_density_condensed ?? "Condensed",
+            comfortable: t.table_density_comfortable,
+            compact: t.table_density_compact,
+            condensed: t.table_density_condensed,
           }}
         />
       </div>

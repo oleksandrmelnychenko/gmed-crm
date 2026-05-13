@@ -64,24 +64,28 @@ export function defaultValueForOperator(
 
 export type FilterOperatorLabels = Partial<Record<FilterOperator, string>>;
 
-export const DEFAULT_OPERATOR_LABELS: Record<FilterOperator, string> = {
-  contains: "contains",
-  does_not_contain: "does not contain",
-  is_empty: "is empty",
-  is_not_empty: "is not empty",
-  is: "is",
-  is_not: "is not",
-  is_any_of: "is any of",
-  is_none_of: "is none of",
-  has_any: "has any of",
-  has_all: "has all of",
-  has_none: "has none of",
-  before: "before",
-  after: "after",
-  between: "between",
-  last_n_days: "last N days",
-  equals: "equals",
-};
+const ALL_FILTER_OPERATORS: readonly FilterOperator[] = [
+  "contains",
+  "does_not_contain",
+  "is_empty",
+  "is_not_empty",
+  "is",
+  "is_not",
+  "is_any_of",
+  "is_none_of",
+  "has_any",
+  "has_all",
+  "has_none",
+  "before",
+  "after",
+  "between",
+  "last_n_days",
+  "equals",
+];
+
+export const DEFAULT_OPERATOR_LABELS = Object.fromEntries(
+  ALL_FILTER_OPERATORS.map((operator) => [operator, operator]),
+) as Record<FilterOperator, string>;
 
 export function labelForOperator(
   operator: FilterOperator,

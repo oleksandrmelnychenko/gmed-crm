@@ -289,7 +289,7 @@ function AssignmentsSection({
                 <div>{t.patients_assigned_by} {formatPatientDateTime(item.assigned_at, t.common_not_set)}</div>
                 <div>{t.patients_assigned_by} {item.assigned_by_name || t.common_unknown}</div>
                 {item.revoked_at ? (
-                  <div>Revoked {formatPatientDateTime(item.revoked_at, t.common_not_set)}</div>
+                  <div>{t.patients_revoked_at ?? t.patients_revoked} {formatPatientDateTime(item.revoked_at, t.common_not_set)}</div>
                 ) : null}
                 <div>{item.user_active ? t.patients_user_active : t.patients_user_inactive}</div>
               </div>

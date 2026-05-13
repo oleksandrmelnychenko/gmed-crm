@@ -11,9 +11,7 @@ const PatientPrivacyPage = lazy(() =>
 
 export function PrivacyPage() {
   const { user } = useAuth();
-  const { lang } = useLang();
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const { t } = useLang();
 
   if (user?.role === "patient") {
     return (
@@ -25,11 +23,7 @@ export function PrivacyPage() {
 
   return (
     <div className="rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-600">
-      {l(
-        "Der Datenschutzbereich hier ist nur fuer Patientenkonten.",
-        "Этот раздел приватности доступен только пациентским аккаунтам.",
-        "This privacy area is only available for patient accounts.",
-      )}
+      {t.portal_privacy_area_patient_only}
     </div>
   );
 }

@@ -265,7 +265,7 @@ function AdminCustomFieldCreateSheet({
                   <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_field_key} *</Label>
                   <Input
                     required
-                    placeholder="my_field"
+                    placeholder={t.cf_field_key_placeholder}
                     value={fKey}
                     onChange={(event) => onKeyChange(event.target.value)}
                     className="h-9 rounded-lg bg-card"
@@ -307,7 +307,7 @@ function AdminCustomFieldCreateSheet({
                 <div className="space-y-1.5">
                   <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_options}</Label>
                   <Input
-                    placeholder='["opt1","opt2"]'
+                    placeholder={t.cf_options_placeholder}
                     value={fOptions}
                     onChange={(event) => onOptionsChange(event.target.value)}
                     className="h-9 rounded-lg bg-card"

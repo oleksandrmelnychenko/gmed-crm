@@ -91,6 +91,10 @@ function portalDocumentSourceLabel(
   return sharedPortalDocumentSourceLabel(source, clinic);
 }
 
+function formatPortalCountLabel(template: string, count: number) {
+  return template.replace("{count}", String(count));
+}
+
 interface PatientDocumentsState {
   documents: PortalDocumentItem[];
   documentAlerts: PortalDocumentAlertsSummary | null;
@@ -437,10 +441,11 @@ function usePatientDocumentsPageContent() {
               <div className="space-y-3">
                 <div>
                   <p className="font-semibold">
-                    {l(
-                      `Es fehlen noch ${documentAlerts.missing_count} Pflichtdokument${documentAlerts.missing_count === 1 ? "" : "e"}.`,
-                      `Еще не хватает ${documentAlerts.missing_count} обязательн${documentAlerts.missing_count === 1 ? "ого документа" : "ых документов"}.`,
-                      `${documentAlerts.missing_count} required document${documentAlerts.missing_count === 1 ? "" : "s"} still missing`,
+                    {formatPortalCountLabel(
+                      documentAlerts.missing_count === 1
+                        ? t.portal_documents_missing_required_document_one
+                        : t.portal_documents_missing_required_document_many,
+                      documentAlerts.missing_count,
                     )}
                   </p>
                   <p className="mt-1 text-sm">

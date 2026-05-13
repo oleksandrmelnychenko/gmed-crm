@@ -1373,10 +1373,10 @@ function useAdminCompliancePageContent() {
               className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]"
               onSubmit={handleLoadPatientRegister}
             >
-              <Field label={`${t.compliance_patient_id} (UUID)`} htmlFor="compliance-patient-id">
+              <Field label={t.compliance_patient_id_uuid} htmlFor="compliance-patient-id">
                 <Input
                   id="compliance-patient-id"
-                  placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                  placeholder={t.compliance_patient_uuid_placeholder}
                   value={patientInput}
                   onChange={(event) => setPatientInput(event.target.value)}
                   className="h-9 rounded-lg bg-card"
@@ -1495,7 +1495,7 @@ function useAdminCompliancePageContent() {
 
           <Section title={t.compliance_export}>
             <div className={cn("grid gap-4 rounded-xl p-3.5 md:grid-cols-[minmax(0,1fr)_auto]", tokens.surface.card)}>
-              <Field label={`${t.compliance_patient_id} (UUID)`}>
+              <Field label={t.compliance_patient_id_uuid}>
                 <Input
                   placeholder={t.compliance_uses_loaded_uuid}
                   value={patientInput}

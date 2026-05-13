@@ -5,16 +5,10 @@ import { CaseItemList } from "./case-item-list";
 import { type AllergieItem, useCaseWorkspace } from "./context";
 import { Field, inputBaseClassName } from "./primitives";
 
-function tri(lang: string, de: string, ru: string, en: string) {
-  if (lang === "de") return de;
-  if (lang === "ru") return ru;
-  return en;
-}
-
 const BLANK: AllergieItem = { allergie: "", reaktion: "" };
 
 export function AllergiesSection() {
-  const { lang } = useLang();
+  const { t } = useLang();
   const {
     detail,
     permissions,
@@ -25,13 +19,8 @@ export function AllergiesSection() {
 
   return (
     <CaseItemList<AllergieItem>
-      title={tri(lang, "Allergien", "Аллергии", "Allergies")}
-      description={tri(
-        lang,
-        "Bekannte Allergien und dokumentierte Reaktionen.",
-        "Известные аллергии и задокументированные реакции.",
-        "Known allergies and documented reactions.",
-      )}
+      title={t.cases_clinical_section_allergies}
+      description={t.cases_allergies_description}
       items={detail?.allergien ?? []}
       blankItem={BLANK}
       cloneItem={(item) => ({
@@ -44,51 +33,31 @@ export function AllergiesSection() {
       sectionError={sectionError}
       canEdit={permissions.canEdit}
       sheetTitle={{
-        create: tri(lang, "Neue Allergie", "Новая аллергия", "New allergy"),
-        edit: tri(lang, "Allergie bearbeiten", "Редактировать аллергию", "Edit allergy"),
+        create: t.cases_allergies_sheet_create,
+        edit: t.cases_allergies_sheet_edit,
       }}
-      emptyTitle={tri(
-        lang,
-        "Keine Allergien erfasst.",
-        "Аллергий пока нет.",
-        "No allergies recorded yet.",
-      )}
-      emptyHint={tri(
-        lang,
-        "Hinzufügen öffnet das Eingabefenster rechts.",
-        "Нажмите «Добавить» — справа откроется окно ввода.",
-        "Use Add to open the side editor.",
-      )}
-      addFirstLabel={tri(
-        lang,
-        "Erste Allergie hinzufügen",
-        "Добавить первую запись",
-        "Add first entry",
-      )}
-      missingPrimaryMessage={tri(
-        lang,
-        "Bitte den Allergiename eingeben.",
-        "Укажите аллерген.",
-        "Please enter the allergen.",
-      )}
+      emptyTitle={t.cases_allergies_empty_title}
+      emptyHint={t.cases_allergies_empty_hint}
+      addFirstLabel={t.cases_allergies_add_first}
+      missingPrimaryMessage={t.cases_allergies_missing_allergen}
       cardContent={(item) => (
         <>
           <div className="flex items-center gap-2">
             <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
             <p className="truncate text-sm font-medium text-foreground">
-              {item.allergie || tri(lang, "Ohne Namen", "Без названия", "Untitled")}
+              {item.allergie || t.cases_allergies_untitled}
             </p>
           </div>
           {item.reaktion ? (
             <p className="line-clamp-3 whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">
               <span className="mr-1 text-[11.5px] font-medium text-muted-foreground">
-                {tri(lang, "Reaktion", "Реакция", "Reaction")}:
+                {t.cases_allergies_reaction}:
               </span>
               {item.reaktion}
             </p>
           ) : (
             <p className="text-xs italic text-muted-foreground">
-              {tri(lang, "Keine Reaktion erfasst", "Реакция не указана", "No reaction recorded")}
+              {t.cases_allergies_no_reaction}
             </p>
           )}
         </>
@@ -96,7 +65,7 @@ export function AllergiesSection() {
       formContent={({ form, updateField, disabled }) => (
         <>
           <Field
-            label={tri(lang, "Allergen", "Аллерген", "Allergen")}
+            label={t.cases_allergies_allergen}
             required
           >
             <Input
@@ -106,7 +75,7 @@ export function AllergiesSection() {
               disabled={disabled}
             />
           </Field>
-          <Field label={tri(lang, "Reaktion", "Реакция", "Reaction")}>
+          <Field label={t.cases_allergies_reaction}>
             <Input
               value={form.reaktion ?? ""}
               onChange={(event) => updateField("reaktion", event.target.value)}

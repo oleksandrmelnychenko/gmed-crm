@@ -2307,9 +2307,7 @@ function StaffDocumentsPage({
                   <Banner tone="error">{generateError}</Banner>
                 ) : null}
 
-                <DocumentSheetSection
-                  title={l("Vorlage", "Шаблон", "Шаблон")}
-                >
+                <DocumentSheetSection title={t.documents_section_template}>
                   <div className="space-y-4">
                     {selectedTemplate ? (
                       <div className="rounded-xl border border-sky-200 bg-sky-50/80 px-4 py-3 text-sm text-sky-900">
@@ -2381,9 +2379,7 @@ function StaffDocumentsPage({
                   </div>
                 </DocumentSheetSection>
 
-                <DocumentSheetSection
-                  title={l("Kontext", "Контекст", "Контекст")}
-                >
+                <DocumentSheetSection title={t.documents_section_context}>
                   <div className="grid gap-4 md:grid-cols-2">
               <Field label={t.orders_patient} required>
                 <NativeComboboxSelect
@@ -2459,9 +2455,7 @@ function StaffDocumentsPage({
                   </div>
                 </DocumentSheetSection>
 
-                <DocumentSheetSection
-                  title={l("Dokumentparameter", "Параметры документа", "Параметри документа")}
-                >
+                <DocumentSheetSection title={t.documents_section_parameters}>
                   <div className="grid gap-4 md:grid-cols-2">
               <Field label={t.users_status}>
                 <NativeComboboxSelect
@@ -2593,11 +2587,9 @@ function StaffDocumentsPage({
                   </DocumentSheetSection>
                 ) : null}
 
-                <DocumentSheetSection
-                  title={l("Text und Notizen", "Текст и заметки", "Текст і нотатки")}
-                >
+                <DocumentSheetSection title={t.documents_section_text_notes}>
                   <div className="grid gap-4 md:grid-cols-2">
-              <Field label={l("Einleitung", "Вступление", "Вступ")}>
+              <Field label={t.documents_introduction}>
                 <textarea
                   value={generateForm.introduction}
                   onChange={(event) =>
@@ -2607,10 +2599,10 @@ function StaffDocumentsPage({
                     }))
                   }
                   className={textareaClassName}
-                  placeholder={l("Einleitungstext", "Текст вступления", "Текст вступу")}
+                  placeholder={t.documents_introduction_placeholder}
                 />
               </Field>
-              <Field label={l("Schlussnotiz", "Заключительная заметка", "Фінальна нотатка")}>
+              <Field label={t.documents_closing_note}>
                 <textarea
                   value={generateForm.closingNote}
                   onChange={(event) =>
@@ -2620,11 +2612,11 @@ function StaffDocumentsPage({
                     }))
                   }
                   className={textareaClassName}
-                  placeholder={l("Text am Dokumentende", "Текст в конце документа", "Текст наприкінці документа")}
+                  placeholder={t.documents_closing_note_placeholder}
                 />
               </Field>
                   </div>
-                  <Field label={l("Interne Notiz", "Внутренняя заметка", "Внутрішня нотатка")}>
+                  <Field label={t.documents_internal_note}>
                     <textarea
                       value={generateForm.notes}
                       onChange={(event) =>
@@ -2670,7 +2662,7 @@ function StaffDocumentsPage({
                   </Banner>
                 ) : null}
 
-                <DocumentSheetSection title={l("Datei", "Файл", "Файл")}>
+                <DocumentSheetSection title={t.documents_section_file}>
                   <div className="grid gap-4 md:grid-cols-2">
                     <Field label={t.documents_filename} required>
                       <Input
@@ -2694,7 +2686,7 @@ function StaffDocumentsPage({
                   </div>
                 </DocumentSheetSection>
 
-                <DocumentSheetSection title={l("Kontext", "Контекст", "Контекст")}>
+                <DocumentSheetSection title={t.documents_section_context}>
                   <div className="grid gap-4 md:grid-cols-2">
                     <Field label={t.orders_patient}>
                       <NativeComboboxSelect
@@ -2763,9 +2755,7 @@ function StaffDocumentsPage({
                   </div>
                 </DocumentSheetSection>
 
-                <DocumentSheetSection
-                  title={l("Dokument", "Документ", "Документ")}
-                >
+                <DocumentSheetSection title={t.documents_section_document}>
                   <div className="grid gap-4 md:grid-cols-2">
                     <Field label={t.operations_document_type}>
                       <Input
@@ -2883,7 +2873,7 @@ function StaffDocumentsPage({
                   </label>
                 </DocumentSheetSection>
 
-                <DocumentSheetSection title={l("Zusätzlich", "Дополнительно", "Додатково")}>
+                <DocumentSheetSection title={t.documents_section_additional}>
                   <Field label={t.patients_notes}>
                     <textarea
                       value={uploadForm.notes}
@@ -2996,9 +2986,7 @@ function StaffDocumentsPage({
                   </div>
                 ) : null}
 
-                <DocumentSheetSection
-                  title={l("Empfänger", "Получатель", "Отримувач")}
-                >
+                <DocumentSheetSection title={t.documents_section_recipient}>
                   <div className="space-y-4">
                     <div className="inline-flex flex-wrap gap-1 rounded-xl border border-border bg-muted/25 p-1">
                       <Button
@@ -3089,9 +3077,7 @@ function StaffDocumentsPage({
                   </div>
                 </DocumentSheetSection>
 
-                <DocumentSheetSection
-                  title={l("Nachricht", "Сообщение", "Повідомлення")}
-                >
+                <DocumentSheetSection title={t.documents_section_message}>
                   <Field
                     label={t.documents_share_message}
                     required={shareForm.targetType === "provider"}
@@ -3110,9 +3096,7 @@ function StaffDocumentsPage({
                   </Field>
                 </DocumentSheetSection>
 
-                <DocumentSheetSection
-                  title={l("Bestätigung", "Подтверждение", "Підтвердження")}
-                >
+                <DocumentSheetSection title={t.documents_section_confirmation}>
                   <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
                     <input
                       type="checkbox"
@@ -3142,11 +3126,7 @@ function StaffDocumentsPage({
               className="flex flex-1 min-h-0 flex-col"
             >
               <AdminSheetScaffold
-                title={l(
-                  "Metadaten bearbeiten",
-                  "\u0420\u0435\u0434\u0430\u043a\u0442\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u043c\u0435\u0442\u0430\u0434\u0430\u043d\u043d\u044b\u0435",
-                  "\u0420\u0435\u0434\u0430\u0433\u0443\u0432\u0430\u0442\u0438 \u043c\u0435\u0442\u0430\u0434\u0430\u043d\u0456",
-                )}
+                title={t.documents_edit_metadata_title}
                 footer={(
                   <SheetFormFooter
                     cancelLabel={t.common_cancel}
@@ -3160,9 +3140,7 @@ function StaffDocumentsPage({
               >
                 {saveError ? <Banner tone="error">{saveError}</Banner> : null}
                 <div className="space-y-4 rounded-xl p-4">
-                  <DocumentSheetSection
-                    title={l("Metadaten", "Метаданные", "Метадані")}
-                  >
+                  <DocumentSheetSection title={t.documents_section_metadata}>
                     <div className="grid gap-4 md:grid-cols-2">
                   <Field label={t.orders_patient}>
                     <NativeComboboxSelect
@@ -3240,9 +3218,7 @@ function StaffDocumentsPage({
                     </div>
                   </DocumentSheetSection>
 
-                  <DocumentSheetSection
-                    title={l("Dokument", "Документ", "Документ")}
-                  >
+                  <DocumentSheetSection title={t.documents_section_document}>
                     <div className="grid gap-4 md:grid-cols-2">
                   <Field label={t.documents_filename} required>
                     <Input
@@ -3294,9 +3270,7 @@ function StaffDocumentsPage({
                     </div>
                   </DocumentSheetSection>
 
-                  <DocumentSheetSection
-                    title={l("Status und Sichtbarkeit", "Статус и видимость", "Статус і видимість")}
-                  >
+                  <DocumentSheetSection title={t.documents_section_status_visibility}>
                     <div className="grid gap-4 md:grid-cols-2">
                   <Field label={t.users_status}>
                     <NativeComboboxSelect
@@ -3389,9 +3363,7 @@ function StaffDocumentsPage({
                     </label>
                   </DocumentSheetSection>
 
-                  <DocumentSheetSection
-                    title={l("Zusätzlich", "Дополнительно", "Додатково")}
-                  >
+                  <DocumentSheetSection title={t.documents_section_additional}>
                     <Field label={t.patients_notes}>
                       <textarea
                         value={editForm.notes}
@@ -4080,7 +4052,7 @@ function StaffDocumentsPage({
                                       variant="ghost"
                                       size="icon-sm"
                                       className="size-7 rounded-full bg-white text-muted-foreground shadow-sm ring-1 ring-border/60 hover:bg-[#f9fdff] hover:text-foreground"
-                                      aria-label={l("Aktionen", "Действия", "Actions")}
+                                      aria-label={t.documents_actions}
                                       aria-expanded={translationActionMenuOpen === request.id}
                                       onClick={(event) => {
                                         if (translationActionMenuOpen === request.id) {
@@ -4132,7 +4104,7 @@ function StaffDocumentsPage({
                                               openDocument(request.translated_document_id!);
                                             }}
                                           >
-                                            {l("Uebersetzung öffnen", "Открыть перевод", "Open translation")}
+                                            {t.documents_open_translation}
                                           </Button>
                                         ) : null}
                                         {canActOnTranslation && request.status !== "in_progress" ? (
@@ -4189,12 +4161,12 @@ function StaffDocumentsPage({
                                                   request.id,
                                                   "completed",
                                                   undefined,
-                                                  l("Uebersetzung abgeschlossen und Dokument erstellt.", "Перевод завершен, документ создан.", "Translation completed and document created."),
+                                                  t.documents_translation_completed_document_notice,
                                                   { createTranslatedDocument: true },
                                                 );
                                               }}
                                             >
-                                              {l("Abschließen + Dokument", "Завершить + документ", "Complete + document")}
+                                              {t.documents_translation_complete_with_document}
                                             </Button>
                                             <Button
                                               type="button"
@@ -4244,9 +4216,9 @@ function StaffDocumentsPage({
                                     </div>
                                     <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                                       <span>
-                                        {l("Zugewiesen", "Назначено", "Assigned")}:{" "}
+                                        {t.documents_assigned}:{" "}
                                         <span className="font-medium text-foreground">
-                                          {request.assigned_to_name ?? l("Nicht zugewiesen", "Не назначено", "Unassigned")}
+                                          {request.assigned_to_name ?? t.documents_unassigned}
                                         </span>
                                       </span>
                                       {request.translated_by_name ? (
@@ -4305,7 +4277,7 @@ function StaffDocumentsPage({
                                   <div className="flex items-center gap-3 px-3 py-2">
                                     <div className="min-w-0">
                                       <p className="text-[11.5px] font-medium leading-tight text-muted-foreground">
-                                        {l("Fertiges Dokument", "Готовый документ", "Ready document")}
+                                        {t.documents_ready_document}
                                       </p>
                                       <p className="mt-1 truncate text-sm font-medium text-foreground">
                                         {request.translated_document_name ?? t.documents_translated_text}
@@ -4333,7 +4305,7 @@ function StaffDocumentsPage({
                                             <option value="uk">{formatLanguageLabel("uk")}</option>
                                           </NativeComboboxSelect>
                                         </Field>
-                                        <Field label={l("Assignee", "Исполнитель", "Assignee")}>
+                                        <Field label={t.documents_assignee}>
                                           <NativeComboboxSelect
                                             value={request.assigned_to ?? ""}
                                             onChange={(event) => {
@@ -4343,14 +4315,14 @@ function StaffDocumentsPage({
                                                 request.id,
                                                 request.status === "pending" ? "in_progress" : request.status,
                                                 undefined,
-                                                l("Zuweisung aktualisiert.", "Назначение обновлено.", "Assignee updated."),
+                                                t.documents_assignee_updated,
                                                 { assignedTo },
                                               );
                                             }}
                                             className={selectClassName}
                                             disabled={translationBusy}
                                           >
-                                            <option value="">{l("Nicht zugewiesen", "Не назначено", "Unassigned")}</option>
+                                            <option value="">{t.documents_unassigned}</option>
                                             {staff.map((member) => (
                                               <option key={member.id} value={member.id}>
                                                 {member.name} / {formatRoleLabel(member.role)}
@@ -4677,11 +4649,7 @@ function StaffDocumentsPage({
                       <div className="flex items-center gap-3 rounded-lg px-3 py-4 text-sm text-muted-foreground">
                         <span className="size-2.5 shrink-0 rounded-full bg-muted-foreground/35" />
                         <span>
-                          {l(
-                            "Noch keine aktiven Portal-Freigaben.",
-                            "\u0410\u043a\u0442\u0438\u0432\u043d\u044b\u0445 \u0440\u0435\u043b\u0438\u0437\u043e\u0432 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442.",
-                            "No active portal releases yet.",
-                          )}
+                          {t.documents_no_active_portal_releases}
                         </span>
                       </div>
                     ) : (
@@ -4756,13 +4724,13 @@ function StaffDocumentsPage({
                           <span className="font-semibold tabular-nums text-foreground">
                             {shares.length}
                           </span>
-                          {l("Gesamt", "\u0412\u0441\u0435\u0433\u043e", "Total")}
+                          {t.documents_total}
                         </span>
                         <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
                           <span className="font-semibold tabular-nums text-emerald-700">
                             {shares.filter((share) => !share.revoked_at).length}
                           </span>
-                          {l("Aktiv", "\u0410\u043a\u0442\u0438\u0432\u043d\u044b\u0435", "Active")}
+                          {t.common_active}
                         </span>
                         <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
                           <span className="font-semibold tabular-nums text-amber-700">
@@ -4804,12 +4772,12 @@ function StaffDocumentsPage({
                     ) : (
                       <div className="overflow-hidden rounded-lg">
                         <div className="hidden grid-cols-[minmax(170px,0.7fr)_minmax(150px,150px)_minmax(360px,1.4fr)] gap-4 px-3 py-2 text-[11px] font-medium text-muted-foreground lg:grid">
-                          <span>{l("Empfaenger", "Получатель", "Recipient")}</span>
+                          <span>{t.documents_section_recipient}</span>
                           <span className="border-l border-border/50 px-3">
                             {t.users_status}
                           </span>
                           <span className="border-l border-border/50 px-3">
-                            {l("Freigabe", "Доступ", "Access")}
+                            {t.documents_access}
                           </span>
                         </div>
                         {shares.map((share) => {
@@ -5246,7 +5214,7 @@ function DocumentTranslationRequestsTable({
       },
       {
         id: "language",
-        label: l("Sprache", "Язык", "Language"),
+        label: t.patients_languages,
         accessor: (request) => request.requested_language,
         searchable: true,
         sortable: true,
@@ -5262,7 +5230,7 @@ function DocumentTranslationRequestsTable({
       },
       {
         id: "requested_at",
-        label: l("Angefragt", "Запрошено", "Requested"),
+        label: t.documents_requested,
         accessor: (request) => request.requested_at,
         filterType: "date",
         sortable: true,
@@ -5280,7 +5248,7 @@ function DocumentTranslationRequestsTable({
       },
       {
         id: "assigned",
-        label: l("Zugewiesen", "Назначено", "Assigned"),
+        label: t.documents_assigned,
         accessor: (request) =>
           `${request.assigned_to_name ?? ""} ${request.translated_document_name ?? ""}`.trim(),
         searchable: true,
@@ -5343,7 +5311,7 @@ function DocumentTranslationRequestsTable({
               }}
             >
               <span className="truncate">
-                {l("Mir zuweisen", "Назначить мне", "Assign to me")}
+                {t.documents_assign_to_me}
               </span>
             </Button>
           ) : null;

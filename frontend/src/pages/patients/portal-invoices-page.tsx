@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useEffect, useMemo, useReducer, type FormEvent } from "react";
+import { startTransition, useEffect, useMemo, useReducer, type FormEvent } from "react";
 import { Download, LoaderCircle, RefreshCw, Upload } from "lucide-react";
 
 import { AdminSheetScaffold } from "@/components/admin-page-patterns";
@@ -66,6 +66,10 @@ const PORTAL_INVOICE_REALTIME_EVENTS = [
   "document.payment_proof_uploaded",
 ] as const;
 
+function formatPortalCountLabel(template: string, count: number) {
+  return template.replace("{count}", String(count));
+}
+
 interface PatientInvoicesState {
   invoices: PortalInvoiceItem[];
   loading: boolean;
@@ -118,7 +122,7 @@ function patientInvoicesReducer(
 }
 
 function usePatientInvoicesPageContent() {
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const [invoicesState, dispatchInvoicesState] = useReducer(
     patientInvoicesReducer,
     INITIAL_PATIENT_INVOICES_STATE,
@@ -140,12 +144,6 @@ function usePatientInvoicesPageContent() {
     uploadOpen,
     version,
   } = invoicesState;
-  const l = useCallback(
-    (de: string, ru: string, en: string) =>
-      lang === "de" ? de : lang === "ru" ? ru : en,
-    [lang],
-  );
-
   useRealtimeSubscription(PORTAL_INVOICE_REALTIME_EVENTS, (event) => {
     clearApiCache("/me/invoices");
     if (event.entity_type === "invoice") {
@@ -334,7 +332,7 @@ function usePatientInvoicesPageContent() {
       <section className="grid gap-4 md:grid-cols-3">
         <StatCard label={t.portal_invoices_visible_invoices} value={String(invoices.length)} />
         <StatCard label={t.portal_invoices_outstanding_balance} value={hiddenAmountCount > 0 ? t.portal_invoices_partly_hidden : formatPortalCurrency(totalBalance)} />
-        <StatCard label={t.portal_invoices_missing_payment_proof} value={String(proofPendingCount)} description={l(`${overdueCount} überfällig`, `${overdueCount} просрочено`, `${overdueCount} overdue`)} />
+        <StatCard label={t.portal_invoices_missing_payment_proof} value={String(proofPendingCount)} description={formatPortalCountLabel(t.portal_invoices_overdue_count, overdueCount)} />
       </section>
 
       <Section title={t.portal_invoices_my_invoices} accessory={<CountBadge>{invoices.length}</CountBadge>}>

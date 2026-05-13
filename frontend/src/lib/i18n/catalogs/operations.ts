@@ -15,6 +15,39 @@ export interface OperationsTranslations {
   operations_status_delivered: string;
   operations_status_approved: string;
   operations_document_type: string;
+  documents_section_template: string;
+  documents_section_context: string;
+  documents_section_parameters: string;
+  documents_section_text_notes: string;
+  documents_section_file: string;
+  documents_section_document: string;
+  documents_section_additional: string;
+  documents_section_recipient: string;
+  documents_section_message: string;
+  documents_section_confirmation: string;
+  documents_section_metadata: string;
+  documents_section_status_visibility: string;
+  documents_edit_metadata_title: string;
+  documents_introduction: string;
+  documents_introduction_placeholder: string;
+  documents_closing_note: string;
+  documents_closing_note_placeholder: string;
+  documents_internal_note: string;
+  documents_actions: string;
+  documents_open_translation: string;
+  documents_translation_completed_document_notice: string;
+  documents_translation_complete_with_document: string;
+  documents_assigned: string;
+  documents_unassigned: string;
+  documents_ready_document: string;
+  documents_assignee: string;
+  documents_assignee_updated: string;
+  documents_requested: string;
+  documents_assign_to_me: string;
+  documents_no_active_portal_releases: string;
+  documents_total: string;
+  documents_access: string;
+  lead_access_restricted: string;
   orders_task_status_open: string;
   orders_task_status_in_progress: string;
   orders_task_status_completed: string;
@@ -212,6 +245,29 @@ export interface OperationsTranslations {
   providers_rating: string;
   concierge_open_requests: string;
   patients_col_created_at: string;
+  patients_no_access_title: string;
+  patients_no_access_body: string;
+  patients_shortcuts_title: string;
+  patients_shortcuts_focus_search: string;
+  patients_shortcuts_navigate_rows: string;
+  patients_shortcuts_open_split_pane: string;
+  patients_shortcuts_multi_sort: string;
+  patients_shortcuts_close_pane: string;
+  patients_revoked_at: string;
+  appointments_repeat_frequency: string;
+  appointments_repeat_every: string;
+  appointment_recurrence_frequency_daily: string;
+  appointment_recurrence_frequency_weekly: string;
+  appointment_recurrence_frequency_monthly: string;
+  appointment_follow_up_preset_post_1w_label: string;
+  appointment_follow_up_preset_post_1m_label: string;
+  appointment_follow_up_preset_post_6m_label: string;
+  appointment_follow_up_preset_post_1w_title: string;
+  appointment_follow_up_preset_post_1m_title: string;
+  appointment_follow_up_preset_post_6m_title: string;
+  appointments_linked_patient_id: string;
+  appointments_linked_email: string;
+  appointments_linked_concierge: string;
   lead_column_group_identity: string;
   lead_column_group_qualification: string;
   lead_column_group_contact: string;
@@ -369,6 +425,41 @@ export const operationsRu: OperationsTranslations = {
   operations_status_delivered: "Оказано",
   operations_status_approved: "Утверждено",
   operations_document_type: "Тип документа",
+  documents_section_template: "Шаблон",
+  documents_section_context: "Контекст",
+  documents_section_parameters: "Параметры документа",
+  documents_section_text_notes: "Текст и заметки",
+  documents_section_file: "Файл",
+  documents_section_document: "Документ",
+  documents_section_additional: "Дополнительно",
+  documents_section_recipient: "Получатель",
+  documents_section_message: "Сообщение",
+  documents_section_confirmation: "Подтверждение",
+  documents_section_metadata: "Метаданные",
+  documents_section_status_visibility: "Статус и видимость",
+  documents_edit_metadata_title: "Редактировать метаданные",
+  documents_introduction: "Вступление",
+  documents_introduction_placeholder: "Текст вступления",
+  documents_closing_note: "Заключительная заметка",
+  documents_closing_note_placeholder: "Текст в конце документа",
+  documents_internal_note: "Внутренняя заметка",
+  documents_actions: "Действия",
+  documents_open_translation: "Открыть перевод",
+  documents_translation_completed_document_notice:
+    "Перевод завершён, документ создан.",
+  documents_translation_complete_with_document: "Завершить + документ",
+  documents_assigned: "Назначено",
+  documents_unassigned: "Не назначено",
+  documents_ready_document: "Готовый документ",
+  documents_assignee: "Исполнитель",
+  documents_assignee_updated: "Назначение обновлено.",
+  documents_requested: "Запрошено",
+  documents_assign_to_me: "Назначить мне",
+  documents_no_active_portal_releases: "Активных портальных релизов пока нет.",
+  documents_total: "Всего",
+  documents_access: "Доступ",
+  lead_access_restricted:
+    "Этот раздел доступен только пациент-менеджерам и sales.",
   orders_task_status_open: "Открыто",
   orders_task_status_in_progress: "В работе",
   orders_task_status_completed: "Завершено",
@@ -593,6 +684,30 @@ export const operationsRu: OperationsTranslations = {
   providers_rating: "Рейтинг",
   concierge_open_requests: "Открытые запросы",
   patients_col_created_at: "Создано",
+  patients_no_access_title: "Реестр пациентов",
+  patients_no_access_body:
+    "Эта рабочая область доступна только сотрудникам с доступом к пациентам.",
+  patients_shortcuts_title: "Клавиатурные сокращения",
+  patients_shortcuts_focus_search: "Фокус на поиске",
+  patients_shortcuts_navigate_rows: "Перемещение по строкам",
+  patients_shortcuts_open_split_pane: "Открыть в разделенной панели",
+  patients_shortcuts_multi_sort: "Мультисортировка",
+  patients_shortcuts_close_pane: "Закрыть панель",
+  patients_revoked_at: "Отозвано",
+  appointments_repeat_frequency: "Частота",
+  appointments_repeat_every: "Каждые",
+  appointment_recurrence_frequency_daily: "Ежедневно",
+  appointment_recurrence_frequency_weekly: "Еженедельно",
+  appointment_recurrence_frequency_monthly: "Ежемесячно",
+  appointment_follow_up_preset_post_1w_label: "1 неделя",
+  appointment_follow_up_preset_post_1m_label: "1 месяц",
+  appointment_follow_up_preset_post_6m_label: "6 месяцев",
+  appointment_follow_up_preset_post_1w_title: "Контрольный follow-up через 1 неделю",
+  appointment_follow_up_preset_post_1m_title: "Контрольный follow-up через 1 месяц",
+  appointment_follow_up_preset_post_6m_title: "Контрольный follow-up через 6 месяцев",
+  appointments_linked_patient_id: "ID пациента",
+  appointments_linked_email: "Электронная почта",
+  appointments_linked_concierge: "Консьерж",
   lead_column_group_identity: "Идентификация",
   lead_column_group_qualification: "Квалификация",
   lead_column_group_contact: "Контакты",
@@ -758,6 +873,41 @@ export const operationsDe: OperationsTranslations = {
   operations_status_delivered: "Erbracht",
   operations_status_approved: "Freigegeben",
   operations_document_type: "Dokumenttyp",
+  documents_section_template: "Vorlage",
+  documents_section_context: "Kontext",
+  documents_section_parameters: "Dokumentparameter",
+  documents_section_text_notes: "Text und Notizen",
+  documents_section_file: "Datei",
+  documents_section_document: "Dokument",
+  documents_section_additional: "Zusätzlich",
+  documents_section_recipient: "Empfänger",
+  documents_section_message: "Nachricht",
+  documents_section_confirmation: "Bestätigung",
+  documents_section_metadata: "Metadaten",
+  documents_section_status_visibility: "Status und Sichtbarkeit",
+  documents_edit_metadata_title: "Metadaten bearbeiten",
+  documents_introduction: "Einleitung",
+  documents_introduction_placeholder: "Einleitungstext",
+  documents_closing_note: "Schlussnotiz",
+  documents_closing_note_placeholder: "Text am Dokumentende",
+  documents_internal_note: "Interne Notiz",
+  documents_actions: "Aktionen",
+  documents_open_translation: "Übersetzung öffnen",
+  documents_translation_completed_document_notice:
+    "Übersetzung abgeschlossen und Dokument erstellt.",
+  documents_translation_complete_with_document: "Abschließen + Dokument",
+  documents_assigned: "Zugewiesen",
+  documents_unassigned: "Nicht zugewiesen",
+  documents_ready_document: "Fertiges Dokument",
+  documents_assignee: "Assignee",
+  documents_assignee_updated: "Zuweisung aktualisiert.",
+  documents_requested: "Angefragt",
+  documents_assign_to_me: "Mir zuweisen",
+  documents_no_active_portal_releases: "Noch keine aktiven Portal-Freigaben.",
+  documents_total: "Gesamt",
+  documents_access: "Freigabe",
+  lead_access_restricted:
+    "Dieser Bereich ist auf Patientenmanager und Sales beschränkt.",
   orders_task_status_open: "Offen",
   orders_task_status_in_progress: "In Bearbeitung",
   orders_task_status_completed: "Abgeschlossen",
@@ -984,6 +1134,30 @@ export const operationsDe: OperationsTranslations = {
   providers_rating: "Bewertung",
   concierge_open_requests: "Offene Anfragen",
   patients_col_created_at: "Erstellt",
+  patients_no_access_title: "Patientenregister",
+  patients_no_access_body:
+    "Dieser Arbeitsbereich ist nur für Mitarbeitende mit Patientenzugriff verfügbar.",
+  patients_shortcuts_title: "Tastenkürzel",
+  patients_shortcuts_focus_search: "Suche fokussieren",
+  patients_shortcuts_navigate_rows: "Zeilen navigieren",
+  patients_shortcuts_open_split_pane: "In geteilter Ansicht öffnen",
+  patients_shortcuts_multi_sort: "Mehrfachsortierung",
+  patients_shortcuts_close_pane: "Bereich schließen",
+  patients_revoked_at: "Widerrufen",
+  appointments_repeat_frequency: "Häufigkeit",
+  appointments_repeat_every: "Alle",
+  appointment_recurrence_frequency_daily: "Täglich",
+  appointment_recurrence_frequency_weekly: "Wöchentlich",
+  appointment_recurrence_frequency_monthly: "Monatlich",
+  appointment_follow_up_preset_post_1w_label: "1 Woche",
+  appointment_follow_up_preset_post_1m_label: "1 Monat",
+  appointment_follow_up_preset_post_6m_label: "6 Monate",
+  appointment_follow_up_preset_post_1w_title: "Follow-up nach 1 Woche",
+  appointment_follow_up_preset_post_1m_title: "Follow-up nach 1 Monat",
+  appointment_follow_up_preset_post_6m_title: "Follow-up nach 6 Monaten",
+  appointments_linked_patient_id: "Patienten-ID",
+  appointments_linked_email: "E-Mail",
+  appointments_linked_concierge: "Concierge",
   lead_column_group_identity: "Identität",
   lead_column_group_qualification: "Qualifikation",
   lead_column_group_contact: "Kontakt",

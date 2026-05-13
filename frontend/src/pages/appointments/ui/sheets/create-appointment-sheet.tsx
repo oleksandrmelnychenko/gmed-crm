@@ -540,7 +540,7 @@ function useCreateAppointmentSheetContent({
                   </label>
                   {form.repeatEnabled ? (
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                      <Field compact label="Frequency">
+                      <Field compact label={t.appointments_repeat_frequency}>
                         <NativeComboboxSelect
                           value={form.repeatFrequency}
                           onChange={(event) =>
@@ -559,7 +559,7 @@ function useCreateAppointmentSheetContent({
                           ))}
                         </NativeComboboxSelect>
                       </Field>
-                      <Field compact label="Every">
+                      <Field compact label={t.appointments_repeat_every}>
                         <Input
                           type="number"
                           min="1"

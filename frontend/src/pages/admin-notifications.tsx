@@ -685,7 +685,7 @@ function useAdminNotificationsPageContent() {
                     id="channel-config"
                     value={formConfig}
                     onChange={(event) => setFormConfig(event.target.value)}
-                    placeholder='{"host":"smtp.example.com","port":587,"user":"ops"}'
+                    placeholder={t.notif_config_placeholder}
                     rows={10}
                     className={textareaClass}
                   />

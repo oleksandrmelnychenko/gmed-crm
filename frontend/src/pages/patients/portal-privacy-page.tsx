@@ -1,5 +1,5 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { startTransition, useCallback, useEffect, useMemo, useReducer, type FormEvent } from "react";
+import { startTransition, useEffect, useMemo, useReducer, type FormEvent } from "react";
 import { LoaderCircle, RefreshCw, Shield } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -21,7 +21,7 @@ import {
   type StatusTone,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
-import { formatUnknownValue, useLang } from "@/lib/i18n";
+import { useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import {
   createPortalPrivacyRequest,
@@ -92,22 +92,12 @@ function patientPrivacyReducer(
 
 function privacyRequestSourceLabel(
   value: string | null | undefined,
-  l: (de: string, ru: string, en: string) => string,
-  translations: { common_unknown: string; common_unknown_value: string },
 ) {
   return sharedPrivacyRequestSourceLabel(value);
-  switch (value) {
-    case "patient_portal":
-      return l("Patientenportal", "Портал пациента", "Patient portal");
-    case "staff_workspace":
-      return l("Team-Workspace", "Рабочая область команды", "Team workspace");
-    default:
-      return formatUnknownValue(value, translations);
-  }
 }
 
 export function PatientPrivacyPage() {
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const [privacyState, dispatchPrivacyState] = useReducer(
     patientPrivacyReducer,
     INITIAL_PATIENT_PRIVACY_STATE,
@@ -123,11 +113,6 @@ export function PatientPrivacyPage() {
     submitting,
     version,
   } = privacyState;
-  const l = useCallback(
-    (de: string, ru: string, en: string) =>
-      lang === "de" ? de : lang === "ru" ? ru : en,
-    [lang],
-  );
 
   useRealtimeSubscription(PORTAL_PRIVACY_REALTIME_EVENTS, () => {
     clearApiCache("/me/privacy-requests");
@@ -157,7 +142,7 @@ export function PatientPrivacyPage() {
       } catch (err) {
         if (cancelled) return;
         dispatchPrivacyState({
-          error: err instanceof Error ? err.message : l("Datenschutzanfragen konnten nicht geladen werden.", "Не удалось загрузить запросы по приватности.", "Failed to load privacy requests."),
+          error: err instanceof Error ? err.message : t.portal_privacy_failed_to_load_requests,
           loading: false,
           refreshing: false,
         });
@@ -168,7 +153,7 @@ export function PatientPrivacyPage() {
     return () => {
       cancelled = true;
     };
-  }, [version, l]);
+  }, [version, t.portal_privacy_failed_to_load_requests]);
 
   const openRequests = useMemo(
     () => requests.filter((item) => !["rejected", "completed", "executed"].includes(item.status)),
@@ -186,13 +171,13 @@ export function PatientPrivacyPage() {
       });
       dispatchPrivacyState((current) => ({
         reason: "",
-        notice: l("Datenschutzanfrage wurde eingereicht.", "Запрос по приватности отправлен.", "Privacy request submitted."),
+        notice: t.portal_privacy_request_submitted,
         submitting: false,
         version: current.version + 1,
       }));
     } catch (err) {
       dispatchPrivacyState({
-        error: err instanceof Error ? err.message : l("Datenschutzanfrage konnte nicht gesendet werden.", "Не удалось отправить запрос по приватности.", "Failed to submit privacy request."),
+        error: err instanceof Error ? err.message : t.portal_privacy_failed_to_submit_request,
         submitting: false,
       });
     }
@@ -209,13 +194,13 @@ export function PatientPrivacyPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title={l("Datenschutzanfragen", "Запросы по приватности", "Privacy requests")}
-        description={l("Reichen Sie DSGVO-Anfragen zur Datenlöschung, Verarbeitungseinschränkung oder zum Widerruf der Weitergabe an Dritte ein.", "Отправляйте запросы по защите данных на удаление, ограничение обработки или отзыв передачи третьим лицам.", "Submit DSGVO requests for data erasure, processing restriction or third-party sharing revocation.")}
+        title={t.portal_privacy_title}
+        description={t.portal_privacy_description}
         actions={
           <>
-            <CountBadge>{l("Patientenportal", "Портал пациента", "Patient portal")}</CountBadge>
+            <CountBadge>{t.portal_privacy_patient_portal}</CountBadge>
             <CountBadge>
-              {l("Offene Anfragen", "Открытые запросы", "Open requests")}: {openRequests.length}
+              {t.portal_privacy_open_requests}: {openRequests.length}
             </CountBadge>
             <Button
               variant="outline"
@@ -223,7 +208,7 @@ export function PatientPrivacyPage() {
               onClick={() => dispatchPrivacyState((current) => ({ version: current.version + 1 }))}
             >
               <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
-              {l("Aktualisieren", "Обновить", "Refresh")}
+              {t.portal_privacy_refresh}
             </Button>
           </>
         }
@@ -233,32 +218,32 @@ export function PatientPrivacyPage() {
 
       <section className="grid gap-6 xl:grid-cols-[0.95fr_1.25fr]">
         <Section
-          title={l("Neue Anfrage", "Новый запрос", "New request")}
+          title={t.portal_privacy_new_request}
           accessory={<Shield className="size-4 text-muted-foreground" />}
         >
           <p className="text-sm text-muted-foreground">
-            {l("Anfragen gehen zur Prüfung und Bearbeitung an Ihren Patientenmanager.", "Запросы поступают вашему менеджеру пациента на рассмотрение и исполнение.", "Requests go to your patient manager for review and execution.")}
+            {t.portal_privacy_manager_review_hint}
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            <Field label={l("Anfragetyp", "Тип запроса", "Request type")} htmlFor="privacy-type">
+            <Field label={t.portal_privacy_request_type} htmlFor="privacy-type">
               <NativeComboboxSelect
                 id="privacy-type"
                 value={requestType}
                 onChange={(event) => dispatchPrivacyState({ requestType: event.target.value as RequestType })}
                 className={selectClass}
               >
-                <option value="restriction">{l("Verarbeitung einschränken", "Ограничить обработку", "Restrict processing")}</option>
-                <option value="erasure">{l("Daten löschen", "Удалить данные", "Erase data")}</option>
-                <option value="third_party_revoke">{l("Weitergabe an Dritte widerrufen", "Отозвать передачу третьим лицам", "Revoke third-party sharing")}</option>
+                <option value="restriction">{t.portal_privacy_request_restriction}</option>
+                <option value="erasure">{t.portal_privacy_request_erasure}</option>
+                <option value="third_party_revoke">{t.portal_privacy_request_third_party_revoke}</option>
               </NativeComboboxSelect>
             </Field>
-            <Field label={l("Begründung", "Причина", "Reason")} htmlFor="privacy-reason">
+            <Field label={t.portal_privacy_reason} htmlFor="privacy-reason">
               <textarea
                 id="privacy-reason"
                 value={reason}
                 onChange={(event) => dispatchPrivacyState({ reason: event.target.value })}
-                placeholder={l("Optionaler Kontext für das Betreuungsteam", "Необязательный контекст для команды сопровождения", "Optional context for the care team")}
+                placeholder={t.portal_privacy_reason_placeholder}
                 className={cn(textareaClass, "min-h-[120px]")}
               />
             </Field>
@@ -268,18 +253,18 @@ export function PatientPrivacyPage() {
               disabled={submitting}
             >
               {submitting ? <LoaderCircle className="size-4 animate-spin" /> : null}
-              {l("Anfrage senden", "Отправить запрос", "Submit request")}
+              {t.portal_privacy_submit_request}
             </Button>
           </form>
         </Section>
 
-        <Section title={l("Anfrageverlauf", "История запросов", "Request history")} accessory={<CountBadge>{requests.length}</CountBadge>}>
+        <Section title={t.portal_privacy_request_history} accessory={<CountBadge>{requests.length}</CountBadge>}>
           <p className="text-sm text-muted-foreground">
-            {l("Zeitachse eingereichter Datenschutzmaßnahmen und ihrer Fristen.", "Хронология отправленных запросов по приватности и их сроков.", "Timeline for submitted privacy actions and due dates.")}
+            {t.portal_privacy_history_description}
           </p>
           {requests.length === 0 ? (
             <EmptyCell>
-              {l("Noch keine Datenschutzanfragen eingereicht.", "Запросы по приватности еще не отправлялись.", "No privacy requests submitted yet.")}
+              {t.portal_privacy_empty}
             </EmptyCell>
           ) : (
             <div className="space-y-3">
@@ -291,7 +276,7 @@ export function PatientPrivacyPage() {
                         {privacyRequestLabel(item.request_type)}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {l("Eingereicht", "Отправлено", "Submitted")} {formatPortalDateTime(item.requested_at)}
+                        {t.portal_privacy_submitted} {formatPortalDateTime(item.requested_at)}
                       </p>
                     </div>
                     <StatusBadge status={item.status} tone={privacyStatusBadgeTone(item.status)}>
@@ -300,10 +285,10 @@ export function PatientPrivacyPage() {
                   </div>
 
                   <div className="mt-4 grid gap-3 md:grid-cols-2">
-                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={l("Fällig", "Срок", "Due")} value={formatPortalDate(item.due_at)} />
-                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={l("Geprüft", "Проверено", "Reviewed")} value={formatPortalDateTime(item.reviewed_at)} />
-                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={l("Ausgeführt", "Исполнено", "Executed")} value={formatPortalDateTime(item.executed_at)} />
-                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={l("Quelle", "Источник", "Source")} value={privacyRequestSourceLabel(item.source, l, t)} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_due} value={formatPortalDate(item.due_at)} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_reviewed} value={formatPortalDateTime(item.reviewed_at)} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_executed} value={formatPortalDateTime(item.executed_at)} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_source} value={privacyRequestSourceLabel(item.source)} />
                   </div>
 
                   {item.reason ? (

@@ -102,8 +102,8 @@ describe("operator predicates", () => {
 describe("labelForOperator", () => {
   it("uses default label when no overrides", () => {
     expect(labelForOperator("contains")).toBe("contains");
-    expect(labelForOperator("is_any_of")).toBe("is any of");
-    expect(labelForOperator("last_n_days")).toBe("last N days");
+    expect(labelForOperator("is_any_of")).toBe("is_any_of");
+    expect(labelForOperator("last_n_days")).toBe("last_n_days");
   });
   it("prefers override when provided", () => {
     expect(labelForOperator("contains", { contains: "містить" })).toBe("містить");
@@ -116,6 +116,6 @@ describe("labelForOperator", () => {
       void op;
     }
     expect(DEFAULT_OPERATOR_LABELS.contains).toBe("contains");
-    expect(DEFAULT_OPERATOR_LABELS.is_empty).toBe("is empty");
+    expect(DEFAULT_OPERATOR_LABELS.is_empty).toBe("is_empty");
   });
 });

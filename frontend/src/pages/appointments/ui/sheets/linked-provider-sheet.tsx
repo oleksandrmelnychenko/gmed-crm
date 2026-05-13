@@ -13,6 +13,7 @@ import {
   StatusBadge,
   tokens,
 } from "@/components/ui-shell";
+import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { appointmentPreviewInfoCardClassName } from "@/pages/appointments/appearance/surface-appearance";
 import { appointmentText } from "@/pages/appointments/model/labels";
@@ -59,6 +60,7 @@ function LinkedProviderOverviewSection({
   detail: ProviderSheetDetail;
   formatDateTimeLabel: (value?: string | null) => string;
 }) {
+  const { t } = useLang();
   const providerTypeLabel =
     detail.provider_type === "medical"
       ? appointmentText("Medizinisch", "Медицинская", "Medical")
@@ -142,7 +144,7 @@ function LinkedProviderOverviewSection({
           />
         </div>
         <div className={appointmentPreviewInfoCardClassName}>
-          <InfoRow label="Email" value={detail.email || notSet} />
+          <InfoRow label={t.appointments_linked_email} value={detail.email || notSet} />
         </div>
       </div>
 
@@ -172,6 +174,7 @@ function LinkedProviderPatientsSection({
   formatDateTimeLabel: (value?: string | null) => string;
   onOpenPatient: (patientId: string) => void;
 }) {
+  const { t } = useLang();
   return (
     <Section
       title={appointmentText(
@@ -220,7 +223,7 @@ function LinkedProviderPatientsSection({
                     {appointmentText("Services", "сервисы", "services")}
                   </CountBadge>
                   <CountBadge>
-                    {patient.concierge_count} Concierge
+                    {patient.concierge_count} {t.appointments_linked_concierge}
                   </CountBadge>
                 </div>
               </div>

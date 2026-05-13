@@ -249,8 +249,6 @@ function createLeadsUiFieldPatch<K extends keyof LeadsUiState>(
 function useLeadsPageContent() {
   const { user } = useAuth();
   const { t, lang } = useLang();
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
   const locale = lang === "de" ? "de-DE" : "ru-RU";
   const leadColumnGroupLabels = useMemo(
     () => ({
@@ -875,11 +873,7 @@ function useLeadsPageContent() {
     return (
       <div className="rounded-xl">
         <ShellBanner tone="warning" withIcon>
-          {l(
-            "Dieser Bereich ist auf Patientenmanager und Sales beschraenkt.",
-            "Section is limited to patient managers and sales.",
-            "This screen is limited to patient managers and sales.",
-          )}
+          {t.lead_access_restricted}
         </ShellBanner>
       </div>
     );
@@ -1687,7 +1681,7 @@ function useLeadsPageContent() {
                   }}
                 >
                   <Plus className="size-4" />
-                  {l("Neuer Lead", "Новый лид", "New lead")}
+                  {t.leads_new}
                 </Button>
               ) : null}
             </>
@@ -1847,8 +1841,8 @@ function useLeadsPageContent() {
                 type="button"
                 variant="outline"
                 size="icon-sm"
-                title={l("Aktualisieren", "Обновить", "Refresh")}
-                aria-label={l("Aktualisieren", "Обновить", "Refresh")}
+                title={t.common_refresh}
+                aria-label={t.common_refresh}
                 onClick={reload}
               >
                 <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
@@ -1881,7 +1875,7 @@ function useLeadsPageContent() {
             activeRowId={selectedLeadId || null}
             onRowClick={(row) => openLeadDetail(row.id)}
             rowAccent={(row) => leadRowAccent(row.qualification_status)}
-            rowActionsLabel={t.users_actions ?? "Actions"}
+            rowActionsLabel={t.users_actions || t.common_actions}
             rowActionsWidth={224}
             rowActions={(row) => {
               const canQualify =
@@ -1974,11 +1968,11 @@ function useLeadsPageContent() {
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
           <form onSubmit={handleCreate} className="flex h-full flex-col">
             <AdminSheetScaffold
-              title={l("Neuer Lead", "Новый лид", "New lead")}
+              title={t.leads_new}
               description={t.lead_create_description}
               footer={(
                 <SheetFormFooter
-                  cancelLabel={l("Abbrechen", "Отмена", "Cancel")}
+                  cancelLabel={t.common_cancel}
                   submitLabel={t.common_save}
                   submittingLabel={t.patients_creating}
                   submitting={createBusy}

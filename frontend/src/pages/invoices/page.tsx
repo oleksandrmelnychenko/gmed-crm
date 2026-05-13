@@ -774,7 +774,7 @@ function useStaffInvoicesPageContent() {
       },
       {
         id: "patient_pid",
-        label: "PID",
+        label: t.revenue_common_patient_id,
         accessor: (row) => row.patient_pid,
         sortable: true,
         width: 130,
@@ -983,7 +983,7 @@ function useStaffInvoicesPageContent() {
     },
     {
       id: "patient_pid",
-      label: "PID",
+      label: t.revenue_common_patient_id,
       accessor: (row) => row.patient_pid ?? "",
       filterType: "text",
       group: "context",

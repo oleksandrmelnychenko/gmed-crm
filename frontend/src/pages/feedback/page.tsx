@@ -1404,7 +1404,7 @@ function useStaffFeedbackWorkspaceContent() {
       },
       {
         id: "patient_pid",
-        label: "PID",
+        label: t.revenue_common_patient_id,
         accessor: (row) => row.patient_pid ?? "",
         filterType: "text",
         group: "identity",

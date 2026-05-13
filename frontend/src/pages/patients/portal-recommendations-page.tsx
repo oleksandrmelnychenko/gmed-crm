@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useEffect, useMemo, useReducer, type FormEvent, type ReactNode, type SetStateAction } from "react";
+import { startTransition, useEffect, useMemo, useReducer, type FormEvent, type ReactNode, type SetStateAction } from "react";
 import { CalendarPlus, CheckCircle2, LoaderCircle, MessageCircle, RefreshCw, XCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -88,7 +88,7 @@ function patientRecommendationsReducer(
 
 export function PatientRecommendationsPage() {
   const { user } = useAuth();
-  const { lang } = useLang();
+  const { t } = useLang();
   const [recommendationsState, dispatchRecommendationsState] = useReducer(
     patientRecommendationsReducer,
     INITIAL_PATIENT_RECOMMENDATIONS_STATE,
@@ -102,11 +102,6 @@ export function PatientRecommendationsPage() {
     refreshing,
     version,
   } = recommendationsState;
-  const l = useCallback(
-    (de: string, ru: string, en: string) =>
-      lang === "de" ? de : lang === "ru" ? ru : en,
-    [lang],
-  );
   const isPatientPortalUser = user?.role === "patient";
 
   useRealtimeSubscription(PORTAL_RECOMMENDATION_REALTIME_EVENTS, () => {
@@ -148,7 +143,7 @@ export function PatientRecommendationsPage() {
       } catch (err) {
         if (cancelled) return;
         dispatchRecommendationsState({
-          error: err instanceof Error ? err.message : l("Empfehlungen konnten nicht geladen werden.", "Не удалось загрузить рекомендации.", "Failed to load recommendations."),
+          error: err instanceof Error ? err.message : t.portal_recommendations_failed_to_load,
           loading: false,
           refreshing: false,
         });
@@ -159,7 +154,7 @@ export function PatientRecommendationsPage() {
     return () => {
       cancelled = true;
     };
-  }, [isPatientPortalUser, version, l]);
+  }, [isPatientPortalUser, version, t.portal_recommendations_failed_to_load]);
 
   const activeCount = useMemo(
     () => recommendations.filter((item) => item.status === "active").length,
@@ -180,8 +175,8 @@ export function PatientRecommendationsPage() {
     try {
       const successNotice =
         decision === "schedule"
-          ? l("Terminanfrage wurde aus der Empfehlung erstellt.", "Запрос на визит создан из рекомендации.", "Appointment request created from the recommendation.")
-          : l("Ihre Entscheidung wurde gespeichert.", "Ваше решение сохранено.", "Your decision was saved.");
+          ? t.portal_recommendations_appointment_request_created
+          : t.portal_recommendations_decision_saved;
       if (decision === "schedule") {
         await requestRecommendationAppointment(recommendationId, {});
       } else {
@@ -197,7 +192,7 @@ export function PatientRecommendationsPage() {
     } catch (err) {
       dispatchRecommendationsState({
         busyId: null,
-        error: err instanceof Error ? err.message : l("Aktion konnte nicht gespeichert werden.", "Не удалось сохранить действие.", "Failed to save action."),
+        error: err instanceof Error ? err.message : t.portal_recommendations_failed_to_save_action,
       });
     }
   }
@@ -217,15 +212,15 @@ export function PatientRecommendationsPage() {
   return (
     <TabShell className="mt-0 min-h-0">
       <PageHeader
-        title={l("Meine Empfehlungen", "Мои рекомендации", "My recommendations")}
-        description={l("Hier sehen Sie freigegebene Empfehlungen Ihres Betreuungsteams und können die nächste Entscheidung dokumentieren.", "Здесь отображаются опубликованные рекомендации команды сопровождения, по которым можно выбрать следующее действие.", "Review released care-team recommendations and record the next decision.")}
+        title={t.portal_recommendations_title}
+        description={t.portal_recommendations_description}
         actions={
           <>
-            <CountBadge>{l("Patientenportal", "Портал пациента", "Patient portal")}</CountBadge>
-            <CountBadge>{l("Aktiv", "Активно", "Active")}: {activeCount}</CountBadge>
+            <CountBadge>{t.portal_recommendations_patient_portal}</CountBadge>
+            <CountBadge>{t.portal_recommendations_active}: {activeCount}</CountBadge>
             <Button variant="outline" className={tokens.control.primaryButton} onClick={() => dispatchRecommendationsState((current) => ({ version: current.version + 1 }))}>
               <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
-              {l("Aktualisieren", "Обновить", "Refresh")}
+              {t.portal_recommendations_refresh}
             </Button>
           </>
         }
@@ -237,10 +232,10 @@ export function PatientRecommendationsPage() {
       {recommendations.length === 0 ? (
         <EmptyCell>
           <p className="text-base font-semibold text-foreground">
-            {l("Noch keine Empfehlungen", "Пока нет рекомендаций", "No recommendations yet")}
+            {t.portal_recommendations_empty_title}
           </p>
           <p className="mt-2 text-sm text-muted-foreground">
-            {l("Sobald Ihr Team eine Empfehlung freigibt, erscheint sie hier.", "Когда команда опубликует рекомендацию, она появится здесь.", "Released recommendations from your care team will appear here.")}
+            {t.portal_recommendations_empty_description}
           </p>
         </EmptyCell>
       ) : (
@@ -266,11 +261,11 @@ export function PatientRecommendationsPage() {
                     <p className="mt-2 text-sm text-muted-foreground">
                       {[item.source_doctor_name, item.source_appointment_title, item.source_document_name, item.source_order_number]
                         .filter(Boolean)
-                        .join(" / ") || l("Betreuungsteam", "Команда сопровождения", "Care team")}
+                        .join(" / ") || t.portal_recommendations_care_team}
                     </p>
                   </div>
                   {item.due_at ? (
-                    <CountBadge>{l("Fällig", "Срок", "Due")} {formatPortalDateTime(item.due_at)}</CountBadge>
+                    <CountBadge>{t.portal_recommendations_due} {formatPortalDateTime(item.due_at)}</CountBadge>
                   ) : null}
                 </div>
 
@@ -282,7 +277,7 @@ export function PatientRecommendationsPage() {
 
                 {item.patient_decision ? (
                   <InfoRow
-                    label={l("Ihre Entscheidung", "Ваше решение", "Your decision")}
+                    label={t.portal_recommendations_your_decision}
                     value={`${recommendationDecisionLabel(item.patient_decision)}${item.appointment_request_status ? ` / ${portalStatusLabel(item.appointment_request_status)}` : ""}`}
                   />
                 ) : null}
@@ -293,28 +288,28 @@ export function PatientRecommendationsPage() {
                       busy={busyId === `${recommendationId}:schedule`}
                       disabled={disabled || Boolean(item.appointment_request_id)}
                       icon={<CalendarPlus className="size-4" />}
-                      label={item.appointment_request_id ? l("Terminanfrage erstellt", "Запрос создан", "Request created") : l("Termin planen", "Запланировать визит", "Schedule")}
+                      label={item.appointment_request_id ? t.portal_recommendations_request_created : t.portal_recommendations_schedule}
                       onClick={() => void handleDecision(recommendationId, "schedule")}
                     />
                     <ActionButton
                       busy={busyId === `${recommendationId}:already_done`}
                       disabled={disabled}
                       icon={<CheckCircle2 className="size-4" />}
-                      label={l("Schon erledigt", "Уже выполнено", "Already done")}
+                      label={t.portal_recommendations_already_done}
                       onClick={() => void handleDecision(recommendationId, "already_done")}
                     />
                     <ActionButton
                       busy={busyId === `${recommendationId}:need_consultation`}
                       disabled={disabled}
                       icon={<MessageCircle className="size-4" />}
-                      label={l("Beratung nötig", "Нужна консультация", "Need consultation")}
+                      label={t.portal_recommendations_need_consultation}
                       onClick={() => void handleDecision(recommendationId, "need_consultation")}
                     />
                     <ActionButton
                       busy={busyId === `${recommendationId}:declined`}
                       disabled={disabled}
                       icon={<XCircle className="size-4" />}
-                      label={l("Ablehnen", "Отклонить", "Decline")}
+                      label={t.portal_recommendations_decline}
                       onClick={() => void handleDecision(recommendationId, "declined")}
                     />
                   </div>

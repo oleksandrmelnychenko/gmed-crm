@@ -637,11 +637,11 @@ function useAdminUsersPageContent() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_name}</Label>
-                    <Input required placeholder="Max Muller" value={newName} onChange={(e) => setNewName(e.target.value)} className="h-9 rounded-lg bg-card" />
+                    <Input required placeholder={t.users_name_placeholder} value={newName} onChange={(e) => setNewName(e.target.value)} className="h-9 rounded-lg bg-card" />
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_email}</Label>
-                    <Input type="email" required placeholder="max@gmed.de" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="h-9 rounded-lg bg-card" />
+                    <Input type="email" required placeholder={t.users_email_placeholder} value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="h-9 rounded-lg bg-card" />
                   </div>
                 </div>
                 <div className="space-y-1.5">

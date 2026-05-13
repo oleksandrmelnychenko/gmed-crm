@@ -1091,7 +1091,7 @@ function useAdminSecurityPageContent() {
                   <Input
                     id="whitelist-cidr"
                     required
-                    placeholder="10.0.0.0/8"
+                    placeholder={t.security_ip_cidr_placeholder}
                     value={newCidr}
                     onChange={(event) => setNewCidr(event.target.value)}
                     className="h-9 rounded-lg bg-card"

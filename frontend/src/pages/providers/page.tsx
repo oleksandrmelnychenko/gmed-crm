@@ -1288,30 +1288,30 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               filters={filterPredicates}
               onChange={setFilterPredicates}
               translations={{
-                addFilter: tr.table_filter ?? "Filter",
-                clearAll: tr.table_sort_clear ?? tr.common_reset ?? "Clear",
-                searchPlaceholder: tr.table_filter_search_fields ?? tr.common_search ?? "Search",
-                noFields: tr.table_filter_no_fields ?? "No available fields",
-                remove: tr.table_filter_remove ?? tr.common_remove ?? "Remove",
-                valuePlaceholder: tr.table_filter_value ?? "Value",
-                yes: tr.common_yes ?? "Yes",
-                no: tr.common_no ?? "No",
+                addFilter: tr.table_filter ?? "table_filter",
+                clearAll: tr.table_sort_clear ?? tr.common_reset ?? "common_clear",
+                searchPlaceholder: tr.table_filter_search_fields ?? tr.common_search ?? "common_search",
+                noFields: tr.table_filter_no_fields ?? "table_filter_no_fields",
+                remove: tr.table_filter_remove ?? tr.common_remove ?? "common_remove",
+                valuePlaceholder: tr.table_filter_value ?? "common_value",
+                yes: tr.common_yes ?? "common_yes",
+                no: tr.common_no ?? "common_no",
                 operatorLabels: {
                   contains: tr.filter_op_contains ?? "contains",
-                  does_not_contain: tr.filter_op_does_not_contain ?? "does not contain",
-                  is_empty: tr.filter_op_is_empty ?? "is empty",
-                  is_not_empty: tr.filter_op_is_not_empty ?? "is not empty",
+                  does_not_contain: tr.filter_op_does_not_contain ?? "does_not_contain",
+                  is_empty: tr.filter_op_is_empty ?? "is_empty",
+                  is_not_empty: tr.filter_op_is_not_empty ?? "is_not_empty",
                   is: tr.filter_op_is ?? "is",
-                  is_not: tr.filter_op_is_not ?? "is not",
-                  is_any_of: tr.filter_op_is_any_of ?? "is any of",
-                  is_none_of: tr.filter_op_is_none_of ?? "is none of",
-                  has_any: tr.filter_op_has_any ?? "has any of",
-                  has_all: tr.filter_op_has_all ?? "has all of",
-                  has_none: tr.filter_op_has_none ?? "has none of",
+                  is_not: tr.filter_op_is_not ?? "is_not",
+                  is_any_of: tr.filter_op_is_any_of ?? "is_any_of",
+                  is_none_of: tr.filter_op_is_none_of ?? "is_none_of",
+                  has_any: tr.filter_op_has_any ?? "has_any",
+                  has_all: tr.filter_op_has_all ?? "has_all",
+                  has_none: tr.filter_op_has_none ?? "has_none",
                   before: tr.filter_op_before ?? "before",
                   after: tr.filter_op_after ?? "after",
                   between: tr.filter_op_between ?? "between",
-                  last_n_days: tr.filter_op_last_n_days ?? "last N days",
+                  last_n_days: tr.filter_op_last_n_days ?? "last_n_days",
                   equals: tr.filter_op_equals ?? "equals",
                 },
               }}
@@ -1321,15 +1321,15 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               value={sortStack}
               onChange={setSortStack}
               translations={{
-                buttonLabel: tr.common_sort ?? "Sort",
-                addSort: tr.table_sort_add ?? "Add sort",
-                clearAll: tr.table_sort_clear ?? tr.common_reset ?? "Clear",
-                ascending: tr.table_sort_ascending ?? "Asc",
-                descending: tr.table_sort_descending ?? "Desc",
-                emptyHint: tr.common_sort ?? "Sort",
-                moveUp: tr.table_sort_move_up ?? "Move up",
-                moveDown: tr.table_sort_move_down ?? "Move down",
-                remove: tr.table_sort_remove ?? tr.common_remove ?? "Remove",
+                buttonLabel: tr.common_sort ?? "common_sort",
+                addSort: tr.table_sort_add ?? "table_sort_add",
+                clearAll: tr.table_sort_clear ?? tr.common_reset ?? "common_clear",
+                ascending: tr.table_sort_ascending ?? "table_sort_ascending",
+                descending: tr.table_sort_descending ?? "table_sort_descending",
+                emptyHint: tr.common_sort ?? "common_sort",
+                moveUp: tr.table_sort_move_up ?? "table_sort_move_up",
+                moveDown: tr.table_sort_move_down ?? "table_sort_move_down",
+                remove: tr.table_sort_remove ?? tr.common_remove ?? "common_remove",
               }}
             />
             <ColumnVisibilityMenu
@@ -1342,25 +1342,25 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               defaultFrozen={DEFAULT_PROVIDER_FROZEN_COLUMNS}
               maxFrozenColumns={MAX_PROVIDER_FROZEN_COLUMNS}
               groupLabels={providerColumnGroupLabels}
-              buttonLabel={tr.table_columns ?? "Columns"}
-              searchPlaceholder={tr.table_columns_search ?? "Search columns"}
-              resetLabel={tr.common_reset ?? "Reset"}
-              showAllLabel={tr.table_columns_show_all ?? "Show all"}
-              hideAllLabel={tr.table_columns_hide_all ?? "Hide all"}
-              noMatchLabel={tr.table_columns_no_match ?? "No matching columns"}
-              requiredNoteLabel={tr.table_columns_required ?? "required"}
-              freezeLabel={tr.table_columns_freeze ?? "Freeze"}
-              unfreezeLabel={tr.table_columns_unfreeze ?? "Unfreeze"}
-              frozenNoteLabel={tr.table_columns_frozen ?? "frozen"}
+              buttonLabel={tr.table_columns ?? "table_columns"}
+              searchPlaceholder={tr.table_columns_search ?? "table_columns_search"}
+              resetLabel={tr.common_reset ?? "common_reset"}
+              showAllLabel={tr.table_columns_show_all ?? "table_columns_show_all"}
+              hideAllLabel={tr.table_columns_hide_all ?? "table_columns_hide_all"}
+              noMatchLabel={tr.table_columns_no_match ?? tr.common_no_results ?? "table_columns_no_match"}
+              requiredNoteLabel={tr.table_columns_required ?? "table_columns_required"}
+              freezeLabel={tr.table_columns_freeze ?? "table_columns_freeze"}
+              unfreezeLabel={tr.table_columns_unfreeze ?? "table_columns_unfreeze"}
+              frozenNoteLabel={tr.table_columns_frozen ?? "table_columns_frozen"}
             />
             <DensityToggle
               value={density}
               onChange={setDensity}
-              ariaLabel={tr.table_density ?? "Row density"}
+              ariaLabel={tr.table_density ?? "table_density"}
               labels={{
-                comfortable: tr.table_density_comfortable ?? "Comfortable",
-                compact: tr.table_density_compact ?? "Compact",
-                condensed: tr.table_density_condensed ?? "Condensed",
+                comfortable: tr.table_density_comfortable ?? "table_density_comfortable",
+                compact: tr.table_density_compact ?? "table_density_compact",
+                condensed: tr.table_density_condensed ?? "table_density_condensed",
               }}
             />
             {anyFilterActive ? (
@@ -2331,7 +2331,7 @@ function LinkedPatientsSection({
                     <p className="mt-1 text-lg font-semibold leading-none text-foreground">{patient.leistung_count}</p>
                   </div>
                   <div className="px-3 py-2">
-                    <p className="text-xs text-muted-foreground">{l("Concierge", "Concierge", "Concierge")}</p>
+                    <p className="text-xs text-muted-foreground">{t.appointments_linked_concierge}</p>
                     <p className="mt-1 text-lg font-semibold leading-none text-foreground">{patient.concierge_count}</p>
                   </div>
                 </div>

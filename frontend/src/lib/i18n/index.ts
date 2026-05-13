@@ -19,6 +19,8 @@ export interface Translations
     RevenueTranslations {
   app_name: string;
   app_subtitle: string;
+  app_not_found_title: string;
+  app_not_found_body: string;
 
   nav_dashboard: string;
   nav_main: string;
@@ -64,7 +66,9 @@ export interface Translations
   users_new: string;
   users_create_title: string;
   users_name: string;
+  users_name_placeholder: string;
   users_email: string;
+  users_email_placeholder: string;
   users_password: string;
   users_role: string;
   users_status: string;
@@ -537,6 +541,7 @@ export interface Translations
   security_ip_add: string;
   security_ip_add_hint: string;
   security_ip_cidr: string;
+  security_ip_cidr_placeholder: string;
   security_ip_desc: string;
   security_ip_none: string;
   security_locked_users: string;
@@ -599,6 +604,8 @@ export interface Translations
   compliance_no_expired: string;
   compliance_recent: string;
   compliance_patient_id: string;
+  compliance_patient_id_uuid: string;
+  compliance_patient_uuid_placeholder: string;
   compliance_privacy_status_requested: string;
   compliance_privacy_status_retention_hold: string;
   compliance_privacy_status_approved: string;
@@ -711,6 +718,7 @@ export interface Translations
   notif_name: string;
   notif_type: string;
   notif_config: string;
+  notif_config_placeholder: string;
   notif_test: string;
   notif_no_channels: string;
   notif_host: string;
@@ -725,11 +733,13 @@ export interface Translations
   cf_new: string;
   cf_entity_type: string;
   cf_field_key: string;
+  cf_field_key_placeholder: string;
   cf_field_label: string;
   cf_field_type: string;
   cf_required: string;
   cf_sort: string;
   cf_options: string;
+  cf_options_placeholder: string;
   cf_no_fields: string;
 
   ann_title: string;

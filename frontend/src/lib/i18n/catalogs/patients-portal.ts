@@ -63,6 +63,29 @@ export interface PatientsPortalTranslations {
   portal_privacy_request_third_party_revoke: string;
   portal_privacy_source_patient_portal: string;
   portal_privacy_source_staff_workspace: string;
+  portal_privacy_area_patient_only: string;
+  portal_privacy_failed_to_load_requests: string;
+  portal_privacy_request_submitted: string;
+  portal_privacy_failed_to_submit_request: string;
+  portal_privacy_title: string;
+  portal_privacy_description: string;
+  portal_privacy_patient_portal: string;
+  portal_privacy_open_requests: string;
+  portal_privacy_refresh: string;
+  portal_privacy_new_request: string;
+  portal_privacy_manager_review_hint: string;
+  portal_privacy_request_type: string;
+  portal_privacy_reason: string;
+  portal_privacy_reason_placeholder: string;
+  portal_privacy_submit_request: string;
+  portal_privacy_request_history: string;
+  portal_privacy_history_description: string;
+  portal_privacy_empty: string;
+  portal_privacy_submitted: string;
+  portal_privacy_due: string;
+  portal_privacy_reviewed: string;
+  portal_privacy_executed: string;
+  portal_privacy_source: string;
 
   portal_feedback_source_patient_portal: string;
   portal_feedback_source_staff_capture: string;
@@ -85,6 +108,25 @@ export interface PatientsPortalTranslations {
   portal_recommendation_decision_declined: string;
   portal_recommendation_decision_need_consultation: string;
   portal_recommendation_decision_schedule: string;
+  portal_recommendations_failed_to_load: string;
+  portal_recommendations_appointment_request_created: string;
+  portal_recommendations_decision_saved: string;
+  portal_recommendations_failed_to_save_action: string;
+  portal_recommendations_title: string;
+  portal_recommendations_description: string;
+  portal_recommendations_patient_portal: string;
+  portal_recommendations_active: string;
+  portal_recommendations_refresh: string;
+  portal_recommendations_empty_title: string;
+  portal_recommendations_empty_description: string;
+  portal_recommendations_care_team: string;
+  portal_recommendations_due: string;
+  portal_recommendations_your_decision: string;
+  portal_recommendations_request_created: string;
+  portal_recommendations_schedule: string;
+  portal_recommendations_already_done: string;
+  portal_recommendations_need_consultation: string;
+  portal_recommendations_decline: string;
 
   portal_appointment_type_internal: string;
   portal_appointment_type_medical: string;
@@ -409,6 +451,12 @@ export interface PatientsPortalTranslations {
   portal_dashboard_submitted_quality_surveys_and_review_follow_up: string;
   portal_dashboard_no_feedback_submitted_yet: string;
   portal_dashboard_general_feedback: string;
+  portal_dashboard_missing_required_document_one: string;
+  portal_dashboard_missing_required_document_many: string;
+  portal_dashboard_released_documents_count: string;
+  portal_dashboard_total_concierge_entries_count: string;
+  portal_dashboard_pending_confirmations_count: string;
+  portal_dashboard_promoter_ratings_count: string;
   portal_documents_failed_to_load_documents: string;
   portal_documents_choose_a_file_first: string;
   portal_documents_upload_sent_to_the_care_team: string;
@@ -472,6 +520,8 @@ export interface PatientsPortalTranslations {
   portal_documents_russian: string;
   portal_documents_cancel: string;
   portal_documents_send_request: string;
+  portal_documents_missing_required_document_one: string;
+  portal_documents_missing_required_document_many: string;
   portal_appointments_failed_to_load_appointment_workspace: string;
   portal_appointments_appointment_request_sent_to_the_care_team: string;
   portal_appointments_failed_to_send_appointment_request: string;
@@ -538,6 +588,7 @@ export interface PatientsPortalTranslations {
   portal_appointments_additional_note: string;
   portal_appointments_optional_logistical_or_clinical_context: string;
   portal_appointments_send_appointment_request: string;
+  portal_appointments_shared_documents_count: string;
   portal_invoices_failed_to_load_invoices: string;
   portal_invoices_failed_to_load_invoice_detail: string;
   portal_invoices_choose_a_file_first: string;
@@ -593,6 +644,7 @@ export interface PatientsPortalTranslations {
   portal_invoices_send_proof: string;
   portal_invoices_qty: string;
   portal_invoices_unit: string;
+  portal_invoices_overdue_count: string;
   patient_profile_editor_edit_patient_profile: string;
   patient_profile_editor_cancel: string;
   patient_profile_editor_save_patient: string;
@@ -833,6 +885,29 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_privacy_request_third_party_revoke: "Отозвать передачу третьим лицам",
   portal_privacy_source_patient_portal: "Портал пациента",
   portal_privacy_source_staff_workspace: "Рабочая область команды",
+  portal_privacy_area_patient_only: "Этот раздел приватности доступен только пациентским аккаунтам.",
+  portal_privacy_failed_to_load_requests: "Не удалось загрузить запросы по приватности.",
+  portal_privacy_request_submitted: "Запрос по приватности отправлен.",
+  portal_privacy_failed_to_submit_request: "Не удалось отправить запрос по приватности.",
+  portal_privacy_title: "Запросы по приватности",
+  portal_privacy_description: "Отправляйте запросы по защите данных на удаление, ограничение обработки или отзыв передачи третьим лицам.",
+  portal_privacy_patient_portal: "Портал пациента",
+  portal_privacy_open_requests: "Открытые запросы",
+  portal_privacy_refresh: "Обновить",
+  portal_privacy_new_request: "Новый запрос",
+  portal_privacy_manager_review_hint: "Запросы поступают вашему менеджеру пациента на рассмотрение и исполнение.",
+  portal_privacy_request_type: "Тип запроса",
+  portal_privacy_reason: "Причина",
+  portal_privacy_reason_placeholder: "Необязательный контекст для команды сопровождения",
+  portal_privacy_submit_request: "Отправить запрос",
+  portal_privacy_request_history: "История запросов",
+  portal_privacy_history_description: "Хронология отправленных запросов по приватности и их сроков.",
+  portal_privacy_empty: "Запросы по приватности еще не отправлялись.",
+  portal_privacy_submitted: "Отправлено",
+  portal_privacy_due: "Срок",
+  portal_privacy_reviewed: "Проверено",
+  portal_privacy_executed: "Исполнено",
+  portal_privacy_source: "Источник",
 
   portal_feedback_source_patient_portal: "Портал пациента",
   portal_feedback_source_staff_capture: "Зафиксировано сотрудником",
@@ -855,6 +930,25 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_recommendation_decision_declined: "Отклонено",
   portal_recommendation_decision_need_consultation: "Нужна консультация",
   portal_recommendation_decision_schedule: "Запланировать визит",
+  portal_recommendations_failed_to_load: "Не удалось загрузить рекомендации.",
+  portal_recommendations_appointment_request_created: "Запрос на визит создан из рекомендации.",
+  portal_recommendations_decision_saved: "Ваше решение сохранено.",
+  portal_recommendations_failed_to_save_action: "Не удалось сохранить действие.",
+  portal_recommendations_title: "Мои рекомендации",
+  portal_recommendations_description: "Здесь отображаются опубликованные рекомендации команды сопровождения, по которым можно выбрать следующее действие.",
+  portal_recommendations_patient_portal: "Портал пациента",
+  portal_recommendations_active: "Активно",
+  portal_recommendations_refresh: "Обновить",
+  portal_recommendations_empty_title: "Пока нет рекомендаций",
+  portal_recommendations_empty_description: "Когда команда опубликует рекомендацию, она появится здесь.",
+  portal_recommendations_care_team: "Команда сопровождения",
+  portal_recommendations_due: "Срок",
+  portal_recommendations_your_decision: "Ваше решение",
+  portal_recommendations_request_created: "Запрос создан",
+  portal_recommendations_schedule: "Запланировать визит",
+  portal_recommendations_already_done: "Уже выполнено",
+  portal_recommendations_need_consultation: "Нужна консультация",
+  portal_recommendations_decline: "Отклонить",
 
   portal_appointment_type_internal: "Внутренний",
   portal_appointment_type_medical: "Медицинский",
@@ -1179,6 +1273,12 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_dashboard_submitted_quality_surveys_and_review_follow_up: "Отправленные опросы качества и их статус проверки.",
   portal_dashboard_no_feedback_submitted_yet: "Отзывы еще не отправлялись.",
   portal_dashboard_general_feedback: "Общий отзыв",
+  portal_dashboard_missing_required_document_one: "Еще не хватает {count} обязательного документа.",
+  portal_dashboard_missing_required_document_many: "Еще не хватает {count} обязательных документов.",
+  portal_dashboard_released_documents_count: "{count} опубликованных документа",
+  portal_dashboard_total_concierge_entries_count: "Всего {count} записей консьерж-сервиса",
+  portal_dashboard_pending_confirmations_count: "{count} ожидающих подтверждений",
+  portal_dashboard_promoter_ratings_count: "{count} оценок промоутеров",
   portal_documents_failed_to_load_documents: "Не удалось загрузить документы.",
   portal_documents_choose_a_file_first: "Сначала выберите файл.",
   portal_documents_upload_sent_to_the_care_team: "Загрузка отправлена команде сопровождения.",
@@ -1242,6 +1342,8 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_documents_russian: "Русский",
   portal_documents_cancel: "Отмена",
   portal_documents_send_request: "Отправить запрос",
+  portal_documents_missing_required_document_one: "Еще не хватает {count} обязательного документа.",
+  portal_documents_missing_required_document_many: "Еще не хватает {count} обязательных документов.",
   portal_appointments_failed_to_load_appointment_workspace: "Не удалось загрузить раздел записей.",
   portal_appointments_appointment_request_sent_to_the_care_team: "Запрос на запись отправлен команде сопровождения.",
   portal_appointments_failed_to_send_appointment_request: "Не удалось отправить запрос на запись.",
@@ -1308,6 +1410,7 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_appointments_additional_note: "Дополнительная заметка",
   portal_appointments_optional_logistical_or_clinical_context: "Необязательный логистический или клинический контекст.",
   portal_appointments_send_appointment_request: "Отправить запрос на запись",
+  portal_appointments_shared_documents_count: "{count} переданных документов",
   portal_invoices_failed_to_load_invoices: "Не удалось загрузить счета.",
   portal_invoices_failed_to_load_invoice_detail: "Не удалось загрузить детали счета.",
   portal_invoices_choose_a_file_first: "Сначала выберите файл.",
@@ -1363,6 +1466,7 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_invoices_send_proof: "Отправить подтверждение",
   portal_invoices_qty: "Кол-во",
   portal_invoices_unit: "Цена за единицу",
+  portal_invoices_overdue_count: "{count} просрочено",
   patient_profile_editor_edit_patient_profile: "Редактировать профиль пациента",
   patient_profile_editor_cancel: "Отмена",
   patient_profile_editor_save_patient: "Сохранить пациента",
@@ -1603,6 +1707,29 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_privacy_request_third_party_revoke: "Weitergabe an Dritte widerrufen",
   portal_privacy_source_patient_portal: "Patientenportal",
   portal_privacy_source_staff_workspace: "Team-Workspace",
+  portal_privacy_area_patient_only: "Der Datenschutzbereich hier ist nur fuer Patientenkonten.",
+  portal_privacy_failed_to_load_requests: "Datenschutzanfragen konnten nicht geladen werden.",
+  portal_privacy_request_submitted: "Datenschutzanfrage wurde eingereicht.",
+  portal_privacy_failed_to_submit_request: "Datenschutzanfrage konnte nicht gesendet werden.",
+  portal_privacy_title: "Datenschutzanfragen",
+  portal_privacy_description: "Reichen Sie DSGVO-Anfragen zur Datenlöschung, Verarbeitungseinschränkung oder zum Widerruf der Weitergabe an Dritte ein.",
+  portal_privacy_patient_portal: "Patientenportal",
+  portal_privacy_open_requests: "Offene Anfragen",
+  portal_privacy_refresh: "Aktualisieren",
+  portal_privacy_new_request: "Neue Anfrage",
+  portal_privacy_manager_review_hint: "Anfragen gehen zur Prüfung und Bearbeitung an Ihren Patientenmanager.",
+  portal_privacy_request_type: "Anfragetyp",
+  portal_privacy_reason: "Begründung",
+  portal_privacy_reason_placeholder: "Optionaler Kontext für das Betreuungsteam",
+  portal_privacy_submit_request: "Anfrage senden",
+  portal_privacy_request_history: "Anfrageverlauf",
+  portal_privacy_history_description: "Zeitachse eingereichter Datenschutzmaßnahmen und ihrer Fristen.",
+  portal_privacy_empty: "Noch keine Datenschutzanfragen eingereicht.",
+  portal_privacy_submitted: "Eingereicht",
+  portal_privacy_due: "Fällig",
+  portal_privacy_reviewed: "Geprüft",
+  portal_privacy_executed: "Ausgeführt",
+  portal_privacy_source: "Quelle",
 
   portal_feedback_source_patient_portal: "Patientenportal",
   portal_feedback_source_staff_capture: "Durch Mitarbeitende erfasst",
@@ -1625,6 +1752,25 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_recommendation_decision_declined: "Abgelehnt",
   portal_recommendation_decision_need_consultation: "Beratung nötig",
   portal_recommendation_decision_schedule: "Termin planen",
+  portal_recommendations_failed_to_load: "Empfehlungen konnten nicht geladen werden.",
+  portal_recommendations_appointment_request_created: "Terminanfrage wurde aus der Empfehlung erstellt.",
+  portal_recommendations_decision_saved: "Ihre Entscheidung wurde gespeichert.",
+  portal_recommendations_failed_to_save_action: "Aktion konnte nicht gespeichert werden.",
+  portal_recommendations_title: "Meine Empfehlungen",
+  portal_recommendations_description: "Hier sehen Sie freigegebene Empfehlungen Ihres Betreuungsteams und können die nächste Entscheidung dokumentieren.",
+  portal_recommendations_patient_portal: "Patientenportal",
+  portal_recommendations_active: "Aktiv",
+  portal_recommendations_refresh: "Aktualisieren",
+  portal_recommendations_empty_title: "Noch keine Empfehlungen",
+  portal_recommendations_empty_description: "Sobald Ihr Team eine Empfehlung freigibt, erscheint sie hier.",
+  portal_recommendations_care_team: "Betreuungsteam",
+  portal_recommendations_due: "Fällig",
+  portal_recommendations_your_decision: "Ihre Entscheidung",
+  portal_recommendations_request_created: "Terminanfrage erstellt",
+  portal_recommendations_schedule: "Termin planen",
+  portal_recommendations_already_done: "Schon erledigt",
+  portal_recommendations_need_consultation: "Beratung nötig",
+  portal_recommendations_decline: "Ablehnen",
 
   portal_appointment_type_internal: "Intern",
   portal_appointment_type_medical: "Medizinisch",
@@ -1949,6 +2095,12 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_dashboard_submitted_quality_surveys_and_review_follow_up: "Eingereichte Qualitätsumfragen und deren Review-Status.",
   portal_dashboard_no_feedback_submitted_yet: "Noch kein Feedback eingereicht.",
   portal_dashboard_general_feedback: "Allgemeines Feedback",
+  portal_dashboard_missing_required_document_one: "Es fehlen noch {count} Pflichtdokument.",
+  portal_dashboard_missing_required_document_many: "Es fehlen noch {count} Pflichtdokumente.",
+  portal_dashboard_released_documents_count: "{count} freigegebene Dokumente",
+  portal_dashboard_total_concierge_entries_count: "{count} Concierge-Einträge gesamt",
+  portal_dashboard_pending_confirmations_count: "{count} ausstehende Bestätigungen",
+  portal_dashboard_promoter_ratings_count: "{count} Promotor-Bewertungen",
   portal_documents_failed_to_load_documents: "Dokumente konnten nicht geladen werden.",
   portal_documents_choose_a_file_first: "Bitte zuerst eine Datei auswählen.",
   portal_documents_upload_sent_to_the_care_team: "Upload wurde an das Betreuungsteam gesendet.",
@@ -2012,6 +2164,8 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_documents_russian: "Russisch",
   portal_documents_cancel: "Abbrechen",
   portal_documents_send_request: "Anfrage senden",
+  portal_documents_missing_required_document_one: "Es fehlen noch {count} Pflichtdokument.",
+  portal_documents_missing_required_document_many: "Es fehlen noch {count} Pflichtdokumente.",
   portal_appointments_failed_to_load_appointment_workspace: "Terminbereich konnte nicht geladen werden.",
   portal_appointments_appointment_request_sent_to_the_care_team: "Terminanfrage wurde an das Betreuungsteam gesendet.",
   portal_appointments_failed_to_send_appointment_request: "Terminanfrage konnte nicht gesendet werden.",
@@ -2078,6 +2232,7 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_appointments_additional_note: "Zusätzliche Notiz",
   portal_appointments_optional_logistical_or_clinical_context: "Optionaler logistischer oder klinischer Kontext.",
   portal_appointments_send_appointment_request: "Terminanfrage senden",
+  portal_appointments_shared_documents_count: "{count} geteilte Dokumente",
   portal_invoices_failed_to_load_invoices: "Rechnungen konnten nicht geladen werden.",
   portal_invoices_failed_to_load_invoice_detail: "Rechnungsdetails konnten nicht geladen werden.",
   portal_invoices_choose_a_file_first: "Bitte zuerst eine Datei auswählen.",
@@ -2133,6 +2288,7 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_invoices_send_proof: "Nachweis senden",
   portal_invoices_qty: "Menge",
   portal_invoices_unit: "Einheit",
+  portal_invoices_overdue_count: "{count} überfällig",
   patient_profile_editor_edit_patient_profile: "Patientenprofil bearbeiten",
   patient_profile_editor_cancel: "Abbrechen",
   patient_profile_editor_save_patient: "Patient speichern",

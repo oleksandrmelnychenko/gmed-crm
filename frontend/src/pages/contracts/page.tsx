@@ -330,6 +330,8 @@ function useContractsPageContent() {
       unitLabel: t.revenue_agency_service_unit_label,
       currency: t.revenue_agency_service_currency,
       vatPercent: t.revenue_agency_service_vat_percent,
+      patientId: t.revenue_common_patient_id,
+      pricing: t.finance_catalog_package_pricing,
       description: t.revenue_agency_service_description_label,
       itemIsActive: t.revenue_agency_service_active_hint,
       saveCatalogItem: t.revenue_agency_service_save,
@@ -899,7 +901,7 @@ function useContractsPageContent() {
       },
       {
         id: "patient_pid",
-        label: "PID",
+        label: text.patientId,
         accessor: (row) => row.patient_pid,
         sortable: true,
         width: 140,
@@ -2208,7 +2210,7 @@ function useContractsPageContent() {
                 </section>
 
                 <section className="rounded-xl border border-border bg-card p-5">
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot("Цена и НДС")}</h2>
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.pricing)}</h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
                     <Field label={text.unitPrice}>
                       <Input
