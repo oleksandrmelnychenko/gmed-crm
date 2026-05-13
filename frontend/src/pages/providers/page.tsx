@@ -45,7 +45,7 @@ import {
   Sheet,
   SheetContent,
 } from "@/components/ui/sheet";
-import { useLang } from "@/lib/i18n";
+import { formatUiText, useLang } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
@@ -837,7 +837,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       setProviderError(
         error instanceof Error
           ? error.message
-          : `Failed to ${active ? "activate" : "deactivate"} provider`
+          : t.common_failed_update
       );
     } finally {
       setProviderActionBusy(null);
@@ -846,7 +846,13 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 
   async function handleDeleteProvider() {
     if (!detail) return;
-    if (!window.confirm(`Delete provider "${detail.name}"?`)) return;
+    if (
+      !window.confirm(
+        formatUiText(t.providers_delete_provider_confirm, { name: detail.name }),
+      )
+    ) {
+      return;
+    }
 
     setProviderActionBusy("delete");
     setProviderError("");
@@ -898,7 +904,13 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 
   async function handleDeleteDoctor(doctorId: string, doctorName: string) {
     if (!detail) return;
-    if (!window.confirm(`Delete doctor "${doctorName}"?`)) return;
+    if (
+      !window.confirm(
+        formatUiText(t.providers_delete_doctor_confirm, { name: doctorName }),
+      )
+    ) {
+      return;
+    }
 
     setDoctorBusy(true);
     setDoctorError("");
@@ -947,7 +959,13 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 
   async function handleDeleteService(serviceId: string, serviceName: string) {
     if (!detail) return;
-    if (!window.confirm(`Delete service "${serviceName}"?`)) return;
+    if (
+      !window.confirm(
+        formatUiText(t.providers_delete_service_confirm, { name: serviceName }),
+      )
+    ) {
+      return;
+    }
 
     setServiceBusy(true);
     setServiceError("");
@@ -1288,31 +1306,31 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               filters={filterPredicates}
               onChange={setFilterPredicates}
               translations={{
-                addFilter: tr.table_filter ?? "table_filter",
-                clearAll: tr.table_sort_clear ?? tr.common_reset ?? "common_clear",
-                searchPlaceholder: tr.table_filter_search_fields ?? tr.common_search ?? "common_search",
-                noFields: tr.table_filter_no_fields ?? "table_filter_no_fields",
-                remove: tr.table_filter_remove ?? tr.common_remove ?? "common_remove",
-                valuePlaceholder: tr.table_filter_value ?? "common_value",
-                yes: tr.common_yes ?? "common_yes",
-                no: tr.common_no ?? "common_no",
+                addFilter: t.table_filter,
+                clearAll: t.table_sort_clear,
+                searchPlaceholder: t.table_filter_search_fields,
+                noFields: t.table_filter_no_fields,
+                remove: t.table_filter_remove,
+                valuePlaceholder: t.table_filter_value,
+                yes: t.common_yes,
+                no: t.common_no,
                 operatorLabels: {
-                  contains: tr.filter_op_contains ?? "contains",
-                  does_not_contain: tr.filter_op_does_not_contain ?? "does_not_contain",
-                  is_empty: tr.filter_op_is_empty ?? "is_empty",
-                  is_not_empty: tr.filter_op_is_not_empty ?? "is_not_empty",
-                  is: tr.filter_op_is ?? "is",
-                  is_not: tr.filter_op_is_not ?? "is_not",
-                  is_any_of: tr.filter_op_is_any_of ?? "is_any_of",
-                  is_none_of: tr.filter_op_is_none_of ?? "is_none_of",
-                  has_any: tr.filter_op_has_any ?? "has_any",
-                  has_all: tr.filter_op_has_all ?? "has_all",
-                  has_none: tr.filter_op_has_none ?? "has_none",
-                  before: tr.filter_op_before ?? "before",
-                  after: tr.filter_op_after ?? "after",
-                  between: tr.filter_op_between ?? "between",
-                  last_n_days: tr.filter_op_last_n_days ?? "last_n_days",
-                  equals: tr.filter_op_equals ?? "equals",
+                  contains: t.filter_op_contains,
+                  does_not_contain: t.filter_op_does_not_contain,
+                  is_empty: t.filter_op_is_empty,
+                  is_not_empty: t.filter_op_is_not_empty,
+                  is: t.filter_op_is,
+                  is_not: t.filter_op_is_not,
+                  is_any_of: t.filter_op_is_any_of,
+                  is_none_of: t.filter_op_is_none_of,
+                  has_any: t.filter_op_has_any,
+                  has_all: t.filter_op_has_all,
+                  has_none: t.filter_op_has_none,
+                  before: t.filter_op_before,
+                  after: t.filter_op_after,
+                  between: t.filter_op_between,
+                  last_n_days: t.filter_op_last_n_days,
+                  equals: t.filter_op_equals,
                 },
               }}
             />
@@ -1321,15 +1339,15 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               value={sortStack}
               onChange={setSortStack}
               translations={{
-                buttonLabel: tr.common_sort ?? "common_sort",
-                addSort: tr.table_sort_add ?? "table_sort_add",
-                clearAll: tr.table_sort_clear ?? tr.common_reset ?? "common_clear",
-                ascending: tr.table_sort_ascending ?? "table_sort_ascending",
-                descending: tr.table_sort_descending ?? "table_sort_descending",
-                emptyHint: tr.common_sort ?? "common_sort",
-                moveUp: tr.table_sort_move_up ?? "table_sort_move_up",
-                moveDown: tr.table_sort_move_down ?? "table_sort_move_down",
-                remove: tr.table_sort_remove ?? tr.common_remove ?? "common_remove",
+                buttonLabel: t.common_sort,
+                addSort: t.table_sort_add,
+                clearAll: t.table_sort_clear,
+                ascending: t.table_sort_ascending,
+                descending: t.table_sort_descending,
+                emptyHint: t.common_sort,
+                moveUp: t.table_sort_move_up,
+                moveDown: t.table_sort_move_down,
+                remove: t.table_sort_remove,
               }}
             />
             <ColumnVisibilityMenu
@@ -1342,25 +1360,25 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               defaultFrozen={DEFAULT_PROVIDER_FROZEN_COLUMNS}
               maxFrozenColumns={MAX_PROVIDER_FROZEN_COLUMNS}
               groupLabels={providerColumnGroupLabels}
-              buttonLabel={tr.table_columns ?? "table_columns"}
-              searchPlaceholder={tr.table_columns_search ?? "table_columns_search"}
-              resetLabel={tr.common_reset ?? "common_reset"}
-              showAllLabel={tr.table_columns_show_all ?? "table_columns_show_all"}
-              hideAllLabel={tr.table_columns_hide_all ?? "table_columns_hide_all"}
-              noMatchLabel={tr.table_columns_no_match ?? tr.common_no_results ?? "table_columns_no_match"}
-              requiredNoteLabel={tr.table_columns_required ?? "table_columns_required"}
-              freezeLabel={tr.table_columns_freeze ?? "table_columns_freeze"}
-              unfreezeLabel={tr.table_columns_unfreeze ?? "table_columns_unfreeze"}
-              frozenNoteLabel={tr.table_columns_frozen ?? "table_columns_frozen"}
+              buttonLabel={t.table_columns}
+              searchPlaceholder={t.table_columns_search}
+              resetLabel={t.common_reset}
+              showAllLabel={t.table_columns_show_all}
+              hideAllLabel={t.table_columns_hide_all}
+              noMatchLabel={t.common_no_results}
+              requiredNoteLabel={t.table_columns_required}
+              freezeLabel={t.table_columns_freeze}
+              unfreezeLabel={t.table_columns_unfreeze}
+              frozenNoteLabel={t.table_columns_frozen}
             />
             <DensityToggle
               value={density}
               onChange={setDensity}
-              ariaLabel={tr.table_density ?? "table_density"}
+              ariaLabel={t.table_density}
               labels={{
-                comfortable: tr.table_density_comfortable ?? "table_density_comfortable",
-                compact: tr.table_density_compact ?? "table_density_compact",
-                condensed: tr.table_density_condensed ?? "table_density_condensed",
+                comfortable: t.table_density_comfortable,
+                compact: t.table_density_compact,
+                condensed: t.table_density_condensed,
               }}
             />
             {anyFilterActive ? (
@@ -2307,7 +2325,7 @@ function LinkedPatientsSection({
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-foreground">{patientLabel(patient)}</p>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                    {l("providers_last_interaction")}: {compactDateTime(patient.last_interaction_at)}
+                    {l("providers_last_interaction")}: {compactDateTime(patient.last_interaction_at, t.common_not_set)}
                   </p>
                 </div>
 
@@ -2404,7 +2422,7 @@ function InteractionHistorySection({
                   {item.title}
                 </div>
                 <span className="text-xs text-muted-foreground">
-                  {compactDateTime(item.occurred_at)}
+                  {compactDateTime(item.occurred_at, t.common_not_set)}
                 </span>
               </div>
               <div className="rounded-[1.4rem] border border-zinc-200 p-4">

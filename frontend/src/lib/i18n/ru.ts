@@ -29,7 +29,7 @@ export const ru = {
   nav_my_documents: "Мои документы",
   nav_my_appointments: "Мои визиты",
   nav_my_recommendations: "Мои рекомендации",
-  nav_my_services: "Concierge",
+  nav_my_services: "Консьерж-сервисы",
   nav_my_invoices: "Мои счета",
   nav_my_privacy: "Конфиденциальность",
   nav_my_feedback: "Мой фидбек",
@@ -219,7 +219,7 @@ export const ru = {
     "Выберите провайдера, чтобы открыть реестровое рабочее пространство.",
   providers_no_access_title: "Реестр клиник и врачей",
   providers_no_access_body:
-    "Этот раздел доступен только CEO, менеджерам пациентов, concierge, billing и sales, потому что он управляет координацией клиник и видимостью внешних партнёров.",
+    "Этот раздел доступен только CEO, менеджерам пациентов, консьержам, billing и sales, потому что он управляет координацией клиник и видимостью внешних партнёров.",
   providers_create_description:
     "Добавьте следующую клинику или сервисного партнёра сразу с примечаниями по договору, контактами и профильным контекстом.",
   providers_edit_restricted_note:
@@ -231,9 +231,9 @@ export const ru = {
   providers_doctors_hint:
     "Карточки врачей используются в фильтрах провайдеров и маршрутизации записей.",
   providers_services_description:
-    "Операционный каталог для поиска и будущих сценариев заказа / concierge.",
+    "Операционный каталог для поиска и будущих сценариев заказов и консьерж-сервисов.",
   providers_services_hint:
-    "Сервисы уже питают фильтры и следующим шагом войдут в заказы и выполнение concierge.",
+    "Сервисы уже питают фильтры и следующим шагом войдут в заказы и выполнение консьерж-сервисов.",
   providers_linked_patients_description:
     "Пациенты, уже связанные с этим провайдером через записи или сервисные записи.",
   providers_interactions_description:
@@ -290,6 +290,9 @@ export const ru = {
   providers_amount: "Сумма",
   providers_select_first: "Сначала выберите провайдера",
   providers_price_numeric: "Цена должна быть числом",
+  providers_delete_provider_confirm: "Удалить провайдера \"{name}\"?",
+  providers_delete_doctor_confirm: "Удалить врача \"{name}\"?",
+  providers_delete_service_confirm: "Удалить услугу \"{name}\"?",
   gender_male: "Мужской",
   gender_female: "Женский",
   gender_diverse: "Другой",
@@ -558,7 +561,7 @@ export const ru = {
   appointments_timeline_interpreter_report_rejected:
     "Отчёт переводчика отклонён",
   appointments_timeline_concierge_transfer_completed:
-    "Этап прибытия в аэропорт завершён. Водитель ожидал в лобби отеля и сопроводил пациента к стойке оформления. Трансфер, связанный с concierge-сервисом, завершён.",
+    "Этап прибытия в аэропорт завершён. Водитель ожидал в лобби отеля и сопроводил пациента к стойке оформления. Трансфер, связанный с консьерж-сервисом, завершён.",
 
   nav_overview: "ОБЗОР",
   nav_crm: "CRM",
@@ -1406,16 +1409,16 @@ export const ru = {
   services_loading: "Загрузка дополнительных сервисов...",
   services_title: "Мои дополнительные сервисы",
   services_description:
-    "Запрашивайте поездки, отели, трансферы и другие concierge-сервисы и отслеживайте, как команда сопровождения их обрабатывает.",
+    "Запрашивайте поездки, отели, трансферы и другие консьерж-сервисы и отслеживайте, как команда сопровождения их обрабатывает.",
   services_open_requests: "Открытые запросы",
   services_booked_or_in_service: "Забронировано или в работе",
   services_completed: "Завершенные сервисы",
   services_history_title: "История сервисов",
   services_history_description:
-    "Запросы из портала и concierge-сервисы, уже организованные по вашему случаю.",
+    "Запросы из портала и консьерж-сервисы, уже организованные по вашему случаю.",
   services_empty_title: "Пока нет дополнительных сервисов",
   services_empty_description:
-    "Как только вы или команда сопровождения создадите запись concierge-сервиса, она появится здесь.",
+    "Как только вы или команда сопровождения создадите запись консьерж-сервиса, она появится здесь.",
   services_care_team_pending: "Ожидает обработки командой сопровождения",
   services_preferred_start: "Предпочтительное начало",
   services_preferred_end: "Предпочтительное окончание",
@@ -1426,7 +1429,7 @@ export const ru = {
   services_cancel_request: "Отменить запрос",
   services_request_title: "Запросить сервис",
   services_request_description:
-    "Отправьте запрос на concierge-сервис прямо из портала. Назначенная команда рассмотрит его и оформит на своей стороне.",
+    "Отправьте запрос на консьерж-сервис прямо из портала. Назначенная команда рассмотрит его и оформит на своей стороне.",
   services_form_service_type: "Тип сервиса",
   services_type_hotel: "Отель",
   services_type_transfer: "Трансфер",

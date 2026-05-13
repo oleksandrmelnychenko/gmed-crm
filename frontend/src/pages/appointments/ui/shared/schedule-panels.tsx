@@ -101,7 +101,9 @@ export function ScheduleWarningsPanel({
                     .map((item) => `${item.title} · ${slotLabel(item)}`)
                     .join(" | ")}
                   {warning.items.length > 2
-                    ? ` | +${warning.items.length - 2} more`
+                    ? ` | ${appointmentText("appointments_hidden_more_count", {
+                        count: warning.items.length - 2,
+                      })}`
                     : ""}
                 </p>
               </div>

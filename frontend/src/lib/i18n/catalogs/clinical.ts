@@ -160,8 +160,12 @@ export interface ClinicalTranslations {
   appointments_follow_up_visit_created: string;
   appointments_follow_up_visit_create_reminder: string;
   appointments_follow_up_visit_create: string;
+  appointments_follow_up_visit_reminder_title: string;
+  appointments_follow_up_visit_reminder_description: string;
   appointments_handoff_title: string;
   appointments_handoff_description: string;
+  appointments_auto_planned_from_appointment: string;
+  appointments_auto_planned_completion: string;
   appointments_package_follow_up_title: string;
   appointments_package_follow_up_description: string;
   appointments_package_follow_up_reminder_scheduled_for: string;
@@ -192,6 +196,9 @@ export interface ClinicalTranslations {
   appointments_interpreter_last: string;
   appointments_interpreter_note: string;
   appointments_interpreter_saving: string;
+  appointments_report_approved_at: string;
+  appointments_report_returned_at: string;
+  appointments_recurring_occurrence_summary: string;
   appointments_edit_recurrence_rule_guidance: string;
   appointments_workflow_completion_scope_blocked: string;
   appointments_workflow_occurrence: string;
@@ -269,7 +276,7 @@ export const clinicalRu: ClinicalTranslations = {
   appointment_task_priority_high: "Высокий",
   appointment_task_priority_urgent: "Срочно",
   appointment_billing_handoff_kind_interpreter_hours: "Часы переводчика",
-  appointment_billing_handoff_kind_concierge_settlement: "Расчёт concierge",
+  appointment_billing_handoff_kind_concierge_settlement: "Расчёт консьерж-сервисов",
   appointment_billing_handoff_kind_patient_invoice: "Счёт пациенту",
   appointment_billing_handoff_kind_provider_invoice: "Счёт провайдера",
   appointment_billing_handoff_kind_payment_confirmation: "Подтверждение оплаты",
@@ -344,12 +351,12 @@ export const clinicalRu: ClinicalTranslations = {
   appointments_common_task_priority: "Приоритет задачи",
   appointments_common_create_linked_task: "Создать связанную задачу",
   appointments_common_open_chat: "Открыть чат",
-  appointments_concierge_title: "Concierge и VIP-сервисы",
+  appointments_concierge_title: "Консьерж- и VIP-сервисы",
   appointments_concierge_description: "Поездки, трансферы и VIP-сопровождение, связанные с этим приёмом.",
   appointments_concierge_estimate: "Оценка",
   appointments_concierge_actual: "Факт",
   appointments_concierge_no_provider: "Без провайдера",
-  appointments_concierge_no_concierge: "Без concierge",
+  appointments_concierge_no_concierge: "Без консьержа",
   appointments_concierge_save_service: "Сохранить сервис",
   appointments_concierge_add_service: "Добавить сервис",
   appointments_external_handoff_title: "Передача клинике и врачу",
@@ -366,8 +373,15 @@ export const clinicalRu: ClinicalTranslations = {
   appointments_follow_up_visit_created: "Follow-up-визит создан.",
   appointments_follow_up_visit_create_reminder: "Создать подготовительное напоминание для нового follow-up-визита.",
   appointments_follow_up_visit_create: "Создать follow-up-визит",
+  appointments_follow_up_visit_reminder_title: "Подготовить follow-up-визит: {title}",
+  appointments_follow_up_visit_reminder_description:
+    "Запланировано из приёма {patientPid} · {title} · {slot}.",
   appointments_handoff_title: "Handoff и follow-up",
   appointments_handoff_description: "Координируйте назначенную команду и планируйте последующее сопровождение прямо из приёма.",
+  appointments_auto_planned_from_appointment:
+    "Автоматически запланировано из приёма {patientPid} · {title}.",
+  appointments_auto_planned_completion:
+    "Автоматически запланировано при завершении приёма для {patientPid} · {title}.",
   appointments_package_follow_up_title: "Follow-up по окончанию пакета",
   appointments_package_follow_up_description: "Запланируйте обязательное напоминание за месяц до окончания связанного пакета или окна заказа.",
   appointments_package_follow_up_reminder_scheduled_for: "Напоминание будет запланировано на",
@@ -398,6 +412,10 @@ export const clinicalRu: ClinicalTranslations = {
   appointments_interpreter_last: "последний",
   appointments_interpreter_note: "Примечание",
   appointments_interpreter_saving: "Сохранение",
+  appointments_report_approved_at: "Утверждено {date}",
+  appointments_report_returned_at: "Возвращено {date}",
+  appointments_recurring_occurrence_summary:
+    "Приём {index} на {date} ({count} {checklistLabel})",
   appointments_edit_recurrence_rule_guidance: "Изменения правила повтора применяются только при выборе «этот и следующие» или «вся серия». Изменение одного приёма не меняет правило серии.",
   appointments_workflow_completion_scope_blocked: "Завершение выбранной области сейчас заблокировано",
   appointments_workflow_occurrence: "повторением",
@@ -407,7 +425,7 @@ export const clinicalRu: ClinicalTranslations = {
   appointments_billing_select_assignee: "Выберите ответственного из биллинга",
   appointments_billing_open_chat: "Открыть черновик billing-чата",
   appointments_billing_create_handoff: "Создать billing-handoff",
-  appointments_overview_concierge_limited_warning: "Вид concierge намеренно ограничен для медицинских слотов. Клинические заметки и детали провайдера здесь скрыты.",
+  appointments_overview_concierge_limited_warning: "Вид консьержа намеренно ограничен для медицинских слотов. Клинические заметки и детали провайдера здесь скрыты.",
 };
 
 export const clinicalDe: ClinicalTranslations = {
@@ -572,8 +590,15 @@ export const clinicalDe: ClinicalTranslations = {
   appointments_follow_up_visit_created: "Follow-up-Termin erstellt.",
   appointments_follow_up_visit_create_reminder: "Vorbereitungs-Reminder für den neuen Follow-up-Termin erstellen.",
   appointments_follow_up_visit_create: "Follow-up-Termin erstellen",
+  appointments_follow_up_visit_reminder_title: "Follow-up-Termin vorbereiten: {title}",
+  appointments_follow_up_visit_reminder_description:
+    "Geplant aus Termin {patientPid} · {title} · {slot}.",
   appointments_handoff_title: "Handoff und Follow-up",
   appointments_handoff_description: "Koordinieren Sie das zugewiesene Team und planen Sie die Nachsorge direkt aus dem Termin.",
+  appointments_auto_planned_from_appointment:
+    "Automatisch aus Termin {patientPid} · {title} geplant.",
+  appointments_auto_planned_completion:
+    "Automatisch beim Terminabschluss fuer {patientPid} · {title} geplant.",
   appointments_package_follow_up_title: "Paketende-Follow-up",
   appointments_package_follow_up_description: "Planen Sie den erforderlichen Reminder einen Monat vor Ende des verknüpften Paket- oder Auftragsfensters.",
   appointments_package_follow_up_reminder_scheduled_for: "Reminder wird geplant für",
@@ -604,6 +629,10 @@ export const clinicalDe: ClinicalTranslations = {
   appointments_interpreter_last: "zuletzt",
   appointments_interpreter_note: "Notiz",
   appointments_interpreter_saving: "Speichern",
+  appointments_report_approved_at: "Freigegeben {date}",
+  appointments_report_returned_at: "Zurueckgegeben {date}",
+  appointments_recurring_occurrence_summary:
+    "Termin {index} am {date} ({count} {checklistLabel})",
   appointments_edit_recurrence_rule_guidance: "Änderungen an der Wiederholungsregel greifen nur, wenn Sie „diesen und folgende“ oder „ganze Serie“ auswählen. Einzeltermine bleiben von Regeländerungen getrennt.",
   appointments_workflow_completion_scope_blocked: "Der Abschluss dieses Bereichs ist derzeit blockiert durch",
   appointments_workflow_occurrence: "Termin",

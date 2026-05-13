@@ -38,29 +38,29 @@ export function PatientsShortcutsDialog({
           </li>
           <li>
             <kbd className="rounded border border-border px-1.5 py-0.5">
-              {t.uiText?.keyboard_key_up ?? "keyboard_key_up"}
+              {t.uiText?.keyboard_key_up ?? ""}
             </kbd>{" "}
             /{" "}
             <kbd className="rounded border border-border px-1.5 py-0.5">
-              {t.uiText?.keyboard_key_down ?? "keyboard_key_down"}
+              {t.uiText?.keyboard_key_down ?? ""}
             </kbd>{" "}
             {t.patients_shortcuts_navigate_rows}
           </li>
           <li>
             <kbd className="rounded border border-border px-1.5 py-0.5">
-              {t.uiText?.keyboard_key_enter ?? "keyboard_key_enter"}
+              {t.uiText?.keyboard_key_enter ?? ""}
             </kbd>{" "}
             {t.patients_shortcuts_open_split_pane}
           </li>
           <li>
             <kbd className="rounded border border-border px-1.5 py-0.5">
-              {t.uiText?.keyboard_key_shift ?? "keyboard_key_shift"}
+              {t.uiText?.keyboard_key_shift ?? ""}
             </kbd>{" "}
             + {t.patients_shortcuts_multi_sort}
           </li>
           <li>
             <kbd className="rounded border border-border px-1.5 py-0.5">
-              {t.uiText?.keyboard_key_esc ?? "keyboard_key_esc"}
+              {t.uiText?.keyboard_key_esc ?? ""}
             </kbd>{" "}
             {t.patients_shortcuts_close_pane}
           </li>

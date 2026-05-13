@@ -1,8 +1,9 @@
 import { apiFetch } from "@/lib/api";
+import { uiText } from "@/lib/i18n";
 
 export const CHAT_E2E_ALGORITHM = "p256-hkdf-aes256gcm-v1";
-export const CHAT_E2E_PREVIEW = "[Encrypted message]";
-export const CHAT_E2E_UNAVAILABLE = "[Encrypted message unavailable on this device]";
+export const CHAT_E2E_PREVIEW = uiText("chat_e2e_preview");
+export const CHAT_E2E_UNAVAILABLE = uiText("chat_e2e_unavailable");
 
 const STORAGE_KEY = "gmed_chat_e2e_keyring_v1";
 const HKDF_INFO = new TextEncoder().encode("gmed-chat-e2e-v1");
@@ -469,7 +470,7 @@ export async function decryptAttachmentFromPeer(
 export async function exportKeyRingBackup(passphrase: string) {
   const trimmedPassphrase = passphrase.trim();
   if (!trimmedPassphrase) {
-    throw new Error("Backup passphrase is required");
+    throw new Error(uiText("chat_e2e_backup_passphrase_required"));
   }
 
   const ring = readKeyRing();
@@ -508,14 +509,14 @@ export async function importKeyRingBackup(
 ) {
   const trimmedPassphrase = passphrase.trim();
   if (!trimmedPassphrase) {
-    throw new Error("Backup passphrase is required");
+    throw new Error(uiText("chat_e2e_backup_passphrase_required"));
   }
 
   let backup: KeyRingBackupEnvelope;
   try {
     backup = JSON.parse(serializedBackup) as KeyRingBackupEnvelope;
   } catch {
-    throw new Error("Invalid secure chat backup file");
+    throw new Error(uiText("chat_e2e_invalid_backup_file"));
   }
 
   if (
@@ -525,7 +526,7 @@ export async function importKeyRingBackup(
     !backup.iv ||
     !backup.ciphertext
   ) {
-    throw new Error("Invalid secure chat backup file");
+    throw new Error(uiText("chat_e2e_invalid_backup_file"));
   }
 
   const salt = base64ToBytes(backup.salt);
@@ -545,18 +546,18 @@ export async function importKeyRingBackup(
       ),
     );
   } catch {
-    throw new Error("Invalid secure chat backup passphrase");
+    throw new Error(uiText("chat_e2e_invalid_backup_passphrase"));
   }
 
   let imported: MessageKeyRing;
   try {
     imported = JSON.parse(new TextDecoder().decode(decrypted)) as MessageKeyRing;
   } catch {
-    throw new Error("Invalid secure chat backup file");
+    throw new Error(uiText("chat_e2e_invalid_backup_file"));
   }
 
   if (!imported || typeof imported !== "object" || !imported.keys) {
-    throw new Error("Invalid secure chat backup file");
+    throw new Error(uiText("chat_e2e_invalid_backup_file"));
   }
 
   const current = readKeyRing();

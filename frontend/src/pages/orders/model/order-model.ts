@@ -358,7 +358,7 @@ export function formatCurrency(value: unknown, currency = "EUR", locale = "de-DE
 export function formatDateTime(
   value: string | null | undefined,
   locale = "de-DE",
-  emptyLabel = "Nicht festgelegt",
+  emptyLabel = translateCatalog(getLang()).common_not_set,
 ) {
   if (!value) return emptyLabel;
   const date = new Date(value);
@@ -372,7 +372,7 @@ export function formatDateTime(
 export function formatDateOnly(
   value: string | null | undefined,
   locale = "de-DE",
-  emptyLabel = "Nicht festgelegt",
+  emptyLabel = translateCatalog(getLang()).common_not_set,
 ) {
   if (!value) return emptyLabel;
   const date = new Date(value);
@@ -395,7 +395,10 @@ export function inputDateTimeToApiValue(value: string) {
   return date.toISOString();
 }
 
-export function patientLabel(patient: PatientOption, fallback = "Patient") {
+export function patientLabel(
+  patient: PatientOption,
+  fallback = translateCatalog(getLang()).orders_patient_fallback,
+) {
   const name = [patient.first_name, patient.last_name]
     .filter(Boolean)
     .join(" ")

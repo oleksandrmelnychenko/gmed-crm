@@ -118,7 +118,7 @@ export function blankQuoteForm(orderId = ""): QuoteFormState {
   };
 }
 
-export function blankAgencyServiceForm(unitLabel = "unit"): AgencyServiceFormState {
+export function blankAgencyServiceForm(unitLabel = ""): AgencyServiceFormState {
   return {
     id: "",
     serviceKey: "",
@@ -262,7 +262,7 @@ export function enumLabel(
 
 export function formatCurrency(value: unknown) {
   const numeric = typeof value === "number" ? value : Number(value ?? 0);
-  if (!Number.isFinite(numeric)) return "EUR 0.00";
+  if (!Number.isFinite(numeric)) return contractCurrencyFormatter.format(0);
   return contractCurrencyFormatter.format(numeric);
 }
 

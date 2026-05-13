@@ -63,7 +63,7 @@ import {
 import { clearApiCache } from "@/lib/api";
 import { useSecurePersistedState } from "@/lib/secure-persist";
 import { useAuth } from "@/lib/auth";
-import { useLang } from "@/lib/i18n";
+import { formatUiText, useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import type { CreateLeadBody, LeadDetail, LeadsStats, MonthlyEntry, StatusCount } from "@/lib/api/types";
@@ -800,7 +800,9 @@ function useLeadsPageContent() {
       // are not visually occluded by the modal overlay.
       setPendingConvertLead(null);
       setSuccessMessage(
-        `Patient ${result.patient_pid} created. Opening detail view...`,
+        formatUiText(t.lead_convert_success_opening, {
+          patientPid: result.patient_pid,
+        }),
       );
       reload();
       // Give the banner a beat to register before routing away.

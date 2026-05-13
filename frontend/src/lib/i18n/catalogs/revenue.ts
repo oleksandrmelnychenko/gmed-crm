@@ -98,6 +98,8 @@ export interface RevenueTranslations {
   revenue_common_gross: string;
   revenue_common_patient_id: string;
   revenue_common_updated_at: string;
+  revenue_common_basic_data: string;
+  revenue_common_validity_period: string;
   revenue_unit_default: string;
   revenue_filter_all_patients: string;
   revenue_filter_all_orders: string;
@@ -136,12 +138,25 @@ export interface RevenueTranslations {
   revenue_agency_service_currency: string;
   revenue_agency_service_vat_percent: string;
   revenue_agency_service_description_label: string;
+  revenue_agency_service_description_status: string;
   revenue_agency_service_active_hint: string;
   revenue_agency_service_save: string;
   revenue_agency_service_create: string;
+  revenue_contracts_section_patient_status: string;
+  revenue_contracts_section_contract_dates: string;
+  revenue_contracts_section_conditions: string;
+  revenue_contracts_linked_patient_card_description: string;
+  revenue_contracts_linked_orders_card_description: string;
+  revenue_contracts_linked_documents_card_description: string;
   revenue_contracts_create_description: string;
   revenue_contracts_select_patient: string;
   revenue_contracts_create: string;
+  revenue_quotes_section_order: string;
+  revenue_quotes_section_notes: string;
+  revenue_quotes_linked_patient_card_description: string;
+  revenue_quotes_linked_order_card_description: string;
+  revenue_quotes_linked_invoices_card_description: string;
+  revenue_quotes_linked_documents_card_description: string;
   revenue_quotes_create_description: string;
   revenue_quotes_loading_orders: string;
   revenue_quotes_select_order: string;
@@ -188,6 +203,13 @@ export interface RevenueTranslations {
   revenue_quote_status_expired: string;
 
   revenue_invoices_create_description: string;
+  revenue_invoices_section_quote: string;
+  revenue_invoices_section_invoice_settings: string;
+  revenue_invoices_linked_patient_card_description: string;
+  revenue_invoices_linked_order_card_description: string;
+  revenue_invoices_linked_quote_card_description: string;
+  revenue_invoices_linked_documents_card_description: string;
+  revenue_invoices_pdf_fallback_filename: string;
   revenue_invoices_ledger_date: string;
   revenue_invoices_ledger_direction: string;
   revenue_invoices_ledger_entry: string;
@@ -632,7 +654,7 @@ const revenueReportsTextRu: RevenueReportsText = {
         nonMedicalProviders: {
           title: "Отчёт по немедицинским провайдерам",
           description:
-            "Concierge-ориентированный объём партнёров по портфелю услуг, текущей нагрузке запросов, охвату пациентов и feedback.",
+            "Консьерж-ориентированный объём партнёров по портфелю услуг, текущей нагрузке запросов, охвату пациентов и feedback.",
           empty: "Данных по немедицинским провайдерам пока нет.",
         },
         countries: {
@@ -700,10 +722,10 @@ const revenueReportsTextRu: RevenueReportsText = {
           max: "Макс.",
           services: "Услуги",
           location: "Локация",
-          conciergeRequests90d: "Concierge-запросы / 90 дн.",
+          conciergeRequests90d: "Консьерж-запросы / 90 дн.",
           openRequests: "Открытые запросы",
           completed90d: "Завершено / 90 дн.",
-          conciergeScore: "Оценка concierge",
+          conciergeScore: "Оценка консьержа",
           feedbackVendors: (feedback: number, vendors: number) =>
             `${feedback} отзывов / ${vendors} поставщиков`,
         },
@@ -823,6 +845,8 @@ export const revenueRu: RevenueTranslations = {
   revenue_common_gross: "Брутто",
   revenue_common_patient_id: "ID пациента",
   revenue_common_updated_at: "Обновлено",
+  revenue_common_basic_data: "Основные данные",
+  revenue_common_validity_period: "Период действия",
   revenue_unit_default: "ед.",
   revenue_filter_all_patients: "Все пациенты",
   revenue_filter_all_orders: "Все заказы",
@@ -866,14 +890,34 @@ export const revenueRu: RevenueTranslations = {
   revenue_agency_service_currency: "Валюта",
   revenue_agency_service_vat_percent: "НДС %",
   revenue_agency_service_description_label: "Описание",
+  revenue_agency_service_description_status: "Описание и статус",
   revenue_agency_service_active_hint:
     "Позиция активна и может использоваться в последующих рабочих процессах",
   revenue_agency_service_save: "Сохранить позицию каталога",
   revenue_agency_service_create: "Создать позицию каталога",
+  revenue_contracts_section_patient_status: "Пациент и статус",
+  revenue_contracts_section_contract_dates: "Сроки договора",
+  revenue_contracts_section_conditions: "Условия",
+  revenue_contracts_linked_patient_card_description:
+    "Откройте карточку пациента, связанного с этим рамочным договором.",
+  revenue_contracts_linked_orders_card_description:
+    "Посмотрите заказы пациента, чтобы сверить услуги и контекст договора.",
+  revenue_contracts_linked_documents_card_description:
+    "Проверьте документы пациента, связанные с договором и услугами.",
   revenue_contracts_create_description:
     "Сначала задайте коммерческую основу по пациенту, затем создавайте предложения и рабочие заказы.",
   revenue_contracts_select_patient: "Выберите пациента",
   revenue_contracts_create: "Создать договор",
+  revenue_quotes_section_order: "Заказ",
+  revenue_quotes_section_notes: "Заметки",
+  revenue_quotes_linked_patient_card_description:
+    "Откройте карточку пациента, связанного с предложением.",
+  revenue_quotes_linked_order_card_description:
+    "Откройте заказ, из которого сформировано это предложение.",
+  revenue_quotes_linked_invoices_card_description:
+    "Проверьте счета и оплаты, связанные с этим предложением.",
+  revenue_quotes_linked_documents_card_description:
+    "Откройте документы заказа и пациента по этому предложению.",
   revenue_quotes_create_description:
     "Создайте предложение из текущих услуг заказа. Суммы рассчитываются на сервере по строкам заказа.",
   revenue_quotes_loading_orders: "Загрузка заказов...",
@@ -933,6 +977,17 @@ export const revenueRu: RevenueTranslations = {
 
   revenue_invoices_create_description:
     "Создайте счет из снимка предложения. Позиции и суммы фиксируются при создании.",
+  revenue_invoices_section_quote: "Предложение",
+  revenue_invoices_section_invoice_settings: "Параметры счёта",
+  revenue_invoices_linked_patient_card_description:
+    "Откройте карточку пациента, связанного с этим счётом.",
+  revenue_invoices_linked_order_card_description:
+    "Проверьте заказ, на основании которого выставлен счёт.",
+  revenue_invoices_linked_quote_card_description:
+    "Откройте предложение, связанное с этим счётом.",
+  revenue_invoices_linked_documents_card_description:
+    "Проверьте документы заказа и пациента по этому счёту.",
+  revenue_invoices_pdf_fallback_filename: "счет.pdf",
   revenue_invoices_ledger_date: "Дата",
   revenue_invoices_ledger_direction: "Направление",
   revenue_invoices_ledger_entry: "Проводка",
@@ -1092,6 +1147,8 @@ export const revenueDe: RevenueTranslations = {
   revenue_common_gross: "Brutto",
   revenue_common_patient_id: "Patienten-ID",
   revenue_common_updated_at: "Aktualisiert",
+  revenue_common_basic_data: "Stammdaten",
+  revenue_common_validity_period: "Gültigkeitszeitraum",
   revenue_unit_default: "Einheit",
   revenue_filter_all_patients: "Alle Patienten",
   revenue_filter_all_orders: "Alle Aufträge",
@@ -1135,14 +1192,34 @@ export const revenueDe: RevenueTranslations = {
   revenue_agency_service_currency: "Währung",
   revenue_agency_service_vat_percent: "USt. %",
   revenue_agency_service_description_label: "Beschreibung",
+  revenue_agency_service_description_status: "Beschreibung und Status",
   revenue_agency_service_active_hint:
     "Position ist aktiv und kann in nachgelagerten Workflows verwendet werden",
   revenue_agency_service_save: "Katalogposition speichern",
   revenue_agency_service_create: "Katalogposition anlegen",
+  revenue_contracts_section_patient_status: "Patient und Status",
+  revenue_contracts_section_contract_dates: "Vertragslaufzeit",
+  revenue_contracts_section_conditions: "Bedingungen",
+  revenue_contracts_linked_patient_card_description:
+    "Patientenakte öffnen, die mit diesem Rahmenvertrag verknüpft ist.",
+  revenue_contracts_linked_orders_card_description:
+    "Aufträge des Patienten prüfen, um Leistungen und Vertragskontext abzugleichen.",
+  revenue_contracts_linked_documents_card_description:
+    "Patientendokumente prüfen, die mit Vertrag und Leistungen verknüpft sind.",
   revenue_contracts_create_description:
     "Legen Sie zuerst die patientengebundene kaufmännische Basis fest, bevor Angebote und Ausführungsaufträge erstellt werden.",
   revenue_contracts_select_patient: "Patient auswählen",
   revenue_contracts_create: "Vertrag anlegen",
+  revenue_quotes_section_order: "Auftrag",
+  revenue_quotes_section_notes: "Notizen",
+  revenue_quotes_linked_patient_card_description:
+    "Patientenakte öffnen, die mit diesem Angebot verknüpft ist.",
+  revenue_quotes_linked_order_card_description:
+    "Auftrag öffnen, aus dem dieses Angebot erzeugt wurde.",
+  revenue_quotes_linked_invoices_card_description:
+    "Rechnungen und Zahlungen prüfen, die mit diesem Angebot verknüpft sind.",
+  revenue_quotes_linked_documents_card_description:
+    "Auftrags- und Patientendokumente zu diesem Angebot öffnen.",
   revenue_quotes_create_description:
     "Erzeugen Sie ein Angebot aus den aktuellen Auftragsleistungen. Summen werden serverseitig aus den Auftragspositionen berechnet.",
   revenue_quotes_loading_orders: "Aufträge werden geladen...",
@@ -1202,6 +1279,17 @@ export const revenueDe: RevenueTranslations = {
 
   revenue_invoices_create_description:
     "Erstellen Sie eine Rechnung aus einem Angebots-Snapshot. Positionen und Summen werden beim Erstellen fixiert.",
+  revenue_invoices_section_quote: "Angebot",
+  revenue_invoices_section_invoice_settings: "Rechnungsparameter",
+  revenue_invoices_linked_patient_card_description:
+    "Patientenakte öffnen, die mit dieser Rechnung verknüpft ist.",
+  revenue_invoices_linked_order_card_description:
+    "Auftrag prüfen, auf dessen Grundlage die Rechnung erstellt wurde.",
+  revenue_invoices_linked_quote_card_description:
+    "Angebot öffnen, das mit dieser Rechnung verknüpft ist.",
+  revenue_invoices_linked_documents_card_description:
+    "Auftrags- und Patientendokumente zu dieser Rechnung prüfen.",
+  revenue_invoices_pdf_fallback_filename: "rechnung.pdf",
   revenue_invoices_ledger_date: "Datum",
   revenue_invoices_ledger_direction: "Richtung",
   revenue_invoices_ledger_entry: "Buchung",

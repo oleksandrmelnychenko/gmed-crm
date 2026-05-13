@@ -6204,7 +6204,7 @@ function useOrdersPageContent() {
                                 )}
                               >
                                 {check.passed
-                                  ? "OK"
+                                  ? t.common_yes
                                   : l("orders_aktualisierung_notig")}
                               </Badge>
                             </div>

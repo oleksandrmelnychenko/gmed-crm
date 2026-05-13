@@ -217,6 +217,7 @@ export function PatientDetailOverlayLayers({
             orders={orders}
             appointments={appointments}
             dictionary={dictionary}
+            l={l}
             lang={lang}
             textareaClassName={textareaClassName}
             statusLabel={patientDetailStatusLabel}

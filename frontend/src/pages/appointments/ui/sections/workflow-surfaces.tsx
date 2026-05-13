@@ -29,7 +29,7 @@ import {
   type InterpreterPreference,
   type InterpreterSuggestion,
 } from "@/lib/api/clinical";
-import { useLang } from "@/lib/i18n";
+import { formatUiText, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { buildAppointmentWorkflowSummary } from "@/pages/appointments/model/selectors";
 import { InterpreterSuggestionsPanel } from "@/pages/appointments/ui/sections/interpreter-suggestions-panel";
@@ -1399,7 +1399,10 @@ function AppointmentCompletionSection({
                 user_id: followUpAssigneeId,
                 remind_at: toRfc3339(remindAt),
                 title: followUpPresetTitle(preset.id),
-                description: `Auto-planned during appointment completion for ${detail.patient_pid} · ${detail.title}.`,
+                description: formatUiText(t.appointments_auto_planned_completion, {
+                  patientPid: detail.patient_pid,
+                  title: detail.title,
+                }),
               }),
             });
           }),

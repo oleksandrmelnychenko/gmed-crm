@@ -1,3 +1,8 @@
+import {
+  getLang,
+  t as translateCatalog,
+  type TranslationKey,
+} from "@/lib/i18n";
 import type {
   FilterFieldType,
   FilterOperator,
@@ -83,13 +88,40 @@ const ALL_FILTER_OPERATORS: readonly FilterOperator[] = [
   "equals",
 ];
 
+const FILTER_OPERATOR_LABEL_KEYS = {
+  contains: "filter_op_contains",
+  does_not_contain: "filter_op_does_not_contain",
+  is_empty: "filter_op_is_empty",
+  is_not_empty: "filter_op_is_not_empty",
+  is: "filter_op_is",
+  is_not: "filter_op_is_not",
+  is_any_of: "filter_op_is_any_of",
+  is_none_of: "filter_op_is_none_of",
+  has_any: "filter_op_has_any",
+  has_all: "filter_op_has_all",
+  has_none: "filter_op_has_none",
+  before: "filter_op_before",
+  after: "filter_op_after",
+  between: "filter_op_between",
+  last_n_days: "filter_op_last_n_days",
+  equals: "filter_op_equals",
+} satisfies Record<FilterOperator, TranslationKey>;
+
+function defaultOperatorLabel(operator: FilterOperator): string {
+  const translations = translateCatalog(getLang());
+  return translations[FILTER_OPERATOR_LABEL_KEYS[operator]];
+}
+
 export const DEFAULT_OPERATOR_LABELS = Object.fromEntries(
-  ALL_FILTER_OPERATORS.map((operator) => [operator, operator]),
+  ALL_FILTER_OPERATORS.map((operator) => [
+    operator,
+    defaultOperatorLabel(operator),
+  ]),
 ) as Record<FilterOperator, string>;
 
 export function labelForOperator(
   operator: FilterOperator,
   overrides?: FilterOperatorLabels,
 ): string {
-  return overrides?.[operator] ?? DEFAULT_OPERATOR_LABELS[operator];
+  return overrides?.[operator] ?? defaultOperatorLabel(operator);
 }

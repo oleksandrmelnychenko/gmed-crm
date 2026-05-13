@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { t as translateCatalog } from "@/lib/i18n";
+
 import {
   buildPatientLabelPrintHtml,
   buildPatientTimelineSummary,
@@ -210,6 +212,7 @@ describe("formatRelatedPatientName", () => {
 
 describe("buildPatientLabelPrintHtml", () => {
   it("renders a print-ready patient label with the requested format metadata", () => {
+    const tr = translateCatalog("ru");
     const html = buildPatientLabelPrintHtml({
       patient_id: "P-20260410-0001",
       title: "Dr.",
@@ -239,7 +242,7 @@ describe("buildPatientLabelPrintHtml", () => {
     expect(html).toContain("70mm 37mm");
     expect(html).toContain("Herr Dr. Max Mustermann");
     expect(html).toContain("P-20260410-0001");
-    expect(html).toContain("Insurance AXA");
+    expect(html).toContain(`${tr.patient_label_print_insurance} AXA`);
     expect(html).toContain("c/o GMED");
   });
 });

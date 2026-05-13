@@ -16,8 +16,15 @@ function AppointmentLinksSection({
   detail: AppointmentDetail;
   onOpenPreview: (kind: LinkedPreviewKind, label: string) => void;
 }) {
-  const { lang, t } = useLang();
-  const descriptions = linkedRecordDescriptions(lang);
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+  const descriptions = {
+    patient: l("appointments_linked_tile_patient_description"),
+    order: l("appointments_linked_tile_order_description"),
+    clinic: l("appointments_linked_tile_clinic_description"),
+    documents: l("appointments_linked_tile_documents_description"),
+    cases: l("appointments_linked_tile_cases_description"),
+  };
   const patientLabel = appointmentText("appointments_patient");
   const orderLabel = appointmentText("appointments_order");
   const clinicLabel = appointmentText("appointments_clinic");
@@ -92,26 +99,6 @@ function LinkedRecordTile({
       </span>
     </button>
   );
-}
-
-function linkedRecordDescriptions(lang: string) {
-  if (lang === "de") {
-    return {
-      patient: "Patientenkarte zum aktuellen Termin öffnen.",
-      order: "Auftrag prüfen, mit dem dieser Termin verknüpft ist.",
-      clinic: "Klinikprofil und Terminkontext öffnen.",
-      documents: "Dokumente zum Patienten und aktuellen Termin prüfen.",
-      cases: "Patientenfälle öffnen, die zu diesem Termin gehören.",
-    };
-  }
-
-  return {
-    patient: "Откройте карточку пациента, связанного с этим приёмом.",
-    order: "Проверьте заказ, к которому привязан этот приём.",
-    clinic: "Откройте карточку клиники и контекст этого приёма.",
-    documents: "Проверьте документы пациента и текущего приёма.",
-    cases: "Откройте кейсы пациента, связанные с этим приёмом.",
-  };
 }
 
 export const MemoizedAppointmentLinksSection = memo(AppointmentLinksSection);

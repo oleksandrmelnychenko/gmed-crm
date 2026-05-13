@@ -109,7 +109,7 @@ async function parseError(response: Response) {
   const message =
     body?.message ??
     body?.error ??
-    `${response.status} ${response.statusText || "Request failed"}`;
+    `${response.status} ${response.statusText || uiText("auth_request_failed")}`;
 
   throw new Error(message);
 }

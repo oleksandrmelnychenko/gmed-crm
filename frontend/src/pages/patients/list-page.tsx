@@ -89,7 +89,7 @@ function PatientsPageHeader({
         </h1>
         {showStats ? (
           <span className="text-xs text-muted-foreground tabular-nums">
-            В· {tallyParts.join(" В· ")}
+            · {tallyParts.join(" · ")}
           </span>
         ) : null}
       </div>

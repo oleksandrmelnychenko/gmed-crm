@@ -200,6 +200,7 @@ export interface PatientsPortalTranslations {
   patient_relation_name_placeholder: string;
   patient_relation_type_label: string;
   patient_relation_phone: string;
+  patient_relation_phone_placeholder: string;
   patient_relation_emergency_contact: string;
   patient_relation_notes: string;
   patient_relation_notes_placeholder: string;
@@ -696,6 +697,14 @@ export interface PatientsPortalTranslations {
   patient_profile_address: string;
   patient_profile_emergency_contact: string;
   patient_profile_edit: string;
+  patient_profile_edit_field_aria: string;
+  patient_label_print_dob: string;
+  patient_label_print_country: string;
+  patient_label_print_insurance: string;
+  patient_label_print_generated: string;
+  patient_label_print_browser_title: string;
+  patient_label_print_dob_not_set: string;
+  patient_label_print_agency_not_configured: string;
   patient_profile_compliance_and_legal_status: string;
   patient_profile_contract_readiness_required_confirmations_and_patient_legal_note: string;
   patient_profile_update_status: string;
@@ -821,6 +830,15 @@ export interface PatientsPortalTranslations {
 }
 
 export const patientsPortalRu: PatientsPortalTranslations = {
+  patient_profile_edit_field_aria: "Редактировать {label}",
+  patient_label_print_dob: "Дата рождения",
+  patient_label_print_country: "Страна",
+  patient_label_print_insurance: "Страховка",
+  patient_label_print_generated: "Создано",
+  patient_label_print_browser_title: "{patientId} - этикетка",
+  patient_label_print_dob_not_set: "Дата рождения не указана",
+  patient_label_print_agency_not_configured: "Агентство не настроено",
+
   portal_status_active: "Активно",
   portal_status_approved: "Одобрено",
   portal_status_archived: "Архивировано",
@@ -1022,6 +1040,7 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   patient_relation_name_placeholder: "Имя родственника или сопровождающего",
   patient_relation_type_label: "Тип связи",
   patient_relation_phone: "Телефон",
+  patient_relation_phone_placeholder: "+49 ...",
   patient_relation_emergency_contact: "Экстренный контакт",
   patient_relation_notes: "Заметки",
   patient_relation_notes_placeholder: "Доступность, заметки по контакту или особые инструкции",
@@ -1643,6 +1662,15 @@ export const patientsPortalRu: PatientsPortalTranslations = {
 };
 
 export const patientsPortalDe: PatientsPortalTranslations = {
+  patient_profile_edit_field_aria: "{label} bearbeiten",
+  patient_label_print_dob: "Geburtsdatum",
+  patient_label_print_country: "Land",
+  patient_label_print_insurance: "Versicherung",
+  patient_label_print_generated: "Erstellt",
+  patient_label_print_browser_title: "{patientId} Etikett",
+  patient_label_print_dob_not_set: "Geburtsdatum nicht angegeben",
+  patient_label_print_agency_not_configured: "Agentur nicht konfiguriert",
+
   portal_status_active: "Aktiv",
   portal_status_approved: "Genehmigt",
   portal_status_archived: "Archiviert",
@@ -1844,6 +1872,7 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   patient_relation_name_placeholder: "Name eines Angehörigen oder Betreuers",
   patient_relation_type_label: "Beziehungstyp",
   patient_relation_phone: "Telefon",
+  patient_relation_phone_placeholder: "+49 ...",
   patient_relation_emergency_contact: "Notfallkontakt",
   patient_relation_notes: "Notizen",
   patient_relation_notes_placeholder: "Erreichbarkeit, Kontakthinweise oder besondere Anweisungen",

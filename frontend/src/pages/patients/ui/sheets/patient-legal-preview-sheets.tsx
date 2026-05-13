@@ -89,7 +89,7 @@ export function PatientDocumentsPreviewSheet({
       bodyClassName="px-4 py-3 space-y-3"
     >
       <PreviewSection
-        title={t.uiText["patients_preview_list"] ?? "patients_preview_list"}
+        title={t.uiText.patients_preview_list}
         accessory={
           <Button
             type="button"
@@ -200,7 +200,7 @@ export function PatientContractsPreviewSheet({
       bodyClassName="px-4 py-3 space-y-3"
     >
       <PreviewSection
-        title={t.uiText["patients_preview_list_2"] ?? "patients_preview_list_2"}
+        title={t.uiText.patients_preview_list_2}
         accessory={
           <Button
             type="button"
@@ -311,7 +311,7 @@ export function PatientInvoicesPreviewSheet({
       bodyClassName="px-4 py-3 space-y-3"
     >
       <PreviewSection
-        title={t.uiText["patients_preview_list_3"] ?? "patients_preview_list_3"}
+        title={t.uiText.patients_preview_list_3}
         accessory={
           <Button
             type="button"

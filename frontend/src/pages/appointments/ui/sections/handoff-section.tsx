@@ -7,7 +7,7 @@ import {
 import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { useLang } from "@/lib/i18n";
+import { formatUiText, useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { apiFetch } from "@/lib/api";
 import {
@@ -104,7 +104,10 @@ function AppointmentHandoffSectionContent({
           user_id: followUpAssigneeId,
           remind_at: toRfc3339(remindAt),
           title: followUpPresetTitle(preset.id),
-          description: `Auto-planned from appointment ${detail.patient_pid} · ${detail.title}.`,
+          description: formatUiText(t.appointments_auto_planned_from_appointment, {
+            patientPid: detail.patient_pid,
+            title: detail.title,
+          }),
         }),
       });
       onRefresh();

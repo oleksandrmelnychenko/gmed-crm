@@ -21,7 +21,7 @@ import {
 import { clearApiCache } from "@/lib/api";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuth } from "@/lib/auth";
-import { useLang } from "@/lib/i18n";
+import { formatUiText, useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import {
   buildInterpreterMobileAgendaSections,
@@ -998,9 +998,13 @@ function useStaffAppointmentsPageContent() {
   const reportReviewMeta = !detailReport
     ? ""
     : detailReport.approval_status === "approved"
-      ? `Approved ${formatDateTimeLabel(detailReport.approved_at)}`
+      ? formatUiText(t.appointments_report_approved_at, {
+          date: formatDateTimeLabel(detailReport.approved_at),
+        })
       : detailReport.approval_status === "rejected"
-        ? `Returned ${formatDateTimeLabel(detailReport.approved_at)}`
+        ? formatUiText(t.appointments_report_returned_at, {
+            date: formatDateTimeLabel(detailReport.approved_at),
+          })
         : tr.mfa_pending;
   const timelineLabels = useMemo(
     () => ({

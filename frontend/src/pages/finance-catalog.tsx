@@ -170,7 +170,7 @@ const BLANK_PACKAGE_ITEM_FORM: ServicePackageItemForm = {
   description: "",
   serviceKey: "",
   includedQuantity: "1",
-  unitLabel: "unit",
+  unitLabel: "",
   overageUnitPriceNet: "",
   taxProfileId: "",
   requiresPatientApproval: false,
@@ -187,7 +187,7 @@ const BLANK_PACKAGE_FORM: ServicePackageForm = {
   isActive: true,
   validFrom: "",
   validTo: "",
-  items: [createBlankPackageItem("unit")],
+  items: [],
 };
 
 function createBlankPackageItem(unitLabel: string): ServicePackageItemForm {
@@ -259,20 +259,26 @@ function taxProfileToForm(profile: TaxProfile): TaxProfileForm {
   };
 }
 
-function packageItemToForm(item: ServicePackageItem): ServicePackageItemForm {
+function packageItemToForm(
+  item: ServicePackageItem,
+  defaultUnitLabel: string,
+): ServicePackageItemForm {
   return {
     formKey: item.id || nextPackageItemFormKey(),
     description: item.description,
     serviceKey: item.service_key ?? "",
     includedQuantity: item.included_quantity,
-    unitLabel: item.unit_label || "unit",
+    unitLabel: item.unit_label || defaultUnitLabel,
     overageUnitPriceNet: item.overage_unit_price_net ?? "",
     taxProfileId: item.tax_profile_id ?? "",
     requiresPatientApproval: item.requires_patient_approval,
   };
 }
 
-function packageToForm(item: ServicePackage): ServicePackageForm {
+function packageToForm(
+  item: ServicePackage,
+  defaultUnitLabel: string,
+): ServicePackageForm {
   return {
     id: item.id,
     packageKey: item.package_key,
@@ -286,8 +292,10 @@ function packageToForm(item: ServicePackage): ServicePackageForm {
     validTo: item.valid_to ?? "",
     items:
       item.items && item.items.length > 0
-        ? item.items.map(packageItemToForm)
-        : [createBlankPackageItem("unit")],
+        ? item.items.map((packageItem) =>
+            packageItemToForm(packageItem, defaultUnitLabel),
+          )
+        : [createBlankPackageItem(defaultUnitLabel)],
   };
 }
 
@@ -648,7 +656,7 @@ function useFinanceCatalogPageContent() {
   function openEditPackage(item: ServicePackage) {
     setCreateOpen(false);
     setEditingTaxProfileId("");
-    setPackageForm(packageToForm(item));
+    setPackageForm(packageToForm(item, t.finance_catalog_unit_default));
     setPackageError("");
     setPackageFormOpen(true);
   }

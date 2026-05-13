@@ -271,7 +271,10 @@ function usePatientInvoicesPageContent() {
       formData.set("file", uploadFile);
       formData.set("order_id", detail.order_id);
       formData.set("upload_kind", "payment_proof");
-      formData.set("auto_name", `Payment proof ${detail.invoice_number}`);
+      formData.set(
+        "auto_name",
+        `${t.portal_invoices_payment_proof} ${detail.invoice_number}`,
+      );
       if (uploadNote.trim()) {
         formData.set("notes", uploadNote.trim());
       }

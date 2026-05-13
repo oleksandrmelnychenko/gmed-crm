@@ -270,7 +270,9 @@ function useAppointmentReportSectionContent({
               />
               <StatCard
                 label={t.appointments_time}
-                value={`${detailReport.hours} h`}
+                value={appointmentText("appointments_report_hours_value", {
+                  hours: detailReport.hours,
+                })}
                 description={
                   detailReport.approval_status === "approved"
                     ? interpreterReportBillingSyncLabel(

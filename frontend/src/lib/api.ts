@@ -1,4 +1,6 @@
-﻿const CLIENT_API_ORIGIN =
+﻿import { uiText } from "@/lib/i18n";
+
+const CLIENT_API_ORIGIN =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/+$/, "") ?? "";
 const API_PREFIX = "/api/v1";
 const ACCESS_TOKEN_KEY = "gmed_access_token";
@@ -171,7 +173,7 @@ const RATE_LIMIT_DEFAULT_BACKOFF_MS = 1000;
 const RATE_LIMIT_MAX_BACKOFF_MS = 10_000;
 
 function cancelledRequestError() {
-  return new ApiRequestError("Request was cancelled.", { code: "aborted" });
+  return new ApiRequestError(uiText("api_request_cancelled"), { code: "aborted" });
 }
 
 function isAbortError(error: unknown) {
@@ -180,7 +182,7 @@ function isAbortError(error: unknown) {
 
 function timeoutError(timeoutMs: number) {
   const seconds = Math.max(1, Math.round(timeoutMs / 1000));
-  return new ApiRequestError(`Request timed out after ${seconds}s. Please try again.`, {
+  return new ApiRequestError(uiText("api_request_timeout", undefined, { seconds }), {
     code: "timeout",
   });
 }
@@ -202,7 +204,7 @@ export async function fetchWithApiTimeout(
       if (isAbortError(error)) {
         throw cancelledRequestError();
       }
-      throw new ApiRequestError("Network error. Please check your connection and try again.", {
+      throw new ApiRequestError(uiText("api_network_error"), {
         code: "network",
         cause: error,
       });
@@ -230,7 +232,7 @@ export async function fetchWithApiTimeout(
     if (callerSignal?.aborted || isAbortError(error)) {
       throw cancelledRequestError();
     }
-    throw new ApiRequestError("Network error. Please check your connection and try again.", {
+    throw new ApiRequestError(uiText("api_network_error"), {
       code: "network",
       cause: error,
     });
@@ -377,7 +379,7 @@ async function readApiJsonResponse<T>(res: Response): Promise<T> {
     const message = body?.message ?? body?.error ?? `${res.status} ${res.statusText}`;
     if (res.status === 429) {
       throw new ApiRequestError(
-        message || "Too many requests. Please try again later.",
+        message || uiText("api_rate_limited"),
         { status: res.status, code: "rate_limited", body },
       );
     }
@@ -521,7 +523,7 @@ export async function apiFetchFile(path: string, init: ApiFileFetchInit = {}) {
     const message = body?.message ?? body?.error ?? `${res.status} ${res.statusText}`;
     if (res.status === 429) {
       throw new ApiRequestError(
-        message || "Too many requests. Please try again later.",
+        message || uiText("api_rate_limited"),
         { status: res.status, code: "rate_limited", body },
       );
     }

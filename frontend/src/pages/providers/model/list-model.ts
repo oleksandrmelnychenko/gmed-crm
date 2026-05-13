@@ -178,7 +178,10 @@ export function providerTypeLabel(value: string, tr: Record<string, string>) {
   });
 }
 
-export function compactDateTime(value?: string | null, fallback = "Not set") {
+export function compactDateTime(
+  value?: string | null,
+  fallback = translateCatalog(getLang()).common_not_set,
+) {
   if (!value) return fallback;
   try {
     return COMPACT_DATE_TIME_FORMATTER.format(new Date(value));
@@ -187,7 +190,10 @@ export function compactDateTime(value?: string | null, fallback = "Not set") {
   }
 }
 
-export function compactDate(value?: string | null, fallback = "Not set") {
+export function compactDate(
+  value?: string | null,
+  fallback = translateCatalog(getLang()).common_not_set,
+) {
   if (!value) return fallback;
   try {
     return COMPACT_DATE_FORMATTER.format(new Date(`${value}T00:00:00`));

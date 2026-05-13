@@ -406,9 +406,9 @@ function escapeHtml(value: string) {
     .replaceAll("'", "&#39;");
 }
 
-function formatPrintValue(value?: string | null, fallback = "Not set") {
+function formatPrintValue(value?: string | null, fallback?: string) {
   const normalized = value?.trim();
-  return normalized ? normalized : fallback;
+  return normalized ? normalized : fallback ?? translateCatalog(getLang()).common_not_set;
 }
 
 function formatPatientLabelBirthDate(value: string) {
@@ -429,16 +429,23 @@ function resolvePatientLabelFormat(formatId: string): PatientLabelFormat {
 }
 
 export function buildPatientLabelPrintHtml(payload: PatientLabelPayload) {
+  const lang = getLang();
+  const tr = translateCatalog(lang);
   const format = resolvePatientLabelFormat(payload.format?.id ?? DEFAULT_PATIENT_LABEL_FORMAT_ID);
   const labelWidth = Math.max(format.width_mm - 10, 48);
   const labelHeight = Math.max(format.height_mm - 10, 24);
   const titleLine = [payload.salutation, payload.title, payload.first_name, payload.last_name]
     .filter((value) => Boolean(value && value.trim()))
     .join(" ");
+  const birthDateLine = payload.birth_date
+    ? `${tr.patient_label_print_dob} ${formatPatientLabelBirthDate(payload.birth_date)}`
+    : "";
   const metaLine = [
-    `DOB ${formatPatientLabelBirthDate(payload.birth_date)}`,
-    payload.country_code ? `Country ${payload.country_code}` : "",
-    payload.insurance_provider ? `Insurance ${payload.insurance_provider}` : "",
+    birthDateLine,
+    payload.country_code ? `${tr.patient_label_print_country} ${payload.country_code}` : "",
+    payload.insurance_provider
+      ? `${tr.patient_label_print_insurance} ${payload.insurance_provider}`
+      : "",
   ]
     .filter(Boolean)
     .join("  ·  ");
@@ -450,13 +457,17 @@ export function buildPatientLabelPrintHtml(payload: PatientLabelPayload) {
   ]
     .filter((value) => Boolean(value && value.trim()))
     .join("  ·  ");
-  const footerLine = `Generated ${formatPrintValue(payload.generated_at, new Date().toISOString())}`;
+  const footerLine = `${tr.patient_label_print_generated} ${formatPrintValue(payload.generated_at, new Date().toISOString())}`;
+  const documentTitle = tr.patient_label_print_browser_title.replace(
+    "{patientId}",
+    payload.patient_id,
+  );
 
   return `<!doctype html>
-<html lang="en">
+<html lang="${lang}">
   <head>
     <meta charset="utf-8" />
-    <title>${escapeHtml(payload.patient_id)} label</title>
+    <title>${escapeHtml(documentTitle)}</title>
     <style>
       @page {
         size: ${format.width_mm}mm ${format.height_mm}mm;
@@ -539,8 +550,8 @@ export function buildPatientLabelPrintHtml(payload: PatientLabelPayload) {
       <div class="eyebrow">${escapeHtml(patientLabelFormatLabel(format))}</div>
       <div class="patient-id">${escapeHtml(payload.patient_id)}</div>
       <div class="name">${escapeHtml(titleLine || payload.patient_id)}</div>
-      <div class="meta">${escapeHtml(metaLine || "DOB not set")}</div>
-      <div class="agency">${escapeHtml(agencyLine || payload.agency.name || "Agency not configured")}</div>
+      <div class="meta">${escapeHtml(metaLine || tr.patient_label_print_dob_not_set)}</div>
+      <div class="agency">${escapeHtml(agencyLine || payload.agency.name || tr.patient_label_print_agency_not_configured)}</div>
       <div class="footer">${escapeHtml(footerLine)}</div>
     </article>
     <script>

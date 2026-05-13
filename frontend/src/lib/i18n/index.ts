@@ -283,6 +283,9 @@ export interface Translations
   providers_amount: string;
   providers_select_first: string;
   providers_price_numeric: string;
+  providers_delete_provider_confirm: string;
+  providers_delete_doctor_confirm: string;
+  providers_delete_service_confirm: string;
   gender_male: string;
   gender_female: string;
   gender_diverse: string;

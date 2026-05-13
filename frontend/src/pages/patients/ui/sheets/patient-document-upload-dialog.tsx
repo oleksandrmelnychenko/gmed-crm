@@ -48,6 +48,7 @@ type PatientDocumentUploadDialogProps = {
   orders: OrderItem[];
   appointments: AppointmentItem[];
   dictionary: Record<string, string>;
+  l: Localize;
   lang: string;
   textareaClassName: string;
   statusLabel: (status: string) => string;
@@ -66,6 +67,7 @@ function PatientDocumentUploadDialog({
   orders,
   appointments,
   dictionary,
+  l,
   textareaClassName,
   statusLabel,
   formatDate,
@@ -75,7 +77,6 @@ function PatientDocumentUploadDialog({
 }: PatientDocumentUploadDialogProps) {
   const [form, setForm] = useState<DocumentUploadFormState>(blankDocumentUploadForm);
   const [busy, setBusy] = useState(false);
-  const l = (key: string) => dictionary[key] ?? key;
 
   useEffect(() => {
     if (!open) {

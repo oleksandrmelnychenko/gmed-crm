@@ -388,7 +388,7 @@ describe("buildInterpreterMobileAgendaSections", () => {
     expect(sections).toHaveLength(2);
     expect(sections[0]).toMatchObject({
       date: "2026-04-14",
-      label: "Today",
+      label: "Пациенты сегодня",
       itemCount: 2,
       pendingResponseCount: 1,
     });

@@ -368,7 +368,7 @@ function PatientRelationEditorSheet({
                 }))
               }
               className={inputClass}
-              placeholder="+49 ..."
+              placeholder={t.patient_relation_phone_placeholder}
             />
           </FormField>
 

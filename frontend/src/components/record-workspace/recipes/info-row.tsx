@@ -2,7 +2,7 @@ import { type ReactNode } from "react";
 
 import { Pencil } from "lucide-react";
 
-import { useLang } from "@/lib/i18n";
+import { formatUiText, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import { tokens } from "../primitives/design-tokens";
@@ -22,7 +22,10 @@ export function InfoRow({
 }) {
   const { t } = useLang();
   const resolvedEditLabel =
-    editLabel ?? (typeof label === "string" ? `${t.common_edit} ${label}` : t.common_edit);
+    editLabel ??
+    (typeof label === "string"
+      ? formatUiText(t.uiText.common_edit_label, { label })
+      : t.common_edit);
 
   return (
     <div className={cn("group relative flex flex-col gap-1", className)}>

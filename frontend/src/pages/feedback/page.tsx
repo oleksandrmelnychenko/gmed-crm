@@ -433,7 +433,12 @@ function ScoreGrid({
         (value) => setForm((current) => ({ ...current, overallScore: value })),
         scoreOptions,
       )}
-      {scoreField("NPS 0-10", form.npsScore, (value) => setForm((current) => ({ ...current, npsScore: value })), npsOptions)}
+      {scoreField(
+        `${t.uiText.feedback_nps_label} 0-10`,
+        form.npsScore,
+        (value) => setForm((current) => ({ ...current, npsScore: value })),
+        npsOptions,
+      )}
       {scoreField(
         t.feedback_patient_manager,
         form.patientManagerScore,

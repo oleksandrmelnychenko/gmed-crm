@@ -4,6 +4,10 @@ import {
   t as translateCatalog,
   type Translations,
 } from "@/lib/i18n";
+import {
+  communicationChannelLabel,
+  communicationDirectionLabel,
+} from "@/pages/appointments/model/labels";
 import type {
   AppointmentPermissions,
   AppointmentTimelineEvent,
@@ -259,9 +263,6 @@ type TimelineCommunicationEntry = {
   doctor_name: string | null;
 };
 
-const CONCIERGE_TRANSFER_COMPLETED_TEXT =
-  "Completed airport arrival step. Driver waited at hotel lobby and escorted patient to admission desk. Completed concierge-linked transfer.";
-
 const FINDINGS_PREFIX = "Findings:";
 const INCOMING_DATA_PREFIX = "Incoming data:";
 const DOCTOR_FOLLOW_UP_PREFIX = "Doctor-directed:";
@@ -347,12 +348,16 @@ function communicationTargetLabel(entry: TimelineCommunicationEntry) {
 function localizeKnownTimelineText(
   value: string | null | undefined,
   labels: {
+    appointments_legacy_concierge_transfer_completed_source: string;
     appointments_timeline_concierge_transfer_completed: string;
   },
 ) {
   if (!value) return value ?? "";
   const normalized = value.trim();
-  if (normalized === CONCIERGE_TRANSFER_COMPLETED_TEXT) {
+  if (
+    normalized ===
+    labels.appointments_legacy_concierge_transfer_completed_source
+  ) {
     return labels.appointments_timeline_concierge_transfer_completed;
   }
   return value;
@@ -525,6 +530,8 @@ export function buildAppointmentTimelineEvents(args: {
     values?: Record<string, string | number | boolean | null | undefined>,
   ) => formatUiText(dictionary.uiText[key] ?? key, values);
   const labels = {
+    appointments_legacy_concierge_transfer_completed_source:
+      dictionary.uiText.appointments_legacy_concierge_transfer_completed_source,
     appointments_timeline_appointment_created:
       dictionary.appointments_timeline_appointment_created,
     appointments_timeline_scheduled_slot:
@@ -684,7 +691,11 @@ export function buildAppointmentTimelineEvents(args: {
       occurredAt: item.created_at,
       title: localizeKnownTimelineText(item.subject, labels),
       detail: [
-        `${item.direction} via ${item.channel}`,
+        formatUiText("{direction} {via} {channel}", {
+          direction: communicationDirectionLabel(item.direction),
+          via: dictionary.appointments_common_via,
+          channel: communicationChannelLabel(item.channel),
+        }),
         communicationTargetLabel(item),
         item.contact_name ?? "",
         localizeKnownTimelineText(item.message, labels),

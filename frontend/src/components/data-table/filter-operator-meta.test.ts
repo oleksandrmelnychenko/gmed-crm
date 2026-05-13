@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { getLang, t } from "@/lib/i18n";
 import {
   DEFAULT_OPERATOR_LABELS,
   OPERATORS_BY_FIELD_TYPE,
@@ -12,6 +13,8 @@ import {
   operatorExpectsSingleDate,
   operatorTakesValue,
 } from "./filter-operator-meta";
+
+const dictionary = t(getLang());
 
 describe("OPERATORS_BY_FIELD_TYPE", () => {
   it("text operators include contains + empties", () => {
@@ -101,21 +104,23 @@ describe("operator predicates", () => {
 
 describe("labelForOperator", () => {
   it("uses default label when no overrides", () => {
-    expect(labelForOperator("contains")).toBe("contains");
-    expect(labelForOperator("is_any_of")).toBe("is_any_of");
-    expect(labelForOperator("last_n_days")).toBe("last_n_days");
+    expect(labelForOperator("contains")).toBe(dictionary.filter_op_contains);
+    expect(labelForOperator("is_any_of")).toBe(dictionary.filter_op_is_any_of);
+    expect(labelForOperator("last_n_days")).toBe(dictionary.filter_op_last_n_days);
   });
   it("prefers override when provided", () => {
     expect(labelForOperator("contains", { contains: "містить" })).toBe("містить");
   });
   it("falls back to default if override missing this key", () => {
-    expect(labelForOperator("contains", { is: "равно" })).toBe("contains");
+    expect(labelForOperator("contains", { is: "равно" })).toBe(
+      dictionary.filter_op_contains,
+    );
   });
   it("DEFAULT_OPERATOR_LABELS covers all operators", () => {
     for (const op of Object.keys(OPERATORS_BY_FIELD_TYPE.date)) {
       void op;
     }
-    expect(DEFAULT_OPERATOR_LABELS.contains).toBe("contains");
-    expect(DEFAULT_OPERATOR_LABELS.is_empty).toBe("is_empty");
+    expect(DEFAULT_OPERATOR_LABELS.contains).toBe(dictionary.filter_op_contains);
+    expect(DEFAULT_OPERATOR_LABELS.is_empty).toBe(dictionary.filter_op_is_empty);
   });
 });

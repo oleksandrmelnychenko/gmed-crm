@@ -402,6 +402,7 @@ export interface OperationsTranslations {
   lead_convert_dialog_start: string;
   lead_convert_dialog_end: string;
   lead_create_patient: string;
+  lead_convert_success_opening: string;
   lead_filter_active_leads: string;
   lead_filter_with_archive: string;
   lead_state_region: string;
@@ -561,22 +562,22 @@ export const operationsRu: OperationsTranslations = {
   staff_services_column_cost: "Стоимость",
   staff_services_column_concierge: "Консьерж",
   staff_services_lookup_failed: "Не удалось загрузить справочники.",
-  staff_services_load_failed: "Не удалось загрузить concierge-сервисы.",
+  staff_services_load_failed: "Не удалось загрузить консьерж-сервисы.",
   staff_services_patient_required: "Пациент обязателен.",
   staff_services_title_required: "Название обязательно.",
   staff_services_cost_invalid: "Поля стоимости должны быть корректными числами.",
   staff_services_currency_invalid: "Валюта должна состоять из 3 букв.",
-  staff_services_create_failed: "Не удалось создать concierge-сервис.",
-  staff_services_loading: "Загрузка concierge-сервисов...",
-  staff_services_title: "Concierge-сервисы",
+  staff_services_create_failed: "Не удалось создать консьерж-сервис.",
+  staff_services_loading: "Загрузка консьерж-сервисов...",
+  staff_services_title: "Консьерж-сервисы",
   staff_services_add_service: "Добавить сервис",
   staff_services_stat_active: "Активные",
   staff_services_stat_billing_ready: "Готовы к биллингу",
   staff_services_stat_portal_requests: "Запросы портала",
   staff_services_search_placeholder: "Пациент, провайдер, бронь...",
   staff_services_mine: "Мои",
-  staff_services_empty: "Нет concierge-сервисов в текущем фильтре.",
-  staff_services_create_title: "Добавить concierge-сервис",
+  staff_services_empty: "Нет консьерж-сервисов в текущем фильтре.",
+  staff_services_create_title: "Добавить консьерж-сервис",
   staff_services_create_description:
     "Выберите пациента, тип сервиса и временное окно.",
   staff_services_create_section_service: "Услуга и пациент",
@@ -850,6 +851,8 @@ export const operationsRu: OperationsTranslations = {
   lead_convert_dialog_end:
     "с назначением patient manager и подготовкой стандартного workflow-чеклиста. Сам лид перейдёт в статус",
   lead_create_patient: "Создать пациента",
+  lead_convert_success_opening:
+    "Пациент {patientPid} создан. Открывается карточка...",
   lead_filter_active_leads: "Активные лиды",
   lead_filter_with_archive: "С архивом",
   lead_state_region: "Штат / регион",
@@ -1301,6 +1304,8 @@ export const operationsDe: OperationsTranslations = {
   lead_convert_dialog_end:
     "mit Zuweisung des Patientenmanagements und Vorbereitung der Standard-Workflow-Checkliste. Der Lead wechselt in den Status",
   lead_create_patient: "Patient anlegen",
+  lead_convert_success_opening:
+    "Patient {patientPid} wurde angelegt. Detailansicht wird geöffnet...",
   lead_filter_active_leads: "Aktive Leads",
   lead_filter_with_archive: "Mit Archiv",
   lead_state_region: "Bundesland / Region",

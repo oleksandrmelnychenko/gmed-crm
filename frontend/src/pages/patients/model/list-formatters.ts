@@ -1,3 +1,5 @@
+import { getLang, t as translateCatalog } from "@/lib/i18n";
+
 import type {
   PatientDetail,
   PatientsDictionary,
@@ -20,8 +22,12 @@ const PATIENT_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-GB", {
   minute: "2-digit",
 });
 
-export function formatPatientDate(value?: string | null, fallback = "Not set") {
-  if (!value) return fallback;
+function localizedNotSetFallback() {
+  return translateCatalog(getLang()).common_not_set;
+}
+
+export function formatPatientDate(value?: string | null, fallback?: string) {
+  if (!value) return fallback ?? localizedNotSetFallback();
   try {
     return PATIENT_DATE_FORMATTER.format(new Date(`${value}T00:00:00`));
   } catch {
@@ -29,8 +35,8 @@ export function formatPatientDate(value?: string | null, fallback = "Not set") {
   }
 }
 
-export function formatPatientDateTime(value?: string | null, fallback = "Not set") {
-  if (!value) return fallback;
+export function formatPatientDateTime(value?: string | null, fallback?: string) {
+  if (!value) return fallback ?? localizedNotSetFallback();
   try {
     return PATIENT_DATE_TIME_FORMATTER.format(new Date(value));
   } catch {
@@ -89,8 +95,9 @@ export function getPatientDisplayName(patient: PatientSummary | PatientDetail) {
 
 export function getPatientFieldValue(
   value: string | string[] | null | undefined,
-  fallback = "Not set",
+  fallback?: string,
 ) {
-  if (Array.isArray(value)) return value.length ? value.join(", ") : fallback;
-  return value && value.trim() ? value : fallback;
+  const nextFallback = fallback ?? localizedNotSetFallback();
+  if (Array.isArray(value)) return value.length ? value.join(", ") : nextFallback;
+  return value && value.trim() ? value : nextFallback;
 }

@@ -331,14 +331,29 @@ function useContractsPageContent() {
       currency: t.revenue_agency_service_currency,
       vatPercent: t.revenue_agency_service_vat_percent,
       patientId: t.revenue_common_patient_id,
+      basicData: t.revenue_common_basic_data,
+      validityPeriod: t.revenue_common_validity_period,
       pricing: t.finance_catalog_package_pricing,
       description: t.revenue_agency_service_description_label,
+      descriptionStatus: t.revenue_agency_service_description_status,
       itemIsActive: t.revenue_agency_service_active_hint,
       saveCatalogItem: t.revenue_agency_service_save,
       createCatalogItem: t.revenue_agency_service_create,
+      contractPatientStatus: t.revenue_contracts_section_patient_status,
+      contractDates: t.revenue_contracts_section_contract_dates,
+      contractConditions: t.revenue_contracts_section_conditions,
+      contractLinkedPatientCard: t.revenue_contracts_linked_patient_card_description,
+      contractLinkedOrdersCard: t.revenue_contracts_linked_orders_card_description,
+      contractLinkedDocumentsCard: t.revenue_contracts_linked_documents_card_description,
       createContractDescription: t.revenue_contracts_create_description,
       selectPatient: t.revenue_contracts_select_patient,
       createContract: t.revenue_contracts_create,
+      quoteOrderSection: t.revenue_quotes_section_order,
+      quoteNotesSection: t.revenue_quotes_section_notes,
+      quoteLinkedPatientCard: t.revenue_quotes_linked_patient_card_description,
+      quoteLinkedOrderCard: t.revenue_quotes_linked_order_card_description,
+      quoteLinkedInvoicesCard: t.revenue_quotes_linked_invoices_card_description,
+      quoteLinkedDocumentsCard: t.revenue_quotes_linked_documents_card_description,
       createQuoteDescription: t.revenue_quotes_create_description,
       loadingOrders: t.revenue_quotes_loading_orders,
       selectOrder: t.revenue_quotes_select_order,
@@ -2171,7 +2186,7 @@ function useContractsPageContent() {
               <div className="space-y-4 rounded-xl p-4">
                 {agencyServiceFormError ? <ShellBanner tone="error">{agencyServiceFormError}</ShellBanner> : null}
                 <section className="rounded-xl border border-border bg-card p-5">
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot("Основные данные")}</h2>
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.basicData)}</h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
                     <Field label={text.serviceKey}>
                       <Input
@@ -2247,7 +2262,7 @@ function useContractsPageContent() {
                 </section>
 
                 <section className="rounded-xl border border-border bg-card p-5">
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot("Период действия")}</h2>
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.validityPeriod)}</h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
                     <Field label={t.providers_service_valid_from}>
                       <Input
@@ -2274,7 +2289,7 @@ function useContractsPageContent() {
                 </section>
 
                 <section className="rounded-xl border border-border bg-card p-5">
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot("Описание и статус")}</h2>
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.descriptionStatus)}</h2>
                   <div className="mt-5 space-y-4">
                     <Field label={text.description}>
                       <textarea
@@ -2327,7 +2342,7 @@ function useContractsPageContent() {
               <div className="space-y-4 rounded-xl p-4">
                 {createContractError ? <ShellBanner tone="error">{createContractError}</ShellBanner> : null}
                 <section className="rounded-xl border border-border bg-card p-5">
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot("Пациент и статус")}</h2>
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.contractPatientStatus)}</h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
                     <Field label={t.contracts_patient}>
                       <NativeComboboxSelect
@@ -2373,7 +2388,7 @@ function useContractsPageContent() {
                 </section>
 
                 <section className="rounded-xl border border-border bg-card p-5">
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot("Сроки договора")}</h2>
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.contractDates)}</h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
                     <Field label={t.providers_service_valid_from}>
                       <Input
@@ -2409,7 +2424,7 @@ function useContractsPageContent() {
                 </section>
 
                 <section className="rounded-xl border border-border bg-card p-5">
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot("Условия")}</h2>
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.contractConditions)}</h2>
                   <div className="mt-5">
                     <Field label={t.contracts_notes}>
                       <textarea
@@ -2451,7 +2466,7 @@ function useContractsPageContent() {
               <div className="space-y-4 rounded-xl p-4">
                 {createQuoteError ? <ShellBanner tone="error">{createQuoteError}</ShellBanner> : null}
                 <section className="rounded-xl border border-border bg-card p-5">
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot("Заказ")}</h2>
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.quoteOrderSection)}</h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
                     <Field label={t.orders_title} className="sm:col-span-2">
                       <NativeComboboxSelect
@@ -2503,7 +2518,7 @@ function useContractsPageContent() {
                 </section>
 
                 <section className="rounded-xl border border-border bg-card p-5">
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot("Заметки")}</h2>
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.quoteNotesSection)}</h2>
                   <div className="mt-5">
                     <Field label={t.contracts_notes}>
                       <textarea
@@ -2614,7 +2629,7 @@ function useContractsPageContent() {
                         <div className="relative z-10">
                           <h3 className="text-sm font-semibold text-foreground">{t.contracts_patient}</h3>
                           <p className="mt-2 text-xs leading-tight text-muted-foreground">
-                            Откройте карточку пациента, связанного с этим рамочным договором.
+                            {text.contractLinkedPatientCard}
                           </p>
                         </div>
                         <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
@@ -2629,7 +2644,7 @@ function useContractsPageContent() {
                         <div className="relative z-10">
                           <h3 className="text-sm font-semibold text-foreground">{text.orders}</h3>
                           <p className="mt-2 text-xs leading-tight text-muted-foreground">
-                            Посмотрите заказы пациента, чтобы сверить услуги и контекст договора.
+                            {text.contractLinkedOrdersCard}
                           </p>
                         </div>
                         <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
@@ -2644,7 +2659,7 @@ function useContractsPageContent() {
                         <div className="relative z-10">
                           <h3 className="text-sm font-semibold text-foreground">{text.documents}</h3>
                           <p className="mt-2 text-xs leading-tight text-muted-foreground">
-                            Проверьте документы пациента, связанные с договором и услугами.
+                            {text.contractLinkedDocumentsCard}
                           </p>
                         </div>
                         <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
@@ -2834,7 +2849,7 @@ function useContractsPageContent() {
                         <div className="relative z-10">
                           <h3 className="text-sm font-semibold text-foreground">{t.contracts_patient}</h3>
                           <p className="mt-2 text-xs leading-tight text-muted-foreground">
-                            Откройте карточку пациента, связанного с предложением.
+                            {text.quoteLinkedPatientCard}
                           </p>
                         </div>
                         <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
@@ -2849,7 +2864,7 @@ function useContractsPageContent() {
                         <div className="relative z-10">
                           <h3 className="text-sm font-semibold text-foreground">{text.order}</h3>
                           <p className="mt-2 text-xs leading-tight text-muted-foreground">
-                            Откройте заказ, из которого сформировано это предложение.
+                            {text.quoteLinkedOrderCard}
                           </p>
                         </div>
                         <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
@@ -2864,7 +2879,7 @@ function useContractsPageContent() {
                         <div className="relative z-10">
                           <h3 className="text-sm font-semibold text-foreground">{text.invoices}</h3>
                           <p className="mt-2 text-xs leading-tight text-muted-foreground">
-                            Проверьте счета и оплаты, связанные с этим предложением.
+                            {text.quoteLinkedInvoicesCard}
                           </p>
                         </div>
                         <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
@@ -2879,7 +2894,7 @@ function useContractsPageContent() {
                         <div className="relative z-10">
                           <h3 className="text-sm font-semibold text-foreground">{text.documents}</h3>
                           <p className="mt-2 text-xs leading-tight text-muted-foreground">
-                            Откройте документы заказа и пациента по этому предложению.
+                            {text.quoteLinkedDocumentsCard}
                           </p>
                         </div>
                         <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">

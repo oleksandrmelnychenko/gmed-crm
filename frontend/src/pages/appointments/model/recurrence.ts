@@ -1,4 +1,4 @@
-import type { Translations } from "@/lib/i18n";
+import { formatUiText, type Translations } from "@/lib/i18n";
 import { appointmentText, recurrenceFrequencyLabel } from "@/pages/appointments/model/labels";
 import type {
   AppointmentDetail,
@@ -97,7 +97,12 @@ export function recurringOccurrenceLabel(
     item.open_checklist_count === 1
       ? t.appointments_open_checklist
       : t.appointments_open_checklists;
-  return `Occurrence ${item.recurrence_index + 1} on ${item.date} (${item.open_checklist_count} ${checklistLabel})`;
+  return formatUiText(t.appointments_recurring_occurrence_summary, {
+    index: item.recurrence_index + 1,
+    date: item.date,
+    count: item.open_checklist_count,
+    checklistLabel,
+  });
 }
 
 export function recurringLineageRelationLabel(

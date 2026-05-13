@@ -16,7 +16,7 @@ import {
   Banner,
   checkboxClass,
 } from "@/components/ui-shell";
-import { useLang } from "@/lib/i18n";
+import { formatUiText, useLang } from "@/lib/i18n";
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
@@ -311,13 +311,23 @@ function useAppointmentFollowUpVisitSectionContent({
       });
 
       if (result.id && form.createReminder && form.reminderUserId && form.reminderAt) {
+        const followUpTitle = form.title.trim();
         await apiFetch<{ id: string }>(`/appointments/${result.id}/reminders`, {
           method: "POST",
           body: JSON.stringify({
             user_id: form.reminderUserId,
             remind_at: toRfc3339(form.reminderAt),
-            title: `Prepare follow-up visit: ${form.title.trim()}`,
-            description: `Planned from appointment ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}.`,
+            title: formatUiText(t.appointments_follow_up_visit_reminder_title, {
+              title: followUpTitle,
+            }),
+            description: formatUiText(
+              t.appointments_follow_up_visit_reminder_description,
+              {
+                patientPid: detail.patient_pid,
+                title: detail.title,
+                slot: slotLabel(detail),
+              },
+            ),
           }),
         });
       }

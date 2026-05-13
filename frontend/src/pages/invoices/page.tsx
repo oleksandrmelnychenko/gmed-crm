@@ -223,12 +223,16 @@ async function openInvoicePdfPreview(invoiceId: string, popupMessage: string) {
   openPdfBlobPreview(blob, popupMessage);
 }
 
-async function downloadInvoicePdf(invoiceId: string, filename: string) {
+async function downloadInvoicePdf(
+  invoiceId: string,
+  filename: string,
+  fallbackFilename: string,
+) {
   const blob = await fetchInvoicePdfBlob(invoiceId);
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = filename || "invoice.pdf";
+  link.download = filename || fallbackFilename;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -388,6 +392,8 @@ function useStaffInvoicesPageContent() {
     previous: t.invoices_workspace_previous,
     next: t.invoices_workspace_next,
     createInvoiceDescription: t.revenue_invoices_create_description,
+    createQuoteSection: t.revenue_invoices_section_quote,
+    invoiceSettingsSection: t.revenue_invoices_section_invoice_settings,
     selectedQuoteSnapshot: t.invoices_workspace_selected_quote_snapshot,
     chooseQuote: t.invoices_workspace_choose_quote,
     notes: t.invoices_workspace_notes,
@@ -403,6 +409,10 @@ function useStaffInvoicesPageContent() {
     linkedContextDescription: t.invoices_workspace_linked_context_description,
     quotes: t.invoices_workspace_quotes,
     documents: t.invoices_workspace_documents,
+    linkedPatientCardDescription: t.revenue_invoices_linked_patient_card_description,
+    linkedOrderCardDescription: t.revenue_invoices_linked_order_card_description,
+    linkedQuoteCardDescription: t.revenue_invoices_linked_quote_card_description,
+    linkedDocumentsCardDescription: t.revenue_invoices_linked_documents_card_description,
     saveInvoice: t.invoices_workspace_save_invoice,
     dunningTitle: t.invoices_workspace_dunning_title,
     dunningDescription: t.invoices_workspace_dunning_description,
@@ -1852,7 +1862,7 @@ function useStaffInvoicesPageContent() {
               <div className="space-y-4 rounded-xl p-4">
                 {createError ? <ShellBanner tone="error">{createError}</ShellBanner> : null}
                 <section className="rounded-xl border border-border bg-card p-5">
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot("Предложение")}</h2>
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.createQuoteSection)}</h2>
                   <div className="mt-5 space-y-4">
                     <Field label={t.contracts_type}>
                       <NativeComboboxSelect
@@ -1887,7 +1897,7 @@ function useStaffInvoicesPageContent() {
                 </section>
 
                 <section className="rounded-xl border border-border bg-card p-5">
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot("Параметры счёта")}</h2>
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.invoiceSettingsSection)}</h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
                     <Field label={t.invoices_type}>
                       <NativeComboboxSelect
@@ -1921,7 +1931,7 @@ function useStaffInvoicesPageContent() {
                 </section>
 
                 <section className="rounded-xl border border-border bg-card p-5">
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot("Заметки")}</h2>
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.notes)}</h2>
                   <div className="mt-5">
                     <Field label={text.notes}>
                       <textarea
@@ -2018,7 +2028,11 @@ function useStaffInvoicesPageContent() {
                             size="sm"
                             className="justify-center rounded-lg"
                             onClick={() =>
-                              void downloadInvoicePdf(detail.id, `${detail.invoice_number}.pdf`).catch((error) =>
+                              void downloadInvoicePdf(
+                                detail.id,
+                                detail.invoice_number ? `${detail.invoice_number}.pdf` : "",
+                                t.revenue_invoices_pdf_fallback_filename,
+                              ).catch((error) =>
                                 setDetailError(error instanceof Error ? error.message : text.pdfDownloadError),
                               )
                             }
@@ -2083,7 +2097,7 @@ function useStaffInvoicesPageContent() {
                       <div className="relative z-10">
                         <h3 className="text-sm font-semibold text-foreground">{t.invoices_patient}</h3>
                         <p className="mt-2 text-xs leading-tight text-muted-foreground">
-                          Откройте карточку пациента, связанного с этим счётом.
+                          {text.linkedPatientCardDescription}
                         </p>
                       </div>
                       <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
@@ -2098,7 +2112,7 @@ function useStaffInvoicesPageContent() {
                       <div className="relative z-10">
                         <h3 className="text-sm font-semibold text-foreground">{text.linkedOrder}</h3>
                         <p className="mt-2 text-xs leading-tight text-muted-foreground">
-                          Проверьте заказ, на основании которого выставлен счёт.
+                          {text.linkedOrderCardDescription}
                         </p>
                       </div>
                       <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
@@ -2113,7 +2127,7 @@ function useStaffInvoicesPageContent() {
                       <div className="relative z-10">
                         <h3 className="text-sm font-semibold text-foreground">{text.quotes}</h3>
                         <p className="mt-2 text-xs leading-tight text-muted-foreground">
-                          Откройте предложение, связанное с этим счётом.
+                          {text.linkedQuoteCardDescription}
                         </p>
                       </div>
                       <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
@@ -2128,7 +2142,7 @@ function useStaffInvoicesPageContent() {
                       <div className="relative z-10">
                         <h3 className="text-sm font-semibold text-foreground">{text.documents}</h3>
                         <p className="mt-2 text-xs leading-tight text-muted-foreground">
-                          Проверьте документы заказа и пациента по этому счёту.
+                          {text.linkedDocumentsCardDescription}
                         </p>
                       </div>
                       <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">

@@ -129,7 +129,9 @@ function AppointmentClinicalSection({
                 }
                 description={
                   detailReport
-                    ? `${detailReport.hours} h`
+                    ? appointmentText("appointments_report_hours_value", {
+                        hours: detailReport.hours,
+                      })
                     : appointmentText("appointments_not_submitted_yet")
                 }
               />

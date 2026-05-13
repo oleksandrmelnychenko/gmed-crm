@@ -143,7 +143,7 @@ export function appointmentTimelineKindLabel(kind: AppointmentTimelineKind) {
     case "followup":
       return appointmentText("appointments_follow_up");
     case "concierge":
-      return "Concierge";
+      return appointmentText("timeline_source_concierge");
     default:
       return kind;
   }

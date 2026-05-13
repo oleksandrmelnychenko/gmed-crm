@@ -93,7 +93,8 @@ describe("OrderServiceGroupPanel", () => {
     );
 
     expect(html).toContain("Пропустить дубли");
-    expect(html).toContain("Существующая строка: leistung-1");
+    expect(html).toContain("Существующая строка");
+    expect(html).toContain("leistung-1");
     expect(html).toContain("без дублей");
   });
 });

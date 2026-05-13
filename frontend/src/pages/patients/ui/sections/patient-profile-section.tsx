@@ -487,19 +487,19 @@ function usePatientProfileTabContent({
             label={t.patients_nationality}
             value={fieldValue(detail.nationality, t.common_not_set)}
             onEdit={editAction}
-            editLabel={editPatientFieldLabel(t.patients_nationality)}
+            editLabel={editPatientFieldLabel(t.patients_nationality, t.patient_profile_edit_field_aria)}
           />
           <ProfileSummaryLine
             label={t.patients_residence_country}
             value={fieldValue(detail.residence_country, t.common_not_set)}
             onEdit={editAction}
-            editLabel={editPatientFieldLabel(t.patients_residence_country)}
+            editLabel={editPatientFieldLabel(t.patients_residence_country, t.patient_profile_edit_field_aria)}
           />
           <ProfileSummaryLine
             label={t.patients_languages}
             value={fieldValue(detail.languages, t.common_not_set)}
             onEdit={editAction}
-            editLabel={editPatientFieldLabel(t.patients_languages)}
+            editLabel={editPatientFieldLabel(t.patients_languages, t.patient_profile_edit_field_aria)}
           />
           <ProfileSummaryLine
             label={t.patient_profile_functional_labels}
@@ -511,7 +511,7 @@ function usePatientProfileTabContent({
                 : t.common_not_set
             }
             onEdit={editAction}
-            editLabel={editPatientFieldLabel(t.patient_profile_functional_labels)}
+            editLabel={editPatientFieldLabel(t.patient_profile_functional_labels, t.patient_profile_edit_field_aria)}
           />
         </ProfileSummaryCard>
 
@@ -522,19 +522,19 @@ function usePatientProfileTabContent({
             label={t.patients_phone_primary}
             value={fieldValue(detail.phone_primary, t.common_not_set)}
             onEdit={editAction}
-            editLabel={editPatientFieldLabel(t.patients_phone_primary)}
+            editLabel={editPatientFieldLabel(t.patients_phone_primary, t.patient_profile_edit_field_aria)}
           />
           <ProfileSummaryLine
             label={t.patients_phone_secondary}
             value={fieldValue(detail.phone_secondary, t.common_not_set)}
             onEdit={editAction}
-            editLabel={editPatientFieldLabel(t.patients_phone_secondary)}
+            editLabel={editPatientFieldLabel(t.patients_phone_secondary, t.patient_profile_edit_field_aria)}
           />
           <ProfileSummaryLine
             label={t.patients_email}
             value={fieldValue(detail.email, t.common_not_set)}
             onEdit={editAction}
-            editLabel={editPatientFieldLabel(t.patients_email)}
+            editLabel={editPatientFieldLabel(t.patients_email, t.patient_profile_edit_field_aria)}
           />
         </ProfileSummaryCard>
 
@@ -545,19 +545,19 @@ function usePatientProfileTabContent({
             label={t.patients_insurance_type}
             value={insuranceLabel(detail.insurance_type, tr)}
             onEdit={editAction}
-            editLabel={editPatientFieldLabel(t.patients_insurance_type)}
+            editLabel={editPatientFieldLabel(t.patients_insurance_type, t.patient_profile_edit_field_aria)}
           />
           <ProfileSummaryLine
             label={t.patients_insurance_provider}
             value={fieldValue(detail.insurance_provider, t.common_not_set)}
             onEdit={editAction}
-            editLabel={editPatientFieldLabel(t.patients_insurance_provider)}
+            editLabel={editPatientFieldLabel(t.patients_insurance_provider, t.patient_profile_edit_field_aria)}
           />
           <ProfileSummaryLine
             label={t.patients_insurance_number}
             value={fieldValue(detail.insurance_number, t.common_not_set)}
             onEdit={editAction}
-            editLabel={editPatientFieldLabel(t.patients_insurance_number)}
+            editLabel={editPatientFieldLabel(t.patients_insurance_number, t.patient_profile_edit_field_aria)}
           />
         </ProfileSummaryCard>
 
@@ -569,25 +569,25 @@ function usePatientProfileTabContent({
             label={t.patients_address_street}
             value={fieldValue(detail.address_street, t.common_not_set)}
             onEdit={editAction}
-            editLabel={editPatientFieldLabel(t.patients_address_street)}
+            editLabel={editPatientFieldLabel(t.patients_address_street, t.patient_profile_edit_field_aria)}
           />
           <ProfileSummaryLine
             label={t.patients_address_city}
             value={fieldValue(detail.address_city, t.common_not_set)}
             onEdit={editAction}
-            editLabel={editPatientFieldLabel(t.patients_address_city)}
+            editLabel={editPatientFieldLabel(t.patients_address_city, t.patient_profile_edit_field_aria)}
           />
           <ProfileSummaryLine
             label={t.patients_address_zip}
             value={fieldValue(detail.address_zip, t.common_not_set)}
             onEdit={editAction}
-            editLabel={editPatientFieldLabel(t.patients_address_zip)}
+            editLabel={editPatientFieldLabel(t.patients_address_zip, t.patient_profile_edit_field_aria)}
           />
           <ProfileSummaryLine
             label={t.patients_address_country}
             value={fieldValue(detail.address_country, t.common_not_set)}
             onEdit={editAction}
-            editLabel={editPatientFieldLabel(t.patients_address_country)}
+            editLabel={editPatientFieldLabel(t.patients_address_country, t.patient_profile_edit_field_aria)}
           />
         </ProfileSummaryCard>
 
@@ -1317,6 +1317,6 @@ export function PatientProfileTab(...args: Parameters<typeof usePatientProfileTa
   return usePatientProfileTabContent(...args);
 }
 
-function editPatientFieldLabel(label: string) {
-  return `Edit ${label}`;
+function editPatientFieldLabel(label: string, template: string) {
+  return template.replace("{label}", label);
 }
