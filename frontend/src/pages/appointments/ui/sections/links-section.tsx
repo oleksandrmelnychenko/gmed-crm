@@ -1,6 +1,6 @@
 import { memo } from "react";
+import { ArrowUpRight } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import { CountBadge, Section } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { appointmentText } from "@/pages/appointments/model/labels";
@@ -16,9 +16,8 @@ function AppointmentLinksSection({
   detail: AppointmentDetail;
   onOpenPreview: (kind: LinkedPreviewKind, label: string) => void;
 }) {
-  const { t } = useLang();
-  const previewButtonClass =
-    "h-8 rounded-lg gap-1.5 border-orange-500 bg-orange-500 px-3 text-xs font-medium text-white transition-colors hover:cursor-pointer hover:border-orange-600 hover:bg-orange-600";
+  const { lang, t } = useLang();
+  const descriptions = linkedRecordDescriptions(lang);
   const patientLabel = appointmentText("appointments_patient");
   const orderLabel = appointmentText("appointments_order");
   const clinicLabel = appointmentText("appointments_clinic");
@@ -32,51 +31,87 @@ function AppointmentLinksSection({
       title={t.compliance_col_linked_records}
       accessory={<CountBadge>{linkedCount}</CountBadge>}
     >
-      <div>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            className={previewButtonClass}
-            onClick={() => onOpenPreview("patient", patientLabel)}
-          >
-            {patientLabel}
-          </Button>
-          {detail.order_id ? (
-            <Button
-              type="button"
-              className={previewButtonClass}
-              onClick={() => onOpenPreview("order", orderLabel)}
-            >
-              {orderLabel}
-            </Button>
-          ) : null}
-          {detail.provider_id ? (
-            <Button
-              type="button"
-              className={previewButtonClass}
-              onClick={() => onOpenPreview("provider", clinicLabel)}
-            >
-              {clinicLabel}
-            </Button>
-          ) : null}
-          <Button
-            type="button"
-            className={previewButtonClass}
-            onClick={() => onOpenPreview("documents", documentsLabel)}
-          >
-            {documentsLabel}
-          </Button>
-          <Button
-            type="button"
-            className={previewButtonClass}
-            onClick={() => onOpenPreview("cases", casesLabel)}
-          >
-            {casesLabel}
-          </Button>
-        </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <LinkedRecordTile
+          title={patientLabel}
+          description={descriptions.patient}
+          onClick={() => onOpenPreview("patient", patientLabel)}
+        />
+        {detail.order_id ? (
+          <LinkedRecordTile
+            title={orderLabel}
+            description={descriptions.order}
+            onClick={() => onOpenPreview("order", orderLabel)}
+          />
+        ) : null}
+        {detail.provider_id ? (
+          <LinkedRecordTile
+            title={clinicLabel}
+            description={descriptions.clinic}
+            onClick={() => onOpenPreview("provider", clinicLabel)}
+          />
+        ) : null}
+        <LinkedRecordTile
+          title={documentsLabel}
+          description={descriptions.documents}
+          onClick={() => onOpenPreview("documents", documentsLabel)}
+        />
+        <LinkedRecordTile
+          title={casesLabel}
+          description={descriptions.cases}
+          onClick={() => onOpenPreview("cases", casesLabel)}
+        />
       </div>
     </Section>
   );
+}
+
+function LinkedRecordTile({
+  title,
+  description,
+  onClick,
+}: {
+  title: string;
+  description: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+      onClick={onClick}
+    >
+      <div className="relative z-10 min-w-0">
+        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+        <p className="mt-2 line-clamp-3 text-xs leading-tight text-muted-foreground">
+          {description}
+        </p>
+      </div>
+      <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
+        <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+      </span>
+    </button>
+  );
+}
+
+function linkedRecordDescriptions(lang: string) {
+  if (lang === "de") {
+    return {
+      patient: "Patientenkarte zum aktuellen Termin öffnen.",
+      order: "Auftrag prüfen, mit dem dieser Termin verknüpft ist.",
+      clinic: "Klinikprofil und Terminkontext öffnen.",
+      documents: "Dokumente zum Patienten und aktuellen Termin prüfen.",
+      cases: "Patientenfälle öffnen, die zu diesem Termin gehören.",
+    };
+  }
+
+  return {
+    patient: "Откройте карточку пациента, связанного с этим приёмом.",
+    order: "Проверьте заказ, к которому привязан этот приём.",
+    clinic: "Откройте карточку клиники и контекст этого приёма.",
+    documents: "Проверьте документы пациента и текущего приёма.",
+    cases: "Откройте кейсы пациента, связанные с этим приёмом.",
+  };
 }
 
 export const MemoizedAppointmentLinksSection = memo(AppointmentLinksSection);

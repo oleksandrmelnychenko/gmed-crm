@@ -9,7 +9,6 @@ import {
 } from "@/pages/appointments/model/labels";
 import { formatAppointmentDateTimeLabel } from "@/pages/appointments/model/runtime-formatters";
 import type { AppointmentDetail } from "@/pages/appointments/model/types";
-import { ContextCard } from "@/pages/appointments/ui/shared/context-card";
 
 function AppointmentSnapshotSection({
   detail,
@@ -67,18 +66,56 @@ function AppointmentSnapshotSection({
           {summaryTitle}
         </h3>
       </div>
-      <div className="mt-4 grid gap-x-8 gap-y-3 md:grid-cols-2 xl:grid-cols-4">
-        {snapshotCards.map((card) => (
-          <ContextCard
+      <div className="mt-5 grid gap-x-14 gap-y-4 lg:grid-cols-2">
+        {snapshotCards.map((card, index) => (
+          <SnapshotSummaryRow
             key={`${card.label}:${card.value}`}
-            variant="snapshot"
             label={card.label}
+            subLabel={card.meta}
             value={card.value}
-            meta={card.meta}
+            fullWidth={
+              snapshotCards.length % 2 === 1 &&
+              index === snapshotCards.length - 1
+            }
           />
         ))}
       </div>
     </section>
+  );
+}
+
+function SnapshotSummaryRow({
+  label,
+  subLabel,
+  value,
+  fullWidth = false,
+}: {
+  label: string;
+  subLabel: string;
+  value: string;
+  fullWidth?: boolean;
+}) {
+  return (
+    <div
+      className={
+        fullWidth
+          ? "grid grid-cols-[minmax(96px,max-content)_minmax(24px,1fr)_minmax(0,auto)] items-start gap-3 lg:col-span-2"
+          : "grid grid-cols-[minmax(96px,max-content)_minmax(24px,1fr)_auto] items-start gap-3"
+      }
+    >
+      <div className="min-w-0 pt-0.5">
+        <p className="truncate text-[12px] font-medium leading-tight text-muted-foreground">
+          {label}
+        </p>
+        <p className="mt-0.5 truncate text-[11px] leading-tight text-muted-foreground/75">
+          {subLabel}
+        </p>
+      </div>
+      <span className="mt-3 h-px min-w-6 bg-border/70" />
+      <p className="max-w-[420px] truncate text-right text-sm font-semibold leading-tight text-foreground">
+        {value}
+      </p>
+    </div>
   );
 }
 
