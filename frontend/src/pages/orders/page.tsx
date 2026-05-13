@@ -13,6 +13,7 @@ import {
 import { useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
+  ArrowUpRight,
   Building2,
   CalendarClock,
   CheckCircle2,
@@ -31,7 +32,6 @@ import { Badge } from "@/components/ui/badge";
 import {
   AdminSheetScaffold,
   AdminInlineMetric,
-  AdminTableCard,
   SheetFormFooter,
 } from "@/components/admin-page-patterns";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
@@ -292,6 +292,18 @@ function DetailField({ label, value }: DetailFieldProps) {
     <div className={cn("rounded-xl p-3", tokens.surface.card)}>
       <div className={tokens.text.eyebrow}>{label}</div>
       <div className="mt-2 text-sm text-foreground">{value}</div>
+    </div>
+  );
+}
+
+function OrderSummaryLine({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 rounded-lg py-2">
+      <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
+      <span className="h-px min-w-6 flex-1 bg-border/70" />
+      <span className="max-w-[48%] text-right text-sm font-semibold leading-tight text-foreground">
+        {value}
+      </span>
     </div>
   );
 }
@@ -2972,10 +2984,13 @@ function useOrdersPageContent() {
               <>
                 {shouldRenderOrderSection("overview") ? (
                   <>
-                    <AdminTableCard
-                      title={titleWithDot(tx.orders_title)}
-                      description={tx.orders_subtitle}
-                      accessory={
+                    <section className="rounded-xl border border-border bg-card p-6">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div>
+                          <h2 className={tokens.text.sectionTitle}>
+                            {titleWithDot(tx.orders_title)}
+                          </h2>
+                        </div>
                         <div className="flex flex-wrap items-center gap-2">
                           <StatusBadge tone={orderPhaseTone(orderDetail.phase)}>
                             {phaseLabel(orderDetail.phase)}
@@ -2984,139 +2999,148 @@ function useOrdersPageContent() {
                             {orderStatusLabel(orderDetail.status)}
                           </StatusBadge>
                         </div>
-                      }
-                    >
-                      <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
-                        <DetailField
-                          label={t.orders_patient}
-                          value={`${orderDetail.patient_name} (${orderDetail.patient_pid})`}
-                        />
-                        <DetailField
-                          label={tx.patients_created}
-                          value={
-                            <span className="inline-flex items-center gap-2">
-                              <CalendarClock className="size-4 text-muted-foreground" />
-                              {formatDateTimeLabel(orderDetail.created_at)}
-                            </span>
-                          }
-                        />
-                        <DetailField
-                          label={tx.common_loading}
-                          value={
-                            <span className="inline-flex items-center gap-2">
-                              <RefreshCw className="size-4 text-muted-foreground" />
-                              {formatDateTimeLabel(orderDetail.updated_at)}
-                            </span>
-                          }
-                        />
-                        <DetailField
-                          label={tx.contracts_signed}
-                          value={`${orderDetail.signed_patient ? tx.contracts_signed : tx.mfa_pending} / ${
-                            orderDetail.signed_agency
-                              ? tx.contracts_signed
-                              : tx.mfa_pending
-                          }`}
-                        />
-                        <DetailField
-                          label={t.leads_needs}
-                          value={orderDetail.needs_description || tx.common_not_set}
-                        />
-                        <DetailField
-                          label={tx.invoices_subtotal}
-                          value={formatMoney(orderDetail.total_estimated)}
-                        />
-                        <DetailField
-                          label={tx.invoices_total}
-                          value={formatMoney(orderDetail.total_actual)}
-                        />
-                        <DetailField
-                          label={tx.providers_services}
-                          value={l(
-                            `${leistungMetrics.total} Positionen / ${leistungMetrics.delivered} erbracht / ${leistungMetrics.approved} freigegeben`,
-                            `${leistungMetrics.total} позиций / ${leistungMetrics.delivered} оказано / ${leistungMetrics.approved} утверждено`,
-                          )}
-                        />
                       </div>
-                    </AdminTableCard>
+                      <div className="mt-5 space-y-5">
+                        <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
+                          <OrderSummaryLine
+                            label={t.orders_patient}
+                            value={`${orderDetail.patient_name} (${orderDetail.patient_pid})`}
+                          />
+                          <OrderSummaryLine
+                            label={t.orders_phase}
+                            value={phaseLabel(orderDetail.phase)}
+                          />
+                          <OrderSummaryLine
+                            label={tx.patients_created}
+                            value={formatDateTimeLabel(orderDetail.created_at)}
+                          />
+                          <OrderSummaryLine
+                            label={t.invoices_status}
+                            value={orderStatusLabel(orderDetail.status)}
+                          />
+                          <OrderSummaryLine
+                            label={l("Aktualisiert", "Обновлено")}
+                            value={formatDateTimeLabel(orderDetail.updated_at)}
+                          />
+                          <OrderSummaryLine
+                            label={tx.contracts_signed}
+                            value={`${orderDetail.signed_patient ? tx.contracts_signed : tx.mfa_pending} / ${
+                              orderDetail.signed_agency
+                                ? tx.contracts_signed
+                                : tx.mfa_pending
+                            }`}
+                          />
+                          <OrderSummaryLine
+                            label={tx.invoices_subtotal}
+                            value={formatMoney(orderDetail.total_estimated)}
+                          />
+                          <OrderSummaryLine
+                            label={tx.invoices_total}
+                            value={formatMoney(orderDetail.total_actual)}
+                          />
+                          <OrderSummaryLine
+                            label={tx.providers_services}
+                            value={l(
+                              `${leistungMetrics.total} Positionen / ${leistungMetrics.delivered} erbracht / ${leistungMetrics.approved} freigegeben`,
+                              `${leistungMetrics.total} позиций / ${leistungMetrics.delivered} оказано / ${leistungMetrics.approved} утверждено`,
+                            )}
+                          />
+                        </div>
+                        <div className="space-y-3">
+                          <div className="flex items-start justify-between gap-4">
+                            <div>
+                              <h2 className={tokens.text.sectionTitle}>
+                                {titleWithDot(t.leads_needs)}
+                              </h2>
+                            </div>
+                          </div>
+                          <div className="rounded-xl border border-border bg-background/60 p-4 text-sm leading-snug text-muted-foreground">
+                            {orderDetail.needs_description || tx.common_not_set}
+                          </div>
+                        </div>
+                      </div>
+                    </section>
 
-                    <AdminTableCard
-                      title={eyebrowWithDot(l("Bedarfsklärung", "Уточнение потребности"))}
-                      description={l(
-                        "Direkt in Patienten-, Fall- und Terminkontexte springen, ohne Filter manuell neu aufzubauen.",
-                        "Переходите в соседние контексты пациента, кейса и приёмов без ручной пересборки фильтров.",
-                      )}
-                    >
-                      <div className="flex flex-wrap gap-2 p-4">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-9 rounded-lg px-3.5"
-                          onClick={() =>
-                            staffGo(`/patients/${orderDetail.patient_id}?tab=orders`)
-                          }
-                        >
-                          {l("Patient", "Пациент")}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-9 rounded-lg px-3.5"
-                          onClick={() =>
-                            staffGo(`/patients/${orderDetail.patient_id}?tab=cases`)
-                          }
-                        >
-                          {l("Fälle", "Кейсы")}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-9 rounded-lg px-3.5"
-                          onClick={() =>
-                            staffGo(
-                              `/appointments?patient=${orderDetail.patient_id}`,
-                            )
-                          }
-                        >
-                          {l("Termine", "Приёмы")}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-9 rounded-lg px-3.5"
-                          onClick={() =>
-                            staffGo(
-                              `/contracts?order=${orderDetail.id}&patient=${orderDetail.patient_id}&tab=quotes`,
-                            )
-                          }
-                        >
-                          {l("Verträge", "Договоры")}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-9 rounded-lg px-3.5"
-                          onClick={() =>
-                            staffGo(
-                              `/invoices?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
-                            )
-                          }
-                        >
-                          {l("Rechnungen", "Счета")}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-9 rounded-lg px-3.5"
-                          onClick={() =>
-                            staffGo(
-                              `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
-                            )
-                          }
-                        >
-                          {l("Dokumente", "Документы")}
-                        </Button>
+                    <section className="rounded-xl border border-border bg-card p-6">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div>
+                          <h2 className={tokens.text.sectionTitle}>
+                            {titleWithDot(l("Bedarfsklärung", "Уточнение потребности"))}
+                          </h2>
+                        </div>
                       </div>
-                    </AdminTableCard>
+
+                      <div className="mt-5 grid grid-cols-[repeat(auto-fit,minmax(185px,1fr))] gap-3">
+                        {[
+                          {
+                            label: l("Patient", "Пациент"),
+                            description: `${orderDetail.patient_name} (${orderDetail.patient_pid})`,
+                            href: `/patients/${orderDetail.patient_id}?tab=orders`,
+                          },
+                          {
+                            label: l("Fälle", "Кейсы"),
+                            description: l(
+                              "Fallkontext dieses Patienten öffnen.",
+                              "Открыть кейсы этого пациента.",
+                            ),
+                            href: `/patients/${orderDetail.patient_id}?tab=cases`,
+                          },
+                          {
+                            label: l("Termine", "Приёмы"),
+                            description: l(
+                              "Termine dieses Patienten anzeigen.",
+                              "Показать приёмы этого пациента.",
+                            ),
+                            href: `/appointments?patient=${orderDetail.patient_id}`,
+                          },
+                          {
+                            label: l("Verträge", "Договоры"),
+                            description: l(
+                              "Angebote und Verträge dieses Auftrags öffnen.",
+                              "Открыть предложения и договоры этого заказа.",
+                            ),
+                            href: `/contracts?order=${orderDetail.id}&patient=${orderDetail.patient_id}&tab=quotes`,
+                          },
+                          {
+                            label: l("Rechnungen", "Счета"),
+                            description: l(
+                              "Rechnungen dieses Auftrags anzeigen.",
+                              "Показать счета этого заказа.",
+                            ),
+                            href: `/invoices?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                          },
+                          {
+                            label: l("Dokumente", "Документы"),
+                            description: l(
+                              "Dokumente dieses Auftrags anzeigen.",
+                              "Показать документы этого заказа.",
+                            ),
+                            href: `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                          },
+                        ].map((link) => (
+                          <button
+                            key={link.href}
+                            type="button"
+                            className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                            onClick={() =>
+                              window.open(link.href, "_blank", "noopener,noreferrer")
+                            }
+                          >
+                            <div className="relative z-10">
+                              <h3 className="text-sm font-semibold text-foreground">
+                                {link.label}
+                              </h3>
+                              <p className="mt-2 text-xs leading-tight text-muted-foreground">
+                                {link.description}
+                              </p>
+                            </div>
+                            <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
+                              <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-tranzinc-y-0.5 group-hover:tranzinc-x-0.5" />
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </section>
                   </>
                 ) : null}
 
