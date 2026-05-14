@@ -1,11 +1,10 @@
-# Promtail config that runs on the PROD server and ships every
-# container's Docker JSON log file to Loki on the monitoring host.
+# Promtail config shared by PROD, DEV, and the monitoring host. It
+# ships every container's Docker JSON log file plus host operation logs
+# to Loki.
 #
-# Resolution path: `gmed-monitoring` is the Tailscale hostname the
-# monitoring server registers with (see its sops bundle's
-# `TAILSCALE_HOSTNAME`). MagicDNS in the tailnet resolves it to the
-# 100.x.y.z address. If MagicDNS is disabled, override LOKI_URL in
-# release.env with the literal tailnet IP.
+# On app hosts, `gmed-monitoring` is the Tailscale hostname registered
+# by the monitoring server. MagicDNS resolves it to the 100.x.y.z
+# address. The monitoring stack overrides LOKI_URL to local `loki`.
 
 server:
   http_listen_port: 9080
@@ -73,12 +72,12 @@ scrape_configs:
       - labels:
           program: ""
 
-  # Backup cron writes to a dedicated file instead of syslog so restore
-  # investigations have a compact trail. Ship it separately into Loki.
-  - job_name: backup-cron
+  # GMed host operation logs. These are produced by deploy, backup,
+  # and restore scripts under /var/log/gmed-*.log.
+  - job_name: gmed-host-ops
     static_configs:
       - targets: [localhost]
         labels:
-          job: backup-cron
+          job: gmed-host-ops
           host: ${HOST_LABEL}
-          __path__: /var/log/gmed-backup.log
+          __path__: /var/log/gmed-*.log

@@ -103,6 +103,27 @@ services:
       loki:
         condition: service_healthy
 
+  promtail:
+    image: grafana/promtail:3.3.1
+    container_name: gmed-promtail
+    restart: unless-stopped
+    user: "0:0"
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/log:/var/log:ro
+      - ./promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - promtail_positions:/var/lib/promtail
+    command:
+      - '-config.file=/etc/promtail/config.yml'
+      - '-config.expand-env=true'
+    environment:
+      LOKI_URL: "http://loki:3100/loki/api/v1/push"
+      HOST_LABEL: "gmed-monitoring"
+    depends_on:
+      loki:
+        condition: service_healthy
+
   node-exporter:
     image: prom/node-exporter:v1.8.2
     container_name: gmed-node-exporter
@@ -125,3 +146,4 @@ volumes:
   loki_data:
   alertmanager_data:
   grafana_data:
+  promtail_positions:

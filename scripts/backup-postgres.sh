@@ -41,6 +41,14 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 
+finish() {
+  local rc=$?
+  trap - EXIT
+  echo "[$(date -u +%FT%TZ)] backup-postgres finished rc=$rc"
+  exit "$rc"
+}
+trap finish EXIT
+
 if [[ ! -r "$RELEASE_ENV" ]]; then
   echo "ERROR: $RELEASE_ENV missing or unreadable. Run deploy-prod.sh first." >&2
   exit 1

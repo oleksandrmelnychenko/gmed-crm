@@ -45,6 +45,25 @@ groups:
   - name: gmed-prod-app
     interval: 30s
     rules:
+      - alert: BackendErrorLogBurst
+        # tracing-subscriber emits JSON with `level=ERROR`. A small
+        # backend should not sustain noisy error logging; metrics catch
+        # HTTP failures, this catches background/audit/worker failures.
+        expr: |
+          sum by (host) (
+            count_over_time(
+              {container=~".+-backend(-[0-9]+)?"}
+              | json
+              | level = "ERROR" [10m]
+            )
+          ) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Backend ERROR log burst on {{ $labels.host }}"
+          description: "The backend logged more than 10 ERROR events in 10 minutes. Check Loki around the first event and correlate with Prometheus app metrics."
+
       - alert: BackendPanicLogged
         # The Rust app uses tracing-subscriber's JSON layer. A panic
         # message contains the literal "thread '..panicked at..".
@@ -69,6 +88,41 @@ groups:
           summary: "Backend panic logged"
           description: "The Rust backend logged a panic on {{ $labels.host }} within the last 10 minutes. Pull the full log line and the surrounding context — panics in axum handlers are recovered, but they signal a bug."
 
+      - alert: AuditLogQueueDroppedEvent
+        # The audit writer uses a bounded channel. Dropped audit events
+        # mean compliance history may be incomplete even if requests
+        # themselves still succeeded.
+        expr: |
+          sum by (host) (
+            count_over_time(
+              {container=~".+-backend(-[0-9]+)?"}
+              |= "audit_log channel saturated, event dropped" [10m]
+            )
+          ) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "audit_log event dropped on {{ $labels.host }}"
+          description: "The backend dropped at least one audit_log event because the audit queue was saturated. Investigate DB health, queue sizing, and request volume."
+
+      - alert: AuditLogPersistFailure
+        # This is worse than a generic backend error: the app attempted
+        # to write audit_log and Postgres rejected or failed it.
+        expr: |
+          sum by (host) (
+            count_over_time(
+              {container=~".+-backend(-[0-9]+)?"}
+              |= "failed to persist audit_log row" [10m]
+            )
+          ) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "audit_log persist failure on {{ $labels.host }}"
+          description: "The backend failed to persist at least one audit_log row. Check Postgres errors and the surrounding backend logs immediately."
+
   - name: gmed-prod-ssh
     interval: 1m
     rules:
@@ -90,3 +144,40 @@ groups:
         annotations:
           summary: "fail2ban: >3 SSH bans in 10m on {{ $labels.host }}"
           description: "fail2ban banned more than 3 SSH sources in 10 minutes. Confirm Hetzner firewall is correctly closing public 22."
+
+  - name: gmed-host-ops
+    interval: 1m
+    rules:
+      - alert: HostOperationFailed
+        # deploy/backup/restore scripts always log a final rc line.
+        # Promtail ships /var/log/gmed-*.log from each host so a
+        # failed operator action becomes visible in Alertmanager.
+        expr: |
+          sum by (host) (
+            count_over_time(
+              {job="gmed-host-ops"}
+              |~ "(deploy-prod|deploy-monitoring|restore-postgres|backup-postgres) finished rc=[1-9][0-9]*" [10m]
+            )
+          ) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Host operation failed on {{ $labels.host }}"
+          description: "A deploy, backup, or restore script finished non-zero. Check the matching /var/log/gmed-*.log stream in Loki for the full command trail."
+
+      - alert: BackupCronSilent
+        # Healthchecks.io is the primary dead-man switch, but Loki gives
+        # us a second local signal: the daily backup should write a
+        # successful final rc line at 02:30 UTC.
+        expr: |
+          absent_over_time(
+            {job="gmed-host-ops", host="gmed-prod"}
+            |= "backup-postgres finished rc=0" [26h]
+          ) == 1
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No successful backup log in 26h"
+          description: "Loki has not seen a successful backup-postgres final rc line from gmed-prod in 26 hours. Confirm cron, Promtail shipping, and Healthchecks.io state."

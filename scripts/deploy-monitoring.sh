@@ -22,11 +22,31 @@ RELEASE_ENV="${RELEASE_ENV:-/opt/gmed/monitoring.env}"
 AGE_KEY_FILE="${AGE_KEY_FILE:-/etc/gmed/age.key}"
 SECRETS_PATH="${SECRETS_PATH:-infra/terraform/environments/monitoring-hetzner/secrets.sops.yaml}"
 GIT_BRANCH="${GIT_BRANCH:-main}"
+LOG_FILE="${LOG_FILE:-/var/log/gmed-monitoring-deploy.log}"
+TMP_ENV=""
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "ERROR: deploy-monitoring.sh must be run as root (sudo)." >&2
   exit 1
 fi
+
+install -d -m 755 "$(dirname "$LOG_FILE")"
+touch "$LOG_FILE"
+chmod 640 "$LOG_FILE"
+exec > >(TZ=UTC awk '{ print strftime("[%Y-%m-%dT%H:%M:%SZ]"), $0; fflush(); }' | tee -a "$LOG_FILE") 2>&1
+
+finish() {
+  local rc=$?
+  trap - EXIT
+  if [[ -n "${TMP_ENV:-}" ]]; then
+    rm -f "$TMP_ENV" || true
+  fi
+  echo "deploy-monitoring finished rc=$rc"
+  exit "$rc"
+}
+trap finish EXIT
+
+echo "deploy-monitoring started branch=$GIT_BRANCH repo=$REPO_DIR"
 
 for path in "$REPO_DIR/.git" "$AGE_KEY_FILE"; do
   if [[ ! -e "$path" ]]; then
@@ -42,7 +62,6 @@ git reset --hard "origin/$GIT_BRANCH"
 
 # Atomic decrypt to a fresh env file.
 TMP_ENV="$(mktemp -p "$(dirname "$RELEASE_ENV")" monitoring.env.XXXXXX)"
-trap 'rm -f "$TMP_ENV"' EXIT
 
 SOPS_AGE_KEY_FILE="$AGE_KEY_FILE" \
   sops -d --output-type dotenv "$REPO_DIR/$SECRETS_PATH" > "$TMP_ENV"

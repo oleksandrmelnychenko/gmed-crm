@@ -30,11 +30,31 @@ RELEASE_ENV="${RELEASE_ENV:-/opt/gmed/release.env}"
 BACKUP_AGE_KEY="${BACKUP_AGE_KEY:-/etc/gmed/backup-age.key}"
 POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-gmed-postgres}"
 REMOTE_NAME="${REMOTE_NAME:-gmedbackup}"
+LOG_FILE="${LOG_FILE:-/var/log/gmed-restore.log}"
+TMP=""
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "ERROR: must run as root (uses Docker, /etc/gmed/, and /var/tmp)." >&2
   exit 1
 fi
+
+install -d -m 755 "$(dirname "$LOG_FILE")"
+touch "$LOG_FILE"
+chmod 640 "$LOG_FILE"
+exec > >(TZ=UTC awk '{ print strftime("[%Y-%m-%dT%H:%M:%SZ]"), $0; fflush(); }' | tee -a "$LOG_FILE") 2>&1
+
+finish() {
+  local rc=$?
+  trap - EXIT
+  if [[ -n "${TMP:-}" ]]; then
+    shred -u "$TMP" 2>/dev/null || rm -f "$TMP" || true
+  fi
+  echo "restore-postgres finished rc=$rc"
+  exit "$rc"
+}
+trap finish EXIT
+
+echo "restore-postgres started"
 
 set -a
 # shellcheck disable=SC1090
@@ -70,7 +90,6 @@ fi
 # sure we don't leave plaintext around on a successful exit.
 TMP="$(mktemp -p /var/tmp gmed-restore.XXXXXX.pgdump)"
 chmod 600 "$TMP"
-trap 'shred -u "$TMP" 2>/dev/null || rm -f "$TMP"' EXIT
 
 echo "[$(date -u +%FT%TZ)] downloading + decrypting → $TMP"
 rclone cat "$REMOTE_NAME:$BACKUP_S3_BUCKET/$BACKUP_KEY" \
