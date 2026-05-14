@@ -1,0 +1,70 @@
+# Loki — single-binary mode with filesystem storage. Sufficient for
+# single-tenant CRM logging volume; can migrate to S3-compatible
+# storage (Hetzner Object Storage) later without changing the query
+# layer.
+
+auth_enabled: false   # no public ingress; the tailnet IS the auth boundary
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: info
+
+common:
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    instance_addr: 127.0.0.1
+    kvstore:
+      store: inmemory
+
+# 30-day retention. The PROD audit log lives in Postgres for
+# compliance retention; Loki here is for searchability and metric
+# extraction. If the operator team grows and needs longer Loki
+# retention, switch to Object Storage backend.
+limits_config:
+  retention_period: 720h
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+  ingestion_rate_mb: 8
+  ingestion_burst_size_mb: 16
+  max_query_series: 5000
+  allow_structured_metadata: true
+
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem
+
+schema_config:
+  configs:
+    - from: 2026-05-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+ruler:
+  storage:
+    type: local
+    # Rules live OUTSIDE the named volume so they can be bind-mounted
+    # from the repo. Loki expects rules under
+    # <directory>/<tenant_id>/<group_file>.yml; with auth_enabled=false
+    # the tenant is hard-coded to `fake`.
+    local:
+      directory: /etc/loki/rules
+  rule_path: /tmp/loki-rule-tmp
+  alertmanager_url: http://alertmanager:9093
+  enable_alertmanager_v2: true
+  ring:
+    kvstore:
+      store: inmemory
+
+analytics:
+  reporting_enabled: false

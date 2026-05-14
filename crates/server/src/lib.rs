@@ -3,6 +3,7 @@
 pub mod access;
 pub mod audit;
 pub mod auth;
+pub mod business_metrics;
 pub mod config;
 pub mod crypto;
 pub mod file_scan;

@@ -1,0 +1,18 @@
+# Daily encrypted off-host Postgres backup for PROD.
+#
+# Installed by `scripts/deploy-prod.sh` to /etc/cron.d/gmed-backup with
+# mode 644 root:root. crond rejects files that are group- or
+# world-writable, so do not chmod loosely.
+#
+# Schedule:
+#   02:30 UTC daily — outside the typical CRM working window in DE and
+#   well before the unattended-upgrades reboot window (Sunday 04:00).
+#
+# The PATH override is required because cron's default PATH does not
+# include /usr/local/bin where rclone may live after a future
+# direct-download install.
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+30 2 * * * root /opt/gmed/repo/scripts/backup-postgres.sh >> /var/log/gmed-backup.log 2>&1

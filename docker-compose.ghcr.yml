@@ -1,0 +1,34 @@
+# GHCR override — switches backend and frontend from build-on-host to
+# pulling pre-built, cosign-signed images from GitHub Container
+# Registry. Layered AFTER docker-compose.prod-hetzner.yml so the
+# Postgres bind mount and credential overrides still apply.
+#
+# Compose layering for PROD:
+#   docker compose \
+#     -f docker-compose.yml \
+#     -f docker-compose.release.yml \
+#     -f docker-compose.hetzner.yml \
+#     -f docker-compose.prod-hetzner.yml \
+#     -f docker-compose.ghcr.yml \
+#     up -d
+#
+# Note: `--build` is NOT passed in the PROD deploy. The whole point
+# of this override is that the server never invokes `docker build` as
+# root again. `scripts/deploy-prod.sh` cosign-verifies these refs
+# before invoking compose.
+#
+# `build: !reset null` removes the build directive inherited from
+# docker-compose.release.yml. Without this, compose would prefer the
+# local build context over the registry image even when `image:` is
+# set.
+
+services:
+  backend:
+    build: !reset null
+    image: "${GMED_BACKEND_IMAGE:?Set GMED_BACKEND_IMAGE in release.env (sops) to a digest-pinned ghcr.io/... reference}"
+    pull_policy: always
+
+  frontend:
+    build: !reset null
+    image: "${GMED_FRONTEND_IMAGE:?Set GMED_FRONTEND_IMAGE in release.env (sops) to a digest-pinned ghcr.io/... reference}"
+    pull_policy: always

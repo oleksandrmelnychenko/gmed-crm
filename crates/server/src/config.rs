@@ -14,6 +14,10 @@ pub struct Config {
     /// `JWT_SECRET` should set a dedicated `AUDIT_IP_SALT` beforehand
     /// to keep IP-hash stability across the rotation.
     pub audit_ip_salt: String,
+    /// Address the Prometheus `/metrics` endpoint binds to. Defaults to
+    /// `0.0.0.0:9091`. Set to an empty string to disable the metrics
+    /// listener entirely (useful in unit tests; PROD always runs it).
+    pub metrics_listen: Option<SocketAddr>,
 }
 
 impl Config {
@@ -50,6 +54,17 @@ impl Config {
             jwt_secret.clone()
         });
 
+        // Empty METRICS_LISTEN disables the endpoint. Unset uses the
+        // default (`0.0.0.0:9091`). Anything else must parse to a valid
+        // socket address.
+        let metrics_listen = match std::env::var("METRICS_LISTEN") {
+            Ok(s) if s.trim().is_empty() => None,
+            Ok(s) => Some(s.parse().unwrap_or_else(|e| {
+                panic!("METRICS_LISTEN ({s}) is not a valid socket address: {e}")
+            })),
+            Err(_) => Some(SocketAddr::from(([0, 0, 0, 0], 9091))),
+        };
+
         Self {
             database_url: std::env::var("DATABASE_URL").expect("DATABASE_URL must be set"),
             listen_addr: SocketAddr::from(([0, 0, 0, 0], port)),
@@ -58,6 +73,7 @@ impl Config {
                 .unwrap_or_else(|_| "http://localhost:8080".into()),
             message_key_registry,
             audit_ip_salt,
+            metrics_listen,
         }
     }
 }

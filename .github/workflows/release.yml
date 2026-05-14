@@ -1,0 +1,176 @@
+name: Release
+
+# Builds and pushes signed container images to GHCR. Triggered on:
+#   - every push to main → `:main` floating tag + `:sha-<short>`
+#   - git tags `v*`       → `:vX.Y.Z` and `:sha-<short>` (PROD promotion)
+#
+# Why a separate workflow:
+#   - The CI workflow (.github/workflows/ci.yml) does a smoke `docker
+#     build` for correctness; it does not push, sign, or build the ARM
+#     target. Mixing the two slows every PR.
+#   - Push and OIDC permissions are scoped here so PR builds from forks
+#     never get write access to GHCR or Sigstore.
+#
+# Why cosign keyless:
+#   - Avoids managing a signing key. The signature carries the
+#     GitHub OIDC certificate identity, which the verifier on the host
+#     pins to `<repo>/.github/workflows/release.yml`. A stolen image
+#     pushed by an attacker who can't produce that certificate
+#     identity fails verification.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  # Read-only repo access — no contents:write needed.
+  contents: read
+  # GHCR pushes use the workflow token; packages:write gives it the
+  # `push` scope for the org/user's container registry.
+  packages: write
+  # Required for cosign keyless: GHA mints an OIDC token that
+  # Sigstore Fulcio exchanges for a short-lived signing cert.
+  id-token: write
+  # Required to upload Trivy SARIF results to the repo's Security tab.
+  # Without this the scan still runs and gates the workflow; only the
+  # nice in-UI presentation is lost.
+  security-events: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build-and-sign:
+    # ubuntu-24.04-arm matches the cax21 server target so the Rust
+    # build runs natively (no QEMU emulation). If the runner is not
+    # available in this repo's billing tier, switch to ubuntu-latest
+    # + QEMU and accept the ~30-minute backend build.
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: server
+            dockerfile: Dockerfile.backend
+            context: .
+          - name: frontend
+            dockerfile: frontend/Dockerfile
+            context: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # The image namespace mirrors the repo: a fork stays in its
+          # own ghcr.io/<fork-owner>/<repo>-* scope automatically.
+          images: ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.name }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha,prefix=sha-,format=short
+          # SPDX provenance + OCI labels for traceability from a
+          # registry browser back to this run.
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=UNLICENSED
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # SLSA-style provenance attached to the image. The
+          # `mode=max` setting includes the build invocation graph
+          # so `cosign tree` shows full lineage.
+          provenance: mode=max
+          sbom: true
+          # Re-use the GitHub Actions cache across runs.
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,scope=${{ matrix.name }},mode=max
+
+      # Trivy gate runs AFTER push but BEFORE sign. If the scan fails,
+      # the image lives in GHCR unsigned — and the host's cosign verify
+      # (in scripts/deploy-prod.sh) refuses to deploy unsigned digests.
+      # The signature is therefore the operational seal-of-approval:
+      # "built AND passed all gates".
+      #
+      # `ignore-unfixed: true` skips CVEs that have no upstream fix yet.
+      # We can't act on them; treating them as fatal would block every
+      # release on a single un-patched advisory. Track those separately
+      # via Dependabot / cargo-deny.
+      - name: Trivy scan (HIGH+CRITICAL, fixable only)
+        id: trivy
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.name }}@${{ steps.build.outputs.digest }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+          format: sarif
+          output: trivy-${{ matrix.name }}.sarif
+
+      # Upload findings to the Security tab even on success — gives a
+      # browsable trend over time. `if: always()` ensures the SARIF is
+      # uploaded even after the scan-fail short-circuits, so the
+      # operator can see which CVEs blocked the release.
+      - name: Upload Trivy SARIF
+        if: always() && hashFiles(format('trivy-{0}.sarif', matrix.name)) != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-${{ matrix.name }}.sarif
+          category: trivy-${{ matrix.name }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image (keyless)
+        # Sign EACH digest produced by docker/metadata-action — this
+        # is one digest per platform; we only build arm64 so it is
+        # just one ref, but the loop keeps the workflow ready for a
+        # multi-arch follow-up.
+        env:
+          COSIGN_EXPERIMENTAL: '1'
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          for tag in $TAGS; do
+            ref="${tag%%:*}@${DIGEST}"
+            echo "::group::cosign sign $ref"
+            cosign sign --yes "$ref"
+            echo "::endgroup::"
+          done
+
+      - name: Output digest
+        run: |
+          env_name="$(echo "${{ matrix.name }}" | tr a-z A-Z)"
+          if [[ "$env_name" == "SERVER" ]]; then
+            env_name="BACKEND"
+          fi
+          echo "## ${{ matrix.name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Digest: \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Pin in PROD release.env:" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "GMED_${env_name}_IMAGE=${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.name }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,51 @@
+# Caddy as the TLS-terminating edge proxy.
+#
+# Caddy handles Let's Encrypt issuance + renewal automatically. The
+# server (or VM) must:
+#   1. Have its DNS A/AAAA records pointing here BEFORE Caddy starts,
+#      otherwise the ACME HTTP-01 challenge fails until they do.
+#   2. Have ports 80 and 443 reachable from the public internet (the
+#      Hetzner firewall in `hcloud-firewall` opens them when
+#      `allow_http`/`allow_https` are true).
+#
+# Hostname and ACME contact email are taken from env so the same file
+# works for `console.gmed-health.com` (prod) and `console-dev.gmed-health.com`
+# (dev). The `:?` syntax fails fast if either is missing.
+#
+# We forward to the frontend container (nginx on :8080). The frontend
+# already reverse-proxies `/api/*` to the backend, so Caddy stays
+# single-route — keeping the chain to two hops (client → Caddy → nginx)
+# and the rate-limit accounting predictable. The backend has
+# `TRUST_FORWARDED_HEADERS=true` set in the Hetzner compose override,
+# so `rate_limit.rs` keys off the original client IP rather than the
+# inter-container hop.
+
+{
+	email {$ACME_EMAIL}
+	# Production CA by default. To test against staging without burning
+	# rate-limit quota, set CADDY_ACME_CA="https://acme-staging-v02.api.letsencrypt.org/directory"
+	# and uncomment the line below.
+	# acme_ca {$CADDY_ACME_CA}
+}
+
+{$CADDY_HOSTNAME} {
+	encode zstd gzip
+
+	reverse_proxy frontend:8080 {
+		# Caddy sets X-Forwarded-For / X-Forwarded-Proto / X-Forwarded-Host
+		# automatically; no overrides needed.
+		transport http {
+			# A long-running upload or download must not be killed by a
+			# default 30s read timeout on the upstream.
+			read_timeout 10m
+			write_timeout 10m
+		}
+	}
+
+	# JSON structured logs go to stdout so `docker logs caddy` (and any
+	# log driver we plug in later, e.g. Loki) can ingest them as-is.
+	log {
+		output stdout
+		format json
+	}
+}

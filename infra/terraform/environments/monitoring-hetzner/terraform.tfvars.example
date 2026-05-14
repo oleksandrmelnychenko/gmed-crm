@@ -1,0 +1,32 @@
+# Copy to `terraform.tfvars` (gitignored) and fill in.
+#
+# The Hetzner API token is the SAME PROD project token by default
+# (early stage). If you split monitoring into its own project later,
+# export a different HCLOUD_TOKEN before `terraform apply` from this
+# directory.
+#
+#   export HCLOUD_TOKEN="..."
+
+project_name = "gmed"
+environment  = "monitoring"
+
+datacenter  = "fsn1-dc14"
+# cax21 (4 vCPU / 8 GB ~€6.49/mo) — Loki + Prom + Grafana + AM fit
+# comfortably with headroom. Downsize to cax11 only if metrics show
+# sustained idle.
+server_type = "cax21"
+image       = "ubuntu-24.04"
+
+# Initial bootstrap needs SSH. Same two-step apply as PROD: set your
+# /32 here for the first apply, then flip to `[]` once Tailscale is
+# authenticated and re-apply.
+admin_ip_allowlist = ["203.0.113.10/32"]
+
+# Install Tailscale (key authentication happens in
+# scripts/deploy-monitoring.sh from the sops bundle).
+tailscale_enabled = true
+
+# OpenSSH public key for the operator account.
+admin_ssh_public_key = "ssh-ed25519 AAAAC3Nz... your-key@host"
+
+admin_username = "gmed"

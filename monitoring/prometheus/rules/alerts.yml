@@ -1,0 +1,47 @@
+# Alert rules for Phase 3e1.
+#
+# These three rules target the MONITORING host only — there is nothing
+# else to scrape yet. They are intentionally trivial; their job is to
+# prove the alert delivery path end-to-end before we layer on real
+# PROD-side rules in Phase 3e2.
+#
+# Reload after edits: `curl -X POST http://localhost:9090/-/reload`
+# or restart the prometheus container.
+
+groups:
+  - name: monitoring-host
+    interval: 30s
+    rules:
+      - alert: MonitoringDiskFull
+        expr: |
+          (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} /
+           node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) < 0.10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Monitoring host disk {{ $labels.mountpoint }} <10% free"
+          description: "Disk free on {{ $labels.instance }} mount {{ $labels.mountpoint }} is below 10% for 10 minutes."
+
+      - alert: MonitoringCPUSustained
+        # Average non-idle CPU across all cores > 80% for 10m.
+        expr: |
+          (1 - avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) > 0.80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Monitoring host CPU > 80% sustained"
+          description: "Average CPU on {{ $labels.instance }} has been above 80% for 10 minutes — investigate."
+
+      - alert: MonitoringDown
+        # Prometheus failing to scrape itself is the canary for the
+        # whole stack: if this fires we know the alert pipeline is
+        # functional but Prometheus is degraded.
+        expr: up{job="prometheus"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus self-scrape failing"
+          description: "Prometheus has been unable to scrape itself for 5 minutes."

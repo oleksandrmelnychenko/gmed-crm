@@ -18,16 +18,26 @@
 //!
 //! ## Client identification
 //!
-//! Both layers use `PeerIpKeyExtractor`, which keys off the TCP peer
-//! address. This is correct while the server runs without a reverse proxy
-//! (local dev, single-tenant VM). **When the service is eventually fronted
-//! by an AWS Application Load Balancer — or any other proxy — the extractor
-//! must switch to `SmartIpKeyExtractor` and the trusted-proxy count must
-//! be set explicitly in config.** Without that change, every request will
-//! carry the ALB's private IP as the peer and the limiter will collapse
-//! into a single global bucket. This migration is deferred until the AWS
-//! infrastructure lands; the `TODO(aws-alb)` marker in `build_and_wrap`
-//! points at the line that needs to change.
+//! Two key-extraction modes are supported, selected at startup by the
+//! `TRUST_FORWARDED_HEADERS` environment variable.
+//!
+//! - **Unset / `false` (default)** — `PeerIpKeyExtractor` keys off the TCP
+//!   peer address. Correct when the server is reached directly (local
+//!   dev, single-tenant VM with no proxy). Any `X-Forwarded-For` header
+//!   in this mode would be attacker-controlled and is ignored.
+//! - **`true`** — `SmartIpKeyExtractor` reads the client IP from
+//!   `Forwarded` / `X-Forwarded-For` / `X-Real-IP`, in that order. Set
+//!   this only when the listener is **always** behind a trusted reverse
+//!   proxy that strips client-supplied forwarding headers and writes its
+//!   own. In our Hetzner topology that proxy is Caddy (in front of the
+//!   frontend nginx, which appends its own hop), so the resulting chain
+//!   is `client, caddy_ip` and `SmartIpKeyExtractor` picks the leftmost
+//!   entry as the client.
+//!
+//! Flipping the switch with no proxy in place is a footgun: clients can
+//! spoof their bucket key. The deployment unit that sets
+//! `TRUST_FORWARDED_HEADERS=true` MUST also close the backend port to
+//! anything except the proxy.
 //!
 //! ## Rejected requests
 //!
@@ -41,7 +51,7 @@ use std::time::Duration;
 use axum::Router;
 use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
-use tower_governor::key_extractor::PeerIpKeyExtractor;
+use tower_governor::key_extractor::{PeerIpKeyExtractor, SmartIpKeyExtractor};
 
 /// Allowed auth request burst before the bucket begins throttling.
 const AUTH_BURST: u32 = 10;
@@ -62,6 +72,13 @@ fn limiter_disabled_for_e2e() -> bool {
         .is_some_and(|value| matches!(value, "1" | "true" | "TRUE" | "yes" | "YES"))
 }
 
+fn trust_forwarded_headers() -> bool {
+    std::env::var("TRUST_FORWARDED_HEADERS")
+        .ok()
+        .as_deref()
+        .is_some_and(|value| matches!(value, "1" | "true" | "TRUE" | "yes" | "YES"))
+}
+
 fn build_and_wrap<S>(router: Router<S>, burst: u32, refill: Duration) -> Router<S>
 where
     S: Clone + Send + Sync + 'static,
@@ -70,15 +87,27 @@ where
         return router;
     }
 
-    // TODO(aws-alb): when fronted by ALB, swap PeerIpKeyExtractor for
-    // SmartIpKeyExtractor and configure the trusted proxy count.
-    let config = GovernorConfigBuilder::default()
-        .period(refill)
-        .burst_size(burst)
-        .key_extractor(PeerIpKeyExtractor)
-        .finish()
-        .expect("rate-limit quota constants are static and non-zero");
-    router.layer(GovernorLayer::new(config))
+    // `SmartIpKeyExtractor` and `PeerIpKeyExtractor` produce differently
+    // parameterised `GovernorConfig<K, _>`, so each branch builds and
+    // attaches the layer independently. The arms share no state — the
+    // duplication is fine.
+    if trust_forwarded_headers() {
+        let config = GovernorConfigBuilder::default()
+            .period(refill)
+            .burst_size(burst)
+            .key_extractor(SmartIpKeyExtractor)
+            .finish()
+            .expect("rate-limit quota constants are static and non-zero");
+        router.layer(GovernorLayer::new(config))
+    } else {
+        let config = GovernorConfigBuilder::default()
+            .period(refill)
+            .burst_size(burst)
+            .key_extractor(PeerIpKeyExtractor)
+            .finish()
+            .expect("rate-limit quota constants are static and non-zero");
+        router.layer(GovernorLayer::new(config))
+    }
 }
 
 /// Wrap a router in the tight auth-endpoint limiter.

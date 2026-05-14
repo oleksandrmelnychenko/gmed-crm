@@ -1,0 +1,28 @@
+# sops creation rules. sops reads this file walking up from the file
+# being encrypted, so anywhere under `infra/terraform/...` picks up
+# these rules automatically.
+#
+# Recipients are age public keys. Private keys never leave 1Password
+# (or wherever you store them) — they only land on the running host
+# as `/etc/gmed/age.key` via the cloud-init bootstrap.
+#
+# Adding a recipient to a rule does NOT re-encrypt existing files; run
+# `sops updatekeys path/to/secrets.sops.yaml` after the change.
+#
+# IMPORTANT: the `age:` value below is a literal string and ALL of it
+# is fed to sops as a recipient list. `#` inside a YAML scalar is NOT
+# a comment — keep instructional notes OUTSIDE the value, like this
+# header. Replace the placeholders with real `age1...` lines before
+# encrypting anything.
+
+creation_rules:
+  # Replace the placeholder with the DEV age recipient:
+  #   age-keygen -y ~/.config/sops/age/gmed-dev.key
+  # Multiple recipients can be comma-separated.
+  - path_regex: environments/dev-hetzner/.*\.sops\.yaml$
+    age: age1devplaceholderxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+  # Replace the placeholder with the PROD age recipient. Distinct from
+  # DEV so a leaked DEV key cannot decrypt PROD secrets.
+  - path_regex: environments/prod-hetzner/.*\.sops\.yaml$
+    age: age1prodplaceholderxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx

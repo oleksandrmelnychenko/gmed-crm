@@ -1,0 +1,127 @@
+# Monitoring stack — Prometheus + Loki + Grafana + Alertmanager.
+#
+# Deployed by `scripts/deploy-monitoring.sh` on the monitoring host.
+# All services bind to the host's 0.0.0.0; the Hetzner firewall
+# closes everything except SSH (Tailscale handles the rest). The
+# practical effect is "only tailnet peers can reach these ports".
+#
+# Service versions pinned by tag for reproducibility. Upstream
+# upstream images (grafana, prometheus) are well-maintained; pinning
+# by digest is overkill until we have a Trivy gate for them too.
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: gmed-prometheus
+    restart: unless-stopped
+    user: "65534:65534"   # nobody, matching the image's filesystem perms
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=90d'
+      - '--web.enable-lifecycle'   # POST /-/reload to apply config changes
+    ports:
+      - "9090:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  loki:
+    image: grafana/loki:3.3.1
+    container_name: gmed-loki
+    restart: unless-stopped
+    user: "10001:10001"
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - ./loki/rules:/etc/loki/rules:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/loki-config.yml
+    ports:
+      - "3100:3100"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:3100/ready | grep -q 'ready'"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: gmed-alertmanager
+    restart: unless-stopped
+    user: "65534:65534"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    environment:
+      ALERTMANAGER_SMTP_HOST: "${ALERTMANAGER_SMTP_HOST:?Set ALERTMANAGER_SMTP_HOST in monitoring.env}"
+      ALERTMANAGER_SMTP_FROM: "${ALERTMANAGER_SMTP_FROM:?Set ALERTMANAGER_SMTP_FROM in monitoring.env}"
+      ALERTMANAGER_SMTP_USERNAME: "${ALERTMANAGER_SMTP_USERNAME:?}"
+      ALERTMANAGER_SMTP_PASSWORD: "${ALERTMANAGER_SMTP_PASSWORD:?}"
+      ALERTMANAGER_TO_EMAIL: "${ALERTMANAGER_TO_EMAIL:?}"
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      # Required for the ${VAR} substitutions in alertmanager.yml
+      # (SMTP creds piped through from the sops-decrypted env).
+      - '--config.expand-env=true'
+    ports:
+      - "9093:9093"
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: gmed-grafana
+    restart: unless-stopped
+    user: "472:472"   # grafana uid baked into the image
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: "admin"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in monitoring.env}"
+      GF_SECURITY_SECRET_KEY: "${GRAFANA_SECRET_KEY:?Set GRAFANA_SECRET_KEY in monitoring.env}"
+      # Reachable only via tailnet — these toggles disable Grafana's
+      # own anonymous and sign-up paths in case the firewall is ever
+      # accidentally loosened.
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_SECURITY_COOKIE_SECURE: "false"   # we're not behind HTTPS on the tailnet IP
+    ports:
+      - "3000:3000"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: gmed-node-exporter
+    restart: unless-stopped
+    pid: host
+    network_mode: host   # so it reports the HOST's network/IP, not the container's
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro,rslave
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--web.listen-address=:9100'
+
+volumes:
+  prometheus_data:
+  loki_data:
+  alertmanager_data:
+  grafana_data:

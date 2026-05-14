@@ -13,6 +13,7 @@ use serde_json::json;
 
 use crate::audit;
 use crate::auth::{blacklist, middleware::AuthUser, password, tokens};
+use crate::business_metrics::LOGIN_ATTEMPTS_TOTAL;
 use crate::state::AppState;
 
 /// Hash an optional string-form IP through the current audit sender.
@@ -134,6 +135,12 @@ async fn login(
                 ip_hash_opt(&state, ip.as_deref()),
                 json!({ "reason": "ip_whitelist" }),
             ));
+            metrics::counter!(
+                LOGIN_ATTEMPTS_TOTAL,
+                "outcome" => "blocked",
+                "reason" => "ip_whitelist",
+            )
+            .increment(1);
             return err(
                 StatusCode::FORBIDDEN,
                 "ip_blocked",
@@ -170,6 +177,12 @@ async fn login(
                 ip_hash_opt(&state, ip.as_deref()),
                 json!({ "reason": "unknown_email" }),
             ));
+            metrics::counter!(
+                LOGIN_ATTEMPTS_TOTAL,
+                "outcome" => "failure",
+                "reason" => "unknown_email",
+            )
+            .increment(1);
             return err(
                 StatusCode::UNAUTHORIZED,
                 "unauthorized",
@@ -185,6 +198,12 @@ async fn login(
             ip_hash_opt(&state, ip.as_deref()),
             json!({ "reason": "account_inactive" }),
         ));
+        metrics::counter!(
+            LOGIN_ATTEMPTS_TOTAL,
+            "outcome" => "blocked",
+            "reason" => "account_inactive",
+        )
+        .increment(1);
         return err(StatusCode::FORBIDDEN, "forbidden", "Account is deactivated");
     }
 
@@ -197,6 +216,12 @@ async fn login(
             ip_hash_opt(&state, ip.as_deref()),
             json!({ "reason": "account_locked", "locked_until": locked_until }),
         ));
+        metrics::counter!(
+            LOGIN_ATTEMPTS_TOTAL,
+            "outcome" => "blocked",
+            "reason" => "account_locked",
+        )
+        .increment(1);
         return err(
             StatusCode::FORBIDDEN,
             "account_locked",
@@ -249,6 +274,12 @@ async fn login(
                     "locked_until": lock_until,
                 }),
             ));
+            metrics::counter!(
+                LOGIN_ATTEMPTS_TOTAL,
+                "outcome" => "blocked",
+                "reason" => "auto_locked",
+            )
+            .increment(1);
             return err(
                 StatusCode::FORBIDDEN,
                 "account_locked",
@@ -270,6 +301,12 @@ async fn login(
             ip_hash_opt(&state, ip.as_deref()),
             json!({ "reason": "wrong_password", "failed_attempts": new_attempts }),
         ));
+        metrics::counter!(
+            LOGIN_ATTEMPTS_TOTAL,
+            "outcome" => "failure",
+            "reason" => "wrong_password",
+        )
+        .increment(1);
         return err(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
@@ -310,6 +347,12 @@ async fn login(
                     ip_hash_opt(&state, ip.as_deref()),
                     json!({ "pending_id": row.id }),
                 ));
+                metrics::counter!(
+                    LOGIN_ATTEMPTS_TOTAL,
+                    "outcome" => "mfa_pending",
+                    "reason" => "mfa_required",
+                )
+                .increment(1);
                 return Json(serde_json::json!({
                     "status": "mfa_pending",
                     "pending_id": row.id,
@@ -359,6 +402,12 @@ async fn login(
         ip_hash_opt(&state, ip.as_deref()),
         json!({ "role": user.role }),
     ));
+    metrics::counter!(
+        LOGIN_ATTEMPTS_TOTAL,
+        "outcome" => "success",
+        "reason" => "ok",
+    )
+    .increment(1);
 
     Json(AuthResponse {
         access_token: pair.access_token,

@@ -1,0 +1,375 @@
+#!/usr/bin/env bash
+# Phase-0 bootstrap: harden the OS, install Docker, create a non-root
+# admin user. App deploy (sops, compose-up, Caddy edge) is added by a
+# follow-up commit. This script is intentionally idempotent: re-running
+# it on a healthy host must be a no-op.
+#
+# Logs land in /var/log/cloud-init-output.log; check there if SSH is
+# unreachable after `terraform apply`.
+
+set -euo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
+
+# ---------------------------------------------------------------------------
+# 1. Base packages.
+#    auditd          — kernel-syscall audit trail for the host (BSI C5 OPS-09).
+#    chrony          — NTP. Correct timestamps are a prerequisite for any
+#                      meaningful audit log.
+#    fail2ban        — temporary SSH brute-force mitigation. Real protection
+#                      comes from key-only auth; fail2ban exists to keep
+#                      noise out of the logs.
+#    unattended-upgrades — security patches without manual intervention.
+# ---------------------------------------------------------------------------
+apt-get update
+apt-get install -y --no-install-recommends \
+  auditd \
+  ca-certificates \
+  chrony \
+  curl \
+  fail2ban \
+  git \
+  gnupg \
+  jq \
+  unattended-upgrades
+
+# ---------------------------------------------------------------------------
+# 2. Unattended security upgrades. The default 50unattended-upgrades on
+#    Ubuntu LTS already restricts to security pockets; we just enable the
+#    periodic timers.
+# ---------------------------------------------------------------------------
+cat > /etc/apt/apt.conf.d/20auto-upgrades <<'EOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+APT::Periodic::AutocleanInterval "7";
+EOF
+systemctl enable --now unattended-upgrades
+
+# ---------------------------------------------------------------------------
+# 3. Docker via the official convenience script. Pin a daemon config that
+#    caps container log files so a chatty service cannot fill the root
+#    disk — Hetzner servers don't auto-resize, and a full root volume is
+#    indistinguishable from the host being down.
+# ---------------------------------------------------------------------------
+if ! command -v docker >/dev/null 2>&1; then
+  curl -fsSL https://get.docker.com | sh
+fi
+
+mkdir -p /etc/docker
+cat > /etc/docker/daemon.json <<'EOF'
+{
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "50m", "max-file": "5" },
+  "live-restore": true,
+  "userland-proxy": false,
+  "no-new-privileges": true
+}
+EOF
+systemctl enable docker
+systemctl restart docker
+
+# ---------------------------------------------------------------------------
+# 4. Non-root admin user. Cloud-init places the SSH key in /root/.ssh; we
+#    copy it once to the admin user and (later) disable root SSH entirely.
+# ---------------------------------------------------------------------------
+ADMIN_USER='${admin_username}'
+
+if ! id "$ADMIN_USER" >/dev/null 2>&1; then
+  useradd --create-home --shell /bin/bash --groups sudo,docker "$ADMIN_USER"
+fi
+
+install -d -m 700 -o "$ADMIN_USER" -g "$ADMIN_USER" "/home/$ADMIN_USER/.ssh"
+if [[ -f /root/.ssh/authorized_keys ]]; then
+  install -m 600 -o "$ADMIN_USER" -g "$ADMIN_USER" \
+    /root/.ssh/authorized_keys "/home/$ADMIN_USER/.ssh/authorized_keys"
+fi
+
+# Passwordless sudo for the deploy-relevant docker subcommands only.
+# Anything more privileged requires an interactive session.
+cat > "/etc/sudoers.d/$ADMIN_USER" <<EOF
+$ADMIN_USER ALL=(ALL) NOPASSWD: /usr/bin/docker, /usr/bin/docker compose
+EOF
+chmod 440 "/etc/sudoers.d/$ADMIN_USER"
+
+# ---------------------------------------------------------------------------
+# 5. SSH hardening. The Hetzner firewall already restricts source IPs;
+#    this layer enforces key-only auth and non-root login even if a CIDR
+#    is accidentally widened.
+# ---------------------------------------------------------------------------
+cat > /etc/ssh/sshd_config.d/99-gmed.conf <<EOF
+PasswordAuthentication no
+PermitRootLogin no
+AllowUsers $ADMIN_USER
+MaxAuthTries 3
+ClientAliveInterval 300
+ClientAliveCountMax 2
+EOF
+systemctl restart ssh
+
+# ---------------------------------------------------------------------------
+# 6. fail2ban: sshd jail. Bans repeating offenders for an hour after five
+#    failed attempts within ten minutes.
+# ---------------------------------------------------------------------------
+cat > /etc/fail2ban/jail.d/sshd.local <<'EOF'
+[sshd]
+enabled  = true
+maxretry = 5
+findtime = 10m
+bantime  = 1h
+EOF
+systemctl enable --now fail2ban
+
+# ---------------------------------------------------------------------------
+# 7. Kernel-level hardening. Conservative defaults that match what most
+#    CIS Ubuntu 22.04 / 24.04 benchmarks recommend.
+# ---------------------------------------------------------------------------
+cat > /etc/sysctl.d/99-gmed.conf <<'EOF'
+# Network
+net.ipv4.tcp_syncookies = 1
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.default.rp_filter = 1
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.default.accept_redirects = 0
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.send_redirects = 0
+net.ipv4.conf.all.accept_source_route = 0
+net.ipv4.conf.default.accept_source_route = 0
+net.ipv6.conf.all.accept_redirects = 0
+net.ipv6.conf.default.accept_redirects = 0
+net.ipv6.conf.all.accept_source_route = 0
+net.ipv6.conf.default.accept_source_route = 0
+
+# Hide kernel pointers and dmesg from non-root users.
+kernel.kptr_restrict = 2
+kernel.dmesg_restrict = 1
+EOF
+sysctl --system
+
+# ---------------------------------------------------------------------------
+# 8. auditd: enable and start. Default rules cover sudoers/passwd/shadow
+#    and Docker socket changes — enough for a Phase-0 trail.
+# ---------------------------------------------------------------------------
+systemctl enable --now auditd
+
+# Mark the bootstrap as complete so reruns can short-circuit early in a
+# future iteration. (Currently this script is fully idempotent, but the
+# marker is useful as a probe.)
+install -d -m 700 /etc/gmed
+date -u +%Y-%m-%dT%H:%M:%SZ > /etc/gmed/bootstrap.phase0
+
+echo "Phase-0 bootstrap complete."
+
+# ===========================================================================
+# Phase 0.5 — optional Postgres data volume.
+#
+# Runs BEFORE the deploy_app gate so PROD (where deploy is manual) also
+# gets the volume mounted: the operator should not have to mkfs/mount
+# by hand before invoking scripts/deploy-prod.sh.
+#
+# The Volume is pre-formatted by Hetzner (format = "ext4" on the
+# `hcloud_volume` resource), so this script does NOT run mkfs. Doing
+# so would wipe the contents on every re-bootstrap.
+# ===========================================================================
+POSTGRES_VOLUME_DEVICE='${postgres_volume_device_path}'
+POSTGRES_VOLUME_MOUNT='${postgres_volume_mount_path}'
+
+if [[ -n "$POSTGRES_VOLUME_DEVICE" ]]; then
+  echo "Mounting postgres volume $POSTGRES_VOLUME_DEVICE at $POSTGRES_VOLUME_MOUNT"
+
+  install -d -m 700 "$POSTGRES_VOLUME_MOUNT"
+
+  # Wait for the device to appear. The volume is attached by the
+  # `hcloud_volume_attachment` resource which can race cloud-init.
+  for _ in $(seq 1 60); do
+    if [[ -b "$POSTGRES_VOLUME_DEVICE" ]]; then
+      break
+    fi
+    sleep 1
+  done
+
+  if [[ ! -b "$POSTGRES_VOLUME_DEVICE" ]]; then
+    echo "ERROR: postgres volume device $POSTGRES_VOLUME_DEVICE did not appear within 60s" >&2
+    exit 1
+  fi
+
+  # Use UUID in /etc/fstab — survives device renumbering across kernel
+  # versions and re-attachments.
+  VOL_UUID="$(blkid -s UUID -o value "$POSTGRES_VOLUME_DEVICE")"
+  if [[ -z "$VOL_UUID" ]]; then
+    echo "ERROR: could not read UUID from $POSTGRES_VOLUME_DEVICE — was the volume pre-formatted?" >&2
+    exit 1
+  fi
+
+  FSTAB_LINE="UUID=$VOL_UUID $POSTGRES_VOLUME_MOUNT ext4 defaults,nofail,noatime 0 2"
+  if ! grep -qF "UUID=$VOL_UUID $POSTGRES_VOLUME_MOUNT" /etc/fstab; then
+    echo "$FSTAB_LINE" >> /etc/fstab
+  fi
+
+  if ! mountpoint -q "$POSTGRES_VOLUME_MOUNT"; then
+    mount "$POSTGRES_VOLUME_MOUNT"
+  fi
+
+  # Postgres in the alpine image runs as uid 70. Idempotent — chown on
+  # an empty dir is fast; chown on a populated dir is recursive only
+  # if we tell it to (we do not).
+  chown 70:70 "$POSTGRES_VOLUME_MOUNT"
+  chmod 700 "$POSTGRES_VOLUME_MOUNT"
+
+  echo "Postgres volume ready."
+fi
+
+# ===========================================================================
+# Phase 0.6 — optional Tailscale admin overlay.
+#
+# Two modes:
+#   - `tailscale_enabled = true` only             → package installed,
+#     daemon running idle. The operator (or scripts/deploy-prod.sh) is
+#     expected to run `tailscale up` later with a key sourced from
+#     sops. This is the PROD path — the key never enters TF state.
+#
+#   - `tailscale_enabled = true` AND
+#     `tailscale_auth_key` non-empty              → bootstrap installs
+#     AND authenticates. This is the DEV path — DEV already accepts
+#     the trade-off of having secrets in TF state.
+#
+# tailscale_enabled = false skips the section entirely (no package
+# installed). Runs BEFORE the deploy_app gate so PROD also gets the
+# package even though Phase 1 is skipped on PROD.
+# ===========================================================================
+if [[ "${tailscale_enabled}" == "true" ]]; then
+  echo "Installing Tailscale"
+
+  # Official tailscale apt repo. The keyring + sources list approach
+  # is the supported method on Ubuntu 22.04/24.04. The keyring goes to
+  # /usr/share/keyrings (matches Debian best practice) so apt does not
+  # mix it into the global trust set.
+  if [[ ! -f /usr/share/keyrings/tailscale-archive-keyring.gpg ]]; then
+    curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg \
+      | tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
+    curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.tailscale-keyring.list \
+      | tee /etc/apt/sources.list.d/tailscale.list >/dev/null
+    apt-get update
+  fi
+
+  apt-get install -y --no-install-recommends tailscale
+  systemctl enable --now tailscaled
+
+  TAILSCALE_AUTH_KEY='${tailscale_auth_key}'
+  TAILSCALE_HOSTNAME='${tailscale_hostname}'
+
+  if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
+    # Idempotent: tailscale up on an already-up daemon with the same
+    # config is fast and harmless.
+    #   --accept-routes=false  → server does not pull peers' subnet routes
+    #   --accept-dns=false     → server keeps its own resolver
+    #   --ssh=false            → use standard SSH over the tailnet IP
+    #                            (operator's authorized_keys remain
+    #                            the source of truth; can flip later)
+    HOSTNAME_FLAG=""
+    if [[ -n "$TAILSCALE_HOSTNAME" ]]; then
+      HOSTNAME_FLAG="--hostname=$TAILSCALE_HOSTNAME"
+    fi
+
+    tailscale up \
+      --authkey="$TAILSCALE_AUTH_KEY" \
+      $HOSTNAME_FLAG \
+      --accept-routes=false \
+      --accept-dns=false \
+      --ssh=false
+
+    echo "Tailscale joined: $(tailscale ip -4 2>/dev/null || echo 'pending')"
+  else
+    echo "Tailscale installed; authentication deferred to deploy-prod.sh"
+  fi
+fi
+
+# ===========================================================================
+# Phase 0.7 — secrets toolchain for manual/app deploy.
+#
+# Runs BEFORE the deploy_app gate so PROD / monitoring hosts, which do
+# manual deploys after Phase 0, still have the exact `sops -d
+# --output-type dotenv` binary that scripts/deploy-*.sh require.
+# ===========================================================================
+apt-get install -y --no-install-recommends age
+
+SOPS_VERSION="v3.9.4"
+ARCH="$(dpkg --print-architecture)"
+if [[ ! -x /usr/local/bin/sops ]] || ! /usr/local/bin/sops --version | grep -q "$${SOPS_VERSION#v}"; then
+  curl -fsSL \
+    "https://github.com/getsops/sops/releases/download/$${SOPS_VERSION}/sops-$${SOPS_VERSION}.linux.$${ARCH}" \
+    -o /usr/local/bin/sops
+  chmod +x /usr/local/bin/sops
+fi
+
+# ===========================================================================
+# Phase 1 — application deploy.
+#
+# Gated on ${deploy_app}. When false, the script exits here and the host
+# stays at the Phase-0 state (hardened OS, no app). Set deploy_app=true
+# in tfvars to run the full deploy.
+# ===========================================================================
+if [[ "${deploy_app}" != "true" ]]; then
+  echo "deploy_app=false — skipping Phase-1 app deploy."
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Phase-1.1: stage the age private key.
+#
+# The key is interpolated by Terraform's templatefile() — it lives in
+# the TF state once apply runs. Acceptable trade-off for DEV; PROD will
+# provision out-of-band post-boot. We never echo the key, and the file
+# is root-owned 0600.
+# ---------------------------------------------------------------------------
+install -d -m 700 /etc/gmed
+cat > /etc/gmed/age.key <<'GMED_AGE_KEY_EOF'
+${age_private_key}
+GMED_AGE_KEY_EOF
+chmod 600 /etc/gmed/age.key
+
+# ---------------------------------------------------------------------------
+# Phase-1.3: fetch / refresh the repo.
+#
+# `git clone --depth 1` keeps the bootstrap fast; for DEV we accept that
+# blame/history is not available on the box itself.
+# ---------------------------------------------------------------------------
+install -d -m 755 /opt/gmed
+
+if [[ ! -d /opt/gmed/repo/.git ]]; then
+  git clone --depth 1 --branch "${app_branch}" "${app_repo_url}" /opt/gmed/repo
+else
+  cd /opt/gmed/repo
+  git fetch origin "${app_branch}"
+  git checkout "${app_branch}"
+  git reset --hard "origin/${app_branch}"
+fi
+
+# ---------------------------------------------------------------------------
+# Phase-1.4: decrypt secrets to /opt/gmed/release.env in dotenv format.
+#
+# The compose files reference `$${GMED_*}` env vars; release.env is the
+# `--env-file` we pass to compose, and chmod 600 keeps it root-only on
+# disk.
+# ---------------------------------------------------------------------------
+SOPS_AGE_KEY_FILE=/etc/gmed/age.key \
+  /usr/local/bin/sops -d --output-type dotenv \
+    "/opt/gmed/repo/${secrets_sops_path}" \
+    > /opt/gmed/release.env
+
+chmod 600 /opt/gmed/release.env
+
+# ---------------------------------------------------------------------------
+# Phase-1.5: docker compose up.
+#
+# Compose files are passed in the order configured in Terraform; the
+# Hetzner override goes last so its tweaks (Caddy edge, port resets,
+# TRUST_FORWARDED_HEADERS) win.
+# ---------------------------------------------------------------------------
+cd /opt/gmed/repo
+docker compose \
+  --env-file /opt/gmed/release.env \
+  -f ${join(" -f ", compose_files)} \
+  up -d --build
+
+date -u +%Y-%m-%dT%H:%M:%SZ > /etc/gmed/bootstrap.phase1
+echo "Phase-1 deploy complete."

@@ -1,0 +1,84 @@
+# Promtail config that runs on the PROD server and ships every
+# container's Docker JSON log file to Loki on the monitoring host.
+#
+# Resolution path: `gmed-monitoring` is the Tailscale hostname the
+# monitoring server registers with (see its sops bundle's
+# `TAILSCALE_HOSTNAME`). MagicDNS in the tailnet resolves it to the
+# 100.x.y.z address. If MagicDNS is disabled, override LOKI_URL in
+# release.env with the literal tailnet IP.
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: info
+
+positions:
+  # Promtail tracks how far it has read in each log file. Persisting
+  # this across restarts avoids re-shipping the entire backlog after
+  # a container restart.
+  filename: /var/lib/promtail/positions.yaml
+
+clients:
+  - url: ${LOKI_URL}
+    # Loki on the monitoring host has auth_enabled=false because the
+    # tailnet IS the auth boundary; no Basic-Auth needed.
+    backoff_config:
+      min_period: 500ms
+      max_period: 5m
+      max_retries: 10
+    batchwait: 1s
+    batchsize: 1048576
+
+scrape_configs:
+  # Discover every Docker container on the host and pick up its log
+  # file. Promtail uses the Docker JSON log driver (which we set in
+  # /etc/docker/daemon.json at bootstrap), so the per-line JSON
+  # framing is handled by the `cri` pipeline stage.
+  - job_name: docker-containers
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 10s
+    relabel_configs:
+      # Container name without the leading slash.
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: container
+      - source_labels: ['__meta_docker_container_log_stream']
+        target_label: stream
+      # Carry the image tag for filtering in Grafana.
+      - source_labels: ['__meta_docker_container_image']
+        target_label: image
+      # Per-env host label. Set HOST_LABEL=gmed-prod | gmed-dev |
+      # gmed-monitoring in the compose env so the same promtail
+      # config works on every server.
+      - target_label: host
+        replacement: ${HOST_LABEL}
+    pipeline_stages:
+      - docker: {}
+
+  # System logs (auditd, fail2ban, sshd, unattended-upgrades). These
+  # complement container logs — the host itself doesn't write much,
+  # but security-relevant events (SSH bans, ssh failures) live here.
+  - job_name: syslog
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: syslog
+          host: ${HOST_LABEL}
+          __path__: /var/log/syslog
+    pipeline_stages:
+      # Extract the syslog facility + level if present.
+      - regex:
+          expression: '^(?P<timestamp>\S+\s+\S+\s+\S+)\s+(?P<hostname>\S+)\s+(?P<program>\S+):\s+(?P<message>.*)$'
+      - labels:
+          program: ""
+
+  # Backup cron writes to a dedicated file instead of syslog so restore
+  # investigations have a compact trail. Ship it separately into Loki.
+  - job_name: backup-cron
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: backup-cron
+          host: ${HOST_LABEL}
+          __path__: /var/log/gmed-backup.log

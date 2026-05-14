@@ -1,0 +1,65 @@
+# Copy this file to `terraform.tfvars` (already in .gitignore) and fill in.
+#
+# The Hetzner API token is read from the HCLOUD_TOKEN env var, not from
+# this file. Export it before running terraform:
+#
+#   export HCLOUD_TOKEN="..."
+
+project_name = "gmed"
+environment  = "dev"
+
+# Falkenstein DC14. For Nuremberg use nbg1-dc3. DE only — the compute
+# module fails the plan otherwise.
+datacenter = "fsn1-dc14"
+
+# cax31  = ARM 8 vCPU / 16 GB ~€12.49/mo  (default — comfortable iteration)
+# cax21  = ARM 4 vCPU / 8 GB  ~€6.49/mo   (tighter, slower Rust builds)
+# cax11  = ARM 2 vCPU / 4 GB  ~€3.79/mo   (very tight)
+# cax41  = ARM 16 vCPU / 32 GB ~€24.49/mo (only if you regularly run e2e in parallel)
+server_type = "cax31"
+
+image = "ubuntu-24.04"
+
+# Restrict SSH to your office/home IPs. Empty list = SSH closed (use
+# Tailscale/bastion instead, added in Phase 2).
+# Example: ["203.0.113.10/32", "2001:db8::1/128"]
+admin_ip_allowlist = []
+
+# Paste an OpenSSH public key (ed25519 preferred, hardware-key backed
+# strongly recommended).
+admin_ssh_public_key = "ssh-ed25519 AAAAC3Nz... your-key@host"
+
+# Non-root admin user that owns SSH access on the host. Match your
+# personal naming if needed — bootstrap creates this user.
+admin_username = "gmed"
+
+# --- Phase 1: application deploy --------------------------------------------
+
+# When true the bootstrap script clones the repo and runs `docker compose
+# up`. Set to false on the first run if you want to validate Phase 0 in
+# isolation first.
+deploy_app = true
+
+app_repo_url = "https://github.com/oleksandrmelnychenko/gmed-crm.git"
+app_branch   = "main"
+
+# Contents of your DEV age private key (AGE-SECRET-KEY-1...). Generate
+# with `age-keygen -o dev.key` and store the file in 1Password. Paste the
+# single-line key value here; the bootstrap installs it as
+# /etc/gmed/age.key on the server.
+#
+# NEVER commit terraform.tfvars (already gitignored). NEVER reuse this
+# key for prod.
+age_private_key = "AGE-SECRET-KEY-1REPLACEMEREPLACEMEREPLACEMEREPLACEMEREPLACEMEREP"
+
+# Tailscale: ensures the monitoring host can scrape DEV exporters and
+# Promtail on DEV can ship logs to Loki via the tailnet.
+#
+# In the Tailscale admin console:
+#   - Create tag `tag:gmed-dev` (separate from `tag:gmed-prod`).
+#   - Generate a reusable + non-ephemeral + pre-approved auth key
+#     under that tag.
+#   - Adjust the ACL so `tag:gmed-monitoring` can reach
+#     `tag:gmed-dev:9091`, `:9100`, `:9080`, `:9187` for scraping.
+tailscale_enabled  = true
+tailscale_auth_key = "tskey-auth-REPLACE-WITH-DEV-KEY"
