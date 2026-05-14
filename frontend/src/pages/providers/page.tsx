@@ -49,49 +49,61 @@ import { formatUiText, useLang } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
-import { ColumnVisibilityMenu } from "@/components/data-table/column-visibility-menu";
-import { DataTable } from "@/components/data-table/data-table";
-import { DensityToggle } from "@/components/data-table/density-toggle";
 import { exportCsv } from "@/components/data-table/csv-export";
-import { FilterBuilder } from "@/components/data-table/filter-builder";
-import { SortBuilder } from "@/components/data-table/sort-builder";
-import type { DensityLevel, FilterPredicate, SortStack } from "@/components/data-table/types";
-import { useLocalStorage, useVersionedLocalStorage } from "@/components/data-table/use-local-storage";
+import type { SortStack } from "@/components/data-table/types";
 import { readDataTableState, writeDataTableState } from "@/components/data-table/url-state";
 
 import {
+  createProviderStaffRole,
+  createSpecialization,
   createProvider,
   deleteProvider,
   deleteProviderDoctor,
   deleteProviderService,
+  deleteProviderStaff,
   fetchProviderDetail,
+  fetchProviderStaffRoles,
   fetchProviders,
+  fetchSpecializationsForAdmin,
   saveProviderDoctor,
   saveProviderService,
+  saveProviderStaff,
   setProviderActive,
+  setProviderStaffRoleActive,
+  setSpecializationActive,
   updateProvider,
+  updateProviderStaffRole,
+  updateSpecialization,
 } from "./data/provider-api";
 import {
   DEFAULT_FILTERS,
   blankDoctorForm,
   blankProviderForm,
   blankServiceForm,
+  blankStaffForm,
   buildProvidersQuery,
   compactDate,
   compactDateTime,
   doctorToForm,
   humanizeCode,
-  moneyLabel,
   patientLabel,
   providerMeta,
   providerPermissions,
   providerToForm,
   providerTypeLabel,
   serviceToForm,
+  servicePriceLabel,
+  staffToForm,
   toDoctorPayload,
   toProviderPayload,
   toServicePayload,
+  toStaffPayload,
 } from "./model/list-model";
+import {
+  normalizeSpecializationLabelKey,
+  specializationLabelForItem,
+  specializationLabelForValue,
+} from "./model/specialization-labels";
 import type {
   DoctorFormState,
   DoctorSummary,
@@ -99,19 +111,20 @@ import type {
   ProviderFilters,
   ProviderFormState,
   ProviderPermissions,
+  ProviderStaffRoleItem,
   ProviderSummary,
   ServiceFormState,
   ServiceItem,
+  StaffFormState,
+  ProviderStaff,
+  SpecializationItem,
 } from "./model/types";
-import {
-  DEFAULT_PROVIDER_FROZEN_COLUMNS,
-  DEFAULT_PROVIDER_HIDDEN_COLUMNS,
-  MAX_PROVIDER_FROZEN_COLUMNS,
-} from "./ui/providers-columns";
+import { ProviderHierarchyTimeline } from "./ui/provider-hierarchy-timeline";
 import { useProvidersListTableModel } from "./ui/hooks/use-providers-list-table-model";
 import {
   PageHeader,
   Section,
+  checkboxClass,
   inputClass as shellInputClassName,
   selectClass as shellSelectClassName,
   textareaClass as shellTextareaClass,
@@ -121,8 +134,13 @@ import { useSecurePersistedState } from "@/lib/secure-persist";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 
 const selectClassName = shellSelectClassName;
+const formSelectClassName = cn(
+  shellInputClassName,
+  "w-full border border-input px-2.5 py-1 text-sm font-normal text-foreground hover:bg-card focus-visible:ring-2 focus-visible:ring-ring/25"
+);
 const textareaClassName = shellTextareaClass;
 const DEFAULT_PROVIDER_SORT: SortStack = [{ field: "provider", dir: "asc" }];
+const LEGACY_PROVIDER_TABLE_QUERY_KEYS = ["filters", "sort", "density", "hide"] as const;
 const PROVIDER_REALTIME_EVENTS = [
   "provider.created",
   "provider.updated",
@@ -137,6 +155,9 @@ const PROVIDER_REALTIME_EVENTS = [
   "provider.service_created",
   "provider.service_updated",
   "provider.service_deleted",
+  "provider.staff_created",
+  "provider.staff_updated",
+  "provider.staff_deleted",
 ] as const;
 
 function cardClass(extra?: string) {
@@ -144,6 +165,13 @@ function cardClass(extra?: string) {
     "rounded-[1.75rem] border border-border/70 bg-card",
     extra
   );
+}
+
+function stripLegacyProviderTableQuery(params: URLSearchParams) {
+  for (const key of LEGACY_PROVIDER_TABLE_QUERY_KEYS) {
+    params.delete(key);
+  }
+  return params;
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -154,6 +182,151 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
       </span>
       {children}
     </label>
+  );
+}
+
+function normalizeSpecializationKey(value: string) {
+  return normalizeSpecializationLabelKey(value);
+}
+
+function splitSpecializationValue(value: string) {
+  const seen = new Set<string>();
+  return value.split(",").flatMap((part) => {
+    const trimmed = part.trim();
+    const key = normalizeSpecializationKey(trimmed);
+    if (!trimmed || seen.has(key)) return [];
+    seen.add(key);
+    return [trimmed];
+  });
+}
+
+function joinSpecializationValue(values: string[]) {
+  return values.join(", ");
+}
+
+function firstSpecializationValue(value: string) {
+  return splitSpecializationValue(value)[0] ?? "";
+}
+
+function specializationRuLabel(item: SpecializationItem) {
+  return specializationLabelForItem(item, "ru");
+}
+
+function specializationDeLabel(item: SpecializationItem) {
+  return specializationLabelForItem(item, "de");
+}
+
+function specializationOptionLabel(item: SpecializationItem, lang: "de" | "ru") {
+  return specializationLabelForItem(item, lang);
+}
+
+function specializationOptionValue(item: SpecializationItem) {
+  return item.name_en || item.code;
+}
+
+function specializationDisplayValue(value: string, items: SpecializationItem[], lang: "de" | "ru") {
+  const key = normalizeSpecializationKey(value);
+  const match = items.find((item) =>
+    [
+      item.code,
+      item.name_en,
+      item.name_de,
+      item.name_ru,
+    ].some((candidate) => candidate && normalizeSpecializationKey(candidate) === key),
+  );
+  return match ? specializationOptionLabel(match, lang) : specializationLabelForValue(value, items, lang);
+}
+
+function SpecializationMultiSelect({
+  value,
+  items,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  items: SpecializationItem[];
+  disabled?: boolean;
+  onChange: (value: string) => void;
+}) {
+  const { t, lang } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+  const selected = useMemo(() => splitSpecializationValue(value), [value]);
+  const selectedKeys = useMemo(
+    () => new Set(selected.map(normalizeSpecializationKey)),
+    [selected],
+  );
+  const options = useMemo(() => {
+    const seen = new Set<string>();
+    return items.flatMap((item) => {
+      const value = specializationOptionValue(item).trim();
+      const label = specializationOptionLabel(item, lang).trim();
+      const key = normalizeSpecializationKey(value);
+      if (!value || !label || seen.has(key)) return [];
+      if (!item.is_active && !selectedKeys.has(key)) return [];
+      seen.add(key);
+      return [{ key: item.id || item.code || key, value, label }];
+    });
+  }, [items, lang, selectedKeys]);
+  const availableOptions = options.filter(
+    (option) => !selectedKeys.has(normalizeSpecializationKey(option.value)),
+  );
+  const selectPlaceholder = l("providers_specialization_select_placeholder");
+  const removeLabel = l("providers_specialization_remove");
+
+  const commit = (next: string[]) => onChange(joinSpecializationValue(next));
+  const addSpecialization = (nextValue: string) => {
+    const trimmed = nextValue.trim();
+    const key = normalizeSpecializationKey(trimmed);
+    if (!trimmed || selectedKeys.has(key)) return;
+    commit([...selected, trimmed]);
+  };
+  const removeSpecialization = (target: string) => {
+    const targetKey = normalizeSpecializationKey(target);
+    commit(selected.filter((item) => normalizeSpecializationKey(item) !== targetKey));
+  };
+
+  return (
+    <div className="space-y-2">
+      <NativeComboboxSelect
+        value=""
+        onChange={(event) => addSpecialization(event.target.value)}
+        className={formSelectClassName}
+        disabled={disabled || availableOptions.length === 0}
+      >
+        <option value="">{selectPlaceholder}</option>
+        {availableOptions.map((option) => (
+          <option key={option.key} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </NativeComboboxSelect>
+      {selected.length > 0 ? (
+        <div className="flex min-h-8 flex-wrap gap-1.5 rounded-lg border border-border/70 bg-muted/20 p-1.5">
+          {selected.map((item) => (
+            <Badge
+              key={item}
+              variant="secondary"
+              className="h-7 max-w-full gap-1.5 rounded-full px-2.5 text-[12px] font-medium"
+            >
+              <span className="min-w-0 truncate">
+                {specializationDisplayValue(item, items, lang)}
+              </span>
+              {!disabled ? (
+                <button
+                  type="button"
+                  onClick={() => removeSpecialization(item)}
+                  className="inline-flex size-4 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground"
+                  aria-label={`${removeLabel}: ${item}`}
+                  title={`${removeLabel}: ${item}`}
+                >
+                  <X className="size-3" />
+                </button>
+              ) : null}
+            </Badge>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -201,12 +374,17 @@ type ProvidersPageProps = {
 };
 
 type ProvidersPageState = {
-  filterPredicates: FilterPredicate[];
   sortStack: SortStack;
   providers: ProviderSummary[];
   listBusy: boolean;
   listError: string;
   listVersion: number;
+  specializations: SpecializationItem[];
+  specializationDialogOpen: boolean;
+  specializationBusy: boolean;
+  specializationError: string;
+  staffRoles: ProviderStaffRoleItem[];
+  parentProviderOptions: ProviderSummary[];
   createOpen: boolean;
   createBusy: boolean;
   createError: string;
@@ -229,6 +407,13 @@ type ProvidersPageState = {
   serviceDialogOpen: boolean;
   serviceBusy: boolean;
   serviceError: string;
+  staffForm: StaffFormState;
+  staffDialogOpen: boolean;
+  staffRoleDialogOpen: boolean;
+  staffRoleBusy: boolean;
+  staffRoleError: string;
+  staffBusy: boolean;
+  staffError: string;
 };
 
 type ProvidersPagePatch =
@@ -260,20 +445,10 @@ function createProvidersPageFieldPatch<K extends keyof ProvidersPageState>(
 
 function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}) {
   const { user } = useAuth();
-  const { t } = useLang();
-  const tr = t as unknown as Record<string, string>;
+  const { t, lang } = useLang();
+  const tr = { ...t.uiText, ...t } as unknown as Record<string, string>;
   const l = (key: string) => t.uiText[key] ?? key;
   const detailPageMode = Boolean(detailRouteId);
-  const providerColumnGroupLabels = useMemo(
-    () => ({
-      identity: t.operations_column_group_identity,
-      registry: t.operations_column_group_registry,
-      contact: t.operations_column_group_contact,
-      activity: t.operations_column_group_activity,
-      audit: t.operations_column_group_audit,
-    }),
-    [t],
-  );
   const { staffGo } = useStaffNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = useMemo(() => providerPermissions(user?.role), [user?.role]);
@@ -350,32 +525,22 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     [setPersistedProviderFilters],
   );
   const deferredSearch = useDeferredValue(filters.search);
-  const [hiddenColumns, setHiddenColumns] = useVersionedLocalStorage<string[]>(
-    "providers.hiddenColumns",
-    DEFAULT_PROVIDER_HIDDEN_COLUMNS,
-    1,
-  );
-  const [frozenColumns, setFrozenColumns] = useVersionedLocalStorage<string[]>(
-    "providers.frozenColumns",
-    DEFAULT_PROVIDER_FROZEN_COLUMNS,
-    1,
-  );
-  const [density, setDensity] = useLocalStorage<DensityLevel>("providers.density", "compact");
   const [pageState, dispatchPageState] = useReducer(
     providersPageReducer,
     undefined,
     (): ProvidersPageState => {
-      const tableState =
-        typeof window === "undefined"
-          ? null
-          : readDataTableState(new URLSearchParams(window.location.search));
       return {
-        filterPredicates: tableState?.filters ?? [],
-        sortStack: tableState?.sort?.length ? tableState.sort : DEFAULT_PROVIDER_SORT,
+        sortStack: DEFAULT_PROVIDER_SORT,
         providers: [],
         listBusy: false,
         listError: "",
         listVersion: 0,
+        specializations: [],
+        specializationDialogOpen: false,
+        specializationBusy: false,
+        specializationError: "",
+        staffRoles: [],
+        parentProviderOptions: [],
         createOpen: false,
         createBusy: false,
         createError: "",
@@ -398,16 +563,28 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
         serviceDialogOpen: false,
         serviceBusy: false,
         serviceError: "",
+        staffForm: blankStaffForm(),
+        staffDialogOpen: false,
+        staffRoleDialogOpen: false,
+        staffRoleBusy: false,
+        staffRoleError: "",
+        staffBusy: false,
+        staffError: "",
       };
     },
   );
   const {
-    filterPredicates,
     sortStack,
     providers,
     listBusy,
     listError,
     listVersion,
+    specializations,
+    specializationDialogOpen,
+    specializationBusy,
+    specializationError,
+    staffRoles,
+    parentProviderOptions,
     createOpen,
     createBusy,
     createError,
@@ -430,15 +607,18 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     serviceDialogOpen,
     serviceBusy,
     serviceError,
+    staffForm,
+    staffDialogOpen,
+    staffRoleDialogOpen,
+    staffRoleBusy,
+    staffRoleError,
+    staffBusy,
+    staffError,
   } = pageState;
   const setProvidersPageField = <K extends keyof ProvidersPageState>(
     field: K,
     value: SetStateAction<ProvidersPageState[K]>,
   ) => dispatchPageState(createProvidersPageFieldPatch(field, value));
-  const setFilterPredicatesState = (value: SetStateAction<FilterPredicate[]>) =>
-    setProvidersPageField("filterPredicates", value);
-  const setSortStackState = (value: SetStateAction<SortStack>) =>
-    setProvidersPageField("sortStack", value);
   const setProviders = (value: SetStateAction<ProviderSummary[]>) =>
     setProvidersPageField("providers", value);
   const setListBusy = (value: SetStateAction<boolean>) =>
@@ -447,6 +627,18 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     setProvidersPageField("listError", value);
   const setListVersion = (value: SetStateAction<number>) =>
     setProvidersPageField("listVersion", value);
+  const setSpecializations = (value: SetStateAction<SpecializationItem[]>) =>
+    setProvidersPageField("specializations", value);
+  const setSpecializationDialogOpen = (value: SetStateAction<boolean>) =>
+    setProvidersPageField("specializationDialogOpen", value);
+  const setSpecializationBusy = (value: SetStateAction<boolean>) =>
+    setProvidersPageField("specializationBusy", value);
+  const setSpecializationError = (value: SetStateAction<string>) =>
+    setProvidersPageField("specializationError", value);
+  const setStaffRoles = (value: SetStateAction<ProviderStaffRoleItem[]>) =>
+    setProvidersPageField("staffRoles", value);
+  const setParentProviderOptions = (value: SetStateAction<ProviderSummary[]>) =>
+    setProvidersPageField("parentProviderOptions", value);
   const setCreateOpen = (value: SetStateAction<boolean>) =>
     setProvidersPageField("createOpen", value);
   const setCreateBusy = (value: SetStateAction<boolean>) =>
@@ -491,6 +683,20 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     setProvidersPageField("serviceBusy", value);
   const setServiceError = (value: SetStateAction<string>) =>
     setProvidersPageField("serviceError", value);
+  const setStaffForm = (value: SetStateAction<StaffFormState>) =>
+    setProvidersPageField("staffForm", value);
+  const setStaffDialogOpen = (value: SetStateAction<boolean>) =>
+    setProvidersPageField("staffDialogOpen", value);
+  const setStaffRoleDialogOpen = (value: SetStateAction<boolean>) =>
+    setProvidersPageField("staffRoleDialogOpen", value);
+  const setStaffRoleBusy = (value: SetStateAction<boolean>) =>
+    setProvidersPageField("staffRoleBusy", value);
+  const setStaffRoleError = (value: SetStateAction<string>) =>
+    setProvidersPageField("staffRoleError", value);
+  const setStaffBusy = (value: SetStateAction<boolean>) =>
+    setProvidersPageField("staffBusy", value);
+  const setStaffError = (value: SetStateAction<string>) =>
+    setProvidersPageField("staffError", value);
 
   const effectiveFilters = useMemo<ProviderFilters>(
     () => ({ ...filters, search: deferredSearch || filters.search }),
@@ -504,35 +710,16 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 
   const { columns, metrics, sortedAndFilteredProviders } = useProvidersListTableModel({
     deferredSearch,
-    filterPredicates,
-    frozenColumns,
     providers,
     sortStack,
     tr,
   });
 
-  const anyFilterActive =
-    filters.search.trim() !== "" ||
-    filters.providerType !== (permissions.forceNonMedical ? "non_medical" : "") ||
-    filters.activeOnly !== DEFAULT_FILTERS.activeOnly ||
-    filters.hasContract !== "" ||
-    filterPredicates.length > 0;
-
-  function setFilterPredicates(next: FilterPredicate[]) {
-    setFilterPredicatesState(next);
-    const params = writeDataTableState(new URLSearchParams(searchParams), { filters: next });
-    setSearchParams(params, { replace: true });
-  }
-
-  function setSortStack(next: SortStack) {
-    setSortStackState(next);
-    const params = writeDataTableState(new URLSearchParams(searchParams), { sort: next });
-    setSearchParams(params, { replace: true });
-  }
-
   function setSearch(value: string) {
     setFilters((current) => ({ ...current, search: value }));
-    const params = writeDataTableState(new URLSearchParams(searchParams), { search: value });
+    const params = stripLegacyProviderTableQuery(
+      writeDataTableState(new URLSearchParams(searchParams), { search: value }),
+    );
     setSearchParams(params, { replace: true });
   }
 
@@ -541,26 +728,13 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     syncQuery({ [queryKey]: value || null });
   }
 
-  function handleColumnFreezeChange(columnId: string, frozen: boolean) {
-    setFrozenColumns((current) => {
-      if (frozen) {
-        if (current.includes(columnId) || current.length >= MAX_PROVIDER_FROZEN_COLUMNS) {
-          return current;
-        }
-        return [...current, columnId];
-      }
-      return current.filter((id) => id !== columnId);
-    });
-  }
-
   function exportProviders() {
-    const visibleColumns = columns.filter((column) => !hiddenColumns.includes(column.id) || column.required);
     const stamp = new Date().toISOString().slice(0, 10);
-    exportCsv(sortedAndFilteredProviders, visibleColumns, `providers-${stamp}.csv`);
+    exportCsv(sortedAndFilteredProviders, columns, `providers-${stamp}.csv`);
   }
 
   function syncQuery(next: Record<string, string | null>) {
-    const params = new URLSearchParams(searchParams);
+    const params = stripLegacyProviderTableQuery(new URLSearchParams(searchParams));
     Object.entries(next).forEach(([key, value]) => {
       if (value) {
         params.set(key, value);
@@ -609,6 +783,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     setProviderError("");
     setDoctorError("");
     setServiceError("");
+    setStaffError("");
   }, []);
 
   const applyProviderDetail = useCallback((item: ProviderDetail) => {
@@ -675,6 +850,31 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     listVersion,
     startProviderListLoad,
   ]);
+
+  useEffect(() => {
+    if (!permissions.canViewPage) return;
+    let cancelled = false;
+    void Promise.all([
+      fetchSpecializationsForAdmin(),
+      fetchProviders("/providers?active_only=true"),
+      fetchProviderStaffRoles(true),
+    ])
+      .then(([specializationItems, providerItems, roleItems]) => {
+        if (cancelled) return;
+        setSpecializations(specializationItems);
+        setParentProviderOptions(providerItems);
+        setStaffRoles(roleItems);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSpecializations([]);
+        setParentProviderOptions([]);
+        setStaffRoles([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [permissions.canViewPage]);
 
   useEffect(() => {
     const shouldLoadDetail = detailOpen || detailPageMode;
@@ -761,24 +961,6 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 
   function openProvider(id: string) {
     staffGo(`/providers/${id}`);
-  }
-
-  function resetFilters() {
-    setFilters({
-      ...DEFAULT_FILTERS,
-      providerType: permissions.forceNonMedical ? "non_medical" : "",
-    });
-    setFilterPredicatesState([]);
-    setSortStackState(DEFAULT_PROVIDER_SORT);
-    const params = writeDataTableState(new URLSearchParams(searchParams), {
-      filters: [],
-      sort: DEFAULT_PROVIDER_SORT,
-      search: "",
-    });
-    params.delete("provider_type");
-    params.delete("active");
-    params.delete("contract");
-    setSearchParams(params, { replace: true });
   }
 
   function openCreateSheet() {
@@ -984,6 +1166,170 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     }
   }
 
+  async function handleStaffSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!detail) return;
+
+    setStaffBusy(true);
+    setStaffError("");
+
+    try {
+      await saveProviderStaff(detail.id, staffForm.id, toStaffPayload(staffForm));
+      setStaffDialogOpen(false);
+      setStaffForm(blankStaffForm());
+      refreshList();
+      refreshDetail();
+    } catch (error) {
+      setStaffError(error instanceof Error ? error.message : t.common_failed_update);
+    } finally {
+      setStaffBusy(false);
+    }
+  }
+
+  async function reloadSpecializations() {
+    const items = await fetchSpecializationsForAdmin();
+    setSpecializations(items);
+  }
+
+  async function handleCreateSpecialization(payload: Record<string, unknown>) {
+    setSpecializationBusy(true);
+    setSpecializationError("");
+
+    try {
+      await createSpecialization(payload);
+      await reloadSpecializations();
+    } catch (error) {
+      setSpecializationError(error instanceof Error ? error.message : t.common_failed_update);
+      throw error;
+    } finally {
+      setSpecializationBusy(false);
+    }
+  }
+
+  async function handleUpdateSpecialization(
+    specializationId: string,
+    payload: Record<string, unknown>,
+  ) {
+    setSpecializationBusy(true);
+    setSpecializationError("");
+
+    try {
+      await updateSpecialization(specializationId, payload);
+      await reloadSpecializations();
+      refreshList();
+      refreshDetail();
+    } catch (error) {
+      setSpecializationError(error instanceof Error ? error.message : t.common_failed_update);
+      throw error;
+    } finally {
+      setSpecializationBusy(false);
+    }
+  }
+
+  async function handleToggleSpecialization(specializationId: string, active: boolean) {
+    setSpecializationBusy(true);
+    setSpecializationError("");
+
+    try {
+      await setSpecializationActive(specializationId, active);
+      await reloadSpecializations();
+    } catch (error) {
+      setSpecializationError(error instanceof Error ? error.message : t.common_failed_update);
+    } finally {
+      setSpecializationBusy(false);
+    }
+  }
+
+  function openSpecializationManager() {
+    setSpecializationError("");
+    setSpecializationDialogOpen(true);
+  }
+
+  async function reloadStaffRoles() {
+    const roles = await fetchProviderStaffRoles(true);
+    setStaffRoles(roles);
+  }
+
+  async function handleCreateStaffRole(payload: Record<string, unknown>) {
+    setStaffRoleBusy(true);
+    setStaffRoleError("");
+
+    try {
+      await createProviderStaffRole(payload);
+      await reloadStaffRoles();
+    } catch (error) {
+      setStaffRoleError(error instanceof Error ? error.message : t.common_failed_update);
+      throw error;
+    } finally {
+      setStaffRoleBusy(false);
+    }
+  }
+
+  async function handleUpdateStaffRole(roleId: string, payload: Record<string, unknown>) {
+    setStaffRoleBusy(true);
+    setStaffRoleError("");
+
+    try {
+      await updateProviderStaffRole(roleId, payload);
+      await reloadStaffRoles();
+    } catch (error) {
+      setStaffRoleError(error instanceof Error ? error.message : t.common_failed_update);
+      throw error;
+    } finally {
+      setStaffRoleBusy(false);
+    }
+  }
+
+  async function handleToggleStaffRole(roleId: string, active: boolean) {
+    setStaffRoleBusy(true);
+    setStaffRoleError("");
+
+    try {
+      await setProviderStaffRoleActive(roleId, active);
+      await reloadStaffRoles();
+    } catch (error) {
+      setStaffRoleError(error instanceof Error ? error.message : t.common_failed_update);
+    } finally {
+      setStaffRoleBusy(false);
+    }
+  }
+
+  function openStaffRoleManager() {
+    setStaffRoleError("");
+    setStaffRoleDialogOpen(true);
+  }
+
+  function handleStaffDialogOpenChange(open: boolean) {
+    setStaffDialogOpen(open);
+    if (!open) {
+      setStaffError("");
+      setStaffForm(blankStaffForm());
+    }
+  }
+
+  async function handleDeleteStaff(staffId: string, staffName: string) {
+    if (!detail) return;
+    if (!window.confirm(formatUiText(t.providers_delete_doctor_confirm, { name: staffName }))) {
+      return;
+    }
+
+    setStaffBusy(true);
+    setStaffError("");
+
+    try {
+      await deleteProviderStaff(detail.id, staffId);
+      if (staffForm.id === staffId) {
+        setStaffForm(blankStaffForm());
+      }
+      refreshList();
+      refreshDetail();
+    } catch (error) {
+      setStaffError(error instanceof Error ? error.message : t.common_failed_update);
+    } finally {
+      setStaffBusy(false);
+    }
+  }
+
   if (!permissions.canViewPage) {
     return (
       <div className="space-y-6">
@@ -1066,6 +1412,9 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     >
                       <ProviderFormFields
                         form={providerForm}
+                        specializations={specializations}
+                        parentProviderOptions={parentProviderOptions}
+                        currentProviderId={detail.id}
                         onChange={(field, value) =>
                           setProviderForm((current) => ({ ...current, [field]: value }))
                         }
@@ -1085,6 +1434,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     detail={detail}
                     busy={doctorBusy}
                     canManage={permissions.canManageRegistry}
+                    onManageSpecializations={openSpecializationManager}
                     onNew={() => {
                       setDoctorError("");
                       setDoctorForm(blankDoctorForm());
@@ -1096,6 +1446,25 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                       setDoctorDialogOpen(true);
                     }}
                     onDelete={handleDeleteDoctor}
+                  />
+
+                  <StaffSection
+                    detail={detail}
+                    busy={staffBusy}
+                    staffRoles={staffRoles}
+                    canManage={permissions.canManageRegistry}
+                    onManageRoles={openStaffRoleManager}
+                    onNew={() => {
+                      setStaffError("");
+                      setStaffForm(blankStaffForm());
+                      setStaffDialogOpen(true);
+                    }}
+                    onEdit={(staff) => {
+                      setStaffError("");
+                      setStaffForm(staffToForm(staff));
+                      setStaffDialogOpen(true);
+                    }}
+                    onDelete={handleDeleteStaff}
                   />
 
                   <ServiceSection
@@ -1151,11 +1520,15 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             open={doctorDialogOpen}
             onOpenChange={handleDoctorDialogOpenChange}
             form={doctorForm}
+            specializations={specializations}
             busy={doctorBusy}
             error={doctorError}
             onSubmit={handleDoctorSubmit}
             onChange={(field, value) =>
               setDoctorForm((current) => ({ ...current, [field]: value }))
+            }
+            onContactsChange={(contacts) =>
+              setDoctorForm((current) => ({ ...current, contacts }))
             }
           />
         ) : null}
@@ -1173,6 +1546,50 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             }
           />
         ) : null}
+
+        {detail ? (
+          <ProviderStaffFormSheet
+            open={staffDialogOpen}
+            onOpenChange={handleStaffDialogOpenChange}
+            form={staffForm}
+            staffRoles={staffRoles}
+            busy={staffBusy}
+            error={staffError}
+            onSubmit={handleStaffSubmit}
+            onChange={(field, value) =>
+              setStaffForm((current) => ({ ...current, [field]: value }))
+            }
+            onContactsChange={(contacts) =>
+              setStaffForm((current) => ({ ...current, contacts }))
+            }
+          />
+        ) : null}
+
+        {permissions.canManageRegistry ? (
+          <SpecializationManagerSheet
+            open={specializationDialogOpen}
+            items={specializations}
+            busy={specializationBusy}
+            error={specializationError}
+            onOpenChange={setSpecializationDialogOpen}
+            onCreate={handleCreateSpecialization}
+            onUpdate={handleUpdateSpecialization}
+            onToggleActive={handleToggleSpecialization}
+          />
+        ) : null}
+
+        {permissions.canManageRegistry ? (
+          <StaffRoleManagerSheet
+            open={staffRoleDialogOpen}
+            roles={staffRoles}
+            busy={staffRoleBusy}
+            error={staffRoleError}
+            onOpenChange={setStaffRoleDialogOpen}
+            onCreate={handleCreateStaffRole}
+            onUpdate={handleUpdateStaffRole}
+            onToggleActive={handleToggleStaffRole}
+          />
+        ) : null}
       </>
     );
   }
@@ -1185,14 +1602,16 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           actions={
             <>
               {permissions.canManageRegistry ? (
-                <Button
-                  type="button"
-                  className="h-9 rounded-lg px-3.5"
-                  onClick={openCreateSheet}
-                >
-                  <Plus className="size-4" />
-                  {t.providers_new}
-                </Button>
+                <>
+                  <Button
+                    type="button"
+                    className="h-9 rounded-lg px-3.5"
+                    onClick={openCreateSheet}
+                  >
+                    <Plus className="size-4" />
+                    {t.providers_new}
+                  </Button>
+                </>
               ) : null}
             </>
           }
@@ -1224,7 +1643,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
         <div className="relative z-30 flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
             <div className="relative min-w-[240px] flex-1 sm:max-w-sm">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -tranzinc-y-1/2 text-muted-foreground" />
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={filters.search}
                 onChange={(event) => setSearch(event.target.value)}
@@ -1235,7 +1654,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   }
                 }}
                 placeholder={t.common_search}
-                className="h-8 w-full rounded-lg bg-background pl-8 text-[13px]"
+                className="h-8 w-full rounded-lg bg-card pl-8 text-[13px]"
               />
             </div>
 
@@ -1243,7 +1662,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               value={filters.providerType}
               onChange={(event) => setServerFilter("providerType", event.target.value, "provider_type")}
               disabled={permissions.forceNonMedical}
-              className={cn(selectClassName, "h-8 w-[170px] bg-background text-[13px]")}
+              className={cn(selectClassName, "h-8 w-[170px] bg-card text-[13px]")}
             >
               <option value="">{t.providers_all}</option>
               <option value="medical">{t.providers_type_medical}</option>
@@ -1253,7 +1672,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             <NativeComboboxSelect
               value={filters.activeOnly}
               onChange={(event) => setServerFilter("activeOnly", event.target.value, "active")}
-              className={cn(selectClassName, "h-8 w-[140px] bg-background text-[13px]")}
+              className={cn(selectClassName, "h-8 w-[140px] bg-card text-[13px]")}
             >
               <option value="">{t.providers_all}</option>
               <option value="true">{t.common_active}</option>
@@ -1263,7 +1682,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             <NativeComboboxSelect
               value={filters.hasContract}
               onChange={(event) => setServerFilter("hasContract", event.target.value, "contract")}
-              className={cn(selectClassName, "h-8 w-[160px] bg-background text-[13px]")}
+              className={cn(selectClassName, "h-8 w-[160px] bg-card text-[13px]")}
             >
               <option value="">{t.providers_contract}</option>
               <option value="true">{t.providers_contract_with}</option>
@@ -1275,6 +1694,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                 type="button"
                 variant="outline"
                 size="icon-sm"
+                className="!bg-card hover:!bg-card"
                 title={t.common_refresh}
                 aria-label={t.common_refresh}
                 onClick={() => {
@@ -1290,6 +1710,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                 type="button"
                 variant="outline"
                 size="icon-sm"
+                className="!bg-card hover:!bg-card"
                 title={t.common_export}
                 aria-label={t.common_export}
                 onClick={exportProviders}
@@ -1298,144 +1719,35 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               </Button>
             </div>
           </div>
-
-          <div className="flex flex-wrap items-center gap-1.5">
-            <FilterBuilder
-              columns={columns}
-              rows={providers}
-              filters={filterPredicates}
-              onChange={setFilterPredicates}
-              translations={{
-                addFilter: t.table_filter,
-                clearAll: t.table_sort_clear,
-                searchPlaceholder: t.table_filter_search_fields,
-                noFields: t.table_filter_no_fields,
-                remove: t.table_filter_remove,
-                valuePlaceholder: t.table_filter_value,
-                yes: t.common_yes,
-                no: t.common_no,
-                operatorLabels: {
-                  contains: t.filter_op_contains,
-                  does_not_contain: t.filter_op_does_not_contain,
-                  is_empty: t.filter_op_is_empty,
-                  is_not_empty: t.filter_op_is_not_empty,
-                  is: t.filter_op_is,
-                  is_not: t.filter_op_is_not,
-                  is_any_of: t.filter_op_is_any_of,
-                  is_none_of: t.filter_op_is_none_of,
-                  has_any: t.filter_op_has_any,
-                  has_all: t.filter_op_has_all,
-                  has_none: t.filter_op_has_none,
-                  before: t.filter_op_before,
-                  after: t.filter_op_after,
-                  between: t.filter_op_between,
-                  last_n_days: t.filter_op_last_n_days,
-                  equals: t.filter_op_equals,
-                },
-              }}
-            />
-            <SortBuilder
-              columns={columns}
-              value={sortStack}
-              onChange={setSortStack}
-              translations={{
-                buttonLabel: t.common_sort,
-                addSort: t.table_sort_add,
-                clearAll: t.table_sort_clear,
-                ascending: t.table_sort_ascending,
-                descending: t.table_sort_descending,
-                emptyHint: t.common_sort,
-                moveUp: t.table_sort_move_up,
-                moveDown: t.table_sort_move_down,
-                remove: t.table_sort_remove,
-              }}
-            />
-            <ColumnVisibilityMenu
-              columns={columns}
-              hiddenColumns={hiddenColumns}
-              onChange={setHiddenColumns}
-              defaultHidden={DEFAULT_PROVIDER_HIDDEN_COLUMNS}
-              frozenColumns={frozenColumns}
-              onFrozenColumnsChange={setFrozenColumns}
-              defaultFrozen={DEFAULT_PROVIDER_FROZEN_COLUMNS}
-              maxFrozenColumns={MAX_PROVIDER_FROZEN_COLUMNS}
-              groupLabels={providerColumnGroupLabels}
-              buttonLabel={t.table_columns}
-              searchPlaceholder={t.table_columns_search}
-              resetLabel={t.common_reset}
-              showAllLabel={t.table_columns_show_all}
-              hideAllLabel={t.table_columns_hide_all}
-              noMatchLabel={t.common_no_results}
-              requiredNoteLabel={t.table_columns_required}
-              freezeLabel={t.table_columns_freeze}
-              unfreezeLabel={t.table_columns_unfreeze}
-              frozenNoteLabel={t.table_columns_frozen}
-            />
-            <DensityToggle
-              value={density}
-              onChange={setDensity}
-              ariaLabel={t.table_density}
-              labels={{
-                comfortable: t.table_density_comfortable,
-                compact: t.table_density_compact,
-                condensed: t.table_density_condensed,
-              }}
-            />
-            {anyFilterActive ? (
-              <Button type="button" variant="ghost" size="sm" onClick={resetFilters}>
-                <X className="size-3.5" />
-                {l("providers_reset")}
-              </Button>
-            ) : null}
-          </div>
         </div>
 
         {/* Error banner */}
         {listError ? <Banner tone="error">{listError}</Banner> : null}
 
-        <DataTable
-          rows={sortedAndFilteredProviders}
-          columns={columns}
-          hiddenColumns={hiddenColumns}
-          sort={sortStack}
-          onSortChange={setSortStack}
-          onColumnFreezeChange={handleColumnFreezeChange}
-          isColumnFreezeDisabled={(column, nextFrozen) =>
-            nextFrozen &&
-            !frozenColumns.includes(column.id) &&
-            frozenColumns.length >= MAX_PROVIDER_FROZEN_COLUMNS
-          }
-          columnHeaderContextMenuLabels={{
-            column: tr.table_columns,
-            freeze: tr.table_columns_freeze,
-            unfreeze: tr.table_columns_unfreeze,
-            frozen: tr.table_columns_frozen,
-            freezeLimitReached: tr.table_columns_freeze_limit,
-          }}
-          density={density}
-          rowId={(provider) => provider.id}
-          activeRowId={selectedId}
-          onRowClick={(provider) => openProvider(provider.id)}
-          loading={listBusy && providers.length === 0}
-          emptyState={<span className="text-sm text-muted-foreground">{t.patients_no_match}</span>}
-          className="min-h-[460px]"
-          footer={
-            <div className="flex items-center justify-between">
-              <span className="tabular-nums">
-                {sortedAndFilteredProviders.length === providers.length
-                  ? `${providers.length}`
-                  : `${sortedAndFilteredProviders.length} / ${providers.length}`}{" "}
-                {t.providers_title.toLowerCase()}
-              </span>
-              {listBusy && providers.length > 0 ? (
-                <span className="inline-flex items-center gap-1">
-                  <LoaderCircle className="size-3 animate-spin" />
-                  {t.common_loading}
-                </span>
-              ) : null}
-            </div>
-          }
-        />
+        {listBusy && providers.length === 0 ? (
+          <div className="flex min-h-[360px] items-center justify-center rounded-lg border border-border/70 bg-card text-sm text-muted-foreground">
+            <span className="inline-flex items-center gap-2">
+              <LoaderCircle className="size-4 animate-spin" />
+              {t.common_loading}
+            </span>
+          </div>
+        ) : (
+          <>
+            {sortedAndFilteredProviders.length > 0 ? (
+              <ProviderHierarchyTimeline
+                lang={lang}
+                providers={sortedAndFilteredProviders}
+                selectedProviderId={selectedId}
+                tr={tr}
+                onProviderClick={openProvider}
+              />
+            ) : (
+              <div className="flex min-h-[260px] items-center justify-center rounded-lg border border-dashed border-border/70 bg-card text-sm text-muted-foreground">
+                {t.patients_no_match}
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       <Sheet open={createOpen} onOpenChange={setCreateOpen}>
@@ -1458,6 +1770,8 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                 {createError ? <Banner tone="error">{createError}</Banner> : null}
                 <ProviderFormFields
                   form={createForm}
+                  specializations={specializations}
+                  parentProviderOptions={parentProviderOptions}
                   onChange={(field, value) =>
                     setCreateForm((current) => ({ ...current, [field]: value }))
                   }
@@ -1480,8 +1794,10 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             setProviderError("");
             setDoctorError("");
             setServiceError("");
+            setStaffError("");
             setDoctorForm(blankDoctorForm());
             setServiceForm(blankServiceForm());
+            setStaffForm(blankStaffForm());
             syncQuery({ provider: null });
           }
         }}
@@ -1548,6 +1864,9 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   >
                     <ProviderFormFields
                       form={providerForm}
+                      specializations={specializations}
+                      parentProviderOptions={parentProviderOptions}
+                      currentProviderId={detail.id}
                       onChange={(field, value) =>
                         setProviderForm((current) => ({ ...current, [field]: value }))
                       }
@@ -1567,6 +1886,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   detail={detail}
                   busy={doctorBusy}
                   canManage={permissions.canManageRegistry}
+                  onManageSpecializations={openSpecializationManager}
                   onNew={() => {
                     setDoctorError("");
                     setDoctorForm(blankDoctorForm());
@@ -1578,6 +1898,25 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     setDoctorDialogOpen(true);
                   }}
                   onDelete={handleDeleteDoctor}
+                />
+
+                <StaffSection
+                  detail={detail}
+                  busy={staffBusy}
+                  staffRoles={staffRoles}
+                  canManage={permissions.canManageRegistry}
+                  onManageRoles={openStaffRoleManager}
+                  onNew={() => {
+                    setStaffError("");
+                    setStaffForm(blankStaffForm());
+                    setStaffDialogOpen(true);
+                  }}
+                  onEdit={(staff) => {
+                    setStaffError("");
+                    setStaffForm(staffToForm(staff));
+                    setStaffDialogOpen(true);
+                  }}
+                  onDelete={handleDeleteStaff}
                 />
 
                 <ServiceSection
@@ -1635,11 +1974,15 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           open={doctorDialogOpen}
           onOpenChange={handleDoctorDialogOpenChange}
           form={doctorForm}
+          specializations={specializations}
           busy={doctorBusy}
           error={doctorError}
           onSubmit={handleDoctorSubmit}
           onChange={(field, value) =>
             setDoctorForm((current) => ({ ...current, [field]: value }))
+          }
+          onContactsChange={(contacts) =>
+            setDoctorForm((current) => ({ ...current, contacts }))
           }
         />
       ) : null}
@@ -1657,6 +2000,50 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           }
         />
       ) : null}
+
+      {detail ? (
+        <ProviderStaffFormSheet
+          open={staffDialogOpen}
+          onOpenChange={handleStaffDialogOpenChange}
+          form={staffForm}
+          staffRoles={staffRoles}
+          busy={staffBusy}
+          error={staffError}
+          onSubmit={handleStaffSubmit}
+        onChange={(field, value) =>
+          setStaffForm((current) => ({ ...current, [field]: value }))
+        }
+        onContactsChange={(contacts) =>
+          setStaffForm((current) => ({ ...current, contacts }))
+        }
+      />
+      ) : null}
+
+      {permissions.canManageRegistry ? (
+        <SpecializationManagerSheet
+          open={specializationDialogOpen}
+          items={specializations}
+          busy={specializationBusy}
+          error={specializationError}
+          onOpenChange={setSpecializationDialogOpen}
+          onCreate={handleCreateSpecialization}
+          onUpdate={handleUpdateSpecialization}
+          onToggleActive={handleToggleSpecialization}
+        />
+      ) : null}
+
+      {permissions.canManageRegistry ? (
+        <StaffRoleManagerSheet
+          open={staffRoleDialogOpen}
+          roles={staffRoles}
+          busy={staffRoleBusy}
+          error={staffRoleError}
+          onOpenChange={setStaffRoleDialogOpen}
+          onCreate={handleCreateStaffRole}
+          onUpdate={handleUpdateStaffRole}
+          onToggleActive={handleToggleStaffRole}
+        />
+      ) : null}
     </>
   );
 }
@@ -1665,18 +2052,22 @@ function ProviderDoctorFormSheet({
   open,
   onOpenChange,
   form,
+  specializations,
   busy,
   error,
   onSubmit,
   onChange,
+  onContactsChange,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   form: DoctorFormState;
+  specializations: SpecializationItem[];
   busy: boolean;
   error: string;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onChange: (field: keyof DoctorFormState, value: string) => void;
+  onContactsChange: (contacts: DoctorFormState["contacts"]) => void;
 }) {
   const { t } = useLang();
   const submitLabel = form.id ? t.common_save : t.providers_doctor_new;
@@ -1699,7 +2090,12 @@ function ProviderDoctorFormSheet({
           >
             <div className="space-y-3 rounded-xl p-4">
               {error ? <Banner tone="error">{error}</Banner> : null}
-              <DoctorFormFields form={form} onChange={onChange} />
+              <DoctorFormFields
+                form={form}
+                specializations={specializations}
+                onChange={onChange}
+                onContactsChange={onContactsChange}
+              />
             </div>
           </AdminSheetScaffold>
         </form>
@@ -1755,6 +2151,569 @@ function ProviderServiceFormSheet({
   );
 }
 
+function ProviderStaffFormSheet({
+  open,
+  onOpenChange,
+  form,
+  staffRoles,
+  busy,
+  error,
+  onSubmit,
+  onChange,
+  onContactsChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  form: StaffFormState;
+  staffRoles: ProviderStaffRoleItem[];
+  busy: boolean;
+  error: string;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onChange: (field: keyof StaffFormState, value: string) => void;
+  onContactsChange: (contacts: StaffFormState["contacts"]) => void;
+}) {
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+  const submitLabel = form.id ? t.common_save : l("providers_staff_new");
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
+        <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
+          <AdminSheetScaffold
+            title={form.id ? l("providers_staff_detail") : l("providers_staff_new")}
+            footer={
+              <SheetFormFooter
+                cancelLabel={t.common_cancel}
+                submitLabel={submitLabel}
+                submittingLabel={submitLabel}
+                submitting={busy}
+                onCancel={() => onOpenChange(false)}
+              />
+            }
+          >
+            <div className="space-y-3 rounded-xl p-4">
+              {error ? <Banner tone="error">{error}</Banner> : null}
+              <StaffFormFields
+                form={form}
+                staffRoles={staffRoles}
+                onChange={onChange}
+                onContactsChange={onContactsChange}
+              />
+            </div>
+          </AdminSheetScaffold>
+        </form>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+type SpecializationDraft = {
+  nameEn: string;
+  nameDe: string;
+  nameRu: string;
+  sortOrder: string;
+  isActive: boolean;
+};
+
+function blankSpecializationDraft(): SpecializationDraft {
+  return {
+    nameEn: "",
+    nameDe: "",
+    nameRu: "",
+    sortOrder: "1000",
+    isActive: true,
+  };
+}
+
+function specializationToDraft(item: SpecializationItem): SpecializationDraft {
+  return {
+    nameEn: item.name_en,
+    nameDe: item.name_de ?? "",
+    nameRu: item.name_ru ?? item.name_en ?? "",
+    sortOrder: String(item.sort_order),
+    isActive: item.is_active,
+  };
+}
+
+function specializationDraftPayload(draft: SpecializationDraft) {
+  const ruName = draft.nameRu.trim();
+  const deName = draft.nameDe.trim();
+  const fallbackName = ruName || deName;
+
+  return {
+    name_en: draft.nameEn.trim() || fallbackName,
+    name_de: deName || fallbackName || null,
+    name_ru: ruName || fallbackName || null,
+    sort_order: Number.parseInt(draft.sortOrder, 10) || 1000,
+    is_active: draft.isActive,
+  };
+}
+
+function SpecializationManagerSheet({
+  open,
+  items,
+  busy,
+  error,
+  onOpenChange,
+  onCreate,
+  onUpdate,
+  onToggleActive,
+}: {
+  open: boolean;
+  items: SpecializationItem[];
+  busy: boolean;
+  error: string;
+  onOpenChange: (open: boolean) => void;
+  onCreate: (payload: Record<string, unknown>) => Promise<void>;
+  onUpdate: (specializationId: string, payload: Record<string, unknown>) => Promise<void>;
+  onToggleActive: (specializationId: string, active: boolean) => Promise<void>;
+}) {
+  const { t, lang } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+  const [editingId, setEditingId] = useState("");
+  const [draft, setDraft] = useState<SpecializationDraft>(() => blankSpecializationDraft());
+  const editingItem = items.find((item) => item.id === editingId);
+
+  function handleOpenChange(nextOpen: boolean) {
+    if (!nextOpen) {
+      setEditingId("");
+      setDraft(blankSpecializationDraft());
+    }
+    onOpenChange(nextOpen);
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const payload = specializationDraftPayload(draft);
+    if (!payload.name_en) return;
+
+    if (editingId) {
+      await onUpdate(editingId, payload);
+    } else {
+      await onCreate(payload);
+    }
+    setEditingId("");
+    setDraft(blankSpecializationDraft());
+  }
+
+  function startEdit(item: SpecializationItem) {
+    setEditingId(item.id);
+    setDraft(specializationToDraft(item));
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={handleOpenChange}>
+      <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
+        <AdminSheetScaffold
+          title={l("providers_specializations_title")}
+          footer={
+            <SheetActionsFooter>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 rounded-lg"
+                onClick={() => handleOpenChange(false)}
+                disabled={busy}
+              >
+                {t.common_cancel}
+              </Button>
+              <Button
+                type="submit"
+                form="provider-specialization-form"
+                className="h-9 rounded-lg"
+                disabled={busy || !(draft.nameRu.trim() || draft.nameDe.trim())}
+              >
+                {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                {editingId
+                  ? l("providers_specialization_update")
+                  : l("providers_specialization_create")}
+              </Button>
+            </SheetActionsFooter>
+          }
+        >
+          <div className="space-y-4 p-4">
+            {error ? <Banner tone="error">{error}</Banner> : null}
+
+            <form id="provider-specialization-form" onSubmit={handleSubmit} className="space-y-3">
+              <Section
+                title={
+                  editingItem
+                    ? formatUiText(l("common_edit_label"), {
+                        label: specializationOptionLabel(editingItem, lang),
+                      })
+                    : l("providers_specialization_create")
+                }
+              >
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field label={l("providers_specialization_name_ru")}>
+                    <Input
+                      value={draft.nameRu}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, nameRu: event.target.value }))
+                      }
+                      className={shellInputClassName}
+                      required={!draft.nameDe.trim()}
+                    />
+                  </Field>
+                  <Field label={l("providers_specialization_name_de")}>
+                    <Input
+                      value={draft.nameDe}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, nameDe: event.target.value }))
+                      }
+                      className={shellInputClassName}
+                      required={!draft.nameRu.trim()}
+                    />
+                  </Field>
+                  <Field label={l("providers_specialization_sort_order")}>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={draft.sortOrder}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, sortOrder: event.target.value }))
+                      }
+                      className={shellInputClassName}
+                    />
+                  </Field>
+                </div>
+                <label className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={draft.isActive}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, isActive: event.target.checked }))
+                    }
+                    className={checkboxClass}
+                  />
+                  {l("providers_specialization_active")}
+                </label>
+              </Section>
+            </form>
+
+            <Section title={l("providers_specializations_list")}>
+              {items.length === 0 ? (
+                <EmptyPanel
+                  title={l("providers_specializations_title")}
+                  text={l("providers_specializations_empty")}
+                />
+              ) : (
+                <div className="space-y-2">
+                  {items.map((item) => (
+                    <div
+                      key={item.id}
+                      className="grid gap-3 rounded-lg border border-border bg-card/70 p-3 md:grid-cols-[minmax(0,1fr)_auto]"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="truncate text-sm font-semibold text-foreground">
+                            {specializationOptionLabel(item, lang)}
+                          </p>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "rounded-full px-2 py-0.5 text-[11px] font-medium",
+                              item.is_active
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : "border-zinc-200 bg-zinc-50 text-zinc-600",
+                            )}
+                          >
+                            {item.is_active ? t.common_active : t.common_inactive}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 truncate text-xs text-muted-foreground">
+                          {item.code} - {l("providers_specialization_sort_order")}: {item.sort_order}
+                        </p>
+                        <p className="mt-1 truncate text-xs text-muted-foreground">
+                          DE: {specializationDeLabel(item) || "-"} / RU: {specializationRuLabel(item) || "-"}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 rounded-lg bg-muted/20"
+                          disabled={busy}
+                          onClick={() => startEdit(item)}
+                        >
+                          {t.uiText.patients_edit ?? "Edit"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 rounded-lg bg-muted/20"
+                          disabled={busy}
+                          onClick={() => onToggleActive(item.id, !item.is_active)}
+                        >
+                          {item.is_active
+                            ? l("providers_specialization_deactivate")
+                            : l("providers_specialization_activate")}
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Section>
+          </div>
+        </AdminSheetScaffold>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+type StaffRoleDraft = {
+  nameDe: string;
+  nameRu: string;
+  sortOrder: string;
+  isActive: boolean;
+};
+
+function blankStaffRoleDraft(): StaffRoleDraft {
+  return {
+    nameDe: "",
+    nameRu: "",
+    sortOrder: "1000",
+    isActive: true,
+  };
+}
+
+function staffRoleToDraft(role: ProviderStaffRoleItem): StaffRoleDraft {
+  return {
+    nameDe: role.name_de ?? "",
+    nameRu: role.name_ru ?? "",
+    sortOrder: String(role.sort_order),
+    isActive: role.is_active,
+  };
+}
+
+function staffRoleDraftPayload(draft: StaffRoleDraft) {
+  const fallbackName = draft.nameRu.trim() || draft.nameDe.trim();
+
+  return {
+    name_en: fallbackName,
+    name_de: draft.nameDe.trim() || null,
+    name_ru: draft.nameRu.trim() || null,
+    sort_order: Number.parseInt(draft.sortOrder, 10) || 1000,
+    is_active: draft.isActive,
+  };
+}
+
+function StaffRoleManagerSheet({
+  open,
+  roles,
+  busy,
+  error,
+  onOpenChange,
+  onCreate,
+  onUpdate,
+  onToggleActive,
+}: {
+  open: boolean;
+  roles: ProviderStaffRoleItem[];
+  busy: boolean;
+  error: string;
+  onOpenChange: (open: boolean) => void;
+  onCreate: (payload: Record<string, unknown>) => Promise<void>;
+  onUpdate: (roleId: string, payload: Record<string, unknown>) => Promise<void>;
+  onToggleActive: (roleId: string, active: boolean) => Promise<void>;
+}) {
+  const { t, lang } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+  const [editingId, setEditingId] = useState("");
+  const [draft, setDraft] = useState<StaffRoleDraft>(() => blankStaffRoleDraft());
+  const editingRole = roles.find((role) => role.id === editingId);
+
+  function handleOpenChange(nextOpen: boolean) {
+    if (!nextOpen) {
+      setEditingId("");
+      setDraft(blankStaffRoleDraft());
+    }
+    onOpenChange(nextOpen);
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const payload = staffRoleDraftPayload(draft);
+    if (!payload.name_en) return;
+
+    if (editingId) {
+      await onUpdate(editingId, payload);
+    } else {
+      await onCreate(payload);
+    }
+    setEditingId("");
+    setDraft(blankStaffRoleDraft());
+  }
+
+  function startEdit(role: ProviderStaffRoleItem) {
+    setEditingId(role.id);
+    setDraft(staffRoleToDraft(role));
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={handleOpenChange}>
+      <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
+        <AdminSheetScaffold
+          title={l("providers_staff_roles_title")}
+          footer={
+            <SheetActionsFooter>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 rounded-lg"
+                onClick={() => handleOpenChange(false)}
+                disabled={busy}
+              >
+                {t.common_cancel}
+              </Button>
+              <Button
+                type="submit"
+                form="provider-staff-role-form"
+                className="h-9 rounded-lg"
+                disabled={busy || !(draft.nameRu.trim() || draft.nameDe.trim())}
+              >
+                {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                {editingId ? l("providers_staff_role_update") : l("providers_staff_role_create")}
+              </Button>
+            </SheetActionsFooter>
+          }
+        >
+          <div className="space-y-4 p-4">
+            {error ? <Banner tone="error">{error}</Banner> : null}
+
+            <form id="provider-staff-role-form" onSubmit={handleSubmit} className="space-y-3">
+              <Section
+                title={
+                  editingRole
+                    ? formatUiText(l("common_edit_label"), {
+                        label: staffRoleDisplayName(editingRole, lang),
+                      })
+                    : l("providers_staff_role_create")
+                }
+              >
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field label={l("providers_staff_role_name_ru")}>
+                    <Input
+                      value={draft.nameRu}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, nameRu: event.target.value }))
+                      }
+                      className={shellInputClassName}
+                      required
+                    />
+                  </Field>
+                  <Field label={l("providers_staff_role_name_de")}>
+                    <Input
+                      value={draft.nameDe}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, nameDe: event.target.value }))
+                      }
+                      className={shellInputClassName}
+                    />
+                  </Field>
+                  <Field label={l("providers_staff_role_sort_order")}>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={draft.sortOrder}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, sortOrder: event.target.value }))
+                      }
+                      className={shellInputClassName}
+                    />
+                  </Field>
+                </div>
+                <label className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={draft.isActive}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, isActive: event.target.checked }))
+                    }
+                    className={checkboxClass}
+                  />
+                  {l("providers_staff_role_active")}
+                </label>
+              </Section>
+            </form>
+
+            <Section title={l("providers_staff_roles_list")}>
+              {roles.length === 0 ? (
+                <EmptyPanel
+                  title={l("providers_staff_roles_title")}
+                  text={l("providers_staff_roles_empty")}
+                />
+              ) : (
+                <div className="space-y-2">
+                  {roles.map((role) => (
+                    <div
+                      key={role.id}
+                      className="grid gap-3 rounded-lg border border-border bg-card/70 p-3 md:grid-cols-[minmax(0,1fr)_auto]"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="truncate text-sm font-semibold text-foreground">
+                            {staffRoleDisplayName(role, lang)}
+                          </p>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "rounded-full px-2 py-0.5 text-[11px] font-medium",
+                              role.is_active
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : "border-zinc-200 bg-zinc-50 text-zinc-600",
+                            )}
+                          >
+                            {role.is_active ? t.common_active : t.common_inactive}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 truncate text-xs text-muted-foreground">
+                          {role.code} - {l("providers_staff_role_sort_order")}: {role.sort_order}
+                        </p>
+                        <p className="mt-1 truncate text-xs text-muted-foreground">
+                          DE: {role.name_de || "-"} / RU: {role.name_ru || "-"}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 rounded-lg bg-muted/20"
+                          disabled={busy}
+                          onClick={() => startEdit(role)}
+                        >
+                          {t.uiText.patients_edit ?? "Edit"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 rounded-lg bg-muted/20"
+                          disabled={busy}
+                          onClick={() => onToggleActive(role.id, !role.is_active)}
+                        >
+                          {role.is_active
+                            ? l("providers_staff_role_deactivate")
+                            : l("providers_staff_role_activate")}
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Section>
+          </div>
+        </AdminSheetScaffold>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 function ProvidersPage(...args: Parameters<typeof useProvidersPageContent>) {
   return useProvidersPageContent(...args);
 }
@@ -1782,6 +2741,14 @@ function ProviderOverviewSection({
     {
       label: t.providers_services,
       value: detail.services.length,
+    },
+    {
+      label: t.uiText.providers_staff ?? "providers_staff",
+      value: detail.staff.length,
+    },
+    {
+      label: t.uiText.providers_children ?? "providers_children",
+      value: detail.children.length,
     },
     {
       label: t.providers_linked_patients,
@@ -1873,7 +2840,7 @@ function ProviderSheetHero({
   onDeactivate: () => void;
   onDelete: () => void;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const l = (key: string) => t.uiText[key] ?? key;
   const isMedical = detail.provider_type === "medical";
@@ -1881,6 +2848,7 @@ function ProviderSheetHero({
     detail.legal_name && detail.legal_name !== detail.name ? detail.legal_name : null,
     providerMeta(detail),
   ].filter(Boolean).join(" - ");
+  const specializationLine = specializationText(detail.specializations, detail.fachbereich, lang);
 
   return (
     <section className="relative overflow-hidden rounded-xl border border-border bg-card px-7 py-4">
@@ -1924,6 +2892,20 @@ function ProviderSheetHero({
             >
               {providerTypeLabel(detail.provider_type, tr)}
             </Badge>
+            <Badge
+              variant="outline"
+              className="rounded-full border-border bg-muted/30 px-2 py-0.5 text-xs font-medium text-muted-foreground"
+            >
+              {humanizeCode(detail.organization_level)}
+            </Badge>
+            {detail.parent_provider_name ? (
+              <Badge
+                variant="outline"
+                className="rounded-full border-border bg-muted/30 px-2 py-0.5 text-xs font-medium text-muted-foreground"
+              >
+                {detail.parent_provider_name}
+              </Badge>
+            ) : null}
           </div>
           <div className="mt-4 grid gap-x-6 gap-y-2 text-xs text-muted-foreground sm:grid-cols-2">
             <HeroInfoLine icon={MapPin}>
@@ -1939,7 +2921,7 @@ function ProviderSheetHero({
               {detail.tax_id || t.common_not_set}
             </HeroInfoLine>
             <HeroInfoLine icon={Stethoscope}>
-              {detail.fachbereich || t.common_not_set}
+              {specializationLine || t.common_not_set}
             </HeroInfoLine>
           </div>
         </div>
@@ -2001,10 +2983,52 @@ function ProviderSheetHero({
   );
 }
 
+function specializationText(
+  specializations:
+    | { name_en?: string | null; name_de?: string | null; name_ru?: string | null; code?: string }[]
+    | undefined,
+  fallback?: string | null,
+  lang: "de" | "ru" = "de",
+) {
+  const labels = (specializations ?? [])
+    .map((item) => specializationOptionLabel(item as SpecializationItem, lang) || "")
+    .filter(Boolean);
+  if (labels.length) return labels.join(", ");
+  return fallback ? specializationLabelForValue(fallback, specializations ?? [], lang) : "";
+}
+
+function contactSummary(
+  contacts: { contact_kind: string; contact_type: string; value: string; is_primary?: boolean }[] | undefined,
+  fallbackPhone?: string | null,
+  fallbackEmail?: string | null,
+) {
+  const primaryPhone =
+    contacts?.find((contact) => contact.contact_kind === "phone" && contact.is_primary)?.value ??
+    contacts?.find((contact) => contact.contact_kind === "phone")?.value ??
+    fallbackPhone;
+  const primaryEmail =
+    contacts?.find((contact) => contact.contact_kind === "email" && contact.is_primary)?.value ??
+    contacts?.find((contact) => contact.contact_kind === "email")?.value ??
+    fallbackEmail;
+  return [primaryPhone, primaryEmail].filter(Boolean).join(" - ");
+}
+
+function staffRoleDisplayName(role: ProviderStaffRoleItem | undefined, lang: "de" | "ru") {
+  if (!role) return "";
+  return lang === "de"
+    ? role.name_de || role.name_ru || role.code
+    : role.name_ru || role.name_de || role.code;
+}
+
+function staffRoleLabel(code: string, roles: ProviderStaffRoleItem[], lang: "de" | "ru") {
+  return staffRoleDisplayName(roles.find((role) => role.code === code), lang) || humanizeCode(code);
+}
+
 function DoctorSection({
   detail,
   busy,
   canManage,
+  onManageSpecializations,
   onNew,
   onEdit,
   onDelete,
@@ -2012,11 +3036,12 @@ function DoctorSection({
   detail: ProviderDetail;
   busy: boolean;
   canManage: boolean;
+  onManageSpecializations: () => void;
   onNew: () => void;
   onEdit: (doctor: DoctorSummary) => void;
   onDelete: (doctorId: string, doctorName: string) => void;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
 
   return (
@@ -2034,16 +3059,28 @@ function DoctorSection({
           </span>
         </div>
         {canManage ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-8 justify-center rounded-lg bg-muted/20"
-            onClick={onNew}
-          >
-            <Plus className="size-3.5" />
-            {t.providers_doctor_new}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 justify-center rounded-lg bg-muted/20"
+              onClick={onManageSpecializations}
+            >
+              <BadgeCheck className="size-3.5" />
+              {l("providers_specializations_manage")}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 justify-center rounded-lg bg-muted/20"
+              onClick={onNew}
+            >
+              <Plus className="size-3.5" />
+              {t.providers_doctor_new}
+            </Button>
+          </div>
         ) : null}
       </div>
 
@@ -2056,7 +3093,10 @@ function DoctorSection({
         </div>
       ) : (
         <div className="mt-4 space-y-3">
-          {detail.doctors.map((doctor) => (
+          {detail.doctors.map((doctor) => {
+            const specializations = specializationText(doctor.specializations, doctor.fachbereich, lang);
+            const contacts = contactSummary(doctor.contacts, doctor.phone, doctor.email);
+            return (
             <details
               key={doctor.id}
               className="group overflow-hidden rounded-[1.4rem] border border-border bg-card"
@@ -2076,7 +3116,7 @@ function DoctorSection({
                         variant="outline"
                         className="rounded-full border-border bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
                       >
-                        {doctor.fachbereich || t.common_not_set}
+                        {specializations || t.common_not_set}
                       </Badge>
                       {doctor.languages.map((language) => (
                         <Badge
@@ -2089,7 +3129,7 @@ function DoctorSection({
                       ))}
                     </div>
                     <p className="mt-2 text-xs leading-snug text-muted-foreground">
-                      {doctor.phone || t.common_not_set} · {doctor.email || t.common_not_set}
+                      {contacts || t.common_not_set}
                     </p>
                   </div>
                 </div>
@@ -2129,7 +3169,13 @@ function DoctorSection({
                 </div>
               </summary>
 
-              <div className="grid border-t border-border bg-muted/10 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_0.5fr_0.5fr]">
+              <div className="grid border-t border-border bg-muted/10 sm:grid-cols-2 lg:grid-cols-[1.1fr_1fr_1fr_0.5fr_0.5fr]">
+                <div className="border-b border-border px-4 py-3 sm:border-r lg:border-b-0">
+                  <p className="text-xs text-muted-foreground">{l("providers_doctor_specializations")}</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">
+                    {specializations || t.common_not_set}
+                  </p>
+                </div>
                 <div className="border-b border-border px-4 py-3 sm:border-r lg:border-b-0">
                   <p className="text-xs text-muted-foreground">{l("providers_license")}</p>
                   <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -2160,12 +3206,163 @@ function DoctorSection({
                 </div>
               </div>
             </details>
-          ))}
+            );
+          })}
         </div>
       )}
     </section>
   );
 }
+
+function StaffSection({
+  detail,
+  busy,
+  staffRoles,
+  canManage,
+  onManageRoles,
+  onNew,
+  onEdit,
+  onDelete,
+}: {
+  detail: ProviderDetail;
+  busy: boolean;
+  staffRoles: ProviderStaffRoleItem[];
+  canManage: boolean;
+  onManageRoles: () => void;
+  onNew: () => void;
+  onEdit: (staff: ProviderStaff) => void;
+  onDelete: (staffId: string, staffName: string) => void;
+}) {
+  const { t, lang } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+
+  return (
+    <section className="space-y-3 rounded-xl border border-border/70 bg-card p-3.5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <h3 className="truncate text-sm font-semibold text-foreground">
+            {l("providers_staff")}
+          </h3>
+          <span className="shrink-0 text-xs font-medium text-muted-foreground">
+            {detail.staff.length}
+          </span>
+        </div>
+        {canManage ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 justify-center rounded-lg bg-muted/20"
+              onClick={onManageRoles}
+            >
+              <BadgeCheck className="size-3.5" />
+              {l("providers_staff_roles_manage")}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 justify-center rounded-lg bg-muted/20"
+              onClick={onNew}
+            >
+              <Plus className="size-3.5" />
+              {l("providers_staff_new")}
+            </Button>
+          </div>
+        ) : null}
+      </div>
+
+      {detail.staff.length === 0 ? (
+        <div className="mt-4">
+          <EmptyPanel
+            title={l("providers_staff")}
+            text={l("providers_no_staff")}
+          />
+        </div>
+      ) : (
+        <div className="mt-4 space-y-3">
+          {detail.staff.map((staff) => {
+            const contacts = contactSummary(staff.contacts);
+            return (
+              <div
+                key={staff.id}
+                className="overflow-hidden rounded-[1.4rem] border border-border bg-card"
+              >
+                <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_180px_160px]">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-foreground">{staff.display_name}</p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      <Badge
+                        variant="outline"
+                        className="rounded-full border-border bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                      >
+                        {staffRoleLabel(staff.role, staffRoles, lang)}
+                      </Badge>
+                      <Badge
+                        variant="outline"
+                        className="rounded-full border-border bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                      >
+                        {humanizeCode(staff.status)}
+                      </Badge>
+                      {staff.department ? (
+                        <Badge
+                          variant="outline"
+                          className="rounded-full border-border bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                        >
+                          {staff.department}
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <p className="mt-2 text-xs leading-snug text-muted-foreground">
+                      {contacts || t.common_not_set}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-border/70 px-3 py-2">
+                    <span className="text-xs text-muted-foreground">
+                      {l("providers_staff_notes")}
+                    </span>
+                    <p className="mt-1 line-clamp-3 text-sm text-foreground">
+                      {staff.notes || t.common_not_set}
+                    </p>
+                  </div>
+
+                  {canManage ? (
+                    <div className="flex flex-col justify-end gap-2 border-t border-dashed border-border pt-3 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 w-full justify-center rounded-lg bg-muted/20"
+                        onClick={() => onEdit(staff)}
+                      >
+                        {t.uiText.patients_edit ?? "Edit"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 w-full justify-center rounded-lg gap-1.5 border-rose-200 bg-rose-50/40 text-rose-700 hover:bg-rose-50"
+                        disabled={busy}
+                        onClick={() => onDelete(staff.id, staff.display_name)}
+                      >
+                        <Trash2 className="size-3.5" />
+                        {t.uiText.patients_delete ?? "Delete"}
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function ServiceSection({
   detail,
   busy,
@@ -2248,7 +3445,7 @@ function ServiceSection({
                 <div className="flex flex-col justify-between gap-2 rounded-xl border border-border/70 px-3 py-2">
                   <span className="text-xs text-muted-foreground">{l("providers_price")}</span>
                   <span className="text-lg font-semibold leading-none text-foreground">
-                    {moneyLabel(service.price, service.currency)}
+                    {servicePriceLabel(service)}
                   </span>
                 </div>
 
@@ -2526,12 +3723,18 @@ function InteractionHistorySection({
 
 function ProviderFormFields({
   form,
+  specializations,
+  parentProviderOptions,
+  currentProviderId,
   onChange,
   forceNonMedical,
   disabled = false,
   grouped = false,
 }: {
   form: ProviderFormState;
+  specializations: SpecializationItem[];
+  parentProviderOptions: ProviderSummary[];
+  currentProviderId?: string;
   onChange: (field: keyof ProviderFormState, value: string) => void;
   forceNonMedical: boolean;
   disabled?: boolean;
@@ -2539,6 +3742,9 @@ function ProviderFormFields({
 }) {
   const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
+  const parentOptions = parentProviderOptions.filter(
+    (provider) => provider.id !== currentProviderId,
+  );
 
   const profileFields = (
     <>
@@ -2569,7 +3775,7 @@ function ProviderFormFields({
             value={forceNonMedical ? "non_medical" : form.providerType}
             onChange={(event) => onChange("providerType", event.target.value || "medical")}
             disabled={disabled || forceNonMedical}
-            className={selectClassName}
+            className={formSelectClassName}
           >
             <option value="medical">{t.providers_type_medical}</option>
             <option value="non_medical">{t.providers_type_non_medical}</option>
@@ -2589,12 +3795,14 @@ function ProviderFormFields({
         </Field>
 
         <Field label={t.providers_fachbereich}>
-          <Input
-            value={form.fachbereich}
-            onChange={(event) => onChange("fachbereich", event.target.value)}
-            className={shellInputClassName}
-            placeholder={t.providers_fachbereich}
+          <SpecializationMultiSelect
+            value={form.specializations}
+            items={specializations}
             disabled={disabled}
+            onChange={(nextValue) => {
+              onChange("specializations", nextValue);
+              onChange("fachbereich", firstSpecializationValue(nextValue));
+            }}
           />
         </Field>
 
@@ -2606,6 +3814,39 @@ function ProviderFormFields({
             placeholder={l("providers_https")}
             disabled={disabled}
           />
+        </Field>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Field label={l("providers_organization_level")}>
+          <NativeComboboxSelect
+            value={form.organizationLevel}
+            onChange={(event) => onChange("organizationLevel", event.target.value)}
+            disabled={disabled}
+            className={formSelectClassName}
+          >
+            <option value="organization">{l("providers_level_organization")}</option>
+            <option value="clinic">{l("providers_level_clinic")}</option>
+            <option value="department">{l("providers_level_department")}</option>
+            <option value="unit">{l("providers_level_unit")}</option>
+          </NativeComboboxSelect>
+        </Field>
+        <Field label={l("providers_parent_provider")}>
+          <NativeComboboxSelect
+            value={form.parentProviderId}
+            onChange={(event) => onChange("parentProviderId", event.target.value)}
+            className={formSelectClassName}
+            disabled={disabled}
+          >
+            <option value="">{l("providers_no_parent")}</option>
+            {parentOptions.map((provider) => (
+              <option key={provider.id} value={provider.id}>
+                {[provider.name, provider.address_city, provider.address_country]
+                  .filter(Boolean)
+                  .join(" - ")}
+              </option>
+            ))}
+          </NativeComboboxSelect>
         </Field>
       </div>
     </>
@@ -2732,39 +3973,113 @@ function ProviderFormFields({
 
 function DoctorFormFields({
   form,
+  specializations,
   onChange,
+  onContactsChange,
 }: {
   form: DoctorFormState;
+  specializations: SpecializationItem[];
   onChange: (field: keyof DoctorFormState, value: string) => void;
+  onContactsChange: (contacts: DoctorFormState["contacts"]) => void;
 }) {
   const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
+  const normalizeContacts = (contacts: DoctorFormState["contacts"]) =>
+    contacts.map((contact, _index, all) => {
+      const sameKind = all.filter((item) => item.contactKind === contact.contactKind);
+      const firstPrimary = sameKind.find((item) => item.isPrimary);
+      if (firstPrimary) {
+        return { ...contact, isPrimary: contact.id === firstPrimary.id };
+      }
+      return { ...contact, isPrimary: sameKind[0]?.id === contact.id };
+    });
+  const updateContact = (
+    contactId: string,
+    patch: Partial<DoctorFormState["contacts"][number]>,
+  ) => {
+    const changedContacts = form.contacts.map((contact) => {
+        if (contact.id !== contactId) return contact;
+        const next = { ...contact, ...patch };
+        if (patch.isPrimary) {
+          return next;
+        }
+        return next;
+      }).map((contact, _index, all) => {
+        if (!patch.isPrimary) return contact;
+        const changed = all.find((item) => item.id === contactId);
+        if (!changed || contact.contactKind !== changed.contactKind || contact.id === contactId) {
+          return contact;
+        }
+        return { ...contact, isPrimary: false };
+      });
+    onContactsChange(normalizeContacts(changedContacts));
+  };
+  const addContact = () => {
+    const hasPhone = form.contacts.some((contact) => contact.contactKind === "phone");
+    const contactKind = hasPhone ? "email" : "phone";
+    onContactsChange(normalizeContacts([
+      ...form.contacts,
+      {
+        id: `contact-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        contactKind,
+        contactType: "work",
+        value: "",
+        isPrimary: !form.contacts.some((contact) => contact.contactKind === contactKind),
+        notes: "",
+      },
+    ]));
+  };
+  const removeContact = (contactId: string) => {
+    onContactsChange(normalizeContacts(form.contacts.filter((contact) => contact.id !== contactId)));
+  };
 
   return (
     <div className="space-y-3">
       <Section title={l("providers_doctor_profile")}>
         <div className="grid gap-4 md:grid-cols-2">
+          <Field label={t.patients_first_name}>
+            <Input
+              value={form.firstName}
+              onChange={(event) => onChange("firstName", event.target.value)}
+              className={shellInputClassName}
+            />
+          </Field>
+          <Field label={t.patients_last_name}>
+            <Input
+              value={form.lastName}
+              onChange={(event) => onChange("lastName", event.target.value)}
+              className={shellInputClassName}
+            />
+          </Field>
           <Field label={t.providers_doctors}>
             <Input
               value={form.name}
               onChange={(event) => onChange("name", event.target.value)}
               className={shellInputClassName}
-              required
+              placeholder={l("patients_display_name")}
             />
           </Field>
           <Field label={t.providers_doctor_title}>
-            <Input
+            <NativeComboboxSelect
               value={form.title}
               onChange={(event) => onChange("title", event.target.value)}
-              className={shellInputClassName}
-              placeholder={t.providers_doctor_title}
-            />
+              className={formSelectClassName}
+            >
+              <option value="">{t.common_not_set}</option>
+              <option value="Dr. med.">Dr. med.</option>
+              <option value="PD">PD</option>
+              <option value="Prof.">Prof.</option>
+              <option value="Prof. Dr. med.">Prof. Dr. med.</option>
+            </NativeComboboxSelect>
           </Field>
-          <Field label={t.providers_fachbereich}>
-            <Input
-              value={form.fachbereich}
-              onChange={(event) => onChange("fachbereich", event.target.value)}
-              className={shellInputClassName}
+          <Field label={l("providers_doctor_specializations")}>
+            <SpecializationMultiSelect
+              value={form.specializations}
+              items={specializations}
+              onChange={(nextValue) => {
+                onChange("specializations", nextValue);
+                onChange("fachbereich", firstSpecializationValue(nextValue));
+              }}
             />
           </Field>
           <Field label={l("providers_languages")}>
@@ -2779,22 +4094,87 @@ function DoctorFormFields({
       </Section>
 
       <Section title={l("providers_contacts")}>
-        <div className="grid gap-4 md:grid-cols-2">
-          <Field label={t.field_phone}>
-            <Input
-              value={form.phone}
-              onChange={(event) => onChange("phone", event.target.value)}
-              className={shellInputClassName}
-            />
-          </Field>
-          <Field label={t.field_email}>
-            <Input
-              type="email"
-              value={form.email}
-              onChange={(event) => onChange("email", event.target.value)}
-              className={shellInputClassName}
-            />
-          </Field>
+        <div className="space-y-2">
+          {form.contacts.map((contact) => (
+            <div
+              key={contact.id}
+              className="grid gap-2 rounded-lg border border-border/70 bg-card/50 p-2 md:grid-cols-[132px_132px_minmax(0,1fr)_92px_36px]"
+            >
+              <Field label={l("providers_contact_kind")}>
+                <NativeComboboxSelect
+                  value={contact.contactKind}
+                  onChange={(event) =>
+                    updateContact(contact.id, {
+                      contactKind: event.target.value === "email" ? "email" : "phone",
+                    })
+                  }
+                  className={formSelectClassName}
+                >
+                  <option value="phone">{t.field_phone}</option>
+                  <option value="email">{t.field_email}</option>
+                </NativeComboboxSelect>
+              </Field>
+              <Field label={l("providers_contact_type")}>
+                <NativeComboboxSelect
+                  value={contact.contactType}
+                  onChange={(event) =>
+                    updateContact(contact.id, {
+                      contactType:
+                        event.target.value === "private" || event.target.value === "other"
+                          ? event.target.value
+                          : "work",
+                    })
+                  }
+                  className={formSelectClassName}
+                >
+                  <option value="work">{l("providers_contact_type_work")}</option>
+                  <option value="private">{l("providers_contact_type_private")}</option>
+                  <option value="other">{l("providers_contact_type_other")}</option>
+                </NativeComboboxSelect>
+              </Field>
+              <Field label={l("providers_contact_value")}>
+                <Input
+                  type={contact.contactKind === "email" ? "email" : "text"}
+                  value={contact.value}
+                  onChange={(event) => updateContact(contact.id, { value: event.target.value })}
+                  className={shellInputClassName}
+                />
+              </Field>
+              <label className="flex min-h-[58px] items-end gap-2 pb-1.5 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={contact.isPrimary}
+                  onChange={(event) =>
+                    updateContact(contact.id, { isPrimary: event.target.checked })
+                  }
+                  className={checkboxClass}
+                />
+                {l("providers_contact_primary")}
+              </label>
+              <div className="flex items-end pb-0.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
+                  title={t.common_remove}
+                  aria-label={t.common_remove}
+                  onClick={() => removeContact(contact.id)}
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </div>
+            </div>
+          ))}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-lg bg-muted/20"
+            onClick={addContact}
+          >
+            <Plus className="size-3.5" />
+            {l("providers_contact_add")}
+          </Button>
         </div>
       </Section>
 
@@ -2838,6 +4218,231 @@ function DoctorFormFields({
     </div>
   );
 }
+
+function StaffFormFields({
+  form,
+  staffRoles,
+  onChange,
+  onContactsChange,
+}: {
+  form: StaffFormState;
+  staffRoles: ProviderStaffRoleItem[];
+  onChange: (field: keyof StaffFormState, value: string) => void;
+  onContactsChange: (contacts: StaffFormState["contacts"]) => void;
+}) {
+  const { t, lang } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+  const selectableRoles = staffRoles.filter((role) => role.is_active || role.code === form.role);
+  const hasCustomRole =
+    Boolean(form.role) && !selectableRoles.some((role) => role.code === form.role);
+  const normalizeContacts = (contacts: StaffFormState["contacts"]) =>
+    contacts.map((contact, _index, all) => {
+      const sameKind = all.filter((item) => item.contactKind === contact.contactKind);
+      const firstPrimary = sameKind.find((item) => item.isPrimary);
+      if (firstPrimary) {
+        return { ...contact, isPrimary: contact.id === firstPrimary.id };
+      }
+      return { ...contact, isPrimary: sameKind[0]?.id === contact.id };
+    });
+  const updateContact = (
+    contactId: string,
+    patch: Partial<StaffFormState["contacts"][number]>,
+  ) => {
+    const changedContacts = form.contacts.map((contact) => {
+        if (contact.id !== contactId) return contact;
+        return { ...contact, ...patch };
+      }).map((contact, _index, all) => {
+        if (!patch.isPrimary) return contact;
+        const changed = all.find((item) => item.id === contactId);
+        if (!changed || contact.contactKind !== changed.contactKind || contact.id === contactId) {
+          return contact;
+        }
+        return { ...contact, isPrimary: false };
+      });
+    onContactsChange(normalizeContacts(changedContacts));
+  };
+  const addContact = () => {
+    const hasPhone = form.contacts.some((contact) => contact.contactKind === "phone");
+    const contactKind = hasPhone ? "email" : "phone";
+    onContactsChange(normalizeContacts([
+      ...form.contacts,
+      {
+        id: `contact-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        contactKind,
+        contactType: "work",
+        value: "",
+        isPrimary: !form.contacts.some((contact) => contact.contactKind === contactKind),
+        notes: "",
+      },
+    ]));
+  };
+  const removeContact = (contactId: string) => {
+    onContactsChange(normalizeContacts(form.contacts.filter((contact) => contact.id !== contactId)));
+  };
+
+  return (
+    <div className="space-y-3">
+      <Section title={l("providers_staff_profile")}>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label={t.patients_first_name}>
+            <Input
+              value={form.firstName}
+              onChange={(event) => onChange("firstName", event.target.value)}
+              className={shellInputClassName}
+            />
+          </Field>
+          <Field label={t.patients_last_name}>
+            <Input
+              value={form.lastName}
+              onChange={(event) => onChange("lastName", event.target.value)}
+              className={shellInputClassName}
+            />
+          </Field>
+          <Field label={l("patients_display_name")}>
+            <Input
+              value={form.displayName}
+              onChange={(event) => onChange("displayName", event.target.value)}
+              className={shellInputClassName}
+            />
+          </Field>
+          <Field label={l("providers_staff_role")}>
+            <NativeComboboxSelect
+              value={form.role}
+              onChange={(event) => onChange("role", event.target.value)}
+              className={formSelectClassName}
+              required
+            >
+              {selectableRoles.map((role) => (
+                <option key={role.id} value={role.code}>
+                  {staffRoleLabel(role.code, staffRoles, lang)}
+                </option>
+              ))}
+              {hasCustomRole ? (
+                <option value={form.role}>{humanizeCode(form.role)}</option>
+              ) : null}
+            </NativeComboboxSelect>
+          </Field>
+          <Field label={l("providers_staff_department")}>
+            <Input
+              value={form.department}
+              onChange={(event) => onChange("department", event.target.value)}
+              className={shellInputClassName}
+            />
+          </Field>
+          <Field label={l("providers_staff_status")}>
+            <NativeComboboxSelect
+              value={form.status}
+              onChange={(event) => onChange("status", event.target.value)}
+              className={formSelectClassName}
+            >
+              <option value="active">{t.common_active}</option>
+              <option value="inactive">{t.common_inactive}</option>
+              <option value="external">{l("providers_staff_external")}</option>
+              <option value="unknown">{l("providers_staff_unknown")}</option>
+            </NativeComboboxSelect>
+          </Field>
+        </div>
+      </Section>
+
+      <Section title={l("providers_contacts")}>
+        <div className="space-y-2">
+          {form.contacts.map((contact) => (
+            <div
+              key={contact.id}
+              className="grid gap-2 rounded-lg border border-border/70 bg-card/50 p-2 md:grid-cols-[132px_132px_minmax(0,1fr)_92px_36px]"
+            >
+              <Field label={l("providers_contact_kind")}>
+                <NativeComboboxSelect
+                  value={contact.contactKind}
+                  onChange={(event) =>
+                    updateContact(contact.id, {
+                      contactKind: event.target.value === "email" ? "email" : "phone",
+                    })
+                  }
+                  className={formSelectClassName}
+                >
+                  <option value="phone">{t.field_phone}</option>
+                  <option value="email">{t.field_email}</option>
+                </NativeComboboxSelect>
+              </Field>
+              <Field label={l("providers_contact_type")}>
+                <NativeComboboxSelect
+                  value={contact.contactType}
+                  onChange={(event) =>
+                    updateContact(contact.id, {
+                      contactType:
+                        event.target.value === "private" || event.target.value === "other"
+                          ? event.target.value
+                          : "work",
+                    })
+                  }
+                  className={formSelectClassName}
+                >
+                  <option value="work">{l("providers_contact_type_work")}</option>
+                  <option value="private">{l("providers_contact_type_private")}</option>
+                  <option value="other">{l("providers_contact_type_other")}</option>
+                </NativeComboboxSelect>
+              </Field>
+              <Field label={l("providers_contact_value")}>
+                <Input
+                  type={contact.contactKind === "email" ? "email" : "text"}
+                  value={contact.value}
+                  onChange={(event) => updateContact(contact.id, { value: event.target.value })}
+                  className={shellInputClassName}
+                />
+              </Field>
+              <label className="flex min-h-[58px] items-end gap-2 pb-1.5 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={contact.isPrimary}
+                  onChange={(event) =>
+                    updateContact(contact.id, { isPrimary: event.target.checked })
+                  }
+                  className={checkboxClass}
+                />
+                {l("providers_contact_primary")}
+              </label>
+              <div className="flex items-end pb-0.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
+                  title={t.common_remove}
+                  aria-label={t.common_remove}
+                  onClick={() => removeContact(contact.id)}
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </div>
+            </div>
+          ))}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-lg bg-muted/20"
+            onClick={addContact}
+          >
+            <Plus className="size-3.5" />
+            {l("providers_contact_add")}
+          </Button>
+        </div>
+      </Section>
+
+      <Section title={l("appointments_notes")}>
+        <Field label={t.providers_notes}>
+          <textarea
+            value={form.notes}
+            onChange={(event) => onChange("notes", event.target.value)}
+            className={textareaClassName}
+            rows={3}
+          />
+        </Field>
+      </Section>
+    </div>
+  );
+}
+
 function ServiceFormFields({
   form,
   onChange,
@@ -2872,17 +4477,70 @@ function ServiceFormFields({
 
       <Section title={l("providers_cost")}>
         <div className="grid gap-4 md:grid-cols-2">
-          <Field label={t.providers_service_price}>
-            <Input
-              type="number"
-              min="0"
-              step="0.01"
-              value={form.price}
-              onChange={(event) => onChange("price", event.target.value)}
-              className={shellInputClassName}
-              required
-            />
+          <Field label={l("providers_price_type")}>
+            <NativeComboboxSelect
+              value={form.priceType}
+              onChange={(event) => onChange("priceType", event.target.value)}
+              className={formSelectClassName}
+            >
+              <option value="fixed">{l("providers_price_fixed")}</option>
+              <option value="range">{l("providers_price_range")}</option>
+              <option value="on_request">{l("providers_price_on_request")}</option>
+            </NativeComboboxSelect>
           </Field>
+          {form.priceType === "fixed" ? (
+            <Field label={t.providers_service_price}>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.price}
+                onChange={(event) => {
+                  onChange("price", event.target.value);
+                  onChange("priceFrom", event.target.value);
+                  onChange("priceTo", event.target.value);
+                }}
+                className={shellInputClassName}
+                required
+              />
+            </Field>
+          ) : null}
+          {form.priceType === "range" ? (
+            <>
+              <Field label={l("providers_price_from")}>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.priceFrom}
+                  onChange={(event) => onChange("priceFrom", event.target.value)}
+                  className={shellInputClassName}
+                  required
+                />
+              </Field>
+              <Field label={l("providers_price_to")}>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.priceTo}
+                  onChange={(event) => onChange("priceTo", event.target.value)}
+                  className={shellInputClassName}
+                  required
+                />
+              </Field>
+            </>
+          ) : null}
+          {form.priceType === "on_request" ? (
+            <Field label={l("providers_price_note")}>
+              <Input
+                value={form.priceNote}
+                onChange={(event) => onChange("priceNote", event.target.value)}
+                className={shellInputClassName}
+                placeholder={l("providers_price_on_request")}
+              />
+            </Field>
+          ) : null}
           <Field label={t.providers_service_currency}>
             <Input
               value={form.currency}
@@ -2890,6 +4548,15 @@ function ServiceFormFields({
               className={shellInputClassName}
             />
           </Field>
+          {form.priceType !== "on_request" ? (
+            <Field label={l("providers_price_note")}>
+              <Input
+                value={form.priceNote}
+                onChange={(event) => onChange("priceNote", event.target.value)}
+                className={shellInputClassName}
+              />
+            </Field>
+          ) : null}
         </div>
       </Section>
 

@@ -1,4 +1,51 @@
 export type ProviderType = "medical" | "non_medical";
+export type ProviderOrganizationLevel = "organization" | "clinic" | "department" | "unit";
+export type ServicePriceType = "fixed" | "range" | "on_request";
+
+export type SpecializationItem = {
+  id: string;
+  code: string;
+  name_en: string;
+  name_de: string | null;
+  name_ru: string | null;
+  is_active: boolean;
+  sort_order: number;
+  created_at?: string;
+  updated_at?: string;
+  is_primary?: boolean;
+};
+
+export type ProviderStaffRoleItem = {
+  id: string;
+  code: string;
+  name_en: string;
+  name_de: string | null;
+  name_ru: string | null;
+  is_active: boolean;
+  sort_order: number;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type PersonContact = {
+  id: string | null;
+  contact_kind: "phone" | "email";
+  contact_type: "work" | "private" | "other";
+  value: string;
+  is_primary: boolean;
+  notes: string | null;
+};
+
+export type PersonContactFormState = {
+  id: string;
+  contactKind: "phone" | "email";
+  contactType: "work" | "private" | "other";
+  value: string;
+  isPrimary: boolean;
+  notes: string;
+};
+
+export type DoctorContactFormState = PersonContactFormState;
 
 export type ProviderSummary = {
   id: string;
@@ -11,6 +58,10 @@ export type ProviderSummary = {
   fachbereich: string | null;
   phone: string | null;
   email: string | null;
+  parent_provider_id: string | null;
+  parent_provider_name: string | null;
+  organization_level: ProviderOrganizationLevel;
+  specializations: SpecializationItem[];
   is_active: boolean;
   has_contract: boolean;
   doctor_count: number;
@@ -60,11 +111,16 @@ export type DoctorSummary = {
   id: string;
   provider_id: string;
   name: string;
+  first_name: string | null;
+  last_name: string | null;
+  display_name: string | null;
   title: string | null;
   fachbereich: string | null;
+  specializations: SpecializationItem[];
   languages: string[];
   phone: string | null;
   email: string | null;
+  contacts: PersonContact[];
   license_number: string | null;
   licensing_country: string | null;
   licensing_valid_until: string | null;
@@ -80,10 +136,40 @@ export type ServiceItem = {
   service_name: string;
   description: string | null;
   price: string;
+  price_type: ServicePriceType;
+  price_from: string | null;
+  price_to: string | null;
+  price_note: string | null;
   currency: string;
   valid_from: string;
   valid_to: string | null;
   created_at: string;
+};
+
+export type ProviderStaff = {
+  id: string;
+  provider_id: string;
+  first_name: string | null;
+  last_name: string | null;
+  display_name: string;
+  role: string;
+  department: string | null;
+  status: "active" | "inactive" | "external" | "unknown";
+  notes: string | null;
+  is_active: boolean;
+  contacts: PersonContact[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProviderChild = {
+  id: string;
+  name: string;
+  provider_type: ProviderType;
+  organization_level: ProviderOrganizationLevel;
+  address_city: string | null;
+  address_country: string | null;
+  is_active: boolean;
 };
 
 export type ProviderDetail = {
@@ -100,6 +186,10 @@ export type ProviderDetail = {
   email: string | null;
   website: string | null;
   fachbereich: string | null;
+  specializations: SpecializationItem[];
+  parent_provider_id: string | null;
+  parent_provider_name: string | null;
+  organization_level: ProviderOrganizationLevel;
   kooperationsvertrag: unknown;
   notes: string | null;
   is_active: boolean;
@@ -107,6 +197,8 @@ export type ProviderDetail = {
   updated_at: string;
   doctors: DoctorSummary[];
   services: ServiceItem[];
+  staff: ProviderStaff[];
+  children: ProviderChild[];
   linked_patients: LinkedPatient[];
   interactions: InteractionItem[];
 };
@@ -143,6 +235,9 @@ export type ProviderFormState = {
   email: string;
   website: string;
   fachbereich: string;
+  specializations: string;
+  parentProviderId: string;
+  organizationLevel: ProviderOrganizationLevel;
   contractText: string;
   notes: string;
 };
@@ -150,11 +245,17 @@ export type ProviderFormState = {
 export type DoctorFormState = {
   id: string;
   name: string;
+  firstName: string;
+  lastName: string;
   title: string;
   fachbereich: string;
+  specializations: string;
   languages: string;
   phone: string;
   email: string;
+  privatePhone: string;
+  privateEmail: string;
+  contacts: DoctorContactFormState[];
   licenseNumber: string;
   licensingCountry: string;
   licensingValidUntil: string;
@@ -166,9 +267,29 @@ export type ServiceFormState = {
   serviceName: string;
   description: string;
   price: string;
+  priceType: ServicePriceType;
+  priceFrom: string;
+  priceTo: string;
+  priceNote: string;
   currency: string;
   validFrom: string;
   validTo: string;
+};
+
+export type StaffFormState = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  displayName: string;
+  role: string;
+  department: string;
+  status: "active" | "inactive" | "external" | "unknown";
+  phone: string;
+  email: string;
+  privatePhone: string;
+  privateEmail: string;
+  contacts: PersonContactFormState[];
+  notes: string;
 };
 
 export type ProviderPermissions = {

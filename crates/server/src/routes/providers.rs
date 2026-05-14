@@ -18,6 +18,38 @@ use gmed_domain::role::Role;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/providers", get(list_providers).post(create_provider))
+        .route(
+            "/providers/specializations",
+            get(list_specializations).post(create_specialization),
+        )
+        .route(
+            "/providers/specializations/{specialization_id}/update",
+            post(update_specialization),
+        )
+        .route(
+            "/providers/specializations/{specialization_id}/activate",
+            post(activate_specialization),
+        )
+        .route(
+            "/providers/specializations/{specialization_id}/deactivate",
+            post(deactivate_specialization),
+        )
+        .route(
+            "/providers/staff-roles",
+            get(list_provider_staff_roles).post(create_provider_staff_role),
+        )
+        .route(
+            "/providers/staff-roles/{role_id}/update",
+            post(update_provider_staff_role),
+        )
+        .route(
+            "/providers/staff-roles/{role_id}/activate",
+            post(activate_provider_staff_role),
+        )
+        .route(
+            "/providers/staff-roles/{role_id}/deactivate",
+            post(deactivate_provider_staff_role),
+        )
         .route("/providers/{provider_id}", get(get_provider))
         .route("/providers/{provider_id}/update", post(update_provider))
         .route("/providers/{provider_id}/activate", post(activate_provider))
@@ -59,6 +91,18 @@ pub fn router() -> Router<AppState> {
             post(delete_doctor),
         )
         .route(
+            "/providers/{provider_id}/staff",
+            get(list_provider_staff).post(create_provider_staff),
+        )
+        .route(
+            "/providers/{provider_id}/staff/{staff_id}/update",
+            post(update_provider_staff),
+        )
+        .route(
+            "/providers/{provider_id}/staff/{staff_id}/delete",
+            post(delete_provider_staff),
+        )
+        .route(
             "/providers/{provider_id}/services",
             get(list_services).post(create_service),
         )
@@ -92,6 +136,16 @@ struct ListProvidersQuery {
 }
 
 #[derive(Deserialize)]
+struct ListSpecializationsQuery {
+    include_inactive: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct ListStaffRolesQuery {
+    include_inactive: Option<bool>,
+}
+
+#[derive(Deserialize)]
 struct UpsertProviderRequest {
     name: String,
     provider_type: String,
@@ -105,18 +159,26 @@ struct UpsertProviderRequest {
     email: Option<String>,
     website: Option<String>,
     fachbereich: Option<String>,
+    specializations: Option<Vec<String>>,
+    parent_provider_id: Option<Uuid>,
+    organization_level: Option<String>,
     kooperationsvertrag: Option<Value>,
     notes: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct UpsertDoctorRequest {
-    name: String,
+    name: Option<String>,
+    first_name: Option<String>,
+    last_name: Option<String>,
+    display_name: Option<String>,
     title: Option<String>,
     fachbereich: Option<String>,
+    specializations: Option<Vec<String>>,
     languages: Option<Vec<String>>,
     phone: Option<String>,
     email: Option<String>,
+    contacts: Option<Vec<UpsertPersonContactRequest>>,
     license_number: Option<String>,
     licensing_country: Option<String>,
     licensing_valid_until: Option<String>,
@@ -127,10 +189,55 @@ struct UpsertDoctorRequest {
 struct UpsertServiceRequest {
     service_name: String,
     description: Option<String>,
-    price: f64,
+    price: Option<f64>,
+    price_type: Option<String>,
+    price_from: Option<f64>,
+    price_to: Option<f64>,
+    price_note: Option<String>,
     currency: Option<String>,
     valid_from: Option<String>,
     valid_to: Option<String>,
+}
+
+#[derive(Deserialize, Clone)]
+struct UpsertPersonContactRequest {
+    contact_kind: String,
+    contact_type: Option<String>,
+    value: String,
+    is_primary: Option<bool>,
+    notes: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct UpsertProviderStaffRequest {
+    first_name: Option<String>,
+    last_name: Option<String>,
+    display_name: String,
+    role: Option<String>,
+    department: Option<String>,
+    status: Option<String>,
+    notes: Option<String>,
+    contacts: Option<Vec<UpsertPersonContactRequest>>,
+}
+
+#[derive(Deserialize)]
+struct UpsertProviderStaffRoleRequest {
+    code: Option<String>,
+    name_en: String,
+    name_de: Option<String>,
+    name_ru: Option<String>,
+    sort_order: Option<i32>,
+    is_active: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct UpsertSpecializationRequest {
+    code: Option<String>,
+    name_en: String,
+    name_de: Option<String>,
+    name_ru: Option<String>,
+    sort_order: Option<i32>,
+    is_active: Option<bool>,
 }
 
 #[derive(Deserialize, Default, Clone)]
@@ -191,6 +298,8 @@ async fn list_providers(
         r#"SELECT p.id, p.name, p.provider_type, p.legal_name, p.tax_id,
                   p.address_city, p.address_country, p.fachbereich,
                   p.phone, p.email, p.is_active, p.created_at,
+                  p.parent_provider_id, parent.name AS parent_provider_name,
+                  p.organization_level,
                   (p.kooperationsvertrag IS NOT NULL) AS has_contract,
                   (
                     SELECT COUNT(*)
@@ -254,6 +363,7 @@ async fn list_providers(
                     to_timestamp(0)
                   ) AS last_interaction_at
            FROM providers p
+           LEFT JOIN providers parent ON parent.id = p.parent_provider_id
            WHERE ($1::bool = false OR p.is_active = true)
              AND ($2::text IS NULL OR p.provider_type = $2)
              AND (
@@ -263,12 +373,27 @@ async fn list_providers(
                 OR COALESCE(p.tax_id, '') ILIKE $3
                 OR COALESCE(p.address_city, '') ILIKE $3
                 OR COALESCE(p.fachbereich, '') ILIKE $3
+                OR EXISTS (
+                    SELECT 1
+                    FROM provider_specializations ps
+                    JOIN medical_specializations ms ON ms.id = ps.specialization_id
+                    WHERE ps.provider_id = p.id
+                      AND (
+                        ms.name_en ILIKE $3
+                        OR COALESCE(ms.name_de, '') ILIKE $3
+                        OR COALESCE(ms.name_ru, '') ILIKE $3
+                        OR ms.code ILIKE $3
+                      )
+                )
                  OR EXISTS (
                      SELECT 1
                      FROM provider_doctors d
                      WHERE d.provider_id = p.id
                        AND (
                          d.name ILIKE $3
+                         OR COALESCE(d.display_name, '') ILIKE $3
+                         OR COALESCE(d.first_name, '') ILIKE $3
+                         OR COALESCE(d.last_name, '') ILIKE $3
                          OR COALESCE(d.fachbereich, '') ILIKE $3
                        )
                  )
@@ -286,14 +411,34 @@ async fn list_providers(
              )
              AND ($4::text = '%%' OR COALESCE(p.address_city, '') ILIKE $4)
              AND ($5::text = '%%' OR COALESCE(p.address_country, '') ILIKE $5)
-             AND ($6::text = '%%' OR COALESCE(p.fachbereich, '') ILIKE $6)
+             AND (
+                $6::text = '%%'
+                OR COALESCE(p.fachbereich, '') ILIKE $6
+                OR EXISTS (
+                    SELECT 1
+                    FROM provider_specializations ps
+                    JOIN medical_specializations ms ON ms.id = ps.specialization_id
+                    WHERE ps.provider_id = p.id
+                      AND (
+                        ms.name_en ILIKE $6
+                        OR COALESCE(ms.name_de, '') ILIKE $6
+                        OR COALESCE(ms.name_ru, '') ILIKE $6
+                        OR ms.code ILIKE $6
+                      )
+                )
+             )
              AND (
                 $7::text = '%%'
                 OR EXISTS (
                     SELECT 1
                     FROM provider_doctors d
                     WHERE d.provider_id = p.id
-                      AND d.name ILIKE $7
+                      AND (
+                        d.name ILIKE $7
+                        OR COALESCE(d.display_name, '') ILIKE $7
+                        OR COALESCE(d.first_name, '') ILIKE $7
+                        OR COALESCE(d.last_name, '') ILIKE $7
+                      )
                 )
              )
              AND (
@@ -302,7 +447,21 @@ async fn list_providers(
                     SELECT 1
                     FROM provider_doctors d
                     WHERE d.provider_id = p.id
-                      AND COALESCE(d.fachbereich, '') ILIKE $8
+                      AND (
+                        COALESCE(d.fachbereich, '') ILIKE $8
+                        OR EXISTS (
+                            SELECT 1
+                            FROM provider_doctor_specializations ds
+                            JOIN medical_specializations ms ON ms.id = ds.specialization_id
+                            WHERE ds.doctor_id = d.id
+                              AND (
+                                ms.name_en ILIKE $8
+                                OR COALESCE(ms.name_de, '') ILIKE $8
+                                OR COALESCE(ms.name_ru, '') ILIKE $8
+                                OR ms.code ILIKE $8
+                              )
+                        )
+                      )
                 )
              )
              AND (
@@ -405,6 +564,10 @@ async fn list_providers(
                 );
             }
         };
+        let specializations = match load_provider_specializations_json(&state, id).await {
+            Ok(items) => items,
+            Err(resp) => return resp,
+        };
 
         providers.push(json!({
             "id": id,
@@ -417,6 +580,10 @@ async fn list_providers(
             "fachbereich": row.try_get::<Option<String>, _>("fachbereich").unwrap_or_default(),
             "phone": row.try_get::<Option<String>, _>("phone").unwrap_or_default(),
             "email": row.try_get::<Option<String>, _>("email").unwrap_or_default(),
+            "parent_provider_id": row.try_get::<Option<Uuid>, _>("parent_provider_id").unwrap_or_default(),
+            "parent_provider_name": row.try_get::<Option<String>, _>("parent_provider_name").unwrap_or_default(),
+            "organization_level": row.try_get::<String, _>("organization_level").unwrap_or_else(|_| "organization".to_string()),
+            "specializations": specializations,
             "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
             "has_contract": row.try_get::<bool, _>("has_contract").unwrap_or(false),
             "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
@@ -435,6 +602,332 @@ async fn list_providers(
     Json(providers).into_response()
 }
 
+async fn list_specializations(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Query(query): Query<ListSpecializationsQuery>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::Concierge,
+        Role::Billing,
+        Role::Sales,
+    ]) {
+        return e;
+    }
+
+    match load_specializations_json(&state, query.include_inactive.unwrap_or(false)).await {
+        Ok(items) => Json(items).into_response(),
+        Err(resp) => resp,
+    }
+}
+
+async fn create_specialization(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Json(body): Json<UpsertSpecializationRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+
+    let specialization = match normalize_specialization_payload(body, true) {
+        Ok(payload) => payload,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let code = specialization
+        .code
+        .unwrap_or_else(|| specialization_code(&specialization.name_en));
+
+    let row = match sqlx::query(
+        r#"INSERT INTO medical_specializations (
+                code, name_en, name_de, name_ru, sort_order, is_active
+           ) VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING id"#,
+    )
+    .bind(&code)
+    .bind(&specialization.name_en)
+    .bind(&specialization.name_de)
+    .bind(&specialization.name_ru)
+    .bind(specialization.sort_order)
+    .bind(specialization.is_active)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) if is_unique_violation(&e) => {
+            return err(StatusCode::CONFLICT, "Specialization already exists");
+        }
+        Err(e) => {
+            tracing::error!(error = %e, specialization = %code, "Failed to create specialization");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create specialization",
+            );
+        }
+    };
+
+    let specialization_id: Uuid = match row.try_get("id") {
+        Ok(value) => value,
+        Err(_) => {
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to decode specialization",
+            );
+        }
+    };
+    let _ = audit(
+        &state,
+        auth.user_id,
+        "create_provider_specialization",
+        "medical_specialization",
+        Some(specialization_id),
+        Some(json!({ "code": code })),
+    )
+    .await;
+
+    (
+        StatusCode::CREATED,
+        Json(json!({ "id": specialization_id })),
+    )
+        .into_response()
+}
+
+async fn update_specialization(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(specialization_id): Path<Uuid>,
+    Json(body): Json<UpsertSpecializationRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+
+    let specialization = match normalize_specialization_payload(body, false) {
+        Ok(payload) => payload,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+
+    match sqlx::query(
+        r#"UPDATE medical_specializations
+           SET name_en = $2,
+               name_de = $3,
+               name_ru = $4,
+               sort_order = $5,
+               is_active = $6,
+               updated_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(specialization_id)
+    .bind(&specialization.name_en)
+    .bind(&specialization.name_de)
+    .bind(&specialization.name_ru)
+    .bind(specialization.sort_order)
+    .bind(specialization.is_active)
+    .execute(&state.db)
+    .await
+    {
+        Ok(result) if result.rows_affected() > 0 => {}
+        Ok(_) => return err(StatusCode::NOT_FOUND, "Specialization not found"),
+        Err(e) => {
+            tracing::error!(error = %e, specialization_id = %specialization_id, "Failed to update specialization");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update specialization",
+            );
+        }
+    }
+
+    let _ = audit(
+        &state,
+        auth.user_id,
+        "update_provider_specialization",
+        "medical_specialization",
+        Some(specialization_id),
+        Some(json!({ "specialization_id": specialization_id })),
+    )
+    .await;
+
+    Json(json!({ "ok": true })).into_response()
+}
+
+async fn activate_specialization(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(specialization_id): Path<Uuid>,
+) -> axum::response::Response {
+    toggle_specialization_active(state, auth, specialization_id, true).await
+}
+
+async fn deactivate_specialization(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(specialization_id): Path<Uuid>,
+) -> axum::response::Response {
+    toggle_specialization_active(state, auth, specialization_id, false).await
+}
+
+async fn list_provider_staff_roles(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Query(query): Query<ListStaffRolesQuery>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::Concierge,
+        Role::Billing,
+        Role::Sales,
+    ]) {
+        return e;
+    }
+
+    match load_provider_staff_roles_json(&state, query.include_inactive.unwrap_or(false)).await {
+        Ok(items) => Json(items).into_response(),
+        Err(resp) => resp,
+    }
+}
+
+async fn create_provider_staff_role(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Json(body): Json<UpsertProviderStaffRoleRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+
+    let role = match normalize_provider_staff_role_payload(body, true) {
+        Ok(payload) => payload,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let code = role.code.unwrap_or_else(|| staff_role_code(&role.name_en));
+
+    let row = match sqlx::query(
+        r#"INSERT INTO provider_staff_roles (
+                code, name_en, name_de, name_ru, sort_order, is_active
+           ) VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING id"#,
+    )
+    .bind(&code)
+    .bind(&role.name_en)
+    .bind(&role.name_de)
+    .bind(&role.name_ru)
+    .bind(role.sort_order)
+    .bind(role.is_active)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) if is_unique_violation(&e) => {
+            return err(StatusCode::CONFLICT, "Provider staff role already exists");
+        }
+        Err(e) => {
+            tracing::error!(error = %e, role = %code, "Failed to create provider staff role");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create provider staff role",
+            );
+        }
+    };
+
+    let role_id: Uuid = match row.try_get("id") {
+        Ok(value) => value,
+        Err(_) => {
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to decode staff role",
+            );
+        }
+    };
+    let _ = audit(
+        &state,
+        auth.user_id,
+        "create_provider_staff_role",
+        "provider_staff_role",
+        Some(role_id),
+        Some(json!({ "code": code })),
+    )
+    .await;
+
+    (StatusCode::CREATED, Json(json!({ "id": role_id }))).into_response()
+}
+
+async fn update_provider_staff_role(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(role_id): Path<Uuid>,
+    Json(body): Json<UpsertProviderStaffRoleRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+
+    let role = match normalize_provider_staff_role_payload(body, false) {
+        Ok(payload) => payload,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+
+    match sqlx::query(
+        r#"UPDATE provider_staff_roles
+           SET name_en = $2,
+               name_de = $3,
+               name_ru = $4,
+               sort_order = $5,
+               is_active = $6,
+               updated_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(role_id)
+    .bind(&role.name_en)
+    .bind(&role.name_de)
+    .bind(&role.name_ru)
+    .bind(role.sort_order)
+    .bind(role.is_active)
+    .execute(&state.db)
+    .await
+    {
+        Ok(result) if result.rows_affected() > 0 => {}
+        Ok(_) => return err(StatusCode::NOT_FOUND, "Provider staff role not found"),
+        Err(e) => {
+            tracing::error!(error = %e, role_id = %role_id, "Failed to update provider staff role");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update provider staff role",
+            );
+        }
+    }
+
+    let _ = audit(
+        &state,
+        auth.user_id,
+        "update_provider_staff_role",
+        "provider_staff_role",
+        Some(role_id),
+        Some(json!({ "role_id": role_id })),
+    )
+    .await;
+
+    Json(json!({ "ok": true })).into_response()
+}
+
+async fn activate_provider_staff_role(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(role_id): Path<Uuid>,
+) -> axum::response::Response {
+    toggle_provider_staff_role_active(state, auth, role_id, true).await
+}
+
+async fn deactivate_provider_staff_role(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(role_id): Path<Uuid>,
+) -> axum::response::Response {
+    toggle_provider_staff_role_active(state, auth, role_id, false).await
+}
+
 async fn create_provider(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -448,16 +941,22 @@ async fn create_provider(
         Ok(payload) => payload,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
+    if let Err(resp) = validate_provider_parent(&state, None, provider.parent_provider_id).await {
+        return resp;
+    }
+    let specializations = provider.specializations.clone();
 
     let row = match sqlx::query(
         r#"INSERT INTO providers (
                 name, provider_type, legal_name, tax_id,
                 address_street, address_city, address_zip, address_country,
-                phone, email, website, fachbereich, kooperationsvertrag, notes
+                phone, email, website, fachbereich, parent_provider_id, organization_level,
+                kooperationsvertrag, notes
            ) VALUES (
                 $1, $2, $3, $4,
                 $5, $6, $7, $8,
-                $9, $10, $11, $12, $13, $14
+                $9, $10, $11, $12, $13, $14,
+                $15, $16
            )
            RETURNING id, created_at"#,
     )
@@ -473,6 +972,8 @@ async fn create_provider(
     .bind(provider.email)
     .bind(provider.website)
     .bind(provider.fachbereich)
+    .bind(provider.parent_provider_id)
+    .bind(provider.organization_level)
     .bind(provider.kooperationsvertrag)
     .bind(provider.notes)
     .fetch_one(&state.db)
@@ -497,6 +998,11 @@ async fn create_provider(
             );
         }
     };
+    if let Some(values) = specializations
+        && let Err(resp) = sync_provider_specializations(&state, provider_id, &values).await
+    {
+        return resp;
+    }
 
     let _ = audit(
         &state,
@@ -548,6 +1054,9 @@ async fn get_provider(
         r#"SELECT id, name, provider_type, legal_name, tax_id,
                   address_street, address_city, address_zip,
                   address_country, phone, email, website, fachbereich, kooperationsvertrag, notes,
+                  parent_provider_id,
+                  (SELECT name FROM providers parent WHERE parent.id = providers.parent_provider_id) AS parent_provider_name,
+                  organization_level,
                   is_active, created_at, updated_at
            FROM providers
            WHERE id = $1"#,
@@ -564,12 +1073,24 @@ async fn get_provider(
         }
     };
 
-    let (doctors, services, linked_patients, interactions, templates) = tokio::join!(
+    let (
+        doctors,
+        services,
+        linked_patients,
+        interactions,
+        templates,
+        specializations,
+        staff,
+        children,
+    ) = tokio::join!(
         load_doctors_json(&state, provider_id),
         load_services_json(&state, provider_id),
         load_provider_patients_json(&state, provider_id, None),
         load_provider_interactions_json(&state, provider_id, None),
         load_provider_templates_json(&state, provider_id),
+        load_provider_specializations_json(&state, provider_id),
+        load_provider_staff_json(&state, provider_id),
+        load_provider_children_json(&state, provider_id),
     );
 
     let doctors = match doctors {
@@ -592,6 +1113,18 @@ async fn get_provider(
         Ok(items) => items,
         Err(resp) => return resp,
     };
+    let specializations = match specializations {
+        Ok(items) => items,
+        Err(resp) => return resp,
+    };
+    let staff = match staff {
+        Ok(items) => items,
+        Err(resp) => return resp,
+    };
+    let children = match children {
+        Ok(items) => items,
+        Err(resp) => return resp,
+    };
 
     Json(json!({
         "id": provider.try_get::<Uuid, _>("id").unwrap_or(provider_id),
@@ -607,6 +1140,10 @@ async fn get_provider(
         "email": provider.try_get::<Option<String>, _>("email").unwrap_or_default(),
         "website": provider.try_get::<Option<String>, _>("website").unwrap_or_default(),
         "fachbereich": provider.try_get::<Option<String>, _>("fachbereich").unwrap_or_default(),
+        "specializations": specializations,
+        "parent_provider_id": provider.try_get::<Option<Uuid>, _>("parent_provider_id").unwrap_or_default(),
+        "parent_provider_name": provider.try_get::<Option<String>, _>("parent_provider_name").unwrap_or_default(),
+        "organization_level": provider.try_get::<String, _>("organization_level").unwrap_or_else(|_| "organization".to_string()),
         "kooperationsvertrag": provider.try_get::<Option<Value>, _>("kooperationsvertrag").unwrap_or_default(),
         "notes": provider.try_get::<Option<String>, _>("notes").unwrap_or_default(),
         "is_active": provider.try_get::<bool, _>("is_active").unwrap_or(true),
@@ -614,6 +1151,8 @@ async fn get_provider(
         "updated_at": provider.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
         "doctors": doctors,
         "services": services,
+        "staff": staff,
+        "children": children,
         "linked_patients": linked_patients,
         "interactions": interactions,
         "templates": templates,
@@ -635,6 +1174,12 @@ async fn update_provider(
         Ok(payload) => payload,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
+    if let Err(resp) =
+        validate_provider_parent(&state, Some(provider_id), provider.parent_provider_id).await
+    {
+        return resp;
+    }
+    let specializations = provider.specializations.clone();
 
     let row = match sqlx::query(
         r#"UPDATE providers
@@ -650,8 +1195,10 @@ async fn update_provider(
                email = $11,
                website = $12,
                fachbereich = $13,
-               kooperationsvertrag = $14,
-               notes = $15,
+               parent_provider_id = $14,
+               organization_level = $15,
+               kooperationsvertrag = $16,
+               notes = $17,
                updated_at = now()
            WHERE id = $1
            RETURNING id"#,
@@ -669,6 +1216,8 @@ async fn update_provider(
     .bind(provider.email)
     .bind(provider.website)
     .bind(provider.fachbereich)
+    .bind(provider.parent_provider_id)
+    .bind(provider.organization_level)
     .bind(provider.kooperationsvertrag)
     .bind(provider.notes)
     .fetch_optional(&state.db)
@@ -694,6 +1243,11 @@ async fn update_provider(
             );
         }
     };
+    if let Some(values) = specializations
+        && let Err(resp) = sync_provider_specializations(&state, updated_id, &values).await
+    {
+        return resp;
+    }
 
     let _ = audit(
         &state,
@@ -1105,7 +1659,8 @@ async fn get_doctor(
     }
 
     match sqlx::query(
-        r#"SELECT d.id, d.provider_id, d.name, d.title, d.fachbereich, d.languages,
+        r#"SELECT d.id, d.provider_id, d.name, d.first_name, d.last_name, d.display_name,
+                  d.title, d.fachbereich, d.languages,
                   d.phone, d.email, d.license_number, d.licensing_country,
                   d.licensing_valid_until, d.notes, d.created_at,
                   (
@@ -1127,6 +1682,25 @@ async fn get_doctor(
     .await
     {
         Ok(Some(row)) => {
+            let specializations = match load_doctor_specializations_json(&state, doctor_id).await {
+                Ok(items) => items,
+                Err(resp) => return resp,
+            };
+            let contacts = match load_person_contacts_json(
+                &state,
+                provider_id,
+                Some(doctor_id),
+                None,
+                row.try_get::<Option<String>, _>("phone")
+                    .unwrap_or_default(),
+                row.try_get::<Option<String>, _>("email")
+                    .unwrap_or_default(),
+            )
+            .await
+            {
+                Ok(items) => items,
+                Err(resp) => return resp,
+            };
             let linked_patients =
                 match load_provider_patients_json(&state, provider_id, Some(doctor_id)).await {
                     Ok(items) => items,
@@ -1142,11 +1716,16 @@ async fn get_doctor(
                 "id": row.try_get::<Uuid, _>("id").unwrap_or(doctor_id),
                 "provider_id": row.try_get::<Uuid, _>("provider_id").unwrap_or(provider_id),
                 "name": row.try_get::<String, _>("name").unwrap_or_default(),
+                "first_name": row.try_get::<Option<String>, _>("first_name").unwrap_or_default(),
+                "last_name": row.try_get::<Option<String>, _>("last_name").unwrap_or_default(),
+                "display_name": row.try_get::<Option<String>, _>("display_name").unwrap_or_default(),
                 "title": row.try_get::<Option<String>, _>("title").unwrap_or_default(),
                 "fachbereich": row.try_get::<Option<String>, _>("fachbereich").unwrap_or_default(),
+                "specializations": specializations,
                 "languages": row.try_get::<Vec<String>, _>("languages").unwrap_or_default(),
                 "phone": row.try_get::<Option<String>, _>("phone").unwrap_or_default(),
                 "email": row.try_get::<Option<String>, _>("email").unwrap_or_default(),
+                "contacts": contacts,
                 "license_number": row.try_get::<Option<String>, _>("license_number").unwrap_or_default(),
                 "licensing_country": row.try_get::<Option<String>, _>("licensing_country").unwrap_or_default(),
                 "licensing_valid_until": row.try_get::<Option<chrono::NaiveDate>, _>("licensing_valid_until").unwrap_or_default().map(|v| v.to_string()),
@@ -1185,19 +1764,26 @@ async fn create_doctor(
         Ok(payload) => payload,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
+    let specializations = doctor.specializations.clone();
+    let contacts = doctor.contacts.clone();
 
     let row = match sqlx::query(
         r#"INSERT INTO provider_doctors (
-                provider_id, name, title, fachbereich, languages,
+                provider_id, name, first_name, last_name, display_name,
+                title, fachbereich, languages,
                 phone, email, license_number, licensing_country, licensing_valid_until, notes
            ) VALUES (
                 $1, $2, $3, $4, $5,
-                $6, $7, $8, $9, $10, $11
+                $6, $7, $8,
+                $9, $10, $11, $12, $13, $14
            )
            RETURNING id, created_at"#,
     )
     .bind(provider_id)
     .bind(doctor.name)
+    .bind(doctor.first_name)
+    .bind(doctor.last_name)
+    .bind(doctor.display_name)
     .bind(doctor.title)
     .bind(doctor.fachbereich)
     .bind(doctor.languages)
@@ -1221,6 +1807,17 @@ async fn create_doctor(
         Ok(value) => value,
         Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to decode doctor"),
     };
+    if let Some(values) = specializations
+        && let Err(resp) = sync_doctor_specializations(&state, doctor_id, &values).await
+    {
+        return resp;
+    }
+    if let Some(values) = contacts
+        && let Err(resp) =
+            replace_person_contacts(&state, provider_id, Some(doctor_id), None, &values).await
+    {
+        return resp;
+    }
 
     let _ = audit(
         &state,
@@ -1267,24 +1864,32 @@ async fn update_doctor(
         Ok(payload) => payload,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
+    let specializations = doctor.specializations.clone();
+    let contacts = doctor.contacts.clone();
 
     match sqlx::query(
         r#"UPDATE provider_doctors
            SET name = $3,
-               title = $4,
-               fachbereich = $5,
-               languages = $6,
-               phone = $7,
-               email = $8,
-               license_number = $9,
-               licensing_country = $10,
-               licensing_valid_until = $11,
-               notes = $12
+               first_name = $4,
+               last_name = $5,
+               display_name = $6,
+               title = $7,
+               fachbereich = $8,
+               languages = $9,
+               phone = $10,
+               email = $11,
+               license_number = $12,
+               licensing_country = $13,
+               licensing_valid_until = $14,
+               notes = $15
            WHERE provider_id = $1 AND id = $2"#,
     )
     .bind(provider_id)
     .bind(doctor_id)
     .bind(doctor.name)
+    .bind(doctor.first_name)
+    .bind(doctor.last_name)
+    .bind(doctor.display_name)
     .bind(doctor.title)
     .bind(doctor.fachbereich)
     .bind(doctor.languages)
@@ -1303,6 +1908,17 @@ async fn update_doctor(
             tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, "Failed to update doctor");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update doctor");
         }
+    }
+    if let Some(values) = specializations
+        && let Err(resp) = sync_doctor_specializations(&state, doctor_id, &values).await
+    {
+        return resp;
+    }
+    if let Some(values) = contacts
+        && let Err(resp) =
+            replace_person_contacts(&state, provider_id, Some(doctor_id), None, &values).await
+    {
+        return resp;
     }
 
     let _ = audit(
@@ -1370,6 +1986,259 @@ async fn delete_doctor(
     StatusCode::NO_CONTENT.into_response()
 }
 
+async fn list_provider_staff(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(provider_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::Concierge,
+        Role::Billing,
+        Role::Sales,
+    ]) {
+        return e;
+    }
+
+    if let Err(resp) = ensure_provider_exists(&state, provider_id).await {
+        return resp;
+    }
+
+    match load_provider_staff_json(&state, provider_id).await {
+        Ok(staff) => Json(staff).into_response(),
+        Err(resp) => resp,
+    }
+}
+
+async fn create_provider_staff(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(provider_id): Path<Uuid>,
+    Json(body): Json<UpsertProviderStaffRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+
+    if let Err(resp) = ensure_provider_exists(&state, provider_id).await {
+        return resp;
+    }
+
+    let staff = match normalize_provider_staff_payload(body) {
+        Ok(payload) => payload,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    if let Err(resp) = ensure_provider_staff_role_exists(&state, &staff.role).await {
+        return resp;
+    }
+    let contacts = staff.contacts.clone();
+
+    let row = match sqlx::query(
+        r#"INSERT INTO provider_staff (
+                provider_id, first_name, last_name, display_name, role,
+                department, status, notes, is_active
+           ) VALUES (
+                $1, $2, $3, $4, $5,
+                $6, $7, $8, $9
+           )
+           RETURNING id, created_at"#,
+    )
+    .bind(provider_id)
+    .bind(staff.first_name)
+    .bind(staff.last_name)
+    .bind(staff.display_name)
+    .bind(staff.role)
+    .bind(staff.department)
+    .bind(staff.status)
+    .bind(staff.notes)
+    .bind(staff.is_active)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = %e, provider_id = %provider_id, "Failed to create provider staff");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create provider staff",
+            );
+        }
+    };
+
+    let staff_id: Uuid = match row.try_get("id") {
+        Ok(value) => value,
+        Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to decode staff"),
+    };
+    if let Some(values) = contacts
+        && let Err(resp) =
+            replace_person_contacts(&state, provider_id, None, Some(staff_id), &values).await
+    {
+        return resp;
+    }
+
+    let _ = audit(
+        &state,
+        auth.user_id,
+        "create_provider_staff",
+        "provider_staff",
+        Some(staff_id),
+        Some(json!({ "provider_id": provider_id, "staff_id": staff_id })),
+    )
+    .await;
+    crate::realtime::publish_provider_event(
+        &state,
+        Some(auth.user_id),
+        "provider.staff_created",
+        provider_id,
+        json!({ "provider_id": provider_id, "staff_id": staff_id }),
+    )
+    .await;
+
+    (
+        StatusCode::CREATED,
+        Json(json!({
+            "id": staff_id,
+            "created_at": row
+                .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+                .map(|v| v.to_rfc3339())
+                .unwrap_or_default(),
+        })),
+    )
+        .into_response()
+}
+
+async fn update_provider_staff(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((provider_id, staff_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<UpsertProviderStaffRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+
+    let staff = match normalize_provider_staff_payload(body) {
+        Ok(payload) => payload,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    if let Err(resp) = ensure_provider_staff_role_exists(&state, &staff.role).await {
+        return resp;
+    }
+    let contacts = staff.contacts.clone();
+
+    match sqlx::query(
+        r#"UPDATE provider_staff
+           SET first_name = $3,
+               last_name = $4,
+               display_name = $5,
+               role = $6,
+               department = $7,
+               status = $8,
+               notes = $9,
+               is_active = $10,
+               updated_at = now()
+           WHERE provider_id = $1 AND id = $2"#,
+    )
+    .bind(provider_id)
+    .bind(staff_id)
+    .bind(staff.first_name)
+    .bind(staff.last_name)
+    .bind(staff.display_name)
+    .bind(staff.role)
+    .bind(staff.department)
+    .bind(staff.status)
+    .bind(staff.notes)
+    .bind(staff.is_active)
+    .execute(&state.db)
+    .await
+    {
+        Ok(result) if result.rows_affected() > 0 => {}
+        Ok(_) => return err(StatusCode::NOT_FOUND, "Provider staff not found"),
+        Err(e) => {
+            tracing::error!(error = %e, provider_id = %provider_id, staff_id = %staff_id, "Failed to update provider staff");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update provider staff",
+            );
+        }
+    }
+
+    if let Some(values) = contacts
+        && let Err(resp) =
+            replace_person_contacts(&state, provider_id, None, Some(staff_id), &values).await
+    {
+        return resp;
+    }
+
+    let _ = audit(
+        &state,
+        auth.user_id,
+        "update_provider_staff",
+        "provider_staff",
+        Some(staff_id),
+        Some(json!({ "provider_id": provider_id, "staff_id": staff_id })),
+    )
+    .await;
+    crate::realtime::publish_provider_event(
+        &state,
+        Some(auth.user_id),
+        "provider.staff_updated",
+        provider_id,
+        json!({ "provider_id": provider_id, "staff_id": staff_id }),
+    )
+    .await;
+
+    Json(json!({ "ok": true })).into_response()
+}
+
+async fn delete_provider_staff(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((provider_id, staff_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+
+    match sqlx::query("DELETE FROM provider_staff WHERE provider_id = $1 AND id = $2")
+        .bind(provider_id)
+        .bind(staff_id)
+        .execute(&state.db)
+        .await
+    {
+        Ok(result) if result.rows_affected() > 0 => {}
+        Ok(_) => return err(StatusCode::NOT_FOUND, "Provider staff not found"),
+        Err(e) => {
+            tracing::error!(error = %e, provider_id = %provider_id, staff_id = %staff_id, "Failed to delete provider staff");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete provider staff",
+            );
+        }
+    }
+
+    let _ = audit(
+        &state,
+        auth.user_id,
+        "delete_provider_staff",
+        "provider_staff",
+        Some(staff_id),
+        Some(json!({ "provider_id": provider_id, "staff_id": staff_id })),
+    )
+    .await;
+    crate::realtime::publish_provider_event(
+        &state,
+        Some(auth.user_id),
+        "provider.staff_deleted",
+        provider_id,
+        json!({ "provider_id": provider_id, "staff_id": staff_id }),
+    )
+    .await;
+
+    StatusCode::NO_CONTENT.into_response()
+}
+
 async fn list_services(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -1412,6 +2281,7 @@ async fn get_service(
 
     match sqlx::query(
         r#"SELECT id, provider_id, service_name, description, price, currency,
+                  price_type, price_from, price_to, price_note,
                   valid_from, valid_to, created_at
            FROM service_catalog
            WHERE provider_id = $1 AND id = $2"#,
@@ -1427,6 +2297,10 @@ async fn get_service(
             "service_name": row.try_get::<String, _>("service_name").unwrap_or_default(),
             "description": row.try_get::<Option<String>, _>("description").unwrap_or_default(),
             "price": row.try_get::<rust_decimal::Decimal, _>("price").unwrap_or(rust_decimal::Decimal::ZERO),
+            "price_type": row.try_get::<String, _>("price_type").unwrap_or_else(|_| "fixed".to_string()),
+            "price_from": row.try_get::<Option<rust_decimal::Decimal>, _>("price_from").unwrap_or_default(),
+            "price_to": row.try_get::<Option<rust_decimal::Decimal>, _>("price_to").unwrap_or_default(),
+            "price_note": row.try_get::<Option<String>, _>("price_note").unwrap_or_default(),
             "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
             "valid_from": row.try_get::<chrono::NaiveDate, _>("valid_from").map(|v| v.to_string()).unwrap_or_default(),
             "valid_to": row.try_get::<Option<chrono::NaiveDate>, _>("valid_to").unwrap_or_default().map(|v| v.to_string()),
@@ -1462,9 +2336,13 @@ async fn create_service(
 
     let row = match sqlx::query(
         r#"INSERT INTO service_catalog (
-                provider_id, service_name, description, price, currency, valid_from, valid_to
+                provider_id, service_name, description, price,
+                price_type, price_from, price_to, price_note,
+                currency, valid_from, valid_to
            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7
+                $1, $2, $3, $4,
+                $5, $6, $7, $8,
+                $9, $10, $11
            )
            RETURNING id, created_at"#,
     )
@@ -1472,6 +2350,10 @@ async fn create_service(
     .bind(service.service_name)
     .bind(service.description)
     .bind(service.price)
+    .bind(service.price_type)
+    .bind(service.price_from)
+    .bind(service.price_to)
+    .bind(service.price_note)
     .bind(service.currency)
     .bind(service.valid_from)
     .bind(service.valid_to)
@@ -1549,9 +2431,13 @@ async fn update_service(
            SET service_name = $3,
                description = $4,
                price = $5,
-               currency = $6,
-               valid_from = $7,
-               valid_to = $8
+               price_type = $6,
+               price_from = $7,
+               price_to = $8,
+               price_note = $9,
+               currency = $10,
+               valid_from = $11,
+               valid_to = $12
            WHERE provider_id = $1 AND id = $2"#,
     )
     .bind(provider_id)
@@ -1559,6 +2445,10 @@ async fn update_service(
     .bind(service.service_name)
     .bind(service.description)
     .bind(service.price)
+    .bind(service.price_type)
+    .bind(service.price_from)
+    .bind(service.price_to)
+    .bind(service.price_note)
     .bind(service.currency)
     .bind(service.valid_from)
     .bind(service.valid_to)
@@ -1657,17 +2547,25 @@ struct ProviderPayload {
     email: Option<String>,
     website: Option<String>,
     fachbereich: Option<String>,
+    specializations: Option<Vec<String>>,
+    parent_provider_id: Option<Uuid>,
+    organization_level: String,
     kooperationsvertrag: Option<Value>,
     notes: Option<String>,
 }
 
 struct DoctorPayload {
     name: String,
+    first_name: Option<String>,
+    last_name: Option<String>,
+    display_name: Option<String>,
     title: Option<String>,
     fachbereich: Option<String>,
+    specializations: Option<Vec<String>>,
     languages: Vec<String>,
     phone: Option<String>,
     email: Option<String>,
+    contacts: Option<Vec<PersonContactPayload>>,
     license_number: Option<String>,
     licensing_country: Option<String>,
     licensing_valid_until: Option<chrono::NaiveDate>,
@@ -1678,9 +2576,52 @@ struct ServicePayload {
     service_name: String,
     description: Option<String>,
     price: rust_decimal::Decimal,
+    price_type: String,
+    price_from: Option<rust_decimal::Decimal>,
+    price_to: Option<rust_decimal::Decimal>,
+    price_note: Option<String>,
     currency: String,
     valid_from: chrono::NaiveDate,
     valid_to: Option<chrono::NaiveDate>,
+}
+
+#[derive(Clone)]
+struct PersonContactPayload {
+    contact_kind: String,
+    contact_type: String,
+    value: String,
+    is_primary: bool,
+    notes: Option<String>,
+}
+
+struct ProviderStaffPayload {
+    first_name: Option<String>,
+    last_name: Option<String>,
+    display_name: String,
+    role: String,
+    department: Option<String>,
+    status: String,
+    notes: Option<String>,
+    is_active: bool,
+    contacts: Option<Vec<PersonContactPayload>>,
+}
+
+struct ProviderStaffRolePayload {
+    code: Option<String>,
+    name_en: String,
+    name_de: Option<String>,
+    name_ru: Option<String>,
+    sort_order: i32,
+    is_active: bool,
+}
+
+struct SpecializationPayload {
+    code: Option<String>,
+    name_en: String,
+    name_de: Option<String>,
+    name_ru: Option<String>,
+    sort_order: i32,
+    is_active: bool,
 }
 
 struct ProviderTemplatePayload {
@@ -1715,6 +2656,21 @@ fn normalize_provider_payload(
     if !is_valid_provider_type(&provider_type) {
         return Err("Provider type must be medical or non_medical");
     }
+    let explicit_specializations = body.specializations.is_some();
+    let mut specializations = normalize_string_list(body.specializations);
+    let fachbereich = normalize_optional(body.fachbereich);
+    if specializations.is_empty()
+        && let Some(value) = fachbereich.clone()
+    {
+        specializations.push(value);
+    }
+    let fachbereich = fachbereich.or_else(|| specializations.first().cloned());
+
+    let organization_level =
+        normalize_optional(body.organization_level).unwrap_or_else(|| "organization".to_string());
+    if !is_valid_organization_level(&organization_level) {
+        return Err("Organization level is invalid");
+    }
 
     Ok(ProviderPayload {
         name,
@@ -1728,28 +2684,78 @@ fn normalize_provider_payload(
         phone: normalize_optional(body.phone),
         email: normalize_optional(body.email),
         website: normalize_optional(body.website),
-        fachbereich: normalize_optional(body.fachbereich),
+        fachbereich,
+        specializations: if explicit_specializations || !specializations.is_empty() {
+            Some(specializations)
+        } else {
+            None
+        },
+        parent_provider_id: body.parent_provider_id,
+        organization_level,
         kooperationsvertrag: normalize_json(body.kooperationsvertrag),
         notes: normalize_optional(body.notes),
     })
 }
 
 fn normalize_doctor_payload(body: UpsertDoctorRequest) -> Result<DoctorPayload, &'static str> {
-    let name = body.name.trim().to_string();
+    let first_name = normalize_optional(body.first_name);
+    let last_name = normalize_optional(body.last_name);
+    let display_name = normalize_optional(body.display_name);
+    let legacy_name = normalize_optional(body.name);
+    let joined_name = [first_name.clone(), last_name.clone()]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let name = legacy_name
+        .or_else(|| display_name.clone())
+        .or_else(|| {
+            if joined_name.is_empty() {
+                None
+            } else {
+                Some(joined_name)
+            }
+        })
+        .ok_or("Doctor name is required (max 255)")?;
     if name.is_empty() || name.len() > 255 {
         return Err("Doctor name is required (max 255)");
     }
 
     let languages = normalize_string_list(body.languages);
     let licensing_valid_until = parse_date(body.licensing_valid_until, "licensing_valid_until")?;
+    let explicit_specializations = body.specializations.is_some();
+    let mut specializations = normalize_string_list(body.specializations);
+    let fachbereich = normalize_optional(body.fachbereich);
+    if specializations.is_empty()
+        && let Some(value) = fachbereich.clone()
+    {
+        specializations.push(value);
+    }
+    let fachbereich = fachbereich.or_else(|| specializations.first().cloned());
+    let phone = normalize_optional(body.phone);
+    let email = normalize_optional(body.email);
+    let contacts = match body.contacts {
+        Some(raw) => Some(normalize_person_contacts(raw)?),
+        None => legacy_contacts_from_fields(phone.clone(), email.clone()),
+    };
+    let display_name = display_name.or_else(|| Some(name.clone()));
 
     Ok(DoctorPayload {
         name,
+        first_name,
+        last_name,
+        display_name,
         title: normalize_optional(body.title),
-        fachbereich: normalize_optional(body.fachbereich),
+        fachbereich,
+        specializations: if explicit_specializations || !specializations.is_empty() {
+            Some(specializations)
+        } else {
+            None
+        },
         languages,
-        phone: normalize_optional(body.phone),
-        email: normalize_optional(body.email),
+        phone,
+        email,
+        contacts,
         license_number: normalize_optional(body.license_number),
         licensing_country: normalize_optional(body.licensing_country),
         licensing_valid_until,
@@ -1763,12 +2769,45 @@ fn normalize_service_payload(body: UpsertServiceRequest) -> Result<ServicePayloa
         return Err("Service name is required (max 255)");
     }
 
-    if !body.price.is_finite() || body.price < 0.0 {
-        return Err("Service price must be a valid non-negative number");
+    let requested_price_type = normalize_optional(body.price_type);
+    let price_type = requested_price_type.unwrap_or_else(|| {
+        if body.price_from.is_some() || body.price_to.is_some() {
+            "range".to_string()
+        } else {
+            "fixed".to_string()
+        }
+    });
+    if !matches!(price_type.as_str(), "fixed" | "range" | "on_request") {
+        return Err("Service price type is invalid");
     }
 
-    let price = rust_decimal::Decimal::try_from(body.price)
-        .map_err(|_| "Service price must be a valid non-negative number")?;
+    let legacy_price = normalize_money(body.price)?;
+    let requested_price_from = normalize_money(body.price_from)?;
+    let requested_price_to = normalize_money(body.price_to)?;
+    let (price, price_from, price_to) = match price_type.as_str() {
+        "fixed" => {
+            let price = legacy_price
+                .or(requested_price_from)
+                .or(requested_price_to)
+                .unwrap_or(rust_decimal::Decimal::ZERO);
+            (price, Some(price), Some(price))
+        }
+        "range" => {
+            let price_from = requested_price_from
+                .or(legacy_price)
+                .ok_or("Service price_from is required for price range")?;
+            let price_to = requested_price_to.unwrap_or(price_from);
+            if price_to < price_from {
+                return Err("Service price_to must be greater than or equal to price_from");
+            }
+            (price_from, Some(price_from), Some(price_to))
+        }
+        _ => (
+            legacy_price.unwrap_or(rust_decimal::Decimal::ZERO),
+            requested_price_from,
+            requested_price_to,
+        ),
+    };
 
     let currency = normalize_optional(body.currency)
         .unwrap_or_else(|| "EUR".to_string())
@@ -1791,10 +2830,229 @@ fn normalize_service_payload(body: UpsertServiceRequest) -> Result<ServicePayloa
         service_name,
         description: normalize_optional(body.description),
         price,
+        price_type,
+        price_from,
+        price_to,
+        price_note: normalize_optional(body.price_note),
         currency,
         valid_from,
         valid_to,
     })
+}
+
+fn normalize_provider_staff_payload(
+    body: UpsertProviderStaffRequest,
+) -> Result<ProviderStaffPayload, &'static str> {
+    let first_name = normalize_optional(body.first_name);
+    let last_name = normalize_optional(body.last_name);
+    let display_name = normalize_optional(Some(body.display_name))
+        .or_else(|| {
+            let joined = [first_name.clone(), last_name.clone()]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" ");
+            if joined.is_empty() {
+                None
+            } else {
+                Some(joined)
+            }
+        })
+        .ok_or("Staff display name is required")?;
+    if display_name.len() > 255 {
+        return Err("Staff display name is too long");
+    }
+
+    let role = normalize_optional(body.role).unwrap_or_else(|| "staff".to_string());
+    if role.len() > 120 {
+        return Err("Staff role is too long");
+    }
+    let status = normalize_optional(body.status).unwrap_or_else(|| "active".to_string());
+    if !matches!(
+        status.as_str(),
+        "active" | "inactive" | "external" | "unknown"
+    ) {
+        return Err("Staff status is invalid");
+    }
+    let contacts = match body.contacts {
+        Some(raw) => Some(normalize_person_contacts(raw)?),
+        None => None,
+    };
+
+    Ok(ProviderStaffPayload {
+        first_name,
+        last_name,
+        display_name,
+        role,
+        department: normalize_optional(body.department),
+        status: status.clone(),
+        notes: normalize_optional(body.notes),
+        is_active: status == "active",
+        contacts,
+    })
+}
+
+fn normalize_provider_staff_role_payload(
+    body: UpsertProviderStaffRoleRequest,
+    allow_code: bool,
+) -> Result<ProviderStaffRolePayload, &'static str> {
+    let name_en =
+        normalize_optional(Some(body.name_en)).ok_or("Provider staff role name is required")?;
+    if name_en.len() > 120 {
+        return Err("Provider staff role name is too long");
+    }
+
+    let name_de = normalize_optional(body.name_de);
+    if name_de.as_ref().is_some_and(|value| value.len() > 120) {
+        return Err("Provider staff role German name is too long");
+    }
+    let name_ru = normalize_optional(body.name_ru);
+    if name_ru.as_ref().is_some_and(|value| value.len() > 120) {
+        return Err("Provider staff role Russian name is too long");
+    }
+
+    let code = if allow_code {
+        normalize_optional(body.code).map(|value| staff_role_code(&value))
+    } else {
+        None
+    };
+    if code.as_ref().is_some_and(|value| value.len() > 120) {
+        return Err("Provider staff role code is too long");
+    }
+
+    Ok(ProviderStaffRolePayload {
+        code,
+        name_en,
+        name_de,
+        name_ru,
+        sort_order: body.sort_order.unwrap_or(1000),
+        is_active: body.is_active.unwrap_or(true),
+    })
+}
+
+fn normalize_specialization_payload(
+    body: UpsertSpecializationRequest,
+    allow_code: bool,
+) -> Result<SpecializationPayload, &'static str> {
+    let name_en =
+        normalize_optional(Some(body.name_en)).ok_or("Specialization name is required")?;
+    if name_en.len() > 120 {
+        return Err("Specialization name is too long");
+    }
+
+    let name_de = normalize_optional(body.name_de);
+    if name_de.as_ref().is_some_and(|value| value.len() > 120) {
+        return Err("Specialization German name is too long");
+    }
+    let name_ru = normalize_optional(body.name_ru);
+    if name_ru.as_ref().is_some_and(|value| value.len() > 120) {
+        return Err("Specialization alternate name is too long");
+    }
+
+    let code = if allow_code {
+        normalize_optional(body.code).map(|value| specialization_code(&value))
+    } else {
+        None
+    };
+    if code.as_ref().is_some_and(|value| value.len() > 120) {
+        return Err("Specialization code is too long");
+    }
+
+    Ok(SpecializationPayload {
+        code,
+        name_en,
+        name_de,
+        name_ru,
+        sort_order: body.sort_order.unwrap_or(1000),
+        is_active: body.is_active.unwrap_or(true),
+    })
+}
+
+fn normalize_person_contacts(
+    raw_contacts: Vec<UpsertPersonContactRequest>,
+) -> Result<Vec<PersonContactPayload>, &'static str> {
+    let mut contacts = Vec::new();
+    for raw in raw_contacts {
+        let contact_kind = raw.contact_kind.trim().to_lowercase();
+        if !matches!(contact_kind.as_str(), "phone" | "email") {
+            return Err("Contact kind must be phone or email");
+        }
+        let contact_type = normalize_optional(raw.contact_type)
+            .unwrap_or_else(|| "work".to_string())
+            .to_lowercase();
+        if !matches!(contact_type.as_str(), "work" | "private" | "other") {
+            return Err("Contact type must be work, private or other");
+        }
+        let value = raw.value.trim().to_string();
+        if value.is_empty() || value.len() > 255 {
+            return Err("Contact value is required (max 255)");
+        }
+        contacts.push(PersonContactPayload {
+            contact_kind,
+            contact_type,
+            value,
+            is_primary: raw.is_primary.unwrap_or(false),
+            notes: normalize_optional(raw.notes),
+        });
+    }
+    ensure_primary_contacts(&mut contacts);
+    Ok(contacts)
+}
+
+fn legacy_contacts_from_fields(
+    phone: Option<String>,
+    email: Option<String>,
+) -> Option<Vec<PersonContactPayload>> {
+    let mut contacts = Vec::new();
+    if let Some(value) = phone {
+        contacts.push(PersonContactPayload {
+            contact_kind: "phone".to_string(),
+            contact_type: "work".to_string(),
+            value,
+            is_primary: true,
+            notes: None,
+        });
+    }
+    if let Some(value) = email {
+        contacts.push(PersonContactPayload {
+            contact_kind: "email".to_string(),
+            contact_type: "work".to_string(),
+            value,
+            is_primary: true,
+            notes: None,
+        });
+    }
+    if contacts.is_empty() {
+        None
+    } else {
+        Some(contacts)
+    }
+}
+
+fn ensure_primary_contacts(contacts: &mut [PersonContactPayload]) {
+    for kind in ["phone", "email"] {
+        let mut saw_primary = false;
+        let mut saw_kind = false;
+        for contact in contacts
+            .iter_mut()
+            .filter(|contact| contact.contact_kind == kind)
+        {
+            saw_kind = true;
+            if contact.is_primary && !saw_primary {
+                saw_primary = true;
+            } else {
+                contact.is_primary = false;
+            }
+        }
+        if !saw_primary && saw_kind {
+            if let Some(contact) = contacts
+                .iter_mut()
+                .find(|contact| contact.contact_kind == kind)
+            {
+                contact.is_primary = true;
+            }
+        }
+    }
 }
 
 fn normalize_provider_template_payload(
@@ -1890,6 +3148,16 @@ fn normalize_json(value: Option<Value>) -> Option<Value> {
     value.and_then(|raw| if raw.is_null() { None } else { Some(raw) })
 }
 
+fn normalize_money(value: Option<f64>) -> Result<Option<rust_decimal::Decimal>, &'static str> {
+    match value {
+        Some(raw) if raw.is_finite() && raw >= 0.0 => rust_decimal::Decimal::try_from(raw)
+            .map(Some)
+            .map_err(|_| "Service price must be a valid non-negative number"),
+        Some(_) => Err("Service price must be a valid non-negative number"),
+        None => Ok(None),
+    }
+}
+
 fn parse_date(
     value: Option<String>,
     field_name: &'static str,
@@ -1948,6 +3216,10 @@ fn normalize_provider_template_language(value: &str) -> Option<&'static str> {
 
 fn is_valid_provider_type(value: &str) -> bool {
     matches!(value, "medical" | "non_medical")
+}
+
+fn is_valid_organization_level(value: &str) -> bool {
+    matches!(value, "organization" | "clinic" | "department" | "unit")
 }
 
 async fn toggle_provider_active(
@@ -2051,12 +3323,721 @@ async fn ensure_doctor_belongs_to_provider(
     }
 }
 
+async fn validate_provider_parent(
+    state: &AppState,
+    provider_id: Option<Uuid>,
+    parent_provider_id: Option<Uuid>,
+) -> Result<(), axum::response::Response> {
+    let Some(parent_provider_id) = parent_provider_id else {
+        return Ok(());
+    };
+    if provider_id == Some(parent_provider_id) {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Provider cannot be its own parent",
+        ));
+    }
+
+    let exists = sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM providers WHERE id = $1)")
+        .bind(parent_provider_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, parent_provider_id = %parent_provider_id, "Failed to validate parent provider");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate parent provider",
+            )
+        })?;
+    if !exists {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Parent provider not found",
+        ));
+    }
+
+    let Some(provider_id) = provider_id else {
+        return Ok(());
+    };
+    let would_cycle = sqlx::query_scalar::<_, bool>(
+        r#"WITH RECURSIVE parent_chain AS (
+                SELECT id, parent_provider_id
+                FROM providers
+                WHERE id = $1
+                UNION ALL
+                SELECT p.id, p.parent_provider_id
+                FROM providers p
+                JOIN parent_chain c ON p.id = c.parent_provider_id
+            )
+            SELECT EXISTS(SELECT 1 FROM parent_chain WHERE id = $2)"#,
+    )
+    .bind(parent_provider_id)
+    .bind(provider_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, provider_id = %provider_id, parent_provider_id = %parent_provider_id, "Failed to validate provider hierarchy");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate provider hierarchy",
+        )
+    })?;
+    if would_cycle {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Provider hierarchy cannot contain a cycle",
+        ));
+    }
+
+    Ok(())
+}
+
+async fn load_specializations_json(
+    state: &AppState,
+    include_inactive: bool,
+) -> Result<Vec<serde_json::Value>, axum::response::Response> {
+    let rows = sqlx::query(
+        r#"SELECT id, code, name_en, name_de, name_ru, is_active, sort_order, created_at, updated_at
+           FROM medical_specializations
+           WHERE $1 OR is_active = TRUE
+           ORDER BY is_active DESC, sort_order, name_en"#,
+    )
+    .bind(include_inactive)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to load specializations");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load specializations",
+        )
+    })?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "code": row.try_get::<String, _>("code").unwrap_or_default(),
+                "name_en": row.try_get::<String, _>("name_en").unwrap_or_default(),
+                "name_de": row.try_get::<Option<String>, _>("name_de").unwrap_or_default(),
+                "name_ru": row.try_get::<Option<String>, _>("name_ru").unwrap_or_default(),
+                "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
+                "sort_order": row.try_get::<i32, _>("sort_order").unwrap_or_default(),
+                "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
+                "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
+            })
+        })
+        .collect())
+}
+
+async fn toggle_specialization_active(
+    state: AppState,
+    auth: AuthUser,
+    specialization_id: Uuid,
+    is_active: bool,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+
+    match sqlx::query(
+        "UPDATE medical_specializations SET is_active = $2, updated_at = now() WHERE id = $1",
+    )
+    .bind(specialization_id)
+    .bind(is_active)
+    .execute(&state.db)
+    .await
+    {
+        Ok(result) if result.rows_affected() > 0 => {}
+        Ok(_) => return err(StatusCode::NOT_FOUND, "Specialization not found"),
+        Err(e) => {
+            tracing::error!(error = %e, specialization_id = %specialization_id, "Failed to toggle specialization");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update specialization",
+            );
+        }
+    }
+
+    let action = if is_active {
+        "activate_provider_specialization"
+    } else {
+        "deactivate_provider_specialization"
+    };
+    let _ = audit(
+        &state,
+        auth.user_id,
+        action,
+        "medical_specialization",
+        Some(specialization_id),
+        Some(json!({ "specialization_id": specialization_id, "is_active": is_active })),
+    )
+    .await;
+
+    Json(json!({ "ok": true })).into_response()
+}
+
+async fn load_provider_staff_roles_json(
+    state: &AppState,
+    include_inactive: bool,
+) -> Result<Vec<serde_json::Value>, axum::response::Response> {
+    let rows = sqlx::query(
+        r#"SELECT id, code, name_en, name_de, name_ru, is_active, sort_order, created_at, updated_at
+           FROM provider_staff_roles
+           WHERE $1 OR is_active = TRUE
+           ORDER BY is_active DESC, sort_order, name_en"#,
+    )
+    .bind(include_inactive)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to load provider staff roles");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load provider staff roles",
+        )
+    })?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "code": row.try_get::<String, _>("code").unwrap_or_default(),
+                "name_en": row.try_get::<String, _>("name_en").unwrap_or_default(),
+                "name_de": row.try_get::<Option<String>, _>("name_de").unwrap_or_default(),
+                "name_ru": row.try_get::<Option<String>, _>("name_ru").unwrap_or_default(),
+                "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
+                "sort_order": row.try_get::<i32, _>("sort_order").unwrap_or_default(),
+                "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
+                "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
+            })
+        })
+        .collect())
+}
+
+async fn ensure_provider_staff_role_exists(
+    state: &AppState,
+    code: &str,
+) -> Result<(), axum::response::Response> {
+    let exists = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS (
+               SELECT 1 FROM provider_staff_roles WHERE code = $1
+           )"#,
+    )
+    .bind(code)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, role = %code, "Failed to validate provider staff role");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate provider staff role",
+        )
+    })?;
+
+    if exists {
+        Ok(())
+    } else {
+        Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Provider staff role is invalid",
+        ))
+    }
+}
+
+async fn toggle_provider_staff_role_active(
+    state: AppState,
+    auth: AuthUser,
+    role_id: Uuid,
+    is_active: bool,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+
+    match sqlx::query(
+        "UPDATE provider_staff_roles SET is_active = $2, updated_at = now() WHERE id = $1",
+    )
+    .bind(role_id)
+    .bind(is_active)
+    .execute(&state.db)
+    .await
+    {
+        Ok(result) if result.rows_affected() > 0 => {}
+        Ok(_) => return err(StatusCode::NOT_FOUND, "Provider staff role not found"),
+        Err(e) => {
+            tracing::error!(error = %e, role_id = %role_id, "Failed to toggle provider staff role");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update provider staff role",
+            );
+        }
+    }
+
+    let action = if is_active {
+        "activate_provider_staff_role"
+    } else {
+        "deactivate_provider_staff_role"
+    };
+    let _ = audit(
+        &state,
+        auth.user_id,
+        action,
+        "provider_staff_role",
+        Some(role_id),
+        Some(json!({ "role_id": role_id, "is_active": is_active })),
+    )
+    .await;
+
+    Json(json!({ "ok": true })).into_response()
+}
+
+async fn load_provider_specializations_json(
+    state: &AppState,
+    provider_id: Uuid,
+) -> Result<Vec<serde_json::Value>, axum::response::Response> {
+    let rows = sqlx::query(
+        r#"SELECT ms.id, ms.code, ms.name_en, ms.name_de, ms.name_ru, ms.is_active, ms.sort_order, ps.is_primary
+           FROM provider_specializations ps
+           JOIN medical_specializations ms ON ms.id = ps.specialization_id
+           WHERE ps.provider_id = $1
+           ORDER BY ps.is_primary DESC, ms.sort_order, ms.name_en"#,
+    )
+    .bind(provider_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, provider_id = %provider_id, "Failed to load provider specializations");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load provider specializations",
+        )
+    })?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "code": row.try_get::<String, _>("code").unwrap_or_default(),
+                "name_en": row.try_get::<String, _>("name_en").unwrap_or_default(),
+                "name_de": row.try_get::<Option<String>, _>("name_de").unwrap_or_default(),
+                "name_ru": row.try_get::<Option<String>, _>("name_ru").unwrap_or_default(),
+                "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
+                "sort_order": row.try_get::<i32, _>("sort_order").unwrap_or_default(),
+                "is_primary": row.try_get::<bool, _>("is_primary").unwrap_or(false),
+            })
+        })
+        .collect())
+}
+
+async fn load_doctor_specializations_json(
+    state: &AppState,
+    doctor_id: Uuid,
+) -> Result<Vec<serde_json::Value>, axum::response::Response> {
+    let rows = sqlx::query(
+        r#"SELECT ms.id, ms.code, ms.name_en, ms.name_de, ms.name_ru, ms.is_active, ms.sort_order, ds.is_primary
+           FROM provider_doctor_specializations ds
+           JOIN medical_specializations ms ON ms.id = ds.specialization_id
+           WHERE ds.doctor_id = $1
+           ORDER BY ds.is_primary DESC, ms.sort_order, ms.name_en"#,
+    )
+    .bind(doctor_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, doctor_id = %doctor_id, "Failed to load doctor specializations");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load doctor specializations",
+        )
+    })?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "code": row.try_get::<String, _>("code").unwrap_or_default(),
+                "name_en": row.try_get::<String, _>("name_en").unwrap_or_default(),
+                "name_de": row.try_get::<Option<String>, _>("name_de").unwrap_or_default(),
+                "name_ru": row.try_get::<Option<String>, _>("name_ru").unwrap_or_default(),
+                "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
+                "sort_order": row.try_get::<i32, _>("sort_order").unwrap_or_default(),
+                "is_primary": row.try_get::<bool, _>("is_primary").unwrap_or(false),
+            })
+        })
+        .collect())
+}
+
+async fn sync_provider_specializations(
+    state: &AppState,
+    provider_id: Uuid,
+    values: &[String],
+) -> Result<(), axum::response::Response> {
+    let specialization_ids = upsert_specialization_ids(state, values).await?;
+    sqlx::query("DELETE FROM provider_specializations WHERE provider_id = $1")
+        .bind(provider_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, provider_id = %provider_id, "Failed to replace provider specializations");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update provider specializations",
+            )
+        })?;
+    for (index, specialization_id) in specialization_ids.into_iter().enumerate() {
+        sqlx::query(
+            r#"INSERT INTO provider_specializations (provider_id, specialization_id, is_primary)
+               VALUES ($1, $2, $3)
+               ON CONFLICT (provider_id, specialization_id)
+               DO UPDATE SET is_primary = EXCLUDED.is_primary"#,
+        )
+        .bind(provider_id)
+        .bind(specialization_id)
+        .bind(index == 0)
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, provider_id = %provider_id, specialization_id = %specialization_id, "Failed to insert provider specialization");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update provider specializations",
+            )
+        })?;
+    }
+    Ok(())
+}
+
+async fn sync_doctor_specializations(
+    state: &AppState,
+    doctor_id: Uuid,
+    values: &[String],
+) -> Result<(), axum::response::Response> {
+    let specialization_ids = upsert_specialization_ids(state, values).await?;
+    sqlx::query("DELETE FROM provider_doctor_specializations WHERE doctor_id = $1")
+        .bind(doctor_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, doctor_id = %doctor_id, "Failed to replace doctor specializations");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update doctor specializations",
+            )
+        })?;
+    for (index, specialization_id) in specialization_ids.into_iter().enumerate() {
+        sqlx::query(
+            r#"INSERT INTO provider_doctor_specializations (doctor_id, specialization_id, is_primary)
+               VALUES ($1, $2, $3)
+               ON CONFLICT (doctor_id, specialization_id)
+               DO UPDATE SET is_primary = EXCLUDED.is_primary"#,
+        )
+        .bind(doctor_id)
+        .bind(specialization_id)
+        .bind(index == 0)
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, doctor_id = %doctor_id, specialization_id = %specialization_id, "Failed to insert doctor specialization");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update doctor specializations",
+            )
+        })?;
+    }
+    Ok(())
+}
+
+async fn upsert_specialization_ids(
+    state: &AppState,
+    values: &[String],
+) -> Result<Vec<Uuid>, axum::response::Response> {
+    let mut ids = Vec::new();
+    for value in values {
+        let label = value.trim();
+        if label.is_empty() {
+            continue;
+        }
+        let code = specialization_code(label);
+        let row = sqlx::query(
+            r#"INSERT INTO medical_specializations (code, name_en, name_de, name_ru, sort_order)
+               VALUES ($1, $2, $2, $2, 900)
+               ON CONFLICT (code) DO UPDATE
+               SET name_en = EXCLUDED.name_en,
+                   name_de = COALESCE(medical_specializations.name_de, EXCLUDED.name_de),
+                   name_ru = COALESCE(medical_specializations.name_ru, EXCLUDED.name_ru),
+                   updated_at = now()
+               RETURNING id"#,
+        )
+        .bind(code)
+        .bind(label)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, specialization = %label, "Failed to upsert specialization");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update specializations",
+            )
+        })?;
+        let id: Uuid = row.try_get("id").map_err(|_| {
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to decode specialization",
+            )
+        })?;
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
+}
+
+fn specialization_code(label: &str) -> String {
+    let mut code = String::new();
+    let mut previous_was_separator = false;
+    for ch in label.trim().to_lowercase().chars() {
+        if ch.is_alphanumeric() {
+            code.push(ch);
+            previous_was_separator = false;
+        } else if !previous_was_separator {
+            code.push('_');
+            previous_was_separator = true;
+        }
+    }
+    let code = code.trim_matches('_').to_string();
+    if code.is_empty() {
+        format!("custom_{}", Uuid::new_v4().simple())
+    } else {
+        code
+    }
+}
+
+fn staff_role_code(label: &str) -> String {
+    specialization_code(label)
+}
+
+fn is_unique_violation(error: &sqlx::Error) -> bool {
+    error
+        .as_database_error()
+        .and_then(|db_error| db_error.code())
+        .is_some_and(|code| code == "23505")
+}
+
+async fn replace_person_contacts(
+    state: &AppState,
+    provider_id: Uuid,
+    doctor_id: Option<Uuid>,
+    staff_id: Option<Uuid>,
+    contacts: &[PersonContactPayload],
+) -> Result<(), axum::response::Response> {
+    let delete_sql = if doctor_id.is_some() {
+        "DELETE FROM provider_person_contacts WHERE doctor_id = $1"
+    } else {
+        "DELETE FROM provider_person_contacts WHERE staff_id = $1"
+    };
+    sqlx::query(delete_sql)
+        .bind(doctor_id.or(staff_id))
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, provider_id = %provider_id, "Failed to clear person contacts");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update person contacts",
+            )
+        })?;
+
+    for contact in contacts {
+        sqlx::query(
+            r#"INSERT INTO provider_person_contacts (
+                    provider_id, doctor_id, staff_id, contact_kind, contact_type,
+                    value, is_primary, notes
+               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#,
+        )
+        .bind(provider_id)
+        .bind(doctor_id)
+        .bind(staff_id)
+        .bind(&contact.contact_kind)
+        .bind(&contact.contact_type)
+        .bind(&contact.value)
+        .bind(contact.is_primary)
+        .bind(&contact.notes)
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, provider_id = %provider_id, "Failed to insert person contact");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update person contacts",
+            )
+        })?;
+    }
+
+    Ok(())
+}
+
+async fn load_person_contacts_json(
+    state: &AppState,
+    provider_id: Uuid,
+    doctor_id: Option<Uuid>,
+    staff_id: Option<Uuid>,
+    fallback_phone: Option<String>,
+    fallback_email: Option<String>,
+) -> Result<Vec<serde_json::Value>, axum::response::Response> {
+    let rows = sqlx::query(
+        r#"SELECT id, contact_kind, contact_type, value, is_primary, notes, created_at
+           FROM provider_person_contacts
+           WHERE provider_id = $1
+             AND ($2::uuid IS NULL OR doctor_id = $2)
+             AND ($3::uuid IS NULL OR staff_id = $3)
+           ORDER BY contact_kind, is_primary DESC, contact_type, created_at"#,
+    )
+    .bind(provider_id)
+    .bind(doctor_id)
+    .bind(staff_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, provider_id = %provider_id, "Failed to load person contacts");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load person contacts",
+        )
+    })?;
+
+    if rows.is_empty()
+        && let Some(contacts) = legacy_contacts_from_fields(fallback_phone, fallback_email)
+    {
+        return Ok(contacts
+            .into_iter()
+            .map(|contact| {
+                json!({
+                    "id": Value::Null,
+                    "contact_kind": contact.contact_kind,
+                    "contact_type": contact.contact_type,
+                    "value": contact.value,
+                    "is_primary": contact.is_primary,
+                    "notes": contact.notes,
+                })
+            })
+            .collect());
+    }
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "id": row.try_get::<Uuid, _>("id").ok(),
+                "contact_kind": row.try_get::<String, _>("contact_kind").unwrap_or_default(),
+                "contact_type": row.try_get::<String, _>("contact_type").unwrap_or_else(|_| "work".to_string()),
+                "value": row.try_get::<String, _>("value").unwrap_or_default(),
+                "is_primary": row.try_get::<bool, _>("is_primary").unwrap_or(false),
+                "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+            })
+        })
+        .collect())
+}
+
+async fn load_provider_staff_json(
+    state: &AppState,
+    provider_id: Uuid,
+) -> Result<Vec<serde_json::Value>, axum::response::Response> {
+    let rows = sqlx::query(
+        r#"SELECT id, provider_id, first_name, last_name, display_name, role,
+                  department, status, notes, is_active, created_at, updated_at
+           FROM provider_staff
+           WHERE provider_id = $1
+           ORDER BY is_active DESC, role, display_name"#,
+    )
+    .bind(provider_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, provider_id = %provider_id, "Failed to load provider staff");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load provider staff",
+        )
+    })?;
+
+    let mut staff = Vec::with_capacity(rows.len());
+    for row in rows {
+        let staff_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
+        let contacts =
+            match load_person_contacts_json(&state, provider_id, None, Some(staff_id), None, None)
+                .await
+            {
+                Ok(items) => items,
+                Err(resp) => return Err(resp),
+            };
+        staff.push(json!({
+            "id": staff_id,
+            "provider_id": row.try_get::<Uuid, _>("provider_id").unwrap_or(provider_id),
+            "first_name": row.try_get::<Option<String>, _>("first_name").unwrap_or_default(),
+            "last_name": row.try_get::<Option<String>, _>("last_name").unwrap_or_default(),
+            "display_name": row.try_get::<String, _>("display_name").unwrap_or_default(),
+            "role": row.try_get::<String, _>("role").unwrap_or_default(),
+            "department": row.try_get::<Option<String>, _>("department").unwrap_or_default(),
+            "status": row.try_get::<String, _>("status").unwrap_or_else(|_| "active".to_string()),
+            "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+            "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
+            "contacts": contacts,
+            "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
+            "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
+        }));
+    }
+    Ok(staff)
+}
+
+async fn load_provider_children_json(
+    state: &AppState,
+    provider_id: Uuid,
+) -> Result<Vec<serde_json::Value>, axum::response::Response> {
+    let rows = sqlx::query(
+        r#"SELECT id, name, provider_type, organization_level, address_city, address_country, is_active
+           FROM providers
+           WHERE parent_provider_id = $1
+           ORDER BY organization_level, name"#,
+    )
+    .bind(provider_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, provider_id = %provider_id, "Failed to load provider children");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load provider children",
+        )
+    })?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "name": row.try_get::<String, _>("name").unwrap_or_default(),
+                "provider_type": row.try_get::<String, _>("provider_type").unwrap_or_default(),
+                "organization_level": row.try_get::<String, _>("organization_level").unwrap_or_else(|_| "clinic".to_string()),
+                "address_city": row.try_get::<Option<String>, _>("address_city").unwrap_or_default(),
+                "address_country": row.try_get::<Option<String>, _>("address_country").unwrap_or_default(),
+                "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
+            })
+        })
+        .collect())
+}
+
 async fn load_doctors_json(
     state: &AppState,
     provider_id: Uuid,
 ) -> Result<Vec<serde_json::Value>, axum::response::Response> {
     let rows = sqlx::query(
-        r#"SELECT d.id, d.provider_id, d.name, d.title, d.fachbereich, d.languages,
+        r#"SELECT d.id, d.provider_id, d.name, d.first_name, d.last_name, d.display_name,
+                  d.title, d.fachbereich, d.languages,
                   d.phone, d.email, d.license_number, d.licensing_country,
                   d.licensing_valid_until, d.notes, d.created_at,
                   (
@@ -2086,15 +4067,37 @@ async fn load_doctors_json(
 
     let mut doctors = Vec::with_capacity(rows.len());
     for row in rows {
+        let doctor_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
+        let specializations = load_doctor_specializations_json(state, doctor_id).await?;
+        let phone = row
+            .try_get::<Option<String>, _>("phone")
+            .unwrap_or_default();
+        let email = row
+            .try_get::<Option<String>, _>("email")
+            .unwrap_or_default();
+        let contacts = load_person_contacts_json(
+            state,
+            provider_id,
+            Some(doctor_id),
+            None,
+            phone.clone(),
+            email.clone(),
+        )
+        .await?;
         doctors.push(json!({
-            "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+            "id": doctor_id,
             "provider_id": row.try_get::<Uuid, _>("provider_id").unwrap_or(provider_id),
             "name": row.try_get::<String, _>("name").unwrap_or_default(),
+            "first_name": row.try_get::<Option<String>, _>("first_name").unwrap_or_default(),
+            "last_name": row.try_get::<Option<String>, _>("last_name").unwrap_or_default(),
+            "display_name": row.try_get::<Option<String>, _>("display_name").unwrap_or_default(),
             "title": row.try_get::<Option<String>, _>("title").unwrap_or_default(),
             "fachbereich": row.try_get::<Option<String>, _>("fachbereich").unwrap_or_default(),
+            "specializations": specializations,
             "languages": row.try_get::<Vec<String>, _>("languages").unwrap_or_default(),
-            "phone": row.try_get::<Option<String>, _>("phone").unwrap_or_default(),
-            "email": row.try_get::<Option<String>, _>("email").unwrap_or_default(),
+            "phone": phone,
+            "email": email,
+            "contacts": contacts,
             "license_number": row.try_get::<Option<String>, _>("license_number").unwrap_or_default(),
             "licensing_country": row.try_get::<Option<String>, _>("licensing_country").unwrap_or_default(),
             "licensing_valid_until": row.try_get::<Option<chrono::NaiveDate>, _>("licensing_valid_until").unwrap_or_default().map(|v| v.to_string()),
@@ -2114,6 +4117,7 @@ async fn load_services_json(
 ) -> Result<Vec<serde_json::Value>, axum::response::Response> {
     let rows = sqlx::query(
         r#"SELECT id, provider_id, service_name, description, price, currency,
+                  price_type, price_from, price_to, price_note,
                   valid_from, valid_to, created_at
            FROM service_catalog
            WHERE provider_id = $1
@@ -2138,6 +4142,10 @@ async fn load_services_json(
             "service_name": row.try_get::<String, _>("service_name").unwrap_or_default(),
             "description": row.try_get::<Option<String>, _>("description").unwrap_or_default(),
             "price": row.try_get::<rust_decimal::Decimal, _>("price").unwrap_or(rust_decimal::Decimal::ZERO),
+            "price_type": row.try_get::<String, _>("price_type").unwrap_or_else(|_| "fixed".to_string()),
+            "price_from": row.try_get::<Option<rust_decimal::Decimal>, _>("price_from").unwrap_or_default(),
+            "price_to": row.try_get::<Option<rust_decimal::Decimal>, _>("price_to").unwrap_or_default(),
+            "price_note": row.try_get::<Option<String>, _>("price_note").unwrap_or_default(),
             "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
             "valid_from": row.try_get::<chrono::NaiveDate, _>("valid_from").map(|v| v.to_string()).unwrap_or_default(),
             "valid_to": row.try_get::<Option<chrono::NaiveDate>, _>("valid_to").unwrap_or_default().map(|v| v.to_string()),

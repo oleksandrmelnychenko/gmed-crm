@@ -9106,6 +9106,8 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
             "email": format!("info-{tag}@clinic-api.example"),
             "website": "https://clinic-api.example",
             "fachbereich": "Cardiology",
+            "specializations": ["Cardiology", "Neurology"],
+            "organization_level": "organization",
             "kooperationsvertrag": kooperationsvertrag.clone(),
             "notes": "Created via PM happy-path round-trip test",
         })),
@@ -9114,6 +9116,96 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
     assert_eq!(status, StatusCode::CREATED);
     let provider_id = Uuid::parse_str(create_body["id"].as_str().unwrap()).unwrap();
 
+    let (status, specialization_list) = json_request(
+        &app,
+        "GET",
+        "/api/v1/providers/specializations?include_inactive=true",
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        specialization_list
+            .as_array()
+            .expect("specialization list")
+            .iter()
+            .any(|row| row["code"] == "cardiology")
+    );
+
+    let managed_specialization_code = format!("managed_specialization_{}", tag.replace('-', "_"));
+    let (status, specialization_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/providers/specializations",
+        &pm_bearer,
+        Some(json!({
+            "code": managed_specialization_code,
+            "name_en": format!("Managed specialization {tag}"),
+            "name_de": format!("Verwaltete Spezialisierung {tag}"),
+            "name_ru": format!("Managed specialization RU {tag}"),
+            "sort_order": 18,
+            "is_active": true,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let managed_specialization_id =
+        Uuid::parse_str(specialization_body["id"].as_str().unwrap()).unwrap();
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/specializations/{managed_specialization_id}/update"),
+        &pm_bearer,
+        Some(json!({
+            "name_en": format!("Managed specialization updated {tag}"),
+            "name_de": format!("Verwaltete Spezialisierung aktualisiert {tag}"),
+            "name_ru": format!("Managed specialization RU updated {tag}"),
+            "sort_order": 19,
+            "is_active": true,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/specializations/{managed_specialization_id}/deactivate"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, active_specializations) = json_request(
+        &app,
+        "GET",
+        "/api/v1/providers/specializations",
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        !active_specializations
+            .as_array()
+            .expect("active specialization list")
+            .iter()
+            .any(|row| row["code"] == managed_specialization_code)
+    );
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/specializations/{managed_specialization_id}/activate"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
     let (status, doctor_body) = json_request(
         &app,
         "POST",
@@ -9121,11 +9213,34 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
         &pm_bearer,
         Some(json!({
             "name": format!("Dr Roundtrip {tag}"),
-            "title": "Prof. Dr.",
+            "first_name": "Roundtrip",
+            "last_name": format!("{tag}"),
+            "title": "Prof.",
             "fachbereich": "Cardiology",
+            "specializations": ["Cardiology", "Internal medicine"],
             "languages": ["de", "en", "uk"],
             "phone": "+49 30 4445566",
             "email": format!("doctor-{tag}@clinic-api.example"),
+            "contacts": [
+                {
+                    "contact_kind": "phone",
+                    "contact_type": "work",
+                    "value": "+49 30 4445566",
+                    "is_primary": true
+                },
+                {
+                    "contact_kind": "email",
+                    "contact_type": "work",
+                    "value": format!("doctor-{tag}@clinic-api.example"),
+                    "is_primary": true
+                },
+                {
+                    "contact_kind": "phone",
+                    "contact_type": "private",
+                    "value": "+49 170 000000",
+                    "is_primary": false
+                }
+            ],
             "license_number": format!("LIC-{tag}"),
             "licensing_country": "DE",
             "licensing_valid_until": "2028-06-30",
@@ -9144,7 +9259,9 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
         Some(json!({
             "service_name": "Echocardiography",
             "description": "Resting echo with reporting",
-            "price": 320.0,
+            "price_type": "range",
+            "price_from": 300.0,
+            "price_to": 420.0,
             "currency": "EUR",
             "valid_from": "2026-02-01",
             "valid_to": "2026-12-31",
@@ -9153,6 +9270,128 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
     .await;
     assert_eq!(status, StatusCode::CREATED);
     let service_id = Uuid::parse_str(service_body["id"].as_str().unwrap()).unwrap();
+
+    let (status, role_list) = json_request(
+        &app,
+        "GET",
+        "/api/v1/providers/staff-roles?include_inactive=true",
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        role_list
+            .as_array()
+            .expect("staff role list")
+            .iter()
+            .any(|row| row["code"] == "secretary")
+    );
+
+    let managed_role_code = format!("managed_{}", tag.replace('-', "_"));
+    let (status, role_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/providers/staff-roles",
+        &pm_bearer,
+        Some(json!({
+            "code": managed_role_code,
+            "name_en": format!("Managed role {tag}"),
+            "name_de": format!("Verwaltete Rolle {tag}"),
+            "name_ru": format!("Managed role RU {tag}"),
+            "sort_order": 15,
+            "is_active": true,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let managed_role_id = Uuid::parse_str(role_body["id"].as_str().unwrap()).unwrap();
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/staff-roles/{managed_role_id}/update"),
+        &pm_bearer,
+        Some(json!({
+            "name_en": format!("Managed role updated {tag}"),
+            "name_de": format!("Verwaltete Rolle aktualisiert {tag}"),
+            "name_ru": format!("Managed role RU updated {tag}"),
+            "sort_order": 16,
+            "is_active": true,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/staff-roles/{managed_role_id}/deactivate"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, active_roles) = json_request(
+        &app,
+        "GET",
+        "/api/v1/providers/staff-roles",
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        !active_roles
+            .as_array()
+            .expect("active staff role list")
+            .iter()
+            .any(|row| row["code"] == managed_role_code)
+    );
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/staff-roles/{managed_role_id}/activate"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, staff_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{provider_id}/staff"),
+        &pm_bearer,
+        Some(json!({
+            "first_name": "Marta",
+            "last_name": format!("Secretary {tag}"),
+            "display_name": format!("Marta Secretary {tag}"),
+            "role": managed_role_code,
+            "department": "front desk",
+            "status": "active",
+            "contacts": [
+                {
+                    "contact_kind": "phone",
+                    "contact_type": "work",
+                    "value": "+49 30 7778899",
+                    "is_primary": true
+                },
+                {
+                    "contact_kind": "email",
+                    "contact_type": "work",
+                    "value": format!("secretary-{tag}@clinic-api.example"),
+                    "is_primary": true
+                }
+            ],
+            "notes": "Clinic coordinator",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let staff_id = Uuid::parse_str(staff_body["id"].as_str().unwrap()).unwrap();
 
     // Round-trip the entire payload through GET /providers/{id}.
     let (status, detail) = json_request(
@@ -9177,8 +9416,22 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
     assert_eq!(detail["email"], format!("info-{tag}@clinic-api.example"));
     assert_eq!(detail["website"], "https://clinic-api.example");
     assert_eq!(detail["fachbereich"], "Cardiology");
+    assert_eq!(detail["organization_level"], "organization");
     assert_eq!(detail["notes"], "Created via PM happy-path round-trip test");
     assert_eq!(detail["kooperationsvertrag"], kooperationsvertrag);
+    let provider_specializations = detail["specializations"]
+        .as_array()
+        .expect("provider specializations array");
+    assert!(
+        provider_specializations
+            .iter()
+            .any(|row| row["name_en"] == "Cardiology")
+    );
+    assert!(
+        provider_specializations
+            .iter()
+            .any(|row| row["name_en"] == "Neurology")
+    );
 
     let doctors = detail["doctors"].as_array().expect("doctors array");
     let doctor_row = doctors
@@ -9186,8 +9439,26 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
         .find(|row| row["id"] == doctor_id.to_string())
         .expect("created doctor visible in provider detail");
     assert_eq!(doctor_row["name"], format!("Dr Roundtrip {tag}"));
-    assert_eq!(doctor_row["title"], "Prof. Dr.");
+    assert_eq!(doctor_row["first_name"], "Roundtrip");
+    assert_eq!(doctor_row["last_name"], tag);
+    assert_eq!(doctor_row["title"], "Prof.");
     assert_eq!(doctor_row["fachbereich"], "Cardiology");
+    let doctor_specializations = doctor_row["specializations"]
+        .as_array()
+        .expect("doctor specializations array");
+    assert!(
+        doctor_specializations
+            .iter()
+            .any(|row| row["name_en"] == "Internal medicine")
+    );
+    let doctor_contacts = doctor_row["contacts"]
+        .as_array()
+        .expect("doctor contacts array");
+    assert!(
+        doctor_contacts
+            .iter()
+            .any(|row| row["contact_kind"] == "phone" && row["contact_type"] == "private")
+    );
     assert_eq!(doctor_row["license_number"], format!("LIC-{tag}"));
     assert_eq!(doctor_row["licensing_country"], "DE");
     assert_eq!(doctor_row["licensing_valid_until"], "2028-06-30");
@@ -9203,9 +9474,29 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
         .expect("created service visible in provider detail");
     assert_eq!(service_row["service_name"], "Echocardiography");
     assert_eq!(service_row["description"], "Resting echo with reporting");
+    assert_eq!(service_row["price_type"], "range");
+    assert!(service_row["price_from"].to_string().contains("300"));
+    assert!(service_row["price_to"].to_string().contains("420"));
     assert_eq!(service_row["currency"], "EUR");
     assert_eq!(service_row["valid_from"], "2026-02-01");
     assert_eq!(service_row["valid_to"], "2026-12-31");
+
+    let staff = detail["staff"].as_array().expect("staff array");
+    let staff_row = staff
+        .iter()
+        .find(|row| row["id"] == staff_id.to_string())
+        .expect("created staff visible in provider detail");
+    assert_eq!(staff_row["display_name"], format!("Marta Secretary {tag}"));
+    assert_eq!(staff_row["role"], managed_role_code);
+    assert_eq!(staff_row["department"], "front desk");
+    let staff_contacts = staff_row["contacts"]
+        .as_array()
+        .expect("staff contacts array");
+    assert!(
+        staff_contacts
+            .iter()
+            .any(|row| row["contact_kind"] == "email" && row["contact_type"] == "work")
+    );
 
     // Suppress the pool-only `admin_id` unused-warning if tests later evolve.
     let _ = admin_id;

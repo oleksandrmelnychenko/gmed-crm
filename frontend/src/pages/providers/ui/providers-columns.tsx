@@ -1,9 +1,23 @@
+import { ChevronRight } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
 import type { ColumnDef, FilterOption } from "@/components/data-table/types";
 import { cn } from "@/lib/utils";
 
 import { compactDateTime, providerTypeLabel } from "../model/list-model";
-import type { ProviderSummary } from "../model/types";
+import type { ProviderOrganizationLevel, ProviderSummary } from "../model/types";
+
+export type ProviderTreeMeta = {
+  childCount: number;
+  depth: number;
+  isExpanded: boolean;
+  isMatched: boolean;
+};
+
+type BuildProviderColumnsOptions = {
+  onToggleProviderCollapsed?: (providerId: string) => void;
+  treeMetaById?: ReadonlyMap<string, ProviderTreeMeta>;
+};
 
 type ProviderDynamicOptions = {
   cities: FilterOption[];
@@ -53,6 +67,124 @@ function commonNotSet(tr: Record<string, string>) {
 
 function formatRating(value: number | null, fallback: string) {
   return value == null ? fallback : value.toFixed(1);
+}
+
+function providerLevelLabel(level: ProviderOrganizationLevel, tr: Record<string, string>) {
+  switch (level) {
+    case "organization":
+      return tr.providers_level_organization ?? level;
+    case "clinic":
+      return tr.providers_level_clinic ?? level;
+    case "department":
+      return tr.providers_level_department ?? level;
+    case "unit":
+      return tr.providers_level_unit ?? level;
+    default:
+      return level;
+  }
+}
+
+function ProviderLevelBadge({
+  level,
+  tr,
+}: {
+  level: ProviderOrganizationLevel;
+  tr: Record<string, string>;
+}) {
+  const label = providerLevelLabel(level, tr);
+
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        "rounded-full text-[10px]",
+        level === "organization" && "border-slate-200 bg-slate-50 text-slate-700",
+        level === "clinic" && "border-sky-200 bg-sky-50 text-sky-700",
+        level === "department" && "border-amber-200 bg-amber-50 text-amber-700",
+        level === "unit" && "border-emerald-200 bg-emerald-50 text-emerald-700",
+      )}
+    >
+      {label}
+    </Badge>
+  );
+}
+
+function ProviderIdentityCell({
+  provider,
+  treeMeta,
+  tr,
+  onToggleProviderCollapsed,
+}: {
+  provider: ProviderSummary;
+  treeMeta: ProviderTreeMeta | null;
+  tr: Record<string, string>;
+  onToggleProviderCollapsed?: (providerId: string) => void;
+}) {
+  const notSet = commonNotSet(tr);
+  const childCount = treeMeta?.childCount ?? 0;
+  const depth = treeMeta?.depth ?? 0;
+  const hasChildren = childCount > 0;
+
+  return (
+    <div
+      className="flex min-w-0 items-center gap-2"
+      style={{ paddingLeft: depth > 0 ? Math.min(depth, 8) * 18 : 0 }}
+    >
+      {hasChildren ? (
+        <button
+          type="button"
+          aria-expanded={treeMeta?.isExpanded ?? false}
+          aria-label={
+            treeMeta?.isExpanded
+              ? (tr.providers_tree_collapse ?? provider.name)
+              : (tr.providers_tree_expand ?? provider.name)
+          }
+          className="flex size-5 shrink-0 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleProviderCollapsed?.(provider.id);
+          }}
+        >
+          <ChevronRight
+            className={cn(
+              "size-3.5 transition-transform",
+              treeMeta?.isExpanded && "rotate-90",
+            )}
+          />
+        </button>
+      ) : (
+        <span className="size-5 shrink-0" aria-hidden="true" />
+      )}
+      <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-foreground">
+        {provider.name
+          .split(/\s+/)
+          .slice(0, 2)
+          .map((word) => word[0]?.toUpperCase() ?? "")
+          .join("")}
+      </div>
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate text-xs font-medium text-foreground">{provider.name}</span>
+          {childCount > 0 ? (
+            <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">
+              {childCount}
+            </span>
+          ) : null}
+        </div>
+        {provider.legal_name && provider.legal_name !== provider.name ? (
+          <div className="truncate text-[10px] text-muted-foreground">{provider.legal_name}</div>
+        ) : provider.tax_id ? (
+          <div className="truncate text-[10px] text-muted-foreground">
+            {(tr.providers_tax_id ?? notSet)} {provider.tax_id}
+          </div>
+        ) : provider.parent_provider_name && depth === 0 ? (
+          <div className="truncate text-[10px] text-muted-foreground">
+            {tr.providers_parent_provider ?? notSet}: {provider.parent_provider_name}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 function ProviderTypeBadge({
@@ -115,6 +247,7 @@ function ContractBadge({
 export function buildProviderColumns(
   tr: Record<string, string>,
   rows: readonly ProviderSummary[] = [],
+  options: BuildProviderColumnsOptions = {},
 ): ColumnDef<ProviderSummary>[] {
   const dyn = deriveDynamicOptions(rows);
   const notSet = commonNotSet(tr);
@@ -143,29 +276,33 @@ export function buildProviderColumns(
       searchable: true,
       required: true,
       pinned: "left",
-      width: 270,
+      width: 320,
       group: "identity",
       render: (provider) => (
-        <div className="flex min-w-0 items-center gap-2.5">
-          <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-foreground">
-            {provider.name
-              .split(/\s+/)
-              .slice(0, 2)
-              .map((word) => word[0]?.toUpperCase() ?? "")
-              .join("")}
-          </div>
-          <div className="min-w-0">
-            <div className="truncate text-xs font-medium text-foreground">{provider.name}</div>
-            {provider.legal_name && provider.legal_name !== provider.name ? (
-              <div className="truncate text-[10px] text-muted-foreground">{provider.legal_name}</div>
-            ) : provider.tax_id ? (
-              <div className="truncate text-[10px] text-muted-foreground">
-                {(tr.providers_tax_id ?? notSet)} {provider.tax_id}
-              </div>
-            ) : null}
-          </div>
-        </div>
+        <ProviderIdentityCell
+          provider={provider}
+          treeMeta={options.treeMetaById?.get(provider.id) ?? null}
+          tr={tr}
+          onToggleProviderCollapsed={options.onToggleProviderCollapsed}
+        />
       ),
+    },
+    {
+      id: "organization_level",
+      label: tr.providers_organization_level ?? notSet,
+      accessor: (provider) => provider.organization_level,
+      filterType: "enum",
+      filterOptions: [
+        { value: "organization", label: tr.providers_level_organization ?? "organization" },
+        { value: "clinic", label: tr.providers_level_clinic ?? "clinic" },
+        { value: "department", label: tr.providers_level_department ?? "department" },
+        { value: "unit", label: tr.providers_level_unit ?? "unit" },
+      ],
+      sortable: true,
+      searchable: true,
+      width: 150,
+      group: "identity",
+      render: (provider) => <ProviderLevelBadge level={provider.organization_level} tr={tr} />,
     },
     {
       id: "type",
