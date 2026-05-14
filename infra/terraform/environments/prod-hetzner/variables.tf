@@ -75,4 +75,3 @@ variable "tailscale_enabled" {
   EOT
   default     = true
 }
-
