@@ -35,6 +35,10 @@ pub fn router() -> Router<AppState> {
             post(deactivate_specialization),
         )
         .route(
+            "/providers/specializations/{specialization_id}/delete",
+            post(delete_specialization),
+        )
+        .route(
             "/providers/staff-roles",
             get(list_provider_staff_roles).post(create_provider_staff_role),
         )
@@ -644,6 +648,15 @@ async fn create_specialization(
         r#"INSERT INTO medical_specializations (
                 code, name_en, name_de, name_ru, sort_order, is_active
            ) VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (code) DO UPDATE
+           SET name_en = EXCLUDED.name_en,
+               name_de = EXCLUDED.name_de,
+               name_ru = EXCLUDED.name_ru,
+               sort_order = EXCLUDED.sort_order,
+               is_active = EXCLUDED.is_active,
+               deleted_at = NULL,
+               updated_at = now()
+           WHERE medical_specializations.deleted_at IS NOT NULL
            RETURNING id"#,
     )
     .bind(&code)
@@ -652,13 +665,11 @@ async fn create_specialization(
     .bind(&specialization.name_ru)
     .bind(specialization.sort_order)
     .bind(specialization.is_active)
-    .fetch_one(&state.db)
+    .fetch_optional(&state.db)
     .await
     {
-        Ok(row) => row,
-        Err(e) if is_unique_violation(&e) => {
-            return err(StatusCode::CONFLICT, "Specialization already exists");
-        }
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::CONFLICT, "Specialization already exists"),
         Err(e) => {
             tracing::error!(error = %e, specialization = %code, "Failed to create specialization");
             return err(
@@ -717,7 +728,7 @@ async fn update_specialization(
                sort_order = $5,
                is_active = $6,
                updated_at = now()
-           WHERE id = $1"#,
+           WHERE id = $1 AND deleted_at IS NULL"#,
     )
     .bind(specialization_id)
     .bind(&specialization.name_en)
@@ -766,6 +777,50 @@ async fn deactivate_specialization(
     Path(specialization_id): Path<Uuid>,
 ) -> axum::response::Response {
     toggle_specialization_active(state, auth, specialization_id, false).await
+}
+
+async fn delete_specialization(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(specialization_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+
+    match sqlx::query(
+        r#"UPDATE medical_specializations
+           SET is_active = FALSE,
+               deleted_at = COALESCE(deleted_at, now()),
+               updated_at = now()
+           WHERE id = $1 AND deleted_at IS NULL"#,
+    )
+        .bind(specialization_id)
+        .execute(&state.db)
+        .await
+    {
+        Ok(result) if result.rows_affected() > 0 => {}
+        Ok(_) => return err(StatusCode::NOT_FOUND, "Specialization not found"),
+        Err(e) => {
+            tracing::error!(error = %e, specialization_id = %specialization_id, "Failed to delete specialization");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete specialization",
+            );
+        }
+    }
+
+    let _ = audit(
+        &state,
+        auth.user_id,
+        "delete_provider_specialization",
+        "medical_specialization",
+        Some(specialization_id),
+        Some(json!({ "specialization_id": specialization_id })),
+    )
+    .await;
+
+    Json(json!({ "ok": true })).into_response()
 }
 
 async fn list_provider_staff_roles(
@@ -3399,7 +3454,8 @@ async fn load_specializations_json(
     let rows = sqlx::query(
         r#"SELECT id, code, name_en, name_de, name_ru, is_active, sort_order, created_at, updated_at
            FROM medical_specializations
-           WHERE $1 OR is_active = TRUE
+           WHERE deleted_at IS NULL
+             AND ($1 OR is_active = TRUE)
            ORDER BY is_active DESC, sort_order, name_en"#,
     )
     .bind(include_inactive)
@@ -3442,7 +3498,7 @@ async fn toggle_specialization_active(
     }
 
     match sqlx::query(
-        "UPDATE medical_specializations SET is_active = $2, updated_at = now() WHERE id = $1",
+        "UPDATE medical_specializations SET is_active = $2, updated_at = now() WHERE id = $1 AND deleted_at IS NULL",
     )
     .bind(specialization_id)
     .bind(is_active)

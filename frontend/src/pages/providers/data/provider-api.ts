@@ -108,6 +108,10 @@ export function setSpecializationActive(specializationId: string, active: boolea
   return post(`/providers/specializations/${specializationId}/${active ? "activate" : "deactivate"}`);
 }
 
+export function deleteSpecialization(specializationId: string) {
+  return post(`/providers/specializations/${specializationId}/delete`);
+}
+
 export function fetchProviderStaffRoles(includeInactive = false) {
   const path = includeInactive
     ? "/providers/staff-roles?include_inactive=true"

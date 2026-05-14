@@ -61,6 +61,7 @@ import {
   deleteProviderDoctor,
   deleteProviderService,
   deleteProviderStaff,
+  deleteSpecialization,
   fetchProviderDetail,
   fetchProviderStaffRoles,
   fetchProviders,
@@ -1240,6 +1241,23 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     }
   }
 
+  async function handleDeleteSpecialization(specializationId: string) {
+    setSpecializationBusy(true);
+    setSpecializationError("");
+
+    try {
+      await deleteSpecialization(specializationId);
+      await reloadSpecializations();
+      refreshList();
+      refreshDetail();
+    } catch (error) {
+      setSpecializationError(error instanceof Error ? error.message : t.common_failed_update);
+      throw error;
+    } finally {
+      setSpecializationBusy(false);
+    }
+  }
+
   function openSpecializationManager() {
     setSpecializationError("");
     setSpecializationDialogOpen(true);
@@ -1420,6 +1438,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                         }
                         forceNonMedical={permissions.forceNonMedical}
                         disabled={!permissions.canManageRegistry}
+                        onManageSpecializations={permissions.canManageRegistry ? openSpecializationManager : undefined}
                         grouped
                       />
                       {!permissions.canManageRegistry ? (
@@ -1434,7 +1453,6 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     detail={detail}
                     busy={doctorBusy}
                     canManage={permissions.canManageRegistry}
-                    onManageSpecializations={openSpecializationManager}
                     onNew={() => {
                       setDoctorError("");
                       setDoctorForm(blankDoctorForm());
@@ -1575,6 +1593,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             onCreate={handleCreateSpecialization}
             onUpdate={handleUpdateSpecialization}
             onToggleActive={handleToggleSpecialization}
+            onDelete={handleDeleteSpecialization}
           />
         ) : null}
 
@@ -1776,6 +1795,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     setCreateForm((current) => ({ ...current, [field]: value }))
                   }
                   forceNonMedical={permissions.forceNonMedical}
+                  onManageSpecializations={permissions.canManageRegistry ? openSpecializationManager : undefined}
                   grouped
                 />
               </div>
@@ -1872,6 +1892,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                       }
                       forceNonMedical={permissions.forceNonMedical}
                       disabled={!permissions.canManageRegistry}
+                      onManageSpecializations={permissions.canManageRegistry ? openSpecializationManager : undefined}
                       grouped
                     />
                     {!permissions.canManageRegistry ? (
@@ -1886,7 +1907,6 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   detail={detail}
                   busy={doctorBusy}
                   canManage={permissions.canManageRegistry}
-                  onManageSpecializations={openSpecializationManager}
                   onNew={() => {
                     setDoctorError("");
                     setDoctorForm(blankDoctorForm());
@@ -2029,6 +2049,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           onCreate={handleCreateSpecialization}
           onUpdate={handleUpdateSpecialization}
           onToggleActive={handleToggleSpecialization}
+          onDelete={handleDeleteSpecialization}
         />
       ) : null}
 
@@ -2259,6 +2280,7 @@ function SpecializationManagerSheet({
   onCreate,
   onUpdate,
   onToggleActive,
+  onDelete,
 }: {
   open: boolean;
   items: SpecializationItem[];
@@ -2268,6 +2290,7 @@ function SpecializationManagerSheet({
   onCreate: (payload: Record<string, unknown>) => Promise<void>;
   onUpdate: (specializationId: string, payload: Record<string, unknown>) => Promise<void>;
   onToggleActive: (specializationId: string, active: boolean) => Promise<void>;
+  onDelete: (specializationId: string) => Promise<void>;
 }) {
   const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
@@ -2300,6 +2323,22 @@ function SpecializationManagerSheet({
   function startEdit(item: SpecializationItem) {
     setEditingId(item.id);
     setDraft(specializationToDraft(item));
+  }
+
+  async function handleDelete(item: SpecializationItem) {
+    const label = specializationOptionLabel(item, lang);
+    if (!window.confirm(formatUiText(l("providers_specialization_delete_confirm"), { name: label }))) {
+      return;
+    }
+    try {
+      await onDelete(item.id);
+      if (editingId === item.id) {
+        setEditingId("");
+        setDraft(blankSpecializationDraft());
+      }
+    } catch {
+      // The parent sheet owns the user-visible error banner.
+    }
   }
 
   return (
@@ -2451,6 +2490,17 @@ function SpecializationManagerSheet({
                           {item.is_active
                             ? l("providers_specialization_deactivate")
                             : l("providers_specialization_activate")}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 rounded-lg border-red-200 bg-red-50 text-red-700 hover:bg-red-100 hover:text-red-800"
+                          disabled={busy}
+                          onClick={() => void handleDelete(item)}
+                        >
+                          <Trash2 className="size-3.5" />
+                          {l("providers_specialization_delete")}
                         </Button>
                       </div>
                     </div>
@@ -3028,7 +3078,6 @@ function DoctorSection({
   detail,
   busy,
   canManage,
-  onManageSpecializations,
   onNew,
   onEdit,
   onDelete,
@@ -3036,7 +3085,6 @@ function DoctorSection({
   detail: ProviderDetail;
   busy: boolean;
   canManage: boolean;
-  onManageSpecializations: () => void;
   onNew: () => void;
   onEdit: (doctor: DoctorSummary) => void;
   onDelete: (doctorId: string, doctorName: string) => void;
@@ -3060,16 +3108,6 @@ function DoctorSection({
         </div>
         {canManage ? (
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 justify-center rounded-lg bg-muted/20"
-              onClick={onManageSpecializations}
-            >
-              <BadgeCheck className="size-3.5" />
-              {l("providers_specializations_manage")}
-            </Button>
             <Button
               type="button"
               variant="outline"
@@ -3729,6 +3767,7 @@ function ProviderFormFields({
   onChange,
   forceNonMedical,
   disabled = false,
+  onManageSpecializations,
   grouped = false,
 }: {
   form: ProviderFormState;
@@ -3738,6 +3777,7 @@ function ProviderFormFields({
   onChange: (field: keyof ProviderFormState, value: string) => void;
   forceNonMedical: boolean;
   disabled?: boolean;
+  onManageSpecializations?: () => void;
   grouped?: boolean;
 }) {
   const { t } = useLang();
@@ -3745,6 +3785,7 @@ function ProviderFormFields({
   const parentOptions = parentProviderOptions.filter(
     (provider) => provider.id !== currentProviderId,
   );
+  const canManageSpecializations = Boolean(onManageSpecializations) && !disabled;
 
   const profileFields = (
     <>
@@ -3783,7 +3824,7 @@ function ProviderFormFields({
         </Field>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2">
         <Field label={l("providers_tax_id")}>
           <Input
             value={form.taxId}
@@ -3791,18 +3832,6 @@ function ProviderFormFields({
             className={shellInputClassName}
             placeholder={l("providers_vat_tax_id")}
             disabled={disabled}
-          />
-        </Field>
-
-        <Field label={t.providers_fachbereich}>
-          <SpecializationMultiSelect
-            value={form.specializations}
-            items={specializations}
-            disabled={disabled}
-            onChange={(nextValue) => {
-              onChange("specializations", nextValue);
-              onChange("fachbereich", firstSpecializationValue(nextValue));
-            }}
           />
         </Field>
 
@@ -3848,6 +3877,34 @@ function ProviderFormFields({
             ))}
           </NativeComboboxSelect>
         </Field>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Field label={t.providers_fachbereich}>
+          <SpecializationMultiSelect
+            value={form.specializations}
+            items={specializations}
+            disabled={disabled}
+            onChange={(nextValue) => {
+              onChange("specializations", nextValue);
+              onChange("fachbereich", firstSpecializationValue(nextValue));
+            }}
+          />
+        </Field>
+        {canManageSpecializations ? (
+          <div className="flex justify-start pt-[20px]">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9 justify-center rounded-lg bg-muted/20"
+              onClick={onManageSpecializations}
+            >
+              <BadgeCheck className="size-3.5" />
+              {l("providers_specializations_manage")}
+            </Button>
+          </div>
+        ) : null}
       </div>
     </>
   );

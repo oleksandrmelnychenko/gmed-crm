@@ -9206,6 +9206,33 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/specializations/{managed_specialization_id}/delete"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, specialization_list_after_delete) = json_request(
+        &app,
+        "GET",
+        "/api/v1/providers/specializations?include_inactive=true",
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        !specialization_list_after_delete
+            .as_array()
+            .expect("specialization list")
+            .iter()
+            .any(|row| row["code"] == managed_specialization_code)
+    );
+
     let (status, doctor_body) = json_request(
         &app,
         "POST",
