@@ -1,0 +1,183 @@
+# Loki LogQL alert rules for PROD. Evaluated by Loki's ruler every
+# 30s; firing alerts route to Alertmanager (same as Prometheus alerts).
+#
+# Tenant id `fake` is what Loki uses when `auth_enabled: false`. If
+# we ever enable per-tenant auth, move this directory to match.
+#
+# Patterns assume Promtail labels container streams with
+# `container=gmed-...` (see promtail-config.yml relabel rules).
+
+groups:
+  - name: gmed-prod-caddy
+    interval: 30s
+    rules:
+      - alert: Caddy5xxBurst
+        # Caddy's default access log is JSON; `status` is at the top
+        # level. The expression counts 5xx responses per second
+        # averaged over 5 minutes. >0.5/s sustained = >30 errors/min
+        # — for a single-tenant CRM that is far above noise.
+        expr: |
+          sum by (host) (
+            rate({container="gmed-caddy"} | json | status >= 500 [5m])
+          ) > 0.5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Caddy 5xx burst (>30/min) on {{ $labels.host }}"
+          description: "Caddy on {{ $labels.host }} returned 5xx at >30/min for 5 minutes. App outage or upstream timeout."
+
+      - alert: CaddyRateLimitBurst
+        # 429s in Caddy logs = the Rust app's tower_governor refused
+        # the request. Bursts indicate either an attack (credential
+        # stuffing, scraping) or a buggy client. Either way: action.
+        expr: |
+          sum by (host) (
+            rate({container="gmed-caddy"} | json | status = 429 [5m])
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Rate-limit 429s burst on {{ $labels.host }}"
+          description: "Caddy is forwarding more than 1/s of 429 responses from the app over 5m. Check audit_log for the offending IPs and consider tightening the rate-limit (rate_limit.rs)."
+
+  - name: gmed-prod-app
+    interval: 30s
+    rules:
+      - alert: BackendErrorLogBurst
+        # tracing-subscriber emits JSON with `level=ERROR`. A small
+        # backend should not sustain noisy error logging; metrics catch
+        # HTTP failures, this catches background/audit/worker failures.
+        expr: |
+          sum by (host) (
+            count_over_time(
+              {container=~".+-backend(-[0-9]+)?"}
+              | json
+              | level = "ERROR" [10m]
+            )
+          ) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Backend ERROR log burst on {{ $labels.host }}"
+          description: "The backend logged more than 10 ERROR events in 10 minutes. Check Loki around the first event and correlate with Prometheus app metrics."
+
+      - alert: BackendPanicLogged
+        # The Rust app uses tracing-subscriber's JSON layer. A panic
+        # message contains the literal "thread '..panicked at..".
+        # Stricter regex than just "panic" to avoid false positives
+        # in user-typed content.
+        #
+        # Container regex: docker-compose v2 names containers as
+        # `<project>-<service>-<index>` when no `container_name:` is
+        # set. The backend service uses the default; the regex below
+        # matches both `gmed-crm-backend-1` and any future renamings.
+        expr: |
+          sum by (host) (
+            count_over_time(
+              {container=~".+-backend(-[0-9]+)?"}
+              |~ "(?i)thread .* panicked at" [10m]
+            )
+          ) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Backend panic logged"
+          description: "The Rust backend logged a panic on {{ $labels.host }} within the last 10 minutes. Pull the full log line and the surrounding context — panics in axum handlers are recovered, but they signal a bug."
+
+      - alert: AuditLogQueueDroppedEvent
+        # The audit writer uses a bounded channel. Dropped audit events
+        # mean compliance history may be incomplete even if requests
+        # themselves still succeeded.
+        expr: |
+          sum by (host) (
+            count_over_time(
+              {container=~".+-backend(-[0-9]+)?"}
+              |= "audit_log channel saturated, event dropped" [10m]
+            )
+          ) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "audit_log event dropped on {{ $labels.host }}"
+          description: "The backend dropped at least one audit_log event because the audit queue was saturated. Investigate DB health, queue sizing, and request volume."
+
+      - alert: AuditLogPersistFailure
+        # This is worse than a generic backend error: the app attempted
+        # to write audit_log and Postgres rejected or failed it.
+        expr: |
+          sum by (host) (
+            count_over_time(
+              {container=~".+-backend(-[0-9]+)?"}
+              |= "failed to persist audit_log row" [10m]
+            )
+          ) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "audit_log persist failure on {{ $labels.host }}"
+          description: "The backend failed to persist at least one audit_log row. Check Postgres errors and the surrounding backend logs immediately."
+
+  - name: gmed-prod-ssh
+    interval: 1m
+    rules:
+      - alert: SshFail2banBurst
+        # fail2ban writes "Ban <ip>" to syslog when it bans a source.
+        # >3 bans in 10m on a tailnet-only-SSH host means something
+        # is still probing public 22 (Hetzner firewall should block,
+        # but check belt-and-suspenders).
+        expr: |
+          sum by (host) (
+            count_over_time(
+              {job="syslog", program=~"fail2ban.*"}
+              |= "Ban " [10m]
+            )
+          ) > 3
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "fail2ban: >3 SSH bans in 10m on {{ $labels.host }}"
+          description: "fail2ban banned more than 3 SSH sources in 10 minutes. Confirm Hetzner firewall is correctly closing public 22."
+
+  - name: gmed-host-ops
+    interval: 1m
+    rules:
+      - alert: HostOperationFailed
+        # deploy/backup/restore scripts always log a final rc line.
+        # Promtail ships /var/log/gmed-*.log from each host so a
+        # failed operator action becomes visible in Alertmanager.
+        expr: |
+          sum by (host) (
+            count_over_time(
+              {job="gmed-host-ops"}
+              |~ "(deploy-prod|deploy-monitoring|restore-postgres|backup-postgres) finished rc=[1-9][0-9]*" [10m]
+            )
+          ) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Host operation failed on {{ $labels.host }}"
+          description: "A deploy, backup, or restore script finished non-zero. Check the matching /var/log/gmed-*.log stream in Loki for the full command trail."
+
+      - alert: BackupCronSilent
+        # Healthchecks.io is the primary dead-man switch, but Loki gives
+        # us a second local signal: the daily backup should write a
+        # successful final rc line at 02:30 UTC.
+        expr: |
+          absent_over_time(
+            {job="gmed-host-ops", host="gmed-prod"}
+            |= "backup-postgres finished rc=0" [26h]
+          ) == 1
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No successful backup log in 26h"
+          description: "Loki has not seen a successful backup-postgres final rc line from gmed-prod in 26 hours. Confirm cron, Promtail shipping, and Healthchecks.io state."

@@ -1,0 +1,131 @@
+# DEV-specific overrides for the Hetzner deployment.
+#
+# Mirrors `docker-compose.prod-hetzner.yml`'s observability sidecars
+# but tuned for DEV ergonomics:
+#
+#   - postgres_exporter uses the main POSTGRES_USER (DEV has no
+#     dedicated `gmed_metrics` user; synthetic data, not worth the
+#     SQL setup).
+#   - HOST_LABEL=gmed-dev so Loki / Prometheus partition DEV vs PROD
+#     streams cleanly.
+#   - Backend's `/metrics` port (9091) is published — Prometheus on
+#     the monitoring host scrapes it via Tailscale.
+#   - No postgres bind mount: DEV postgres stays on the docker named
+#     volume (no Hetzner Volume, no separate lifecycle).
+#
+# Compose layering for DEV:
+#   docker compose \
+#     -f docker-compose.yml \
+#     -f docker-compose.release.yml \
+#     -f docker-compose.hetzner.yml \
+#     -f docker-compose.dev-hetzner.yml \
+#     up -d --build
+
+services:
+  backend:
+    # Publish the metrics-only listener so monitoring's Prometheus can
+    # scrape `gmed-dev:9091` via tailnet. The main API port (3000)
+    # stays internal to the docker network — Caddy is the only public
+    # ingress for /api on DEV too.
+    ports:
+      - "9091:9091"
+
+  # --- Observability exporters --------------------------------------
+  # Identical to PROD's sidecars in shape, with DEV-specific config.
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: gmed-node-exporter
+    restart: unless-stopped
+    pid: host
+    network_mode: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro,rslave
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|var/lib/docker)($$|/)'
+      - '--web.listen-address=:9100'
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: gmed-cadvisor
+    restart: unless-stopped
+    network_mode: host
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /etc/machine-id:/etc/machine-id:ro
+    command:
+      - '--port=9080'
+      - '--disable_metrics=disk,referenced_memory,udp,advtcp,sched,hugetlb,process'
+      - '--store_container_labels=false'
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.17.0
+    container_name: gmed-postgres-exporter
+    restart: unless-stopped
+    environment:
+      # DEV reuses the main creds (no dedicated metrics user). The
+      # baseline docker-compose.yml hardcodes "gmed:gmed" — we honour
+      # the same default. For PROD this would be a security smell;
+      # on DEV with synthetic data it's an acceptable simplification.
+      DATA_SOURCE_NAME: "postgresql://gmed:gmed@postgres:5432/gmed?sslmode=disable"
+      PG_EXPORTER_AUTO_DISCOVER_DATABASES: "false"
+      PG_EXPORTER_WEB_LISTEN_ADDRESS: ":9187"
+    ports:
+      - "9187:9187"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  promtail:
+    # See SECURITY NOTE in docker-compose.prod-hetzner.yml about the
+    # docker socket mount. The same caveat applies on DEV.
+    image: grafana/promtail:3.3.1
+    container_name: gmed-promtail
+    restart: unless-stopped
+    user: "0:0"
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/log:/var/log:ro
+      - ./monitoring/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - promtail_positions:/var/lib/promtail
+    command:
+      - '-config.file=/etc/promtail/config.yml'
+      - '-config.expand-env=true'
+    environment:
+      LOKI_URL: "${LOKI_URL:-http://gmed-monitoring:3100/loki/api/v1/push}"
+      HOST_LABEL: "gmed-dev"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  promtail_positions:

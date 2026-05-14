@@ -23,6 +23,7 @@ services:
       AUDIT_IP_SALT: "${GMED_AUDIT_IP_SALT:-}"
       CORS_ORIGIN: "${GMED_CORS_ORIGIN:-http://localhost:8080}"
       RUST_LOG: "${GMED_RUST_LOG:-info,gmed_server=debug}"
+      LOG_FORMAT: "${GMED_LOG_FORMAT:-json}"
     ports:
       - "${BACKEND_PORT:-3000}:3000"
     restart: unless-stopped

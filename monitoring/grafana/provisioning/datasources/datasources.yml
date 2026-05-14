@@ -1,0 +1,31 @@
+# Grafana datasource provisioning.
+#
+# Loaded on every Grafana startup; safe to keep in version control
+# because the datasource URLs are intra-stack docker names and the
+# `basicAuth` fields aren't used.
+#
+# To add a dashboard at provision time, drop a JSON file under
+# `monitoring/grafana/provisioning/dashboards/` and a `dashboards.yml`
+# pointing at it. Phase 3e2 will ship pre-built dashboards (Node,
+# Postgres, Caddy log explorer).
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      httpMethod: POST
+      timeInterval: 30s
+
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    editable: false
+    jsonData:
+      maxLines: 1000

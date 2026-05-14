@@ -1,0 +1,152 @@
+# Prometheus scrape configuration.
+#
+# Phase 3e1: self-scrape only (Prometheus, Alertmanager, Loki, Grafana,
+# host node_exporter). PROD targets land in Phase 3e2 once exporters
+# are added to the PROD compose stack. The shape below already
+# includes a placeholder `gmed-prod` job (commented out) so adding it
+# is one uncomment + reload.
+
+global:
+  scrape_interval: 30s
+  scrape_timeout: 10s
+  evaluation_interval: 30s
+  external_labels:
+    cluster: gmed-prod
+    monitoring_host: gmed-monitoring
+
+# Alertmanager: same host, default port. The `127.0.0.1` reference
+# works because Prometheus runs in a container with `--network=...`
+# default bridge that resolves via the compose service name.
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  # Prometheus self-scrape.
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Alertmanager self-metrics.
+  - job_name: 'alertmanager'
+    static_configs:
+      - targets: ['alertmanager:9093']
+
+  # Loki internal metrics.
+  - job_name: 'loki'
+    static_configs:
+      - targets: ['loki:3100']
+
+  # Grafana internal metrics.
+  - job_name: 'grafana'
+    static_configs:
+      - targets: ['grafana:3000']
+
+  # node_exporter on the monitoring host itself. `network_mode: host`
+  # in compose means the exporter sits on the host's port 9100, so
+  # from inside the prometheus container we reach it via the docker
+  # bridge gateway.
+  - job_name: 'node-monitoring'
+    static_configs:
+      - targets: ['host.docker.internal:9100']
+        labels:
+          instance: gmed-monitoring
+
+  # ---------------------------------------------------------------------
+  # PROD targets (Phase 3e2). The hostname `gmed-prod` resolves via
+  # Tailscale MagicDNS; replace with the literal 100.x.y.z if MagicDNS
+  # is disabled in your tailnet.
+  #
+  # The Hetzner firewall on PROD keeps :9100/:9080/:9187 closed to the
+  # public — only this monitoring host (on the tailnet) reaches them.
+  # ---------------------------------------------------------------------
+  - job_name: 'node-prod'
+    static_configs:
+      - targets: ['gmed-prod:9100']
+        labels:
+          instance: gmed-prod
+          role: app
+          env: prod
+
+  - job_name: 'cadvisor-prod'
+    static_configs:
+      - targets: ['gmed-prod:9080']
+        labels:
+          instance: gmed-prod
+          role: app
+          env: prod
+    # cAdvisor exports per-container time series with high cardinality
+    # (one series per container × metric). Cap the volume by dropping
+    # the most chatty buckets we don't graph.
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'container_(tasks_state|memory_failures_total)'
+        action: drop
+
+  - job_name: 'postgres-prod'
+    static_configs:
+      - targets: ['gmed-prod:9187']
+        labels:
+          instance: gmed-prod
+          role: app
+          env: prod
+
+  # Rust backend metrics (axum-prometheus) on a dedicated listener
+  # separate from the main API port — 9091 carries only /metrics so
+  # publishing it does not expose authenticated routes to the tailnet.
+  - job_name: 'backend-prod'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['gmed-prod:9091']
+        labels:
+          instance: gmed-prod
+          role: app
+          env: prod
+
+  # ---------------------------------------------------------------------
+  # DEV targets (Phase 3e5). Same exporter layout as PROD, scraped via
+  # tailnet. The Hetzner firewall on DEV blocks the public internet from
+  # reaching these ports — only the monitoring host on the tailnet does.
+  # Alerting on DEV is intentionally light (DEV uses synthetic data and
+  # is a sandbox); the scrapes feed Grafana dashboards for visibility.
+  # ---------------------------------------------------------------------
+  - job_name: 'node-dev'
+    static_configs:
+      - targets: ['gmed-dev:9100']
+        labels:
+          instance: gmed-dev
+          role: app
+          env: dev
+
+  - job_name: 'cadvisor-dev'
+    static_configs:
+      - targets: ['gmed-dev:9080']
+        labels:
+          instance: gmed-dev
+          role: app
+          env: dev
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'container_(tasks_state|memory_failures_total)'
+        action: drop
+
+  - job_name: 'postgres-dev'
+    static_configs:
+      - targets: ['gmed-dev:9187']
+        labels:
+          instance: gmed-dev
+          role: app
+          env: dev
+
+  - job_name: 'backend-dev'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['gmed-dev:9091']
+        labels:
+          instance: gmed-dev
+          role: app
+          env: dev

@@ -1,0 +1,71 @@
+# Hetzner-only overrides layered on top of docker-compose.yml and
+# docker-compose.release.yml.
+#
+# What it does:
+#   - Adds Caddy as the TLS-terminating edge proxy.
+#   - Drops the public port mappings on backend and frontend so the only
+#     ingress is Caddy on 80/443 (defence in depth: even if the firewall
+#     leaks, the upstream services are not reachable).
+#   - Turns on TRUST_FORWARDED_HEADERS for the backend so rate limiting
+#     keys off the real client IP, not the inter-container hop.
+#
+# Compose layering:
+#   docker compose \
+#     -f docker-compose.yml \
+#     -f docker-compose.release.yml \
+#     -f docker-compose.hetzner.yml \
+#     up -d --build
+
+services:
+  backend:
+    # !reset clears the host port bindings declared in
+    # docker-compose.release.yml. The backend remains reachable on the
+    # internal docker network at `backend:3000`.
+    ports: !reset []
+    environment:
+      TRUST_FORWARDED_HEADERS: "true"
+
+  frontend:
+    ports: !reset []
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: gmed-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      CADDY_HOSTNAME: "${CADDY_HOSTNAME:?Set CADDY_HOSTNAME in release.env (e.g. console-dev.gmed-health.com)}"
+      ACME_EMAIL: "${ACME_EMAIL:?Set ACME_EMAIL in release.env for Let's Encrypt registration}"
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    # Defence in depth at the container layer.
+    cap_drop:
+      - ALL
+    cap_add:
+      # Required to bind privileged ports 80/443.
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      # Caddy serves the admin endpoint locally on :2019 by default; we
+      # check the public ACME-ready endpoint instead so the probe also
+      # validates the cert loop.
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  caddy_data:
+  caddy_config:

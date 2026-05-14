@@ -1,0 +1,34 @@
+# Alertmanager — email-only delivery via generic SMTP.
+#
+# Environment substitution requires Alertmanager 0.27+. The
+# `${VAR}` patterns are expanded by alertmanager at config-load
+# time (we pass `--config.expand-env=true`).
+#
+# Routing: all alerts go to one receiver (`ops-email`). For multi-
+# tier severity later (page on critical, just email on warning),
+# split into multiple receivers and use `routes` with `match`.
+
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: '${ALERTMANAGER_SMTP_HOST}'
+  smtp_from: '${ALERTMANAGER_SMTP_FROM}'
+  smtp_auth_username: '${ALERTMANAGER_SMTP_USERNAME}'
+  smtp_auth_password: '${ALERTMANAGER_SMTP_PASSWORD}'
+  smtp_require_tls: true
+
+route:
+  receiver: ops-email
+  group_by: ['alertname', 'instance']
+  group_wait: 30s
+  group_interval: 5m
+  # Resend an unresolved alert every 4h so the operator notices an
+  # incident even after dismissing the first email.
+  repeat_interval: 4h
+
+receivers:
+  - name: ops-email
+    email_configs:
+      - to: '${ALERTMANAGER_TO_EMAIL}'
+        send_resolved: true
+        # The default templates render a readable summary including
+        # the rule's `summary` and `description` annotations.

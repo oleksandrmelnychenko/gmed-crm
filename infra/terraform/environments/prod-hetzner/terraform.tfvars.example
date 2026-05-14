@@ -1,0 +1,50 @@
+# Copy to `terraform.tfvars` (gitignored) and fill in.
+#
+# Critical operational notes:
+#
+#   1. The Hetzner API token MUST be the PROD project token, not DEV.
+#        export HCLOUD_TOKEN="<prod-token>"
+#
+#   2. There is NO age_private_key here on purpose. PROD secrets never
+#      transit through TF state. After `terraform apply`, follow the
+#      one-time setup in `scripts/deploy-prod.sh` to install the key
+#      on the host out of band.
+#
+#   3. `admin_ssh_public_key` should be a hardware-key-backed ed25519
+#      key (YubiKey, Secretive on macOS). Software keys are acceptable
+#      for DEV but not here.
+
+project_name = "gmed"
+environment  = "prod"
+
+# Falkenstein DC14. For Nuremberg use nbg1-dc3. DE only.
+datacenter = "fsn1-dc14"
+
+# cax31 (8 vCPU / 16 GB ARM, ~€12.49/mo + 20% native backups) is the
+# default. Comfortable for the full PROD stack on one box plus headroom
+# for spikes. Downsize to cax21 only after monitoring confirms it.
+server_type = "cax31"
+
+image = "ubuntu-24.04"
+
+# Postgres data lives on a dedicated Hetzner Volume (independent
+# lifecycle from the server, delete_protection = true by default).
+# Resize online if you outgrow it; start small.
+postgres_volume_size_gb = 50
+
+# Public SSH allow-list (Hetzner edge firewall). With Tailscale enabled
+# the steady state is `[]` — admin access flows over the tailnet only.
+# But on the very first apply, BEFORE `scripts/deploy-prod.sh` has
+# brought Tailscale up, you need a way to SSH in to run that script.
+# Set your /32 here for the first apply, then flip to `[]` and re-apply
+# once Tailscale is authenticated. See README "Tailscale bootstrap".
+admin_ip_allowlist = ["203.0.113.10/32"]
+
+# Install Tailscale in the bootstrap. The daemon stays idle until
+# scripts/deploy-prod.sh authenticates it using the key from sops.
+tailscale_enabled = true
+
+# Paste an OpenSSH public key (ed25519, hardware-backed).
+admin_ssh_public_key = "ssh-ed25519 AAAAC3Nz... your-key@host"
+
+admin_username = "gmed"

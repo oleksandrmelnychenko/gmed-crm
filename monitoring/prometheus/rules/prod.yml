@@ -1,0 +1,241 @@
+# PROD-side alert rules (Phase 3e2). Evaluated by Prometheus every
+# 30s; firing alerts route to Alertmanager → email.
+#
+# Thresholds are deliberately conservative for a single-tenant CRM:
+# a 1-customer system in steady state has predictable baseline usage,
+# so departures from baseline are interesting at lower thresholds
+# than a high-scale service would want.
+
+groups:
+  - name: prod-host
+    interval: 30s
+    rules:
+      - alert: ProdHostDown
+        expr: up{job="node-prod"} == 0
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PROD host {{ $labels.instance }} unreachable"
+          description: "node_exporter on {{ $labels.instance }} has been down for 3 minutes. Tailscale connectivity? Server crashed?"
+
+      - alert: ProdHostDiskFull
+        expr: |
+          (node_filesystem_avail_bytes{job="node-prod",fstype!~"tmpfs|overlay"} /
+           node_filesystem_size_bytes{job="node-prod",fstype!~"tmpfs|overlay"}) < 0.10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PROD disk {{ $labels.mountpoint }} <10% free"
+          description: "{{ $labels.instance }} mount {{ $labels.mountpoint }} below 10% free for 10m. Check the postgres volume in particular."
+
+      - alert: ProdHostDiskCritical
+        expr: |
+          (node_filesystem_avail_bytes{job="node-prod",fstype!~"tmpfs|overlay"} /
+           node_filesystem_size_bytes{job="node-prod",fstype!~"tmpfs|overlay"}) < 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PROD disk {{ $labels.mountpoint }} <5% free"
+          description: "{{ $labels.instance }} mount {{ $labels.mountpoint }} below 5% free — investigate immediately. Postgres will fail writes once it fills."
+
+      - alert: ProdHostCPUSustained
+        expr: |
+          (1 - avg by(instance) (rate(node_cpu_seconds_total{job="node-prod",mode="idle"}[5m]))) > 0.85
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PROD CPU > 85% sustained"
+          description: "Average CPU on {{ $labels.instance }} > 85% for 15m. Either a real load spike or a runaway loop."
+
+      - alert: ProdHostMemorySaturated
+        # node_exporter on Linux: MemAvailable bytes / MemTotal bytes.
+        # Below 10% available + sustained means swap/OOM is imminent.
+        expr: |
+          (node_memory_MemAvailable_bytes{job="node-prod"} /
+           node_memory_MemTotal_bytes{job="node-prod"}) < 0.10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PROD memory < 10% available"
+          description: "{{ $labels.instance }} has <10% MemAvailable for 5m. Postgres cache + Rust app + Caddy + frontend — something is leaking or undersized."
+
+  - name: prod-postgres
+    interval: 30s
+    rules:
+      - alert: ProdPostgresDown
+        expr: up{job="postgres-prod"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Postgres exporter unreachable"
+          description: "postgres_exporter on {{ $labels.instance }} has been down for 2m. Either the exporter itself or the Postgres it monitors is unreachable."
+
+      - alert: ProdPostgresConnectionsSaturated
+        # pg_stat_database_numbackends counts active connections;
+        # pg_settings_max_connections is the static config value.
+        expr: |
+          sum by(instance) (pg_stat_database_numbackends{job="postgres-prod"})
+            /
+          max by(instance) (pg_settings_max_connections{job="postgres-prod"}) > 0.80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Postgres >80% of max_connections used"
+          description: "Connection pool on {{ $labels.instance }} above 80% of max_connections for 5m. Either a pool leak in the app or undersized max_connections."
+
+      - alert: ProdPostgresLongTransaction
+        # Anything holding a transaction open > 5m on a small CRM is
+        # almost certainly a bug or a stuck backup.
+        expr: |
+          pg_stat_activity_max_tx_duration{job="postgres-prod",state="active"} > 300
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Postgres transaction open > 5 minutes"
+          description: "An active transaction on {{ $labels.instance }} has been open for over 5 minutes — risk of lock contention. Find it: SELECT pid, query FROM pg_stat_activity WHERE state='active' ORDER BY xact_start ASC LIMIT 5;"
+
+  - name: prod-app
+    # axum-prometheus default metrics (Phase 3e3):
+    #   axum_http_requests_total{method,status,endpoint}
+    #   axum_http_requests_duration_seconds{...} (histogram)
+    #   axum_http_requests_pending{...}
+    #
+    # The `endpoint` label uses axum's matched route template (e.g.
+    # `/patients/{patient_id}`), so per-path cardinality is bounded
+    # by the route count — not by the user-facing URL space.
+    interval: 30s
+    rules:
+      - alert: ProdAppDown
+        expr: up{job="backend-prod"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Backend /metrics scrape failing"
+          description: "Prometheus has been unable to scrape backend /metrics on {{ $labels.instance }}:9091 for 2m. Process crashed, port closed, or tailnet routing broken."
+
+      - alert: ProdApp5xxRate
+        # Rate of 5xx responses per second over 5m, summed across all
+        # endpoints + methods. The backend's audit-IP-salt + JWT
+        # middleware mean each handler is heavy; sustained 5xx > 0.2/s
+        # is louder than baseline noise.
+        expr: |
+          sum by (instance) (
+            rate(axum_http_requests_total{job="backend-prod",status=~"5.."}[5m])
+          ) > 0.2
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Backend 5xx rate > 0.2/s sustained"
+          description: "Backend on {{ $labels.instance }} returned 5xx at >12/min for 5m. Check the Caddy5xxBurst Loki alert and `docker logs <backend>` for stack traces."
+
+      - alert: ProdAppLatencyP95High
+        # 95th-percentile request duration > 1.5s over 10m. The
+        # histogram_quantile aggregation looks at the bucket counters
+        # produced by axum_http_requests_duration_seconds.
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, instance) (
+              rate(axum_http_requests_duration_seconds_bucket{job="backend-prod"}[10m])
+            )
+          ) > 1.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Backend p95 latency > 1.5s sustained"
+          description: "p95 request latency on {{ $labels.instance }} above 1.5s for 10m. Either an upstream DB slowdown, GC/allocation pressure, or a particularly hot endpoint — drill in by removing the `instance` group-by."
+
+      - alert: ProdAppAuthFailureBurst
+        # Track auth-tight endpoints by their route template. A burst
+        # of failed logins shows up as 401/403 on those routes.
+        expr: |
+          sum by (instance) (
+            rate(axum_http_requests_total{
+              job="backend-prod",
+              endpoint=~"/auth/(login|refresh|pending/.*)",
+              status=~"4(01|03|29)"
+            }[5m])
+          ) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Auth failure burst on {{ $labels.instance }}"
+          description: "Failed login/refresh attempts (401/403/429) at >30/min for 5m. Could be credential stuffing — cross-check with audit_log to find the source IPs."
+
+      # Business-metric variant of the above. ProdAppAuthFailureBurst
+      # fires on HTTP-level signals (any non-2xx on /auth/*); this
+      # rule fires on the app's own LOGIN_ATTEMPTS_TOTAL counter and
+      # distinguishes the reason (wrong_password vs auto_locked etc).
+      # The two complement each other: HTTP burst catches anything
+      # that even reached the handler; the business metric explains
+      # WHY.
+      - alert: ProdLoginFailureBurst
+        expr: |
+          sum by (reason) (
+            rate(gmed_login_attempts_total{outcome=~"failure|blocked"}[5m])
+          ) > 0.3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Login {{ $labels.reason }} burst > 0.3/s"
+          description: "Login attempts of reason `{{ $labels.reason }}` are firing at >18/min for 5m. wrong_password = credential stuffing candidate; account_locked = lockout storm (one user under attack); auto_locked = many accounts hitting the max-attempts threshold simultaneously."
+
+      - alert: ProdLoginSuccessFlatline
+        # If login_success drops to zero for 30m during what is
+        # normally business hours, something is broken upstream
+        # (Caddy → frontend → backend or DB). The rule fires whenever
+        # the counter is flat — operator silences it for known
+        # off-hours.
+        expr: |
+          sum (
+            increase(gmed_login_attempts_total{outcome="success"}[30m])
+          ) == 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Zero successful logins in last 30m"
+          description: "No successful logins recorded in the last 30 minutes. Possible causes: app down, DB down, MFA admin offline. Silence the alert if this is outside business hours."
+
+  - name: prod-containers
+    interval: 30s
+    rules:
+      - alert: ProdContainerRestartLoop
+        # cAdvisor exposes container_start_time_seconds; a fresh value
+        # within the eval window means the container restarted. If it
+        # keeps restarting we see the metric churn.
+        expr: |
+          changes(container_start_time_seconds{job="cadvisor-prod",name=~"gmed-.+"}[15m]) > 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ $labels.name }} restarted >3 times in 15m"
+          description: "{{ $labels.name }} on {{ $labels.instance }} has restarted more than 3 times in the last 15 minutes. Check `docker logs {{ $labels.name }}` for the failure pattern."
+
+      - alert: ProdContainerHighMemory
+        # cAdvisor: container memory usage relative to its limit.
+        # No `mem_limit` set on most services means this denominator
+        # is the host's total — alert fires only on truly oversized.
+        expr: |
+          container_memory_working_set_bytes{job="cadvisor-prod",name=~"gmed-.+"}
+            / on (instance,name) container_spec_memory_limit_bytes{job="cadvisor-prod",name=~"gmed-.+"} > 0.90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ $labels.name }} memory > 90% of limit"
+          description: "{{ $labels.name }} memory working set above 90% of its limit for 10m."

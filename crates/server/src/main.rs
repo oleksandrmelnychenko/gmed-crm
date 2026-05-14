@@ -89,12 +89,61 @@ async fn main() {
         ])
         .allow_credentials(true);
 
+    // Prometheus instrumentation. The pair is built BEFORE the app so
+    // the layer can wrap every request and the handle can be moved into
+    // the dedicated metrics-only HTTP listener (spawned below). The
+    // layer goes outside rate_limit so 429s are still counted as
+    // requests — otherwise rate-limit storms become invisible in
+    // metrics, which defeats the whole alerting setup.
+    let (prometheus_layer, metric_handle) = axum_prometheus::PrometheusMetricLayerBuilder::new()
+        .with_default_metrics()
+        .build_pair();
+
+    // Register `# HELP` text for every business counter declared in
+    // `business_metrics`. Must run AFTER the recorder is installed by
+    // the builder above; a describe before recorder install is a
+    // silent no-op.
+    gmed_server::business_metrics::describe_all();
+
+    if let Some(metrics_addr) = cfg.metrics_listen {
+        let handle_for_route = metric_handle.clone();
+        tokio::spawn(async move {
+            let metrics_app: axum::Router = axum::Router::new().route(
+                "/metrics",
+                axum::routing::get(move || {
+                    let handle = handle_for_route.clone();
+                    async move { handle.render() }
+                }),
+            );
+            match tokio::net::TcpListener::bind(metrics_addr).await {
+                Ok(listener) => {
+                    tracing::info!(addr = %metrics_addr, "Metrics endpoint listening");
+                    if let Err(e) = axum::serve(listener, metrics_app).await {
+                        tracing::error!(error = %e, "Metrics server exited");
+                    }
+                }
+                Err(e) => {
+                    // A failed bind on the metrics port is not fatal to
+                    // the application — log and carry on. Observability
+                    // should never take down the service it observes.
+                    tracing::error!(
+                        addr = %metrics_addr,
+                        error = %e,
+                        "Failed to bind metrics endpoint — continuing without /metrics"
+                    );
+                }
+            }
+        });
+    }
+
     // Security-header baseline is applied inside `build_app` so integration
     // tests exercise it too; here we only add the CORS layer (which needs
-    // config-time origin values) and the PII-safe HTTP tracing layer.
+    // config-time origin values), the PII-safe HTTP tracing layer, and
+    // the Prometheus instrumentation.
     let app = build_app(app_state)
         .layer(cors)
-        .layer(telemetry::http_trace_layer());
+        .layer(telemetry::http_trace_layer())
+        .layer(prometheus_layer);
 
     tracing::info!("Server starting on {}", cfg.listen_addr);
 

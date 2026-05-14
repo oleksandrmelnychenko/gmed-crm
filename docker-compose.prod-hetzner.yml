@@ -1,0 +1,197 @@
+# PROD-only overrides layered on top of:
+#   docker-compose.yml
+#   docker-compose.release.yml
+#   docker-compose.hetzner.yml
+#
+# What it changes vs the Hetzner override:
+#   - Postgres credentials come from env (sops-decrypted), not the
+#     hardcoded "gmed/gmed/gmed" baked into docker-compose.yml.
+#     GMED_DATABASE_URL in release.env must reference the same
+#     credentials — the two are kept consistent inside the sops bundle,
+#     not at runtime, so a mismatch surfaces immediately at first apply.
+#   - JSON logging caps tightened for every long-lived service. The
+#     log driver settings are inherited from /etc/docker/daemon.json
+#     already, but a per-service `logging:` block makes the cap visible
+#     in the compose project too.
+#   - All services pick up `restart: unless-stopped` (already set in
+#     release.yml for backend/frontend; Caddy already has it; postgres
+#     gets it here).
+#
+# Compose layering:
+#   docker compose \
+#     -f docker-compose.yml \
+#     -f docker-compose.release.yml \
+#     -f docker-compose.hetzner.yml \
+#     -f docker-compose.prod-hetzner.yml \
+#     up -d --build
+
+services:
+  postgres:
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-gmed}"
+      POSTGRES_USER: "${POSTGRES_USER:?Set POSTGRES_USER in release.env (sops)}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in release.env (sops)}"
+    # !override replaces the inherited volume list from docker-compose.yml
+    # (which uses the named `pgdata` docker volume) with a bind mount
+    # pointing at the Hetzner Volume mounted by cloud-init at
+    # /mnt/postgres. The named `pgdata` volume declaration at the top of
+    # docker-compose.yml stays declared but unused; compose tolerates
+    # that.
+    volumes: !override
+      - /mnt/postgres:/var/lib/postgresql/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  backend:
+    # Publish the metrics-only listener (9091) for Prometheus scrape
+    # over the tailnet. The main API port (3000) stays internal to
+    # the docker network — Caddy is the only public ingress for /api.
+    # The Hetzner firewall keeps 9091 closed to the public internet.
+    ports:
+      - "9091:9091"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  frontend:
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  caddy:
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # --- Observability exporters (Phase 3e2) ----------------------------------
+  # All sidecars listen on the host's all-interfaces (`network_mode: host`
+  # for node_exporter and cAdvisor, published ports for postgres_exporter
+  # and promtail). The Hetzner firewall keeps those ports closed to the
+  # public internet; only tailnet peers (the monitoring host) can scrape.
+  # --------------------------------------------------------------------------
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: gmed-node-exporter
+    restart: unless-stopped
+    pid: host
+    network_mode: host   # reports the host's interfaces, not the container's
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro,rslave
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      # Exclude pseudo-filesystems and the docker/overlayfs mountpoints
+      # so disk metrics reflect the real root + Postgres volume only.
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|var/lib/docker)($$|/)'
+      - '--web.listen-address=:9100'
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: gmed-cadvisor
+    restart: unless-stopped
+    network_mode: host
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /etc/machine-id:/etc/machine-id:ro
+    command:
+      - '--port=9080'
+      # Disable cAdvisor's own UI — we only want the /metrics endpoint
+      # exposed to Prometheus over the tailnet.
+      - '--disable_metrics=disk,referenced_memory,udp,advtcp,sched,hugetlb,process'
+      - '--store_container_labels=false'
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  postgres-exporter:
+    # quay.io because docker.io rate-limits anonymous pulls. The image
+    # is built by the Prometheus community and signed with the cosign
+    # keyless pipeline of the prometheus-community org (verify with
+    # `cosign verify --certificate-identity-regexp=...` if you want
+    # belt-and-suspenders before flipping the digest pin).
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.17.0
+    container_name: gmed-postgres-exporter
+    restart: unless-stopped
+    environment:
+      # Dedicated read-only user with the pg_monitor role — created
+      # idempotently by scripts/ensure-prod-metrics-user.sh during
+      # deploy-prod.sh. The exporter NEVER uses the main POSTGRES_USER
+      # credentials.
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_METRICS_USER:?Set POSTGRES_METRICS_USER in release.env}:${POSTGRES_METRICS_PASSWORD:?Set POSTGRES_METRICS_PASSWORD}@postgres:5432/${POSTGRES_DB:-gmed}?sslmode=disable"
+      PG_EXPORTER_AUTO_DISCOVER_DATABASES: "false"
+      PG_EXPORTER_WEB_LISTEN_ADDRESS: ":9187"
+    ports:
+      - "9187:9187"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  promtail:
+    # Ships every container's Docker JSON log file to Loki on the
+    # monitoring host (via tailnet — see promtail-config.yml).
+    #
+    # SECURITY NOTE: `docker.sock` is mounted read-only so promtail can
+    # use `docker_sd_configs` to discover containers and label streams
+    # with the container name + image. A `:ro` socket mount still
+    # exposes a fair Docker API surface (a kernel exploit in
+    # containerd would let promtail enumerate / read other containers).
+    # Hardening path: replace with `tecnativa/docker-socket-proxy`
+    # restricting endpoints to /containers and /events only.
+    image: grafana/promtail:3.3.1
+    container_name: gmed-promtail
+    restart: unless-stopped
+    user: "0:0"   # needs root to read /var/lib/docker/containers/*/*.log
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/log:/var/log:ro
+      - ./monitoring/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - promtail_positions:/var/lib/promtail
+    command:
+      - '-config.file=/etc/promtail/config.yml'
+      # Allow the loki URL to come from env so the same config works in
+      # any tailnet configuration (`http://gmed-monitoring:3100/...`).
+      - '-config.expand-env=true'
+    environment:
+      LOKI_URL: "${LOKI_URL:-http://gmed-monitoring:3100/loki/api/v1/push}"
+      HOST_LABEL: "gmed-prod"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  promtail_positions:
