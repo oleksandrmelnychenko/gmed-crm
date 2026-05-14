@@ -126,28 +126,24 @@ The script:
 2. Decrypts `secrets.sops.yaml` to `/opt/gmed/release.env` (atomic
    write).
 3. Validates all required keys exist.
-4. Installs / refreshes `rclone` + `age` and the backup cron entry
-   (`/etc/cron.d/gmed-backup`, daily 02:30 UTC).
-5. `docker compose up -d --build` with the full PROD compose stack.
-6. Prunes dangling images older than 24h.
+4. Installs / refreshes `rclone` + `age`, the backup cron entry
+   (`/etc/cron.d/gmed-backup`, daily 02:30 UTC), and the external
+   Healthchecks.io `/health` ping cron if `HEALTHCHECKS_PING_URL` is
+   set.
+5. `docker compose up -d` with digest-pinned GHCR images.
+6. Creates / rotates the read-only `postgres_exporter` role via
+   `scripts/ensure-prod-metrics-user.sh`.
+7. Prunes dangling images older than 24h.
 
 It is idempotent — re-running on a healthy host is a `git pull` plus
 a compose reconciliation.
 
-### 9. Optional: healthchecks ping cron
+### 9. Healthchecks ping cron
 
-Add a `*/5 * * * *` cron entry that probes the local `/health` and
-pings the configured Healthchecks.io URL on success:
-
-```bash
-sudo crontab -e
-```
-
-```cron
-*/5 * * * * curl -fsS https://console.gmed-health.com/health >/dev/null 2>&1 && curl -fsS --retry 3 "$(grep '^HEALTHCHECKS_PING_URL=' /opt/gmed/release.env | cut -d= -f2-)" >/dev/null 2>&1
-```
-
-Phase 3 replaces this with a proper monitoring stack.
+Create a Healthchecks.io check for the public app health probe and put
+its ping URL in `HEALTHCHECKS_PING_URL` in the PROD SOPS bundle.
+`scripts/deploy-prod.sh` installs `/etc/cron.d/gmed-app-healthcheck`
+automatically and removes it again if the variable is absent.
 
 ### 10. One-time: encrypted off-host backups
 
@@ -546,25 +542,21 @@ disabled; Terraform fails the plan instead of emitting a warning.
 VNC remains. Reboot from the Console, log in as root, fix Tailscale,
 then SSH resumes.
 
-### Phase 3e2 metrics-user setup (one-time)
+### Phase 3e2 metrics-user setup
 
-After the first deploy, create the dedicated metrics user that
-`postgres_exporter` connects with. The user has the `pg_monitor`
-role (read-only access to catalog + stats); even a compromised
-exporter cannot touch application data or mutate state.
+`scripts/deploy-prod.sh` now runs
+`scripts/ensure-prod-metrics-user.sh` automatically after compose is up.
+That helper creates or rotates the dedicated `postgres_exporter` role
+with `pg_monitor` (read-only access to catalog + stats). Rotation is
+therefore just: edit `POSTGRES_METRICS_PASSWORD` in SOPS, re-encrypt,
+commit, deploy.
+
+Manual fallback:
 
 ```bash
 ssh gmed@console.gmed-health.com
-docker exec -it -e PGPASSWORD="$(grep '^POSTGRES_PASSWORD=' /opt/gmed/release.env | cut -d= -f2-)" \
-  gmed-postgres \
-  psql -U "$(grep '^POSTGRES_USER=' /opt/gmed/release.env | cut -d= -f2-)" -d gmed -c \
-  "CREATE USER gmed_metrics WITH PASSWORD 'PASTE-FROM-POSTGRES_METRICS_PASSWORD-IN-SOPS'; GRANT pg_monitor TO gmed_metrics;"
+sudo /opt/gmed/repo/scripts/ensure-prod-metrics-user.sh
 ```
-
-After this runs, `postgres_exporter` will start scraping successfully
-within a Prometheus interval. Rotation: edit `POSTGRES_METRICS_PASSWORD`
-in sops, then `ALTER USER gmed_metrics WITH PASSWORD '...';` and
-redeploy.
 
 ## What this environment intentionally does NOT have yet
 

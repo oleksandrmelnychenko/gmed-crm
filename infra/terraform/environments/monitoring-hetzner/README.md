@@ -201,8 +201,14 @@ PROD logs (Phase 3e2, [gmed-prod.yml](../../../../monitoring/loki/rules/fake/gme
 
 - **Caddy5xxBurst** — > 30 5xx/min for 5m.
 - **CaddyRateLimitBurst** — > 60 429/min for 5m.
+- **BackendErrorLogBurst** — backend `ERROR` log burst.
 - **BackendPanicLogged** — Rust panic line in backend stdout.
+- **AuditLogQueueDroppedEvent / AuditLogPersistFailure** — audit log
+  pipeline integrity failures.
 - **SshFail2banBurst** — > 3 SSH bans in 10m.
+- **HostOperationFailed** — deploy / backup / restore script exited
+  non-zero.
+- **BackupCronSilent** — no successful backup final rc line in 26h.
 
 ## DEV ↔ PROD ↔ MONITORING differences (short)
 

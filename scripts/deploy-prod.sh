@@ -193,6 +193,22 @@ if [[ -r "$REPO_DIR/infra/cron/gmed-backup.cron" ]]; then
   chmod 640 /var/log/gmed-backup.log
 fi
 
+# Install / refresh the external application health ping if configured.
+# This is intentionally separate from Prometheus: Healthchecks.io is the
+# outside watcher for "host or monitoring stack is gone".
+if [[ -n "${HEALTHCHECKS_PING_URL:-}" ]]; then
+  cat > /etc/cron.d/gmed-app-healthcheck <<EOF
+# Auto-installed by deploy-prod.sh. Pings Healthchecks.io only after
+# the public app health endpoint responds successfully.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+*/5 * * * * root curl -fsS --max-time 10 "https://${CADDY_HOSTNAME}/health" >/dev/null 2>&1 && curl -fsS --retry 3 --max-time 10 "$HEALTHCHECKS_PING_URL" >/dev/null 2>&1
+EOF
+  chmod 600 /etc/cron.d/gmed-app-healthcheck
+else
+  rm -f /etc/cron.d/gmed-app-healthcheck
+fi
+
 # Bring (or keep) services up. No --build: PROD pulls cosign-verified
 # images, never builds them locally. The ghcr override is layered LAST
 # so its `image:` directives win over any inherited `build:` block.
@@ -204,6 +220,11 @@ docker compose \
   -f docker-compose.prod-hetzner.yml \
   -f docker-compose.ghcr.yml \
   up -d --remove-orphans
+
+if [[ -x "$REPO_DIR/scripts/ensure-prod-metrics-user.sh" ]]; then
+  "$REPO_DIR/scripts/ensure-prod-metrics-user.sh"
+  docker restart gmed-postgres-exporter >/dev/null 2>&1 || true
+fi
 
 # Prune dangling images so the host doesn't accumulate layers from
 # older pinned digests. The volumes (pgdata, uploads, caddy_data) are

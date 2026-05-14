@@ -121,7 +121,7 @@ SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 */5 * * * * root curl -fsS --max-time 10 http://127.0.0.1:9090/-/healthy >/dev/null 2>&1 && curl -fsS --retry 3 --max-time 10 "$MONITORING_HEALTHCHECKS_PING_URL" >/dev/null 2>&1
 EOF
-  chmod 644 /etc/cron.d/gmed-monitoring-ping
+  chmod 600 /etc/cron.d/gmed-monitoring-ping
 fi
 
 # Bring (or keep) the monitoring stack up.

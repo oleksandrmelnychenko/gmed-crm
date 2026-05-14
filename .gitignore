@@ -8,6 +8,7 @@
 node_modules/
 *.log
 .agent-extract/
+.ops-bootstrap/
 /.claude/settings.local.json
 /target-patient-slice/
 /crates/server/uploads/

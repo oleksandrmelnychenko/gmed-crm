@@ -141,8 +141,9 @@ services:
     restart: unless-stopped
     environment:
       # Dedicated read-only user with the pg_monitor role — created
-      # one-time via SQL after first PROD deploy (see PROD README).
-      # The exporter NEVER uses the main POSTGRES_USER credentials.
+      # idempotently by scripts/ensure-prod-metrics-user.sh during
+      # deploy-prod.sh. The exporter NEVER uses the main POSTGRES_USER
+      # credentials.
       DATA_SOURCE_NAME: "postgresql://${POSTGRES_METRICS_USER:?Set POSTGRES_METRICS_USER in release.env}:${POSTGRES_METRICS_PASSWORD:?Set POSTGRES_METRICS_PASSWORD}@postgres:5432/${POSTGRES_DB:-gmed}?sslmode=disable"
       PG_EXPORTER_AUTO_DISCOVER_DATABASES: "false"
       PG_EXPORTER_WEB_LISTEN_ADDRESS: ":9187"
