@@ -1434,6 +1434,73 @@ async fn medical_appointments_support_care_path_kind_round_trip_and_filtering() 
 }
 
 #[tokio::test]
+async fn medical_appointment_requires_provider_or_explicit_opt_out() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("appointment-medical-provider-binding");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let base_payload = json!({
+        "patient_id": patient_id,
+        "owner_user_id": pm_id,
+        "appointment_type": "medical",
+        "title": format!("Unbound medical appointment {tag}"),
+        "date": "2026-08-14",
+        "time_start": "11:00",
+        "time_end": "11:30",
+        "location": "To be confirmed"
+    });
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(base_payload.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains("provider")
+    );
+
+    let mut opt_out_payload = base_payload;
+    opt_out_payload["skip_medical_provider_binding"] = json!(true);
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(opt_out_payload),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let appointment_id = body["id"].as_str().unwrap();
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{appointment_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["type"], "medical");
+    assert!(detail["provider_id"].is_null());
+    assert!(detail["doctor_id"].is_null());
+}
+
+#[tokio::test]
 async fn non_medical_appointments_reject_non_regular_care_path_kind() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
@@ -9278,6 +9345,29 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
     assert_eq!(status, StatusCode::CREATED);
     let doctor_id = Uuid::parse_str(doctor_body["id"].as_str().unwrap()).unwrap();
 
+    let (status, fixed_medical_service_error) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{provider_id}/services"),
+        &pm_bearer,
+        Some(json!({
+            "service_name": "Fixed-price medical service",
+            "description": "Should be rejected for medical providers",
+            "price_type": "fixed",
+            "price": 300.0,
+            "currency": "EUR",
+            "valid_from": "2026-02-01",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        fixed_medical_service_error["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("price range")
+    );
+
     let (status, service_body) = json_request(
         &app,
         "POST",
@@ -9576,6 +9666,176 @@ async fn create_provider_rejects_invalid_name_and_provider_type() {
             .unwrap_or_default()
             .contains("medical")
     );
+}
+
+#[tokio::test]
+async fn non_medical_provider_rejects_provider_specializations() {
+    let Some((app, _pool, _admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("provider-nonmedical-specs");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/providers",
+        &bearer,
+        Some(json!({
+            "name": format!("Travel Direct Specs {tag}"),
+            "provider_type": "non_medical",
+            "specializations": ["Cardiology"],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains("specializations")
+    );
+
+    let (status, create_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/providers",
+        &bearer,
+        Some(json!({
+            "name": format!("Travel Clean {tag}"),
+            "provider_type": "non_medical",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let non_medical_id = Uuid::parse_str(create_body["id"].as_str().unwrap()).unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{non_medical_id}/doctors"),
+        &bearer,
+        Some(json!({
+            "first_name": "Travel",
+            "last_name": "Contact",
+            "title": "PD",
+            "specializations": ["Cardiology"],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains("specializations")
+    );
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{non_medical_id}/update"),
+        &bearer,
+        Some(json!({
+            "name": format!("Travel Clean Updated {tag}"),
+            "provider_type": "non_medical",
+            "specializations": ["Neurology"],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains("specializations")
+    );
+
+    let (status, medical_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/providers",
+        &bearer,
+        Some(json!({
+            "name": format!("Clinic Convert {tag}"),
+            "provider_type": "medical",
+            "specializations": ["Cardiology"],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let medical_id = Uuid::parse_str(medical_body["id"].as_str().unwrap()).unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{medical_id}/doctors"),
+        &bearer,
+        Some(json!({
+            "first_name": "Invalid",
+            "last_name": "Title",
+            "title": "Dr.",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains("title")
+    );
+
+    let (status, doctor_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{medical_id}/doctors"),
+        &bearer,
+        Some(json!({
+            "first_name": "Valid",
+            "last_name": "Doctor",
+            "title": "Dr. med.",
+            "specializations": ["Cardiology"],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let doctor_id = Uuid::parse_str(doctor_body["id"].as_str().unwrap()).unwrap();
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{medical_id}/update"),
+        &bearer,
+        Some(json!({
+            "name": format!("Clinic Converted {tag}"),
+            "provider_type": "non_medical",
+            "specializations": [],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{medical_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["provider_type"], "non_medical");
+    assert_eq!(detail["specializations"].as_array().unwrap().len(), 0);
+    let doctors = detail["doctors"].as_array().expect("doctors array");
+    let doctor = doctors
+        .iter()
+        .find(|row| row["id"] == doctor_id.to_string())
+        .expect("doctor remains visible after provider conversion");
+    assert_eq!(doctor["specializations"].as_array().unwrap().len(), 0);
 }
 
 #[tokio::test]
@@ -10068,6 +10328,25 @@ async fn create_patient_rejects_missing_and_invalid_required_fields() {
             .contains("birth_date format")
     );
 
+    let mut minor_without_guardian = base.clone();
+    minor_without_guardian["birth_date"] = json!("2020-01-01");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/patients",
+        &bearer,
+        Some(minor_without_guardian),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains("guardian")
+    );
+
     let mut bad_gender = base.clone();
     bad_gender["gender"] = json!("unspecified");
     let (status, body) =
@@ -10099,6 +10378,178 @@ async fn create_patient_rejects_missing_and_invalid_required_fields() {
             .to_lowercase()
             .contains("insurance type")
     );
+}
+
+#[tokio::test]
+async fn create_and_update_patient_reject_noncanonical_select_fields() {
+    let Some((app, _pool, _admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let base = json!({
+        "first_name": "Ada",
+        "last_name": "Lovelace",
+        "birth_date": "1990-01-01",
+        "gender": "female",
+    });
+
+    let mut invalid_nationality = base.clone();
+    invalid_nationality["nationality"] = json!("Martian");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/patients",
+        &bearer,
+        Some(invalid_nationality),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains("nationality")
+    );
+
+    let mut invalid_country = base.clone();
+    invalid_country["address_country"] = json!("Atlantis");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/patients",
+        &bearer,
+        Some(invalid_country),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains("address_country")
+    );
+
+    let mut invalid_language = base.clone();
+    invalid_language["languages"] = json!(["de", "xx"]);
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/patients",
+        &bearer,
+        Some(invalid_language),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains("language")
+    );
+
+    let (status, create_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/patients",
+        &bearer,
+        Some(json!({
+            "first_name": "Valid",
+            "last_name": "Selects",
+            "birth_date": "1990-01-01",
+            "gender": "female",
+            "nationality": "Ukrainian",
+            "residence_country": "Germany",
+            "address_country": "Germany",
+            "languages": ["de", "uk"],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let patient_id = Uuid::parse_str(create_body["id"].as_str().unwrap()).unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/update"),
+        &bearer,
+        Some(json!({
+            "residence_country": "Neverland",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains("residence_country")
+    );
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/update"),
+        &bearer,
+        Some(json!({
+            "languages": ["de", "zz"],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains("language")
+    );
+}
+
+#[tokio::test]
+async fn create_patient_accepts_minor_with_guardian_relation() {
+    let Some((app, _pool, _admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("patient-minor-guardian");
+    let payload = json!({
+        "first_name": "Minor",
+        "last_name": format!("Patient {tag}"),
+        "birth_date": "2020-01-01",
+        "gender": "female",
+        "patient_relations": [
+            {
+                "related_name": "Guardian Person",
+                "relation_type": "guardian",
+                "is_emergency_contact": true,
+                "phone": "+49 30 123456"
+            }
+        ]
+    });
+
+    let (status, create_body) =
+        json_request(&app, "POST", "/api/v1/patients", &bearer, Some(payload)).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let patient_id = Uuid::parse_str(create_body["id"].as_str().unwrap()).unwrap();
+
+    let (status, relations) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/relations"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let relations = relations.as_array().expect("relations array");
+    assert_eq!(relations.len(), 1);
+    assert_eq!(relations[0]["relation_type"], "guardian");
+    assert_eq!(relations[0]["related_name"], "Guardian Person");
+    assert_eq!(relations[0]["is_emergency_contact"], true);
 }
 
 #[tokio::test]
@@ -10851,6 +11302,8 @@ async fn ceo_can_update_unassigned_patient_and_audit_log_records_the_mutation() 
         Some(json!({
             "first_name": format!("CEO-Changed {tag}"),
             "last_name": "Updated",
+            "birth_date": "2004-02-03",
+            "gender": "diverse",
             "notes": "Updated by CEO without assignment",
             "legal_status": {
                 "compliance_completed": true,
@@ -10872,6 +11325,8 @@ async fn ceo_can_update_unassigned_patient_and_audit_log_records_the_mutation() 
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(detail["first_name"], format!("CEO-Changed {tag}"));
+    assert_eq!(detail["birth_date"], "2004-02-03");
+    assert_eq!(detail["gender"], "diverse");
     assert_eq!(detail["notes"], "Updated by CEO without assignment");
 
     // Audit log records the `update_patient` domain event with the caller as actor.
@@ -10907,6 +11362,8 @@ async fn ceo_can_update_unassigned_patient_and_audit_log_records_the_mutation() 
     .await
     .unwrap();
     assert_eq!(context["legal_status_updated"], true);
+    assert_eq!(context["birth_date_updated"], true);
+    assert_eq!(context["gender_updated"], true);
     assert_eq!(context["compliance_completed"], true);
     assert_eq!(context["contract_status"], "signed");
 }

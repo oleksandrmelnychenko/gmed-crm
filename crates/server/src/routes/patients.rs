@@ -5,6 +5,7 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
+use chrono::Datelike;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
@@ -125,6 +126,7 @@ struct CreatePatientRequest {
     emergency_contact_name: Option<String>,
     emergency_contact_phone: Option<String>,
     emergency_contact_relation: Option<String>,
+    patient_relations: Option<Vec<UpsertRelationRequest>>,
     notes: Option<String>,
 }
 
@@ -133,6 +135,8 @@ struct UpdatePatientRequest {
     title: Option<Value>,
     first_name: Option<String>,
     last_name: Option<String>,
+    birth_date: Option<String>,
+    gender: Option<String>,
     phone_primary: Option<Value>,
     phone_secondary: Option<Value>,
     email: Option<Value>,
@@ -338,6 +342,56 @@ const ALLOWED_PATIENT_FUNCTIONAL_LABELS: [&str; 5] = [
     "fall_risk",
     "complex_coordination",
 ];
+const ALLOWED_PATIENT_COUNTRIES: [&str; 21] = [
+    "Germany",
+    "Ukraine",
+    "Austria",
+    "Switzerland",
+    "Poland",
+    "Czech Republic",
+    "Denmark",
+    "Latvia",
+    "Greece",
+    "Turkey",
+    "United Arab Emirates",
+    "Saudi Arabia",
+    "Egypt",
+    "Nigeria",
+    "Ghana",
+    "Brazil",
+    "China",
+    "Russia",
+    "Pakistan",
+    "United Kingdom",
+    "United States",
+];
+const ALLOWED_PATIENT_NATIONALITIES: [&str; 21] = [
+    "German",
+    "Ukrainian",
+    "Austrian",
+    "Swiss",
+    "Polish",
+    "Czech",
+    "Danish",
+    "Latvian",
+    "Greek",
+    "Turkish",
+    "Emirati",
+    "Saudi",
+    "Egyptian",
+    "Nigerian",
+    "Ghanaian",
+    "Brazilian",
+    "Chinese",
+    "Russian",
+    "Pakistani",
+    "British",
+    "American",
+];
+const ALLOWED_PATIENT_LANGUAGES: [&str; 17] = [
+    "de", "uk", "ru", "en", "ar", "pt", "fr", "es", "it", "tr", "pl", "cs", "da", "el", "lv", "zh",
+    "ur",
+];
 
 fn validate_create(req: &CreatePatientRequest) -> Result<(), &'static str> {
     let first_name = req.first_name.trim();
@@ -353,9 +407,8 @@ fn validate_create(req: &CreatePatientRequest) -> Result<(), &'static str> {
     if birth_date.is_empty() {
         return Err("Birth date required");
     }
-    if chrono::NaiveDate::parse_from_str(birth_date, "%Y-%m-%d").is_err() {
-        return Err("Invalid birth_date format (YYYY-MM-DD)");
-    }
+    let parsed_birth_date = chrono::NaiveDate::parse_from_str(birth_date, "%Y-%m-%d")
+        .map_err(|_| "Invalid birth_date format (YYYY-MM-DD)")?;
     match req.gender.as_str() {
         "male" => {}
         "female" => {}
@@ -371,6 +424,186 @@ fn validate_create(req: &CreatePatientRequest) -> Result<(), &'static str> {
             _ => return Err("Invalid insurance type"),
         }
     }
+    validate_optional_patient_select(
+        req.nationality.as_deref(),
+        &ALLOWED_PATIENT_NATIONALITIES,
+        "nationality",
+    )?;
+    validate_optional_patient_select(
+        req.residence_country.as_deref(),
+        &ALLOWED_PATIENT_COUNTRIES,
+        "residence_country",
+    )?;
+    validate_optional_patient_select(
+        req.address_country.as_deref(),
+        &ALLOWED_PATIENT_COUNTRIES,
+        "address_country",
+    )?;
+    validate_patient_languages(req.languages.as_deref())?;
+    if let Some(relations) = req.patient_relations.as_ref() {
+        for relation in relations {
+            validate_relation_payload_fields(relation)?;
+        }
+    }
+    if is_minor_birth_date(parsed_birth_date, chrono::Utc::now().date_naive())
+        && !has_minor_guardian(req)
+    {
+        return Err(
+            "Minor patients require a guardian/parent relation or guardian emergency contact",
+        );
+    }
+    Ok(())
+}
+
+fn validate_optional_patient_select(
+    value: Option<&str>,
+    allowed_values: &[&str],
+    field_name: &'static str,
+) -> Result<(), &'static str> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let value = value.trim();
+    if value.is_empty() || allowed_values.contains(&value) {
+        return Ok(());
+    }
+    match field_name {
+        "nationality" => Err("Invalid nationality"),
+        "residence_country" => Err("Invalid residence_country"),
+        "address_country" => Err("Invalid address_country"),
+        _ => Err("Invalid select value"),
+    }
+}
+
+fn validate_optional_patient_select_update(
+    value: Option<&str>,
+    current: Option<&str>,
+    allowed_values: &[&str],
+    field_name: &'static str,
+) -> Result<(), &'static str> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let value = value.trim();
+    if value.is_empty() || allowed_values.contains(&value) {
+        return Ok(());
+    }
+    if current.is_some_and(|current| current.trim() == value) {
+        return Ok(());
+    }
+    match field_name {
+        "nationality" => Err("Invalid nationality"),
+        "residence_country" => Err("Invalid residence_country"),
+        "address_country" => Err("Invalid address_country"),
+        _ => Err("Invalid select value"),
+    }
+}
+
+fn validate_patient_languages(languages: Option<&[String]>) -> Result<(), &'static str> {
+    let Some(languages) = languages else {
+        return Ok(());
+    };
+    for language in languages {
+        let language = language.trim();
+        if !language.is_empty() && !ALLOWED_PATIENT_LANGUAGES.contains(&language) {
+            return Err("Invalid patient language");
+        }
+    }
+    Ok(())
+}
+
+fn normalize_patient_select_value(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    })
+}
+
+fn normalize_patient_language_values(
+    languages: Option<Vec<String>>,
+) -> Result<Vec<String>, &'static str> {
+    let mut normalized = Vec::new();
+    for language in languages.unwrap_or_default() {
+        let language = language.trim();
+        if language.is_empty() {
+            continue;
+        }
+        if !ALLOWED_PATIENT_LANGUAGES.contains(&language) {
+            return Err("Invalid patient language");
+        }
+        if !normalized.iter().any(|item| item == language) {
+            normalized.push(language.to_string());
+        }
+    }
+    Ok(normalized)
+}
+
+fn normalize_patient_language_values_for_update(
+    languages: Vec<String>,
+    current: &[String],
+) -> Result<Vec<String>, &'static str> {
+    let mut normalized = Vec::new();
+    for language in languages {
+        let language = language.trim();
+        if language.is_empty() {
+            continue;
+        }
+        if !ALLOWED_PATIENT_LANGUAGES.contains(&language)
+            && !current.iter().any(|current| current == language)
+        {
+            return Err("Invalid patient language");
+        }
+        if !normalized.iter().any(|item| item == language) {
+            normalized.push(language.to_string());
+        }
+    }
+    Ok(normalized)
+}
+
+fn is_minor_birth_date(birth_date: chrono::NaiveDate, today: chrono::NaiveDate) -> bool {
+    let mut age = today.year() - birth_date.year();
+    if (today.month(), today.day()) < (birth_date.month(), birth_date.day()) {
+        age -= 1;
+    }
+    age < 18
+}
+
+fn has_minor_guardian(req: &CreatePatientRequest) -> bool {
+    if let Some(relations) = req.patient_relations.as_ref()
+        && relations.iter().any(|relation| {
+            is_guardian_or_parent_relation_type(&relation.relation_type)
+                && !relation.related_name.trim().is_empty()
+        })
+    {
+        return true;
+    }
+
+    is_guardian_or_parent_relation_type(req.emergency_contact_relation.as_deref().unwrap_or(""))
+        && req
+            .emergency_contact_name
+            .as_deref()
+            .is_some_and(|name| !name.trim().is_empty())
+        && req
+            .emergency_contact_phone
+            .as_deref()
+            .is_some_and(|phone| !phone.trim().is_empty())
+}
+
+fn is_guardian_or_parent_relation_type(value: &str) -> bool {
+    matches!(value.trim(), "guardian" | "parent")
+}
+
+fn validate_relation_payload_fields(body: &UpsertRelationRequest) -> Result<(), &'static str> {
+    if body.related_name.trim().is_empty() || body.related_name.trim().len() > 200 {
+        return Err("Related name required (max 200)");
+    }
+
+    match body.relation_type.trim() {
+        "spouse" | "parent" | "child" | "sibling" | "relative" | "guardian" | "caregiver"
+        | "friend" | "other" => {}
+        _ => return Err("Invalid relation type"),
+    }
+
     Ok(())
 }
 
@@ -977,6 +1210,7 @@ async fn create_patient(
         emergency_contact_name,
         emergency_contact_phone,
         emergency_contact_relation,
+        patient_relations,
         notes,
     } = body;
 
@@ -1002,12 +1236,26 @@ async fn create_patient(
         })?;
 
     let pid = generate_patient_id(seq);
-    let langs = languages.unwrap_or_default();
+    let nationality = normalize_patient_select_value(nationality);
+    let residence_country = normalize_patient_select_value(residence_country);
+    let address_country = normalize_patient_select_value(address_country);
+    let langs = match normalize_patient_language_values(languages) {
+        Ok(values) => values,
+        Err(message) => return Err(err(StatusCode::UNPROCESSABLE_ENTITY, message)),
+    };
     let functional_labels = match normalize_functional_labels(functional_labels) {
         Ok(Some(labels)) => labels,
         Ok(None) => Vec::new(),
         Err(response) => return Err(response),
     };
+
+    if let Some(relations) = patient_relations.as_ref() {
+        for relation in relations {
+            if let Some(related_patient_id) = relation.related_patient_id {
+                ensure_related_patient_exists(&state, related_patient_id).await?;
+            }
+        }
+    }
 
     let row = sqlx::query!(
         r#"INSERT INTO patients (
@@ -1058,6 +1306,33 @@ async fn create_patient(
             "Failed to create patient",
         )
     })?;
+
+    if let Some(relations) = patient_relations {
+        for relation in relations {
+            sqlx::query(
+                r#"INSERT INTO patient_relations (
+                        patient_id, related_patient_id, related_name, relation_type,
+                        is_emergency_contact, phone, notes
+                   ) VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
+            )
+            .bind(row.id)
+            .bind(relation.related_patient_id)
+            .bind(relation.related_name.trim())
+            .bind(relation.relation_type.trim())
+            .bind(relation.is_emergency_contact.unwrap_or(false))
+            .bind(relation.phone.as_deref())
+            .bind(relation.notes.as_deref())
+            .execute(&state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, patient_id = %row.id, "Failed to create initial patient relation");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create patient relation",
+                )
+            })?;
+        }
+    }
 
     sqlx::query!(
         "INSERT INTO patient_assignments (patient_id, user_id, assigned_by) VALUES ($1, $2, $2)",
@@ -1127,6 +1402,7 @@ async fn update_patient(
 
     let current = match sqlx::query(
         r#"SELECT title, first_name, last_name, phone_primary, phone_secondary, email,
+                  birth_date, gender,
                   nationality, residence_country, languages, functional_labels,
                   address_street, address_city, address_zip, address_country,
                   insurance_provider, insurance_number, insurance_type,
@@ -1170,6 +1446,43 @@ async fn update_patient(
         }
         None => current.try_get("last_name").unwrap_or_default(),
     };
+    let birth_date_supplied = body.birth_date.is_some();
+    let birth_date: chrono::NaiveDate = match body.birth_date.as_deref() {
+        Some(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                return err(StatusCode::UNPROCESSABLE_ENTITY, "Birth date required");
+            }
+            match chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d") {
+                Ok(value) => value,
+                Err(_) => {
+                    return err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "Invalid birth_date format (YYYY-MM-DD)",
+                    );
+                }
+            }
+        }
+        None => current.try_get("birth_date").unwrap_or_default(),
+    };
+    let gender_supplied = body.gender.is_some();
+    let gender = match body.gender.as_deref() {
+        Some(value) => match value.trim() {
+            "male" => "male".to_string(),
+            "female" => "female".to_string(),
+            "diverse" => "diverse".to_string(),
+            _ => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Gender must be male, female, or diverse",
+                );
+            }
+        },
+        None => current.try_get("gender").unwrap_or_default(),
+    };
+    let nationality_supplied = body.nationality.is_some();
+    let residence_country_supplied = body.residence_country.is_some();
+    let address_country_supplied = body.address_country.is_some();
     let title = match normalize_patient_text_patch(
         body.title,
         current.try_get("title").unwrap_or_default(),
@@ -1202,22 +1515,45 @@ async fn update_patient(
         Ok(value) => value,
         Err(response) => return response,
     };
+    let current_nationality: Option<String> = current.try_get("nationality").unwrap_or_default();
     let nationality = match normalize_patient_text_patch(
         body.nationality,
-        current.try_get("nationality").unwrap_or_default(),
+        current_nationality.clone(),
         "nationality",
     ) {
         Ok(value) => value,
         Err(response) => return response,
     };
+    if nationality_supplied
+        && let Err(message) = validate_optional_patient_select_update(
+            nationality.as_deref(),
+            current_nationality.as_deref(),
+            &ALLOWED_PATIENT_NATIONALITIES,
+            "nationality",
+        )
+    {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, message);
+    }
+    let current_residence_country: Option<String> =
+        current.try_get("residence_country").unwrap_or_default();
     let residence_country = match normalize_patient_text_patch(
         body.residence_country,
-        current.try_get("residence_country").unwrap_or_default(),
+        current_residence_country.clone(),
         "residence_country",
     ) {
         Ok(value) => value,
         Err(response) => return response,
     };
+    if residence_country_supplied
+        && let Err(message) = validate_optional_patient_select_update(
+            residence_country.as_deref(),
+            current_residence_country.as_deref(),
+            &ALLOWED_PATIENT_COUNTRIES,
+            "residence_country",
+        )
+    {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, message);
+    }
     let address_street = match normalize_patient_text_patch(
         body.address_street,
         current.try_get("address_street").unwrap_or_default(),
@@ -1242,14 +1578,26 @@ async fn update_patient(
         Ok(value) => value,
         Err(response) => return response,
     };
+    let current_address_country: Option<String> =
+        current.try_get("address_country").unwrap_or_default();
     let address_country = match normalize_patient_text_patch(
         body.address_country,
-        current.try_get("address_country").unwrap_or_default(),
+        current_address_country.clone(),
         "address_country",
     ) {
         Ok(value) => value,
         Err(response) => return response,
     };
+    if address_country_supplied
+        && let Err(message) = validate_optional_patient_select_update(
+            address_country.as_deref(),
+            current_address_country.as_deref(),
+            &ALLOWED_PATIENT_COUNTRIES,
+            "address_country",
+        )
+    {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, message);
+    }
     let insurance_provider = match normalize_patient_text_patch(
         body.insurance_provider,
         current.try_get("insurance_provider").unwrap_or_default(),
@@ -1311,9 +1659,15 @@ async fn update_patient(
         Ok(value) => value,
         Err(response) => return response,
     };
-    let languages = body
-        .languages
-        .unwrap_or_else(|| current.try_get("languages").unwrap_or_default());
+    let current_languages: Vec<String> = current.try_get("languages").unwrap_or_default();
+    let languages = if let Some(languages) = body.languages {
+        match normalize_patient_language_values_for_update(languages, &current_languages) {
+            Ok(values) => values,
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        }
+    } else {
+        current_languages
+    };
     let functional_labels_supplied = body.functional_labels.is_some();
     let functional_labels = match normalize_functional_labels(body.functional_labels) {
         Ok(Some(labels)) => labels,
@@ -1344,6 +1698,8 @@ async fn update_patient(
     let legal_status_updated = legal_status.is_some();
     let clinical_warnings_updated = clinical_warnings_supplied;
     let functional_labels_updated = functional_labels_supplied;
+    let birth_date_updated = birth_date_supplied;
+    let gender_updated = gender_supplied;
     let contract_status = legal_status
         .as_ref()
         .and_then(|value| value.0.get("contract_status"))
@@ -1358,26 +1714,28 @@ async fn update_patient(
         r#"UPDATE patients SET
             title = $2,
             first_name = $3, last_name = $4,
-            phone_primary = $5,
-            phone_secondary = $6,
-            email = $7,
-            nationality = $8,
-            residence_country = $9,
-            languages = $10,
-            functional_labels = $11,
-            address_street = $12,
-            address_city = $13,
-            address_zip = $14,
-            address_country = $15,
-            insurance_provider = $16,
-            insurance_number = $17,
-            insurance_type = $18,
-            emergency_contact_name = $19,
-            emergency_contact_phone = $20,
-            emergency_contact_relation = $21,
-            legal_status = COALESCE($22::jsonb, legal_status),
-            notes = $23,
-            clinical_warnings = CASE WHEN $24 THEN $25 ELSE clinical_warnings END,
+            birth_date = $5,
+            gender = $6,
+            phone_primary = $7,
+            phone_secondary = $8,
+            email = $9,
+            nationality = $10,
+            residence_country = $11,
+            languages = $12,
+            functional_labels = $13,
+            address_street = $14,
+            address_city = $15,
+            address_zip = $16,
+            address_country = $17,
+            insurance_provider = $18,
+            insurance_number = $19,
+            insurance_type = $20,
+            emergency_contact_name = $21,
+            emergency_contact_phone = $22,
+            emergency_contact_relation = $23,
+            legal_status = COALESCE($24::jsonb, legal_status),
+            notes = $25,
+            clinical_warnings = CASE WHEN $26 THEN $27 ELSE clinical_warnings END,
             updated_at = now()
         WHERE id = $1"#,
     )
@@ -1385,6 +1743,8 @@ async fn update_patient(
     .bind(title)
     .bind(&first)
     .bind(&last)
+    .bind(birth_date)
+    .bind(gender)
     .bind(phone_primary)
     .bind(phone_secondary)
     .bind(email)
@@ -1413,6 +1773,8 @@ async fn update_patient(
         "legal_status_updated": legal_status_updated,
         "clinical_warnings_updated": clinical_warnings_updated,
         "functional_labels_updated": functional_labels_updated,
+        "birth_date_updated": birth_date_updated,
+        "gender_updated": gender_updated,
         "contract_status": contract_status,
         "compliance_completed": compliance_completed,
     });
@@ -4830,11 +5192,8 @@ fn validate_relation_request(
     body: &UpsertRelationRequest,
     patient_id: Uuid,
 ) -> Result<(), axum::response::Response> {
-    if body.related_name.trim().is_empty() || body.related_name.trim().len() > 200 {
-        return Err(err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Related name required (max 200)",
-        ));
+    if let Err(message) = validate_relation_payload_fields(body) {
+        return Err(err(StatusCode::UNPROCESSABLE_ENTITY, message));
     }
 
     if let Some(related_patient_id) = body.related_patient_id
@@ -4844,17 +5203,6 @@ fn validate_relation_request(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Patient relation cannot point to the same patient",
         ));
-    }
-
-    match body.relation_type.trim() {
-        "spouse" | "parent" | "child" | "sibling" | "relative" | "guardian" | "caregiver"
-        | "friend" | "other" => {}
-        _ => {
-            return Err(err(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "Invalid relation type",
-            ));
-        }
     }
 
     Ok(())

@@ -40,6 +40,7 @@ export function blankAppointmentForm(): AppointmentFormState {
     location: "",
     category: "",
     notes: "",
+    skipMedicalProviderBinding: false,
     repeatEnabled: false,
     repeatFrequency: "weekly",
     repeatInterval: "1",
@@ -66,6 +67,7 @@ export function buildEditAppointmentForm(
     location: detail.location ?? "",
     category: detail.category ?? "",
     notes: detail.notes ?? "",
+    skipMedicalProviderBinding: detail.type === "medical" && !detail.provider_id,
     repeatEnabled: Boolean(detail.recurrence_frequency),
     repeatFrequency: detail.recurrence_frequency ?? "weekly",
     repeatInterval: String(detail.recurrence_interval ?? 1),
@@ -112,6 +114,7 @@ export function buildFollowUpVisitForm(
       ? `${detail.category} ${followUpLabel}`
       : followUpLabel,
     notes: detail.followup_notes ?? detail.notes ?? "",
+    skipMedicalProviderBinding: detail.type === "medical" && !detail.provider_id,
     repeatEnabled: false,
     repeatFrequency: "weekly",
     repeatInterval: "1",

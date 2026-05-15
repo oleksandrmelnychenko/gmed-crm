@@ -189,6 +189,10 @@ function useCreateAppointmentSheetContent({
       userId,
     ],
   );
+  const selectedProvider = useMemo(
+    () => providers.find((provider) => provider.id === form.providerId) ?? null,
+    [form.providerId, providers],
+  );
   const conflictQuery = useMemo(() => {
     if (!open || !form.patientId || !form.date) return "";
     return buildConflictQuery(
@@ -264,6 +268,17 @@ function useCreateAppointmentSheetContent({
         });
         return;
       }
+      if (
+        form.appointmentType === "medical" &&
+        !form.providerId &&
+        !form.skipMedicalProviderBinding
+      ) {
+        dispatchSheetState({
+          error: appointmentText("appointments_medical_provider_required"),
+          busy: false,
+        });
+        return;
+      }
       const repeatInterval = parsePositiveIntegerInput(form.repeatInterval);
       const repeatCount = parsePositiveIntegerInput(form.repeatCount);
       if (form.repeatEnabled) {
@@ -295,6 +310,10 @@ function useCreateAppointmentSheetContent({
           owner_user_id: form.ownerUserId || null,
           interpreter_id: form.interpreterId || null,
           appointment_type: form.appointmentType,
+          skip_medical_provider_binding:
+            form.appointmentType === "medical" &&
+            !form.providerId &&
+            form.skipMedicalProviderBinding,
           care_path_kind: normalizeCarePathKindForAppointmentType(
             form.appointmentType,
             form.carePathKind,
@@ -408,6 +427,10 @@ function useCreateAppointmentSheetContent({
                             event.target.value === "medical" ? current.carePathKind : "regular",
                           providerId: event.target.value === "internal" ? "" : current.providerId,
                           doctorId: event.target.value === "internal" ? "" : current.doctorId,
+                          skipMedicalProviderBinding:
+                            event.target.value === "medical"
+                              ? current.skipMedicalProviderBinding
+                              : false,
                         }))
                       }
                       className={createSheetSelectClassName}
@@ -610,13 +633,22 @@ function useCreateAppointmentSheetContent({
                   <Field compact label={t.common_provider}>
                     <NativeComboboxSelect
                       value={form.providerId}
-                      onChange={(event) =>
+                      onChange={(event) => {
+                        const providerId = event.target.value;
+                        const provider = providers.find((item) => item.id === providerId);
                         setForm((current) => ({
                           ...current,
-                          providerId: event.target.value,
+                          providerId,
                           doctorId: "",
-                        }))
-                      }
+                          skipMedicalProviderBinding: providerId
+                            ? false
+                            : current.skipMedicalProviderBinding,
+                          location:
+                            provider && !current.location.trim()
+                              ? providerLabel(provider)
+                              : current.location,
+                        }));
+                      }}
                       disabled={form.appointmentType === "internal"}
                       className={createSheetSelectClassName}
                     >
@@ -649,6 +681,41 @@ function useCreateAppointmentSheetContent({
                     </NativeComboboxSelect>
                   </Field>
                 </div>
+                {form.appointmentType === "medical" ? (
+                  <div className="space-y-2">
+                    <label
+                      htmlFor="appointment-skip-provider-binding"
+                      className="flex items-start gap-3 rounded-lg border border-border/60 bg-card px-3 py-2 text-sm text-foreground"
+                    >
+                      <input
+                        id="appointment-skip-provider-binding"
+                        type="checkbox"
+                        checked={form.skipMedicalProviderBinding}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            skipMedicalProviderBinding: event.target.checked,
+                          }))
+                        }
+                        disabled={Boolean(form.providerId)}
+                        className={cn(checkboxClass, "mt-0.5")}
+                      />
+                      <span>
+                        <span className="block font-medium text-foreground">
+                          {appointmentText("appointments_medical_provider_opt_out")}
+                        </span>
+                        <span className="block text-xs text-muted-foreground">
+                          {appointmentText("appointments_medical_provider_opt_out_hint")}
+                        </span>
+                      </span>
+                    </label>
+                    {!form.providerId && !form.skipMedicalProviderBinding ? (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                        {appointmentText("appointments_medical_provider_required_hint")}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
         </section>
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
                 {sectionTitle(appointmentText("appointments_coordination_and_notes"))}
@@ -701,6 +768,11 @@ function useCreateAppointmentSheetContent({
                           ...current,
                           location: event.target.value,
                         }))
+                      }
+                      placeholder={
+                        selectedProvider
+                          ? providerLabel(selectedProvider)
+                          : appointmentText("appointments_location")
                       }
                       className={createSheetInputClassName}
                     />

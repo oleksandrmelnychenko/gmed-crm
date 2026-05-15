@@ -12,6 +12,7 @@ import {
   inputClass,
   textareaClass,
 } from "@/components/ui-shell";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 
 // Re-export shell primitives so existing screens keep working.
 // New code should import from "@/components/ui-shell" directly.
@@ -19,6 +20,224 @@ export { Field, FormSection };
 
 export const formInputClassName = inputClass;
 export const textareaClassName = textareaClass;
+
+type PatientSelectOption = {
+  value: string;
+  label: string;
+};
+
+const COUNTRY_OPTIONS: PatientSelectOption[] = [
+  { value: "Germany", label: "Germany" },
+  { value: "Ukraine", label: "Ukraine" },
+  { value: "Austria", label: "Austria" },
+  { value: "Switzerland", label: "Switzerland" },
+  { value: "Poland", label: "Poland" },
+  { value: "Czech Republic", label: "Czech Republic" },
+  { value: "Denmark", label: "Denmark" },
+  { value: "Latvia", label: "Latvia" },
+  { value: "Greece", label: "Greece" },
+  { value: "Turkey", label: "Turkey" },
+  { value: "United Arab Emirates", label: "United Arab Emirates" },
+  { value: "Saudi Arabia", label: "Saudi Arabia" },
+  { value: "Egypt", label: "Egypt" },
+  { value: "Nigeria", label: "Nigeria" },
+  { value: "Ghana", label: "Ghana" },
+  { value: "Brazil", label: "Brazil" },
+  { value: "China", label: "China" },
+  { value: "Russia", label: "Russia" },
+  { value: "Pakistan", label: "Pakistan" },
+  { value: "United Kingdom", label: "United Kingdom" },
+  { value: "United States", label: "United States" },
+];
+
+const NATIONALITY_OPTIONS: PatientSelectOption[] = [
+  { value: "German", label: "German" },
+  { value: "Ukrainian", label: "Ukrainian" },
+  { value: "Austrian", label: "Austrian" },
+  { value: "Swiss", label: "Swiss" },
+  { value: "Polish", label: "Polish" },
+  { value: "Czech", label: "Czech" },
+  { value: "Danish", label: "Danish" },
+  { value: "Latvian", label: "Latvian" },
+  { value: "Greek", label: "Greek" },
+  { value: "Turkish", label: "Turkish" },
+  { value: "Emirati", label: "Emirati" },
+  { value: "Saudi", label: "Saudi" },
+  { value: "Egyptian", label: "Egyptian" },
+  { value: "Nigerian", label: "Nigerian" },
+  { value: "Ghanaian", label: "Ghanaian" },
+  { value: "Brazilian", label: "Brazilian" },
+  { value: "Chinese", label: "Chinese" },
+  { value: "Russian", label: "Russian" },
+  { value: "Pakistani", label: "Pakistani" },
+  { value: "British", label: "British" },
+  { value: "American", label: "American" },
+];
+
+const LANGUAGE_OPTIONS: PatientSelectOption[] = [
+  { value: "de", label: "German (de)" },
+  { value: "uk", label: "Ukrainian (uk)" },
+  { value: "ru", label: "Russian (ru)" },
+  { value: "en", label: "English (en)" },
+  { value: "ar", label: "Arabic (ar)" },
+  { value: "pt", label: "Portuguese (pt)" },
+  { value: "fr", label: "French (fr)" },
+  { value: "es", label: "Spanish (es)" },
+  { value: "it", label: "Italian (it)" },
+  { value: "tr", label: "Turkish (tr)" },
+  { value: "pl", label: "Polish (pl)" },
+  { value: "cs", label: "Czech (cs)" },
+  { value: "da", label: "Danish (da)" },
+  { value: "el", label: "Greek (el)" },
+  { value: "lv", label: "Latvian (lv)" },
+  { value: "zh", label: "Chinese (zh)" },
+  { value: "ur", label: "Urdu (ur)" },
+];
+
+function normalizeSelectKey(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function optionExists(options: PatientSelectOption[], value: string) {
+  const key = normalizeSelectKey(value);
+  return options.some((option) => normalizeSelectKey(option.value) === key);
+}
+
+function optionLabel(options: PatientSelectOption[], value: string) {
+  const key = normalizeSelectKey(value);
+  return options.find((option) => normalizeSelectKey(option.value) === key)?.label ?? value;
+}
+
+function optionsWithCurrent(options: PatientSelectOption[], value: string) {
+  const trimmed = value.trim();
+  if (!trimmed || optionExists(options, trimmed)) return options;
+  return [{ value: trimmed, label: trimmed }, ...options];
+}
+
+function splitSelectedOptions(value: string) {
+  const seen = new Set<string>();
+  return value.split(",").flatMap((item) => {
+    const normalized = item.trim();
+    const key = normalizeSelectKey(normalized);
+    if (!normalized || seen.has(key)) return [];
+    seen.add(key);
+    return [normalized];
+  });
+}
+
+export function CountrySelect({
+  value,
+  onChange,
+  placeholder,
+  required,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  required?: boolean;
+}) {
+  return (
+    <NativeComboboxSelect
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      className={cn("w-full", formInputClassName)}
+      required={required}
+    >
+      <option value="">{placeholder}</option>
+      {optionsWithCurrent(COUNTRY_OPTIONS, value).map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </NativeComboboxSelect>
+  );
+}
+
+export function NationalitySelect({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <NativeComboboxSelect
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      className={cn("w-full", formInputClassName)}
+    >
+      <option value="">{placeholder}</option>
+      {optionsWithCurrent(NATIONALITY_OPTIONS, value).map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </NativeComboboxSelect>
+  );
+}
+
+export function LanguageChips({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  placeholder: string;
+}) {
+  const selected = splitSelectedOptions(value);
+  const selectedKeys = new Set(selected.map(normalizeSelectKey));
+  const availableOptions = LANGUAGE_OPTIONS.filter(
+    (option) => !selectedKeys.has(normalizeSelectKey(option.value)),
+  );
+  const addLanguage = (nextValue: string) => {
+    const normalized = nextValue.trim();
+    if (!normalized || selectedKeys.has(normalizeSelectKey(normalized))) return;
+    onChange([...selected, normalized].join(", "));
+  };
+  const removeLanguage = (target: string) => {
+    const targetKey = normalizeSelectKey(target);
+    onChange(
+      selected
+        .filter((item) => normalizeSelectKey(item) !== targetKey)
+        .join(", "),
+    );
+  };
+
+  return (
+    <div className="space-y-2">
+      <NativeComboboxSelect
+        value=""
+        onChange={(event) => addLanguage(event.target.value)}
+        className={cn("w-full", formInputClassName)}
+      >
+        <option value="">{placeholder}</option>
+        {availableOptions.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </NativeComboboxSelect>
+      {selected.length > 0 ? (
+        <div className="flex min-h-8 flex-wrap gap-1.5 rounded-lg border border-border/70 bg-muted/20 p-1.5">
+          {selected.map((item) => (
+            <button
+              key={item}
+              type="button"
+              onClick={() => removeLanguage(item)}
+              className="h-7 rounded-full border border-border bg-card px-2.5 text-[12px] font-medium text-foreground transition-colors hover:border-foreground/30 hover:bg-muted/40"
+              title={optionLabel(LANGUAGE_OPTIONS, item)}
+            >
+              {optionLabel(LANGUAGE_OPTIONS, item)} x
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 // Patient-specific: functional label chips.
 // Kept here because the label dictionary is patient-domain.

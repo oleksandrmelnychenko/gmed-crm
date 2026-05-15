@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ProviderOrganizationLevel, ProviderSummary } from "../model/types";
-import { buildProviderTimelineTree } from "./provider-hierarchy-timeline";
+import { buildProviderTimelineTree, flattenProviderTimelineTree } from "./provider-hierarchy-timeline";
 
 function provider(
   id: string,
@@ -61,5 +61,28 @@ describe("buildProviderTimelineTree", () => {
     expect(tree).toHaveLength(1);
     expect(tree[0].provider.id).toBe("missing-child");
     expect(tree[0].children).toEqual([]);
+  });
+
+  it("hides descendants of collapsed root providers", () => {
+    const tree = buildProviderTimelineTree([
+      provider("root", "TUM", "organization"),
+      provider("clinic", "Cardiology", "clinic", "root"),
+      provider("unit", "Cath Lab", "unit", "clinic"),
+      provider("external", "External", "organization"),
+      provider("external-child", "External Child", "clinic", "external"),
+    ]);
+
+    expect(flattenProviderTimelineTree(tree).map((item) => item.node.provider.id)).toEqual([
+      "external",
+      "external-child",
+      "root",
+      "clinic",
+      "unit",
+    ]);
+    expect(
+      flattenProviderTimelineTree(tree, {
+        collapsedRootIds: new Set(["root"]),
+      }).map((item) => item.node.provider.id),
+    ).toEqual(["external", "external-child", "root"]);
   });
 });

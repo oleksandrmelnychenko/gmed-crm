@@ -524,6 +524,7 @@ export type AppointmentFormState = {
   location: string;
   category: string;
   notes: string;
+  skipMedicalProviderBinding: boolean;
   repeatEnabled: boolean;
   repeatFrequency: AppointmentRecurrenceFrequency;
   repeatInterval: string;

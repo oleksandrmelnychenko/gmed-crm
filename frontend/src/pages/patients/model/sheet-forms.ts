@@ -30,6 +30,8 @@ export type PatientEditFormState = {
   title: string;
   firstName: string;
   lastName: string;
+  birthDate: string;
+  gender: string;
   phonePrimary: string;
   phoneSecondary: string;
   email: string;
@@ -94,6 +96,8 @@ export function patientToEditForm(detail: PatientDetail): PatientEditFormState {
     title: detail.title ?? "",
     firstName: detail.first_name ?? "",
     lastName: detail.last_name ?? "",
+    birthDate: detail.birth_date ?? "",
+    gender: detail.gender ?? "male",
     phonePrimary: detail.phone_primary ?? "",
     phoneSecondary: detail.phone_secondary ?? "",
     email: detail.email ?? "",

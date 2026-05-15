@@ -162,13 +162,13 @@ export function blankDoctorForm(): DoctorFormState {
   };
 }
 
-export function blankServiceForm(): ServiceFormState {
+export function blankServiceForm(priceType: ServiceFormState["priceType"] = "fixed"): ServiceFormState {
   return {
     id: "",
     serviceName: "",
     description: "",
     price: "",
-    priceType: "fixed",
+    priceType,
     priceFrom: "",
     priceTo: "",
     priceNote: "",
@@ -556,9 +556,11 @@ export function staffToForm(staff: {
 }
 
 export function toProviderPayload(form: ProviderFormState, forceNonMedical: boolean) {
+  const providerType = forceNonMedical ? "non_medical" : form.providerType;
+  const isMedical = providerType === "medical";
   return {
     name: form.name.trim(),
-    provider_type: forceNonMedical ? "non_medical" : form.providerType,
+    provider_type: providerType,
     legal_name: toOptional(form.legalName),
     tax_id: toOptional(form.taxId),
     address_street: toOptional(form.addressStreet),
@@ -568,8 +570,8 @@ export function toProviderPayload(form: ProviderFormState, forceNonMedical: bool
     phone: toOptional(form.phone),
     email: toOptional(form.email),
     website: toOptional(form.website),
-    fachbereich: toOptional(form.fachbereich),
-    specializations: parseCommaList(form.specializations || form.fachbereich),
+    fachbereich: isMedical ? toOptional(form.fachbereich) : null,
+    specializations: isMedical ? parseCommaList(form.specializations || form.fachbereich) : [],
     parent_provider_id: toOptional(form.parentProviderId),
     organization_level: form.organizationLevel,
     kooperationsvertrag: parseContract(form.contractText),
@@ -600,8 +602,8 @@ export function toDoctorPayload(form: DoctorFormState) {
   };
 }
 
-export function toServicePayload(form: ServiceFormState) {
-  const priceType = form.priceType || "fixed";
+export function toServicePayload(form: ServiceFormState, forceRange = false) {
+  const priceType = forceRange ? "range" : form.priceType || "fixed";
   const fixedPrice = Number.parseFloat(form.price || form.priceFrom || "0");
   const priceFrom = Number.parseFloat(form.priceFrom || form.price || "0");
   const priceTo = Number.parseFloat(form.priceTo || form.priceFrom || form.price || "0");

@@ -13,6 +13,7 @@ import { Banner } from "@/components/ui-shell";
 import { createPatient } from "../../data/patient-mutations";
 import {
   blankPatientForm,
+  computeAge,
   parseLanguages,
   toOptional,
   type PatientFormState,
@@ -92,6 +93,18 @@ function CreatePatientSheet({
     });
 
     try {
+      const age = computeAge(form.birthDate);
+      const patientRelations =
+        age !== null && age < 18 && form.emergencyContactName.trim()
+          ? [
+              {
+                related_name: form.emergencyContactName.trim(),
+                relation_type: "guardian",
+                is_emergency_contact: true,
+                phone: toOptional(form.emergencyContactPhone),
+              },
+            ]
+          : undefined;
       const created = await createPatient({
         title: toOptional(form.title),
         first_name: form.firstName.trim(),
@@ -115,6 +128,7 @@ function CreatePatientSheet({
         emergency_contact_name: toOptional(form.emergencyContactName),
         emergency_contact_phone: toOptional(form.emergencyContactPhone),
         emergency_contact_relation: toOptional(form.emergencyContactRelation),
+        patient_relations: patientRelations,
         notes: toOptional(form.notes),
       });
       onOpenChange(false);

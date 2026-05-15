@@ -1,5 +1,5 @@
-import { Fragment, useMemo } from "react";
-import { Building2, MapPin, Stethoscope, UsersRound } from "lucide-react";
+import { Fragment, useMemo, useState } from "react";
+import { Building2, ChevronRight, MapPin, Stethoscope, UsersRound } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import type { Lang } from "@/lib/i18n";
@@ -20,6 +20,10 @@ type ProviderTimelineVisualNode = {
   isFirst: boolean;
   isLast: boolean;
   node: ProviderTimelineNode;
+};
+
+type FlattenProviderTimelineOptions = {
+  collapsedRootIds?: ReadonlySet<string>;
 };
 
 const LEVEL_ORDER: Record<ProviderOrganizationLevel, number> = {
@@ -238,13 +242,19 @@ export function buildProviderTimelineTree(
   return sortNodes(roots.map((node) => cloneWithoutCycles(node, new Set())));
 }
 
-function flattenProviderTimelineTree(
+const EMPTY_COLLAPSED_ROOT_IDS = new Set<string>();
+
+export function flattenProviderTimelineTree(
   nodes: readonly ProviderTimelineNode[],
+  options: FlattenProviderTimelineOptions = {},
   depth = 0,
   ancestorHasNext: boolean[] = [],
 ): ProviderTimelineVisualNode[] {
+  const collapsedRootIds = options.collapsedRootIds ?? EMPTY_COLLAPSED_ROOT_IDS;
+
   return nodes.flatMap((node, index) => {
     const isLast = index === nodes.length - 1;
+    const isCollapsedRoot = depth === 0 && collapsedRootIds.has(node.provider.id);
     return [
       {
         ancestorHasNext,
@@ -253,10 +263,14 @@ function flattenProviderTimelineTree(
         isLast,
         node,
       },
-      ...flattenProviderTimelineTree(node.children, depth + 1, [
-        ...ancestorHasNext,
-        !isLast,
-      ]),
+      ...(isCollapsedRoot
+        ? []
+        : flattenProviderTimelineTree(
+            node.children,
+            options,
+            depth + 1,
+            [...ancestorHasNext, !isLast],
+          )),
     ];
   });
 }
@@ -276,8 +290,23 @@ export function ProviderHierarchyTimeline({
   selectedProviderId,
   tr,
 }: ProviderHierarchyTimelineProps) {
+  const [collapsedRootIds, setCollapsedRootIds] = useState<Set<string>>(() => new Set());
   const tree = useMemo(() => buildProviderTimelineTree(providers), [providers]);
-  const timelineItems = useMemo(() => flattenProviderTimelineTree(tree), [tree]);
+  const timelineItems = useMemo(
+    () => flattenProviderTimelineTree(tree, { collapsedRootIds }),
+    [collapsedRootIds, tree],
+  );
+  const toggleRootCollapsed = (providerId: string) => {
+    setCollapsedRootIds((current) => {
+      const next = new Set(current);
+      if (next.has(providerId)) {
+        next.delete(providerId);
+      } else {
+        next.add(providerId);
+      }
+      return next;
+    });
+  };
   const organizationDividerIds = useMemo(() => {
     const ids = new Set<string>();
     let hasRootOrganization = false;
@@ -341,8 +370,10 @@ export function ProviderHierarchyTimeline({
                 {organizationDividerIds.has(item.node.provider.id) ? <OrganizationDivider /> : null}
                 <TimelineNode
                   item={item}
+                  isCollapsed={item.depth === 0 && collapsedRootIds.has(item.node.provider.id)}
                   lang={lang}
                   onProviderClick={onProviderClick}
+                  onToggleRootCollapsed={toggleRootCollapsed}
                   selectedProviderId={selectedProviderId}
                   tr={tr}
                 />
@@ -368,17 +399,21 @@ function OrganizationDivider() {
 }
 
 type TimelineNodeProps = {
+  isCollapsed: boolean;
   item: ProviderTimelineVisualNode;
   lang: Lang;
   onProviderClick: (providerId: string) => void;
+  onToggleRootCollapsed: (providerId: string) => void;
   selectedProviderId?: string | null;
   tr: Record<string, string>;
 };
 
 function TimelineNode({
+  isCollapsed,
   item,
   lang,
   onProviderClick,
+  onToggleRootCollapsed,
   selectedProviderId,
   tr,
 }: TimelineNodeProps) {
@@ -392,6 +427,7 @@ function TimelineNode({
   const connectorWidth = (depth + 1) * CONNECTOR_STEP;
   const currentCenter = depth * CONNECTOR_STEP + CONNECTOR_CENTER;
   const isRootOrganization = depth === 0 && provider.organization_level === "organization";
+  const canToggleRoot = depth === 0 && hasChildren;
   const showCurrentConnector = !isRootOrganization;
   const connectParentAbove = showCurrentConnector && depth > 0;
   const connectBelow = showCurrentConnector && depth > 0 && !isLast;
@@ -445,81 +481,109 @@ function TimelineNode({
           <ProviderLevelIcon className="size-3.5" level={provider.organization_level} />
         </span>
       </div>
-      <button
-        type="button"
-        onClick={() => onProviderClick(provider.id)}
+      <div
         className={cn(
           "group flex min-h-14 min-w-0 flex-1 items-center justify-between gap-3 rounded-lg border border-border/60 bg-white/95 px-3 py-2 text-left shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors hover:border-primary/35 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
           active && "border-primary/55 bg-white shadow-[inset_3px_0_0_var(--primary),0_1px_3px_rgba(15,23,42,0.08)]",
         )}
       >
-        <span className="min-w-0">
-          <span className="block truncate text-xs font-semibold text-foreground">
-            {provider.name}
-          </span>
-          <span className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
-            <Badge
-              variant="outline"
-              className={cn("rounded-full text-[10px]", tone.badge)}
+        {depth === 0 ? (
+          canToggleRoot ? (
+            <button
+              type="button"
+              aria-expanded={!isCollapsed}
+              aria-label={
+                isCollapsed
+                  ? (tr.providers_tree_expand ?? provider.name)
+                  : (tr.providers_tree_collapse ?? provider.name)
+              }
+              title={
+                isCollapsed
+                  ? (tr.providers_tree_expand ?? provider.name)
+                  : (tr.providers_tree_collapse ?? provider.name)
+              }
+              className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+              onClick={() => onToggleRootCollapsed(provider.id)}
             >
-              {levelLabel(provider.organization_level, tr)}
-            </Badge>
-            <Badge
-              variant="outline"
-              className={cn("rounded-full text-[10px]", providerTypeTone(provider))}
-            >
-              {providerTypeLabel(provider.provider_type, tr)}
-            </Badge>
-            <ProviderStatusBadge active={provider.is_active} tr={tr} />
-            <Badge
-              variant="outline"
-              className={cn("rounded-full text-[10px]", contractTone(provider))}
-            >
-              {contractLabel(provider, tr)}
-            </Badge>
-          </span>
-          <span className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-            {locationText ? (
-              <span className="min-w-0 truncate">
-                <span className="font-medium text-foreground/70">
-                  {tr.providers_city} / {tr.providers_country}:{" "}
+              <ChevronRight className={cn("size-4 transition-transform", !isCollapsed && "rotate-90")} />
+            </button>
+          ) : (
+            <span className="size-7 shrink-0" aria-hidden="true" />
+          )
+        ) : null}
+        <button
+          type="button"
+          onClick={() => onProviderClick(provider.id)}
+          className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+        >
+          <span className="min-w-0">
+            <span className="block truncate text-xs font-semibold text-foreground">
+              {provider.name}
+            </span>
+            <span className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
+              <Badge
+                variant="outline"
+                className={cn("rounded-full text-[10px]", tone.badge)}
+              >
+                {levelLabel(provider.organization_level, tr)}
+              </Badge>
+              <Badge
+                variant="outline"
+                className={cn("rounded-full text-[10px]", providerTypeTone(provider))}
+              >
+                {providerTypeLabel(provider.provider_type, tr)}
+              </Badge>
+              <ProviderStatusBadge active={provider.is_active} tr={tr} />
+              <Badge
+                variant="outline"
+                className={cn("rounded-full text-[10px]", contractTone(provider))}
+              >
+                {contractLabel(provider, tr)}
+              </Badge>
+            </span>
+            <span className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+              {locationText ? (
+                <span className="min-w-0 truncate">
+                  <span className="font-medium text-foreground/70">
+                    {tr.providers_city} / {tr.providers_country}:{" "}
+                  </span>
+                  {locationText}
                 </span>
-                {locationText}
-              </span>
+              ) : null}
+              {specializationText ? (
+                <span className="min-w-0 truncate">
+                  <span className="font-medium text-foreground/70">{tr.providers_fachbereich}: </span>
+                  {specializationText}
+                </span>
+              ) : null}
+            </span>
+          </span>
+          <span className="flex shrink-0 flex-wrap items-center justify-end gap-1.5 text-[11px] text-muted-foreground">
+            {hasChildren ? (
+              <TimelineMetric
+                icon="children"
+                label={
+                  tr.providers_hierarchy_metric_children ??
+                  tr.providers_children ??
+                  "children"
+                }
+                value={children.length}
+              />
             ) : null}
-            {specializationText ? (
-              <span className="min-w-0 truncate">
-                <span className="font-medium text-foreground/70">{tr.providers_fachbereich}: </span>
-                {specializationText}
-              </span>
+            {provider.doctor_count > 0 ? (
+              <TimelineMetric
+                icon="doctors"
+                label={
+                  tr.providers_hierarchy_metric_doctors ??
+                  tr.providers_doctors ??
+                  "doctors"
+                }
+                value={provider.doctor_count}
+              />
             ) : null}
           </span>
-        </span>
-        <span className="flex shrink-0 flex-wrap items-center justify-end gap-1.5 text-[11px] text-muted-foreground">
-          {hasChildren ? (
-            <TimelineMetric
-              icon="children"
-              label={
-                tr.providers_hierarchy_metric_children ??
-                tr.providers_children ??
-                "children"
-              }
-              value={children.length}
-            />
-          ) : null}
-          {provider.doctor_count > 0 ? (
-            <TimelineMetric
-              icon="doctors"
-              label={
-                tr.providers_hierarchy_metric_doctors ??
-                tr.providers_doctors ??
-                "doctors"
-              }
-              value={provider.doctor_count}
-            />
-          ) : null}
-        </span>
-      </button>
+        </button>
+      </div>
     </div>
   );
 }

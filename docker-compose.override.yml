@@ -1,0 +1,6 @@
+# Local-only: host already runs a native PostgreSQL on 5432.
+# Remap the dev container to 5433 to avoid the collision.
+services:
+  postgres:
+    ports:
+      - "5433:5432"

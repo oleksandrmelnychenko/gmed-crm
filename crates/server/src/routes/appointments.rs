@@ -139,6 +139,7 @@ struct CreateAppointment {
     interpreter_id: Option<Uuid>,
     order_id: Option<Uuid>,
     appointment_type: String,
+    skip_medical_provider_binding: Option<bool>,
     care_path_kind: Option<String>,
     title: String,
     date: String,
@@ -2037,6 +2038,15 @@ async fn create_appointment(
     if !is_valid_appointment_type(&body.appointment_type) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid type");
     }
+    if body.appointment_type == "medical"
+        && body.provider_id.is_none()
+        && !body.skip_medical_provider_binding.unwrap_or(false)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Medical appointments require a provider or explicit provider binding opt-out",
+        );
+    }
     let care_path_kind = normalize_care_path_kind_input(body.care_path_kind.clone());
     if let Err(message) =
         validate_care_path_kind_for_appointment_type(&body.appointment_type, &care_path_kind)
@@ -2096,6 +2106,7 @@ async fn create_appointment(
         interpreter_id,
         order_id,
         appointment_type,
+        skip_medical_provider_binding: _,
         care_path_kind: _,
         title,
         date: _,

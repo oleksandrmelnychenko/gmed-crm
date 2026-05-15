@@ -4,10 +4,14 @@ import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import type { PatientFormState } from "../../model/list-model";
+import { computeAge } from "../../model/list-model";
 import {
+  CountrySelect,
   Field,
   FormSection,
   FunctionalLabelChips,
+  LanguageChips,
+  NationalitySelect,
   formInputClassName,
   textareaClassName,
 } from "./patient-form-primitives";
@@ -25,6 +29,17 @@ export function PatientFormFields({
 }: PatientFormFieldsProps) {
   const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
+  const age = computeAge(form.birthDate);
+  const isMinor = includeBirthAndGender && age !== null && age < 18;
+  const notSetLabel = t.common_not_set;
+
+  function handleBirthDateChange(value: string) {
+    onChange("birthDate", value);
+    const nextAge = computeAge(value);
+    if (nextAge !== null && nextAge < 18 && !form.emergencyContactRelation.trim()) {
+      onChange("emergencyContactRelation", "guardian");
+    }
+  }
 
   return (
     <div className="space-y-3">
@@ -61,7 +76,7 @@ export function PatientFormFields({
               <Input
                 type="date"
                 value={form.birthDate}
-                onChange={(event) => onChange("birthDate", event.target.value)}
+                onChange={(event) => handleBirthDateChange(event.target.value)}
                 className={formInputClassName}
                 required
               />
@@ -77,29 +92,34 @@ export function PatientFormFields({
           </div>
         ) : null}
 
+        {isMinor ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            {l("patients_minor_guardian_notice")}
+          </div>
+        ) : null}
+
         <div className="grid gap-3 md:grid-cols-2">
           <Field label={t.patients_nationality}>
-            <Input
+            <NationalitySelect
               value={form.nationality}
-              onChange={(event) => onChange("nationality", event.target.value)}
-              className={formInputClassName}
+              onChange={(value) => onChange("nationality", value)}
+              placeholder={notSetLabel}
             />
           </Field>
           <Field label={t.patients_residence_country}>
-            <Input
+            <CountrySelect
               value={form.residenceCountry}
-              onChange={(event) => onChange("residenceCountry", event.target.value)}
-              className={formInputClassName}
+              onChange={(value) => onChange("residenceCountry", value)}
+              placeholder={notSetLabel}
             />
           </Field>
         </div>
 
         <Field label={t.patients_languages}>
-          <Input
+          <LanguageChips
             value={form.languages}
-            onChange={(event) => onChange("languages", event.target.value)}
-            className={formInputClassName}
-            placeholder={t.patients_languages}
+            onChange={(next) => onChange("languages", next)}
+            placeholder={l("patients_languages_select_placeholder")}
           />
         </Field>
 
@@ -163,10 +183,10 @@ export function PatientFormFields({
             />
           </Field>
           <Field label={t.patients_address_country}>
-            <Input
+            <CountrySelect
               value={form.addressCountry}
-              onChange={(event) => onChange("addressCountry", event.target.value)}
-              className={formInputClassName}
+              onChange={(value) => onChange("addressCountry", value)}
+              placeholder={notSetLabel}
             />
           </Field>
         </div>
@@ -201,13 +221,20 @@ export function PatientFormFields({
         </div>
       </FormSection>
 
-      <FormSection title={l("patients_emergency_contact")}>
+      <FormSection
+        title={
+          isMinor
+            ? l("patients_guardian_parent_contact")
+            : l("patients_emergency_contact")
+        }
+      >
         <div className="grid gap-3 md:grid-cols-3">
           <Field label={t.patients_emergency_name}>
             <Input
               value={form.emergencyContactName}
               onChange={(event) => onChange("emergencyContactName", event.target.value)}
               className={formInputClassName}
+              required={isMinor}
             />
           </Field>
           <Field label={t.patients_emergency_phone}>
@@ -215,6 +242,7 @@ export function PatientFormFields({
               value={form.emergencyContactPhone}
               onChange={(event) => onChange("emergencyContactPhone", event.target.value)}
               className={formInputClassName}
+              required={isMinor}
             />
           </Field>
           <Field label={t.patients_emergency_relation}>
@@ -222,6 +250,7 @@ export function PatientFormFields({
               value={form.emergencyContactRelation}
               onChange={(event) => onChange("emergencyContactRelation", event.target.value)}
               className={formInputClassName}
+              required={isMinor}
             />
           </Field>
         </div>

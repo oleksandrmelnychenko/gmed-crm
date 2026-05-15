@@ -296,6 +296,8 @@ function useAppointmentFollowUpVisitSectionContent({
           interpreter_id: form.interpreterId || null,
           order_id: form.linkOrder ? detail.order_id : null,
           appointment_type: form.appointmentType,
+          skip_medical_provider_binding:
+            form.appointmentType === "medical" && !form.providerId,
           care_path_kind: normalizeCarePathKindForAppointmentType(
             form.appointmentType,
             form.carePathKind,

@@ -6,7 +6,10 @@ import {
 } from "react";
 
 import {
+  CountrySelect,
   FunctionalLabelChips,
+  LanguageChips,
+  NationalitySelect,
   parseFunctionalLabels,
 } from "../shared/patient-form-primitives";
 import { Button } from "@/components/ui/button";
@@ -23,7 +26,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import { updatePatient } from "../../data/patient-mutations";
-import type { PatientDetail } from "../../model/list-model";
+import { computeAge, type PatientDetail } from "../../model/list-model";
 import {
   patientToEditForm,
   type PatientEditFormState,
@@ -72,9 +75,21 @@ function PatientProfileEditorFormSections({
   updateField,
   updateLegalStatusField,
 }: PatientProfileEditorFormSectionsProps) {
+  const age = computeAge(form.birthDate);
+  const isMinor = age !== null && age < 18;
+  const text = dictionary.uiText ?? {};
+
+  function handleBirthDateChange(value: string) {
+    updateField("birthDate", value);
+    const nextAge = computeAge(value);
+    if (nextAge !== null && nextAge < 18 && !form.emergencyContactRelation.trim()) {
+      updateField("emergencyContactRelation", "guardian");
+    }
+  }
+
   return (        <div className="space-y-3">
               <FormSection title={dictionary.patient_profile_editor_personal_data}>
-                <div className="grid gap-3 md:grid-cols-3">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
                   <FormField label={dictionary.patient_profile_editor_title}>
                     <Input
                       value={form.title}
@@ -98,34 +113,57 @@ function PatientProfileEditorFormSections({
                       className={formInputClassName}
                     />
                   </FormField>
-                </div>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <FormField label={dictionary.patient_profile_editor_nationality}>
+                  <FormField label={dictionary.patients_birth_date}>
                     <Input
-                      value={form.nationality}
-                      onChange={(event) => updateField("nationality", event.target.value)}
+                      type="date"
+                      value={form.birthDate}
+                      onChange={(event) => handleBirthDateChange(event.target.value)}
+                      required
                       className={formInputClassName}
                     />
                   </FormField>
+                  <FormField label={dictionary.patients_gender}>
+                    <NativeComboboxSelect
+                      value={form.gender}
+                      onChange={(event) => updateField("gender", event.target.value)}
+                      required
+                      className={cn("w-full", formInputClassName)}
+                    >
+                      <option value="male">{text.patients_gender_male ?? "Male"}</option>
+                      <option value="female">{text.patients_gender_female ?? "Female"}</option>
+                      <option value="diverse">{text.patients_gender_diverse ?? "Diverse"}</option>
+                    </NativeComboboxSelect>
+                  </FormField>
+                </div>
+                {isMinor ? (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                    {text.patients_minor_guardian_notice ?? "Patient is a minor. Add parent or guardian contact."}
+                  </div>
+                ) : null}
+                <div className="grid gap-3 md:grid-cols-2">
+                  <FormField label={dictionary.patient_profile_editor_nationality}>
+                    <NationalitySelect
+                      value={form.nationality}
+                      onChange={(value) => updateField("nationality", value)}
+                      placeholder={dictionary.common_not_set}
+                    />
+                  </FormField>
                   <FormField label={dictionary.patient_profile_editor_residence_country}>
-                    <Input
+                    <CountrySelect
                       value={form.residenceCountry}
-                      onChange={(event) =>
-                        updateField("residenceCountry", event.target.value)
-                      }
-                      className={formInputClassName}
+                      onChange={(value) => updateField("residenceCountry", value)}
+                      placeholder={dictionary.common_not_set}
                     />
                   </FormField>
                 </div>
                 <FormField label={dictionary.patient_profile_editor_languages}>
-                  <Input
+                  <LanguageChips
                     value={form.languages}
-                    onChange={(event) => updateField("languages", event.target.value)}
+                    onChange={(next) => updateField("languages", next)}
                     placeholder={
                       dictionary.uiText?.patients_languages_placeholder ??
                       "patients_languages_placeholder"
                     }
-                    className={formInputClassName}
                   />
                 </FormField>
                 <FormField
@@ -193,10 +231,10 @@ function PatientProfileEditorFormSections({
                     />
                   </FormField>
                   <FormField label={dictionary.patient_profile_editor_address_country}>
-                    <Input
+                    <CountrySelect
                       value={form.addressCountry}
-                      onChange={(event) => updateField("addressCountry", event.target.value)}
-                      className={formInputClassName}
+                      onChange={(value) => updateField("addressCountry", value)}
+                      placeholder={dictionary.common_not_set}
                     />
                   </FormField>
                 </div>
@@ -243,7 +281,13 @@ function PatientProfileEditorFormSections({
                 </div>
               </FormSection>
 
-              <FormSection title={dictionary.patient_profile_editor_emergency_contact}>
+              <FormSection
+                title={
+                  isMinor
+                    ? (text.patients_guardian_parent_contact ?? dictionary.patient_profile_editor_emergency_contact)
+                    : dictionary.patient_profile_editor_emergency_contact
+                }
+              >
                 <div className="grid gap-3 md:grid-cols-3">
                   <FormField label={dictionary.patient_profile_editor_contact_2}>
                     <Input
@@ -251,6 +295,7 @@ function PatientProfileEditorFormSections({
                       onChange={(event) =>
                         updateField("emergencyContactName", event.target.value)
                       }
+                      required={isMinor}
                       className={formInputClassName}
                     />
                   </FormField>
@@ -260,6 +305,7 @@ function PatientProfileEditorFormSections({
                       onChange={(event) =>
                         updateField("emergencyContactPhone", event.target.value)
                       }
+                      required={isMinor}
                       className={formInputClassName}
                     />
                   </FormField>
@@ -269,6 +315,7 @@ function PatientProfileEditorFormSections({
                       onChange={(event) =>
                         updateField("emergencyContactRelation", event.target.value)
                       }
+                      required={isMinor}
                       className={formInputClassName}
                     />
                   </FormField>
@@ -415,6 +462,8 @@ function PatientProfileEditorSheetContent({
           title: form.title,
           first_name: form.firstName,
           last_name: form.lastName,
+          birth_date: form.birthDate,
+          gender: form.gender,
           phone_primary: form.phonePrimary,
           phone_secondary: form.phoneSecondary,
           email: form.email,

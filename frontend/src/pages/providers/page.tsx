@@ -1120,9 +1120,14 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     setServiceError("");
 
     try {
-      await saveProviderService(detail.id, serviceForm.id, toServicePayload(serviceForm));
+      const isMedicalProvider = detail.provider_type === "medical";
+      await saveProviderService(
+        detail.id,
+        serviceForm.id,
+        toServicePayload(serviceForm, isMedicalProvider),
+      );
       setServiceDialogOpen(false);
-      setServiceForm(blankServiceForm());
+      setServiceForm(blankServiceForm(isMedicalProvider ? "range" : "fixed"));
       refreshList();
       refreshDetail();
     } catch (error) {
@@ -1136,7 +1141,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     setServiceDialogOpen(open);
     if (!open) {
       setServiceError("");
-      setServiceForm(blankServiceForm());
+      setServiceForm(blankServiceForm(detail?.provider_type === "medical" ? "range" : "fixed"));
     }
   }
 
@@ -1156,7 +1161,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     try {
       await deleteProviderService(detail.id, serviceId);
       if (serviceForm.id === serviceId) {
-        setServiceForm(blankServiceForm());
+        setServiceForm(blankServiceForm(detail.provider_type === "medical" ? "range" : "fixed"));
       }
       refreshList();
       refreshDetail();
@@ -1491,7 +1496,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     canManage={permissions.canManageRegistry}
                     onNew={() => {
                       setServiceError("");
-                      setServiceForm(blankServiceForm());
+                      setServiceForm(blankServiceForm(detail.provider_type === "medical" ? "range" : "fixed"));
                       setServiceDialogOpen(true);
                     }}
                     onEdit={(service) => {
@@ -1558,6 +1563,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             form={serviceForm}
             busy={serviceBusy}
             error={serviceError}
+            forcePriceRange={detail.provider_type === "medical"}
             onSubmit={handleServiceSubmit}
             onChange={(field, value) =>
               setServiceForm((current) => ({ ...current, [field]: value }))
@@ -1816,7 +1822,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             setServiceError("");
             setStaffError("");
             setDoctorForm(blankDoctorForm());
-            setServiceForm(blankServiceForm());
+            setServiceForm(blankServiceForm(detail?.provider_type === "medical" ? "range" : "fixed"));
             setStaffForm(blankStaffForm());
             syncQuery({ provider: null });
           }
@@ -1945,7 +1951,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   canManage={permissions.canManageRegistry}
                   onNew={() => {
                     setServiceError("");
-                    setServiceForm(blankServiceForm());
+                    setServiceForm(blankServiceForm(detail.provider_type === "medical" ? "range" : "fixed"));
                     setServiceDialogOpen(true);
                   }}
                   onEdit={(service) => {
@@ -2014,6 +2020,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           form={serviceForm}
           busy={serviceBusy}
           error={serviceError}
+          forcePriceRange={detail.provider_type === "medical"}
           onSubmit={handleServiceSubmit}
           onChange={(field, value) =>
             setServiceForm((current) => ({ ...current, [field]: value }))
@@ -2131,6 +2138,7 @@ function ProviderServiceFormSheet({
   form,
   busy,
   error,
+  forcePriceRange,
   onSubmit,
   onChange,
 }: {
@@ -2139,6 +2147,7 @@ function ProviderServiceFormSheet({
   form: ServiceFormState;
   busy: boolean;
   error: string;
+  forcePriceRange: boolean;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onChange: (field: keyof ServiceFormState, value: string) => void;
 }) {
@@ -2163,7 +2172,11 @@ function ProviderServiceFormSheet({
           >
             <div className="space-y-3 rounded-xl p-4">
               {error ? <Banner tone="error">{error}</Banner> : null}
-              <ServiceFormFields form={form} onChange={onChange} />
+              <ServiceFormFields
+                form={form}
+                forcePriceRange={forcePriceRange}
+                onChange={onChange}
+              />
             </div>
           </AdminSheetScaffold>
         </form>
@@ -3785,7 +3798,9 @@ function ProviderFormFields({
   const parentOptions = parentProviderOptions.filter(
     (provider) => provider.id !== currentProviderId,
   );
-  const canManageSpecializations = Boolean(onManageSpecializations) && !disabled;
+  const providerType = forceNonMedical ? "non_medical" : form.providerType;
+  const isMedicalProvider = providerType === "medical";
+  const canManageSpecializations = Boolean(onManageSpecializations) && !disabled && isMedicalProvider;
 
   const profileFields = (
     <>
@@ -3813,8 +3828,15 @@ function ProviderFormFields({
 
         <Field label={t.providers_type}>
           <NativeComboboxSelect
-            value={forceNonMedical ? "non_medical" : form.providerType}
-            onChange={(event) => onChange("providerType", event.target.value || "medical")}
+            value={providerType}
+            onChange={(event) => {
+              const nextProviderType = event.target.value === "non_medical" ? "non_medical" : "medical";
+              onChange("providerType", nextProviderType);
+              if (nextProviderType !== "medical") {
+                onChange("specializations", "");
+                onChange("fachbereich", "");
+              }
+            }}
             disabled={disabled || forceNonMedical}
             className={formSelectClassName}
           >
@@ -3879,33 +3901,35 @@ function ProviderFormFields({
         </Field>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Field label={t.providers_fachbereich}>
-          <SpecializationMultiSelect
-            value={form.specializations}
-            items={specializations}
-            disabled={disabled}
-            onChange={(nextValue) => {
-              onChange("specializations", nextValue);
-              onChange("fachbereich", firstSpecializationValue(nextValue));
-            }}
-          />
-        </Field>
-        {canManageSpecializations ? (
-          <div className="flex justify-start pt-[20px]">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-9 justify-center rounded-lg bg-muted/20"
-              onClick={onManageSpecializations}
-            >
-              <BadgeCheck className="size-3.5" />
-              {l("providers_specializations_manage")}
-            </Button>
-          </div>
-        ) : null}
-      </div>
+      {isMedicalProvider ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label={t.providers_fachbereich}>
+            <SpecializationMultiSelect
+              value={form.specializations}
+              items={specializations}
+              disabled={disabled}
+              onChange={(nextValue) => {
+                onChange("specializations", nextValue);
+                onChange("fachbereich", firstSpecializationValue(nextValue));
+              }}
+            />
+          </Field>
+          {canManageSpecializations ? (
+            <div className="flex justify-start pt-[20px]">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 justify-center rounded-lg bg-muted/20"
+                onClick={onManageSpecializations}
+              >
+                <BadgeCheck className="size-3.5" />
+                {l("providers_specializations_manage")}
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </>
   );
 
@@ -4041,6 +4065,8 @@ function DoctorFormFields({
 }) {
   const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
+  const doctorTitleOptions = ["Dr. med.", "PD", "Prof."];
+  const hasCustomTitle = Boolean(form.title) && !doctorTitleOptions.includes(form.title);
   const normalizeContacts = (contacts: DoctorFormState["contacts"]) =>
     contacts.map((contact, _index, all) => {
       const sameKind = all.filter((item) => item.contactKind === contact.contactKind);
@@ -4123,10 +4149,12 @@ function DoctorFormFields({
               className={formSelectClassName}
             >
               <option value="">{t.common_not_set}</option>
-              <option value="Dr. med.">Dr. med.</option>
-              <option value="PD">PD</option>
-              <option value="Prof.">Prof.</option>
-              <option value="Prof. Dr. med.">Prof. Dr. med.</option>
+              {doctorTitleOptions.map((title) => (
+                <option key={title} value={title}>
+                  {title}
+                </option>
+              ))}
+              {hasCustomTitle ? <option value={form.title}>{form.title}</option> : null}
             </NativeComboboxSelect>
           </Field>
           <Field label={l("providers_doctor_specializations")}>
@@ -4502,13 +4530,16 @@ function StaffFormFields({
 
 function ServiceFormFields({
   form,
+  forcePriceRange,
   onChange,
 }: {
   form: ServiceFormState;
+  forcePriceRange: boolean;
   onChange: (field: keyof ServiceFormState, value: string) => void;
 }) {
   const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
+  const priceType = forcePriceRange ? "range" : form.priceType;
   return (
     <div className="space-y-3">
       <Section title={l("providers_service")}>
@@ -4536,16 +4567,17 @@ function ServiceFormFields({
         <div className="grid gap-4 md:grid-cols-2">
           <Field label={l("providers_price_type")}>
             <NativeComboboxSelect
-              value={form.priceType}
+              value={priceType}
               onChange={(event) => onChange("priceType", event.target.value)}
               className={formSelectClassName}
+              disabled={forcePriceRange}
             >
-              <option value="fixed">{l("providers_price_fixed")}</option>
+              {forcePriceRange ? null : <option value="fixed">{l("providers_price_fixed")}</option>}
               <option value="range">{l("providers_price_range")}</option>
-              <option value="on_request">{l("providers_price_on_request")}</option>
+              {forcePriceRange ? null : <option value="on_request">{l("providers_price_on_request")}</option>}
             </NativeComboboxSelect>
           </Field>
-          {form.priceType === "fixed" ? (
+          {priceType === "fixed" ? (
             <Field label={t.providers_service_price}>
               <Input
                 type="number"
@@ -4562,7 +4594,7 @@ function ServiceFormFields({
               />
             </Field>
           ) : null}
-          {form.priceType === "range" ? (
+          {priceType === "range" ? (
             <>
               <Field label={l("providers_price_from")}>
                 <Input
@@ -4588,7 +4620,7 @@ function ServiceFormFields({
               </Field>
             </>
           ) : null}
-          {form.priceType === "on_request" ? (
+          {priceType === "on_request" ? (
             <Field label={l("providers_price_note")}>
               <Input
                 value={form.priceNote}
@@ -4605,7 +4637,7 @@ function ServiceFormFields({
               className={shellInputClassName}
             />
           </Field>
-          {form.priceType !== "on_request" ? (
+          {priceType !== "on_request" ? (
             <Field label={l("providers_price_note")}>
               <Input
                 value={form.priceNote}

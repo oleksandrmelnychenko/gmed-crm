@@ -1260,7 +1260,7 @@ async fn update_provider(
     )
     .bind(provider_id)
     .bind(provider.name)
-    .bind(provider.provider_type)
+    .bind(&provider.provider_type)
     .bind(provider.legal_name)
     .bind(provider.tax_id)
     .bind(provider.address_street)
@@ -1298,7 +1298,14 @@ async fn update_provider(
             );
         }
     };
-    if let Some(values) = specializations
+    if provider.provider_type == "non_medical" {
+        if let Err(resp) = sync_provider_specializations(&state, updated_id, &[]).await {
+            return resp;
+        }
+        if let Err(resp) = clear_provider_doctor_specializations(&state, updated_id).await {
+            return resp;
+        }
+    } else if let Some(values) = specializations
         && let Err(resp) = sync_provider_specializations(&state, updated_id, &values).await
     {
         return resp;
@@ -1811,16 +1818,30 @@ async fn create_doctor(
         return e;
     }
 
-    if let Err(resp) = ensure_provider_exists(&state, provider_id).await {
-        return resp;
-    }
+    let provider_type = match load_provider_type(&state, provider_id).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
 
     let doctor = match normalize_doctor_payload(body) {
         Ok(payload) => payload,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
+    if let Err(message) = validate_new_doctor_title(doctor.title.as_deref()) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, message);
+    }
     let specializations = doctor.specializations.clone();
     let contacts = doctor.contacts.clone();
+    if provider_type == "non_medical"
+        && specializations
+            .as_ref()
+            .is_some_and(|values| !values.is_empty())
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Doctor specializations are only allowed for medical providers",
+        );
+    }
 
     let row = match sqlx::query(
         r#"INSERT INTO provider_doctors (
@@ -1915,12 +1936,46 @@ async fn update_doctor(
         return e;
     }
 
+    let provider_type = match load_provider_type(&state, provider_id).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
     let doctor = match normalize_doctor_payload(body) {
         Ok(payload) => payload,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
+    let current_title: Option<String> = match sqlx::query_scalar(
+        "SELECT title FROM provider_doctors WHERE provider_id = $1 AND id = $2",
+    )
+    .bind(provider_id)
+    .bind(doctor_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Doctor not found"),
+        Err(e) => {
+            tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, "Failed to load doctor title");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update doctor");
+        }
+    };
+    if let Err(message) =
+        validate_updated_doctor_title(doctor.title.as_deref(), current_title.as_deref())
+    {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, message);
+    }
     let specializations = doctor.specializations.clone();
     let contacts = doctor.contacts.clone();
+    if provider_type == "non_medical"
+        && specializations
+            .as_ref()
+            .is_some_and(|values| !values.is_empty())
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Doctor specializations are only allowed for medical providers",
+        );
+    }
 
     match sqlx::query(
         r#"UPDATE provider_doctors
@@ -1964,7 +2019,11 @@ async fn update_doctor(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update doctor");
         }
     }
-    if let Some(values) = specializations
+    if provider_type == "non_medical" {
+        if let Err(resp) = sync_doctor_specializations(&state, doctor_id, &[]).await {
+            return resp;
+        }
+    } else if let Some(values) = specializations
         && let Err(resp) = sync_doctor_specializations(&state, doctor_id, &values).await
     {
         return resp;
@@ -2380,14 +2439,20 @@ async fn create_service(
         return e;
     }
 
-    if let Err(resp) = ensure_provider_exists(&state, provider_id).await {
-        return resp;
-    }
-
     let service = match normalize_service_payload(body) {
         Ok(payload) => payload,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
+    let provider_type = match load_provider_type(&state, provider_id).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    if provider_type == "medical" && service.price_type != "range" {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Medical provider services require a price range",
+        );
+    }
 
     let row = match sqlx::query(
         r#"INSERT INTO service_catalog (
@@ -2480,6 +2545,16 @@ async fn update_service(
         Ok(payload) => payload,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
+    let provider_type = match load_provider_type(&state, provider_id).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    if provider_type == "medical" && service.price_type != "range" {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Medical provider services require a price range",
+        );
+    }
 
     match sqlx::query(
         r#"UPDATE service_catalog
@@ -2699,6 +2774,8 @@ struct ProviderTemplatePayload {
     auto_send_on_confirmed_appointment: bool,
 }
 
+const ALLOWED_DOCTOR_TITLES: [&str; 3] = ["Dr. med.", "PD", "Prof."];
+
 fn normalize_provider_payload(
     body: UpsertProviderRequest,
 ) -> Result<ProviderPayload, &'static str> {
@@ -2720,6 +2797,9 @@ fn normalize_provider_payload(
         specializations.push(value);
     }
     let fachbereich = fachbereich.or_else(|| specializations.first().cloned());
+    if provider_type == "non_medical" && !specializations.is_empty() {
+        return Err("Specializations are only allowed for medical providers");
+    }
 
     let organization_level =
         normalize_optional(body.organization_level).unwrap_or_else(|| "organization".to_string());
@@ -2778,6 +2858,7 @@ fn normalize_doctor_payload(body: UpsertDoctorRequest) -> Result<DoctorPayload, 
 
     let languages = normalize_string_list(body.languages);
     let licensing_valid_until = parse_date(body.licensing_valid_until, "licensing_valid_until")?;
+    let title = normalize_optional(body.title);
     let explicit_specializations = body.specializations.is_some();
     let mut specializations = normalize_string_list(body.specializations);
     let fachbereich = normalize_optional(body.fachbereich);
@@ -2800,7 +2881,7 @@ fn normalize_doctor_payload(body: UpsertDoctorRequest) -> Result<DoctorPayload, 
         first_name,
         last_name,
         display_name,
-        title: normalize_optional(body.title),
+        title,
         fachbereich,
         specializations: if explicit_specializations || !specializations.is_empty() {
             Some(specializations)
@@ -2893,6 +2974,28 @@ fn normalize_service_payload(body: UpsertServiceRequest) -> Result<ServicePayloa
         valid_from,
         valid_to,
     })
+}
+
+fn validate_new_doctor_title(title: Option<&str>) -> Result<(), &'static str> {
+    if let Some(title) = title
+        && !ALLOWED_DOCTOR_TITLES.contains(&title)
+    {
+        return Err("Doctor title must be Dr. med., PD or Prof.");
+    }
+    Ok(())
+}
+
+fn validate_updated_doctor_title(
+    title: Option<&str>,
+    current_title: Option<&str>,
+) -> Result<(), &'static str> {
+    if let Some(title) = title
+        && !ALLOWED_DOCTOR_TITLES.contains(&title)
+        && !current_title.is_some_and(|current| current.trim() == title)
+    {
+        return Err("Doctor title must be Dr. med., PD or Prof.");
+    }
+    Ok(())
 }
 
 fn normalize_provider_staff_payload(
@@ -3355,6 +3458,57 @@ async fn ensure_provider_exists(
     }
 }
 
+async fn load_provider_type(
+    state: &AppState,
+    provider_id: Uuid,
+) -> Result<String, axum::response::Response> {
+    match sqlx::query("SELECT provider_type FROM providers WHERE id = $1")
+        .bind(provider_id)
+        .fetch_optional(&state.db)
+        .await
+    {
+        Ok(Some(row)) => Ok(row
+            .try_get::<String, _>("provider_type")
+            .unwrap_or_else(|_| "medical".to_string())),
+        Ok(None) => Err(err(StatusCode::NOT_FOUND, "Provider not found")),
+        Err(e) => {
+            tracing::error!(error = %e, provider_id = %provider_id, "Failed to load provider type");
+            Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate provider",
+            ))
+        }
+    }
+}
+
+async fn load_doctor_provider_type(
+    state: &AppState,
+    doctor_id: Uuid,
+) -> Result<String, axum::response::Response> {
+    match sqlx::query(
+        r#"SELECT p.provider_type
+           FROM provider_doctors d
+           JOIN providers p ON p.id = d.provider_id
+           WHERE d.id = $1"#,
+    )
+    .bind(doctor_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => Ok(row
+            .try_get::<String, _>("provider_type")
+            .unwrap_or_else(|_| "medical".to_string())),
+        Ok(None) => Err(err(StatusCode::NOT_FOUND, "Doctor not found")),
+        Err(e) => {
+            tracing::error!(error = %e, doctor_id = %doctor_id, "Failed to load doctor provider type");
+            Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate doctor provider",
+            ))
+        }
+    }
+}
+
 async fn ensure_doctor_belongs_to_provider(
     state: &AppState,
     provider_id: Uuid,
@@ -3733,6 +3887,14 @@ async fn sync_provider_specializations(
     provider_id: Uuid,
     values: &[String],
 ) -> Result<(), axum::response::Response> {
+    let provider_type = load_provider_type(state, provider_id).await?;
+    if provider_type == "non_medical" && !values.is_empty() {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Specializations are only allowed for medical providers",
+        ));
+    }
+
     let specialization_ids = upsert_specialization_ids(state, values).await?;
     sqlx::query("DELETE FROM provider_specializations WHERE provider_id = $1")
         .bind(provider_id)
@@ -3768,11 +3930,42 @@ async fn sync_provider_specializations(
     Ok(())
 }
 
+async fn clear_provider_doctor_specializations(
+    state: &AppState,
+    provider_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    sqlx::query(
+        r#"DELETE FROM provider_doctor_specializations
+           WHERE doctor_id IN (
+               SELECT id FROM provider_doctors WHERE provider_id = $1
+           )"#,
+    )
+    .bind(provider_id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, provider_id = %provider_id, "Failed to clear provider doctor specializations");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update doctor specializations",
+        )
+    })?;
+    Ok(())
+}
+
 async fn sync_doctor_specializations(
     state: &AppState,
     doctor_id: Uuid,
     values: &[String],
 ) -> Result<(), axum::response::Response> {
+    let provider_type = load_doctor_provider_type(state, doctor_id).await?;
+    if provider_type == "non_medical" && !values.is_empty() {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Doctor specializations are only allowed for medical providers",
+        ));
+    }
+
     let specialization_ids = upsert_specialization_ids(state, values).await?;
     sqlx::query("DELETE FROM provider_doctor_specializations WHERE doctor_id = $1")
         .bind(doctor_id)
