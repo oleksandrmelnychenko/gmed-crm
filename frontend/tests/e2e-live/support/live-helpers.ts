@@ -370,15 +370,20 @@ export async function loginViaUi(page: Page, email: string, password: string) {
       ensureFrontendHealthy(),
       page.goto("/login"),
     ]);
-    await Promise.all([
-      page.locator("#email").fill(email),
-      page.locator("#password").fill(password),
-    ]);
+    const emailInput = page.locator("#email");
+    const passwordInput = page.locator("#password");
+    await emailInput.fill(email);
+    await expect(emailInput).toHaveValue(email);
+    await passwordInput.fill(password);
+    await expect(passwordInput).toHaveValue(password);
     try {
-      await Promise.all([
-        page.waitForURL(/\/$/, { timeout: 30_000 }),
-        page.getByRole("button", { name: /Anmelden|Войти/i }).click(),
-      ]);
+      await page.getByRole("button", { name: /Anmelden|Войти/i }).click();
+      await page.waitForURL((url) => url.pathname !== "/login", {
+        timeout: 30_000,
+      });
+      await expect(
+        page.getByRole("button", { name: /Abmelden|Выйти|Logout/i }),
+      ).toBeVisible({ timeout: 30_000 });
     } catch (error) {
       if (attempt >= 2) {
         throw error instanceof Error ? error : new Error(String(error));
@@ -433,10 +438,10 @@ export async function loginViaApi(
           refreshToken: result.refresh_token,
         },
       );
-      await Promise.all([
-        page.waitForURL(/\/$/, { timeout: 30_000 }),
-        page.goto("/"),
-      ]);
+      await page.goto("/");
+      await expect(
+        page.getByRole("button", { name: /Abmelden|Выйти|Logout/i }),
+      ).toBeVisible({ timeout: 30_000 });
     } catch (error) {
       if (attempt >= 2) {
         throw error instanceof Error ? error : new Error(String(error));

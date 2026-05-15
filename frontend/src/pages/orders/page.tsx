@@ -5619,7 +5619,7 @@ function useOrdersPageContent() {
                                               {invoiceUpdating ? (
                                                 <LoaderCircle className="mr-2 size-4 animate-spin" />
                                               ) : null}
-                                              {externalInvoiceStatusLabel("approved")}
+                                              {t.orders_external_invoice_mark_approved}
                                             </Button>
                                           ) : null}
                                           {invoice.status !== "paid" ? (
@@ -5638,7 +5638,7 @@ function useOrdersPageContent() {
                                               {invoiceUpdating ? (
                                                 <LoaderCircle className="mr-2 size-4 animate-spin" />
                                               ) : null}
-                                              {externalInvoiceStatusLabel("paid")}
+                                              {t.orders_external_invoice_mark_paid}
                                             </Button>
                                           ) : null}
                                           {invoice.status !== "cancelled" ? (
@@ -6130,7 +6130,7 @@ function useOrdersPageContent() {
                 </OrderSheetSection>
 
                 {createForm.patientId ? (
-                  <OrderSheetSection title={l("orders_re_check")}>
+                  <OrderSheetSection title={l("orders_re_check_fur_bestandskunden")}>
                     <div className="space-y-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">

@@ -3432,23 +3432,37 @@ async fn confirmed_appointment_auto_sends_only_flagged_provider_template_once_to
     .unwrap();
     assert_eq!(matching_auto_send_templates, 1);
 
-    let (status, body) = json_request(
-        &app,
-        "POST",
-        &format!("/api/v1/appointments/{appointment_id}/status"),
-        &admin_bearer,
-        Some(json!({ "status": "confirmed" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "status body: {body}");
-    assert_eq!(
-        body["auto_preparation_documents"]["templates_matched"], 1,
-        "status body: {body}"
+    let confirm_path = format!("/api/v1/appointments/{appointment_id}/status");
+    let ((first_status, first_body), (second_status, second_body)) = tokio::join!(
+        json_request(
+            &app,
+            "POST",
+            &confirm_path,
+            &admin_bearer,
+            Some(json!({ "status": "confirmed" })),
+        ),
+        json_request(
+            &app,
+            "POST",
+            &confirm_path,
+            &admin_bearer,
+            Some(json!({ "status": "confirmed" })),
+        ),
     );
-    assert_eq!(
-        body["auto_preparation_documents"]["error_count"], 0,
-        "status body: {body}"
-    );
+    for (status, body) in [
+        (first_status, first_body.clone()),
+        (second_status, second_body.clone()),
+    ] {
+        assert_eq!(status, StatusCode::OK, "status body: {body}");
+        assert_eq!(
+            body["auto_preparation_documents"]["templates_matched"], 1,
+            "status body: {body}"
+        );
+        assert_eq!(
+            body["auto_preparation_documents"]["error_count"], 0,
+            "status body: {body}"
+        );
+    }
 
     let auto_documents = sqlx::query(
         r#"SELECT id, visibility, ursprung
@@ -3509,7 +3523,7 @@ async fn confirmed_appointment_auto_sends_only_flagged_provider_template_once_to
     let (status, body) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/appointments/{appointment_id}/status"),
+        &confirm_path,
         &admin_bearer,
         Some(json!({ "status": "confirmed" })),
     )

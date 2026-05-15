@@ -61,6 +61,10 @@ function field(scope: Locator, label: RegExp) {
   return scope.locator("label").filter({ hasText: label }).first();
 }
 
+function providerListItem(page: Page, providerName: string) {
+  return page.getByRole("button").filter({ hasText: providerName }).first();
+}
+
 async function chooseFieldOption(
   page: Page,
   scope: Locator,
@@ -107,17 +111,17 @@ test.describe("provider registry live workflows", () => {
     );
     await expect(page).toHaveURL(/\/providers/);
 
-    const providerRow = page.getByRole("row").filter({ hasText: provider.name }).first();
+    const providerRow = providerListItem(page, provider.name);
     await expect(providerRow).toBeVisible();
-    if (provider.legal_name && provider.legal_name !== provider.name) {
-      await expect(page.getByText(provider.legal_name).first()).toBeVisible();
-    }
     await providerRow.click();
 
     const sheet = page.locator("main");
     await expect(
       sheet.getByRole("heading", { name: provider.name }).first(),
     ).toBeVisible();
+    if (provider.legal_name && provider.legal_name !== provider.name) {
+      await expect(sheet.getByText(provider.legal_name).first()).toBeVisible();
+    }
     if (provider.tax_id) {
       await expect(
         sheet.getByRole("textbox", { name: /Steuer-ID|Tax ID/i }),
@@ -198,7 +202,7 @@ test.describe("provider registry live workflows", () => {
       page.getByRole("button", { name: /Neuer Provider|Новый провайдер/i }),
     ).toHaveCount(0);
 
-    const providerRow = page.getByRole("row").filter({ hasText: provider.name }).first();
+    const providerRow = providerListItem(page, provider.name);
     await expect(providerRow).toBeVisible();
     await providerRow.click();
 
@@ -302,9 +306,8 @@ test.describe("provider registry live workflows", () => {
     await page.getByRole("button", { name: /Spezialisierungen verwalten/i }).first().click();
     const specializationForm = page.locator("form#provider-specialization-form");
     await expect(specializationForm).toBeVisible();
-    await specializationForm.getByLabel(/Name EN/i).fill(doctorSpecializationNameEn);
+    await specializationForm.getByLabel(/Name RU/i).fill(doctorSpecializationNameEn);
     await specializationForm.getByLabel(/Name DE/i).fill(doctorSpecializationNameDe);
-    await specializationForm.getByLabel(/Name UK\/RU/i).fill(`Release specialty alt ${tag}`);
     await specializationForm.getByLabel(/Sortierung/i).fill("18");
     await page.getByRole("button", { name: /Spezialisierung erstellen/i }).click();
     await expect(page.getByText(doctorSpecializationNameDe).first()).toBeVisible();
@@ -329,9 +332,8 @@ test.describe("provider registry live workflows", () => {
     await page.getByRole("button", { name: /Rollen verwalten/i }).click();
     const roleForm = page.locator("form#provider-staff-role-form");
     await expect(roleForm).toBeVisible();
-    await roleForm.getByLabel(/Name EN/i).fill(staffRoleNameEn);
+    await roleForm.getByLabel(/Name RU/i).fill(staffRoleNameEn);
     await roleForm.getByLabel(/Name DE/i).fill(staffRoleNameDe);
-    await roleForm.getByLabel(/Name RU/i).fill(`Release RU ${tag}`);
     await roleForm.getByLabel(/Sortierung/i).fill("17");
     await page.getByRole("button", { name: /Rolle erstellen/i }).click();
     await expect(page.getByText(staffRoleNameDe).first()).toBeVisible();

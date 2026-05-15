@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import {
   authenticateApiClient,
   bootstrapFullSmokeScenario,
+  chooseComboboxOption,
   loginViaApi,
   loginViaUi,
   setGermanLanguage,
@@ -114,7 +115,7 @@ test.describe("commercial live workflows", () => {
     const invoiceSheet = page.getByRole("dialog");
     await expect(invoiceSheet).toBeVisible();
     await expect(
-      invoiceSheet.getByText(scenario.invoice.invoice_number),
+      invoiceSheet.getByText(scenario.invoice.invoice_number).first(),
     ).toBeVisible();
     await expect(
       invoiceSheet.getByText(/Rechnungsübersicht|Обзор счёта/i),
@@ -123,10 +124,13 @@ test.describe("commercial live workflows", () => {
       invoiceSheet.getByRole("button", {
         name: /Rechnung speichern|Сохранить счёт/i,
       }),
+    ).toHaveCount(0);
+    await expect(
+      invoiceSheet.getByRole("button", { name: /Bearbeiten|Edit|Редактировать/i }).first(),
     ).toBeDisabled();
     await expect(
       invoiceSheet.getByRole("button", {
-        name: /Mahnung senden|напоминание|Inkasso/i,
+        name: /Mahnung erstellen|Создать взыскание/i,
       }),
     ).toBeDisabled();
     await expect(
@@ -163,7 +167,7 @@ test.describe("commercial live workflows", () => {
     const invoiceSheet = page.getByRole("dialog");
     await expect(invoiceSheet).toBeVisible();
     await expect(
-      invoiceSheet.getByText(scenario.invoice.invoice_number),
+      invoiceSheet.getByText(scenario.invoice.invoice_number).first(),
     ).toBeVisible();
     await expect(
       invoiceSheet.getByText(/Rechnungsübersicht|Обзор счёта/i),
@@ -172,13 +176,16 @@ test.describe("commercial live workflows", () => {
       invoiceSheet.getByRole("button", {
         name: /Rechnung speichern|Сохранить счёт/i,
       }),
+    ).toHaveCount(0);
+    await expect(
+      invoiceSheet.getByRole("button", { name: /Bearbeiten|Edit|Редактировать/i }).first(),
     ).toBeDisabled();
     await expect(
       invoiceSheet.getByPlaceholder(/Erinnerungstext oder interner Abrechnungshinweis|Текст напоминания или внутренняя заметка биллинга/i),
-    ).toBeDisabled();
+    ).toHaveCount(0);
     await expect(
       invoiceSheet.getByRole("button", {
-        name: /Erste Mahnung senden|Первая просрочка|Отправить:/i,
+        name: /Mahnung erstellen|Создать взыскание/i,
       }),
     ).toBeDisabled();
     await expect(
@@ -237,20 +244,9 @@ test.describe("commercial live workflows", () => {
       scenario.credentials.password,
     );
 
-    await page.goto(`/orders?order=${scenario.order.id}`);
-    await expect(
-      page.getByRole("heading", { name: /Aufträge|Заказы/i }),
-    ).toBeVisible();
+    await page.goto(`/orders/${scenario.order.id}?section=gates`);
     await expect(
       page.getByRole("heading", { name: /Prozess-Gates|Процессные гейты/i }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("heading", {
-        name: /Externe Rechnungen|Внешние счета/i,
-      }),
-    ).toBeVisible();
-    await expect(
-      page.getByText(/Billing nur lesend|Только чтение для биллинга/i),
     ).toBeVisible();
 
     await expect(
@@ -263,11 +259,6 @@ test.describe("commercial live workflows", () => {
         name: /Debt-Workflow speichern|Сохранить debt-workflow/i,
       }),
     ).toBeVisible();
-    await expect(
-      page.getByRole("button", {
-        name: /Externe Rechnung hinzufügen|Добавить внешний счёт/i,
-      }),
-    ).toBeVisible();
 
     await expect(
       page.getByRole("button", {
@@ -278,12 +269,12 @@ test.describe("commercial live workflows", () => {
       page.getByRole("button", {
         name: /Durchführungsstand speichern|Сохранить статус исполнения/i,
       }),
-    ).toBeDisabled();
+    ).toHaveCount(0);
     await expect(
       page.getByRole("button", {
         name: /Nachsorge-Stand speichern|Сохранить статус follow-up/i,
       }),
-    ).toBeDisabled();
+    ).toHaveCount(0);
     await expect(
       page.getByRole("button", {
         name: /Phase speichern|Сохранить фазу/i,
@@ -298,7 +289,11 @@ test.describe("commercial live workflows", () => {
     const billingGateSection = page
       .getByText(/Billing entscheidet, ob die Durchfuhrung ausserhalb der Paketdeckung weiterlaufen darf\./i)
       .locator("xpath=ancestor::*[.//button[normalize-space()='Billing-Gate speichern']][1]");
-    await billingGateSection.locator("select").first().selectOption("denied");
+    await chooseComboboxOption(
+      page,
+      billingGateSection.getByRole("combobox").first(),
+      /Abgelehnt|Denied|Отклонено/i,
+    );
     await billingGateSection
       .locator("textarea")
       .fill("Live E2E billing order-shell proof.");
@@ -319,6 +314,37 @@ test.describe("commercial live workflows", () => {
     await expect(
       page.getByText(/Live E2E billing order-shell proof\./i),
     ).toBeVisible();
+
+    await page.goto(`/orders/${scenario.order.id}?section=execution`);
+    await expect(
+      page.getByRole("button", {
+        name: /Durchführungsstand speichern|Сохранить статус исполнения/i,
+      }),
+    ).toBeDisabled();
+
+    await page.goto(`/orders/${scenario.order.id}?section=followup`);
+    await expect(
+      page.getByRole("button", {
+        name: /Nachsorge-Stand speichern|Сохранить статус follow-up/i,
+      }),
+    ).toBeDisabled();
+
+    await page.goto(`/orders/${scenario.order.id}?section=phase`);
+    await expect(
+      page.getByText(/Billing nur lesend|Только чтение для биллинга/i),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", {
+        name: /Phase speichern|Сохранить фазу/i,
+      }),
+    ).toHaveCount(0);
+
+    await page.goto(`/orders/${scenario.order.id}?section=workflow`);
+    await expect(
+      page.getByRole("button", {
+        name: /Workflow-Punkt hinzufügen|Добавить пункт workflow/i,
+      }),
+    ).toHaveCount(0);
 
     const externalInvoiceNumber = `EXT-LIVE-${Date.now()}`;
     const billingApi = await authenticateApiClient(
@@ -345,7 +371,17 @@ test.describe("commercial live workflows", () => {
       },
     );
     expect(externalInvoiceResponse.ok()).toBe(true);
-    await page.goto(`/orders?order=${scenario.order.id}`);
+    await page.goto(`/orders/${scenario.order.id}?section=invoices`);
+    await expect(
+      page.getByRole("heading", {
+        name: /Externe Rechnungen|Внешние счета/i,
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", {
+        name: /Externe Rechnung (?:hinzufügen|erfassen)|Добавить внешний счёт/i,
+      }),
+    ).toBeVisible();
 
     const invoiceCard = page.locator("div").filter({
       has: page.getByText(externalInvoiceNumber),
@@ -382,7 +418,6 @@ test.describe("commercial live workflows", () => {
     await expect(
       page.getByRole("heading", { name: /Verträge und Angebote|Договоры и предложения/i }),
     ).toBeVisible();
-    await page.getByRole("tab", { name: /Angebote|Предложения/i }).click();
 
     const pmApi = await authenticateApiClient(
       request,
@@ -549,7 +584,16 @@ test.describe("commercial live workflows", () => {
       invoiceSheet.getByText(/Rechnungsübersicht|Обзор счёта/i),
     ).toBeVisible();
 
-    await invoiceSheet
+    await invoiceSheet.getByRole("button", { name: /Mahnung erstellen|Создать взыскание/i }).click();
+    const dunningDialog = billingPage.getByRole("dialog").filter({
+      has: billingPage.getByPlaceholder(
+        /Erinnerungstext oder interner Abrechnungshinweis|Текст напоминания или внутренняя заметка биллинга/i,
+      ),
+    });
+    await expect(
+      dunningDialog.getByText(/Erste Mahnung|Первое напоминание/i),
+    ).toBeVisible();
+    await dunningDialog
       .getByPlaceholder(/Erinnerungstext oder interner Abrechnungshinweis|Текст напоминания или внутренняя заметка биллинга/i)
       .fill("First live dunning reminder for the commercial QA flow.");
     const dunningResponse = billingPage.waitForResponse(
@@ -557,7 +601,9 @@ test.describe("commercial live workflows", () => {
         nextResponse.url().includes(`/api/v1/invoices/${createdInvoice.id}/dunning`) &&
         nextResponse.request().method() === "POST",
     );
-    await invoiceSheet.getByRole("button", { name: /Erste Mahnung senden|Отправить: Первое напоминание/i }).click();
+    await dunningDialog
+      .getByRole("button", { name: /Mahnung erstellen|Создать взыскание/i })
+      .click();
     const firstDunningResponse = await dunningResponse;
     const firstDunningBody = await firstDunningResponse.text();
     expect(firstDunningResponse.status(), firstDunningBody).toBe(200);
@@ -610,7 +656,7 @@ test.describe("commercial live workflows", () => {
     await billingPage.reload();
     const reloadedInvoiceSheet = billingPage.getByRole("dialog");
     await expect(
-      reloadedInvoiceSheet.getByText(createdInvoice.invoice_number),
+      reloadedInvoiceSheet.getByText(createdInvoice.invoice_number).first(),
     ).toBeVisible();
     await expect(
       reloadedInvoiceSheet.getByText(
@@ -619,7 +665,7 @@ test.describe("commercial live workflows", () => {
     ).toBeVisible();
     await expect(
       reloadedInvoiceSheet.getByRole("button", {
-        name: /Zweite Mahnung senden|Inkasso senden|Отправить: Второе напоминание|Отправить: Коллекторы/i,
+        name: /Mahnung erstellen|Создать взыскание/i,
       }),
     ).toBeVisible();
 

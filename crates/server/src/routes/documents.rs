@@ -1928,6 +1928,118 @@ async fn record_appointment_provider_template_delivery(
     Ok(())
 }
 
+async fn claim_appointment_provider_template_delivery(
+    state: &AppState,
+    record: ProviderTemplateDeliveryRecord<'_>,
+) -> Result<bool, axum::response::Response> {
+    let claimed = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO appointment_provider_template_deliveries (
+                appointment_id, template_id, document_id, triggered_by,
+                delivery_status, error_message, delivered_at
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+           ON CONFLICT (appointment_id, template_id) DO NOTHING
+           RETURNING id"#,
+    )
+    .bind(record.appointment_id)
+    .bind(record.template_id)
+    .bind(record.document_id)
+    .bind(record.triggered_by)
+    .bind(record.delivery_status)
+    .bind(record.error_message)
+    .bind(record.delivered_at)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(
+            error = %error,
+            appointment_id = %record.appointment_id,
+            template_id = %record.template_id,
+            delivery_status = %record.delivery_status,
+            "claim appointment provider template delivery"
+        );
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record provider template delivery",
+        )
+    })?;
+
+    Ok(claimed.is_some())
+}
+
+async fn find_existing_auto_preparation_document(
+    state: &AppState,
+    appointment_id: Uuid,
+    ursprung: &str,
+) -> Result<Option<Uuid>, axum::response::Response> {
+    sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT id
+           FROM documents
+           WHERE appointment_id = $1
+             AND ursprung = $2
+             AND status <> 'archived'
+           ORDER BY created_at DESC
+           LIMIT 1"#,
+    )
+    .bind(appointment_id)
+    .bind(ursprung)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, appointment_id = %appointment_id, ursprung = %ursprung, "load existing auto preparation document");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to auto-send preparation documents",
+        )
+    })
+}
+
+async fn find_delivered_auto_preparation_document(
+    state: &AppState,
+    appointment_id: Uuid,
+    template_id: Uuid,
+) -> Result<Option<Uuid>, axum::response::Response> {
+    sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT document_id
+           FROM appointment_provider_template_deliveries
+           WHERE appointment_id = $1
+             AND template_id = $2
+             AND delivery_status = 'delivered'
+             AND document_id IS NOT NULL
+           LIMIT 1"#,
+    )
+    .bind(appointment_id)
+    .bind(template_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, appointment_id = %appointment_id, template_id = %template_id, "load delivered auto preparation document");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to auto-send preparation documents",
+        )
+    })
+}
+
+async fn wait_for_delivered_auto_preparation_document(
+    state: &AppState,
+    appointment_id: Uuid,
+    template_id: Uuid,
+) -> Result<Option<Uuid>, axum::response::Response> {
+    for attempt in 0..80 {
+        if let Some(document_id) =
+            find_delivered_auto_preparation_document(state, appointment_id, template_id).await?
+        {
+            return Ok(Some(document_id));
+        }
+
+        if attempt < 79 {
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+    }
+
+    Ok(None)
+}
+
 fn translated_text_block_body(block: TextBlockDefinition, language: &str) -> &'static str {
     match language {
         "uk" => block.uk,
@@ -11603,7 +11715,13 @@ pub(crate) async fn auto_send_provider_preparation_documents_for_confirmed_appoi
 
     for template in templates {
         let template_id = template.id;
-        record_appointment_provider_template_delivery(
+        let ursprung = format!(
+            "auto_preparation:{}:{}",
+            appointment_id,
+            provider_template_public_id(template.id)
+        );
+
+        let claimed_delivery = claim_appointment_provider_template_delivery(
             state,
             ProviderTemplateDeliveryRecord {
                 appointment_id,
@@ -11617,39 +11735,37 @@ pub(crate) async fn auto_send_provider_preparation_documents_for_confirmed_appoi
         )
         .await?;
 
-        let ursprung = format!(
-            "auto_preparation:{}:{}",
-            appointment_id,
-            provider_template_public_id(template.id)
-        );
-        let existing_document_id = match sqlx::query_scalar::<_, Uuid>(
-            r#"SELECT id
-               FROM documents
-               WHERE appointment_id = $1
-                 AND ursprung = $2
-                 AND status <> 'archived'
-               ORDER BY created_at DESC
-               LIMIT 1"#,
-        )
-        .bind(appointment_id)
-        .bind(&ursprung)
-        .fetch_optional(&state.db)
-        .await
-        {
-            Ok(value) => value,
-            Err(error) => {
-                tracing::error!(error = %error, appointment_id = %appointment_id, template_id = %template.id, "load existing auto preparation document");
-                return Err(err(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to auto-send preparation documents",
-                ));
-            }
+        let existing_document_id = if claimed_delivery {
+            find_existing_auto_preparation_document(state, appointment_id, &ursprung).await?
+        } else {
+            wait_for_delivered_auto_preparation_document(state, appointment_id, template_id)
+                .await?
+                .or(
+                    find_existing_auto_preparation_document(state, appointment_id, &ursprung)
+                        .await?,
+                )
         };
 
         let document_id = if let Some(value) = existing_document_id {
             result.reused_document_count += 1;
             value
         } else {
+            if !claimed_delivery {
+                record_appointment_provider_template_delivery(
+                    state,
+                    ProviderTemplateDeliveryRecord {
+                        appointment_id,
+                        template_id,
+                        document_id: None,
+                        triggered_by: actor_user_id,
+                        delivery_status: "processing",
+                        error_message: None,
+                        delivered_at: None,
+                    },
+                )
+                .await?;
+            }
+
             let generated = match generate_provider_document_from_template_internal(
                 state,
                 actor_user_id,

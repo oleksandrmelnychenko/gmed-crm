@@ -5,6 +5,7 @@ import {
   bootstrapAndLogin,
   bootstrapFullSmokeScenario,
   chooseComboboxOption,
+  ensureDetailsOpen,
   loginViaApi,
   setGermanLanguage,
 } from "./support/live-helpers";
@@ -227,35 +228,58 @@ test.describe("patient profile live workflows", () => {
     await openPatientDetailTab(page, scenario.patient.id, "workflow", "Workflow-Cockpit");
 
     const workflowItemName = "Live E2E workflow call-back";
-    const workflowForm = page
-      .locator("form")
-      .filter({
-        has: page.getByRole("button", {
-          name: /Workflow-Element hinzufügen|Add workflow item/i,
-        }),
-      })
-      .last();
+    await page
+      .getByRole("button", { name: /Element hinzufügen|Add item/i })
+      .click();
+    const workflowForm = page.getByRole("dialog").filter({
+      has: page.getByRole("heading", {
+        name: /Workflow-Element hinzufügen|Add workflow item/i,
+      }),
+    });
     await workflowForm.locator("#patient-workflow-item-text").fill(workflowItemName);
     await fillMuiDateTime(workflowForm, futureLocalDateTime(2));
     await workflowForm
       .getByRole("button", {
-        name: /Workflow-Element hinzufügen|Add workflow item/i,
+        name: /^Hinzufügen$|^Add$/i,
       })
       .click();
+    await expect(workflowForm).toBeHidden({ timeout: 15_000 });
 
-    const workflowCard = page
-      .locator("div")
+    const customWorkflowGroup = page
+      .locator("details")
+      .filter({ has: page.getByText(/Benutzerdefiniert|Custom/i) })
+      .first();
+    await ensureDetailsOpen(customWorkflowGroup);
+
+    const workflowCard = customWorkflowGroup
+      .locator("article")
       .filter({
         has: page.getByText(workflowItemName, { exact: true }),
-        hasNot: page.getByRole("button", {
-          name: "Workflow-Element hinzufügen",
-        }),
       })
       .first();
     await expect(workflowCard).toBeVisible();
-    await workflowCard.getByRole("button", { name: "Abschließen" }).first().click();
+    const completeWorkflowResponse = page.waitForResponse(
+      (nextResponse) =>
+        nextResponse
+          .url()
+          .includes(`/api/v1/patients/${scenario.patient.id}/workflow-checklist/`) &&
+        nextResponse.url().includes("/complete") &&
+        nextResponse.request().method() === "POST",
+    );
+    await workflowCard
+      .getByRole("button", { name: /Abschließen|Complete/i })
+      .first()
+      .click();
+    expect((await completeWorkflowResponse).ok()).toBe(true);
+    await ensureDetailsOpen(customWorkflowGroup);
+    const completedWorkflowCard = customWorkflowGroup
+      .locator("article")
+      .filter({
+        has: page.getByText(workflowItemName, { exact: true }),
+      })
+      .first();
     await expect(
-      workflowCard.getByText(/Abgeschlossen|completed/i).first(),
+      completedWorkflowCard.getByText(/Abgeschlossen|completed/i).first(),
     ).toBeVisible();
   });
 
