@@ -578,15 +578,21 @@ fn has_minor_guardian(req: &CreatePatientRequest) -> bool {
         return true;
     }
 
-    is_guardian_or_parent_relation_type(req.emergency_contact_relation.as_deref().unwrap_or(""))
-        && req
-            .emergency_contact_name
-            .as_deref()
-            .is_some_and(|name| !name.trim().is_empty())
-        && req
-            .emergency_contact_phone
-            .as_deref()
-            .is_some_and(|phone| !phone.trim().is_empty())
+    has_guardian_or_parent_contact(
+        req.emergency_contact_relation.as_deref(),
+        req.emergency_contact_name.as_deref(),
+        req.emergency_contact_phone.as_deref(),
+    )
+}
+
+fn has_guardian_or_parent_contact(
+    relation: Option<&str>,
+    name: Option<&str>,
+    phone: Option<&str>,
+) -> bool {
+    is_guardian_or_parent_relation_type(relation.unwrap_or(""))
+        && name.is_some_and(|value| !value.trim().is_empty())
+        && phone.is_some_and(|value| !value.trim().is_empty())
 }
 
 fn is_guardian_or_parent_relation_type(value: &str) -> bool {
@@ -1651,6 +1657,47 @@ async fn update_patient(
         Ok(value) => value,
         Err(response) => return response,
     };
+    if is_minor_birth_date(birth_date, chrono::Utc::now().date_naive())
+        && !has_guardian_or_parent_contact(
+            emergency_contact_relation.as_deref(),
+            emergency_contact_name.as_deref(),
+            emergency_contact_phone.as_deref(),
+        )
+    {
+        let has_existing_guardian_relation = match sqlx::query_scalar::<_, bool>(
+            r#"SELECT EXISTS (
+                   SELECT 1
+                   FROM patient_relations
+                   WHERE patient_id = $1
+                     AND relation_type IN ('guardian', 'parent')
+                     AND btrim(related_name) <> ''
+               )"#,
+        )
+        .bind(patient_uuid)
+        .fetch_one(&state.db)
+        .await
+        {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::error!(
+                    error = %e,
+                    patient_id = %patient_uuid,
+                    "Failed to validate minor guardian relation"
+                );
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to validate minor guardian relation",
+                );
+            }
+        };
+
+        if !has_existing_guardian_relation {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Minor patients require a guardian/parent relation or guardian emergency contact",
+            );
+        }
+    }
     let notes = match normalize_patient_text_patch(
         body.notes,
         current.try_get("notes").unwrap_or_default(),

@@ -1,6 +1,7 @@
 import {
   memo,
   useCallback,
+  useEffect,
   useState,
   type FormEvent,
 } from "react";
@@ -51,6 +52,10 @@ type PatientProfileEditorSheetProps = {
   onError: (message: string) => void;
 };
 
+function isGuardianOrParentRelation(value: string) {
+  return value.trim() === "guardian" || value.trim() === "parent";
+}
+
 function PatientProfileEditorSheet(props: PatientProfileEditorSheetProps) {
   return (
     <PatientProfileEditorSheetContent
@@ -78,11 +83,29 @@ function PatientProfileEditorFormSections({
   const age = computeAge(form.birthDate);
   const isMinor = age !== null && age < 18;
   const text = dictionary.uiText ?? {};
+  const guardianLabel =
+    dictionary.patient_relation_type_guardian ??
+    text.patients_detail_guardian ??
+    "Guardian";
+  const parentLabel =
+    dictionary.patient_relation_type_parent ??
+    text.patients_detail_parent ??
+    "Parent";
+
+  useEffect(() => {
+    if (isMinor && !isGuardianOrParentRelation(form.emergencyContactRelation)) {
+      updateField("emergencyContactRelation", "guardian");
+    }
+  }, [form.emergencyContactRelation, isMinor, updateField]);
 
   function handleBirthDateChange(value: string) {
     updateField("birthDate", value);
     const nextAge = computeAge(value);
-    if (nextAge !== null && nextAge < 18 && !form.emergencyContactRelation.trim()) {
+    if (
+      nextAge !== null &&
+      nextAge < 18 &&
+      !isGuardianOrParentRelation(form.emergencyContactRelation)
+    ) {
       updateField("emergencyContactRelation", "guardian");
     }
   }
@@ -282,6 +305,7 @@ function PatientProfileEditorFormSections({
               </FormSection>
 
               <FormSection
+                className={isMinor ? "border-amber-200 bg-amber-50/60" : undefined}
                 title={
                   isMinor
                     ? (text.patients_guardian_parent_contact ?? dictionary.patient_profile_editor_emergency_contact)
@@ -310,14 +334,34 @@ function PatientProfileEditorFormSections({
                     />
                   </FormField>
                   <FormField label={dictionary.patient_profile_editor_relation}>
-                    <Input
-                      value={form.emergencyContactRelation}
-                      onChange={(event) =>
-                        updateField("emergencyContactRelation", event.target.value)
-                      }
-                      required={isMinor}
-                      className={formInputClassName}
-                    />
+                    {isMinor ? (
+                      <NativeComboboxSelect
+                        value={
+                          isGuardianOrParentRelation(form.emergencyContactRelation)
+                            ? form.emergencyContactRelation
+                            : "guardian"
+                        }
+                        onChange={(event) =>
+                          updateField(
+                            "emergencyContactRelation",
+                            event.target.value ?? "guardian",
+                          )
+                        }
+                        required
+                        className={cn("w-full", formInputClassName)}
+                      >
+                        <option value="guardian">{guardianLabel}</option>
+                        <option value="parent">{parentLabel}</option>
+                      </NativeComboboxSelect>
+                    ) : (
+                      <Input
+                        value={form.emergencyContactRelation}
+                        onChange={(event) =>
+                          updateField("emergencyContactRelation", event.target.value)
+                        }
+                        className={formInputClassName}
+                      />
+                    )}
                   </FormField>
                 </div>
               </FormSection>

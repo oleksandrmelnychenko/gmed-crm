@@ -1,3 +1,5 @@
+import { useEffect } from "react";
+
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { useLang } from "@/lib/i18n";
@@ -16,6 +18,10 @@ import {
   textareaClassName,
 } from "./patient-form-primitives";
 
+function isGuardianOrParentRelation(value: string) {
+  return value.trim() === "guardian" || value.trim() === "parent";
+}
+
 type PatientFormFieldsProps = {
   form: PatientFormState;
   onChange: (field: keyof PatientFormState, value: string) => void;
@@ -32,11 +38,23 @@ export function PatientFormFields({
   const age = computeAge(form.birthDate);
   const isMinor = includeBirthAndGender && age !== null && age < 18;
   const notSetLabel = t.common_not_set;
+  const guardianLabel = t.patient_relation_type_guardian ?? l("patients_detail_guardian");
+  const parentLabel = t.patient_relation_type_parent ?? l("patients_detail_parent");
+
+  useEffect(() => {
+    if (isMinor && !isGuardianOrParentRelation(form.emergencyContactRelation)) {
+      onChange("emergencyContactRelation", "guardian");
+    }
+  }, [form.emergencyContactRelation, isMinor, onChange]);
 
   function handleBirthDateChange(value: string) {
     onChange("birthDate", value);
     const nextAge = computeAge(value);
-    if (nextAge !== null && nextAge < 18 && !form.emergencyContactRelation.trim()) {
+    if (
+      nextAge !== null &&
+      nextAge < 18 &&
+      !isGuardianOrParentRelation(form.emergencyContactRelation)
+    ) {
       onChange("emergencyContactRelation", "guardian");
     }
   }
@@ -222,6 +240,7 @@ export function PatientFormFields({
       </FormSection>
 
       <FormSection
+        className={isMinor ? "border-amber-200 bg-amber-50/60" : undefined}
         title={
           isMinor
             ? l("patients_guardian_parent_contact")
@@ -246,12 +265,29 @@ export function PatientFormFields({
             />
           </Field>
           <Field label={t.patients_emergency_relation}>
-            <Input
-              value={form.emergencyContactRelation}
-              onChange={(event) => onChange("emergencyContactRelation", event.target.value)}
-              className={formInputClassName}
-              required={isMinor}
-            />
+            {isMinor ? (
+              <NativeComboboxSelect
+                value={
+                  isGuardianOrParentRelation(form.emergencyContactRelation)
+                    ? form.emergencyContactRelation
+                    : "guardian"
+                }
+                onChange={(event) =>
+                  onChange("emergencyContactRelation", event.target.value ?? "guardian")
+                }
+                className={cn("w-full", formInputClassName)}
+                required
+              >
+                <option value="guardian">{guardianLabel}</option>
+                <option value="parent">{parentLabel}</option>
+              </NativeComboboxSelect>
+            ) : (
+              <Input
+                value={form.emergencyContactRelation}
+                onChange={(event) => onChange("emergencyContactRelation", event.target.value)}
+                className={formInputClassName}
+              />
+            )}
           </Field>
         </div>
       </FormSection>

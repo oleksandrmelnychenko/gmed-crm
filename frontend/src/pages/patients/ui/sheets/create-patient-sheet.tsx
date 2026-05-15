@@ -50,6 +50,11 @@ function createPatientSheetReducer(
   };
 }
 
+function guardianRelationType(value: string) {
+  const trimmed = value.trim();
+  return trimmed === "parent" ? "parent" : "guardian";
+}
+
 function CreatePatientSheet({
   open,
   dictionary,
@@ -99,7 +104,7 @@ function CreatePatientSheet({
           ? [
               {
                 related_name: form.emergencyContactName.trim(),
-                relation_type: "guardian",
+                relation_type: guardianRelationType(form.emergencyContactRelation),
                 is_emergency_contact: true,
                 phone: toOptional(form.emergencyContactPhone),
               },

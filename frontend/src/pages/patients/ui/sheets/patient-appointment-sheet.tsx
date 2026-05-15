@@ -1,10 +1,11 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import {
+  checkboxClass,
   Field as FormField,
   Section as FormSection,
   inputClass,
@@ -15,6 +16,11 @@ import { toast } from "@/components/ui/toast";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
+import type {
+  DoctorOption,
+  ProviderSummary,
+} from "@/pages/appointments/model/types";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 type AppointmentKind = "medical" | "non_medical" | "internal";
@@ -58,6 +64,18 @@ function carePathLabel(
   }
 }
 
+function providerLabel(provider: ProviderSummary) {
+  return provider.address_city
+    ? `${provider.name} - ${provider.address_city}`
+    : provider.name;
+}
+
+function doctorLabel(doctor: DoctorOption) {
+  return doctor.fachbereich
+    ? `${doctor.name} (${doctor.fachbereich})`
+    : doctor.name;
+}
+
 function todayDateString() {
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -68,6 +86,9 @@ type FormState = {
   title: string;
   appointmentType: AppointmentKind;
   carePathKind: CarePathKind;
+  providerId: string;
+  doctorId: string;
+  skipMedicalProviderBinding: boolean;
   date: string;
   timeStart: string;
   timeEnd: string;
@@ -80,6 +101,9 @@ function blankForm(): FormState {
     title: "",
     appointmentType: "medical",
     carePathKind: "regular",
+    providerId: "",
+    doctorId: "",
+    skipMedicalProviderBinding: false,
     date: todayDateString(),
     timeStart: "",
     timeEnd: "",
@@ -127,6 +151,75 @@ function PatientAppointmentSheetContent({
   const l = (key: string) => t.uiText[key] ?? key;
   const [form, setForm] = useState<FormState>(blankForm);
   const [busy, setBusy] = useState(false);
+  const [providers, setProviders] = useState<ProviderSummary[]>([]);
+  const [doctors, setDoctors] = useState<DoctorOption[]>([]);
+  const selectedProvider = useMemo(
+    () => providers.find((provider) => provider.id === form.providerId) ?? null,
+    [form.providerId, providers],
+  );
+  const providerOptions = useMemo(
+    () =>
+      form.appointmentType === "medical"
+        ? providers.filter((provider) => provider.provider_type === "medical")
+        : providers,
+    [form.appointmentType, providers],
+  );
+
+  useEffect(() => {
+    if (!open) return;
+
+    let active = true;
+    void apiFetch<ProviderSummary[]>("/providers", { cacheTtlMs: 60_000 })
+      .then((rows) => {
+        if (active) setProviders(rows);
+      })
+      .catch(() => {
+        if (active) setProviders([]);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!form.providerId) {
+      setDoctors([]);
+      setForm((current) =>
+        current.doctorId ? { ...current, doctorId: "" } : current,
+      );
+      return;
+    }
+
+    let active = true;
+    void getProviderDoctors(form.providerId)
+      .then((rows) => {
+        if (active) setDoctors(rows);
+      })
+      .catch(() => {
+        if (active) setDoctors([]);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [form.providerId]);
+
+  useEffect(() => {
+    if (
+      form.appointmentType !== "medical" ||
+      !selectedProvider ||
+      selectedProvider.provider_type === "medical"
+    ) {
+      return;
+    }
+
+    setForm((current) => ({
+      ...current,
+      providerId: "",
+      doctorId: "",
+    }));
+  }, [form.appointmentType, selectedProvider]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -138,17 +231,29 @@ function PatientAppointmentSheetContent({
       toast.error(l("patients_date_required"));
       return;
     }
+    if (
+      form.appointmentType === "medical" &&
+      !form.providerId &&
+      !form.skipMedicalProviderBinding
+    ) {
+      toast.error(l("appointments_medical_provider_required"));
+      return;
+    }
     setBusy(true);
     try {
       await apiFetch("/appointments", {
         method: "POST",
         body: JSON.stringify({
           patient_id: patientId,
-          provider_id: null,
-          doctor_id: null,
+          provider_id: form.providerId || null,
+          doctor_id: form.doctorId || null,
           owner_user_id: null,
           interpreter_id: null,
           appointment_type: form.appointmentType,
+          skip_medical_provider_binding:
+            form.appointmentType === "medical" &&
+            !form.providerId &&
+            form.skipMedicalProviderBinding,
           care_path_kind:
             form.appointmentType === "medical" ? form.carePathKind : "regular",
           title: form.title.trim(),
@@ -178,7 +283,7 @@ function PatientAppointmentSheetContent({
     <PatientSheetScaffold
       open={open}
       onOpenChange={onOpenChange}
-      width="narrow"
+      width="default"
       onSubmit={handleSubmit}
       title={l("patients_new_appointment")}
       bodyClassName="px-4 py-4 space-y-3"
@@ -218,14 +323,22 @@ function PatientAppointmentSheetContent({
             <NativeComboboxSelect
               id="patient-appointment-type"
               value={form.appointmentType}
-              onChange={(event) =>
+              onChange={(event) => {
+                const appointmentType =
+                  (event.target.value as AppointmentKind) ?? form.appointmentType;
                 setForm((current) => ({
                   ...current,
-                  appointmentType: (event.target.value as AppointmentKind) ?? current.appointmentType,
+                  appointmentType,
                   carePathKind:
-                    event.target.value === "medical" ? current.carePathKind : "regular",
-                }))
-              }
+                    appointmentType === "medical" ? current.carePathKind : "regular",
+                  providerId: appointmentType === "internal" ? "" : current.providerId,
+                  doctorId: appointmentType === "internal" ? "" : current.doctorId,
+                  skipMedicalProviderBinding:
+                    appointmentType === "medical"
+                      ? current.skipMedicalProviderBinding
+                      : false,
+                }));
+              }}
               className={cn("w-full", selectClass)}
             >
               {TYPE_OPTIONS.map((option) => (
@@ -299,12 +412,108 @@ function PatientAppointmentSheetContent({
           </FormField>
         </div>
 
+        <div className="grid gap-3 md:grid-cols-2">
+          <FormField label={t.common_provider} htmlFor="patient-appointment-provider">
+            <NativeComboboxSelect
+              id="patient-appointment-provider"
+              value={form.providerId}
+              disabled={form.appointmentType === "internal"}
+              onChange={(event) => {
+                const providerId = event.target.value;
+                const provider = providers.find((item) => item.id === providerId);
+                setForm((current) => ({
+                  ...current,
+                  providerId,
+                  doctorId: "",
+                  skipMedicalProviderBinding: providerId
+                    ? false
+                    : current.skipMedicalProviderBinding,
+                  location:
+                    provider && !current.location.trim()
+                      ? providerLabel(provider)
+                      : current.location,
+                }));
+              }}
+              className={cn("w-full", selectClass)}
+            >
+              <option value="">{t.common_not_set}</option>
+              {providerOptions.map((provider) => (
+                <option key={provider.id} value={provider.id}>
+                  {providerLabel(provider)}
+                </option>
+              ))}
+            </NativeComboboxSelect>
+          </FormField>
+          <FormField label={t.common_doctor} htmlFor="patient-appointment-doctor">
+            <NativeComboboxSelect
+              id="patient-appointment-doctor"
+              value={form.doctorId}
+              disabled={!form.providerId}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  doctorId: event.target.value,
+                }))
+              }
+              className={cn("w-full", selectClass)}
+            >
+              <option value="">{t.common_not_set}</option>
+              {doctors.map((doctor) => (
+                <option key={doctor.id} value={doctor.id}>
+                  {doctorLabel(doctor)}
+                </option>
+              ))}
+            </NativeComboboxSelect>
+          </FormField>
+        </div>
+
+        {form.appointmentType === "medical" ? (
+          <div className="space-y-2">
+            <label
+              htmlFor="patient-appointment-skip-provider-binding"
+              className="flex items-start gap-3 rounded-lg border border-border/60 bg-card px-3 py-2 text-sm text-foreground"
+            >
+              <input
+                id="patient-appointment-skip-provider-binding"
+                type="checkbox"
+                checked={form.skipMedicalProviderBinding}
+                disabled={Boolean(form.providerId)}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    skipMedicalProviderBinding: event.target.checked,
+                  }))
+                }
+                className={cn(checkboxClass, "mt-0.5")}
+              />
+              <span>
+                <span className="block font-medium text-foreground">
+                  {l("appointments_medical_provider_opt_out")}
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  {l("appointments_medical_provider_opt_out_hint")}
+                </span>
+              </span>
+            </label>
+            {!form.providerId && !form.skipMedicalProviderBinding ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                {l("appointments_medical_provider_required_hint")}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         <FormField label={l("patients_location")} htmlFor="patient-appointment-location">
           <Input
             id="patient-appointment-location"
             value={form.location}
             onChange={(event) =>
               setForm((current) => ({ ...current, location: event.target.value }))
+            }
+            placeholder={
+              selectedProvider
+                ? providerLabel(selectedProvider)
+                : l("patients_location")
             }
             className={inputClass}
           />
