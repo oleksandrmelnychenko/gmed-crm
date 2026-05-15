@@ -285,7 +285,7 @@ function PatientAppointmentSheetContent({
       onOpenChange={onOpenChange}
       width="default"
       onSubmit={handleSubmit}
-      title={l("patients_new_appointment")}
+      title={t.appointments_new}
       bodyClassName="px-4 py-4 space-y-3"
       footer={
         <>
@@ -319,7 +319,7 @@ function PatientAppointmentSheetContent({
         </FormField>
 
         <div className="grid gap-3 md:grid-cols-2">
-          <FormField label={l("patients_type")} htmlFor="patient-appointment-type">
+          <FormField label={l("patients_appointment_type")} htmlFor="patient-appointment-type">
             <NativeComboboxSelect
               id="patient-appointment-type"
               value={form.appointmentType}
@@ -349,7 +349,7 @@ function PatientAppointmentSheetContent({
             </NativeComboboxSelect>
           </FormField>
           <FormField
-            label={l("patients_care_path")}
+            label={l("patients_appointment_care_path")}
             htmlFor="patient-appointment-care-path"
           >
             <NativeComboboxSelect
