@@ -96,7 +96,6 @@ export type AppointmentMobileDetailSheetContentProps = {
   openTaskCount: number;
   pendingReminderCount: number;
   interpreterReportReady: boolean;
-  completionWarnings: string[];
   taskAssignableStaff: StaffOption[];
   reportReviewMeta: string;
   detailDisplay: {
@@ -164,7 +163,6 @@ function useAppointmentMobileDetailSheetContentContent({
   openTaskCount,
   pendingReminderCount,
   interpreterReportReady,
-  completionWarnings,
   taskAssignableStaff,
   reportReviewMeta,
   detailDisplay,
@@ -351,7 +349,6 @@ function useAppointmentMobileDetailSheetContentContent({
                       openTaskCount={openTaskCount}
                       pendingReminderCount={pendingReminderCount}
                       interpreterReportReady={interpreterReportReady}
-                      completionWarnings={completionWarnings}
                       followUpAssigneeId={followUpAssigneeId}
                       setFollowUpAssigneeId={setFollowUpAssigneeId}
                       onRefresh={onRefresh}

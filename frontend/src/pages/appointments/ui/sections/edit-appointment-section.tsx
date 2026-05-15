@@ -4,14 +4,21 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useState,
   type FormEvent,
   type SetStateAction,
 } from "react";
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, Pencil } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Banner } from "@/components/ui-shell";
+import {
+  Banner,
+  InfoRow,
+  ListItem,
+  Section,
+  tokens,
+} from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import {
@@ -53,7 +60,10 @@ import type {
   StaffOption,
 } from "@/pages/appointments/model/types";
 import { CARE_PATH_KIND_OPTIONS } from "@/pages/appointments/model/constants";
-import { Field } from "@/pages/appointments/ui/shared/workspace-primitives";
+import {
+  AppointmentEditorSheet,
+  Field,
+} from "@/pages/appointments/ui/shared/workspace-primitives";
 import {
   ConflictPanel,
   ScheduleWarningsPanel,
@@ -135,6 +145,15 @@ function createEditAppointmentFieldAction<K extends keyof EditAppointmentSection
 const selectClassName = appointmentSelectControlClassName;
 const inputClassName = appointmentSlateInputClassName;
 
+function editSheetSectionTitle(label: string) {
+  return (
+    <h3 className="inline-flex items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
+      <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+      <span>{label}</span>
+    </h3>
+  );
+}
+
 function withEllipsis(value: string | null | undefined) {
   const normalized = String(value ?? "").trim();
   if (!normalized) return "";
@@ -165,6 +184,7 @@ function useEditAppointmentSectionContentContent({
       detail,
       createEditAppointmentSectionState,
     );
+  const [sheetOpen, setSheetOpen] = useState(false);
   const setForm = (value: SetStateAction<AppointmentFormState>) =>
     dispatchEditState(createEditAppointmentFieldAction("form", value));
   const setRecurrenceScope = (
@@ -342,6 +362,7 @@ function useEditAppointmentSectionContentContent({
             : "single",
         }),
       });
+      setSheetOpen(false);
       onSaved(buildScheduleNotice(result.conflicts, localWarnings));
     } catch (submitError) {
       setError(
@@ -354,18 +375,127 @@ function useEditAppointmentSectionContentContent({
     }
   }
 
+  function resetEditFormState() {
+    dispatchEditState({
+      type: "patch",
+      value: {
+        form: buildEditAppointmentForm(detail),
+        recurrenceScope: "single",
+        conflicts: null,
+        error: "",
+        busy: false,
+      },
+    });
+  }
+
+  function handleSheetOpenChange(open: boolean) {
+    setSheetOpen(open);
+    if (open) {
+      setError("");
+      return;
+    }
+    resetEditFormState();
+  }
+
+  const providerSummary =
+    providers.find((provider) => provider.id === form.providerId)?.name ??
+    detail.provider_name ??
+    t.common_not_set;
+  const selectedDoctor = doctors.find((doctor) => doctor.id === form.doctorId);
+  const doctorSummary = selectedDoctor
+    ? doctorLabel(selectedDoctor)
+    : detail.doctor_name ?? t.common_not_set;
+  const ownerSummary =
+    staff.find((member) => member.id === form.ownerUserId)?.name ??
+    detail.owner_name ??
+    t.common_not_set;
+  const interpreterSummary =
+    interpreters.find((member) => member.id === form.interpreterId)?.name ??
+    detail.interpreter_name ??
+    t.common_not_set;
+  const timeSummary =
+    [form.timeStart, form.timeEnd].filter(Boolean).join(" - ") ||
+    t.common_not_set;
+
   return (
-    <section className="space-y-3 rounded-xl p-3.5 border border-border/50 bg-card/40">
-      <h3 className="text-sm font-semibold text-foreground">
-        {t.appointments_title}
-      </h3>
-      {error ? (
-        <div className="mt-4">
-          <Banner tone="error" withIcon>{error}</Banner>
-        </div>
-      ) : null}
-      <form onSubmit={handleSubmit} className="mt-4 space-y-4">
-        <Field label={t.appointments_title_col}>
+    <>
+      <Section
+        title={t.appointments_title}
+        accessory={
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-lg gap-1.5"
+            onClick={() => handleSheetOpenChange(true)}
+          >
+            <Pencil className="size-3.5" />
+            {t.common_edit}
+          </Button>
+        }
+      >
+        <ListItem className="space-y-4">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-foreground">
+              {form.title || detail.title}
+            </p>
+            <p className={tokens.text.muted}>
+              {carePathKindLabel(form.carePathKind)}
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <InfoRow
+              label={t.appointments_date}
+              value={form.date || t.common_not_set}
+            />
+            <InfoRow label={t.appointments_time} value={timeSummary} />
+            <InfoRow label={t.common_provider} value={providerSummary} />
+            <InfoRow label={t.common_doctor} value={doctorSummary} />
+            <InfoRow label={t.patients_assign_owner} value={ownerSummary} />
+            <InfoRow label={interpreterFieldLabel} value={interpreterSummary} />
+            <InfoRow
+              label={t.appointments_location}
+              value={form.location.trim() || t.common_not_set}
+            />
+          </div>
+        </ListItem>
+      </Section>
+
+      <AppointmentEditorSheet
+        open={sheetOpen}
+        onOpenChange={handleSheetOpenChange}
+        title={t.appointments_title}
+        maxWidthClassName="sm:max-w-[760px]"
+        onSubmit={handleSubmit}
+        footer={
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg"
+              onClick={() => handleSheetOpenChange(false)}
+            >
+              {t.common_cancel}
+            </Button>
+            <Button
+              type="submit"
+              size="sm"
+              className="h-8 rounded-lg gap-1.5"
+              disabled={busy}
+            >
+              {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+              {busy ? t.patients_saving : t.common_save}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4 rounded-xl p-4">
+        {error ? <Banner tone="error" withIcon>{error}</Banner> : null}
+        <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
+        {editSheetSectionTitle(appointmentText("appointments_appointment_and_timing"))}
+        <div className="grid gap-4 md:grid-cols-2">
+        <Field compact label={t.appointments_title_col}>
           <Input
             value={form.title}
             onChange={(event) =>
@@ -378,6 +508,7 @@ function useEditAppointmentSectionContentContent({
           />
         </Field>
         <Field
+          compact
           label={appointmentText("appointments_care_path")}
         >
           <NativeComboboxSelect
@@ -398,8 +529,9 @@ function useEditAppointmentSectionContentContent({
             ))}
           </NativeComboboxSelect>
         </Field>
+        </div>
         <div className="grid gap-4 md:grid-cols-3">
-          <Field label={t.appointments_date}>
+          <Field compact label={t.appointments_date}>
             <Input
               type="date"
               value={form.date}
@@ -412,7 +544,7 @@ function useEditAppointmentSectionContentContent({
               className={inputClassName}
             />
           </Field>
-          <Field label={t.appointments_time}>
+          <Field compact label={t.appointments_time}>
             <Input
               type="time"
               value={form.timeStart}
@@ -425,7 +557,7 @@ function useEditAppointmentSectionContentContent({
               className={inputClassName}
             />
           </Field>
-          <Field label={t.appointments_time}>
+          <Field compact label={t.appointments_time}>
             <Input
               type="time"
               value={form.timeEnd}
@@ -439,8 +571,11 @@ function useEditAppointmentSectionContentContent({
             />
           </Field>
         </div>
+        </section>
+        <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
+        {editSheetSectionTitle(appointmentText("appointments_provider_and_doctor"))}
         <div className="grid gap-4 md:grid-cols-2">
-          <Field label={t.common_provider}>
+          <Field compact label={t.common_provider}>
             <NativeComboboxSelect
               value={form.providerId}
               onChange={(event) =>
@@ -461,7 +596,7 @@ function useEditAppointmentSectionContentContent({
               ))}
             </NativeComboboxSelect>
           </Field>
-          <Field label={t.common_doctor}>
+          <Field compact label={t.common_doctor}>
             <NativeComboboxSelect
               value={form.doctorId}
               onChange={(event) =>
@@ -482,8 +617,11 @@ function useEditAppointmentSectionContentContent({
             </NativeComboboxSelect>
           </Field>
         </div>
+        </section>
+        <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
+        {editSheetSectionTitle(appointmentText("appointments_coordination_and_notes"))}
         <div className="grid gap-4 md:grid-cols-2">
-          <Field label={t.patients_assign_owner}>
+          <Field compact label={t.patients_assign_owner}>
             <NativeComboboxSelect
               value={form.ownerUserId}
               onChange={(event) =>
@@ -502,7 +640,7 @@ function useEditAppointmentSectionContentContent({
               ))}
             </NativeComboboxSelect>
           </Field>
-          <Field label={interpreterFieldLabel}>
+          <Field compact label={interpreterFieldLabel}>
             <NativeComboboxSelect
               value={form.interpreterId}
               onChange={(event) =>
@@ -522,7 +660,7 @@ function useEditAppointmentSectionContentContent({
             </NativeComboboxSelect>
           </Field>
         </div>
-        <Field label={t.appointments_location}>
+        <Field compact label={t.appointments_location}>
           <Input
             value={form.location}
             onChange={(event) =>
@@ -534,9 +672,12 @@ function useEditAppointmentSectionContentContent({
             className={inputClassName}
           />
         </Field>
+        </section>
         {detail.recurrence_frequency ? (
-          <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3">
-            <Field label={t.appointments_scope_apply_schedule}>
+          <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
+          {editSheetSectionTitle(appointmentText("appointments_repeat_frequency"))}
+          <div className="space-y-3 rounded-lg border border-border/60 bg-card p-3">
+            <Field compact label={t.appointments_scope_apply_schedule}>
               <NativeComboboxSelect
                 value={recurrenceScope}
                 onChange={(event) =>
@@ -553,11 +694,12 @@ function useEditAppointmentSectionContentContent({
                 <option value="series">{t.appointments_scope_series}</option>
               </NativeComboboxSelect>
             </Field>
-            <p className="mt-2 text-xs text-sky-800">
+            <p className="text-xs text-muted-foreground">
               {t.appointments_scope_following_hint}
             </p>
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <Field
+                compact
                 label={appointmentText("appointments_repeat_frequency")}
               >
                 <NativeComboboxSelect
@@ -582,6 +724,7 @@ function useEditAppointmentSectionContentContent({
                 </NativeComboboxSelect>
               </Field>
               <Field
+                compact
                 label={appointmentText("appointments_repeat_every")}
               >
                 <Input
@@ -599,6 +742,7 @@ function useEditAppointmentSectionContentContent({
                 />
               </Field>
               <Field
+                compact
                 label={appointmentText("appointments_total_occurrences")}
               >
                 <Input
@@ -619,6 +763,7 @@ function useEditAppointmentSectionContentContent({
                 />
               </Field>
               <Field
+                compact
                 label={appointmentText("appointments_repeat_until")}
               >
                 <Input
@@ -635,24 +780,17 @@ function useEditAppointmentSectionContentContent({
                 />
               </Field>
             </div>
-            <p className="mt-3 text-xs text-sky-800">
+            <p className="text-xs text-muted-foreground">
               {t.appointments_edit_recurrence_rule_guidance}
             </p>
           </div>
+          </section>
         ) : null}
         <ConflictPanel conflicts={conflicts} />
         <ScheduleWarningsPanel warnings={localWarnings} />
-        <div className="flex justify-end">
-          <Button
-            type="submit"
-            disabled={busy}
-          >
-            {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-            {busy ? t.patients_saving : t.common_save}
-          </Button>
         </div>
-      </form>
-    </section>
+      </AppointmentEditorSheet>
+    </>
   );
 }
 

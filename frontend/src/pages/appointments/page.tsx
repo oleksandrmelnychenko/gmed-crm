@@ -1925,7 +1925,6 @@ function useStaffAppointmentsPageContent() {
           openTaskCount={openTaskCount}
           pendingReminderCount={pendingReminderCount}
           interpreterReportReady={interpreterReportReady}
-          completionWarnings={completionWarnings}
           taskAssignableStaff={taskAssignableStaff}
           reportReviewMeta={reportReviewMeta}
           detailDisplay={{

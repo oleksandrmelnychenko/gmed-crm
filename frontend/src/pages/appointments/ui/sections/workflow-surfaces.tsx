@@ -9,15 +9,23 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
-import { LoaderCircle } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Clock3,
+  Languages,
+  LoaderCircle,
+  Plus,
+} from "lucide-react";
 
+import { AdminInlineMetric } from "@/components/admin-page-patterns";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Banner,
   CountBadge,
+  ListItem,
   Section,
-  StatCard,
   tokens,
 } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
@@ -34,13 +42,8 @@ import { cn } from "@/lib/utils";
 import { buildAppointmentWorkflowSummary } from "@/pages/appointments/model/selectors";
 import { InterpreterSuggestionsPanel } from "@/pages/appointments/ui/sections/interpreter-suggestions-panel";
 import {
-  appointmentSectionCardClassName,
-  appointmentMetaPillClassName,
-  appointmentMiniPillClassName,
   appointmentSelectControlClassName,
   appointmentSlateInputClassName,
-  appointmentSoftPanelClassName,
-  appointmentSoftSplitRowClassName,
   appointmentTextareaControlClassName,
 } from "@/pages/appointments/appearance/surface-appearance";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
@@ -100,14 +103,15 @@ import {
   TASK_STATUS_OPTIONS,
 } from "@/pages/appointments/model/constants";
 import {
-  AppointmentWorkspaceSectionIntro,
+  AppointmentEditorSheet,
   EmptyState,
   Field,
 } from "@/pages/appointments/ui/shared/workspace-primitives";
-import { ContextCard } from "@/pages/appointments/ui/shared/context-card";
 
 const selectClassName = appointmentSelectControlClassName;
 const textareaClassName = appointmentTextareaControlClassName;
+const workflowInlineBadgeClassName =
+  "inline-flex h-6 shrink-0 items-center rounded-full border border-border/60 bg-muted/25 px-2.5 text-[11px] font-medium text-foreground";
 
 function checklistPhaseLabel(phase: string) {
   switch (phase) {
@@ -126,6 +130,59 @@ function withEllipsis(value: string | null | undefined) {
   const normalized = String(value ?? "").trim();
   if (!normalized) return "";
   return /[.…]$/u.test(normalized) ? normalized : `${normalized}…`;
+}
+
+function WorkflowSectionAccessory({
+  count,
+  actionLabel,
+  onAction,
+  disabled,
+}: {
+  count?: ReactNode;
+  actionLabel?: ReactNode;
+  onAction?: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      {count ? <CountBadge>{count}</CountBadge> : null}
+      {actionLabel && onAction ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 rounded-lg gap-1.5"
+          disabled={disabled}
+          onClick={onAction}
+        >
+          <Plus className="size-3.5" />
+          {actionLabel}
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+function WorkflowSheetBody({ children }: { children: ReactNode }) {
+  return <div className="space-y-4 rounded-xl p-4">{children}</div>;
+}
+
+function WorkflowSheetSection({
+  title,
+  children,
+}: {
+  title: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
+      <h3 className="inline-flex items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
+        <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+        <span>{title}</span>
+      </h3>
+      {children}
+    </section>
+  );
 }
 
 type AppointmentWorkflowTabProps = {
@@ -173,26 +230,34 @@ function AppointmentWorkflowOverviewSection({
       title={appointmentText("appointments_operational_overview")}
       accessory={<CountBadge>{workflowSummary.openIssueCount}</CountBadge>}
     >
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard
+      <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
+        <AdminInlineMetric
+          icon={AlertTriangle}
           label={appointmentText("appointments_open_issues_2")}
           value={workflowSummary.openIssueCount}
           description={appointmentText("appointments_checklist_reminder_and_task_items_still_requiring_follow")}
+          tone="amber"
         />
-        <StatCard
+        <AdminInlineMetric
+          icon={CheckCircle2}
           label={appointmentText("appointments_checklist_progress")}
           value={checklistProgressValue}
           description={appointmentText("appointments_completed_versus_total_appointment_bound_workflow_steps")}
+          tone="emerald"
         />
-        <StatCard
+        <AdminInlineMetric
+          icon={Clock3}
           label={appointmentText("appointments_follow_up_queue")}
           value={workflowSummary.followUpQueueCount}
           description={appointmentText("appointments_open_tasks_plus_pending_reminders")}
+          tone="sky"
         />
-        <StatCard
+        <AdminInlineMetric
+          icon={Languages}
           label={appointmentText("appointments_interpreter_gate")}
           value={interpreterGateValue}
           description={interpreterGateDescription}
+          tone="slate"
         />
       </div>
 
@@ -302,12 +367,6 @@ function AppointmentWorkflowTab({
 
   return (
     <>
-      <AppointmentWorkspaceSectionIntro
-        title={appointmentText("appointments_workflow_cockpit")}
-        description={appointmentText("appointments_closure_slot_logistics_and_operational_follow_up_in_one")}
-        accessory={<CountBadge>{workflowSummary.visibleSurfaceCount}</CountBadge>}
-      />
-
       <AppointmentWorkflowOverviewSection
         checklistProgressValue={checklistProgressValue}
         completionWarnings={completionWarnings}
@@ -316,52 +375,43 @@ function AppointmentWorkflowTab({
         workflowSummary={workflowSummary}
       />
       {showTransitionLane ? (
-        <Section
-          title={appointmentText("appointments_closure_and_status")}
-          accessory={<CountBadge>{workflowSummary.transitionSurfaceCount}</CountBadge>}
-        >
-          <p className={tokens.text.muted}>
-            {appointmentText("appointments_close_the_slot_schedule_standard_follow_up_and_control_s")}
-          </p>
+        <div>
           <div className="grid gap-4 xl:grid-cols-2">
             {showCompletionSection ? (
-              <MemoizedAppointmentCompletionSection
-                detail={detail}
-                detailReport={detailReport}
-                handoffStakeholders={handoffStakeholders}
-                openChecklistCount={openChecklistCount}
-                openTaskCount={openTaskCount}
-                pendingReminderCount={pendingReminderCount}
-                interpreterReportReady={interpreterReportReady}
-                completionWarnings={completionWarnings}
-                followUpAssigneeId={followUpAssigneeId}
-                setFollowUpAssigneeId={setFollowUpAssigneeId}
-                onRefresh={onRefresh}
-                onError={onError}
-                onNotice={onNotice}
-              />
+              <div className="xl:col-span-2">
+                <MemoizedAppointmentCompletionSection
+                  detail={detail}
+                  detailReport={detailReport}
+                  handoffStakeholders={handoffStakeholders}
+                  openChecklistCount={openChecklistCount}
+                  openTaskCount={openTaskCount}
+                  pendingReminderCount={pendingReminderCount}
+                  interpreterReportReady={interpreterReportReady}
+                  followUpAssigneeId={followUpAssigneeId}
+                  setFollowUpAssigneeId={setFollowUpAssigneeId}
+                  showStatusToggle={showStatusSection}
+                  onRefresh={onRefresh}
+                  onError={onError}
+                  onNotice={onNotice}
+                />
+              </div>
             ) : null}
-            {showStatusSection ? (
-              <MemoizedAppointmentStatusSection
-                detail={detail}
-                openChecklistCount={openChecklistCount}
-                onRefresh={onRefresh}
-                onError={onError}
-              />
+            {showStatusSection && !showCompletionSection ? (
+              <div className="xl:col-span-2">
+                <MemoizedAppointmentStatusSection
+                  detail={detail}
+                  openChecklistCount={openChecklistCount}
+                  onError={onError}
+                />
+              </div>
             ) : null}
           </div>
-        </Section>
+        </div>
       ) : null}
 
       {showLogisticsLane ? (
-        <Section
-          title={appointmentText("appointments_appointment_logistics")}
-          accessory={<CountBadge>{workflowSummary.logisticsSurfaceCount}</CountBadge>}
-        >
-          <p className={tokens.text.muted}>
-            {appointmentText("appointments_keep_the_slot_ownership_and_interpreter_staffing_aligned")}
-          </p>
-          <div className="grid gap-4 xl:grid-cols-2">
+        <div>
+          <div className="grid gap-4">
             {showScheduleSection ? editAppointmentSection : null}
             {showInterpreterSection ? (
               <MemoizedAppointmentInterpreterSection
@@ -375,17 +425,11 @@ function AppointmentWorkflowTab({
               />
             ) : null}
           </div>
-        </Section>
+        </div>
       ) : null}
 
       {showBacklogLane ? (
-        <Section
-          title={appointmentText("appointments_operational_backlog")}
-          accessory={<CountBadge>{workflowSummary.backlogSurfaceCount}</CountBadge>}
-        >
-          <p className={tokens.text.muted}>
-            {appointmentText("appointments_work_through_checklist_items_reminders_and_appointment_l")}
-          </p>
+        <div>
           <div className="space-y-4">
             {showChecklistSection ? (
               <MemoizedAppointmentChecklistSection
@@ -397,12 +441,7 @@ function AppointmentWorkflowTab({
             ) : null}
 
             {showReminderSection || showTaskSection ? (
-              <div
-                className={cn(
-                  "grid gap-4",
-                  showReminderSection && showTaskSection ? "xl:grid-cols-2" : "",
-                )}
-              >
+              <div className="grid gap-4">
                 {showReminderSection ? (
                   <MemoizedAppointmentRemindersSection
                     detail={detail}
@@ -426,7 +465,7 @@ function AppointmentWorkflowTab({
               </div>
             ) : null}
           </div>
-        </Section>
+        </div>
       ) : null}
     </>
   );
@@ -434,6 +473,7 @@ function AppointmentWorkflowTab({
 
 type InterpreterSectionState = {
   assignInterpreterId: string;
+  assignmentSheetOpen: boolean;
   busyAction: string;
   suggestions: InterpreterSuggestion[];
   suggestionsLoading: boolean;
@@ -460,6 +500,7 @@ type InterpreterSectionAction =
 function createInterpreterSectionState(detail: AppointmentDetail): InterpreterSectionState {
   return {
     assignInterpreterId: detail.interpreter_id ?? "",
+    assignmentSheetOpen: false,
     busyAction: "",
     suggestions: [],
     suggestionsLoading: false,
@@ -545,6 +586,7 @@ function AppointmentInterpreterSection({
       historyError,
       preferenceSavingId,
       interpreterContextNonce,
+      assignmentSheetOpen,
     },
     dispatchInterpreterState,
   ] = useReducer(interpreterSectionReducer, detail, createInterpreterSectionState);
@@ -552,7 +594,11 @@ function AppointmentInterpreterSection({
   useEffect(() => {
     dispatchInterpreterState({
       type: "patch",
-      value: { assignInterpreterId: detail.interpreter_id ?? "", busyAction: "" },
+      value: {
+        assignInterpreterId: detail.interpreter_id ?? "",
+        assignmentSheetOpen: false,
+        busyAction: "",
+      },
     });
   }, [detail.id, detail.interpreter_id]);
 
@@ -657,6 +703,10 @@ function AppointmentInterpreterSection({
           body: JSON.stringify({ interpreter_id: assignInterpreterId }),
         },
       );
+      dispatchInterpreterState({
+        type: "patch",
+        value: { assignmentSheetOpen: false },
+      });
       onRefresh();
     } catch (error) {
       onError(
@@ -697,15 +747,84 @@ function AppointmentInterpreterSection({
   return (
     <>
       {canAssign && !detail.is_blocked ? (
-        <section className={appointmentSectionCardClassName("p-5")}>
-          <h3 className="text-sm font-semibold text-zinc-950">
-            {appointmentText("appointments_interpreter_assignment")}
-          </h3>
-          <form
+        <Section
+          title={appointmentText("appointments_interpreter_assignment")}
+          accessory={
+            <WorkflowSectionAccessory
+              count={detail.interpreter_id ? 1 : 0}
+              actionLabel={appointmentText("appointments_assign_interpreter")}
+              onAction={() =>
+                dispatchInterpreterState({
+                  type: "patch",
+                  value: { assignmentSheetOpen: true },
+                })
+              }
+            />
+          }
+        >
+          {detail.interpreter_id ? (
+            <ListItem>
+              <div className="flex flex-col gap-1">
+                <p className="text-sm font-medium text-foreground">
+                  {detail.interpreter_name ?? t.common_not_set}
+                </p>
+                <p className={tokens.text.muted}>
+                  {responseLabel(detail.interpreter_response ?? "pending")}
+                </p>
+              </div>
+            </ListItem>
+          ) : (
+            <EmptyState
+              text={appointmentText("appointments_no_interpreter_linked_to_this_appointment")}
+            />
+          )}
+
+          <AppointmentEditorSheet
+            open={assignmentSheetOpen}
+            onOpenChange={(open) =>
+              dispatchInterpreterState({
+                type: "patch",
+                value: { assignmentSheetOpen: open },
+              })
+            }
+            title={appointmentText("appointments_interpreter_assignment")}
+            maxWidthClassName="sm:max-w-[760px]"
             onSubmit={handleAssignInterpreter}
-            className="mt-4 grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]"
+            footer={
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 rounded-lg"
+                  onClick={() =>
+                    dispatchInterpreterState({
+                      type: "patch",
+                      value: { assignmentSheetOpen: false },
+                    })
+                  }
+                >
+                  {t.common_cancel}
+                </Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                  className="h-8 rounded-lg gap-1.5"
+                  disabled={!assignInterpreterId || busyAction === "assign"}
+                >
+                  {busyAction === "assign" ? (
+                    <LoaderCircle className="size-3.5 animate-spin" />
+                  ) : null}
+                  {appointmentText("appointments_assign_interpreter")}
+                </Button>
+              </>
+            }
           >
-            <Field label={t.role_interpreter}>
+            <WorkflowSheetBody>
+              <WorkflowSheetSection
+                title={appointmentText("appointments_interpreter_assignment")}
+              >
+            <Field compact label={t.role_interpreter}>
               <NativeComboboxSelect
                 value={assignInterpreterId}
                   onChange={(event) =>
@@ -724,19 +843,7 @@ function AppointmentInterpreterSection({
                 ))}
               </NativeComboboxSelect>
             </Field>
-            <div className="flex items-end">
-              <Button
-                type="submit"
-                disabled={!assignInterpreterId || busyAction === "assign"}
-              >
-                {busyAction === "assign" ? (
-                  <LoaderCircle className="size-4 animate-spin" />
-                ) : null}
-                {appointmentText("appointments_assign_interpreter")}
-              </Button>
-            </div>
-          </form>
-          <div className="mt-4">
+              </WorkflowSheetSection>
             <InterpreterSuggestionsPanel
               suggestions={suggestions}
               selectedInterpreterId={assignInterpreterId}
@@ -756,15 +863,13 @@ function AppointmentInterpreterSection({
                 void handleSetInterpreterPreference(interpreterId, preference)
               }
             />
-          </div>
-        </section>
+            </WorkflowSheetBody>
+          </AppointmentEditorSheet>
+        </Section>
       ) : null}
       {canRespond && detail.interpreter_id === currentUserId ? (
-        <section className={appointmentSectionCardClassName("p-5")}>
-          <h3 className="text-sm font-semibold text-zinc-950">
-            {appointmentText("appointments_interpreter_response")}
-          </h3>
-          <div className="mt-4 flex flex-wrap gap-2">
+        <Section title={appointmentText("appointments_interpreter_response")}>
+          <div className="flex flex-wrap gap-2">
             {INTERPRETER_RESPONSE_OPTIONS.map((value) => (
               <Button
                 key={value}
@@ -781,7 +886,7 @@ function AppointmentInterpreterSection({
               </Button>
             ))}
           </div>
-        </section>
+        </Section>
       ) : null}
     </>
   );
@@ -789,6 +894,7 @@ function AppointmentInterpreterSection({
 
 type ChecklistSectionState = {
   form: ChecklistFormState;
+  sheetOpen: boolean;
   submitBusy: boolean;
   completingId: string;
 };
@@ -799,6 +905,7 @@ type ChecklistSectionAction =
 
 const CHECKLIST_SECTION_INITIAL_STATE: ChecklistSectionState = {
   form: blankChecklistForm(),
+  sheetOpen: false,
   submitBusy: false,
   completingId: "",
 };
@@ -851,10 +958,12 @@ function AppointmentChecklistSection({
 }) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const [{ form, submitBusy, completingId }, dispatchChecklistState] =
+  const [{ form, sheetOpen, submitBusy, completingId }, dispatchChecklistState] =
     useReducer(checklistSectionReducer, CHECKLIST_SECTION_INITIAL_STATE);
   const setForm = (value: SetStateAction<ChecklistFormState>) =>
     dispatchChecklistState(createChecklistFieldAction("form", value));
+  const setSheetOpen = (value: SetStateAction<boolean>) =>
+    dispatchChecklistState(createChecklistFieldAction("sheetOpen", value));
   const setSubmitBusy = (value: SetStateAction<boolean>) =>
     dispatchChecklistState(createChecklistFieldAction("submitBusy", value));
   const setCompletingId = (value: SetStateAction<string>) =>
@@ -865,6 +974,7 @@ function AppointmentChecklistSection({
       type: "patch",
       value: {
         form: blankChecklistForm(),
+        sheetOpen: false,
         submitBusy: false,
         completingId: "",
       },
@@ -883,6 +993,7 @@ function AppointmentChecklistSection({
         }),
       });
       setForm(blankChecklistForm());
+      setSheetOpen(false);
       onRefresh();
     } catch (error) {
       onError(
@@ -914,98 +1025,143 @@ function AppointmentChecklistSection({
     }
   }
 
+  function handleSheetOpenChange(open: boolean) {
+    setSheetOpen(open);
+    if (!open) {
+      setForm(blankChecklistForm());
+      setSubmitBusy(false);
+    }
+  }
+
   return (
-    <section className={appointmentSectionCardClassName("p-5")}>
-      <h3 className="text-sm font-semibold text-zinc-950">
-        {appointmentText("appointments_checklist")}
-      </h3>
-      <div className="mt-4 space-y-3">
+    <>
+    <Section
+      title={appointmentText("appointments_checklist")}
+      accessory={
+        <WorkflowSectionAccessory
+          count={items.length}
+          actionLabel={appointmentText("appointments_add_checklist_item")}
+          onAction={() => setSheetOpen(true)}
+        />
+      }
+    >
+      <div className="space-y-3">
         {items.length === 0 ? (
           <EmptyState
             text={appointmentText("appointments_no_workflow_steps_exist_for_this_appointment_yet")}
           />
         ) : (
           items.map((item) => (
-            <div
-              key={item.id}
-              className={appointmentSoftSplitRowClassName}
-            >
-              <div>
-                <p className="text-sm font-medium text-zinc-900">
-                  {item.item_text}
-                </p>
-                <p className="mt-1 text-xs uppercase tracking-[0.12em] text-zinc-500">
-                  {checklistPhaseLabel(item.phase)}
-                </p>
+            <ListItem key={item.id}>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-medium text-foreground">
+                    {item.item_text}
+                  </p>
+                  <p className={cn("mt-1", tokens.text.eyebrow)}>
+                    {checklistPhaseLabel(item.phase)}
+                  </p>
+                </div>
+                {item.is_completed ? (
+                  <span
+                    className={cn(
+                      workflowInlineBadgeClassName,
+                      "text-emerald-700",
+                    )}
+                  >
+                    {t.common_completed} {formatDateTimeLabel(item.completed_at)}
+                  </span>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={Boolean(completingId)}
+                    onClick={() => void handleComplete(item.id)}
+                  >
+                    {completingId === item.id ? (
+                      <LoaderCircle className="size-4 animate-spin" />
+                    ) : null}
+                    {appointmentText("appointments_mark_complete")}
+                  </Button>
+                )}
               </div>
-              {item.is_completed ? (
-                <span className="text-xs font-medium text-emerald-700">
-                  {t.common_completed} {formatDateTimeLabel(item.completed_at)}
-                </span>
-              ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={Boolean(completingId)}
-                  onClick={() => void handleComplete(item.id)}
-                >
-                  {completingId === item.id ? (
-                    <LoaderCircle className="size-4 animate-spin" />
-                  ) : null}
-                  {appointmentText("appointments_mark_complete")}
-                </Button>
-              )}
-            </div>
+            </ListItem>
           ))
         )}
       </div>
-      <form
-        onSubmit={handleSubmit}
-        className="mt-5 grid gap-4 md:grid-cols-[180px_minmax(0,1fr)_auto]"
-      >
-        <Field label={t.orders_phase}>
-          <NativeComboboxSelect
-            value={form.phase}
-            onChange={(event) =>
-              setForm((current) => ({
-                ...current,
-                phase: event.target.value,
-              }))
-            }
-            className={selectClassName}
+    </Section>
+
+    <AppointmentEditorSheet
+      open={sheetOpen}
+      onOpenChange={handleSheetOpenChange}
+      title={appointmentText("appointments_add_checklist_item")}
+      maxWidthClassName="sm:max-w-[760px]"
+      onSubmit={handleSubmit}
+      footer={
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-lg"
+            onClick={() => handleSheetOpenChange(false)}
           >
-            {CHECKLIST_PHASES.map((phase) => (
-              <option key={phase} value={phase}>
-                {checklistPhaseLabel(phase)}
-              </option>
-            ))}
-          </NativeComboboxSelect>
-        </Field>
-        <Field label={t.orders_phase}>
-          <Input
-            value={form.itemText}
-            onChange={(event) =>
-              setForm((current) => ({
-                ...current,
-                itemText: event.target.value,
-              }))
-            }
-            placeholder={withEllipsis(tr.appointments_title_col)}
-            className={appointmentSlateInputClassName}
-            required
-          />
-        </Field>
-        <div className="flex items-end">
+            {t.common_cancel}
+          </Button>
           <Button
             type="submit"
+            size="sm"
+            className="h-8 rounded-lg gap-1.5"
             disabled={submitBusy || !form.itemText.trim()}
           >
-            {submitBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+            {submitBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
             {appointmentText("appointments_add_checklist_item")}
           </Button>
-        </div>
-      </form>
-    </section>
+        </>
+      }
+    >
+      <WorkflowSheetBody>
+        <WorkflowSheetSection
+          title={appointmentText("appointments_add_checklist_item")}
+        >
+          <div className="grid gap-4 md:grid-cols-[180px_minmax(0,1fr)]">
+            <Field compact label={t.orders_phase}>
+              <NativeComboboxSelect
+                value={form.phase}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    phase: event.target.value,
+                  }))
+                }
+                className={selectClassName}
+              >
+                {CHECKLIST_PHASES.map((phase) => (
+                  <option key={phase} value={phase}>
+                    {checklistPhaseLabel(phase)}
+                  </option>
+                ))}
+              </NativeComboboxSelect>
+            </Field>
+            <Field compact label={tr.appointments_title_col}>
+              <Input
+                value={form.itemText}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    itemText: event.target.value,
+                  }))
+                }
+                placeholder={withEllipsis(tr.appointments_title_col)}
+                className={appointmentSlateInputClassName}
+                required
+              />
+            </Field>
+          </div>
+        </WorkflowSheetSection>
+      </WorkflowSheetBody>
+    </AppointmentEditorSheet>
+    </>
   );
 }
 
@@ -1026,11 +1182,13 @@ function AppointmentRemindersSection({
 }) {
   const { t } = useLang();
   const [form, setForm] = useState<ReminderFormState>(() => blankReminderForm());
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [submitBusy, setSubmitBusy] = useState(false);
   const [completingId, setCompletingId] = useState("");
 
   const resetReminderState = () => {
     setForm(blankReminderForm());
+    setSheetOpen(false);
     setSubmitBusy(false);
     setCompletingId("");
   };
@@ -1053,6 +1211,7 @@ function AppointmentRemindersSection({
         }),
       });
       setForm(blankReminderForm());
+      setSheetOpen(false);
       onRefresh();
     } catch (error) {
       onError(
@@ -1084,60 +1243,121 @@ function AppointmentRemindersSection({
     }
   }
 
+  function handleSheetOpenChange(open: boolean) {
+    setSheetOpen(open);
+    if (!open) {
+      setForm(blankReminderForm());
+      setSubmitBusy(false);
+    }
+  }
+
   return (
-    <section className={appointmentSectionCardClassName("p-5")}>
-      <h3 className="text-sm font-semibold text-zinc-950">
-        {appointmentText("appointments_reminders_2")}
-      </h3>
-      <div className="mt-4 space-y-3">
+    <>
+    <Section
+      title={appointmentText("appointments_reminders_2")}
+      accessory={
+        <WorkflowSectionAccessory
+          count={reminders.length}
+          actionLabel={
+            canManageReminders ? t.appointments_add_reminder : undefined
+          }
+          onAction={canManageReminders ? () => setSheetOpen(true) : undefined}
+        />
+      }
+    >
+      <div className="space-y-3">
         {reminders.length === 0 ? (
           <EmptyState
             text={appointmentText("appointments_no_reminders_exist_for_this_appointment_yet")}
           />
         ) : (
           reminders.map((item) => (
-            <div
-              key={item.id}
-              className={appointmentSoftSplitRowClassName}
-            >
-              <div>
-                <p className="text-sm font-medium text-zinc-900">
-                  {item.title}
-                </p>
-                <p className="mt-1 text-xs text-zinc-500">
-                  {item.user_name} · {formatDateTimeLabel(item.remind_at)}
-                </p>
-                {item.description ? (
-                  <p className="mt-2 text-sm text-zinc-600">
-                    {item.description}
+            <ListItem key={item.id}>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-medium text-foreground">
+                    {item.title}
                   </p>
-                ) : null}
-              </div>
-              {item.is_completed ? (
-                <span className="text-xs font-medium text-emerald-700">
-                  {appointmentText("appointments_completed")}{" "}
-                  {formatDateTimeLabel(item.completed_at)}
-                </span>
-              ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={Boolean(completingId)}
-                  onClick={() => void handleComplete(item.id)}
-                >
-                  {completingId === item.id ? (
-                    <LoaderCircle className="size-4 animate-spin" />
+                  <p className={cn("mt-1", tokens.text.muted)}>
+                  {item.user_name} · {formatDateTimeLabel(item.remind_at)}
+                  </p>
+                  {item.description ? (
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      {item.description}
+                    </p>
                   ) : null}
-                  {appointmentText("appointments_mark_complete")}
-                </Button>
-              )}
-            </div>
+                </div>
+                {item.is_completed ? (
+                  <span
+                    className={cn(
+                      workflowInlineBadgeClassName,
+                      "text-emerald-700",
+                    )}
+                  >
+                    {appointmentText("appointments_completed")}{" "}
+                    {formatDateTimeLabel(item.completed_at)}
+                  </span>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={Boolean(completingId)}
+                    onClick={() => void handleComplete(item.id)}
+                  >
+                    {completingId === item.id ? (
+                      <LoaderCircle className="size-4 animate-spin" />
+                    ) : null}
+                    {appointmentText("appointments_mark_complete")}
+                  </Button>
+                )}
+              </div>
+            </ListItem>
           ))
         )}
       </div>
-      {canManageReminders ? (
-        <form onSubmit={handleSubmit} className="mt-5 grid gap-4 md:grid-cols-2">
-          <Field label={t.patients_assign_owner}>
+    </Section>
+
+    {canManageReminders ? (
+      <AppointmentEditorSheet
+        open={sheetOpen}
+        onOpenChange={handleSheetOpenChange}
+        title={t.appointments_add_reminder}
+        maxWidthClassName="sm:max-w-[760px]"
+        onSubmit={handleSubmit}
+        footer={
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg"
+              onClick={() => handleSheetOpenChange(false)}
+            >
+              {t.common_cancel}
+            </Button>
+            <Button
+              type="submit"
+              size="sm"
+              className="h-8 rounded-lg gap-1.5"
+              disabled={
+                submitBusy ||
+                !form.userId ||
+                !form.remindAt ||
+                !form.title.trim()
+              }
+            >
+              {submitBusy ? (
+                <LoaderCircle className="size-3.5 animate-spin" />
+              ) : null}
+              {t.appointments_add_reminder}
+            </Button>
+          </>
+        }
+      >
+        <WorkflowSheetBody>
+          <WorkflowSheetSection title={t.appointments_add_reminder}>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field compact label={t.patients_assign_owner}>
             <NativeComboboxSelect
               value={form.userId}
               onChange={(event) =>
@@ -1157,7 +1377,7 @@ function AppointmentRemindersSection({
               ))}
             </NativeComboboxSelect>
           </Field>
-          <Field label={t.appointments_date}>
+          <Field compact label={t.appointments_date}>
             <Input
               type="datetime-local"
               value={form.remindAt}
@@ -1171,7 +1391,7 @@ function AppointmentRemindersSection({
               required
             />
           </Field>
-          <Field label={t.appointments_title_col}>
+          <Field compact label={t.appointments_title_col}>
             <Input
               value={form.title}
               onChange={(event) =>
@@ -1184,7 +1404,7 @@ function AppointmentRemindersSection({
               required
             />
           </Field>
-          <Field label={t.providers_service_desc}>
+          <Field compact label={t.providers_service_desc}>
             <textarea
               value={form.description}
               onChange={(event) =>
@@ -1197,25 +1417,12 @@ function AppointmentRemindersSection({
               rows={3}
             />
           </Field>
-          <div className="flex justify-end md:col-span-2">
-            <Button
-              type="submit"
-              disabled={
-                submitBusy ||
-                !form.userId ||
-                !form.remindAt ||
-                !form.title.trim()
-              }
-            >
-              {submitBusy ? (
-                <LoaderCircle className="size-4 animate-spin" />
-              ) : null}
-              {t.appointments_add_reminder}
-            </Button>
-          </div>
-        </form>
-      ) : null}
-    </section>
+        </div>
+          </WorkflowSheetSection>
+        </WorkflowSheetBody>
+      </AppointmentEditorSheet>
+    ) : null}
+    </>
   );
 }
 
@@ -1241,8 +1448,9 @@ function AppointmentCompletionReadinessGrid({
   pendingReminderCount,
 }: AppointmentCompletionReadinessGridProps) {
   return (
-    <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      <ContextCard
+    <div className="mt-4 grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
+      <AdminInlineMetric
+        icon={CheckCircle2}
         label={casesStatusLabel}
         value={
           openChecklistCount === 0
@@ -1251,13 +1459,15 @@ function AppointmentCompletionReadinessGrid({
                 count: openChecklistCount,
               })
         }
-        meta={
+        description={
           openChecklistCount === 0
             ? appointmentText("appointments_no_pending_checklist_items")
             : appointmentText("appointments_finish_outstanding_preparation_or_follow_up_steps")
         }
+        tone={openChecklistCount === 0 ? "emerald" : "amber"}
       />
-      <ContextCard
+      <AdminInlineMetric
+        icon={AlertTriangle}
         label={appointmentText("appointments_tasks")}
         value={
           openTaskCount === 0
@@ -1266,24 +1476,28 @@ function AppointmentCompletionReadinessGrid({
                 count: openTaskCount,
               })
         }
-        meta={
+        description={
           openTaskCount === 0
             ? appointmentText("appointments_no_open_operational_tasks")
             : appointmentText("appointments_resolve_active_pm_interpreter_or_concierge_tasks")
         }
+        tone={openTaskCount === 0 ? "emerald" : "amber"}
       />
-      <ContextCard
+      <AdminInlineMetric
+        icon={Clock3}
         label={appointmentText("appointments_reminders_2")}
         value={appointmentText("appointments_pending_reminders_count", {
           count: pendingReminderCount,
         })}
-        meta={
+        description={
           pendingReminderCount === 0
             ? appointmentText("appointments_no_outstanding_reminders")
             : appointmentText("appointments_pending_reminders_stay_active_after_closure")
         }
+        tone={pendingReminderCount === 0 ? "emerald" : "amber"}
       />
-      <ContextCard
+      <AdminInlineMetric
+        icon={Languages}
         label={interpreterLabel}
         value={
           !detail.interpreter_id
@@ -1292,13 +1506,14 @@ function AppointmentCompletionReadinessGrid({
               ? appointmentText("appointments_approved")
               : appointmentText("appointments_pending_2")
         }
-        meta={
+        description={
           !detail.interpreter_id
             ? appointmentText("appointments_no_interpreter_linked")
             : detailReport
               ? detailReport.approval_status
               : appointmentText("appointments_no_report_submitted_yet")
         }
+        tone={!detail.interpreter_id || interpreterReportReady ? "emerald" : "amber"}
       />
     </div>
   );
@@ -1312,9 +1527,9 @@ function AppointmentCompletionSection({
   openTaskCount,
   pendingReminderCount,
   interpreterReportReady,
-  completionWarnings,
   followUpAssigneeId,
   setFollowUpAssigneeId,
+  showStatusToggle = false,
   onRefresh,
   onError,
   onNotice,
@@ -1326,9 +1541,9 @@ function AppointmentCompletionSection({
   openTaskCount: number;
   pendingReminderCount: number;
   interpreterReportReady: boolean;
-  completionWarnings: string[];
   followUpAssigneeId: string;
   setFollowUpAssigneeId: (value: string) => void;
+  showStatusToggle?: boolean;
   onRefresh: () => void;
   onError: (message: string) => void;
   onNotice: (notice: string) => void;
@@ -1338,6 +1553,7 @@ function AppointmentCompletionSection({
   const [completionPlan, setCompletionPlan] = useState<Record<string, boolean>>(
     () => defaultCompletionPlan(),
   );
+  const [completionSheetOpen, setCompletionSheetOpen] = useState(false);
   const [busyAction, setBusyAction] = useState<"" | "complete" | "follow-up">("");
   const selectedCompletionPresetCount = useMemo(() => {
     let count = 0;
@@ -1351,6 +1567,7 @@ function AppointmentCompletionSection({
 
   useEffect(() => {
     setCompletionPlan(defaultCompletionPlan());
+    setCompletionSheetOpen(false);
     setBusyAction("");
   }, [detail.id, detail.status]);
 
@@ -1361,6 +1578,7 @@ function AppointmentCompletionSection({
         method: "POST",
         body: JSON.stringify({ status: "completed" }),
       });
+      setCompletionSheetOpen(false);
       onRefresh();
     } catch (error) {
       onError(error instanceof Error ? error.message : tr.common_failed_update);
@@ -1416,6 +1634,7 @@ function AppointmentCompletionSection({
             })
           : appointmentText("appointments_appointment_completed"),
       );
+      setCompletionSheetOpen(false);
       onRefresh();
     } catch (error) {
       if (completed) {
@@ -1435,23 +1654,27 @@ function AppointmentCompletionSection({
     }
   }
 
+  const canCompleteAppointment =
+    detail.status !== "completed" && detail.status !== "cancelled";
+
   return (
-    <section className={appointmentSectionCardClassName("p-5")}>
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-zinc-950">
-            {appointmentText("appointments_completion_readiness")}
-          </h3>
-          <p className="text-xs text-zinc-500">
-            {appointmentText("appointments_review_operational_blockers_before_closing_the_appointme")}
-          </p>
-        </div>
-        <span className={appointmentMetaPillClassName}>
-          {detail.status === "completed"
-            ? appointmentText("appointments_completed_2")
-            : statusLabel(detail.status)}
-        </span>
-      </div>
+    <>
+    <Section
+      title={appointmentText("appointments_completion_readiness")}
+      accessory={
+        <WorkflowSectionAccessory
+          actionLabel={
+            canCompleteAppointment ? t.appointments_complete_and_schedule : undefined
+          }
+          onAction={
+            canCompleteAppointment
+              ? () => setCompletionSheetOpen(true)
+              : undefined
+          }
+          disabled={Boolean(busyAction)}
+        />
+      }
+    >
       <AppointmentCompletionReadinessGrid
         casesStatusLabel={t.cases_status}
         detail={detail}
@@ -1461,20 +1684,44 @@ function AppointmentCompletionSection({
         openChecklistCount={openChecklistCount}
         openTaskCount={openTaskCount}
         pendingReminderCount={pendingReminderCount}
-      />      {completionWarnings.length > 0 ? (
+      />
+      {showStatusToggle ? (
         <div className="mt-4">
-          <Banner tone="warning" withIcon>
-            <div className="space-y-1">
-              {completionWarnings.map((warning) => (
-                <p key={warning}>{warning}</p>
-              ))}
-            </div>
-          </Banner>
+          <div className="mb-4 flex items-center gap-2" aria-hidden>
+            <span className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-border" />
+            <span className="size-1.5 rounded-full bg-orange-400" />
+            <span className="size-1.5 rounded-full bg-orange-300" />
+            <span className="size-1.5 rounded-full bg-orange-200" />
+            <span className="h-px flex-1 bg-gradient-to-r from-border via-border to-transparent" />
+          </div>
+          <div className="mb-2 text-xs font-semibold text-muted-foreground">
+            {t.users_status}
+          </div>
+          <AppointmentStatusToggleControl
+            detail={detail}
+            openChecklistCount={openChecklistCount}
+            onError={onError}
+          />
         </div>
       ) : null}
-      {detail.status !== "completed" && detail.status !== "cancelled" ? (
-        <div className="mt-5 space-y-4">
-          <Field label={tr.patients_assign_owner}>
+      {canCompleteAppointment ? (
+        <AppointmentEditorSheet
+          open={completionSheetOpen}
+          onOpenChange={setCompletionSheetOpen}
+          title={appointmentText("appointments_completion_readiness")}
+          footer={
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg"
+              onClick={() => setCompletionSheetOpen(false)}
+            >
+              {t.common_cancel}
+            </Button>
+          }
+        >
+          <Field compact label={tr.patients_assign_owner}>
             <NativeComboboxSelect
               value={followUpAssigneeId}
               onChange={(event) => setFollowUpAssigneeId(event.target.value)}
@@ -1495,12 +1742,6 @@ function AppointmentCompletionSection({
                 type="button"
                 variant={completionPlan[preset.id] ? "default" : "outline"}
                 size="sm"
-                className={cn(
-                  "rounded-2xl",
-                  completionPlan[preset.id]
-                    ? "bg-zinc-950 text-white hover:bg-zinc-800"
-                    : "",
-                )}
                 onClick={() =>
                   setCompletionPlan((current) => ({
                     ...current,
@@ -1535,27 +1776,38 @@ function AppointmentCompletionSection({
               {t.appointments_complete_and_schedule}
             </Button>
           </div>
-        </div>
+        </AppointmentEditorSheet>
       ) : null}
-    </section>
+    </Section>
+    </>
   );
 }
 
-function AppointmentStatusSection({
+function AppointmentStatusToggleControl({
   detail,
   openChecklistCount,
   onRefresh,
   onError,
+  className,
 }: {
   detail: AppointmentDetail;
   openChecklistCount: number;
-  onRefresh: () => void;
+  onRefresh?: () => void;
   onError: (message: string) => void;
+  className?: string;
 }) {
   const { t } = useLang();
   const [statusRecurrenceScope, setStatusRecurrenceScope] =
     useState<AppointmentRecurringActionScope>("single");
   const [busyAction, setBusyAction] = useState("");
+  const [optimisticStatus, setOptimisticStatus] = useState<{
+    appointmentId: string;
+    status: AppointmentStatus;
+  } | null>(null);
+  const visibleStatus =
+    optimisticStatus?.appointmentId === detail.id
+      ? optimisticStatus.status
+      : detail.status;
   const selectedRecurringStatusTargets = useMemo(
     () =>
       detail.recurrence_frequency
@@ -1564,12 +1816,12 @@ function AppointmentStatusSection({
             {
               id: detail.id,
               date: detail.date,
-              status: detail.status,
+              status: visibleStatus,
               recurrence_index: detail.recurrence_index,
               open_checklist_count: openChecklistCount,
             },
           ],
-    [detail, openChecklistCount, statusRecurrenceScope],
+    [detail, openChecklistCount, statusRecurrenceScope, visibleStatus],
   );
   const completionScopeBlockers = useMemo(
     () =>
@@ -1590,7 +1842,11 @@ function AppointmentStatusSection({
     status: AppointmentStatus,
     recurrenceScope: AppointmentRecurringActionScope = "single",
   ) {
+    if (status === visibleStatus) return;
+
     const nextBusyAction = statusActionKey(detail.id, status, recurrenceScope);
+    const previousStatus = visibleStatus;
+    setOptimisticStatus({ appointmentId: detail.id, status });
     setBusyAction(nextBusyAction);
     try {
       await apiFetch<{ ok: boolean }>(`/appointments/${detail.id}/status`, {
@@ -1600,8 +1856,9 @@ function AppointmentStatusSection({
           recurrence_scope: recurrenceScope,
         }),
       });
-      onRefresh();
+      onRefresh?.();
     } catch (error) {
+      setOptimisticStatus({ appointmentId: detail.id, status: previousStatus });
       onError(
         error instanceof Error
           ? error.message
@@ -1613,19 +1870,12 @@ function AppointmentStatusSection({
   }
 
   return (
-    <section className={appointmentSectionCardClassName("p-5")}>
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-zinc-950">
-            {t.users_status}
-          </h3>
-          {detail.recurrence_frequency ? (
-            <p className="mt-1 text-xs text-zinc-500">
-              {t.appointments_scope_bulk_status_hint}
-            </p>
-          ) : null}
-        </div>
-        {detail.recurrence_frequency ? (
+    <div className={cn("space-y-4", className)}>
+      {detail.recurrence_frequency ? (
+        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <p className={tokens.text.muted}>
+            {t.appointments_scope_bulk_status_hint}
+          </p>
           <div className="w-full md:w-[240px]">
             <Field label={t.appointments_scope_apply_status}>
               <NativeComboboxSelect
@@ -1643,46 +1893,57 @@ function AppointmentStatusSection({
               </NativeComboboxSelect>
             </Field>
           </div>
-        ) : null}
-      </div>
-      <div className="mt-4 flex flex-wrap gap-2">
-        {STATUS_OPTIONS.map((status) => {
-          const recurrenceScope = detail.recurrence_frequency
-            ? statusRecurrenceScope
-            : "single";
-          const nextBusyAction = statusActionKey(detail.id, status, recurrenceScope);
-          return (
-            <Button
-              key={status}
-              variant={detail.status === status ? "default" : "outline"}
-              className={cn(
-                "rounded-2xl",
-                detail.status === status
-                  ? "bg-zinc-950 text-white hover:bg-zinc-800"
-                  : "",
-              )}
-              disabled={Boolean(busyAction)}
-              onClick={() => handleStatusChange(status, recurrenceScope)}
-            >
-              {busyAction === nextBusyAction ? (
-                <LoaderCircle className="size-4 animate-spin" />
-              ) : null}
-              {detail.recurrence_frequency && status === "cancelled"
+        </div>
+      ) : null}
+      <div className="pb-1">
+        <div
+          className="grid w-full grid-cols-5 gap-1 rounded-full border border-border/60 bg-muted/30 p-1"
+          role="group"
+          aria-label={t.users_status}
+        >
+          {STATUS_OPTIONS.map((status) => {
+            const recurrenceScope = detail.recurrence_frequency
+              ? statusRecurrenceScope
+              : "single";
+            const nextBusyAction = statusActionKey(detail.id, status, recurrenceScope);
+            const active = visibleStatus === status;
+            const statusOptionLabel =
+              detail.recurrence_frequency && status === "cancelled"
                 ? statusRecurrenceScope === "following"
                   ? t.appointments_cancel_this_and_following
                   : statusRecurrenceScope === "series"
                     ? t.appointments_cancel_whole_series
                     : appointmentText("appointments_cancel_this_occurrence")
-                : statusLabel(status)}
-            </Button>
-          );
-        })}
+                : statusLabel(status);
+            return (
+              <button
+                key={status}
+                type="button"
+                title={statusOptionLabel}
+                aria-pressed={active}
+                disabled={Boolean(busyAction)}
+                onClick={() => handleStatusChange(status, recurrenceScope)}
+                className={cn(
+                  "relative inline-flex h-10 min-w-0 items-center justify-center rounded-full px-2 text-[13px] font-semibold transition-[background-color,color,box-shadow] duration-150 disabled:cursor-not-allowed disabled:opacity-70",
+                  active
+                    ? "bg-orange-500 text-white shadow-sm"
+                    : "text-foreground hover:bg-card",
+                )}
+              >
+                {busyAction === nextBusyAction ? (
+                  <LoaderCircle className="absolute left-2 size-3.5 animate-spin" />
+                ) : null}
+                <span className="min-w-0 truncate">{statusOptionLabel}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
       {detail.recurrence_frequency ? (
-        <div className="mt-4 space-y-3">
-          <p className="text-xs text-zinc-500">
+        <div className="space-y-3">
+          <p className={tokens.text.muted}>
             {t.appointments_scope_targets}{" "}
-            <span className="font-semibold text-zinc-700">
+            <span className="font-semibold text-foreground">
               {selectedRecurringStatusTargets.length}
             </span>{" "}
             {selectedRecurringStatusTargets.length === 1
@@ -1705,7 +1966,32 @@ function AppointmentStatusSection({
           ) : null}
         </div>
       ) : null}
-    </section>
+    </div>
+  );
+}
+
+function AppointmentStatusSection({
+  detail,
+  openChecklistCount,
+  onRefresh,
+  onError,
+}: {
+  detail: AppointmentDetail;
+  openChecklistCount: number;
+  onRefresh?: () => void;
+  onError: (message: string) => void;
+}) {
+  const { t } = useLang();
+
+  return (
+    <Section title={t.users_status}>
+      <AppointmentStatusToggleControl
+        detail={detail}
+        openChecklistCount={openChecklistCount}
+        onRefresh={onRefresh}
+        onError={onError}
+      />
+    </Section>
   );
 }
 
@@ -1746,8 +2032,29 @@ function AppointmentTasksSectionContent({
       buildTaskDefaultDueDate(detail),
     ),
   );
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [submitBusy, setSubmitBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState("");
+
+  function resetTaskForm() {
+    setForm(
+      blankTaskForm(
+        detail.interpreter_id ??
+          detail.owner_user_id ??
+          assignableStaff[0]?.id ??
+          "",
+        buildTaskDefaultDueDate(detail),
+      ),
+    );
+  }
+
+  function handleSheetOpenChange(open: boolean) {
+    setSheetOpen(open);
+    if (!open) {
+      resetTaskForm();
+      setSubmitBusy(false);
+    }
+  }
 
   async function handleTaskSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1766,15 +2073,8 @@ function AppointmentTasksSectionContent({
           priority: form.priority,
         }),
       });
-      setForm(
-        blankTaskForm(
-          detail.interpreter_id ??
-            detail.owner_user_id ??
-            assignableStaff[0]?.id ??
-            "",
-          buildTaskDefaultDueDate(detail),
-        ),
-      );
+      resetTaskForm();
+      setSheetOpen(false);
       onRefresh();
     } catch (error) {
       onError(
@@ -1807,47 +2107,44 @@ function AppointmentTasksSectionContent({
   }
 
   return (
-    <section className={appointmentSectionCardClassName("p-5")}>
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-zinc-950">
-            {appointmentText("appointments_operational_tasks")}
-          </h3>
-          <p className="text-xs text-zinc-500">
-            {appointmentText("appointments_appointment_linked_follow_up_for_pm_teamlead_interpreter")}
-          </p>
-        </div>
-        <span className={appointmentMetaPillClassName}>
-          {appointmentText("appointments_linked_count", {
-            count: tasks.length,
-          })}
-        </span>
-      </div>
-      <div className="mt-4 space-y-3">
+    <>
+    <Section
+      title={appointmentText("appointments_operational_tasks")}
+      accessory={
+        <WorkflowSectionAccessory
+          count={tasks.length}
+          actionLabel={
+            canCreateTasks ? t.appointments_workflow_add_task : undefined
+          }
+          onAction={canCreateTasks ? () => setSheetOpen(true) : undefined}
+        />
+      }
+    >
+      <p className={tokens.text.muted}>
+        {appointmentText("appointments_appointment_linked_follow_up_for_pm_teamlead_interpreter")}
+      </p>
+      <div className="space-y-3">
         {tasks.length === 0 ? (
           <EmptyState
             text={appointmentText("appointments_no_operational_tasks_exist_for_this_appointment_yet")}
           />
         ) : (
           tasks.map((task) => (
-            <div
-              key={task.id}
-              className={appointmentSoftPanelClassName}
-            >
+            <ListItem key={task.id}>
               <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-semibold text-zinc-950">
+                    <p className="text-sm font-semibold text-foreground">
                       {task.title}
                     </p>
-                    <span className={appointmentMiniPillClassName}>
+                    <span className={workflowInlineBadgeClassName}>
                       {taskStatusLabel(task.status)}
                     </span>
-                    <span className={appointmentMiniPillClassName}>
+                    <span className={workflowInlineBadgeClassName}>
                       {taskPriorityLabel(task.priority)}
                     </span>
                   </div>
-                  <p className="mt-1 text-xs text-zinc-500">
+                  <p className={cn("mt-1", tokens.text.muted)}>
                     {task.assigned_to_name} · {roleLabel(task.assigned_to_role)}
                     {task.due_date
                       ? appointmentText("appointments_due_date_suffix", {
@@ -1856,7 +2153,7 @@ function AppointmentTasksSectionContent({
                       : ""}
                   </p>
                   {task.description ? (
-                    <p className="mt-3 text-sm leading-6 text-zinc-600">
+                    <p className="mt-3 text-sm leading-6 text-muted-foreground">
                       {task.description}
                     </p>
                   ) : null}
@@ -1868,12 +2165,6 @@ function AppointmentTasksSectionContent({
                       type="button"
                       variant={task.status === status ? "default" : "outline"}
                       size="sm"
-                      className={cn(
-                        "rounded-2xl",
-                        task.status === status
-                          ? "bg-zinc-950 text-white hover:bg-zinc-800"
-                          : "",
-                      )}
                       disabled={Boolean(actionBusy) || task.status === status}
                       onClick={() => handleTaskStatus(task.id, status)}
                     >
@@ -1885,13 +2176,46 @@ function AppointmentTasksSectionContent({
                   ))}
                 </div>
               </div>
-            </div>
+            </ListItem>
           ))
         )}
       </div>
-      {canCreateTasks ? (
-        <form onSubmit={handleTaskSubmit} className="mt-5 grid gap-4 md:grid-cols-2">
-          <Field label={tr.appointments_title_col}>
+    </Section>
+
+    {canCreateTasks ? (
+      <AppointmentEditorSheet
+        open={sheetOpen}
+        onOpenChange={handleSheetOpenChange}
+        title={t.appointments_workflow_add_task}
+        maxWidthClassName="sm:max-w-[760px]"
+        onSubmit={handleTaskSubmit}
+        footer={
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg"
+              onClick={() => handleSheetOpenChange(false)}
+            >
+              {t.common_cancel}
+            </Button>
+            <Button
+              type="submit"
+              size="sm"
+              className="h-8 rounded-lg gap-1.5"
+              disabled={submitBusy || !form.title.trim() || !form.assignedTo}
+            >
+              {submitBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+              {t.appointments_workflow_add_task}
+            </Button>
+          </>
+        }
+      >
+        <WorkflowSheetBody>
+          <WorkflowSheetSection title={t.appointments_workflow_add_task}>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field compact label={tr.appointments_title_col}>
             <Input
               value={form.title}
               onChange={(event) =>
@@ -1905,7 +2229,7 @@ function AppointmentTasksSectionContent({
               required
             />
           </Field>
-          <Field label={tr.patients_assign_owner}>
+          <Field compact label={tr.patients_assign_owner}>
             <NativeComboboxSelect
               value={form.assignedTo}
               onChange={(event) =>
@@ -1925,7 +2249,7 @@ function AppointmentTasksSectionContent({
               ))}
             </NativeComboboxSelect>
           </Field>
-          <Field label={tr.invoices_due_at}>
+          <Field compact label={tr.invoices_due_at}>
             <Input
               type="datetime-local"
               value={form.dueDate}
@@ -1938,7 +2262,7 @@ function AppointmentTasksSectionContent({
               className={appointmentSlateInputClassName}
             />
           </Field>
-          <Field label={t.users_status}>
+          <Field compact label={t.users_status}>
             <NativeComboboxSelect
               value={form.priority}
               onChange={(event) =>
@@ -1956,7 +2280,7 @@ function AppointmentTasksSectionContent({
               ))}
             </NativeComboboxSelect>
           </Field>
-          <Field label={t.providers_service_desc}>
+          <Field compact label={t.providers_service_desc}>
             <textarea
               value={form.description}
               onChange={(event) =>
@@ -1970,18 +2294,12 @@ function AppointmentTasksSectionContent({
               placeholder={withEllipsis(tr.patients_notes)}
             />
           </Field>
-          <div className="flex items-end justify-end md:col-span-2">
-            <Button
-              type="submit"
-              disabled={submitBusy || !form.title.trim() || !form.assignedTo}
-            >
-              {submitBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-              {t.appointments_workflow_add_task}
-            </Button>
-          </div>
-        </form>
-      ) : null}
-    </section>
+        </div>
+          </WorkflowSheetSection>
+        </WorkflowSheetBody>
+      </AppointmentEditorSheet>
+    ) : null}
+    </>
   );
 }
 
