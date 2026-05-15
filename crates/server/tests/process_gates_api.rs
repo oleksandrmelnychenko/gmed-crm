@@ -926,7 +926,7 @@ async fn create_order_is_blocked_until_existing_customer_recheck_passes() {
         &format!("/api/v1/patients/{patient_id}/update"),
         &pm_bearer,
         Some(json!({
-            "residence_country": "DE",
+            "residence_country": "Germany",
             "languages": ["de"],
             "legal_status": {
                 "dsgvo_signed": true,

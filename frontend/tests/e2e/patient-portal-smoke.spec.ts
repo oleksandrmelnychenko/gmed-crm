@@ -817,21 +817,29 @@ test.describe("patient portal smoke flows", () => {
     await page.goto("/appointments");
     await expect(page).toHaveURL(/\/appointments$/);
 
-    await page.getByRole("textbox").nth(0).fill("2026-05-10");
-    await page.getByRole("textbox").nth(1).fill("2026-05-12");
     await page
+      .getByRole("button", { name: /Terminanfrage senden|Send appointment request/i })
+      .click();
+    const requestSheet = page
+      .getByRole("dialog")
+      .filter({ hasText: /Termin anfragen|Request a visit/i });
+    await expect(requestSheet).toBeVisible();
+
+    await requestSheet.getByLabel(/Bevorzugt ab|Preferred from/i).fill("2026-05-10");
+    await requestSheet.getByLabel(/Bevorzugt bis|Preferred to/i).fill("2026-05-12");
+    await requestSheet
       .getByLabel(/Fachgebiet oder Thema|Specialty or topic/i)
       .fill("Cardiology follow-up");
-    await page
+    await requestSheet
       .getByLabel(/Ortpräferenz|Location preference/i)
       .fill("Clinic Cologne");
-    await page
+    await requestSheet
       .getByLabel(/Anlass|Reason/i)
       .fill("Need a follow-up appointment after receiving the latest findings.");
-    await page
+    await requestSheet
       .getByLabel(/Zusätzliche Notiz|Additional note/i)
       .fill("Morning slots preferred.");
-    await page
+    await requestSheet
       .getByRole("button", {
         name: /Terminanfrage senden|Отправить запрос на запись|Send appointment request/i,
       })

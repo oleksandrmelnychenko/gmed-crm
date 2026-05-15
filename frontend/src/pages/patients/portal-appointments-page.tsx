@@ -8,7 +8,7 @@ import {
   type FormEvent,
   type SetStateAction,
 } from "react";
-import { CalendarClock, LoaderCircle, RefreshCw, Send, Stethoscope } from "lucide-react";
+import { CalendarClock, LoaderCircle, Plus, RefreshCw, Send } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,6 +55,7 @@ import type {
   PortalAppointmentRequestItem,
   PortalFollowupMilestoneItem,
 } from "@/pages/patients/model/portal-shared";
+import { PatientSheetScaffold } from "@/pages/patients/ui/shared/patient-sheet-scaffold";
 import { cn } from "@/lib/utils";
 
 type RequestFormState = {
@@ -94,6 +95,7 @@ type PatientAppointmentsState = {
   requestBusy: boolean;
   requestError: string;
   requestForm: RequestFormState;
+  requestSheetOpen: boolean;
   version: number;
 };
 
@@ -123,6 +125,7 @@ function createPatientAppointmentsState(): PatientAppointmentsState {
     requestBusy: false,
     requestError: "",
     requestForm: blankRequestForm(),
+    requestSheetOpen: false,
     version: 0,
   };
 }
@@ -167,6 +170,7 @@ function usePatientAppointmentsPageContent() {
     requestBusy,
     requestError,
     requestForm,
+    requestSheetOpen,
     version,
   } = pageState;
   const setVersion: Dispatch<SetStateAction<number>> = (nextValue) => {
@@ -184,6 +188,18 @@ function usePatientAppointmentsPageContent() {
           ? nextValue(current.requestForm)
           : nextValue,
     }));
+  };
+  const setRequestSheetOpen = (open: boolean) => {
+    dispatchPageState(
+      open
+        ? { requestSheetOpen: true, requestError: "" }
+        : {
+            requestSheetOpen: false,
+            requestBusy: false,
+            requestError: "",
+            requestForm: blankRequestForm(),
+          },
+    );
   };
 
   useRealtimeSubscription(PORTAL_APPOINTMENT_REALTIME_EVENTS, () => {
@@ -285,6 +301,7 @@ function usePatientAppointmentsPageContent() {
       dispatchPageState((current) => ({
         notice: t.portal_appointments_appointment_request_sent_to_the_care_team,
         requestForm: blankRequestForm(),
+        requestSheetOpen: false,
         version: current.version + 1,
         requestBusy: false,
       }));
@@ -560,12 +577,57 @@ function usePatientAppointmentsPageContent() {
 
         <Section
           title={t.portal_appointments_request_a_visit}
-          accessory={<Stethoscope className="size-4 text-muted-foreground" />}
+          accessory={
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 rounded-lg gap-1.5"
+              onClick={() => setRequestSheetOpen(true)}
+            >
+              <Plus className="size-3.5" />
+              {t.portal_appointments_send_appointment_request}
+            </Button>
+          }
         >
           <p className="text-sm text-muted-foreground">
             {t.portal_appointments_send_preferred_dates_and_context_the_care_team_reviews_and_conve}
           </p>
-          <form className="space-y-4" onSubmit={(event) => void handleSubmitRequest(event)}>
+        </Section>
+
+        <PatientSheetScaffold
+          open={requestSheetOpen}
+          onOpenChange={setRequestSheetOpen}
+          title={t.portal_appointments_request_a_visit}
+          description={t.portal_appointments_send_preferred_dates_and_context_the_care_team_reviews_and_conve}
+          width="form-heavy"
+          onSubmit={(event) => void handleSubmitRequest(event)}
+          footer={
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 rounded-lg"
+                onClick={() => setRequestSheetOpen(false)}
+              >
+                {t.common_cancel}
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                className="h-8 rounded-lg gap-1.5"
+                disabled={requestBusy}
+              >
+                {requestBusy ? (
+                  <LoaderCircle className="size-3.5 animate-spin" />
+                ) : (
+                  <Send className="size-3.5" />
+                )}
+                {t.portal_appointments_send_appointment_request}
+              </Button>
+            </>
+          }
+        >
             <Field label={t.portal_appointments_type} htmlFor="portal-appointment-type">
               <NativeComboboxSelect
                 id="portal-appointment-type"
@@ -674,16 +736,7 @@ function usePatientAppointmentsPageContent() {
               />
             </Field>
             {requestError ? <Banner tone="error">{requestError}</Banner> : null}
-            <Button
-              type="submit"
-              className="h-9 w-full rounded-lg"
-              disabled={requestBusy}
-            >
-              {requestBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
-              {t.portal_appointments_send_appointment_request}
-            </Button>
-          </form>
-        </Section>
+        </PatientSheetScaffold>
       </section>
     </TabShell>
   );

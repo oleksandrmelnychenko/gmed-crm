@@ -2843,8 +2843,8 @@ fn normalize_doctor_payload(body: UpsertDoctorRequest) -> Result<DoctorPayload, 
         .collect::<Vec<_>>()
         .join(" ");
     let name = legacy_name
-        .or_else(|| display_name.clone())
-        .or_else(|| {
+        .or(display_name.clone())
+        .or({
             if joined_name.is_empty() {
                 None
             } else {
@@ -2991,7 +2991,7 @@ fn validate_updated_doctor_title(
 ) -> Result<(), &'static str> {
     if let Some(title) = title
         && !ALLOWED_DOCTOR_TITLES.contains(&title)
-        && !current_title.is_some_and(|current| current.trim() == title)
+        && current_title.is_none_or(|current| current.trim() != title)
     {
         return Err("Doctor title must be Dr. med., PD or Prof.");
     }
@@ -3202,13 +3202,13 @@ fn ensure_primary_contacts(contacts: &mut [PersonContactPayload]) {
                 contact.is_primary = false;
             }
         }
-        if !saw_primary && saw_kind {
-            if let Some(contact) = contacts
+        if !saw_primary
+            && saw_kind
+            && let Some(contact) = contacts
                 .iter_mut()
                 .find(|contact| contact.contact_kind == kind)
-            {
-                contact.is_primary = true;
-            }
+        {
+            contact.is_primary = true;
         }
     }
 }
@@ -4218,7 +4218,7 @@ async fn load_provider_staff_json(
     for row in rows {
         let staff_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
         let contacts =
-            match load_person_contacts_json(&state, provider_id, None, Some(staff_id), None, None)
+            match load_person_contacts_json(state, provider_id, None, Some(staff_id), None, None)
                 .await
             {
                 Ok(items) => items,

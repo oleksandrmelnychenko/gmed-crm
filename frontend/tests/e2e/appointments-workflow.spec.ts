@@ -307,11 +307,18 @@ test.describe("appointments workflow detail", () => {
       `/appointments?appointment=${appointmentId}&detailTab=workflow`,
     );
 
-    await expect(page.getByText("Workflow-Cockpit")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: /Operativer .berblick/i }),
+    ).toBeVisible();
     await expect(page.getByText("Operativer Überblick")).toBeVisible();
-    await expect(page.getByText("Abschluss & Status")).toBeVisible();
-    await expect(page.getByText("Terminlogistik")).toBeVisible();
-    await expect(page.getByText("Operativer Backlog")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Abschlussbereitschaft" }),
+    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Termine" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Dolmetscherbesetzung" }),
+    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Checkliste" })).toBeVisible();
 
     const overviewSection = page
       .locator("section")

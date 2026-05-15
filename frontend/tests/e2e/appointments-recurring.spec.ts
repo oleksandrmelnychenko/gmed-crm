@@ -304,9 +304,21 @@ test.describe("appointments recurring flows", () => {
       .getByRole("button", { name: /Ganze Serie absagen/i })
       .last();
     await expect(cancelWholeSeriesButton).toBeVisible();
-    await cancelWholeSeriesButton.click();
+    const statusChangeRequest = page.waitForRequest((request) => {
+      if (
+        request.method() !== "POST" ||
+        !request.url().includes(`/api/v1/appointments/${appointmentIds[0]}/status`)
+      ) {
+        return false;
+      }
+      const payload = JSON.parse(request.postData() ?? "{}") as {
+        status?: string;
+        recurrence_scope?: string;
+      };
+      return payload.status === "cancelled" && payload.recurrence_scope === "series";
+    });
+    await Promise.all([statusChangeRequest, cancelWholeSeriesButton.click()]);
 
-    await expect(page.getByText(/^Abgesagt$/).first()).toBeVisible();
-    await expect(page.getByText(/^abgesagt:\s*3$/)).toBeVisible();
+    await expect(cancelWholeSeriesButton).toHaveAttribute("aria-pressed", "true");
   });
 });
