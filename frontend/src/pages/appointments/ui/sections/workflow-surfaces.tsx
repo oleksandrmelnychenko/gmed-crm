@@ -24,7 +24,6 @@ import { Input } from "@/components/ui/input";
 import {
   Banner,
   CountBadge,
-  ListItem,
   Section,
   tokens,
 } from "@/components/ui-shell";
@@ -104,7 +103,6 @@ import {
 } from "@/pages/appointments/model/constants";
 import {
   AppointmentEditorSheet,
-  EmptyState,
   Field,
 } from "@/pages/appointments/ui/shared/workspace-primitives";
 
@@ -182,6 +180,44 @@ function WorkflowSheetSection({
       </h3>
       {children}
     </section>
+  );
+}
+
+function WorkflowMiniMetric({
+  label,
+  value,
+}: {
+  label: ReactNode;
+  value: ReactNode;
+}) {
+  return (
+    <div className="flex min-w-[210px] flex-1 items-center justify-between gap-3 rounded-full border border-border bg-muted/20 px-4 py-2">
+      <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+        {label}
+      </span>
+      <span className="shrink-0 text-sm font-semibold leading-none text-foreground">
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function WorkflowEmptyState({
+  title,
+  description,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+}) {
+  return (
+    <div className={cn("rounded-xl px-6 py-10 text-center", tokens.surface.dashed)}>
+      <h3 className="text-base font-semibold text-foreground">{title}</h3>
+      {description ? (
+        <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
+          {description}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -763,19 +799,19 @@ function AppointmentInterpreterSection({
           }
         >
           {detail.interpreter_id ? (
-            <ListItem>
-              <div className="flex flex-col gap-1">
-                <p className="text-sm font-medium text-foreground">
-                  {detail.interpreter_name ?? t.common_not_set}
-                </p>
-                <p className={tokens.text.muted}>
-                  {responseLabel(detail.interpreter_response ?? "pending")}
-                </p>
-              </div>
-            </ListItem>
+            <div className="grid gap-2 md:grid-cols-2">
+              <WorkflowMiniMetric
+                label={t.role_interpreter}
+                value={detail.interpreter_name ?? t.common_not_set}
+              />
+              <WorkflowMiniMetric
+                label={t.users_status}
+                value={responseLabel(detail.interpreter_response ?? "pending")}
+              />
+            </div>
           ) : (
-            <EmptyState
-              text={appointmentText("appointments_no_interpreter_linked_to_this_appointment")}
+            <WorkflowEmptyState
+              title={appointmentText("appointments_no_interpreter_linked_to_this_appointment")}
             />
           )}
 
@@ -1047,21 +1083,44 @@ function AppointmentChecklistSection({
     >
       <div className="space-y-3">
         {items.length === 0 ? (
-          <EmptyState
-            text={appointmentText("appointments_no_workflow_steps_exist_for_this_appointment_yet")}
+          <WorkflowEmptyState
+            title={appointmentText("appointments_no_workflow_steps_exist_for_this_appointment_yet")}
           />
         ) : (
-          items.map((item) => (
-            <ListItem key={item.id}>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm font-medium text-foreground">
-                    {item.item_text}
-                  </p>
-                  <p className={cn("mt-1", tokens.text.eyebrow)}>
-                    {checklistPhaseLabel(item.phase)}
-                  </p>
+          items.map((item, index) => (
+            <article
+              key={item.id}
+              className="overflow-hidden rounded-2xl border border-border bg-card"
+            >
+              <div className="grid lg:grid-cols-[minmax(0,1fr)_112px]">
+                <div className="p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted/30 text-xs font-semibold text-muted-foreground">
+                      {index + 1}
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-semibold leading-snug text-foreground">
+                        {item.item_text}
+                      </h3>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        <span className={workflowInlineBadgeClassName}>
+                          {checklistPhaseLabel(item.phase)}
+                        </span>
+                        <span
+                          className={cn(
+                            workflowInlineBadgeClassName,
+                            item.is_completed ? "text-emerald-700" : "text-amber-700",
+                          )}
+                        >
+                          {item.is_completed
+                            ? t.common_completed
+                            : appointmentText("appointments_open")}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
+                <div className="relative flex items-center justify-end border-t border-border px-3 py-3 lg:border-t-0 lg:pl-4 lg:before:absolute lg:before:bottom-4 lg:before:left-0 lg:before:top-4 lg:before:border-l lg:before:border-dashed lg:before:border-border">
                 {item.is_completed ? (
                   <span
                     className={cn(
@@ -1075,17 +1134,19 @@ function AppointmentChecklistSection({
                   <Button
                     variant="outline"
                     size="sm"
+                    className="h-7 rounded-lg px-2.5"
                     disabled={Boolean(completingId)}
                     onClick={() => void handleComplete(item.id)}
                   >
                     {completingId === item.id ? (
                       <LoaderCircle className="size-4 animate-spin" />
                     ) : null}
-                    {appointmentText("appointments_mark_complete")}
+                    {appointmentText("appointments_mark_complete").replace(/\s+\S+$/u, "")}
                   </Button>
                 )}
               </div>
-            </ListItem>
+              </div>
+            </article>
           ))
         )}
       </div>
@@ -1267,18 +1328,39 @@ function AppointmentRemindersSection({
     >
       <div className="space-y-3">
         {reminders.length === 0 ? (
-          <EmptyState
-            text={appointmentText("appointments_no_reminders_exist_for_this_appointment_yet")}
+          <WorkflowEmptyState
+            title={appointmentText("appointments_no_reminders_exist_for_this_appointment_yet")}
           />
         ) : (
-          reminders.map((item) => (
-            <ListItem key={item.id}>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm font-medium text-foreground">
-                    {item.title}
-                  </p>
-                  <p className={cn("mt-1", tokens.text.muted)}>
+          <div className="space-y-3 pl-6">
+          {reminders.map((item, index) => (
+            <div
+              key={item.id}
+              className={cn(
+                "relative",
+                index < reminders.length - 1 &&
+                  "before:absolute before:-bottom-5 before:-left-4 before:top-3 before:w-px before:bg-border",
+              )}
+            >
+              <span
+                className={cn(
+                  "absolute -left-[1.125rem] top-1.5 z-10 size-2 rounded-full ring-4 ring-background",
+                  item.is_completed ? "bg-emerald-500" : "bg-orange-400",
+                )}
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <div className={tokens.text.sectionTitle}>{item.title}</div>
+                <span className="text-xs text-muted-foreground">
+                  {formatDateTimeLabel(item.remind_at)}
+                </span>
+              </div>
+              <div className="mt-2 overflow-hidden rounded-2xl border border-border bg-card">
+                <div className="grid gap-0 sm:grid-cols-[minmax(0,1fr)_112px]">
+                <div className="px-4 py-3">
+                  <div className="text-xs text-muted-foreground">
+                    {t.patients_assign_owner}
+                  </div>
+                  <p className="mt-1 text-sm font-semibold text-foreground">
                   {item.user_name} · {formatDateTimeLabel(item.remind_at)}
                   </p>
                   {item.description ? (
@@ -1287,6 +1369,7 @@ function AppointmentRemindersSection({
                     </p>
                   ) : null}
                 </div>
+                <div className="relative flex items-center justify-end border-t border-border px-3 py-3 sm:border-t-0 sm:pl-4 sm:before:absolute sm:before:bottom-3 sm:before:left-0 sm:before:top-3 sm:before:border-l sm:before:border-dashed sm:before:border-border">
                 {item.is_completed ? (
                   <span
                     className={cn(
@@ -1301,18 +1384,22 @@ function AppointmentRemindersSection({
                   <Button
                     variant="outline"
                     size="sm"
+                    className="h-7 rounded-lg px-2.5"
                     disabled={Boolean(completingId)}
                     onClick={() => void handleComplete(item.id)}
                   >
                     {completingId === item.id ? (
                       <LoaderCircle className="size-4 animate-spin" />
                     ) : null}
-                    {appointmentText("appointments_mark_complete")}
+                    {t.appointments_external_handoff_cancel}
                   </Button>
                 )}
+                </div>
+                </div>
               </div>
-            </ListItem>
-          ))
+            </div>
+          ))}
+          </div>
         )}
       </div>
     </Section>
@@ -2125,32 +2212,32 @@ function AppointmentTasksSectionContent({
       </p>
       <div className="space-y-3">
         {tasks.length === 0 ? (
-          <EmptyState
-            text={appointmentText("appointments_no_operational_tasks_exist_for_this_appointment_yet")}
+          <WorkflowEmptyState
+            title={appointmentText("appointments_no_operational_tasks_exist_for_this_appointment_yet")}
           />
         ) : (
-          tasks.map((task) => (
-            <ListItem key={task.id}>
-              <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                <div className="min-w-0">
+          tasks.map((task, index) => (
+            <article
+              key={task.id}
+              className="overflow-hidden rounded-2xl border border-border bg-card"
+            >
+              <div className="grid xl:grid-cols-[minmax(0,1fr)_340px]">
+                <div className="p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted/30 text-xs font-semibold text-muted-foreground">
+                      {index + 1}
+                    </div>
+                    <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="text-sm font-semibold text-foreground">
                       {task.title}
                     </p>
-                    <span className={workflowInlineBadgeClassName}>
-                      {taskStatusLabel(task.status)}
-                    </span>
                     <span className={workflowInlineBadgeClassName}>
                       {taskPriorityLabel(task.priority)}
                     </span>
                   </div>
                   <p className={cn("mt-1", tokens.text.muted)}>
                     {task.assigned_to_name} · {roleLabel(task.assigned_to_role)}
-                    {task.due_date
-                      ? appointmentText("appointments_due_date_suffix", {
-                          date: formatDateTimeLabel(task.due_date),
-                        })
-                      : ""}
                   </p>
                   {task.description ? (
                     <p className="mt-3 text-sm leading-6 text-muted-foreground">
@@ -2158,25 +2245,42 @@ function AppointmentTasksSectionContent({
                     </p>
                   ) : null}
                 </div>
-                <div className="flex flex-wrap gap-2">
+                    </div>
+                  </div>
+                <div className="relative border-t border-border p-3 xl:border-t-0 xl:pl-4 xl:before:absolute xl:before:bottom-4 xl:before:left-0 xl:before:top-4 xl:before:border-l xl:before:border-dashed xl:before:border-border">
+                <div
+                  className="grid w-full grid-cols-4 gap-0.5 rounded-lg border border-border bg-muted/25 p-0.5"
+                  role="radiogroup"
+                  aria-label={t.users_status}
+                >
                   {TASK_STATUS_OPTIONS.map((status) => (
-                    <Button
+                    <button
                       key={status}
                       type="button"
-                      variant={task.status === status ? "default" : "outline"}
-                      size="sm"
                       disabled={Boolean(actionBusy) || task.status === status}
                       onClick={() => handleTaskStatus(task.id, status)}
+                      role="radio"
+                      aria-checked={task.status === status}
+                      className={cn(
+                        "relative inline-flex h-7 min-w-0 items-center justify-center rounded-md px-1.5 text-[10.5px] font-semibold transition-[background-color,color,border-color,box-shadow] duration-150 disabled:cursor-not-allowed disabled:opacity-70",
+                        task.status === status
+                          ? "bg-orange-500 text-white shadow-sm"
+                          : "text-foreground hover:bg-card",
+                      )}
                     >
                       {actionBusy === `task:${task.id}:${status}` ? (
-                        <LoaderCircle className="size-4 animate-spin" />
+                        <LoaderCircle className="absolute left-1 size-3 animate-spin" />
                       ) : null}
-                      {taskStatusLabel(status)}
-                    </Button>
+                      <span className="min-w-0 truncate">{taskStatusLabel(status)}</span>
+                    </button>
                   ))}
                 </div>
+                <div className="mt-2 text-right text-xs font-medium text-muted-foreground">
+                  {task.due_date ? formatDateTimeLabel(task.due_date) : tr.common_not_set}
+                </div>
+                </div>
               </div>
-            </ListItem>
+            </article>
           ))
         )}
       </div>

@@ -6,6 +6,7 @@ import {
   useReducer,
   useState,
   type FormEvent,
+  type ReactNode,
   type SetStateAction,
 } from "react";
 import { LoaderCircle, Pencil } from "lucide-react";
@@ -14,9 +15,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Banner,
-  InfoRow,
-  ListItem,
-  Section,
   tokens,
 } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
@@ -151,6 +149,33 @@ function editSheetSectionTitle(label: string) {
       <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
       <span>{label}</span>
     </h3>
+  );
+}
+
+function editOverviewTitle(title: ReactNode) {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+      <span>{title}</span>
+    </span>
+  );
+}
+
+function EditOverviewLine({
+  label,
+  value,
+}: {
+  label: string;
+  value: ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-lg py-2">
+      <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
+      <span className="h-px min-w-6 flex-1 bg-border/70" />
+      <span className="max-w-[48%] text-right text-sm font-semibold leading-tight text-foreground">
+        {value}
+      </span>
+    </div>
   );
 }
 
@@ -419,47 +444,60 @@ function useEditAppointmentSectionContentContent({
 
   return (
     <>
-      <Section
-        title={t.appointments_title}
-        accessory={
+      <section className="rounded-xl border border-border bg-card p-6">
+        <div className="flex items-start justify-between gap-4">
+          <h2 className={tokens.text.sectionTitle}>
+            {editOverviewTitle(t.appointments_title)}
+          </h2>
           <Button
             type="button"
             variant="outline"
-            size="sm"
-            className="h-8 rounded-lg gap-1.5"
+            size="icon"
+            className="size-8 rounded-lg"
             onClick={() => handleSheetOpenChange(true)}
+            aria-label={t.common_edit}
           >
             <Pencil className="size-3.5" />
-            {t.common_edit}
           </Button>
-        }
-      >
-        <ListItem className="space-y-4">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-foreground">
-              {form.title || detail.title}
-            </p>
-            <p className={tokens.text.muted}>
-              {carePathKindLabel(form.carePathKind)}
-            </p>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <InfoRow
+        </div>
+
+        <div className="mt-5 space-y-5">
+          <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
+            <EditOverviewLine
+              label={t.appointments_title_col}
+              value={form.title || detail.title}
+            />
+            <EditOverviewLine
+              label={appointmentText("appointments_care_path")}
+              value={carePathKindLabel(form.carePathKind)}
+            />
+            <EditOverviewLine
               label={t.appointments_date}
               value={form.date || t.common_not_set}
             />
-            <InfoRow label={t.appointments_time} value={timeSummary} />
-            <InfoRow label={t.common_provider} value={providerSummary} />
-            <InfoRow label={t.common_doctor} value={doctorSummary} />
-            <InfoRow label={t.patients_assign_owner} value={ownerSummary} />
-            <InfoRow label={interpreterFieldLabel} value={interpreterSummary} />
-            <InfoRow
-              label={t.appointments_location}
-              value={form.location.trim() || t.common_not_set}
+            <EditOverviewLine label={t.appointments_time} value={timeSummary} />
+            <EditOverviewLine label={t.common_provider} value={providerSummary} />
+            <EditOverviewLine label={t.common_doctor} value={doctorSummary} />
+            <EditOverviewLine
+              label={t.patients_assign_owner}
+              value={ownerSummary}
+            />
+            <EditOverviewLine
+              label={interpreterFieldLabel}
+              value={interpreterSummary}
             />
           </div>
-        </ListItem>
-      </Section>
+
+          <div className="space-y-3">
+            <h3 className={tokens.text.sectionTitle}>
+              {editOverviewTitle(t.appointments_location)}
+            </h3>
+            <div className="rounded-xl border border-border bg-background/60 p-4 text-sm font-medium leading-snug text-foreground">
+              {form.location.trim() || t.common_not_set}
+            </div>
+          </div>
+        </div>
+      </section>
 
       <AppointmentEditorSheet
         open={sheetOpen}
