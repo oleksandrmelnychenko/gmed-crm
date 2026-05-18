@@ -21,6 +21,9 @@ type ComboboxSelectProps = {
   defaultValue?: PrimitiveValue | null
   onValueChange?: (value: string) => void
   options: ComboboxSelectOption[]
+  selectedValues?: readonly PrimitiveValue[]
+  showValueIndicator?: boolean
+  hidePlaceholderOption?: boolean
   id?: string
   name?: string
   required?: boolean
@@ -50,6 +53,9 @@ type NativeComboboxSelectProps = Omit<
   onBlur?: React.FocusEventHandler<HTMLSelectElement>
   onChange?: React.ChangeEventHandler<HTMLSelectElement>
   onFocus?: React.FocusEventHandler<HTMLSelectElement>
+  selectedValues?: readonly PrimitiveValue[]
+  showValueIndicator?: boolean
+  hidePlaceholderOption?: boolean
   searchPlaceholder?: string
   emptyLabel?: React.ReactNode
   missingValueLabel?: React.ReactNode | ((value: string) => React.ReactNode)
@@ -137,6 +143,9 @@ function ComboboxSelect({
   defaultValue,
   onValueChange,
   options,
+  selectedValues = [],
+  showValueIndicator = true,
+  hidePlaceholderOption = false,
   id,
   name,
   required,
@@ -193,6 +202,16 @@ function ComboboxSelect({
   const optionsByValue = React.useMemo(() => {
     return new Map(displayOptions.map((option) => [option.value, option]))
   }, [displayOptions])
+  const listOptions = React.useMemo(
+    () => hidePlaceholderOption
+      ? displayOptions.filter((option) => option.value !== "")
+      : displayOptions,
+    [displayOptions, hidePlaceholderOption],
+  )
+  const selectedValueSet = React.useMemo(
+    () => new Set(selectedValues.map((item) => String(item))),
+    [selectedValues],
+  )
 
   const handleValueChange = React.useCallback(
     (nextValue: string | null) => {
@@ -215,7 +234,7 @@ function ComboboxSelect({
       disabled={disabled}
       value={selectedValue}
       onValueChange={handleValueChange}
-      items={displayOptions.map((option) => option.value)}
+      items={listOptions.map((option) => option.value)}
       itemToStringLabel={(itemValue) =>
         textFromNode(optionsByValue.get(String(itemValue))?.label ?? t.select_missing_value)
       }
@@ -266,6 +285,9 @@ function ComboboxSelect({
                 if (!option) {
                   return null
                 }
+                const isChecked =
+                  selectedValueSet.has(option.value) ||
+                  (showValueIndicator && option.value === selectedValue)
 
                 return (
                   <ComboboxPrimitive.Item
@@ -275,9 +297,9 @@ function ComboboxSelect({
                     className="relative flex min-h-8 w-full cursor-default select-none items-center gap-2 rounded-md py-1.5 pr-8 pl-2 text-sm outline-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground"
                   >
                     <span className="min-w-0 flex-1 truncate">{option.label}</span>
-                    <ComboboxPrimitive.ItemIndicator className="absolute right-2 flex size-4 items-center justify-center">
-                      <CheckIcon className="size-4" />
-                    </ComboboxPrimitive.ItemIndicator>
+                    <span className="absolute right-2 flex size-4 items-center justify-center">
+                      {isChecked ? <CheckIcon className="size-4" /> : null}
+                    </span>
                   </ComboboxPrimitive.Item>
                 )
               }}
@@ -302,6 +324,9 @@ function NativeComboboxSelect({
   required,
   name,
   id,
+  selectedValues,
+  showValueIndicator,
+  hidePlaceholderOption,
   autoComplete,
   searchPlaceholder,
   emptyLabel,
@@ -325,6 +350,9 @@ function NativeComboboxSelect({
       value={normalizeValue(value)}
       defaultValue={normalizeValue(defaultValue)}
       options={options}
+      selectedValues={selectedValues}
+      showValueIndicator={showValueIndicator}
+      hidePlaceholderOption={hidePlaceholderOption}
       className={className}
       searchPlaceholder={searchPlaceholder}
       emptyLabel={emptyLabel}

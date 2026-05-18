@@ -267,12 +267,14 @@ function SpecializationMultiSelect({
   items,
   disabled,
   placeholder,
+  compact = false,
   onChange,
 }: {
   value: string;
   items: SpecializationItem[];
   disabled?: boolean;
   placeholder?: string;
+  compact?: boolean;
   onChange: (value: string) => void;
 }) {
   const { t, lang } = useLang();
@@ -299,6 +301,23 @@ function SpecializationMultiSelect({
   );
   const selectPlaceholder = placeholder ?? l("providers_specialization_select_placeholder");
   const removeLabel = l("providers_specialization_remove");
+  const selectedLabels = useMemo(
+    () => selected.map((item) => specializationDisplayValue(item, items, lang)),
+    [items, lang, selected],
+  );
+  const selectedTitle = selectedLabels.join(", ");
+  const compactPlaceholder =
+    selected.length === 0
+      ? selectPlaceholder
+      : selected.length === 1
+        ? selectedLabels[0] ?? selectPlaceholder
+        : `${selectPlaceholder}: ${selected.length}`;
+  const compactSelectedOptionValues = useMemo(
+    () => options
+      .filter((option) => selectedKeys.has(normalizeSpecializationKey(option.value)))
+      .map((option) => option.value),
+    [options, selectedKeys],
+  );
 
   const commit = (next: string[]) => onChange(joinSpecializationValue(next));
   const addSpecialization = (nextValue: string) => {
@@ -311,6 +330,54 @@ function SpecializationMultiSelect({
     const targetKey = normalizeSpecializationKey(target);
     commit(selected.filter((item) => normalizeSpecializationKey(item) !== targetKey));
   };
+  const toggleSpecialization = (nextValue: string) => {
+    const trimmed = nextValue.trim();
+    if (!trimmed) return;
+    if (selectedKeys.has(normalizeSpecializationKey(trimmed))) {
+      removeSpecialization(trimmed);
+      return;
+    }
+    addSpecialization(trimmed);
+  };
+
+  if (compact) {
+    return (
+      <div className="flex h-8 min-w-0 items-center gap-1.5">
+        <NativeComboboxSelect
+          value=""
+          onChange={(event) => toggleSpecialization(event.target.value)}
+          className={cn(formSelectClassName, "h-8 min-w-0 flex-1 bg-card text-[13px]")}
+          disabled={disabled || options.length === 0}
+          selectedValues={compactSelectedOptionValues}
+          showValueIndicator={false}
+          hidePlaceholderOption
+          title={selectedTitle || selectPlaceholder}
+        >
+          <option value="">{compactPlaceholder}</option>
+          {options.map((option) => (
+            <option key={option.key} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </NativeComboboxSelect>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-sm"
+          className={cn(
+            "h-8 w-8 shrink-0 !bg-card hover:!bg-card",
+            selected.length === 0 && "invisible",
+          )}
+          disabled={disabled || selected.length === 0}
+          title={t.common_clear}
+          aria-label={t.common_clear}
+          onClick={() => commit([])}
+        >
+          <X className="size-3.5" />
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-2">
@@ -2291,6 +2358,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                 value={filters.specializations}
                 items={specializations}
                 placeholder={t.providers_fachbereich}
+                compact
                 disabled={permissions.forceNonMedical || filters.providerType === "non_medical"}
                 onChange={(nextValue) => setServerFilter("specializations", nextValue, "specializations")}
               />
