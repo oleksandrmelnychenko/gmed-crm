@@ -2217,7 +2217,7 @@ function useLeadsPageContent() {
       </div>
 
       <Sheet open={createOpen} onOpenChange={setCreateOpen}>
-        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
+        <SheetContent side="right" className="w-full gap-0 border-l border-border p-0 sm:max-w-2xl">
           <form onSubmit={handleCreate} className="flex h-full flex-col">
             <AdminSheetScaffold
               title={t.leads_new}
@@ -2232,84 +2232,93 @@ function useLeadsPageContent() {
                 />
               )}
             >
-              {createError ? <ShellBanner tone="error">{createError}</ShellBanner> : null}
+              <div className="space-y-4 rounded-xl p-4">
+                {createError ? <ShellBanner tone="error">{createError}</ShellBanner> : null}
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <LeadField label={t.patients_first_name}>
-                  <Input
-                    className={shellInputClassName}
-                    value={createForm.firstName}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({ ...current, firstName: event.target.value }))
-                    }
-                    required
-                  />
-                </LeadField>
-                <LeadField label={t.patients_last_name}>
-                  <Input
-                    className={shellInputClassName}
-                    value={createForm.lastName}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({ ...current, lastName: event.target.value }))
-                    }
-                    required
-                  />
-                </LeadField>
+                <section className={cardClass("p-5")}>
+                  <SectionTitle>{t.lead_section_identity}</SectionTitle>
+                  <div className="mt-5 grid gap-4 md:grid-cols-2">
+                    <LeadField label={t.patients_first_name}>
+                      <Input
+                        className={shellInputClassName}
+                        value={createForm.firstName}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({ ...current, firstName: event.target.value }))
+                        }
+                        required
+                      />
+                    </LeadField>
+                    <LeadField label={t.patients_last_name}>
+                      <Input
+                        className={shellInputClassName}
+                        value={createForm.lastName}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({ ...current, lastName: event.target.value }))
+                        }
+                        required
+                      />
+                    </LeadField>
+                  </div>
+                </section>
+
+                <section className={cardClass("p-5")}>
+                  <SectionTitle>{t.lead_section_contact_origin}</SectionTitle>
+                  <div className="mt-5 grid gap-4 md:grid-cols-2">
+                    <LeadField label={t.field_phone}>
+                      <Input
+                        className={shellInputClassName}
+                        value={createForm.phone}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({ ...current, phone: event.target.value }))
+                        }
+                      />
+                    </LeadField>
+                    <LeadField label={t.patients_email}>
+                      <Input
+                        type="email"
+                        className={shellInputClassName}
+                        value={createForm.email}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({ ...current, email: event.target.value }))
+                        }
+                      />
+                    </LeadField>
+                    <LeadField label={t.leads_source}>
+                      <Input
+                        className={shellInputClassName}
+                        value={createForm.source}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({ ...current, source: event.target.value }))
+                        }
+                      />
+                    </LeadField>
+                    <LeadField label={t.providers_country}>
+                      <Input
+                        className={shellInputClassName}
+                        value={createForm.country}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({ ...current, country: event.target.value }))
+                        }
+                      />
+                    </LeadField>
+                  </div>
+                </section>
+
+                <section className={cardClass("p-5")}>
+                  <SectionTitle>{t.patients_notes}</SectionTitle>
+                  <div className="mt-5">
+                    <textarea
+                      aria-label={t.patients_notes}
+                      value={createForm.notes}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({ ...current, notes: event.target.value }))
+                      }
+                      className={cn(textareaClassName, "min-h-[104px]")}
+                      rows={4}
+                    />
+                  </div>
+                </section>
               </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <LeadField label={t.field_phone}>
-                  <Input
-                    className={shellInputClassName}
-                    value={createForm.phone}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({ ...current, phone: event.target.value }))
-                    }
-                  />
-                </LeadField>
-                <LeadField label={t.patients_email}>
-                  <Input
-                    type="email"
-                    className={shellInputClassName}
-                    value={createForm.email}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({ ...current, email: event.target.value }))
-                    }
-                  />
-                </LeadField>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <LeadField label={t.leads_source}>
-                  <Input
-                    className={shellInputClassName}
-                    value={createForm.source}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({ ...current, source: event.target.value }))
-                    }
-                  />
-                </LeadField>
-                <LeadField label={t.providers_country}>
-                  <Input
-                    className={shellInputClassName}
-                    value={createForm.country}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({ ...current, country: event.target.value }))
-                    }
-                  />
-                </LeadField>
-              </div>
-
-              <LeadField label={t.patients_notes}>
-                <textarea
-                  value={createForm.notes}
-                  onChange={(event) =>
-                    setCreateForm((current) => ({ ...current, notes: event.target.value }))
-                  }
-                  className={cn(textareaClassName, "min-h-[104px]")}
-                  rows={4}
-                />
-              </LeadField>
             </AdminSheetScaffold>
           </form>
         </SheetContent>
