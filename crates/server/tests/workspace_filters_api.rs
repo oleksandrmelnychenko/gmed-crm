@@ -9171,6 +9171,24 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
             "address_country": "Germany",
             "phone": "+49 30 1112233",
             "email": format!("info-{tag}@clinic-api.example"),
+            "contacts": [
+                {
+                    "contact_kind": "phone",
+                    "contact_type": "work",
+                    "label": "Reception",
+                    "department": "front desk",
+                    "value": "+49 30 1112233",
+                    "is_primary": true
+                },
+                {
+                    "contact_kind": "email",
+                    "contact_type": "department",
+                    "label": "Coordination",
+                    "department": "international office",
+                    "value": format!("info-{tag}@clinic-api.example"),
+                    "is_primary": true
+                }
+            ],
             "website": "https://clinic-api.example",
             "fachbereich": "Cardiology",
             "specializations": ["Cardiology", "Neurology"],
@@ -9310,6 +9328,9 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
             "first_name": "Roundtrip",
             "last_name": format!("{tag}"),
             "title": "Prof.",
+            "role_code": "chefarzt",
+            "gender": "female",
+            "opening_hours": "Mon-Fri 09:00-16:00",
             "fachbereich": "Cardiology",
             "specializations": ["Cardiology", "Internal medicine"],
             "languages": ["de", "en", "uk"],
@@ -9344,6 +9365,41 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
     .await;
     assert_eq!(status, StatusCode::CREATED);
     let doctor_id = Uuid::parse_str(doctor_body["id"].as_str().unwrap()).unwrap();
+
+    let (status, target_doctor_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{provider_id}/doctors"),
+        &pm_bearer,
+        Some(json!({
+            "name": format!("Dr Target {tag}"),
+            "first_name": "Target",
+            "last_name": format!("{tag}"),
+            "title": "Dr. med.",
+            "gender": "male",
+            "languages": ["de"],
+            "contacts": [],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let target_doctor_id = Uuid::parse_str(target_doctor_body["id"].as_str().unwrap()).unwrap();
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{provider_id}/doctors/{doctor_id}/relationships"),
+        &pm_bearer,
+        Some(json!({
+            "target_doctor_id": target_doctor_id,
+            "target_provider_id": provider_id,
+            "relationship_type": "referral",
+            "description": "Approach target doctor for complex cases",
+            "is_active": true,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
 
     let (status, fixed_medical_service_error) = json_request(
         &app,
@@ -9488,6 +9544,8 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
             "display_name": format!("Marta Secretary {tag}"),
             "role": managed_role_code,
             "department": "front desk",
+            "gender": "female",
+            "opening_hours": "Mon-Fri 08:00-18:00",
             "status": "active",
             "contacts": [
                 {
@@ -9531,6 +9589,19 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
     assert_eq!(detail["address_country"], "Germany");
     assert_eq!(detail["phone"], "+49 30 1112233");
     assert_eq!(detail["email"], format!("info-{tag}@clinic-api.example"));
+    let provider_contacts = detail["contacts"]
+        .as_array()
+        .expect("provider contacts array");
+    assert!(provider_contacts.iter().any(|row| {
+        row["contact_kind"] == "phone"
+            && row["label"] == "Reception"
+            && row["department"] == "front desk"
+    }));
+    assert!(provider_contacts.iter().any(|row| {
+        row["contact_kind"] == "email"
+            && row["contact_type"] == "department"
+            && row["value"] == format!("info-{tag}@clinic-api.example")
+    }));
     assert_eq!(detail["website"], "https://clinic-api.example");
     assert_eq!(detail["fachbereich"], "Cardiology");
     assert_eq!(detail["organization_level"], "organization");
@@ -9559,6 +9630,9 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
     assert_eq!(doctor_row["first_name"], "Roundtrip");
     assert_eq!(doctor_row["last_name"], tag);
     assert_eq!(doctor_row["title"], "Prof.");
+    assert_eq!(doctor_row["role_code"], "chefarzt");
+    assert_eq!(doctor_row["gender"], "female");
+    assert_eq!(doctor_row["opening_hours"], "Mon-Fri 09:00-16:00");
     assert_eq!(doctor_row["fachbereich"], "Cardiology");
     let doctor_specializations = doctor_row["specializations"]
         .as_array()
@@ -9579,6 +9653,14 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
     assert_eq!(doctor_row["license_number"], format!("LIC-{tag}"));
     assert_eq!(doctor_row["licensing_country"], "DE");
     assert_eq!(doctor_row["licensing_valid_until"], "2028-06-30");
+    let relationships = doctor_row["relationships"]
+        .as_array()
+        .expect("doctor relationships array");
+    assert!(relationships.iter().any(|row| {
+        row["target_doctor_id"] == target_doctor_id.to_string()
+            && row["target_provider_id"] == provider_id.to_string()
+            && row["relationship_type"] == "referral"
+    }));
     let langs = doctor_row["languages"].as_array().expect("languages array");
     assert!(langs.iter().any(|l| l == "de"));
     assert!(langs.iter().any(|l| l == "en"));
@@ -9606,6 +9688,8 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
     assert_eq!(staff_row["display_name"], format!("Marta Secretary {tag}"));
     assert_eq!(staff_row["role"], managed_role_code);
     assert_eq!(staff_row["department"], "front desk");
+    assert_eq!(staff_row["gender"], "female");
+    assert_eq!(staff_row["opening_hours"], "Mon-Fri 08:00-18:00");
     let staff_contacts = staff_row["contacts"]
         .as_array()
         .expect("staff contacts array");

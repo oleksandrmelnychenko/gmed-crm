@@ -12,11 +12,15 @@ import {
 } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  ArrowRight,
   CheckCircle2,
+  ClipboardCheck,
+  FileCheck2,
   LoaderCircle,
   Plus,
   RefreshCw,
   Search,
+  ShieldCheck,
   TrendingUp,
   UserPlus,
   Users,
@@ -102,6 +106,8 @@ import {
   formatSize,
   leadSourceLabel,
   leadStageLabel,
+  leadReadinessCheckLabel,
+  leadReadinessReasonLabel,
   leadTransitionKindLabel,
   legalSexLabel,
   leadPermissions,
@@ -723,6 +729,13 @@ function useLeadsPageContent() {
     syncLeadQuery(leadId);
   }
 
+  function openLeadDetailTab(leadId: string, tab: LeadPaneTab) {
+    setPaneTab(tab);
+    setSelectedLeadId(leadId);
+    setDetailOpen(true);
+    syncLeadQuery(leadId);
+  }
+
   function reload() {
     setVersion((current) => current + 1);
   }
@@ -899,6 +912,39 @@ function useLeadsPageContent() {
     { key: "details", label: t.lead_tab_details },
   ];
 
+  const leadWorkflow = detail
+    ? (() => {
+        const qualificationChecks = detail.readiness.checks.filter(
+          (check) => check.blocking_for === "qualification",
+        );
+        const readyQualificationChecks = qualificationChecks.filter(
+          (check) => check.passed,
+        ).length;
+        const leadQualified =
+          detail.qualification_status === "qualified" ||
+          detail.qualification_status === "converted";
+        const leadConverted =
+          Boolean(detail.converted_patient_id) ||
+          detail.qualification_status === "converted";
+        const failedResolved = detail.failed_outcome.status !== "none";
+        const completedCount = [
+          detail.readiness.qualification_ready,
+          leadQualified,
+          leadConverted,
+        ].filter(Boolean).length;
+
+        return {
+          completedCount,
+          totalCount: 3,
+          readyQualificationChecks,
+          qualificationChecksTotal: qualificationChecks.length,
+          leadQualified,
+          leadConverted,
+          failedResolved,
+        };
+      })()
+    : null;
+
   const detailPaneNode: ReactNode = (
     <div className="flex h-full flex-col">
       <div className="shrink-0 border-b border-border px-4 pt-3 pb-2">
@@ -1039,6 +1085,175 @@ function useLeadsPageContent() {
 
             {paneTab === "process" ? (
               <>
+                {leadWorkflow ? (
+                  <section className={cardClass("p-5")}>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <SectionTitle>{t.lead_workflow_title}</SectionTitle>
+                        <p className="mt-1 text-sm text-zinc-600">
+                          {t.lead_workflow_description}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Badge variant="outline" className="rounded-full">
+                          {formatUiText(t.lead_workflow_progress, {
+                            completed: String(leadWorkflow.completedCount),
+                            total: String(leadWorkflow.totalCount),
+                          })}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 xl:grid-cols-2">
+                      <WorkflowActionCard
+                        icon={<ClipboardCheck className="size-4" />}
+                        title={t.lead_workflow_complete_gate_title}
+                        description={t.lead_workflow_complete_gate_description}
+                        status={
+                          detail.readiness.qualification_ready
+                            ? t.lead_workflow_done
+                            : formatUiText(t.lead_workflow_progress, {
+                                completed: String(
+                                  leadWorkflow.readyQualificationChecks,
+                                ),
+                                total: String(
+                                  leadWorkflow.qualificationChecksTotal,
+                                ),
+                              })
+                        }
+                        tone={
+                          detail.readiness.qualification_ready
+                            ? "success"
+                            : "warning"
+                        }
+                        action={
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setPaneTab("qualification")}
+                          >
+                            {t.lead_workflow_open_gate}
+                            <ArrowRight className="size-3.5" />
+                          </Button>
+                        }
+                      />
+
+                      <WorkflowActionCard
+                        icon={<ShieldCheck className="size-4" />}
+                        title={t.lead_workflow_qualify_title}
+                        description={t.lead_workflow_qualify_description}
+                        status={
+                          leadWorkflow.leadQualified
+                            ? t.lead_workflow_done
+                            : detail.readiness.qualification_ready
+                              ? t.lead_workflow_available
+                              : t.lead_workflow_blocked
+                        }
+                        tone={
+                          leadWorkflow.leadQualified
+                            ? "success"
+                            : detail.readiness.qualification_ready
+                              ? "info"
+                              : "muted"
+                        }
+                        action={
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={
+                              Boolean(actionBusy) ||
+                              leadWorkflow.leadQualified ||
+                              !detail.readiness.qualification_ready ||
+                              detail.failed_outcome.status !== "none"
+                            }
+                            onClick={() => void updateStatus(detail.id, "qualified")}
+                          >
+                            {actionBusy === `status:${detail.id}:qualified` ? (
+                              <LoaderCircle className="size-3.5 animate-spin" />
+                            ) : null}
+                            {t.lead_workflow_mark_qualified}
+                          </Button>
+                        }
+                      />
+
+                      <WorkflowActionCard
+                        icon={<UserPlus className="size-4" />}
+                        title={t.lead_workflow_convert_title}
+                        description={t.lead_workflow_convert_description}
+                        status={
+                          leadWorkflow.leadConverted
+                            ? t.lead_workflow_done
+                            : detail.readiness.conversion_ready
+                              ? t.lead_workflow_available
+                              : t.lead_workflow_blocked
+                        }
+                        tone={
+                          leadWorkflow.leadConverted
+                            ? "success"
+                            : detail.readiness.conversion_ready
+                              ? "info"
+                              : "muted"
+                        }
+                        action={
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={
+                              Boolean(actionBusy) ||
+                              !permissions.canConvert ||
+                              leadWorkflow.leadConverted ||
+                              !detail.readiness.conversion_ready ||
+                              detail.failed_outcome.status !== "none"
+                            }
+                            onClick={() => setPendingConvertLead(detail)}
+                          >
+                            {t.lead_convert_action}
+                            <ArrowRight className="size-3.5" />
+                          </Button>
+                        }
+                      />
+
+                      <WorkflowActionCard
+                        icon={<FileCheck2 className="size-4" />}
+                        title={t.lead_workflow_failed_title}
+                        description={t.lead_workflow_failed_description}
+                        status={
+                          leadWorkflow.failedResolved
+                            ? t.lead_workflow_done
+                            : leadWorkflow.leadConverted
+                              ? t.lead_workflow_locked
+                              : t.lead_workflow_available
+                        }
+                        tone={
+                          leadWorkflow.failedResolved
+                            ? "success"
+                            : leadWorkflow.leadConverted
+                              ? "muted"
+                              : "warning"
+                        }
+                        action={
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={
+                              leadWorkflow.failedResolved ||
+                              leadWorkflow.leadConverted
+                            }
+                            onClick={() => setPaneTab("qualification")}
+                          >
+                            {t.lead_workflow_open_failed}
+                            <ArrowRight className="size-3.5" />
+                          </Button>
+                        }
+                      />
+                    </div>
+                  </section>
+                ) : null}
+
                 <section className={cardClass("p-5")}>
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
@@ -1085,7 +1300,9 @@ function useLeadsPageContent() {
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <p className="text-sm font-medium text-zinc-900">{check.label}</p>
+                            <p className="text-sm font-medium text-zinc-900">
+                              {leadReadinessCheckLabel(check, t)}
+                            </p>
                             <p className="mt-1 text-xs uppercase tracking-[0.12em] text-zinc-500">
                               {t.lead_blocks} {leadStageLabel(check.blocking_for, t)}
                             </p>
@@ -1113,7 +1330,7 @@ function useLeadsPageContent() {
                       </p>
                       <ul className="mt-2 space-y-1 text-sm text-rose-700">
                         {detail.readiness.blocking_reasons.map((reason) => (
-                          <li key={reason}>- {reason}</li>
+                          <li key={reason}>- {leadReadinessReasonLabel(reason, t)}</li>
                         ))}
                       </ul>
                     </div>
@@ -1902,9 +2119,18 @@ function useLeadsPageContent() {
                       variant="outline"
                       className="h-7 rounded-md px-2 text-[11px]"
                       disabled={Boolean(actionBusy)}
+                      title={
+                        row.qualification_ready === false
+                          ? t.lead_workflow_complete_required_fields
+                          : undefined
+                      }
                       onClick={(event) => {
                         event.stopPropagation();
-                        void updateStatus(row.id, "qualified");
+                        if (row.qualification_ready) {
+                          void updateStatus(row.id, "qualified");
+                        } else {
+                          openLeadDetailTab(row.id, "qualification");
+                        }
                       }}
                     >
                       {actionBusy === `status:${row.id}:qualified` ? (
@@ -2153,6 +2379,51 @@ function DetailCard({ label, value }: { label: string; value: string }) {
     <div className={cn("rounded-xl px-4 py-4", tokens.surface.mutedCard)}>
       <p className={tokens.text.eyebrow}>{label}</p>
       <p className="mt-2 text-sm text-foreground">{value}</p>
+    </div>
+  );
+}
+
+function WorkflowActionCard({
+  icon,
+  title,
+  description,
+  status,
+  tone,
+  action,
+}: {
+  icon: ReactNode;
+  title: string;
+  description: string;
+  status: string;
+  tone: "success" | "warning" | "info" | "muted";
+  action: ReactNode;
+}) {
+  const toneClass = {
+    success: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    warning: "border-amber-200 bg-amber-50 text-amber-700",
+    info: "border-sky-200 bg-sky-50 text-sky-700",
+    muted: "border-zinc-200 bg-zinc-50 text-zinc-600",
+  }[tone];
+
+  return (
+    <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3">
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 rounded-lg border border-zinc-200 bg-white p-2 text-zinc-600">
+          {icon}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <p className="text-sm font-medium text-zinc-900">{title}</p>
+              <p className="mt-1 text-sm leading-5 text-zinc-600">{description}</p>
+            </div>
+            <Badge variant="outline" className={cn("rounded-full", toneClass)}>
+              {status}
+            </Badge>
+          </div>
+          <div className="mt-3 flex justify-end">{action}</div>
+        </div>
+      </div>
     </div>
   );
 }

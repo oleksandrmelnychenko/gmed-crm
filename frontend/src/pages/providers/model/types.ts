@@ -1,6 +1,15 @@
 export type ProviderType = "medical" | "non_medical";
 export type ProviderOrganizationLevel = "organization" | "clinic" | "department" | "unit";
 export type ServicePriceType = "fixed" | "range" | "on_request";
+export type ProviderPersonGender = "male" | "female" | "unknown";
+export type DoctorRoleCode =
+  | "clinical_director"
+  | "chefarzt"
+  | "oberarzt"
+  | "facharzt"
+  | "assistenzarzt"
+  | "head_of_department"
+  | "other";
 
 export type SpecializationItem = {
   id: string;
@@ -36,6 +45,17 @@ export type PersonContact = {
   notes: string | null;
 };
 
+export type ProviderContact = {
+  id: string | null;
+  contact_kind: "phone" | "email";
+  contact_type: "work" | "department" | "other";
+  label: string | null;
+  department: string | null;
+  value: string;
+  is_primary: boolean;
+  notes: string | null;
+};
+
 export type PersonContactFormState = {
   id: string;
   contactKind: "phone" | "email";
@@ -46,6 +66,33 @@ export type PersonContactFormState = {
 };
 
 export type DoctorContactFormState = PersonContactFormState;
+
+export type ProviderContactFormState = {
+  id: string;
+  contactKind: "phone" | "email";
+  contactType: "work" | "department" | "other";
+  label: string;
+  department: string;
+  value: string;
+  isPrimary: boolean;
+  notes: string;
+};
+
+export type DoctorRelationship = {
+  id: string;
+  source_doctor_id: string;
+  target_doctor_id: string;
+  target_doctor_name: string;
+  target_doctor_title: string | null;
+  target_provider_id: string;
+  target_provider_name: string;
+  relationship_type: "professional" | "referral" | "knows" | "approach_via" | "other";
+  description: string | null;
+  notes: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
 
 export type ProviderSummary = {
   id: string;
@@ -121,6 +168,11 @@ export type DoctorSummary = {
   phone: string | null;
   email: string | null;
   contacts: PersonContact[];
+  role_code: DoctorRoleCode | null;
+  role_label: string | null;
+  gender: ProviderPersonGender;
+  opening_hours: string | null;
+  relationships: DoctorRelationship[];
   license_number: string | null;
   licensing_country: string | null;
   licensing_valid_until: string | null;
@@ -154,6 +206,8 @@ export type ProviderStaff = {
   display_name: string;
   role: string;
   department: string | null;
+  gender: ProviderPersonGender;
+  opening_hours: string | null;
   status: "active" | "inactive" | "external" | "unknown";
   notes: string | null;
   is_active: boolean;
@@ -184,6 +238,7 @@ export type ProviderDetail = {
   address_country: string | null;
   phone: string | null;
   email: string | null;
+  contacts: ProviderContact[];
   website: string | null;
   fachbereich: string | null;
   specializations: SpecializationItem[];
@@ -233,6 +288,7 @@ export type ProviderFormState = {
   addressCountry: string;
   phone: string;
   email: string;
+  contacts: ProviderContactFormState[];
   website: string;
   fachbereich: string;
   specializations: string;
@@ -248,6 +304,10 @@ export type DoctorFormState = {
   firstName: string;
   lastName: string;
   title: string;
+  roleCode: "" | DoctorRoleCode;
+  roleLabel: string;
+  gender: ProviderPersonGender;
+  openingHours: string;
   fachbereich: string;
   specializations: string;
   languages: string;
@@ -283,6 +343,8 @@ export type StaffFormState = {
   displayName: string;
   role: string;
   department: string;
+  gender: ProviderPersonGender;
+  openingHours: string;
   status: "active" | "inactive" | "external" | "unknown";
   phone: string;
   email: string;

@@ -36,6 +36,7 @@ export interface Lead {
    * list payloads so the Convert button can stay disabled when the lead is
    * missing required data, instead of waiting for a 422.
    */
+  qualification_ready?: boolean;
   conversion_ready?: boolean;
   failed_outcome?: FailedLeadOutcome;
   submitted_at: string | null;

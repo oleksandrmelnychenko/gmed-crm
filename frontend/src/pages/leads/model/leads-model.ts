@@ -112,6 +112,28 @@ const LEAD_TRANSITION_LABEL_KEYS = {
   gate_updated: "lead_transition_gate_updated",
 } satisfies Partial<Record<string, TranslationKey>>;
 
+const LEAD_READINESS_CHECK_LABEL_KEYS: Partial<Record<string, TranslationKey>> = {
+  lead_qualified: "lead_readiness_check_lead_qualified",
+  compliance_completed: "lead_readiness_check_compliance_completed",
+  birth_date_present: "lead_readiness_check_birth_date_present",
+  legal_sex_present: "lead_readiness_check_legal_sex_present",
+  primary_contact_present: "lead_readiness_check_primary_contact_present",
+  privacy_consent: "lead_readiness_check_privacy_consent",
+  healthcare_consent: "lead_readiness_check_healthcare_consent",
+};
+
+const LEAD_READINESS_REASON_LABEL_KEYS: Partial<Record<string, TranslationKey>> = {
+  "Compliance is not signed yet": "lead_readiness_reason_compliance_not_signed",
+  "Birth date is missing": "lead_readiness_reason_birth_date_missing",
+  "Legal sex is missing": "lead_readiness_reason_legal_sex_missing",
+  "Email or phone is required": "lead_readiness_reason_primary_contact_missing",
+  "Privacy practices consent is missing": "lead_readiness_reason_privacy_missing",
+  "Healthcare consent is missing": "lead_readiness_reason_healthcare_missing",
+  "Lead must be qualified before conversion":
+    "lead_readiness_reason_lead_must_be_qualified",
+  "Lead is already converted": "lead_readiness_reason_already_converted",
+};
+
 function runtimeTranslations(translations?: Translations) {
   return translations ?? translateCatalog(getLang());
 }
@@ -292,6 +314,24 @@ export function leadTransitionKindLabel(
     LEAD_TRANSITION_LABEL_KEYS,
     runtimeTranslations(translations),
   );
+}
+
+export function leadReadinessCheckLabel(
+  check: { key?: string | null; label?: string | null },
+  translations?: Translations,
+) {
+  const tr = runtimeTranslations(translations);
+  const labelKey = check.key ? LEAD_READINESS_CHECK_LABEL_KEYS[check.key] : undefined;
+  return labelKey ? tr[labelKey] : dashOrValue(check.label, tr);
+}
+
+export function leadReadinessReasonLabel(
+  reason: string,
+  translations?: Translations,
+) {
+  const tr = runtimeTranslations(translations);
+  const labelKey = LEAD_READINESS_REASON_LABEL_KEYS[reason];
+  return labelKey ? tr[labelKey] : reason;
 }
 
 export function formatDate(

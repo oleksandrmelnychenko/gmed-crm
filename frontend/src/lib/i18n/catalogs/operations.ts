@@ -334,6 +334,42 @@ export interface OperationsTranslations {
   lead_ok: string;
   lead_missing: string;
   lead_blocking_reasons: string;
+  lead_workflow_title: string;
+  lead_workflow_description: string;
+  lead_workflow_progress: string;
+  lead_workflow_ready_count: string;
+  lead_workflow_missing_count: string;
+  lead_workflow_complete_gate_title: string;
+  lead_workflow_complete_gate_description: string;
+  lead_workflow_qualify_title: string;
+  lead_workflow_qualify_description: string;
+  lead_workflow_convert_title: string;
+  lead_workflow_convert_description: string;
+  lead_workflow_failed_title: string;
+  lead_workflow_failed_description: string;
+  lead_workflow_open_gate: string;
+  lead_workflow_mark_qualified: string;
+  lead_workflow_open_failed: string;
+  lead_workflow_locked: string;
+  lead_workflow_done: string;
+  lead_workflow_available: string;
+  lead_workflow_blocked: string;
+  lead_workflow_complete_required_fields: string;
+  lead_readiness_check_lead_qualified: string;
+  lead_readiness_check_compliance_completed: string;
+  lead_readiness_check_birth_date_present: string;
+  lead_readiness_check_legal_sex_present: string;
+  lead_readiness_check_primary_contact_present: string;
+  lead_readiness_check_privacy_consent: string;
+  lead_readiness_check_healthcare_consent: string;
+  lead_readiness_reason_compliance_not_signed: string;
+  lead_readiness_reason_birth_date_missing: string;
+  lead_readiness_reason_legal_sex_missing: string;
+  lead_readiness_reason_primary_contact_missing: string;
+  lead_readiness_reason_privacy_missing: string;
+  lead_readiness_reason_healthcare_missing: string;
+  lead_readiness_reason_lead_must_be_qualified: string;
+  lead_readiness_reason_already_converted: string;
   lead_section_lifecycle: string;
   lead_lifecycle_description: string;
   lead_current_stage: string;
@@ -776,6 +812,50 @@ export const operationsRu: OperationsTranslations = {
   lead_ok: "ОК",
   lead_missing: "Не хватает",
   lead_blocking_reasons: "Причины блокировки",
+  lead_workflow_title: "Рабочий процесс лида",
+  lead_workflow_description:
+    "Соберите недостающие данные, затем переведите лид в qualified и создайте пациента.",
+  lead_workflow_progress: "{completed}/{total} готово",
+  lead_workflow_ready_count: "Готово",
+  lead_workflow_missing_count: "Нужно сделать",
+  lead_workflow_complete_gate_title: "Данные для квалификации",
+  lead_workflow_complete_gate_description:
+    "Проверьте контакт, дату рождения, юридический пол, compliance и согласия.",
+  lead_workflow_qualify_title: "Перевести в Qualified",
+  lead_workflow_qualify_description:
+    "Доступно только когда все проверки квалификации закрыты.",
+  lead_workflow_convert_title: "Создать пациента",
+  lead_workflow_convert_description:
+    "После квалификации CRM создаст карточку пациента и стандартный workflow.",
+  lead_workflow_failed_title: "Закрыть как failed lead",
+  lead_workflow_failed_description:
+    "Если лид не подходит, обработайте архив или анонимизацию контролируемо.",
+  lead_workflow_open_gate: "Открыть данные",
+  lead_workflow_mark_qualified: "Отметить qualified",
+  lead_workflow_open_failed: "Открыть обработку",
+  lead_workflow_locked: "Заблокировано",
+  lead_workflow_done: "Готово",
+  lead_workflow_available: "Можно выполнить",
+  lead_workflow_blocked: "Нужно сначала закрыть",
+  lead_workflow_complete_required_fields:
+    "Сначала заполните недостающие поля в данных квалификации.",
+  lead_readiness_check_lead_qualified: "Лид квалифицирован",
+  lead_readiness_check_compliance_completed: "Compliance подписан",
+  lead_readiness_check_birth_date_present: "Дата рождения заполнена",
+  lead_readiness_check_legal_sex_present: "Юридический пол заполнен",
+  lead_readiness_check_primary_contact_present: "Email или телефон есть",
+  lead_readiness_check_privacy_consent: "Правила приватности приняты",
+  lead_readiness_check_healthcare_consent: "Медицинское согласие есть",
+  lead_readiness_reason_compliance_not_signed: "Compliance ещё не подписан",
+  lead_readiness_reason_birth_date_missing: "Не указана дата рождения",
+  lead_readiness_reason_legal_sex_missing: "Не указан юридический пол",
+  lead_readiness_reason_primary_contact_missing: "Нужен email или телефон",
+  lead_readiness_reason_privacy_missing:
+    "Нет согласия с правилами приватности",
+  lead_readiness_reason_healthcare_missing: "Нет медицинского согласия",
+  lead_readiness_reason_lead_must_be_qualified:
+    "Перед созданием пациента лид должен быть qualified",
+  lead_readiness_reason_already_converted: "Лид уже конвертирован",
   lead_section_lifecycle: "Жизненный цикл лида",
   lead_lifecycle_description:
     "Последовательная история квалификации, обработки failed lead и конверсии.",
@@ -1228,6 +1308,55 @@ export const operationsDe: OperationsTranslations = {
   lead_ok: "OK",
   lead_missing: "Fehlt",
   lead_blocking_reasons: "Blockierende Gründe",
+  lead_workflow_title: "Lead-Workflow",
+  lead_workflow_description:
+    "Fehlende Daten erfassen, Lead qualifizieren und danach als Patient anlegen.",
+  lead_workflow_progress: "{completed}/{total} bereit",
+  lead_workflow_ready_count: "Bereit",
+  lead_workflow_missing_count: "Offen",
+  lead_workflow_complete_gate_title: "Qualifikationsdaten",
+  lead_workflow_complete_gate_description:
+    "Kontakt, Geburtsdatum, rechtliches Geschlecht, Compliance und Einwilligungen prüfen.",
+  lead_workflow_qualify_title: "Auf Qualified setzen",
+  lead_workflow_qualify_description:
+    "Verfügbar, sobald alle Qualifikationsprüfungen erfüllt sind.",
+  lead_workflow_convert_title: "Patient anlegen",
+  lead_workflow_convert_description:
+    "Nach der Qualifikation erstellt CRM die Patientenakte und den Standard-Workflow.",
+  lead_workflow_failed_title: "Als Failed Lead schließen",
+  lead_workflow_failed_description:
+    "Wenn der Lead nicht passt, Archivierung oder Anonymisierung kontrolliert durchführen.",
+  lead_workflow_open_gate: "Daten öffnen",
+  lead_workflow_mark_qualified: "Als qualified markieren",
+  lead_workflow_open_failed: "Bearbeitung öffnen",
+  lead_workflow_locked: "Blockiert",
+  lead_workflow_done: "Fertig",
+  lead_workflow_available: "Ausführbar",
+  lead_workflow_blocked: "Vorher abschließen",
+  lead_workflow_complete_required_fields:
+    "Zuerst die fehlenden Felder in den Qualifikationsdaten ergänzen.",
+  lead_readiness_check_lead_qualified: "Lead qualifiziert",
+  lead_readiness_check_compliance_completed: "Compliance unterschrieben",
+  lead_readiness_check_birth_date_present: "Geburtsdatum erfasst",
+  lead_readiness_check_legal_sex_present: "Rechtliches Geschlecht erfasst",
+  lead_readiness_check_primary_contact_present: "E-Mail oder Telefon vorhanden",
+  lead_readiness_check_privacy_consent: "Datenschutzpraxis akzeptiert",
+  lead_readiness_check_healthcare_consent:
+    "Medizinische Einwilligung liegt vor",
+  lead_readiness_reason_compliance_not_signed:
+    "Compliance ist noch nicht unterschrieben",
+  lead_readiness_reason_birth_date_missing: "Geburtsdatum fehlt",
+  lead_readiness_reason_legal_sex_missing:
+    "Rechtliches Geschlecht fehlt",
+  lead_readiness_reason_primary_contact_missing:
+    "E-Mail oder Telefon ist erforderlich",
+  lead_readiness_reason_privacy_missing:
+    "Einwilligung zur Datenschutzpraxis fehlt",
+  lead_readiness_reason_healthcare_missing:
+    "Medizinische Einwilligung fehlt",
+  lead_readiness_reason_lead_must_be_qualified:
+    "Vor dem Anlegen eines Patienten muss der Lead qualified sein",
+  lead_readiness_reason_already_converted: "Lead ist bereits konvertiert",
   lead_section_lifecycle: "Lead-Lebenszyklus",
   lead_lifecycle_description:
     "Sequenzielle Historie für Qualifikation, Failed-Lead-Behandlung und Konvertierung.",

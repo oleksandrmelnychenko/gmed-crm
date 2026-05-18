@@ -3,10 +3,12 @@ import type {
   DoctorSummary,
   LinkedPatient,
   PersonContactFormState,
+  ProviderContactFormState,
   ProviderDetail,
   ProviderFilters,
   ProviderFormState,
   ProviderPermissions,
+  ProviderPersonGender,
   ProviderSummary,
   ProviderType,
   ServiceFormState,
@@ -57,6 +59,34 @@ type ContactPayload = {
   value: string;
   is_primary: boolean;
   notes?: string | null;
+};
+
+type ProviderContactPayload = {
+  contact_kind: "phone" | "email";
+  contact_type: "work" | "department" | "other";
+  label?: string | null;
+  department?: string | null;
+  value: string;
+  is_primary: boolean;
+  notes?: string | null;
+};
+
+const DOCTOR_ROLE_LABELS: Record<string, string> = {
+  clinical_director: "providers_doctor_role_clinical_director",
+  chefarzt: "providers_doctor_role_chefarzt",
+  oberarzt: "providers_doctor_role_oberarzt",
+  facharzt: "providers_doctor_role_facharzt",
+  assistenzarzt: "providers_doctor_role_assistenzarzt",
+  head_of_department: "providers_doctor_role_head_of_department",
+  other: "providers_doctor_role_other",
+};
+
+const DOCTOR_RELATIONSHIP_LABELS: Record<string, string> = {
+  professional: "providers_relationship_professional",
+  referral: "providers_relationship_referral",
+  knows: "providers_relationship_knows",
+  approach_via: "providers_relationship_approach_via",
+  other: "providers_relationship_other",
 };
 
 const COMPACT_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-GB", {
@@ -130,6 +160,7 @@ export function blankProviderForm(providerType: ProviderType = "medical"): Provi
     addressCountry: "",
     phone: "",
     email: "",
+    contacts: [],
     website: "",
     fachbereich: "",
     specializations: "",
@@ -147,6 +178,10 @@ export function blankDoctorForm(): DoctorFormState {
     firstName: "",
     lastName: "",
     title: "",
+    roleCode: "",
+    roleLabel: "",
+    gender: "unknown",
+    openingHours: "",
     fachbereich: "",
     specializations: "",
     languages: "",
@@ -186,6 +221,8 @@ export function blankStaffForm(): StaffFormState {
     displayName: "",
     role: "staff",
     department: "",
+    gender: "unknown",
+    openingHours: "",
     status: "active",
     phone: "",
     email: "",
@@ -226,7 +263,7 @@ function contactValue(
   return typed?.value ?? primary?.value ?? fallback;
 }
 
-function makeContactFormId(prefix = "contact") {
+export function makeContactFormId(prefix = "contact") {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return `${prefix}-${crypto.randomUUID()}`;
   }
@@ -287,7 +324,80 @@ function toContactForms(
   ].filter(Boolean) as PersonContactFormState[]);
 }
 
+function toProviderContactForms(
+  contacts: {
+    id?: string | null;
+    contact_kind: string;
+    contact_type: string;
+    label?: string | null;
+    department?: string | null;
+    value: string;
+    is_primary?: boolean;
+    notes?: string | null;
+  }[] | undefined,
+  fallbackPhone = "",
+  fallbackEmail = "",
+) {
+  const normalized = (contacts ?? []).flatMap((contact, index): ProviderContactFormState[] => {
+    const contactKind = contact.contact_kind === "email" ? "email" : "phone";
+    const contactType =
+      contact.contact_type === "department" || contact.contact_type === "other"
+        ? contact.contact_type
+        : "work";
+    const value = contact.value?.trim() ?? "";
+    if (!value) return [];
+    return [{
+      id: contact.id ?? makeContactFormId(`provider-contact-${index}`),
+      contactKind,
+      contactType,
+      label: contact.label ?? "",
+      department: contact.department ?? "",
+      value,
+      isPrimary: Boolean(contact.is_primary),
+      notes: contact.notes ?? "",
+    }];
+  });
+
+  if (normalized.length > 0) {
+    return ensureProviderContactPrimary(normalized);
+  }
+
+  return ensureProviderContactPrimary([
+    fallbackPhone && {
+      id: makeContactFormId("provider-legacy-phone"),
+      contactKind: "phone" as const,
+      contactType: "work" as const,
+      label: "",
+      department: "",
+      value: fallbackPhone,
+      isPrimary: true,
+      notes: "",
+    },
+    fallbackEmail && {
+      id: makeContactFormId("provider-legacy-email"),
+      contactKind: "email" as const,
+      contactType: "work" as const,
+      label: "",
+      department: "",
+      value: fallbackEmail,
+      isPrimary: true,
+      notes: "",
+    },
+  ].filter(Boolean) as ProviderContactFormState[]);
+}
+
 function ensureContactPrimary<T extends PersonContactFormState>(contacts: T[]) {
+  return contacts.map((contact, _index, all) => {
+    const sameKind = all.filter((item) => item.contactKind === contact.contactKind);
+    const firstPrimary = sameKind.find((item) => item.isPrimary);
+    if (firstPrimary) {
+      return { ...contact, isPrimary: contact.id === firstPrimary.id };
+    }
+    return { ...contact, isPrimary: sameKind[0]?.id === contact.id };
+  });
+}
+
+function ensureProviderContactPrimary<T extends ProviderContactFormState>(contacts: T[]) {
   return contacts.map((contact, _index, all) => {
     const sameKind = all.filter((item) => item.contactKind === contact.contactKind);
     const firstPrimary = sameKind.find((item) => item.isPrimary);
@@ -312,24 +422,28 @@ function buildDynamicContacts(contacts: PersonContactFormState[]): ContactPayloa
   });
 }
 
+function buildProviderContacts(contacts: ProviderContactFormState[]): ProviderContactPayload[] {
+  return contacts.flatMap((contact): ProviderContactPayload[] => {
+    const value = toOptional(contact.value);
+    if (!value) return [];
+    return [{
+      contact_kind: contact.contactKind,
+      contact_type: contact.contactType,
+      label: toOptional(contact.label),
+      department: toOptional(contact.department),
+      value,
+      is_primary: contact.isPrimary,
+      notes: toOptional(contact.notes),
+    }];
+  });
+}
+
 function buildDoctorContacts(form: DoctorFormState): ContactPayload[] {
-  const contacts = buildDynamicContacts(form.contacts);
-
-  if (contacts.length > 0) {
-    return contacts;
-  }
-
-  return buildContacts(form);
+  return buildDynamicContacts(form.contacts);
 }
 
 function buildStaffContacts(form: StaffFormState): ContactPayload[] {
-  const contacts = buildDynamicContacts(form.contacts);
-
-  if (contacts.length > 0) {
-    return contacts;
-  }
-
-  return buildContacts(form);
+  return buildDynamicContacts(form.contacts);
 }
 
 function primaryContact(
@@ -343,47 +457,19 @@ function primaryContact(
   );
 }
 
-function buildContacts(form: {
-  phone: string;
-  email: string;
-  privatePhone: string;
-  privateEmail: string;
-}): ContactPayload[] {
-  const phone = toOptional(form.phone);
-  const email = toOptional(form.email);
-  const privatePhone = toOptional(form.privatePhone);
-  const privateEmail = toOptional(form.privateEmail);
-  const contacts: Array<ContactPayload | null> = [
-    phone ? {
-      contact_kind: "phone",
-      contact_type: "work",
-      value: phone,
-      is_primary: true,
-      notes: null,
-    } : null,
-    email ? {
-      contact_kind: "email",
-      contact_type: "work",
-      value: email,
-      is_primary: true,
-      notes: null,
-    } : null,
-    privatePhone ? {
-      contact_kind: "phone",
-      contact_type: "private",
-      value: privatePhone,
-      is_primary: !phone,
-      notes: null,
-    } : null,
-    privateEmail ? {
-      contact_kind: "email",
-      contact_type: "private",
-      value: privateEmail,
-      is_primary: !email,
-      notes: null,
-    } : null,
-  ];
-  return contacts.filter((contact): contact is ContactPayload => Boolean(contact));
+function primaryProviderContact(
+  contacts: ProviderContactPayload[],
+  kind: "phone" | "email",
+) {
+  return (
+    contacts.find((contact) => contact.contact_kind === kind && contact.is_primary)?.value ??
+    contacts.find((contact) => contact.contact_kind === kind)?.value ??
+    null
+  );
+}
+
+function normalizeGender(value?: string | null): ProviderPersonGender {
+  return value === "male" || value === "female" ? value : "unknown";
 }
 
 export function providerTypeLabel(value: string, tr: Record<string, string>) {
@@ -395,6 +481,38 @@ export function providerTypeLabel(value: string, tr: Record<string, string>) {
     providers_type_non_medical:
       tr.providers_type_non_medical ?? translations.providers_type_non_medical,
   });
+}
+
+export function doctorRoleLabel(value?: string | null) {
+  if (!value) return translateCatalog(getLang()).common_not_set;
+  const translations = translateCatalog(getLang());
+  const key = DOCTOR_ROLE_LABELS[value];
+  return (key ? translations.uiText[key] : undefined) ?? humanizeCode(value);
+}
+
+export function doctorRelationshipTypeLabel(value?: string | null) {
+  if (!value) return translateCatalog(getLang()).common_not_set;
+  const translations = translateCatalog(getLang());
+  const key = DOCTOR_RELATIONSHIP_LABELS[value];
+  return (key ? translations.uiText[key] : undefined) ?? humanizeCode(value);
+}
+
+export function personGenderLabel(value?: string | null) {
+  const translations = translateCatalog(getLang());
+  switch (value) {
+    case "male":
+      return translations.gender_male;
+    case "female":
+      return translations.gender_female;
+    default:
+      return translations.common_unknown;
+  }
+}
+
+export function providerOrganizationLevelLabel(value?: string | null) {
+  const translations = translateCatalog(getLang());
+  const key = value ? `providers_level_${value}` : "";
+  return (key ? translations.uiText[key] : undefined) ?? humanizeCode(value ?? "");
 }
 
 export function compactDateTime(
@@ -476,6 +594,7 @@ export function providerToForm(detail: ProviderDetail): ProviderFormState {
     addressCountry: detail.address_country ?? "",
     phone: detail.phone ?? "",
     email: detail.email ?? "",
+    contacts: toProviderContactForms(detail.contacts, detail.phone ?? "", detail.email ?? ""),
     website: detail.website ?? "",
     fachbereich: detail.fachbereich ?? "",
     specializations: specializationsToText(detail.specializations, detail.fachbereich ?? ""),
@@ -493,6 +612,10 @@ export function doctorToForm(doctor: DoctorSummary): DoctorFormState {
     firstName: doctor.first_name ?? "",
     lastName: doctor.last_name ?? "",
     title: doctor.title ?? "",
+    roleCode: doctor.role_code ?? "",
+    roleLabel: doctor.role_label ?? "",
+    gender: normalizeGender(doctor.gender),
+    openingHours: doctor.opening_hours ?? "",
     fachbereich: doctor.fachbereich ?? "",
     specializations: specializationsToText(doctor.specializations, doctor.fachbereich ?? ""),
     languages: doctor.languages?.join(", ") ?? "",
@@ -531,6 +654,8 @@ export function staffToForm(staff: {
   display_name: string;
   role: string;
   department: string | null;
+  gender?: string | null;
+  opening_hours?: string | null;
   status: StaffFormState["status"];
   phone?: string | null;
   email?: string | null;
@@ -545,6 +670,8 @@ export function staffToForm(staff: {
     displayName: staff.display_name ?? "",
     role: staff.role ?? "staff",
     department: staff.department ?? "",
+    gender: normalizeGender(staff.gender),
+    openingHours: staff.opening_hours ?? "",
     status: staff.status ?? "active",
     phone: contactValue(staff.contacts, "phone", "work", staff.phone ?? ""),
     email: contactValue(staff.contacts, "email", "work", staff.email ?? ""),
@@ -558,6 +685,7 @@ export function staffToForm(staff: {
 export function toProviderPayload(form: ProviderFormState, forceNonMedical: boolean) {
   const providerType = forceNonMedical ? "non_medical" : form.providerType;
   const isMedical = providerType === "medical";
+  const contacts = buildProviderContacts(form.contacts);
   return {
     name: form.name.trim(),
     provider_type: providerType,
@@ -567,8 +695,9 @@ export function toProviderPayload(form: ProviderFormState, forceNonMedical: bool
     address_city: toOptional(form.addressCity),
     address_zip: toOptional(form.addressZip),
     address_country: toOptional(form.addressCountry),
-    phone: toOptional(form.phone),
-    email: toOptional(form.email),
+    phone: primaryProviderContact(contacts, "phone"),
+    email: primaryProviderContact(contacts, "email"),
+    contacts,
     website: toOptional(form.website),
     fachbereich: isMedical ? toOptional(form.fachbereich) : null,
     specializations: isMedical ? parseCommaList(form.specializations || form.fachbereich) : [],
@@ -589,6 +718,10 @@ export function toDoctorPayload(form: DoctorFormState) {
     last_name: toOptional(form.lastName),
     display_name: name,
     title: toOptional(form.title),
+    role_code: toOptional(form.roleCode),
+    role_label: form.roleCode === "other" ? toOptional(form.roleLabel) : null,
+    gender: form.gender,
+    opening_hours: toOptional(form.openingHours),
     fachbereich: toOptional(form.fachbereich),
     specializations: parseCommaList(form.specializations || form.fachbereich),
     languages: parseCommaList(form.languages),
@@ -612,8 +745,8 @@ export function toServicePayload(form: ServiceFormState, forceRange = false) {
     description: toOptional(form.description),
     price: priceType === "on_request" ? 0 : priceType === "range" ? priceFrom : fixedPrice,
     price_type: priceType,
-    price_from: priceType === "on_request" && !form.priceFrom.trim() ? null : priceFrom,
-    price_to: priceType === "on_request" && !form.priceTo.trim() ? null : priceTo,
+    price_from: priceType === "on_request" ? null : priceFrom,
+    price_to: priceType === "on_request" ? null : priceTo,
     price_note: toOptional(form.priceNote),
     currency: toOptional(form.currency) ?? "EUR",
     valid_from: toOptional(form.validFrom),
@@ -631,6 +764,8 @@ export function toStaffPayload(form: StaffFormState) {
     display_name: displayName,
     role: toOptional(form.role) ?? "staff",
     department: toOptional(form.department),
+    gender: form.gender,
+    opening_hours: toOptional(form.openingHours),
     status: form.status,
     notes: toOptional(form.notes),
     contacts: buildStaffContacts(form),

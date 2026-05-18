@@ -29,13 +29,19 @@ function normalizeProviderDetail(raw: ProviderDetail): ProviderDetail {
     parent_provider_id: raw.parent_provider_id ?? null,
     parent_provider_name: raw.parent_provider_name ?? null,
     specializations: arrayOrEmpty<ProviderDetail["specializations"][number]>(raw.specializations).map(normalizeSpecializationItem),
+    contacts: arrayOrEmpty<ProviderDetail["contacts"][number]>(raw.contacts),
     doctors: arrayOrEmpty<ProviderDetail["doctors"][number]>(raw.doctors).map((doctor) => ({
       ...doctor,
       first_name: doctor.first_name ?? null,
       last_name: doctor.last_name ?? null,
       display_name: doctor.display_name ?? doctor.name ?? null,
+      role_code: doctor.role_code ?? null,
+      role_label: doctor.role_label ?? null,
+      gender: doctor.gender === "male" || doctor.gender === "female" ? doctor.gender : "unknown",
+      opening_hours: doctor.opening_hours ?? null,
       specializations: arrayOrEmpty<ProviderDetail["doctors"][number]["specializations"][number]>(doctor.specializations).map(normalizeSpecializationItem),
       contacts: arrayOrEmpty<ProviderDetail["doctors"][number]["contacts"][number]>(doctor.contacts),
+      relationships: arrayOrEmpty<ProviderDetail["doctors"][number]["relationships"][number]>(doctor.relationships),
     })),
     services: arrayOrEmpty<ProviderDetail["services"][number]>(raw.services).map((service) => ({
       ...service,
@@ -50,6 +56,8 @@ function normalizeProviderDetail(raw: ProviderDetail): ProviderDetail {
       first_name: staff.first_name ?? null,
       last_name: staff.last_name ?? null,
       department: staff.department ?? null,
+      gender: staff.gender === "male" || staff.gender === "female" ? staff.gender : "unknown",
+      opening_hours: staff.opening_hours ?? null,
       contacts: arrayOrEmpty<ProviderDetail["staff"][number]["contacts"][number]>(staff.contacts),
     })),
     children: arrayOrEmpty<ProviderDetail["children"][number]>(raw.children),
@@ -152,6 +160,26 @@ export function saveProviderDoctor(
 
 export function deleteProviderDoctor(providerId: string, doctorId: string) {
   return post(`/providers/${providerId}/doctors/${doctorId}/delete`);
+}
+
+export function saveProviderDoctorRelationship(
+  providerId: string,
+  doctorId: string,
+  relationshipId: string,
+  payload: JsonPayload,
+) {
+  const path = relationshipId
+    ? `/providers/${providerId}/doctors/${doctorId}/relationships/${relationshipId}/update`
+    : `/providers/${providerId}/doctors/${doctorId}/relationships`;
+  return postJson<CreateResponse | void>(path, payload);
+}
+
+export function deleteProviderDoctorRelationship(
+  providerId: string,
+  doctorId: string,
+  relationshipId: string,
+) {
+  return post(`/providers/${providerId}/doctors/${doctorId}/relationships/${relationshipId}/delete`);
 }
 
 export function saveProviderStaff(

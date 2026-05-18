@@ -185,6 +185,7 @@ async fn list_leads(
                     "flow": r.try_get::<Option<String>, _>("flow").unwrap_or_default(),
                     "qualification_status": r.try_get::<String, _>("qualification_status").unwrap_or_default(),
                     "compliance_status": r.try_get::<String, _>("compliance_status").unwrap_or_default(),
+                    "qualification_ready": readiness.qualification_ready,
                     "conversion_ready": readiness.conversion_ready,
                     "failed_outcome": {
                         "status": r
