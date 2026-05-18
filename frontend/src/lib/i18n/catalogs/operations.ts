@@ -294,6 +294,7 @@ export interface OperationsTranslations {
   lead_legal_sex_diverse: string;
   lead_legal_sex_no_entry: string;
   lead_source_manual: string;
+  lead_source_agent: string;
   lead_source_website: string;
   lead_source_website_wizard: string;
   lead_source_visitor_facade: string;
@@ -378,6 +379,13 @@ export interface OperationsTranslations {
   lead_qualification_gate_description: string;
   lead_full_name: string;
   lead_primary_language: string;
+  lead_language_ar: string;
+  lead_language_de: string;
+  lead_language_en: string;
+  lead_language_fa: string;
+  lead_language_pl: string;
+  lead_language_ru: string;
+  lead_language_zh: string;
   lead_needs_interpreter: string;
   lead_flow: string;
   lead_locale: string;
@@ -413,6 +421,35 @@ export interface OperationsTranslations {
   lead_currently_in_treatment: string;
   lead_health_risk_for_travel: string;
   lead_services: string;
+  lead_option_cardiology_fast_track: string;
+  lead_option_concierge_support: string;
+  lead_option_dental_reconstruction: string;
+  lead_option_document_translation: string;
+  lead_option_executive_checkup: string;
+  lead_option_executive_screening: string;
+  lead_option_fertility_support: string;
+  lead_option_interpreter_support: string;
+  lead_option_medical_second_opinion: string;
+  lead_option_medical_treatment: string;
+  lead_option_oncology_second_opinion: string;
+  lead_option_orthopedics: string;
+  lead_option_rehabilitation: string;
+  lead_option_spine_program: string;
+  lead_option_urology_second_opinion: string;
+  lead_option_medical_records_yes: string;
+  lead_option_medical_records_no: string;
+  lead_option_medical_records_none: string;
+  lead_option_insurance_yes: string;
+  lead_option_insurance_no: string;
+  lead_option_insurance_not_sure: string;
+  lead_option_visit_asap: string;
+  lead_option_visit_within_4_weeks: string;
+  lead_option_visit_within_6_weeks: string;
+  lead_option_visit_within_8_weeks: string;
+  lead_option_visit_spring: string;
+  lead_option_visit_summer: string;
+  lead_option_visit_autumn: string;
+  lead_option_visit_flexible: string;
   lead_has_insurance: string;
   lead_insurance_covers_germany: string;
   lead_preferred_location: string;
@@ -771,6 +808,7 @@ export const operationsRu: OperationsTranslations = {
   lead_legal_sex_diverse: "Другое",
   lead_legal_sex_no_entry: "Без записи",
   lead_source_manual: "Вручную",
+  lead_source_agent: "Агент",
   lead_source_website: "Сайт",
   lead_source_website_wizard: "Мастер на сайте",
   lead_source_visitor_facade: "Форма сайта",
@@ -866,6 +904,13 @@ export const operationsRu: OperationsTranslations = {
     "Заполните недостающие поля compliance и идентификации прямо из рабочего пространства лида.",
   lead_full_name: "Полное имя",
   lead_primary_language: "Основной язык",
+  lead_language_ar: "Арабский",
+  lead_language_de: "Немецкий",
+  lead_language_en: "Английский",
+  lead_language_fa: "Персидский",
+  lead_language_pl: "Польский",
+  lead_language_ru: "Русский",
+  lead_language_zh: "Китайский",
   lead_needs_interpreter: "Нужен переводчик",
   lead_flow: "Flow",
   lead_locale: "Локаль",
@@ -903,6 +948,35 @@ export const operationsRu: OperationsTranslations = {
   lead_currently_in_treatment: "Сейчас проходит лечение",
   lead_health_risk_for_travel: "Риск для поездки по здоровью",
   lead_services: "Услуги",
+  lead_option_cardiology_fast_track: "Ускоренная кардиология",
+  lead_option_concierge_support: "Консьерж-сопровождение",
+  lead_option_dental_reconstruction: "Стоматологическая реконструкция",
+  lead_option_document_translation: "Перевод документов",
+  lead_option_executive_checkup: "Комплексное обследование",
+  lead_option_executive_screening: "Расширенный скрининг",
+  lead_option_fertility_support: "Поддержка по фертильности",
+  lead_option_interpreter_support: "Поддержка переводчика",
+  lead_option_medical_second_opinion: "Медицинское второе мнение",
+  lead_option_medical_treatment: "Медицинское лечение",
+  lead_option_oncology_second_opinion: "Онкологическое второе мнение",
+  lead_option_orthopedics: "Ортопедия",
+  lead_option_rehabilitation: "Реабилитация",
+  lead_option_spine_program: "Программа лечения позвоночника",
+  lead_option_urology_second_opinion: "Урологическое второе мнение",
+  lead_option_medical_records_yes: "Документы есть",
+  lead_option_medical_records_no: "Документов нет",
+  lead_option_medical_records_none: "Документы не предоставлены",
+  lead_option_insurance_yes: "Да",
+  lead_option_insurance_no: "Нет",
+  lead_option_insurance_not_sure: "Не уверен",
+  lead_option_visit_asap: "Как можно скорее",
+  lead_option_visit_within_4_weeks: "В течение 4 недель",
+  lead_option_visit_within_6_weeks: "В течение 6 недель",
+  lead_option_visit_within_8_weeks: "В течение 8 недель",
+  lead_option_visit_spring: "Весной",
+  lead_option_visit_summer: "Летом",
+  lead_option_visit_autumn: "Осенью",
+  lead_option_visit_flexible: "Гибкие сроки",
   lead_has_insurance: "Есть страховка",
   lead_insurance_covers_germany: "Страховка покрывает Германию",
   lead_preferred_location: "Предпочтительная локация",
@@ -1267,6 +1341,7 @@ export const operationsDe: OperationsTranslations = {
   lead_legal_sex_diverse: "Divers",
   lead_legal_sex_no_entry: "Kein Eintrag",
   lead_source_manual: "Manuell",
+  lead_source_agent: "Agent",
   lead_source_website: "Website",
   lead_source_website_wizard: "Website-Assistent",
   lead_source_visitor_facade: "Website-Formular",
@@ -1367,6 +1442,13 @@ export const operationsDe: OperationsTranslations = {
     "Fehlende Compliance- und Identitätsfelder direkt im Lead-Arbeitsbereich ergänzen.",
   lead_full_name: "Vollständiger Name",
   lead_primary_language: "Hauptsprache",
+  lead_language_ar: "Arabisch",
+  lead_language_de: "Deutsch",
+  lead_language_en: "Englisch",
+  lead_language_fa: "Persisch",
+  lead_language_pl: "Polnisch",
+  lead_language_ru: "Russisch",
+  lead_language_zh: "Chinesisch",
   lead_needs_interpreter: "Dolmetscher erforderlich",
   lead_flow: "Flow",
   lead_locale: "Locale",
@@ -1404,6 +1486,35 @@ export const operationsDe: OperationsTranslations = {
   lead_currently_in_treatment: "Aktuell in Behandlung",
   lead_health_risk_for_travel: "Gesundheitsrisiko für Reise",
   lead_services: "Leistungen",
+  lead_option_cardiology_fast_track: "Kardiologie Fast Track",
+  lead_option_concierge_support: "Concierge-Begleitung",
+  lead_option_dental_reconstruction: "Zahnrekonstruktion",
+  lead_option_document_translation: "Dokumentenübersetzung",
+  lead_option_executive_checkup: "Umfassende Vorsorgeuntersuchung",
+  lead_option_executive_screening: "Erweitertes Screening",
+  lead_option_fertility_support: "Fertilitätsbegleitung",
+  lead_option_interpreter_support: "Dolmetscherbegleitung",
+  lead_option_medical_second_opinion: "Medizinische Zweitmeinung",
+  lead_option_medical_treatment: "Medizinische Behandlung",
+  lead_option_oncology_second_opinion: "Onkologische Zweitmeinung",
+  lead_option_orthopedics: "Orthopädie",
+  lead_option_rehabilitation: "Rehabilitation",
+  lead_option_spine_program: "Wirbelsäulenprogramm",
+  lead_option_urology_second_opinion: "Urologische Zweitmeinung",
+  lead_option_medical_records_yes: "Unterlagen vorhanden",
+  lead_option_medical_records_no: "Keine Unterlagen",
+  lead_option_medical_records_none: "Unterlagen nicht bereitgestellt",
+  lead_option_insurance_yes: "Ja",
+  lead_option_insurance_no: "Nein",
+  lead_option_insurance_not_sure: "Nicht sicher",
+  lead_option_visit_asap: "So bald wie möglich",
+  lead_option_visit_within_4_weeks: "Innerhalb von 4 Wochen",
+  lead_option_visit_within_6_weeks: "Innerhalb von 6 Wochen",
+  lead_option_visit_within_8_weeks: "Innerhalb von 8 Wochen",
+  lead_option_visit_spring: "Im Frühling",
+  lead_option_visit_summer: "Im Sommer",
+  lead_option_visit_autumn: "Im Herbst",
+  lead_option_visit_flexible: "Flexibler Zeitraum",
   lead_has_insurance: "Versicherung vorhanden",
   lead_insurance_covers_germany: "Versicherung deckt Deutschland ab",
   lead_preferred_location: "Bevorzugter Standort",

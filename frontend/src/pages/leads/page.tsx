@@ -34,7 +34,6 @@ import {
   SheetFormFooter,
 } from "@/components/admin-page-patterns";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
-import { SplitView } from "@/components/data-table/split-view";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -108,7 +107,12 @@ import {
   leadStageLabel,
   leadReadinessCheckLabel,
   leadReadinessReasonLabel,
+  leadInsuranceCoverageLabel,
+  leadLanguageLabel,
+  leadMedicalRecordsLabel,
+  leadProgramServiceLabel,
   leadTransitionKindLabel,
+  leadVisitTimingLabel,
   legalSexLabel,
   leadPermissions,
   leadToGateForm,
@@ -593,11 +597,16 @@ function useLeadsPageContent() {
   useEffect(() => {
     const leadParam = searchParams.get("lead") ?? "";
     if (!leadParam) return;
-    dispatchDetailState({
-      selectedLeadId: leadParam !== selectedLeadId ? leadParam : selectedLeadId,
-      detailOpen: true,
+    dispatchDetailState((current) => {
+      if (current.detailOpen && current.selectedLeadId === leadParam) {
+        return {};
+      }
+      return {
+        selectedLeadId: leadParam,
+        detailOpen: true,
+      };
     });
-  }, [detailOpen, searchParams, selectedLeadId]);
+  }, [searchParams]);
 
   useEffect(() => {
     if (!permissions.canViewPage) return;
@@ -947,7 +956,7 @@ function useLeadsPageContent() {
 
   const detailPaneNode: ReactNode = (
     <div className="flex h-full flex-col">
-      <div className="shrink-0 border-b border-border px-4 pt-3 pb-2">
+      <div className="shrink-0 border-b border-border px-4 pt-3 pb-2 pr-12">
         <h2 className="text-base font-medium text-foreground">
           {detail ? `${detail.first_name} ${detail.last_name}` : t.leads_title}
         </h2>
@@ -1014,7 +1023,7 @@ function useLeadsPageContent() {
 
                 <section className={cardClass("p-5")}>
                   <SectionTitle>{t.lead_section_contact_origin}</SectionTitle>
-                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
                     <DetailCard label={t.patients_email} value={detail.email || t.common_not_set} />
                     <DetailCard label={t.field_phone} value={detail.phone || t.common_not_set} />
                     <DetailCard label={t.leads_source} value={leadSourceLabel(detail.source, t)} />
@@ -1049,7 +1058,7 @@ function useLeadsPageContent() {
 
                 <section className={cardClass("p-5")}>
                   <SectionTitle>{t.lead_section_identity}</SectionTitle>
-                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
                     <DetailCard
                       label={t.lead_full_name}
                       value={dashOrValue(
@@ -1065,14 +1074,14 @@ function useLeadsPageContent() {
                     />
                     <DetailCard label={t.field_birth_date} value={dashOrValue(detail.date_of_birth, t)} />
                     <DetailCard label={t.lead_legal_sex} value={legalSexLabel(detail.legal_sex, t)} />
-                    <DetailCard label={t.lead_primary_language} value={dashOrValue(detail.primary_language, t)} />
+                    <DetailCard label={t.lead_primary_language} value={leadLanguageLabel(detail.primary_language, t)} />
                     <DetailCard label={t.lead_needs_interpreter} value={yesNo(detail.needs_interpreter, t)} />
                   </div>
                 </section>
 
                 <section className={cardClass("p-5")}>
                   <SectionTitle>{t.lead_section_address}</SectionTitle>
-                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
                     <DetailCard label={t.providers_country} value={dashOrValue(detail.country, t)} />
                     <DetailCard label={t.providers_city} value={dashOrValue(detail.city, t)} />
                     <DetailCard label={t.lead_state_region} value={dashOrValue(detail.state, t)} />
@@ -1350,7 +1359,7 @@ function useLeadsPageContent() {
                     </StatusBadge>
                   </div>
 
-                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
                     <DetailCard
                       label={t.lead_current_stage}
                       value={leadStageLabel(detail.lifecycle.current_stage, t)}
@@ -1628,7 +1637,7 @@ function useLeadsPageContent() {
                     </div>
 
                     {detail.failed_outcome.status !== "none" ? (
-                      <div className="mt-4 grid gap-3 md:grid-cols-2">
+                      <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
                         <DetailCard
                           label={t.lead_resolution}
                           value={failedOutcomeLabel(detail.failed_outcome.status, t)}
@@ -1730,13 +1739,16 @@ function useLeadsPageContent() {
                   detail.has_travel_documents !== null) ? (
                   <section className={cardClass("p-5")}>
                     <SectionTitle>{t.lead_section_eligibility_path}</SectionTitle>
-                    <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
                       <DetailCard label={t.lead_location} value={dashOrValue(detail.location, t)} />
                       <DetailCard label={t.lead_location_detailed} value={dashOrValue(detail.location_detailed, t)} />
                       <DetailCard label={t.lead_wants_membership} value={yesNo(detail.wants_membership, t)} />
-                      <DetailCard label={t.lead_selected_program} value={dashOrValue(detail.selected_program, t)} />
+                      <DetailCard
+                        label={t.lead_selected_program}
+                        value={leadProgramServiceLabel(detail.selected_program, t)}
+                      />
                       <DetailCard label={t.lead_can_travel} value={yesNo(detail.can_travel, t)} />
-                      <DetailCard label={t.lead_has_medical_records} value={dashOrValue(detail.has_medical_records, t)} />
+                      <DetailCard label={t.lead_has_medical_records} value={leadMedicalRecordsLabel(detail.has_medical_records, t)} />
                       <DetailCard label={t.lead_records_in_accepted_language} value={yesNo(detail.records_in_accepted_language, t)} />
                       <DetailCard label={t.lead_has_travel_documents} value={yesNo(detail.has_travel_documents, t)} />
                     </div>
@@ -1749,7 +1761,7 @@ function useLeadsPageContent() {
                   detail.additional_concerns) ? (
                   <section className={cardClass("p-5")}>
                     <SectionTitle>{t.lead_section_health_concern}</SectionTitle>
-                    <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
                       <DetailCard label={t.lead_currently_in_treatment} value={yesNo(detail.currently_in_treatment, t)} />
                       <DetailCard label={t.lead_health_risk_for_travel} value={yesNo(detail.has_health_risk_for_travel, t)} />
                     </div>
@@ -1771,13 +1783,19 @@ function useLeadsPageContent() {
                   detail.insurance_covers_germany) ? (
                   <section className={cardClass("p-5")}>
                     <SectionTitle>{t.lead_section_services_insurance}</SectionTitle>
-                    <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
                       <DetailCard
                         label={t.lead_services}
-                        value={detail.services && detail.services.length > 0 ? detail.services.join(", ") : t.common_not_set}
+                        value={
+                          detail.services && detail.services.length > 0
+                            ? detail.services
+                                .map((service) => leadProgramServiceLabel(service, t))
+                                .join(", ")
+                            : t.common_not_set
+                        }
                       />
                       <DetailCard label={t.lead_has_insurance} value={yesNo(detail.has_insurance, t)} />
-                      <DetailCard label={t.lead_insurance_covers_germany} value={dashOrValue(detail.insurance_covers_germany, t)} />
+                      <DetailCard label={t.lead_insurance_covers_germany} value={leadInsuranceCoverageLabel(detail.insurance_covers_germany, t)} />
                     </div>
                   </section>
                 ) : null}
@@ -1787,9 +1805,9 @@ function useLeadsPageContent() {
                   detail.message) ? (
                   <section className={cardClass("p-5")}>
                     <SectionTitle>{t.lead_section_wrap_up}</SectionTitle>
-                    <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
                       <DetailCard label={t.lead_preferred_location} value={dashOrValue(detail.preferred_location, t)} />
-                      <DetailCard label={t.lead_visit_timing} value={dashOrValue(detail.visit_timing, t)} />
+                      <DetailCard label={t.lead_visit_timing} value={leadVisitTimingLabel(detail.visit_timing, t)} />
                     </div>
                     {detail.message ? (
                       <div className="mt-4 rounded-2xl bg-zinc-50 px-4 py-3 text-sm leading-6 text-zinc-700 whitespace-pre-wrap">
@@ -1802,7 +1820,7 @@ function useLeadsPageContent() {
                 {detail.intake_source === "visitor_facade" ? (
                   <section className={cardClass("p-5")}>
                     <SectionTitle>{t.lead_section_consents}</SectionTitle>
-                    <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
                       <DetailCard label={t.lead_consent_automated_contact} value={yesNo(detail.consent_automated_contact, t)} />
                       <DetailCard label={t.lead_consent_healthcare} value={yesNo(detail.consent_healthcare, t)} />
                       <DetailCard label={t.lead_consent_opt_out} value={yesNo(detail.consent_opt_out, t)} />
@@ -1981,14 +1999,6 @@ function useLeadsPageContent() {
         {error ? <ShellBanner tone="error">{error}</ShellBanner> : null}
         {successMessage ? <SuccessBanner>{successMessage}</SuccessBanner> : null}
 
-        <SplitView
-          active={detailOpen}
-          pane={detailPaneNode}
-          onClose={() => {
-            setDetailOpen(false);
-            syncLeadQuery();
-          }}
-        >
         <AdminTableCard
           title={titleWithDot(t.leads_title)}
           count={filteredLeads.length}
@@ -2189,7 +2199,21 @@ function useLeadsPageContent() {
             }
           />
         </AdminTableCard>
-        </SplitView>
+
+        <Sheet
+          open={detailOpen}
+          onOpenChange={(open) => {
+            setDetailOpen(open);
+            if (!open) syncLeadQuery();
+          }}
+        >
+          <SheetContent
+            side="right"
+            className="w-full max-w-none gap-0 border-l border-border p-0 sm:max-w-3xl xl:max-w-4xl"
+          >
+            {detailPaneNode}
+          </SheetContent>
+        </Sheet>
       </div>
 
       <Sheet open={createOpen} onOpenChange={setCreateOpen}>
@@ -2374,11 +2398,14 @@ function SectionTitle({ children }: { children: ReactNode }) {
   );
 }
 
-function DetailCard({ label, value }: { label: string; value: string }) {
+function DetailCard({ label, value }: { label: ReactNode; value: ReactNode }) {
   return (
-    <div className={cn("rounded-xl px-4 py-4", tokens.surface.mutedCard)}>
-      <p className={tokens.text.eyebrow}>{label}</p>
-      <p className="mt-2 text-sm text-foreground">{value}</p>
+    <div className="flex items-center gap-3 rounded-lg py-2">
+      <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
+      <span className="h-px min-w-6 flex-1 bg-border/70" />
+      <span className="max-w-[48%] text-right text-sm font-semibold leading-tight text-foreground">
+        {value}
+      </span>
     </div>
   );
 }

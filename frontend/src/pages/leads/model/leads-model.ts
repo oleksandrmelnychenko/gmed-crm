@@ -80,6 +80,7 @@ const LEAD_LEGAL_SEX_LABEL_KEYS = {
 
 const LEAD_SOURCE_LABEL_KEYS = {
   manual: "lead_source_manual",
+  agent: "lead_source_agent",
   website: "lead_source_website",
   website_wizard: "lead_source_website_wizard",
   visitor_facade: "lead_source_visitor_facade",
@@ -94,6 +95,57 @@ const LEAD_SOURCE_LABEL_KEYS = {
   instagram: "lead_source_instagram",
   walk_in: "lead_source_walk_in",
   other: "lead_source_other",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const LEAD_LANGUAGE_LABEL_KEYS = {
+  ar: "lead_language_ar",
+  de: "lead_language_de",
+  en: "lead_language_en",
+  fa: "lead_language_fa",
+  pl: "lead_language_pl",
+  ru: "lead_language_ru",
+  zh: "lead_language_zh",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const LEAD_PROGRAM_SERVICE_LABEL_KEYS = {
+  cardiology_fast_track: "lead_option_cardiology_fast_track",
+  concierge_support: "lead_option_concierge_support",
+  dental_reconstruction: "lead_option_dental_reconstruction",
+  document_translation: "lead_option_document_translation",
+  executive_checkup: "lead_option_executive_checkup",
+  executive_screening: "lead_option_executive_screening",
+  fertility_support: "lead_option_fertility_support",
+  interpreter_support: "lead_option_interpreter_support",
+  medical_second_opinion: "lead_option_medical_second_opinion",
+  medical_treatment: "lead_option_medical_treatment",
+  oncology_second_opinion: "lead_option_oncology_second_opinion",
+  orthopedics: "lead_option_orthopedics",
+  rehabilitation: "lead_option_rehabilitation",
+  spine_program: "lead_option_spine_program",
+  urology_second_opinion: "lead_option_urology_second_opinion",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const LEAD_MEDICAL_RECORDS_LABEL_KEYS = {
+  yes: "lead_option_medical_records_yes",
+  no: "lead_option_medical_records_no",
+  none: "lead_option_medical_records_none",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const LEAD_INSURANCE_COVERAGE_LABEL_KEYS = {
+  yes: "lead_option_insurance_yes",
+  no: "lead_option_insurance_no",
+  not_sure: "lead_option_insurance_not_sure",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const LEAD_VISIT_TIMING_LABEL_KEYS = {
+  asap: "lead_option_visit_asap",
+  within_4_weeks: "lead_option_visit_within_4_weeks",
+  within_6_weeks: "lead_option_visit_within_6_weeks",
+  within_8_weeks: "lead_option_visit_within_8_weeks",
+  spring: "lead_option_visit_spring",
+  summer: "lead_option_visit_summer",
+  autumn: "lead_option_visit_autumn",
+  flexible: "lead_option_visit_flexible",
 } satisfies Partial<Record<string, TranslationKey>>;
 
 const LEAD_STAGE_LABEL_KEYS = {
@@ -290,6 +342,61 @@ export function leadSourceLabel(
   return formatEnumLabelFromKeys(
     source,
     LEAD_SOURCE_LABEL_KEYS,
+    runtimeTranslations(translations),
+  );
+}
+
+export function leadLanguageLabel(
+  value: string | null | undefined,
+  translations?: Translations,
+) {
+  return formatEnumLabelFromKeys(
+    value,
+    LEAD_LANGUAGE_LABEL_KEYS,
+    runtimeTranslations(translations),
+  );
+}
+
+export function leadProgramServiceLabel(
+  value: string | null | undefined,
+  translations?: Translations,
+) {
+  return formatEnumLabelFromKeys(
+    value,
+    LEAD_PROGRAM_SERVICE_LABEL_KEYS,
+    runtimeTranslations(translations),
+  );
+}
+
+export function leadMedicalRecordsLabel(
+  value: string | null | undefined,
+  translations?: Translations,
+) {
+  return formatEnumLabelFromKeys(
+    value,
+    LEAD_MEDICAL_RECORDS_LABEL_KEYS,
+    runtimeTranslations(translations),
+  );
+}
+
+export function leadInsuranceCoverageLabel(
+  value: string | null | undefined,
+  translations?: Translations,
+) {
+  return formatEnumLabelFromKeys(
+    value,
+    LEAD_INSURANCE_COVERAGE_LABEL_KEYS,
+    runtimeTranslations(translations),
+  );
+}
+
+export function leadVisitTimingLabel(
+  value: string | null | undefined,
+  translations?: Translations,
+) {
+  return formatEnumLabelFromKeys(
+    value,
+    LEAD_VISIT_TIMING_LABEL_KEYS,
     runtimeTranslations(translations),
   );
 }
