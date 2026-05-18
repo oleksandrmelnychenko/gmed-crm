@@ -73,7 +73,7 @@ jobs:
 
       - name: Image metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           # The image namespace mirrors the repo: a fork stays in its
           # own ghcr.io/<fork-owner>/<repo>-* scope automatically.
