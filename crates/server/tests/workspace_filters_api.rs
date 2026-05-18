@@ -9190,6 +9190,7 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
                 }
             ],
             "website": "https://clinic-api.example",
+            "opening_hours": "Mo-Fr 08:00-17:00",
             "fachbereich": "Cardiology",
             "specializations": ["Cardiology", "Neurology"],
             "organization_level": "organization",
@@ -9603,6 +9604,7 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
             && row["value"] == format!("info-{tag}@clinic-api.example")
     }));
     assert_eq!(detail["website"], "https://clinic-api.example");
+    assert_eq!(detail["opening_hours"], "Mo-Fr 08:00-17:00");
     assert_eq!(detail["fachbereich"], "Cardiology");
     assert_eq!(detail["organization_level"], "organization");
     assert_eq!(detail["notes"], "Created via PM happy-path round-trip test");

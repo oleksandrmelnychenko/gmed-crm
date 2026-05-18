@@ -82,6 +82,7 @@ import {
 import { fetchProviderPeople, fetchProviderPeoplePatients } from "./data/provider-people-api";
 import {
   DEFAULT_FILTERS,
+  DOCTOR_TITLE_OPTIONS,
   blankDoctorForm,
   blankProviderForm,
   blankServiceForm,
@@ -90,10 +91,13 @@ import {
   compactDate,
   compactDateTime,
   doctorToForm,
+  doctorListDisplayName,
   doctorRelationshipTypeLabel,
   doctorRoleLabel,
   humanizeCode,
+  joinDoctorTitleValue,
   makeContactFormId,
+  normalizeDoctorTitleKey,
   patientLabel,
   personGenderLabel,
   providerMeta,
@@ -104,6 +108,7 @@ import {
   serviceToForm,
   servicePriceLabel,
   staffToForm,
+  splitDoctorTitleValue,
   toDoctorPayload,
   toProviderPayload,
   toServicePayload,
@@ -412,6 +417,78 @@ function SpecializationMultiSelect({
                   className="inline-flex size-4 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground"
                   aria-label={`${removeLabel}: ${item}`}
                   title={`${removeLabel}: ${item}`}
+                >
+                  <X className="size-3" />
+                </button>
+              ) : null}
+            </Badge>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function DoctorTitleMultiSelect({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+}) {
+  const { t } = useLang();
+  const selected = useMemo(() => splitDoctorTitleValue(value), [value]);
+  const selectedKeys = useMemo(
+    () => new Set(selected.map(normalizeDoctorTitleKey)),
+    [selected],
+  );
+  const availableOptions = DOCTOR_TITLE_OPTIONS.filter(
+    (option) => !selectedKeys.has(normalizeDoctorTitleKey(option.value)),
+  );
+  const commit = (next: string[]) => onChange(joinDoctorTitleValue(next));
+  const addTitle = (nextValue: string) => {
+    const trimmed = nextValue.trim();
+    if (!trimmed || selectedKeys.has(normalizeDoctorTitleKey(trimmed))) return;
+    commit([...selected, trimmed]);
+  };
+  const removeTitle = (target: string) => {
+    const targetKey = normalizeDoctorTitleKey(target);
+    commit(selected.filter((item) => normalizeDoctorTitleKey(item) !== targetKey));
+  };
+
+  return (
+    <div className="space-y-2">
+      <NativeComboboxSelect
+        value=""
+        onChange={(event) => addTitle(event.target.value)}
+        className={formSelectClassName}
+        disabled={disabled || availableOptions.length === 0}
+      >
+        <option value="">{t.providers_doctor_title}</option>
+        {availableOptions.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.value}
+          </option>
+        ))}
+      </NativeComboboxSelect>
+      {selected.length > 0 ? (
+        <div className="flex min-h-8 flex-wrap gap-1.5 rounded-lg border border-border/70 bg-muted/20 p-1.5">
+          {selected.map((title) => (
+            <Badge
+              key={title}
+              variant="secondary"
+              className="h-7 max-w-full gap-1.5 rounded-full px-2.5 text-[12px] font-medium"
+            >
+              <span className="min-w-0 truncate">{title}</span>
+              {!disabled ? (
+                <button
+                  type="button"
+                  onClick={() => removeTitle(title)}
+                  className="inline-flex size-4 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground"
+                  aria-label={`${t.common_remove}: ${title}`}
+                  title={`${t.common_remove}: ${title}`}
                 >
                   <X className="size-3" />
                 </button>
@@ -1035,6 +1112,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       fachbereich: detail.fachbereich,
       phone: detail.phone,
       email: detail.email,
+      opening_hours: detail.opening_hours,
       parent_provider_id: detail.parent_provider_id,
       parent_provider_name: detail.parent_provider_name,
       organization_level: detail.organization_level,
@@ -2865,7 +2943,7 @@ function ProviderDoctorRelationshipFormSheet({
   onChange: (patch: Partial<DoctorRelationshipFormState>) => void;
   onTargetProviderChange: (providerId: string) => void;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   const sourceDoctor = sourceDoctors.find((doctor) => doctor.id === form.sourceDoctorId);
   const availableTargetDoctors = targetDoctors.filter(
@@ -2908,7 +2986,7 @@ function ProviderDoctorRelationshipFormSheet({
                       required
                     >
                       {sourceDoctor ? (
-                        <option value={sourceDoctor.id}>{sourceDoctor.name}</option>
+                        <option value={sourceDoctor.id}>{doctorListDisplayName(sourceDoctor, lang)}</option>
                       ) : (
                         <option value="">{t.common_not_set}</option>
                       )}
@@ -2944,7 +3022,7 @@ function ProviderDoctorRelationshipFormSheet({
                       </option>
                       {availableTargetDoctors.map((doctor) => (
                         <option key={doctor.id} value={doctor.id}>
-                          {doctor.title ? `${doctor.title} ${doctor.name}` : doctor.name}
+                          {doctorListDisplayName(doctor, lang)}
                         </option>
                       ))}
                     </NativeComboboxSelect>
@@ -3857,6 +3935,9 @@ function ProviderSheetHero({
             <HeroInfoLine icon={Mail}>
               {detail.email || t.common_not_set}
             </HeroInfoLine>
+            <HeroInfoLine icon={CalendarClock}>
+              {detail.opening_hours || t.common_not_set}
+            </HeroInfoLine>
             <HeroInfoLine icon={BadgeCheck}>
               {detail.tax_id || t.common_not_set}
             </HeroInfoLine>
@@ -4046,8 +4127,7 @@ function DoctorSection({
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-foreground">
-                      {doctor.title ? `${doctor.title} ` : ""}
-                      {doctor.name}
+                      {doctorListDisplayName(doctor, lang)}
                     </p>
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       <Badge
@@ -4935,7 +5015,7 @@ function ProviderFormFields({
         </Field>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-3">
         <Field label={l("providers_tax_id")}>
           <Input
             value={form.taxId}
@@ -4952,6 +5032,16 @@ function ProviderFormFields({
             onChange={(event) => onChange("website", event.target.value)}
             className={shellInputClassName}
             placeholder={l("providers_https")}
+            disabled={disabled}
+          />
+        </Field>
+
+        <Field label={l("providers_opening_hours")}>
+          <Input
+            value={form.openingHours}
+            onChange={(event) => onChange("openingHours", event.target.value)}
+            className={shellInputClassName}
+            placeholder={l("providers_opening_hours_placeholder")}
             disabled={disabled}
           />
         </Field>
@@ -5240,7 +5330,6 @@ function DoctorFormFields({
 }) {
   const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
-  const doctorTitleOptions = ["Dr. med.", "PD", "Prof."];
   const doctorRoleOptions: Array<{ value: Exclude<DoctorFormState["roleCode"], "">; label: string }> = [
     { value: "clinical_director", label: l("providers_doctor_role_clinical_director") },
     { value: "chefarzt", label: l("providers_doctor_role_chefarzt") },
@@ -5249,7 +5338,6 @@ function DoctorFormFields({
     { value: "assistenzarzt", label: l("providers_doctor_role_assistenzarzt") },
     { value: "other", label: l("providers_doctor_role_other") },
   ];
-  const hasCustomTitle = Boolean(form.title) && !doctorTitleOptions.includes(form.title);
   const normalizeContacts = (contacts: DoctorFormState["contacts"]) =>
     contacts.map((contact, _index, all) => {
       const sameKind = all.filter((item) => item.contactKind === contact.contactKind);
@@ -5326,19 +5414,10 @@ function DoctorFormFields({
             />
           </Field>
           <Field label={t.providers_doctor_title}>
-            <NativeComboboxSelect
+            <DoctorTitleMultiSelect
               value={form.title}
-              onChange={(event) => onChange("title", event.target.value)}
-              className={formSelectClassName}
-            >
-              <option value="">{t.common_not_set}</option>
-              {doctorTitleOptions.map((title) => (
-                <option key={title} value={title}>
-                  {title}
-                </option>
-              ))}
-              {hasCustomTitle ? <option value={form.title}>{form.title}</option> : null}
-            </NativeComboboxSelect>
+              onChange={(nextValue) => onChange("title", nextValue)}
+            />
           </Field>
           <Field label={l("providers_doctor_role")}>
             <NativeComboboxSelect

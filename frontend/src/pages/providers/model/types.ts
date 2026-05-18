@@ -104,6 +104,7 @@ export type ProviderSummary = {
   fachbereich: string | null;
   phone: string | null;
   email: string | null;
+  opening_hours: string | null;
   parent_provider_id: string | null;
   parent_provider_name: string | null;
   organization_level: ProviderOrganizationLevel;
@@ -238,6 +239,7 @@ export type ProviderDetail = {
   address_country: string | null;
   phone: string | null;
   email: string | null;
+  opening_hours: string | null;
   contacts: ProviderContact[];
   website: string | null;
   fachbereich: string | null;
@@ -291,6 +293,7 @@ export type ProviderFormState = {
   email: string;
   contacts: ProviderContactFormState[];
   website: string;
+  openingHours: string;
   fachbereich: string;
   specializations: string;
   parentProviderId: string;

@@ -5,6 +5,9 @@ import {
   blankDoctorForm,
   blankProviderForm,
   buildProvidersQuery,
+  doctorListDisplayName,
+  formatDoctorTitleValue,
+  splitDoctorTitleValue,
   toDoctorPayload,
   toProviderPayload,
 } from "./list-model";
@@ -34,11 +37,13 @@ describe("toProviderPayload", () => {
       ...blankProviderForm("medical"),
       name: "Clinic Rechts der Isar",
       specializations: "cardiology, neurology, oncology",
+      openingHours: "Mo-Fr 08:00-17:00",
     };
 
     const payload = toProviderPayload(form, false);
 
     expect(payload.specializations).toEqual(["cardiology", "neurology", "oncology"]);
+    expect(payload.opening_hours).toBe("Mo-Fr 08:00-17:00");
   });
 });
 
@@ -90,5 +95,35 @@ describe("toDoctorPayload", () => {
     const payload = toDoctorPayload(form);
 
     expect(payload.specializations).toEqual(["cardiology", "electrophysiology", "intensive care"]);
+  });
+
+  it("sorts multiple doctor titles before sending the payload", () => {
+    const form = {
+      ...blankDoctorForm(),
+      name: "John Rembo",
+      title: "Dr. med. Prof.",
+    };
+
+    const payload = toDoctorPayload(form);
+
+    expect(payload.title).toBe("Prof. Dr. med.");
+  });
+});
+
+describe("doctor title helpers", () => {
+  it("parses and sorts title values from highest to lowest", () => {
+    expect(splitDoctorTitleValue("Dr. med. Prof. PD")).toEqual(["Prof.", "PD", "Dr. med."]);
+    expect(formatDoctorTitleValue("Dr. Prof.")).toBe("Prof. Dr.");
+  });
+
+  it("adds gender salutation only for German doctor lists", () => {
+    const doctor = {
+      name: "JOHN REMBO",
+      title: "Prof. Dr.",
+      gender: "male" as const,
+    };
+
+    expect(doctorListDisplayName(doctor, "de")).toBe("Herr Prof. Dr. JOHN REMBO");
+    expect(doctorListDisplayName(doctor, "ru")).toBe("Prof. Dr. JOHN REMBO");
   });
 });

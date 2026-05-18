@@ -176,6 +176,7 @@ struct UpsertProviderRequest {
     email: Option<String>,
     contacts: Option<Vec<UpsertProviderContactRequest>>,
     website: Option<String>,
+    opening_hours: Option<String>,
     fachbereich: Option<String>,
     specializations: Option<Vec<String>>,
     parent_provider_id: Option<Uuid>,
@@ -344,7 +345,7 @@ async fn list_providers(
     let rows = match sqlx::query(
         r#"SELECT p.id, p.name, p.provider_type, p.legal_name, p.tax_id,
                   p.address_city, p.address_country, p.fachbereich,
-                  p.phone, p.email, p.is_active, p.created_at,
+                  p.phone, p.email, p.opening_hours, p.is_active, p.created_at,
                   p.parent_provider_id, parent.name AS parent_provider_name,
                   p.organization_level,
                   (p.kooperationsvertrag IS NOT NULL) AS has_contract,
@@ -476,8 +477,8 @@ async fn list_providers(
              )
              AND (
                 cardinality($12::text[]) = 0
-                OR (
-                    SELECT COUNT(DISTINCT specialization_filter.value)
+                OR EXISTS (
+                    SELECT 1
                     FROM unnest($12::text[]) AS specialization_filter(value)
                     WHERE COALESCE(p.fachbereich, '') ILIKE ('%' || specialization_filter.value || '%')
                        OR EXISTS (
@@ -492,7 +493,7 @@ async fn list_providers(
                                OR COALESCE(ms.name_ru, '') ILIKE ('%' || specialization_filter.value || '%')
                              )
                        )
-                ) = cardinality($12::text[])
+                )
              )
              AND (
                 $7::text = '%%'
@@ -648,6 +649,7 @@ async fn list_providers(
             "fachbereich": row.try_get::<Option<String>, _>("fachbereich").unwrap_or_default(),
             "phone": row.try_get::<Option<String>, _>("phone").unwrap_or_default(),
             "email": row.try_get::<Option<String>, _>("email").unwrap_or_default(),
+            "opening_hours": row.try_get::<Option<String>, _>("opening_hours").unwrap_or_default(),
             "parent_provider_id": row.try_get::<Option<Uuid>, _>("parent_provider_id").unwrap_or_default(),
             "parent_provider_name": row.try_get::<Option<String>, _>("parent_provider_name").unwrap_or_default(),
             "organization_level": row.try_get::<String, _>("organization_level").unwrap_or_else(|_| "organization".to_string()),
@@ -1083,12 +1085,12 @@ async fn create_provider(
                 name, provider_type, legal_name, tax_id,
                 address_street, address_city, address_zip, address_country,
                 phone, email, website, fachbereich, parent_provider_id, organization_level,
-                kooperationsvertrag, notes
+                opening_hours, kooperationsvertrag, notes
            ) VALUES (
                 $1, $2, $3, $4,
                 $5, $6, $7, $8,
                 $9, $10, $11, $12, $13, $14,
-                $15, $16
+                $15, $16, $17
            )
            RETURNING id, created_at"#,
     )
@@ -1106,6 +1108,7 @@ async fn create_provider(
     .bind(provider.fachbereich)
     .bind(provider.parent_provider_id)
     .bind(provider.organization_level)
+    .bind(provider.opening_hours)
     .bind(provider.kooperationsvertrag)
     .bind(provider.notes)
     .fetch_one(&mut *tx)
@@ -1198,7 +1201,7 @@ async fn get_provider(
     let provider = match sqlx::query(
         r#"SELECT id, name, provider_type, legal_name, tax_id,
                   address_street, address_city, address_zip,
-                  address_country, phone, email, website, fachbereich, kooperationsvertrag, notes,
+                  address_country, phone, email, website, opening_hours, fachbereich, kooperationsvertrag, notes,
                   parent_provider_id,
                   (SELECT name FROM providers parent WHERE parent.id = providers.parent_provider_id) AS parent_provider_name,
                   organization_level,
@@ -1300,6 +1303,7 @@ async fn get_provider(
         "email": provider.try_get::<Option<String>, _>("email").unwrap_or_default(),
         "contacts": provider_contacts,
         "website": provider.try_get::<Option<String>, _>("website").unwrap_or_default(),
+        "opening_hours": provider.try_get::<Option<String>, _>("opening_hours").unwrap_or_default(),
         "fachbereich": provider.try_get::<Option<String>, _>("fachbereich").unwrap_or_default(),
         "specializations": specializations,
         "parent_provider_id": provider.try_get::<Option<Uuid>, _>("parent_provider_id").unwrap_or_default(),
@@ -1371,8 +1375,9 @@ async fn update_provider(
                fachbereich = $13,
                parent_provider_id = $14,
                organization_level = $15,
-               kooperationsvertrag = $16,
-               notes = $17,
+               opening_hours = $16,
+               kooperationsvertrag = $17,
+               notes = $18,
                updated_at = now()
            WHERE id = $1
            RETURNING id"#,
@@ -1392,6 +1397,7 @@ async fn update_provider(
     .bind(provider.fachbereich)
     .bind(provider.parent_provider_id)
     .bind(provider.organization_level)
+    .bind(provider.opening_hours)
     .bind(provider.kooperationsvertrag)
     .bind(provider.notes)
     .fetch_optional(&mut *tx)
@@ -3155,6 +3161,7 @@ struct ProviderPayload {
     email: Option<String>,
     contacts: Option<Vec<ProviderContactPayload>>,
     website: Option<String>,
+    opening_hours: Option<String>,
     fachbereich: Option<String>,
     specializations: Option<Vec<String>>,
     parent_provider_id: Option<Uuid>,
@@ -3315,6 +3322,13 @@ fn normalize_provider_payload(
 
     let phone = normalize_optional(body.phone);
     let email = normalize_optional(body.email);
+    let opening_hours = normalize_optional(body.opening_hours);
+    if opening_hours
+        .as_ref()
+        .is_some_and(|value| value.len() > 4000)
+    {
+        return Err("Opening hours are too long");
+    }
     let contacts = match body.contacts {
         Some(raw) => Some(normalize_provider_contacts(raw)?),
         None => Some(legacy_provider_contacts_from_fields(
@@ -3336,6 +3350,7 @@ fn normalize_provider_payload(
         email,
         contacts,
         website: normalize_optional(body.website),
+        opening_hours,
         fachbereich,
         specializations: if explicit_specializations || !specializations.is_empty() {
             Some(specializations)

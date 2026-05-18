@@ -28,6 +28,7 @@ function normalizeProviderDetail(raw: ProviderDetail): ProviderDetail {
     organization_level: raw.organization_level || "organization",
     parent_provider_id: raw.parent_provider_id ?? null,
     parent_provider_name: raw.parent_provider_name ?? null,
+    opening_hours: raw.opening_hours ?? null,
     specializations: arrayOrEmpty<ProviderDetail["specializations"][number]>(raw.specializations).map(normalizeSpecializationItem),
     contacts: arrayOrEmpty<ProviderDetail["contacts"][number]>(raw.contacts),
     doctors: arrayOrEmpty<ProviderDetail["doctors"][number]>(raw.doctors).map((doctor) => ({
@@ -88,6 +89,7 @@ export function fetchProviders(path: string) {
       organization_level: provider.organization_level || "organization",
       parent_provider_id: provider.parent_provider_id ?? null,
       parent_provider_name: provider.parent_provider_name ?? null,
+      opening_hours: provider.opening_hours ?? null,
       specializations: arrayOrEmpty<ProviderSummary["specializations"][number]>(provider.specializations).map(normalizeSpecializationItem),
     }));
   });

@@ -308,7 +308,7 @@ async fn provider_people_returns_doctors_staff_counts_and_patient_filter() {
 }
 
 #[tokio::test]
-async fn provider_specializations_filter_requires_all_selected_specializations() {
+async fn provider_specializations_filter_matches_any_selected_specialization() {
     let Some((app, pool, _admin_id)) = test_context().await else {
         return;
     };
@@ -326,25 +326,36 @@ async fn provider_specializations_filter_requires_all_selected_specializations()
     .fetch_one(&pool)
     .await
     .unwrap();
-    add_provider_specialization(&pool, provider_both, "cardiology", true).await;
-    add_provider_specialization(&pool, provider_both, "neurology", false).await;
+    add_provider_specialization(&pool, provider_both, "kardiologie", true).await;
+    add_provider_specialization(&pool, provider_both, "neurologie", false).await;
 
-    let provider_cardiology_only: Uuid = sqlx::query_scalar(
+    let provider_kardiologie_only: Uuid = sqlx::query_scalar(
         r#"INSERT INTO providers (name, provider_type, address_city, address_country)
            VALUES ($1, 'medical', 'Berlin', 'Germany')
            RETURNING id"#,
     )
-    .bind(format!("Specialization Cardiology Only {tag}"))
+    .bind(format!("Specialization Kardiologie Only {tag}"))
     .fetch_one(&pool)
     .await
     .unwrap();
-    add_provider_specialization(&pool, provider_cardiology_only, "cardiology", true).await;
+    add_provider_specialization(&pool, provider_kardiologie_only, "kardiologie", true).await;
+
+    let provider_radiologie_only: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO providers (name, provider_type, address_city, address_country)
+           VALUES ($1, 'medical', 'Berlin', 'Germany')
+           RETURNING id"#,
+    )
+    .bind(format!("Specialization Radiologie Only {tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    add_provider_specialization(&pool, provider_radiologie_only, "radiologie", true).await;
 
     let (status, body) = json_request(
         &app,
         "GET",
         &format!(
-            "/api/v1/providers?search={tag}&provider_type=medical&specializations=cardiology,neurology"
+            "/api/v1/providers?search={tag}&provider_type=medical&specializations=kardiologie,neurologie"
         ),
         &bearer,
         None,
@@ -358,9 +369,14 @@ async fn provider_specializations_filter_requires_all_selected_specializations()
             .any(|item| item["id"] == provider_both.to_string())
     );
     assert!(
+        items
+            .iter()
+            .any(|item| item["id"] == provider_kardiologie_only.to_string())
+    );
+    assert!(
         !items
             .iter()
-            .any(|item| item["id"] == provider_cardiology_only.to_string())
+            .any(|item| item["id"] == provider_radiologie_only.to_string())
     );
 }
 

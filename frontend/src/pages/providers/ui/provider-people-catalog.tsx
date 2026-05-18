@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 
 import {
   compactDateTime,
+  doctorListDisplayName,
   doctorRoleLabel,
   providerTypeLabel,
 } from "../model/list-model";
@@ -276,10 +277,12 @@ function ProviderTypeBadge({
 }
 
 function PersonIdentityCell({
+  lang,
   labels,
   row,
   uiText,
 }: {
+  lang: Lang;
   labels: Record<string, string>;
   row: ProviderPeopleRow;
   uiText: Record<string, string>;
@@ -296,7 +299,7 @@ function PersonIdentityCell({
       <div className="min-w-0">
         <div className="flex min-w-0 items-center gap-1.5">
           <span className="truncate text-xs font-medium text-foreground">
-            {row.title ? `${row.title} ${row.name}` : row.name}
+            {row.person_type === "doctor" ? doctorListDisplayName(row, lang) : row.name}
           </span>
           <PersonTypeBadge labels={labels} row={row} uiText={uiText} />
         </div>
@@ -373,7 +376,7 @@ function buildPeopleColumns(
       pinned: "left",
       width: 300,
       group: "identity",
-      render: (row) => <PersonIdentityCell labels={labels} row={row} uiText={uiText} />,
+      render: (row) => <PersonIdentityCell labels={labels} lang={lang} row={row} uiText={uiText} />,
     },
     {
       id: "person_type",
@@ -868,7 +871,7 @@ function MobilePeopleCards({
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                 <h4 className="truncate text-sm font-semibold text-foreground">
-                  {row.title ? `${row.title} ${row.name}` : row.name}
+                  {row.person_type === "doctor" ? doctorListDisplayName(row, lang) : row.name}
                 </h4>
                 <PersonTypeBadge labels={labels} row={row} uiText={uiText} />
               </div>

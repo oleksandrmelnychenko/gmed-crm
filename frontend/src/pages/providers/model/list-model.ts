@@ -19,6 +19,7 @@ import {
   formatEnumLabelFromKeys,
   getLang,
   t as translateCatalog,
+  type Lang,
   type TranslationKey,
 } from "@/lib/i18n";
 
@@ -87,6 +88,112 @@ const DOCTOR_RELATIONSHIP_LABELS: Record<string, string> = {
   approach_via: "providers_relationship_approach_via",
   other: "providers_relationship_other",
 };
+
+export const DOCTOR_TITLE_OPTIONS = [
+  { value: "Prof.", sortOrder: 10 },
+  { value: "Priv.-Doz.", sortOrder: 20 },
+  { value: "PD", sortOrder: 30 },
+  { value: "Dr. med.", sortOrder: 40 },
+  { value: "Dr.", sortOrder: 50 },
+  { value: "Dipl.-Med.", sortOrder: 60 },
+] as const;
+
+const DOCTOR_TITLE_PARSE_OPTIONS = [...DOCTOR_TITLE_OPTIONS].sort(
+  (left, right) => right.value.length - left.value.length,
+);
+
+export function normalizeDoctorTitleKey(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("de-DE");
+}
+
+function splitDoctorTitleSegment(segment: string) {
+  const original = segment.trim();
+  if (!original) return [];
+
+  const exact = DOCTOR_TITLE_OPTIONS.find(
+    (option) => normalizeDoctorTitleKey(option.value) === normalizeDoctorTitleKey(original),
+  );
+  if (exact) return [exact.value];
+
+  const parts: string[] = [];
+  let remaining = original;
+
+  while (remaining) {
+    const match = DOCTOR_TITLE_PARSE_OPTIONS.find((option) =>
+      normalizeDoctorTitleKey(remaining).startsWith(normalizeDoctorTitleKey(option.value)),
+    );
+    if (!match) break;
+    parts.push(match.value);
+    remaining = remaining.slice(match.value.length).trim();
+  }
+
+  if (!remaining) return parts;
+  return parts.length > 0 ? [...parts, remaining] : [original];
+}
+
+export function splitDoctorTitleValue(value: string | null | undefined) {
+  const parts = (value ?? "")
+    .split(",")
+    .flatMap(splitDoctorTitleSegment)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return sortDoctorTitleValues(parts);
+}
+
+function doctorTitleSortOrder(value: string) {
+  const key = normalizeDoctorTitleKey(value);
+  const option = DOCTOR_TITLE_OPTIONS.find(
+    (item) => normalizeDoctorTitleKey(item.value) === key,
+  );
+  return option?.sortOrder ?? 1000;
+}
+
+export function sortDoctorTitleValues(values: readonly string[]) {
+  const seen = new Set<string>();
+  return values
+    .map((value, index) => ({
+      value: value.trim(),
+      key: normalizeDoctorTitleKey(value),
+      sortOrder: doctorTitleSortOrder(value),
+      index,
+    }))
+    .filter((item) => {
+      if (!item.value || seen.has(item.key)) return false;
+      seen.add(item.key);
+      return true;
+    })
+    .sort((left, right) => left.sortOrder - right.sortOrder || left.index - right.index)
+    .map((item) => {
+      const canonical = DOCTOR_TITLE_OPTIONS.find(
+        (option) => normalizeDoctorTitleKey(option.value) === item.key,
+      );
+      return canonical?.value ?? item.value;
+    });
+}
+
+export function joinDoctorTitleValue(values: readonly string[]) {
+  return sortDoctorTitleValues(values).join(" ");
+}
+
+export function formatDoctorTitleValue(value: string | null | undefined) {
+  return joinDoctorTitleValue(splitDoctorTitleValue(value));
+}
+
+function doctorGermanSalutation(gender: ProviderPersonGender) {
+  if (gender === "male") return "Herr";
+  if (gender === "female") return "Frau";
+  return "";
+}
+
+export function doctorListDisplayName(
+  doctor: { name: string; title?: string | null; gender?: ProviderPersonGender | null },
+  lang: Lang,
+) {
+  const salutation = lang === "de" && doctor.gender ? doctorGermanSalutation(doctor.gender) : "";
+  return [salutation, formatDoctorTitleValue(doctor.title), doctor.name.trim()]
+    .filter(Boolean)
+    .join(" ");
+}
 
 const COMPACT_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-GB", {
   day: "2-digit",
@@ -162,6 +269,7 @@ export function blankProviderForm(providerType: ProviderType = "medical"): Provi
     email: "",
     contacts: [],
     website: "",
+    openingHours: "",
     fachbereich: "",
     specializations: "",
     parentProviderId: "",
@@ -598,6 +706,7 @@ export function providerToForm(detail: ProviderDetail): ProviderFormState {
     email: detail.email ?? "",
     contacts: toProviderContactForms(detail.contacts, detail.phone ?? "", detail.email ?? ""),
     website: detail.website ?? "",
+    openingHours: detail.opening_hours ?? "",
     fachbereich: detail.fachbereich ?? "",
     specializations: specializationsToText(detail.specializations, detail.fachbereich ?? ""),
     parentProviderId: detail.parent_provider_id ?? "",
@@ -702,6 +811,7 @@ export function toProviderPayload(form: ProviderFormState, forceNonMedical: bool
     email: primaryProviderContact(contacts, "email"),
     contacts,
     website: toOptional(form.website),
+    opening_hours: toOptional(form.openingHours),
     fachbereich: isMedical ? toOptional(form.fachbereich) : null,
     specializations: isMedical ? parseCommaList(form.specializations || form.fachbereich) : [],
     parent_provider_id: toOptional(form.parentProviderId),
@@ -720,7 +830,7 @@ export function toDoctorPayload(form: DoctorFormState) {
     first_name: toOptional(form.firstName),
     last_name: toOptional(form.lastName),
     display_name: name,
-    title: toOptional(form.title),
+    title: toOptional(formatDoctorTitleValue(form.title)),
     role_code: toOptional(form.roleCode),
     role_label: form.roleCode === "other" ? toOptional(form.roleLabel) : null,
     subrole: toOptional(form.subrole),
