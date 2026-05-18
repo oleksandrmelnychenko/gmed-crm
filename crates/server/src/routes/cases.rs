@@ -1126,12 +1126,21 @@ async fn list_case_doctors(
     }
 
     match sqlx::query(
-        r#"SELECT d.id, d.provider_id, d.name, d.title, d.fachbereich,
+        r#"SELECT d.id, d.provider_id, d.name, d.title, d.role_code, d.role_label, d.subrole, d.fachbereich,
                   p.name AS provider_name
            FROM provider_doctors d
            JOIN providers p ON p.id = d.provider_id
            WHERE p.is_active = true
-           ORDER BY p.name, d.name"#,
+           ORDER BY p.name,
+                    CASE d.role_code
+                      WHEN 'clinical_director' THEN 1
+                      WHEN 'chefarzt' THEN 2
+                      WHEN 'oberarzt' THEN 3
+                      WHEN 'facharzt' THEN 4
+                      WHEN 'assistenzarzt' THEN 5
+                      ELSE 6
+                    END,
+                    d.name"#,
     )
     .fetch_all(&state.db)
     .await
@@ -1145,6 +1154,9 @@ async fn list_case_doctors(
                         "provider_name": row.try_get::<String, _>("provider_name").unwrap_or_default(),
                         "name": row.try_get::<String, _>("name").unwrap_or_default(),
                         "title": row.try_get::<Option<String>, _>("title").unwrap_or_default(),
+                        "role_code": row.try_get::<Option<String>, _>("role_code").unwrap_or_default(),
+                        "role_label": row.try_get::<Option<String>, _>("role_label").unwrap_or_default(),
+                        "subrole": row.try_get::<Option<String>, _>("subrole").unwrap_or_default(),
                         "fachbereich": row.try_get::<Option<String>, _>("fachbereich").unwrap_or_default(),
                     })
                 })

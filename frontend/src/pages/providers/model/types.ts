@@ -8,7 +8,6 @@ export type DoctorRoleCode =
   | "oberarzt"
   | "facharzt"
   | "assistenzarzt"
-  | "head_of_department"
   | "other";
 
 export type SpecializationItem = {
@@ -170,6 +169,7 @@ export type DoctorSummary = {
   contacts: PersonContact[];
   role_code: DoctorRoleCode | null;
   role_label: string | null;
+  subrole: string | null;
   gender: ProviderPersonGender;
   opening_hours: string | null;
   relationships: DoctorRelationship[];
@@ -270,6 +270,7 @@ export type ProviderFilters = {
   city: string;
   country: string;
   fachbereich: string;
+  specializations: string;
   doctorName: string;
   doctorFachbereich: string;
   serviceName: string;
@@ -306,6 +307,7 @@ export type DoctorFormState = {
   title: string;
   roleCode: "" | DoctorRoleCode;
   roleLabel: string;
+  subrole: string;
   gender: ProviderPersonGender;
   openingHours: string;
   fachbereich: string;

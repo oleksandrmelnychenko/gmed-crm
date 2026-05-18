@@ -37,6 +37,7 @@ function normalizeProviderDetail(raw: ProviderDetail): ProviderDetail {
       display_name: doctor.display_name ?? doctor.name ?? null,
       role_code: doctor.role_code ?? null,
       role_label: doctor.role_label ?? null,
+      subrole: doctor.subrole ?? null,
       gender: doctor.gender === "male" || doctor.gender === "female" ? doctor.gender : "unknown",
       opening_hours: doctor.opening_hours ?? null,
       specializations: arrayOrEmpty<ProviderDetail["doctors"][number]["specializations"][number]>(doctor.specializations).map(normalizeSpecializationItem),

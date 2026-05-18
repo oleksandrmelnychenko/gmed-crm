@@ -144,6 +144,7 @@ struct ListProvidersQuery {
     city: Option<String>,
     country: Option<String>,
     fachbereich: Option<String>,
+    specializations: Option<String>,
     doctor_name: Option<String>,
     doctor_fachbereich: Option<String>,
     service_name: Option<String>,
@@ -192,6 +193,7 @@ struct UpsertDoctorRequest {
     title: Option<String>,
     role_code: Option<String>,
     role_label: Option<String>,
+    subrole: Option<String>,
     gender: Option<String>,
     opening_hours: Option<String>,
     fachbereich: Option<String>,
@@ -326,6 +328,7 @@ async fn list_providers(
     let city_pattern = format!("%{}%", query.city.unwrap_or_default());
     let country_pattern = format!("%{}%", query.country.unwrap_or_default());
     let fachbereich_pattern = format!("%{}%", query.fachbereich.unwrap_or_default());
+    let specialization_filters = normalize_csv_list(query.specializations);
     let doctor_name_pattern = format!("%{}%", query.doctor_name.unwrap_or_default());
     let doctor_fachbereich_pattern = format!("%{}%", query.doctor_fachbereich.unwrap_or_default());
     let service_name_pattern = format!("%{}%", query.service_name.unwrap_or_default());
@@ -472,6 +475,26 @@ async fn list_providers(
                 )
              )
              AND (
+                cardinality($12::text[]) = 0
+                OR (
+                    SELECT COUNT(DISTINCT specialization_filter.value)
+                    FROM unnest($12::text[]) AS specialization_filter(value)
+                    WHERE COALESCE(p.fachbereich, '') ILIKE ('%' || specialization_filter.value || '%')
+                       OR EXISTS (
+                           SELECT 1
+                           FROM provider_specializations ps
+                           JOIN medical_specializations ms ON ms.id = ps.specialization_id
+                           WHERE ps.provider_id = p.id
+                             AND (
+                               ms.code = specialization_filter.value
+                               OR ms.name_en ILIKE ('%' || specialization_filter.value || '%')
+                               OR COALESCE(ms.name_de, '') ILIKE ('%' || specialization_filter.value || '%')
+                               OR COALESCE(ms.name_ru, '') ILIKE ('%' || specialization_filter.value || '%')
+                             )
+                       )
+                ) = cardinality($12::text[])
+             )
+             AND (
                 $7::text = '%%'
                 OR EXISTS (
                     SELECT 1
@@ -557,6 +580,7 @@ async fn list_providers(
     .bind(service_name_pattern)
     .bind(has_contract)
     .bind(rating_gte)
+    .bind(specialization_filters)
     .fetch_all(&state.db)
     .await
     {
@@ -2080,7 +2104,7 @@ async fn get_doctor(
 
     match sqlx::query(
         r#"SELECT d.id, d.provider_id, d.name, d.first_name, d.last_name, d.display_name,
-                  d.title, d.role_code, d.role_label, d.gender, d.opening_hours,
+                  d.title, d.role_code, d.role_label, d.subrole, d.gender, d.opening_hours,
                   d.fachbereich, d.languages,
                   d.phone, d.email, d.license_number, d.licensing_country,
                   d.licensing_valid_until, d.notes, d.created_at,
@@ -2147,6 +2171,7 @@ async fn get_doctor(
                 "title": row.try_get::<Option<String>, _>("title").unwrap_or_default(),
                 "role_code": row.try_get::<Option<String>, _>("role_code").unwrap_or_default(),
                 "role_label": row.try_get::<Option<String>, _>("role_label").unwrap_or_default(),
+                "subrole": row.try_get::<Option<String>, _>("subrole").unwrap_or_default(),
                 "gender": row.try_get::<String, _>("gender").unwrap_or_else(|_| "unknown".to_string()),
                 "opening_hours": row.try_get::<Option<String>, _>("opening_hours").unwrap_or_default(),
                 "fachbereich": row.try_get::<Option<String>, _>("fachbereich").unwrap_or_default(),
@@ -2222,12 +2247,12 @@ async fn create_doctor(
     let row = match sqlx::query(
         r#"INSERT INTO provider_doctors (
                 provider_id, name, first_name, last_name, display_name,
-                title, role_code, role_label, gender, opening_hours, fachbereich, languages,
+                title, role_code, role_label, subrole, gender, opening_hours, fachbereich, languages,
                 phone, email, license_number, licensing_country, licensing_valid_until, notes
            ) VALUES (
                 $1, $2, $3, $4, $5,
-                $6, $7, $8, $9, $10, $11, $12,
-                $13, $14, $15, $16, $17, $18
+                $6, $7, $8, $9, $10, $11, $12, $13,
+                $14, $15, $16, $17, $18, $19
            )
            RETURNING id, created_at"#,
     )
@@ -2239,6 +2264,7 @@ async fn create_doctor(
     .bind(doctor.title)
     .bind(doctor.role_code)
     .bind(doctor.role_label)
+    .bind(doctor.subrole)
     .bind(doctor.gender)
     .bind(doctor.opening_hours)
     .bind(doctor.fachbereich)
@@ -2379,16 +2405,17 @@ async fn update_doctor(
                title = $7,
                role_code = $8,
                role_label = $9,
-               gender = $10,
-               opening_hours = $11,
-               fachbereich = $12,
-               languages = $13,
-               phone = $14,
-               email = $15,
-               license_number = $16,
-               licensing_country = $17,
-               licensing_valid_until = $18,
-               notes = $19
+               subrole = $10,
+               gender = $11,
+               opening_hours = $12,
+               fachbereich = $13,
+               languages = $14,
+               phone = $15,
+               email = $16,
+               license_number = $17,
+               licensing_country = $18,
+               licensing_valid_until = $19,
+               notes = $20
            WHERE provider_id = $1 AND id = $2"#,
     )
     .bind(provider_id)
@@ -2400,6 +2427,7 @@ async fn update_doctor(
     .bind(doctor.title)
     .bind(doctor.role_code)
     .bind(doctor.role_label)
+    .bind(doctor.subrole)
     .bind(doctor.gender)
     .bind(doctor.opening_hours)
     .bind(doctor.fachbereich)
@@ -3143,6 +3171,7 @@ struct DoctorPayload {
     title: Option<String>,
     role_code: Option<String>,
     role_label: Option<String>,
+    subrole: Option<String>,
     gender: String,
     opening_hours: Option<String>,
     fachbereich: Option<String>,
@@ -3358,6 +3387,10 @@ fn normalize_doctor_payload(body: UpsertDoctorRequest) -> Result<DoctorPayload, 
     if role_label.as_ref().is_some_and(|value| value.len() > 120) {
         return Err("Doctor role label is too long");
     }
+    let subrole = normalize_optional(body.subrole);
+    if subrole.as_ref().is_some_and(|value| value.len() > 255) {
+        return Err("Doctor subrole is too long");
+    }
     let gender = normalize_gender(body.gender)?;
     let opening_hours = normalize_optional(body.opening_hours);
     if opening_hours
@@ -3391,6 +3424,7 @@ fn normalize_doctor_payload(body: UpsertDoctorRequest) -> Result<DoctorPayload, 
         title,
         role_code,
         role_label,
+        subrole,
         gender,
         opening_hours,
         fachbereich,
@@ -3733,13 +3767,7 @@ fn normalize_gender(value: Option<String>) -> Result<String, &'static str> {
 fn is_valid_doctor_role_code(value: &str) -> bool {
     matches!(
         value,
-        "clinical_director"
-            | "chefarzt"
-            | "oberarzt"
-            | "facharzt"
-            | "assistenzarzt"
-            | "head_of_department"
-            | "other"
+        "clinical_director" | "chefarzt" | "oberarzt" | "facharzt" | "assistenzarzt" | "other"
     )
 }
 
@@ -4017,6 +4045,18 @@ fn normalize_string_list(value: Option<Vec<String>>) -> Vec<String> {
             }
         })
         .collect()
+}
+
+fn normalize_csv_list(value: Option<String>) -> Vec<String> {
+    let mut items = Vec::new();
+    for item in value.unwrap_or_default().split(',') {
+        let trimmed = item.trim();
+        if trimmed.is_empty() || items.iter().any(|existing| existing == trimmed) {
+            continue;
+        }
+        items.push(trimmed.to_string());
+    }
+    items
 }
 
 fn normalize_provider_template_languages(
@@ -4311,7 +4351,7 @@ async fn load_specializations_json(
            FROM medical_specializations
            WHERE deleted_at IS NULL
              AND ($1 OR is_active = TRUE)
-           ORDER BY is_active DESC, sort_order, name_en"#,
+           ORDER BY is_active DESC, sort_order, COALESCE(name_de, name_en), name_en"#,
     )
     .bind(include_inactive)
     .fetch_all(&state.db)
@@ -4514,7 +4554,7 @@ async fn load_provider_specializations_json(
            FROM provider_specializations ps
            JOIN medical_specializations ms ON ms.id = ps.specialization_id
            WHERE ps.provider_id = $1
-           ORDER BY ps.is_primary DESC, ms.sort_order, ms.name_en"#,
+           ORDER BY ps.is_primary DESC, ms.sort_order, COALESCE(ms.name_de, ms.name_en), ms.name_en"#,
     )
     .bind(provider_id)
     .fetch_all(&state.db)
@@ -4553,7 +4593,7 @@ async fn load_doctor_specializations_json(
            FROM provider_doctor_specializations ds
            JOIN medical_specializations ms ON ms.id = ds.specialization_id
            WHERE ds.doctor_id = $1
-           ORDER BY ds.is_primary DESC, ms.sort_order, ms.name_en"#,
+           ORDER BY ds.is_primary DESC, ms.sort_order, COALESCE(ms.name_de, ms.name_en), ms.name_en"#,
     )
     .bind(doctor_id)
     .fetch_all(&state.db)
@@ -4713,6 +4753,37 @@ async fn upsert_specialization_ids_tx(
             continue;
         }
         let code = specialization_code(label);
+        let existing = sqlx::query_scalar::<_, Uuid>(
+            r#"SELECT id
+               FROM medical_specializations
+               WHERE deleted_at IS NULL
+                 AND (
+                    code = $1
+                    OR lower(name_en) = lower($2)
+                    OR lower(COALESCE(name_de, '')) = lower($2)
+                    OR lower(COALESCE(name_ru, '')) = lower($2)
+                 )
+               ORDER BY is_active DESC, sort_order, name_en
+               LIMIT 1"#,
+        )
+        .bind(&code)
+        .bind(label)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, specialization = %label, "Failed to resolve specialization");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update specializations",
+            )
+        })?;
+        if let Some(id) = existing {
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+            continue;
+        }
+
         let row = sqlx::query(
             r#"INSERT INTO medical_specializations (code, name_en, name_de, name_ru, sort_order)
                VALUES ($1, $2, $2, $2, 900)
@@ -5154,7 +5225,7 @@ async fn load_doctors_json(
 ) -> Result<Vec<serde_json::Value>, axum::response::Response> {
     let rows = sqlx::query(
         r#"SELECT d.id, d.provider_id, d.name, d.first_name, d.last_name, d.display_name,
-                  d.title, d.role_code, d.role_label, d.gender, d.opening_hours,
+                  d.title, d.role_code, d.role_label, d.subrole, d.gender, d.opening_hours,
                   d.fachbereich, d.languages,
                   d.phone, d.email, d.license_number, d.licensing_country,
                   d.licensing_valid_until, d.notes, d.created_at,
@@ -5170,7 +5241,15 @@ async fn load_doctors_json(
                   ) AS appointment_count
            FROM provider_doctors d
            WHERE d.provider_id = $1
-           ORDER BY d.name"#,
+           ORDER BY CASE d.role_code
+                      WHEN 'clinical_director' THEN 1
+                      WHEN 'chefarzt' THEN 2
+                      WHEN 'oberarzt' THEN 3
+                      WHEN 'facharzt' THEN 4
+                      WHEN 'assistenzarzt' THEN 5
+                      ELSE 6
+                    END,
+                    d.name"#,
     )
     .bind(provider_id)
     .fetch_all(&state.db)
@@ -5213,6 +5292,7 @@ async fn load_doctors_json(
             "title": row.try_get::<Option<String>, _>("title").unwrap_or_default(),
             "role_code": row.try_get::<Option<String>, _>("role_code").unwrap_or_default(),
             "role_label": row.try_get::<Option<String>, _>("role_label").unwrap_or_default(),
+            "subrole": row.try_get::<Option<String>, _>("subrole").unwrap_or_default(),
             "gender": row.try_get::<String, _>("gender").unwrap_or_else(|_| "unknown".to_string()),
             "opening_hours": row.try_get::<Option<String>, _>("opening_hours").unwrap_or_default(),
             "fachbereich": row.try_get::<Option<String>, _>("fachbereich").unwrap_or_default(),

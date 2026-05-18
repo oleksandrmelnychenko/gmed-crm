@@ -30,6 +30,7 @@ pub mod patient_financials;
 pub mod patient_next_actions;
 pub mod patient_recommendations;
 pub mod patients;
+pub mod provider_people;
 pub mod providers;
 pub mod realtime;
 pub mod service_packages;
@@ -52,6 +53,7 @@ pub fn protected_router() -> Router<AppState> {
         .merge(users::router())
         .merge(access_policies::router())
         .merge(patients::router())
+        .merge(provider_people::router())
         .merge(providers::router())
         .merge(sops::router())
         .merge(cases::router())

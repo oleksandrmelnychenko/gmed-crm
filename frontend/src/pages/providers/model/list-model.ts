@@ -77,7 +77,6 @@ const DOCTOR_ROLE_LABELS: Record<string, string> = {
   oberarzt: "providers_doctor_role_oberarzt",
   facharzt: "providers_doctor_role_facharzt",
   assistenzarzt: "providers_doctor_role_assistenzarzt",
-  head_of_department: "providers_doctor_role_head_of_department",
   other: "providers_doctor_role_other",
 };
 
@@ -126,6 +125,7 @@ export const DEFAULT_FILTERS: ProviderFilters = {
   city: "",
   country: "",
   fachbereich: "",
+  specializations: "",
   doctorName: "",
   doctorFachbereich: "",
   serviceName: "",
@@ -180,6 +180,7 @@ export function blankDoctorForm(): DoctorFormState {
     title: "",
     roleCode: "",
     roleLabel: "",
+    subrole: "",
     gender: "unknown",
     openingHours: "",
     fachbereich: "",
@@ -247,7 +248,7 @@ function parseCommaList(value: string) {
 
 function specializationsToText(items?: { name_en?: string | null; code?: string }[], fallback = "") {
   const labels = (items ?? [])
-    .map((item) => item.name_en || item.code || "")
+    .map((item) => item.code || item.name_en || "")
     .filter(Boolean);
   return labels.length ? labels.join(", ") : fallback;
 }
@@ -571,6 +572,7 @@ export function buildProvidersQuery(filters: ProviderFilters, forceNonMedical: b
   if (filters.city.trim()) params.set("city", filters.city.trim());
   if (filters.country.trim()) params.set("country", filters.country.trim());
   if (filters.fachbereich.trim()) params.set("fachbereich", filters.fachbereich.trim());
+  if (filters.specializations.trim()) params.set("specializations", filters.specializations.trim());
   if (filters.doctorName.trim()) params.set("doctor_name", filters.doctorName.trim());
   if (filters.doctorFachbereich.trim()) {
     params.set("doctor_fachbereich", filters.doctorFachbereich.trim());
@@ -614,6 +616,7 @@ export function doctorToForm(doctor: DoctorSummary): DoctorFormState {
     title: doctor.title ?? "",
     roleCode: doctor.role_code ?? "",
     roleLabel: doctor.role_label ?? "",
+    subrole: doctor.subrole ?? "",
     gender: normalizeGender(doctor.gender),
     openingHours: doctor.opening_hours ?? "",
     fachbereich: doctor.fachbereich ?? "",
@@ -720,6 +723,7 @@ export function toDoctorPayload(form: DoctorFormState) {
     title: toOptional(form.title),
     role_code: toOptional(form.roleCode),
     role_label: form.roleCode === "other" ? toOptional(form.roleLabel) : null,
+    subrole: toOptional(form.subrole),
     gender: form.gender,
     opening_hours: toOptional(form.openingHours),
     fachbereich: toOptional(form.fachbereich),

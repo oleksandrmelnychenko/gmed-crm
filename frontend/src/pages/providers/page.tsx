@@ -79,6 +79,7 @@ import {
   updateProviderStaffRole,
   updateSpecialization,
 } from "./data/provider-api";
+import { fetchProviderPeople, fetchProviderPeoplePatients } from "./data/provider-people-api";
 import {
   DEFAULT_FILTERS,
   blankDoctorForm,
@@ -113,8 +114,16 @@ import {
   specializationLabelForItem,
   specializationLabelForValue,
 } from "./model/specialization-labels";
+import {
+  DEFAULT_PROVIDER_PEOPLE_FILTERS,
+  type ProviderPeopleFilters,
+  type ProviderPeoplePatientOption,
+  type ProviderPeoplePersonType,
+  type ProviderPeopleRow,
+} from "./model/people-types";
 import type {
   DoctorFormState,
+  DoctorRoleCode,
   DoctorRelationship,
   DoctorSummary,
   ProviderContactFormState,
@@ -131,6 +140,8 @@ import type {
   SpecializationItem,
 } from "./model/types";
 import { ProviderHierarchyTimeline } from "./ui/provider-hierarchy-timeline";
+import { ProviderChildrenSection } from "./ui/provider-children-section";
+import { ProviderPeopleCatalog } from "./ui/provider-people-catalog";
 import { useProvidersListTableModel } from "./ui/hooks/use-providers-list-table-model";
 import {
   PageHeader,
@@ -235,7 +246,7 @@ function specializationOptionLabel(item: SpecializationItem, lang: "de" | "ru") 
 }
 
 function specializationOptionValue(item: SpecializationItem) {
-  return item.name_en || item.code;
+  return item.code || item.name_en;
 }
 
 function specializationDisplayValue(value: string, items: SpecializationItem[], lang: "de" | "ru") {
@@ -255,11 +266,13 @@ function SpecializationMultiSelect({
   value,
   items,
   disabled,
+  placeholder,
   onChange,
 }: {
   value: string;
   items: SpecializationItem[];
   disabled?: boolean;
+  placeholder?: string;
   onChange: (value: string) => void;
 }) {
   const { t, lang } = useLang();
@@ -284,7 +297,7 @@ function SpecializationMultiSelect({
   const availableOptions = options.filter(
     (option) => !selectedKeys.has(normalizeSpecializationKey(option.value)),
   );
-  const selectPlaceholder = l("providers_specialization_select_placeholder");
+  const selectPlaceholder = placeholder ?? l("providers_specialization_select_placeholder");
   const removeLabel = l("providers_specialization_remove");
 
   const commit = (next: string[]) => onChange(joinSpecializationValue(next));
@@ -387,6 +400,14 @@ type ProvidersPageProps = {
   detailRouteId?: string;
 };
 
+type ProviderCatalogMode = "providers" | "people";
+
+type CatalogPersonContext = {
+  providerId: string;
+  personId: string;
+  personType: ProviderPeoplePersonType;
+};
+
 type DoctorRelationshipFormState = {
   id: string;
   sourceDoctorId: string;
@@ -397,6 +418,122 @@ type DoctorRelationshipFormState = {
   notes: string;
   isActive: boolean;
 };
+
+const DOCTOR_ROLE_CODES: readonly DoctorRoleCode[] = [
+  "clinical_director",
+  "chefarzt",
+  "oberarzt",
+  "facharzt",
+  "assistenzarzt",
+  "other",
+];
+
+function isDoctorRoleCode(value: string | null | undefined): value is DoctorRoleCode {
+  return DOCTOR_ROLE_CODES.includes(value as DoctorRoleCode);
+}
+
+function providerPeopleSpecializationsToText(row: ProviderPeopleRow) {
+  const labels = row.specializations
+    .map((item) => item.code || item.name_en || "")
+    .filter(Boolean);
+  return labels.length > 0 ? labels.join(", ") : row.fachbereich ?? "";
+}
+
+function providerPeopleContactsToForm(row: ProviderPeopleRow): DoctorFormState["contacts"] {
+  const contacts = row.contacts.flatMap((contact, index): DoctorFormState["contacts"] => {
+    const value = contact.value.trim();
+    if (!value) return [];
+    return [{
+      id: contact.id ?? makeContactFormId(`person-contact-${index}`),
+      contactKind: contact.contact_kind === "email" ? "email" : "phone",
+      contactType:
+        contact.contact_type === "private" || contact.contact_type === "other"
+          ? contact.contact_type
+          : "work",
+      value,
+      isPrimary: contact.is_primary,
+      notes: contact.notes ?? "",
+    }];
+  });
+
+  if (contacts.length === 0) {
+    if (row.phone) {
+      contacts.push({
+        id: makeContactFormId("person-phone"),
+        contactKind: "phone",
+        contactType: "work",
+        value: row.phone,
+        isPrimary: true,
+        notes: "",
+      });
+    }
+    if (row.email) {
+      contacts.push({
+        id: makeContactFormId("person-email"),
+        contactKind: "email",
+        contactType: "work",
+        value: row.email,
+        isPrimary: true,
+        notes: "",
+      });
+    }
+  }
+
+  return contacts.map((contact, _index, all) => {
+    const sameKind = all.filter((item) => item.contactKind === contact.contactKind);
+    const firstPrimary = sameKind.find((item) => item.isPrimary);
+    if (firstPrimary) return { ...contact, isPrimary: contact.id === firstPrimary.id };
+    return { ...contact, isPrimary: sameKind[0]?.id === contact.id };
+  });
+}
+
+function providerPeopleDoctorToForm(row: ProviderPeopleRow): DoctorFormState {
+  const roleCode = isDoctorRoleCode(row.role_code) ? row.role_code : row.role_code ? "other" : "";
+  const contacts = providerPeopleContactsToForm(row);
+  return {
+    ...blankDoctorForm(),
+    id: row.person_id,
+    name: row.display_name ?? row.name,
+    firstName: row.first_name ?? "",
+    lastName: row.last_name ?? "",
+    title: row.title ?? "",
+    roleCode,
+    roleLabel: roleCode === "other" ? row.role_label ?? row.role_code ?? "" : row.role_label ?? "",
+    subrole: row.subrole ?? "",
+    gender: row.gender,
+    openingHours: row.opening_hours ?? "",
+    fachbereich: row.fachbereich ?? "",
+    specializations: providerPeopleSpecializationsToText(row),
+    languages: row.languages.join(", "),
+    phone: row.phone ?? "",
+    email: row.email ?? "",
+    contacts,
+    licenseNumber: row.license_number ?? "",
+    licensingCountry: row.licensing_country ?? "",
+    licensingValidUntil: row.licensing_valid_until ?? "",
+    notes: row.notes ?? "",
+  };
+}
+
+function providerPeopleStaffToForm(row: ProviderPeopleRow): StaffFormState {
+  const contacts = providerPeopleContactsToForm(row);
+  return {
+    ...blankStaffForm(),
+    id: row.person_id,
+    firstName: row.first_name ?? "",
+    lastName: row.last_name ?? "",
+    displayName: row.display_name ?? row.name,
+    role: row.role_code ?? "staff",
+    department: row.department ?? "",
+    gender: row.gender,
+    openingHours: row.opening_hours ?? "",
+    status: row.status,
+    phone: row.phone ?? "",
+    email: row.email ?? "",
+    contacts,
+    notes: row.notes ?? "",
+  };
+}
 
 type ProvidersPageState = {
   sortStack: SortStack;
@@ -500,6 +637,39 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = useMemo(() => providerPermissions(user?.role), [user?.role]);
   const relationshipTargetDoctorsRequestRef = useRef(0);
+  const [catalogMode, setCatalogModeState] = useState<ProviderCatalogMode>(() =>
+    searchParams.get("mode") === "people" ? "people" : "providers",
+  );
+  const [catalogPersonContext, setCatalogPersonContext] = useState<CatalogPersonContext | null>(null);
+  const [peopleFilters, setPeopleFilters] = useState<ProviderPeopleFilters>(() => ({
+    ...DEFAULT_PROVIDER_PEOPLE_FILTERS,
+    search: searchParams.get("people_search") ?? "",
+    personType:
+      searchParams.get("person_type") === "doctor" || searchParams.get("person_type") === "staff"
+        ? (searchParams.get("person_type") as ProviderPeopleFilters["personType"])
+        : "",
+    providerId: searchParams.get("people_provider") ?? "",
+    providerType:
+      searchParams.get("people_provider_type") === "medical" ||
+      searchParams.get("people_provider_type") === "non_medical"
+        ? (searchParams.get("people_provider_type") as ProviderPeopleFilters["providerType"])
+        : "",
+    gender:
+      searchParams.get("people_gender") === "male" ||
+      searchParams.get("people_gender") === "female" ||
+      searchParams.get("people_gender") === "unknown"
+        ? (searchParams.get("people_gender") as ProviderPeopleFilters["gender"])
+        : "",
+    fachbereich: searchParams.get("people_fachbereich") ?? "",
+    specialization: searchParams.get("people_specialization") ?? "",
+    role: searchParams.get("people_role") ?? "",
+    patientId: searchParams.get("people_patient") ?? "",
+  }));
+  const [peopleRows, setPeopleRows] = useState<ProviderPeopleRow[]>([]);
+  const [peoplePatientOptions, setPeoplePatientOptions] = useState<ProviderPeoplePatientOption[]>([]);
+  const [peopleBusy, setPeopleBusy] = useState(false);
+  const [peopleError, setPeopleError] = useState("");
+  const [peopleVersion, setPeopleVersion] = useState(0);
   type PersistedProviderFilters = Pick<
     ProviderFilters,
     "providerType" | "activeOnly" | "hasContract"
@@ -539,6 +709,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     const activeOnly = params.get("active");
     const providerType = params.get("provider_type");
     const hasContract = params.get("contract");
+    const specializations = params.get("specializations");
 
     return {
       ...base,
@@ -554,6 +725,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           : base.activeOnly,
       hasContract:
         hasContract === "true" || hasContract === "false" ? hasContract : base.hasContract,
+      specializations: specializations ?? base.specializations,
     };
   });
   const setFilters: typeof setFiltersState = useCallback(
@@ -836,6 +1008,39 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     syncQuery({ [queryKey]: value || null });
   }
 
+  function setCatalogMode(nextMode: ProviderCatalogMode) {
+    setCatalogModeState(nextMode);
+    syncQuery({ mode: nextMode === "people" ? "people" : null });
+  }
+
+  function syncPeopleFilters(nextFilters: ProviderPeopleFilters) {
+    syncQuery({
+      people_search: nextFilters.search || null,
+      person_type: nextFilters.personType || null,
+      people_provider: nextFilters.providerId || null,
+      people_provider_type: nextFilters.providerType || null,
+      people_gender: nextFilters.gender || null,
+      people_fachbereich: nextFilters.fachbereich || null,
+      people_specialization: nextFilters.specialization || null,
+      people_role: nextFilters.role || null,
+      people_patient: nextFilters.patientId || null,
+    });
+  }
+
+  function handlePeopleFiltersChange(nextFilters: ProviderPeopleFilters) {
+    setPeopleFilters(nextFilters);
+    syncPeopleFilters(nextFilters);
+  }
+
+  function resetPeopleFilters() {
+    setPeopleFilters(DEFAULT_PROVIDER_PEOPLE_FILTERS);
+    syncPeopleFilters(DEFAULT_PROVIDER_PEOPLE_FILTERS);
+  }
+
+  function refreshPeople() {
+    setPeopleVersion((current) => current + 1);
+  }
+
   function exportProviders() {
     const stamp = new Date().toISOString().slice(0, 10);
     exportCsv(sortedAndFilteredProviders, columns, `providers-${stamp}.csv`);
@@ -960,24 +1165,61 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
   ]);
 
   useEffect(() => {
+    if (!permissions.canViewPage || detailPageMode || catalogMode !== "people") {
+      return;
+    }
+
+    let cancelled = false;
+    setPeopleBusy(true);
+    setPeopleError("");
+
+    void fetchProviderPeople(peopleFilters)
+      .then((items) => {
+        if (cancelled) return;
+        setPeopleRows(items);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setPeopleError(error instanceof Error ? error.message : t.common_failed_load);
+      })
+      .finally(() => {
+        if (!cancelled) setPeopleBusy(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    catalogMode,
+    detailPageMode,
+    peopleFilters,
+    peopleVersion,
+    permissions.canViewPage,
+    t.common_failed_load,
+  ]);
+
+  useEffect(() => {
     if (!permissions.canViewPage) return;
     let cancelled = false;
     void Promise.all([
       fetchSpecializationsForAdmin(),
       fetchProviders("/providers?active_only=true"),
       fetchProviderStaffRoles(true),
+      fetchProviderPeoplePatients(),
     ])
-      .then(([specializationItems, providerItems, roleItems]) => {
+      .then(([specializationItems, providerItems, roleItems, patientItems]) => {
         if (cancelled) return;
         setSpecializations(specializationItems);
         setParentProviderOptions(providerItems);
         setStaffRoles(roleItems);
+        setPeoplePatientOptions(patientItems);
       })
       .catch(() => {
         if (cancelled) return;
         setSpecializations([]);
         setParentProviderOptions([]);
         setStaffRoles([]);
+        setPeoplePatientOptions([]);
       });
     return () => {
       cancelled = true;
@@ -1069,6 +1311,23 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 
   function openProvider(id: string) {
     staffGo(`/providers/${id}`);
+  }
+
+  function openProviderPerson(row: ProviderPeopleRow) {
+    setCatalogPersonContext({
+      providerId: row.provider_id,
+      personId: row.person_id,
+      personType: row.person_type,
+    });
+    if (row.person_type === "doctor") {
+      setDoctorError("");
+      setDoctorForm(providerPeopleDoctorToForm(row));
+      setDoctorDialogOpen(true);
+      return;
+    }
+    setStaffError("");
+    setStaffForm(providerPeopleStaffToForm(row));
+    setStaffDialogOpen(true);
   }
 
   function openCreateSheet() {
@@ -1166,17 +1425,24 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 
   async function handleDoctorSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!detail) return;
+    const providerId = catalogPersonContext?.providerId ?? detail?.id;
+    if (!providerId) return;
 
     setDoctorBusy(true);
     setDoctorError("");
 
     try {
-      await saveProviderDoctor(detail.id, doctorForm.id, toDoctorPayload(doctorForm));
+      await saveProviderDoctor(providerId, doctorForm.id, toDoctorPayload(doctorForm));
       setDoctorDialogOpen(false);
       setDoctorForm(blankDoctorForm());
+      setCatalogPersonContext(null);
       refreshList();
-      refreshDetail();
+      if (detail?.id === providerId) {
+        refreshDetail();
+      }
+      if (catalogMode === "people") {
+        refreshPeople();
+      }
     } catch (error) {
       setDoctorError(error instanceof Error ? error.message : t.common_failed_update);
     } finally {
@@ -1189,6 +1455,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     if (!open) {
       setDoctorError("");
       setDoctorForm(blankDoctorForm());
+      setCatalogPersonContext(null);
     }
   }
 
@@ -1411,17 +1678,24 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 
   async function handleStaffSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!detail) return;
+    const providerId = catalogPersonContext?.providerId ?? detail?.id;
+    if (!providerId) return;
 
     setStaffBusy(true);
     setStaffError("");
 
     try {
-      await saveProviderStaff(detail.id, staffForm.id, toStaffPayload(staffForm));
+      await saveProviderStaff(providerId, staffForm.id, toStaffPayload(staffForm));
       setStaffDialogOpen(false);
       setStaffForm(blankStaffForm());
+      setCatalogPersonContext(null);
       refreshList();
-      refreshDetail();
+      if (detail?.id === providerId) {
+        refreshDetail();
+      }
+      if (catalogMode === "people") {
+        refreshPeople();
+      }
     } catch (error) {
       setStaffError(error instanceof Error ? error.message : t.common_failed_update);
     } finally {
@@ -1564,6 +1838,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     if (!open) {
       setStaffError("");
       setStaffForm(blankStaffForm());
+      setCatalogPersonContext(null);
     }
   }
 
@@ -1782,7 +2057,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           )}
         </div>
 
-        {detail ? (
+        {detail || catalogPersonContext ? (
           <ProviderDoctorFormSheet
             open={doctorDialogOpen}
             onOpenChange={handleDoctorDialogOpenChange}
@@ -1834,7 +2109,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           />
         ) : null}
 
-        {detail ? (
+        {detail || catalogPersonContext ? (
           <ProviderStaffFormSheet
             open={staffDialogOpen}
             onOpenChange={handleStaffDialogOpenChange}
@@ -1928,6 +2203,29 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           />
         </div>
 
+        <div className="inline-flex w-fit rounded-lg border border-border bg-card p-1">
+          <Button
+            type="button"
+            variant={catalogMode === "providers" ? "default" : "ghost"}
+            size="sm"
+            className="h-8 rounded-md px-3"
+            onClick={() => setCatalogMode("providers")}
+          >
+            {t.providers_title}
+          </Button>
+          <Button
+            type="button"
+            variant={catalogMode === "people" ? "default" : "ghost"}
+            size="sm"
+            className="h-8 rounded-md px-3"
+            onClick={() => setCatalogMode("people")}
+          >
+            {l("providers_people_catalog")}
+          </Button>
+        </div>
+
+        {catalogMode === "providers" ? (
+          <>
         <div className="relative z-30 flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
             <div className="relative min-w-[240px] flex-1 sm:max-w-sm">
@@ -1948,7 +2246,18 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 
             <NativeComboboxSelect
               value={filters.providerType}
-              onChange={(event) => setServerFilter("providerType", event.target.value, "provider_type")}
+              onChange={(event) => {
+                const nextType = event.target.value;
+                setFilters((current) => ({
+                  ...current,
+                  providerType: nextType,
+                  specializations: nextType === "non_medical" ? "" : current.specializations,
+                }));
+                syncQuery({
+                  provider_type: nextType || null,
+                  specializations: nextType === "non_medical" ? null : filters.specializations || null,
+                });
+              }}
               disabled={permissions.forceNonMedical}
               className={cn(selectClassName, "h-8 w-[170px] bg-card text-[13px]")}
             >
@@ -1976,6 +2285,16 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               <option value="true">{t.providers_contract_with}</option>
               <option value="false">{t.providers_contract_without}</option>
             </NativeComboboxSelect>
+
+            <div className="min-w-[220px] max-w-sm flex-1 sm:flex-none">
+              <SpecializationMultiSelect
+                value={filters.specializations}
+                items={specializations}
+                placeholder={t.providers_fachbereich}
+                disabled={permissions.forceNonMedical || filters.providerType === "non_medical"}
+                onChange={(nextValue) => setServerFilter("specializations", nextValue, "specializations")}
+              />
+            </div>
 
             <div className="ml-auto flex items-center gap-1">
               <Button
@@ -2035,6 +2354,24 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               </div>
             )}
           </>
+        )}
+          </>
+        ) : (
+          <ProviderPeopleCatalog
+            rows={peopleRows}
+            filters={peopleFilters}
+            patients={peoplePatientOptions}
+            providers={parentProviderOptions}
+            specializations={specializations}
+            staffRoles={staffRoles}
+            loading={peopleBusy}
+            error={peopleError}
+            onFiltersChange={handlePeopleFiltersChange}
+            onResetFilters={resetPeopleFilters}
+            onRetry={refreshPeople}
+            onOpenPerson={(_, row) => openProviderPerson(row)}
+            onOpenProvider={(providerId) => openProvider(providerId)}
+          />
         )}
       </div>
 
@@ -2150,6 +2487,11 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     detail={detail}
                     onOpenPatients={() => window.open(`/patients?provider=${detail.id}`, "_blank", "noopener,noreferrer")}
                     onOpenAppointments={() => window.open(`/appointments?provider=${detail.id}`, "_blank", "noopener,noreferrer")}
+                  />
+
+                  <ProviderChildrenSection
+                    children={detail.children}
+                    onOpenProvider={openProvider}
                   />
 
                 {permissions.canManageRegistry || permissions.canViewPage ? (
@@ -2272,7 +2614,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
         </SheetContent>
       </Sheet>
 
-      {detail ? (
+      {detail || catalogPersonContext ? (
         <ProviderDoctorFormSheet
           open={doctorDialogOpen}
           onOpenChange={handleDoctorDialogOpenChange}
@@ -2324,7 +2666,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
         />
       ) : null}
 
-      {detail ? (
+      {detail || catalogPersonContext ? (
         <ProviderStaffFormSheet
           open={staffDialogOpen}
           onOpenChange={handleStaffDialogOpenChange}
@@ -3623,6 +3965,7 @@ function DoctorSection({
             const specializations = specializationText(doctor.specializations, doctor.fachbereich, lang);
             const contacts = contactSummary(doctor.contacts, doctor.phone, doctor.email);
             const roleLabel = doctor.role_label || (doctor.role_code ? doctorRoleLabel(doctor.role_code) : "");
+            const subrole = doctor.subrole?.trim() ?? "";
             return (
             <details
               key={doctor.id}
@@ -3651,6 +3994,14 @@ function DoctorSection({
                           className="rounded-full border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700"
                         >
                           {roleLabel}
+                        </Badge>
+                      ) : null}
+                      {subrole ? (
+                        <Badge
+                          variant="outline"
+                          className="rounded-full border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700"
+                        >
+                          {subrole}
                         </Badge>
                       ) : null}
                       <Badge
@@ -4828,7 +5179,6 @@ function DoctorFormFields({
     { value: "oberarzt", label: l("providers_doctor_role_oberarzt") },
     { value: "facharzt", label: l("providers_doctor_role_facharzt") },
     { value: "assistenzarzt", label: l("providers_doctor_role_assistenzarzt") },
-    { value: "head_of_department", label: l("providers_doctor_role_head_of_department") },
     { value: "other", label: l("providers_doctor_role_other") },
   ];
   const hasCustomTitle = Boolean(form.title) && !doctorTitleOptions.includes(form.title);
@@ -4945,6 +5295,14 @@ function DoctorFormFields({
               />
             </Field>
           ) : null}
+          <Field label={l("providers_doctor_subrole")}>
+            <Input
+              value={form.subrole}
+              onChange={(event) => onChange("subrole", event.target.value)}
+              className={shellInputClassName}
+              placeholder="Stellvertretender Klinikdirektor"
+            />
+          </Field>
           <Field label={t.patients_gender}>
             <NativeComboboxSelect
               value={form.gender}
