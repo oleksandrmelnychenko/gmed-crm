@@ -116,6 +116,7 @@ struct CreatePatientRequest {
     phone_primary: Option<String>,
     phone_secondary: Option<String>,
     email: Option<String>,
+    contacts: Option<Vec<PatientContactRequest>>,
     address_street: Option<String>,
     address_city: Option<String>,
     address_zip: Option<String>,
@@ -127,6 +128,34 @@ struct CreatePatientRequest {
     emergency_contact_phone: Option<String>,
     emergency_contact_relation: Option<String>,
     patient_relations: Option<Vec<UpsertRelationRequest>>,
+    notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PatientContactRequest {
+    contact_kind: String,
+    contact_type: Option<String>,
+    value: String,
+    is_primary: Option<bool>,
+    notes: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct NormalizedPatientContact {
+    contact_kind: String,
+    contact_type: String,
+    value: String,
+    is_primary: bool,
+    notes: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct PatientContactInput {
+    id: Uuid,
+    contact_kind: String,
+    contact_type: String,
+    value: String,
+    is_primary: bool,
     notes: Option<String>,
 }
 
@@ -440,6 +469,11 @@ fn validate_create(req: &CreatePatientRequest) -> Result<(), &'static str> {
         "address_country",
     )?;
     validate_patient_languages(req.languages.as_deref())?;
+    if let Some(contacts) = req.contacts.as_ref() {
+        for contact in contacts {
+            validate_patient_contact_payload(contact)?;
+        }
+    }
     if let Some(relations) = req.patient_relations.as_ref() {
         for relation in relations {
             validate_relation_payload_fields(relation)?;
@@ -453,6 +487,122 @@ fn validate_create(req: &CreatePatientRequest) -> Result<(), &'static str> {
         );
     }
     Ok(())
+}
+
+fn validate_patient_contact_payload(contact: &PatientContactRequest) -> Result<(), &'static str> {
+    match contact.contact_kind.trim() {
+        "phone" | "email" => {}
+        _ => return Err("Invalid contact kind"),
+    }
+    match contact.contact_type.as_deref().unwrap_or("private").trim() {
+        "work" | "private" | "other" => {}
+        _ => return Err("Invalid contact type"),
+    }
+    if contact.value.trim().len() > 255 {
+        return Err("Contact value max 255");
+    }
+    if contact.notes.as_deref().unwrap_or("").trim().len() > 1000 {
+        return Err("Contact notes max 1000");
+    }
+    Ok(())
+}
+
+fn normalize_patient_text(value: impl AsRef<str>, max_len: usize) -> Option<String> {
+    let normalized = value.as_ref().trim();
+    if normalized.is_empty() {
+        return None;
+    }
+    Some(normalized.chars().take(max_len).collect())
+}
+
+fn normalize_patient_contacts(
+    contacts: Option<Vec<PatientContactRequest>>,
+    phone_primary: Option<&str>,
+    phone_secondary: Option<&str>,
+    email: Option<&str>,
+) -> Vec<NormalizedPatientContact> {
+    let mut normalized = match contacts {
+        Some(contacts) => contacts
+            .into_iter()
+            .flat_map(|contact| {
+                let value = contact.value.trim().to_string();
+                if value.is_empty() {
+                    return None;
+                }
+                Some(NormalizedPatientContact {
+                    contact_kind: match contact.contact_kind.trim() {
+                        "email" => "email".to_string(),
+                        _ => "phone".to_string(),
+                    },
+                    contact_type: match contact.contact_type.as_deref().unwrap_or("private").trim()
+                    {
+                        "work" => "work".to_string(),
+                        "other" => "other".to_string(),
+                        _ => "private".to_string(),
+                    },
+                    value,
+                    is_primary: contact.is_primary.unwrap_or(false),
+                    notes: contact
+                        .notes
+                        .and_then(|value| normalize_patient_text(value, 1000)),
+                })
+            })
+            .collect::<Vec<_>>(),
+        None => {
+            let mut contacts = Vec::new();
+            if let Some(value) = normalize_patient_text(phone_primary.unwrap_or_default(), 255) {
+                contacts.push(NormalizedPatientContact {
+                    contact_kind: "phone".to_string(),
+                    contact_type: "private".to_string(),
+                    value,
+                    is_primary: true,
+                    notes: None,
+                });
+            }
+            if let Some(value) = normalize_patient_text(phone_secondary.unwrap_or_default(), 255) {
+                contacts.push(NormalizedPatientContact {
+                    contact_kind: "phone".to_string(),
+                    contact_type: "private".to_string(),
+                    value,
+                    is_primary: false,
+                    notes: None,
+                });
+            }
+            if let Some(value) = normalize_patient_text(email.unwrap_or_default(), 255) {
+                contacts.push(NormalizedPatientContact {
+                    contact_kind: "email".to_string(),
+                    contact_type: "private".to_string(),
+                    value,
+                    is_primary: true,
+                    notes: None,
+                });
+            }
+            contacts
+        }
+    };
+
+    for kind in ["phone", "email"] {
+        let mut first_index = None;
+        let mut primary_seen = false;
+        for index in 0..normalized.len() {
+            if normalized[index].contact_kind != kind {
+                continue;
+            }
+            if first_index.is_none() {
+                first_index = Some(index);
+            }
+            if normalized[index].is_primary && !primary_seen {
+                primary_seen = true;
+            } else if normalized[index].is_primary {
+                normalized[index].is_primary = false;
+            }
+        }
+        if !primary_seen && let Some(index) = first_index {
+            normalized[index].is_primary = true;
+        }
+    }
+
+    normalized
 }
 
 fn validate_optional_patient_select(
@@ -973,6 +1123,7 @@ async fn get_patient(
             }
 
             let policies = load_patient_field_policies(&state, &auth).await?;
+            let contacts = load_patient_contacts(&state, patient_id).await?;
             let patient_json = build_patient_detail_json(
                 &auth,
                 &policies,
@@ -1056,6 +1207,7 @@ async fn get_patient(
                             "Failed to decode patient",
                         )
                     })?,
+                    contacts,
                     address_street: r.try_get("address_street").map_err(|_| {
                         err(
                             StatusCode::INTERNAL_SERVER_ERROR,
@@ -1182,6 +1334,42 @@ async fn get_patient(
     }
 }
 
+async fn load_patient_contacts(
+    state: &AppState,
+    patient_id: Uuid,
+) -> Result<Vec<PatientContactInput>, axum::response::Response> {
+    let rows = sqlx::query(
+        r#"SELECT id, contact_kind, contact_type, value, is_primary, notes
+           FROM patient_contacts
+           WHERE patient_id = $1
+           ORDER BY contact_kind DESC, is_primary DESC, created_at ASC, id ASC"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_id, "Failed to load patient contacts");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load patient contacts",
+        )
+    })?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| PatientContactInput {
+            id: row.try_get("id").unwrap_or_default(),
+            contact_kind: row.try_get("contact_kind").unwrap_or_default(),
+            contact_type: row
+                .try_get("contact_type")
+                .unwrap_or_else(|_| "private".to_string()),
+            value: row.try_get("value").unwrap_or_default(),
+            is_primary: row.try_get("is_primary").unwrap_or(false),
+            notes: row.try_get("notes").unwrap_or_default(),
+        })
+        .collect())
+}
+
 async fn create_patient(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -1206,6 +1394,7 @@ async fn create_patient(
         phone_primary,
         phone_secondary,
         email,
+        contacts,
         address_street,
         address_city,
         address_zip,
@@ -1254,6 +1443,37 @@ async fn create_patient(
         Ok(None) => Vec::new(),
         Err(response) => return Err(response),
     };
+    let normalized_contacts = normalize_patient_contacts(
+        contacts,
+        phone_primary.as_deref(),
+        phone_secondary.as_deref(),
+        email.as_deref(),
+    );
+    let derived_phone_primary = normalized_contacts
+        .iter()
+        .find(|contact| contact.contact_kind == "phone" && contact.is_primary)
+        .or_else(|| {
+            normalized_contacts
+                .iter()
+                .find(|contact| contact.contact_kind == "phone")
+        })
+        .map(|contact| contact.value.clone());
+    let derived_phone_secondary = normalized_contacts
+        .iter()
+        .find(|contact| {
+            contact.contact_kind == "phone"
+                && Some(contact.value.as_str()) != derived_phone_primary.as_deref()
+        })
+        .map(|contact| contact.value.clone());
+    let derived_email = normalized_contacts
+        .iter()
+        .find(|contact| contact.contact_kind == "email" && contact.is_primary)
+        .or_else(|| {
+            normalized_contacts
+                .iter()
+                .find(|contact| contact.contact_kind == "email")
+        })
+        .map(|contact| contact.value.clone());
 
     if let Some(relations) = patient_relations.as_ref() {
         for relation in relations {
@@ -1287,9 +1507,9 @@ async fn create_patient(
         residence_country,
         &langs,
         &functional_labels,
-        phone_primary,
-        phone_secondary,
-        email,
+        derived_phone_primary,
+        derived_phone_secondary,
+        derived_email,
         address_street,
         address_city,
         address_zip,
@@ -1312,6 +1532,29 @@ async fn create_patient(
             "Failed to create patient",
         )
     })?;
+
+    for contact in &normalized_contacts {
+        sqlx::query(
+            r#"INSERT INTO patient_contacts (
+                    patient_id, contact_kind, contact_type, value, is_primary, notes
+               ) VALUES ($1, $2, $3, $4, $5, $6)"#,
+        )
+        .bind(row.id)
+        .bind(&contact.contact_kind)
+        .bind(&contact.contact_type)
+        .bind(&contact.value)
+        .bind(contact.is_primary)
+        .bind(contact.notes.as_deref())
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, patient_id = %row.id, "Failed to create patient contact");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create patient contact",
+            )
+        })?;
+    }
 
     if let Some(relations) = patient_relations {
         for relation in relations {
@@ -5579,6 +5822,7 @@ struct PatientDetailInput {
     phone_primary: Option<String>,
     phone_secondary: Option<String>,
     email: Option<String>,
+    contacts: Vec<PatientContactInput>,
     address_street: Option<String>,
     address_city: Option<String>,
     address_zip: Option<String>,
@@ -5716,6 +5960,7 @@ fn build_patient_detail_json(
                 patient.phone_primary,
                 patient.phone_secondary,
             );
+            insert_patient_contacts_field(map, auth, policies, patient.contacts);
         }
 
         insert_clinical_warnings_field(map, auth, policies, patient.clinical_warnings);
@@ -5832,6 +6077,45 @@ fn insert_email_field(
         }
         Some(FieldAccess::Hidden) | None => {}
     }
+}
+
+fn insert_patient_contacts_field(
+    data: &mut Map<String, Value>,
+    auth: &AuthUser,
+    policies: &HashMap<String, FieldPolicy>,
+    contacts: Vec<PatientContactInput>,
+) {
+    let mut values = Vec::new();
+    for contact in contacts {
+        let field_name = if contact.contact_kind == "email" {
+            "email"
+        } else {
+            "phone"
+        };
+        let Some(access) = field_access(policies, field_name, auth.role == Role::Ceo) else {
+            continue;
+        };
+        let value = match access {
+            FieldAccess::Visible => contact.value,
+            FieldAccess::Masked => {
+                if contact.contact_kind == "email" {
+                    access::mask_email(&contact.value)
+                } else {
+                    access::mask_phone(&contact.value)
+                }
+            }
+            FieldAccess::Hidden => continue,
+        };
+        values.push(json!({
+            "id": contact.id,
+            "contact_kind": contact.contact_kind,
+            "contact_type": contact.contact_type,
+            "value": value,
+            "is_primary": contact.is_primary,
+            "notes": contact.notes,
+        }));
+    }
+    data.insert("contacts".to_string(), Value::Array(values));
 }
 
 fn insert_nationality_fields(

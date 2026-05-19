@@ -1,12 +1,18 @@
 import { useEffect } from "react";
+import { Plus, Trash2 } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
-import type { PatientFormState } from "../../model/list-model";
-import { computeAge } from "../../model/list-model";
+import type { PatientContactFormState, PatientFormState } from "../../model/list-model";
+import {
+  computeAge,
+  makePatientContactFormId,
+  normalizePatientContactForms,
+} from "../../model/list-model";
 import {
   CountrySelect,
   Field,
@@ -25,6 +31,8 @@ function isGuardianOrParentRelation(value: string) {
 type PatientFormFieldsProps = {
   form: PatientFormState;
   onChange: (field: keyof PatientFormState, value: string) => void;
+  onContactsChange?: (contacts: PatientContactFormState[]) => void;
+  contactMode?: "simple" | "multiple";
   includeBirthAndGender?: boolean;
   readOnly?: boolean;
 };
@@ -32,6 +40,8 @@ type PatientFormFieldsProps = {
 export function PatientFormFields({
   form,
   onChange,
+  onContactsChange,
+  contactMode = "simple",
   includeBirthAndGender = false,
   readOnly = false,
 }: PatientFormFieldsProps) {
@@ -61,6 +71,52 @@ export function PatientFormFields({
       onChange("emergencyContactRelation", "guardian");
     }
   }
+
+  const updateContact = (
+    contactId: string,
+    patch: Partial<PatientContactFormState>,
+  ) => {
+    if (!onContactsChange || readOnly) return;
+    const changedContacts = form.contacts
+      .map((contact) => (contact.id === contactId ? { ...contact, ...patch } : contact))
+      .map((contact, _index, all) => {
+        if (!patch.isPrimary) return contact;
+        const changed = all.find((item) => item.id === contactId);
+        if (!changed || contact.contactKind !== changed.contactKind || contact.id === contactId) {
+          return contact;
+        }
+        return { ...contact, isPrimary: false };
+      });
+    onContactsChange(normalizePatientContactForms(changedContacts));
+  };
+
+  const addContact = () => {
+    if (!onContactsChange || readOnly) return;
+    const hasPhone = form.contacts.some((contact) => contact.contactKind === "phone");
+    const contactKind = hasPhone ? "email" : "phone";
+    onContactsChange(
+      normalizePatientContactForms([
+        ...form.contacts,
+        {
+          id: makePatientContactFormId("patient-contact"),
+          contactKind,
+          contactType: "private",
+          value: "",
+          isPrimary: !form.contacts.some((contact) => contact.contactKind === contactKind),
+          notes: "",
+        },
+      ]),
+    );
+  };
+
+  const removeContact = (contactId: string) => {
+    if (!onContactsChange || readOnly) return;
+    onContactsChange(
+      normalizePatientContactForms(
+        form.contacts.filter((contact) => contact.id !== contactId),
+      ),
+    );
+  };
 
   return (
     <div className="space-y-3">
@@ -161,33 +217,124 @@ export function PatientFormFields({
       </FormSection>
 
       <FormSection title={l("patients_contact")}>
-        <div className="grid gap-3 md:grid-cols-3">
-          <Field label={t.patients_phone_primary}>
-            <Input
-              value={form.phonePrimary}
-              onChange={(event) => onChange("phonePrimary", event.target.value)}
-              className={formInputClassName}
+        {contactMode === "multiple" ? (
+          <div className="space-y-2">
+            {form.contacts.map((contact) => (
+              <div
+                key={contact.id}
+                className="grid gap-2 rounded-lg border border-border/70 bg-card/50 p-2 md:grid-cols-[132px_132px_minmax(0,1fr)_92px_36px]"
+              >
+                <Field label={l("providers_contact_kind")}>
+                  <NativeComboboxSelect
+                    value={contact.contactKind}
+                    onChange={(event) =>
+                      updateContact(contact.id, {
+                        contactKind: event.target.value === "email" ? "email" : "phone",
+                      })
+                    }
+                    className={cn("w-full", formInputClassName)}
+                    disabled={readOnly}
+                  >
+                    <option value="phone">{t.field_phone}</option>
+                    <option value="email">{t.field_email}</option>
+                  </NativeComboboxSelect>
+                </Field>
+                <Field label={l("providers_contact_type")}>
+                  <NativeComboboxSelect
+                    value={contact.contactType}
+                    onChange={(event) =>
+                      updateContact(contact.id, {
+                        contactType:
+                          event.target.value === "work" || event.target.value === "other"
+                            ? event.target.value
+                            : "private",
+                      })
+                    }
+                    className={cn("w-full", formInputClassName)}
+                    disabled={readOnly}
+                  >
+                    <option value="private">{l("providers_contact_type_private")}</option>
+                    <option value="work">{l("providers_contact_type_work")}</option>
+                    <option value="other">{l("providers_contact_type_other")}</option>
+                  </NativeComboboxSelect>
+                </Field>
+                <Field label={l("providers_contact_value")}>
+                  <Input
+                    type={contact.contactKind === "email" ? "email" : "text"}
+                    value={contact.value}
+                    onChange={(event) => updateContact(contact.id, { value: event.target.value })}
+                    className={formInputClassName}
+                    disabled={readOnly}
+                  />
+                </Field>
+                <label className="flex min-h-[58px] items-end gap-2 pb-1.5 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={contact.isPrimary}
+                    onChange={(event) =>
+                      updateContact(contact.id, { isPrimary: event.target.checked })
+                    }
+                    className="size-4 rounded border-border text-[var(--brand)] focus:ring-[var(--brand)]"
+                    disabled={readOnly}
+                  />
+                  {l("providers_contact_primary")}
+                </label>
+                <div className="flex items-end pb-0.5">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon-sm"
+                    title={t.common_remove}
+                    aria-label={t.common_remove}
+                    onClick={() => removeContact(contact.id)}
+                    disabled={readOnly}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg bg-muted/20"
+              onClick={addContact}
               disabled={readOnly}
-            />
-          </Field>
-          <Field label={t.patients_phone_secondary}>
-            <Input
-              value={form.phoneSecondary}
-              onChange={(event) => onChange("phoneSecondary", event.target.value)}
-              className={formInputClassName}
-              disabled={readOnly}
-            />
-          </Field>
-          <Field label={t.patients_email}>
-            <Input
-              type="email"
-              value={form.email}
-              onChange={(event) => onChange("email", event.target.value)}
-              className={formInputClassName}
-              disabled={readOnly}
-            />
-          </Field>
-        </div>
+            >
+              <Plus className="size-3.5" />
+              {l("providers_contact_add")}
+            </Button>
+          </div>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-3">
+            <Field label={t.patients_phone_primary}>
+              <Input
+                value={form.phonePrimary}
+                onChange={(event) => onChange("phonePrimary", event.target.value)}
+                className={formInputClassName}
+                disabled={readOnly}
+              />
+            </Field>
+            <Field label={t.patients_phone_secondary}>
+              <Input
+                value={form.phoneSecondary}
+                onChange={(event) => onChange("phoneSecondary", event.target.value)}
+                className={formInputClassName}
+                disabled={readOnly}
+              />
+            </Field>
+            <Field label={t.patients_email}>
+              <Input
+                type="email"
+                value={form.email}
+                onChange={(event) => onChange("email", event.target.value)}
+                className={formInputClassName}
+                disabled={readOnly}
+              />
+            </Field>
+          </div>
+        )}
       </FormSection>
 
       <FormSection title={l("patients_address")}>

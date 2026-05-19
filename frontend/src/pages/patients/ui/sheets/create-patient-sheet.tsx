@@ -16,6 +16,7 @@ import {
   computeAge,
   parseLanguages,
   toOptional,
+  type PatientContactFormState,
   type PatientFormState,
   type PatientsDictionary,
 } from "../../model/list-model";
@@ -53,6 +54,36 @@ function createPatientSheetReducer(
 function guardianRelationType(value: string) {
   const trimmed = value.trim();
   return trimmed === "parent" ? "parent" : "guardian";
+}
+
+function contactsToCreatePayload(contacts: PatientContactFormState[]) {
+  const normalized = contacts.flatMap((contact) => {
+    const value = contact.value.trim();
+    if (!value) return [];
+    return [
+      {
+        contact_kind: contact.contactKind,
+        contact_type: contact.contactType,
+        value,
+        is_primary: contact.isPrimary,
+        notes: toOptional(contact.notes),
+      },
+    ];
+  });
+  const phones = normalized.filter((contact) => contact.contact_kind === "phone");
+  const emails = normalized.filter((contact) => contact.contact_kind === "email");
+  const primaryPhone = phones.find((contact) => contact.is_primary) ?? phones[0];
+  const secondaryPhone =
+    phones.find((contact) => contact !== primaryPhone) ??
+    phones.find((contact) => contact.value !== primaryPhone?.value);
+  const primaryEmail = emails.find((contact) => contact.is_primary) ?? emails[0];
+
+  return {
+    contacts: normalized,
+    phonePrimary: primaryPhone?.value ?? "",
+    phoneSecondary: secondaryPhone?.value ?? "",
+    email: primaryEmail?.value ?? "",
+  };
 }
 
 function CreatePatientSheet({
@@ -99,6 +130,7 @@ function CreatePatientSheet({
 
     try {
       const age = computeAge(form.birthDate);
+      const contactPayload = contactsToCreatePayload(form.contacts);
       const patientRelations =
         age !== null && age < 18 && form.emergencyContactName.trim()
           ? [
@@ -120,9 +152,10 @@ function CreatePatientSheet({
         residence_country: toOptional(form.residenceCountry),
         languages: parseLanguages(form.languages),
         functional_labels: parseFunctionalLabels(form.functionalLabels),
-        phone_primary: toOptional(form.phonePrimary),
-        phone_secondary: toOptional(form.phoneSecondary),
-        email: toOptional(form.email),
+        phone_primary: toOptional(contactPayload.phonePrimary),
+        phone_secondary: toOptional(contactPayload.phoneSecondary),
+        email: toOptional(contactPayload.email),
+        contacts: contactPayload.contacts,
         address_street: toOptional(form.addressStreet),
         address_city: toOptional(form.addressCity),
         address_zip: toOptional(form.addressZip),
@@ -184,6 +217,10 @@ function CreatePatientSheet({
         onChange={(field, value) =>
           setForm((current) => ({ ...current, [field]: value }))
         }
+        onContactsChange={(contacts) =>
+          setForm((current) => ({ ...current, contacts }))
+        }
+        contactMode="multiple"
         includeBirthAndGender
       />
     </PatientSheetScaffold>

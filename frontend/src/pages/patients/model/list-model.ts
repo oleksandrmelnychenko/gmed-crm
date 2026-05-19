@@ -21,6 +21,7 @@ export type PatientSummary = {
 export type PatientDetail = PatientSummary & {
   updated_at?: string;
   phone_secondary?: string | null;
+  contacts?: PatientContact[];
   address_street?: string | null;
   address_city?: string | null;
   address_zip?: string | null;
@@ -64,6 +65,24 @@ export type DoctorOption = {
   fachbereich: string | null;
 };
 
+export type PatientContact = {
+  id: string | null;
+  contact_kind: "phone" | "email";
+  contact_type: "work" | "private" | "other";
+  value: string;
+  is_primary: boolean;
+  notes: string | null;
+};
+
+export type PatientContactFormState = {
+  id: string;
+  contactKind: "phone" | "email";
+  contactType: "work" | "private" | "other";
+  value: string;
+  isPrimary: boolean;
+  notes: string;
+};
+
 export type PatientFilters = {
   search: string;
   activeOnly: string;
@@ -84,6 +103,7 @@ export type PatientFormState = {
   phonePrimary: string;
   phoneSecondary: string;
   email: string;
+  contacts: PatientContactFormState[];
   addressStreet: string;
   addressCity: string;
   addressZip: string;
@@ -149,6 +169,24 @@ export function blankPatientForm(): PatientFormState {
     phonePrimary: "",
     phoneSecondary: "",
     email: "",
+    contacts: [
+      {
+        id: makePatientContactFormId("patient-phone"),
+        contactKind: "phone",
+        contactType: "private",
+        value: "",
+        isPrimary: true,
+        notes: "",
+      },
+      {
+        id: makePatientContactFormId("patient-email"),
+        contactKind: "email",
+        contactType: "private",
+        value: "",
+        isPrimary: true,
+        notes: "",
+      },
+    ],
     addressStreet: "",
     addressCity: "",
     addressZip: "",
@@ -161,6 +199,81 @@ export function blankPatientForm(): PatientFormState {
     emergencyContactRelation: "",
     notes: "",
   };
+}
+
+export function makePatientContactFormId(prefix = "patient-contact") {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function patientContactsToForm(detail: PatientDetail): PatientContactFormState[] {
+  const contacts = (detail.contacts ?? []).flatMap(
+    (contact, index): PatientContactFormState[] => {
+      const value = contact.value.trim();
+      if (!value) return [];
+      return [
+        {
+          id: contact.id ?? makePatientContactFormId(`patient-contact-${index}`),
+          contactKind: contact.contact_kind === "email" ? "email" : "phone",
+          contactType:
+            contact.contact_type === "work" || contact.contact_type === "other"
+              ? contact.contact_type
+              : "private",
+          value,
+          isPrimary: contact.is_primary,
+          notes: contact.notes ?? "",
+        },
+      ];
+    },
+  );
+
+  if (contacts.length === 0) {
+    if (detail.phone_primary) {
+      contacts.push({
+        id: makePatientContactFormId("patient-phone-primary"),
+        contactKind: "phone",
+        contactType: "private",
+        value: detail.phone_primary,
+        isPrimary: true,
+        notes: "",
+      });
+    }
+    if (detail.phone_secondary) {
+      contacts.push({
+        id: makePatientContactFormId("patient-phone-secondary"),
+        contactKind: "phone",
+        contactType: "private",
+        value: detail.phone_secondary,
+        isPrimary: false,
+        notes: "",
+      });
+    }
+    if (detail.email) {
+      contacts.push({
+        id: makePatientContactFormId("patient-email"),
+        contactKind: "email",
+        contactType: "private",
+        value: detail.email,
+        isPrimary: true,
+        notes: "",
+      });
+    }
+  }
+
+  return normalizePatientContactForms(contacts.length > 0 ? contacts : blankPatientForm().contacts);
+}
+
+export function normalizePatientContactForms(contacts: PatientContactFormState[]) {
+  return contacts.map((contact, _index, all) => {
+    const sameKind = all.filter((item) => item.contactKind === contact.contactKind);
+    const firstPrimary = sameKind.find((item) => item.isPrimary);
+    if (firstPrimary) {
+      return { ...contact, isPrimary: contact.id === firstPrimary.id };
+    }
+    return { ...contact, isPrimary: sameKind[0]?.id === contact.id };
+  });
 }
 
 export function toOptional(value: string) {
@@ -189,6 +302,7 @@ export function patientToForm(detail: PatientDetail): PatientFormState {
     phonePrimary: detail.phone_primary ?? "",
     phoneSecondary: detail.phone_secondary ?? "",
     email: detail.email ?? "",
+    contacts: patientContactsToForm(detail),
     addressStreet: detail.address_street ?? "",
     addressCity: detail.address_city ?? "",
     addressZip: detail.address_zip ?? "",
