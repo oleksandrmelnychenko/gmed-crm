@@ -30,6 +30,7 @@ import { formatEnumLabelFromKeys, formatUnknownValue, type TranslationKey, useLa
 import { getRevenueReportsText } from "@/lib/i18n/catalogs/revenue";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
+import { serviceKindLabel } from "@/pages/appointments/model/labels";
 import { fetchReportsExport, fetchReportsWorkspace } from "./data/reports-api";
 import {
   formatChange,
@@ -226,6 +227,14 @@ type ReportsWorkspacePayload = {
   } | null;
   financial_metrics_visible: boolean;
 };
+
+function reportBackendLabel(value: string, text: ReturnType<typeof getRevenueReportsText>) {
+  if (value === "provider_specialty.unknown") return text.common.unknownSpecialty;
+  if (value === "order_service.unnamed") return text.common.unnamedService;
+  const conciergeKind = value.match(/^concierge_service_kind\.(.+)$/)?.[1];
+  if (conciergeKind) return serviceKindLabel(conciergeKind);
+  return value;
+}
 
 type ForecastQuotePipelineRow = {
   status: string;
@@ -922,11 +931,15 @@ function useReportsPageContent() {
       {
         id: "service",
         label: text.providerCosts.title,
-        accessor: (row) => row.service_label,
+        accessor: (row) => reportBackendLabel(row.service_label, text),
         width: 220,
         pinned: "left",
         sortable: true,
-        render: (row) => <span className="text-sm font-medium text-foreground">{row.service_label}</span>,
+        render: (row) => (
+          <span className="text-sm font-medium text-foreground">
+            {reportBackendLabel(row.service_label, text)}
+          </span>
+        ),
       },
       {
         id: "provider",
@@ -2039,7 +2052,7 @@ function useReportsPageContent() {
                       ? detail.row.name
                       : detail.kind === "doctor"
                         ? [detail.row.title, detail.row.name].filter(Boolean).join(" ")
-                        : detail.row.service_label,
+                        : reportBackendLabel(detail.row.service_label, text),
                   )}
                   description={
                     detail.kind === "clinic"

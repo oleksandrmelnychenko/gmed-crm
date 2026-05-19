@@ -393,7 +393,14 @@ async fn load_staff_people(
 ) -> Result<Vec<Value>, axum::response::Response> {
     let rows = sqlx::query(
         r#"SELECT s.id, s.provider_id, s.first_name, s.last_name, s.display_name,
-                  s.role, COALESCE(sr.name_en, initcap(replace(s.role, '_', ' '))) AS role_label,
+                  s.role,
+                  COALESCE(
+                      NULLIF(TRIM(sr.name_de), ''),
+                      NULLIF(TRIM(sr.name_ru), ''),
+                      s.role
+                  ) AS role_label,
+                  sr.name_de AS role_name_de,
+                  sr.name_ru AS role_name_ru,
                   s.department, s.gender, s.opening_hours, s.status, s.notes, s.is_active,
                   s.created_at, s.updated_at,
                   p.name AS provider_name,
@@ -503,6 +510,9 @@ async fn load_staff_people(
                 "role": role,
                 "role_code": role,
                 "role_label": row.try_get::<String, _>("role_label").ok(),
+                "role_label_key": format!("provider_staff_role.{role}"),
+                "role_name_de": row.try_get::<Option<String>, _>("role_name_de").unwrap_or_default(),
+                "role_name_ru": row.try_get::<Option<String>, _>("role_name_ru").unwrap_or_default(),
                 "subrole": Value::Null,
                 "gender": row.try_get::<String, _>("gender").unwrap_or_else(|_| "unknown".to_string()),
                 "opening_hours": row.try_get::<Option<String>, _>("opening_hours").unwrap_or_default(),

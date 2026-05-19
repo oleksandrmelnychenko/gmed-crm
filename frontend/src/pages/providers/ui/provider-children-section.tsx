@@ -20,11 +20,17 @@ function uiLabel(labels: Record<string, string>, key: string, fallback: string) 
   return labels[key] ?? fallback;
 }
 
+function localizedFallback(lang: "de" | "ru", de: string, ru: string) {
+  return lang === "de" ? de : ru;
+}
+
 function StatusBadge({
   active,
+  lang,
   labels,
 }: {
   active: boolean;
+  lang: "de" | "ru";
   labels: Record<string, string>;
 }) {
   return (
@@ -36,8 +42,8 @@ function StatusBadge({
     >
       <span className={cn("size-1.5 rounded-full", active ? "bg-emerald-500" : "bg-neutral-400")} />
       {active
-        ? uiLabel(labels, "common_active", "Active")
-        : uiLabel(labels, "common_inactive", "Inactive")}
+        ? uiLabel(labels, "common_active", localizedFallback(lang, "Aktiv", "Активно"))
+        : uiLabel(labels, "common_inactive", localizedFallback(lang, "Inaktiv", "Неактивно"))}
     </span>
   );
 }
@@ -47,15 +53,19 @@ export function ProviderChildrenSection({
   className,
   onOpenProvider,
 }: ProviderChildrenSectionProps) {
-  const { t } = useLang();
+  const { lang, t } = useLang();
   const labels = t as unknown as Record<string, string>;
-  const title = t.uiText.providers_children ?? "Child providers";
-  const emptyTitle = t.uiText.providers_children_empty ?? "No child providers";
+  const title = t.uiText.providers_children ?? localizedFallback(lang, "Untereinheiten", "Дочерние подразделения");
+  const emptyTitle = t.uiText.providers_children_empty ?? localizedFallback(lang, "Keine untergeordneten Provider", "Нет дочерних провайдеров");
   const emptyText =
     t.uiText.providers_children_empty_description ??
-    "This provider does not have linked child clinics, departments, or units yet.";
-  const providerLabel = t.providers_title ?? "Providers";
-  const openLabel = t.uiText.providers_open_provider ?? "Open provider";
+    localizedFallback(
+      lang,
+      "Dieser Provider hat noch keine verknüpften Kliniken, Abteilungen oder Einheiten.",
+      "У этого провайдера пока нет связанных клиник, отделений или подразделений.",
+    );
+  const providerLabel = t.providers_title ?? localizedFallback(lang, "Provider", "Провайдеры");
+  const openLabel = t.uiText.providers_open_provider ?? localizedFallback(lang, "Provider öffnen", "Открыть провайдера");
 
   return (
     <section className={cn("space-y-3 rounded-xl border border-border/70 bg-card p-3.5", className)}>
@@ -113,7 +123,7 @@ export function ProviderChildrenSection({
                       >
                         {providerTypeLabel(child.provider_type, labels)}
                       </Badge>
-                      <StatusBadge active={child.is_active} labels={labels} />
+                      <StatusBadge active={child.is_active} lang={lang} labels={labels} />
                     </span>
                   </span>
                 </span>

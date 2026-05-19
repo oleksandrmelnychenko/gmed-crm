@@ -32,8 +32,8 @@ export const ru = {
   nav_my_services: "Консьерж-сервисы",
   nav_my_invoices: "Мои счета",
   nav_my_privacy: "Конфиденциальность",
-  nav_my_feedback: "Мой фидбек",
-  nav_feedback: "Фидбек",
+  nav_my_feedback: "Мои отзывы",
+  nav_feedback: "Отзывы",
   nav_reports: "Отчеты",
   nav_learning: "SOP и обучение",
 
@@ -482,7 +482,7 @@ export const ru = {
   appointments_cancel_whole_series: "Отменить всю серию",
   appointments_complete_only: "Только завершить",
   appointments_complete_and_schedule: "Завершить и запланировать",
-  appointments_scope_targets: "Текущий scope охватывает",
+  appointments_scope_targets: "Текущая область охватывает",
   appointments_active_occurrence: "активный приём",
   appointments_active_occurrences: "активных приёмов",
   appointments_open_branch_root: "Открыть корень ветки",
@@ -572,7 +572,7 @@ export const ru = {
   dash_daily_ops: "Ежедневные операции",
   phase_discovery: "Исследование",
   phase_execution: "Выполнение",
-  phase_followup: "Follow-up",
+  phase_followup: "Сопровождение",
 
   settings_title: "Системные настройки",
   settings_subtitle: "Конфигурация токенов и управление сессиями",
@@ -1048,7 +1048,7 @@ export const ru = {
   invoices_workspace_quotes_ready: "Доступные предложения",
   invoices_workspace_quotes_ready_description: "Доступные контексты предложений",
   invoices_workspace_accounting_title: "Бухгалтерский реестр",
-  invoices_workspace_accounting_description: "Cash-based read model для EÜR на основе оплаченных счетов и закрытых внешних инвойсов.",
+  invoices_workspace_accounting_description: "Кассовая модель учёта для EÜR на основе оплаченных счетов и закрытых внешних счетов.",
   invoices_workspace_refresh_ledger: "Обновить реестр",
   invoices_workspace_export_csv: "Экспорт CSV",
   invoices_workspace_cash_income: "Денежные поступления",
@@ -1158,9 +1158,9 @@ export const ru = {
   documents_delete: "Удалить",
   documents_delete_file: "Удалить файл",
   documents_delete_file_description:
-    "Контролируемо удалить сохранённый файл, отозвать активные шаринги и оставить запись документа как архивную историю.",
+    "Контролируемо удалить сохранённый файл, отозвать активные публикации и оставить запись документа как архивную историю.",
   documents_delete_file_hint:
-    "Это действие удаляет бинарный файл с диска, отзывает активные шаринги и навсегда отключает скачивание и предпросмотр. Метаданные и история версий остаются как audit trail.",
+    "Это действие удаляет бинарный файл с диска, отзывает активные публикации и навсегда отключает скачивание и предпросмотр. Метаданные и история версий остаются в аудиторском следе.",
   documents_delete_file_reason: "Причина удаления",
   documents_delete_file_reason_placeholder:
     "Почему сохранённый файл нужно удалить?",
@@ -1185,7 +1185,7 @@ export const ru = {
   documents_select_template: "Выберите шаблон",
   documents_select_patient: "Выберите пациента",
   documents_patient_wide_context: "Использовать контекст всего пациента",
-  documents_all_appointments_scope: "Все приёмы в scope",
+  documents_all_appointments_scope: "Все приёмы в выбранной области",
   documents_text_blocks: "Переиспользуемые текстовые блоки",
   documents_text_blocks_hint:
     "Они становятся стандартизированными подсказками или инструкционными секциями в сгенерированном документе.",
@@ -1197,16 +1197,16 @@ export const ru = {
   documents_run_extraction: "Запустить извлечение",
   documents_extracted_text: "Извлечённый текст",
   documents_no_extracted_text:
-    "Извлечённый текст пока недоступен. Используйте извлечение для текстовых файлов или добавьте ручную транскрипцию в translation workspace.",
+    "Извлечённый текст пока недоступен. Используйте извлечение для текстовых файлов или добавьте ручную транскрипцию в рабочей области перевода.",
   documents_translation_requests: "Запросы на перевод",
   documents_request_translation: "Запросить перевод",
   documents_no_translation_requests:
     "Для этого документа ещё нет запросов на перевод.",
   documents_source_language: "Исходный язык",
   documents_use_extracted_text: "Подставить извлечённый текст",
-  documents_save_workspace: "Сохранить workspace",
+  documents_save_workspace: "Сохранить рабочую область",
   documents_translation_note_placeholder:
-    "Scope, срок или примечания к доставке…",
+    "Область, срок или примечания к доставке…",
   documents_source_text: "Исходный текст",
   documents_source_text_placeholder:
     "Оригинальный извлечённый или вручную расшифрованный текст…",
@@ -1234,8 +1234,8 @@ export const ru = {
   documents_release_to_portal: "Выпустить в портал пациента",
   documents_revoke_portal_release: "Отозвать релиз портала",
   documents_only_ceo_pm_portal:
-    "Только CEO и patient manager могут публиковать документы в портале пациента.",
-  documents_no_shares_yet: "Шаров пока нет.",
+    "Только CEO и пациент-менеджер могут публиковать документы в портале пациента.",
+  documents_no_shares_yet: "Публикаций пока нет.",
   documents_internal_user: "Внутренний пользователь",
   documents_provider_target: "Провайдер",
   documents_select_user: "Выберите пользователя",
@@ -1244,9 +1244,9 @@ export const ru = {
   documents_share_message_placeholder:
     "Короткий контекст для клиники, врача или service provider…",
   documents_share_message_required:
-    "Для шаринга провайдеру нужно сопроводительное сообщение.",
+    "Для публикации провайдеру нужно сопроводительное сообщение.",
   documents_detail_description:
-    "Метаданные, контекст и история шаринга для выбранного файла.",
+    "Метаданные, контекст и история публикаций для выбранного файла.",
   documents_loading_document: "Загрузка документа…",
   documents_unknown_uploader: "Неизвестный загрузивший",
   documents_updated: "Обновлено",
@@ -1273,26 +1273,26 @@ export const ru = {
   documents_sharing_selected:
     "Поделиться {count} выбранными документами одним действием.",
   documents_require_confirmation: "Требовать подтверждение",
-  documents_create_share: "Создать шаринг",
-  documents_sharing: "Шаринг…",
+  documents_create_share: "Создать публикацию",
+  documents_sharing: "Публикация…",
   documents_no_city: "Город не указан",
   documents_preview: "Предпросмотр",
   documents_released: "Выпущено",
   documents_revoke: "Отозвать",
   documents_portal_trail_hint:
-    "Релиз создаёт отдельный портальный след шаринга и сохраняет состояние подтверждения в audit flow.",
+    "Публикация создаёт отдельный след в портале и сохраняет состояние подтверждения в аудите.",
   documents_workspace_heading: "Рабочее пространство документов",
   documents_workspace_intro:
-    "Загружайте, классифицируйте, шарьте и отслеживайте файлы по пациентам, заказам и приёмам.",
+    "Загружайте, классифицируйте, публикуйте и отслеживайте файлы по пациентам, заказам и приёмам.",
   documents_refresh: "Обновить",
   documents_generate_from_template: "Сгенерировать из шаблона",
-  documents_intake_queue: "Очередь intake документов",
+  documents_intake_queue: "Очередь входящих документов",
   documents_intake_interpreter_hint:
-    "Загрузки переводчика и другие intake-файлы, которым ещё нужна таксономическая проверка.",
+    "Загрузки переводчика и другие входящие файлы, которым ещё нужна таксономическая проверка.",
   documents_intake_general_hint:
     "Неклассифицированные загрузки и портал-файлы, которым ещё нужна таксономическая проверка.",
   documents_pending: "в ожидании",
-  documents_loading_intake_queue: "Загрузка очереди intake…",
+  documents_loading_intake_queue: "Загрузка очереди входящих документов…",
   documents_no_intake_pending:
     "Сейчас нет документов, ожидающих категоризации.",
   documents_unlinked_document: "Непривязанный документ",
@@ -1310,16 +1310,16 @@ export const ru = {
   documents_confidence_high: "высокая",
   documents_unclassified: "Без классификации",
   documents_upload_interpreter_hint:
-    "Загрузки переводчика сохраняются как внутренние draft-документы и отправляются на проверку тимлиду.",
+    "Загрузки переводчика сохраняются как внутренние черновики документов и отправляются на проверку тимлиду.",
   documents_upload_teamlead_hint:
-    "Эта загрузка сохраняется как внутренний документ. Здесь для teamlead-загрузок недоступны полные инструменты управления документом.",
+    "Эта загрузка сохраняется как внутренний документ. Здесь для загрузок тимлида недоступны полные инструменты управления документом.",
   documents_auto_classification_optional:
     "Необязательно. Оставьте пустым для автоклассификации.",
   documents_popup_blocked:
-    "Разрешите pop-up окна, чтобы открыть предпросмотр документа.",
+    "Разрешите всплывающие окна, чтобы открыть предпросмотр документа.",
   documents_failed_load_documents: "Не удалось загрузить документы.",
   documents_failed_load_intake_queue:
-    "Не удалось загрузить очередь intake документов.",
+    "Не удалось загрузить очередь входящих документов.",
   documents_failed_load_document: "Не удалось загрузить документ.",
   documents_file_required: "Файл обязателен.",
   documents_link_context_required:
@@ -1327,7 +1327,7 @@ export const ru = {
   documents_uploaded_internal_review:
     "Документ загружен для внутренней проверки.",
   documents_uploaded_to_intake:
-    "Документ загружен и добавлен в intake-очередь.",
+    "Документ загружен и добавлен в очередь входящих документов.",
   documents_uploaded: "Документ загружен.",
   documents_failed_upload: "Не удалось загрузить документ.",
   documents_classification_applied_released:
@@ -1364,10 +1364,10 @@ export const ru = {
   documents_choose_user_target: "Выберите пользователя-получателя.",
   documents_choose_provider_target: "Выберите провайдера-получателя.",
   documents_shared_count: "Документы поделены: {count}.",
-  documents_share_created_notice: "Шаринг создан.",
-  documents_failed_create_share: "Не удалось создать шаринг.",
-  documents_share_revoked_notice: "Шаринг отозван.",
-  documents_share_confirmed_notice: "Шаринг подтверждён.",
+  documents_share_created_notice: "Публикация создана.",
+  documents_failed_create_share: "Не удалось создать публикацию.",
+  documents_share_revoked_notice: "Публикация отозвана.",
+  documents_share_confirmed_notice: "Публикация подтверждена.",
   documents_portal_released_notice: "Документ выпущен в портал пациента.",
   documents_failed_release_portal:
     "Не удалось выпустить документ в портал пациента.",
@@ -1375,7 +1375,7 @@ export const ru = {
   documents_failed_revoke_portal: "Не удалось отозвать релиз портала.",
   documents_select_all_shown: "Выбрать все показанные",
   documents_clear_selection: "Очистить выбор",
-  documents_select_bulk_share: "Выбрать для массового шаринга",
+  documents_select_bulk_share: "Выбрать для массовой публикации",
   documents_no_documents_match:
     "Нет документов, подходящих под текущие фильтры.",
   documents_shares_count: "Шарингов: {count}",

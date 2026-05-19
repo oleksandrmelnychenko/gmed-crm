@@ -3105,10 +3105,28 @@ async fn risk_analysis_returns_role_scoped_patient_manager_and_billing_signals()
     );
     assert!(pm_body["billing"].is_null());
     let pm_alerts = pm_body["patient_manager"]["alerts"].as_array().unwrap();
+    let pm_alert = pm_alerts
+        .iter()
+        .find(|row| row["patient_id"] == patient_pm.to_string())
+        .expect("expected patient-manager risk alert");
+    assert_eq!(
+        pm_alert["title_key"],
+        "risk.patient_manager.care_coordination"
+    );
+    assert_eq!(pm_alert["title"], "risk.patient_manager.care_coordination");
     assert!(
-        pm_alerts
+        pm_alert["reasons"]
+            .as_array()
+            .unwrap()
             .iter()
-            .any(|row| row["patient_id"] == patient_pm.to_string())
+            .all(|value| value.as_str().unwrap_or_default().starts_with("risk."))
+    );
+    assert!(
+        pm_alert["reason_details"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reason| reason["code"] == "risk.patient_manager.reason.high_risk_label")
     );
     assert!(
         pm_alerts
@@ -3147,10 +3165,28 @@ async fn risk_analysis_returns_role_scoped_patient_manager_and_billing_signals()
     );
     assert!(billing_body["patient_manager"].is_null());
     let billing_alerts = billing_body["billing"]["alerts"].as_array().unwrap();
+    let billing_alert = billing_alerts
+        .iter()
+        .find(|row| row["order_id"] == order_pm.to_string())
+        .expect("expected billing risk alert");
+    assert_eq!(
+        billing_alert["title_key"],
+        "risk.billing.financial_exposure"
+    );
+    assert_eq!(billing_alert["title"], "risk.billing.financial_exposure");
     assert!(
-        billing_alerts
+        billing_alert["reasons"]
+            .as_array()
+            .unwrap()
             .iter()
-            .any(|row| row["order_id"] == order_pm.to_string())
+            .all(|value| value.as_str().unwrap_or_default().starts_with("risk."))
+    );
+    assert!(
+        billing_alert["reason_details"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reason| reason["code"] == "risk.billing.reason.overdue_invoices")
     );
     assert!(
         billing_body["billing"]["summary"]["overdue_invoice_count"]

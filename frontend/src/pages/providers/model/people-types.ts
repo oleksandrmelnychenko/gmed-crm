@@ -31,6 +31,9 @@ export type ProviderPeopleRow = {
   title: string | null;
   role_code: string | null;
   role_label: string | null;
+  role_label_key?: string | null;
+  role_name_de?: string | null;
+  role_name_ru?: string | null;
   subrole?: string | null;
   gender: ProviderPersonGender;
   opening_hours: string | null;

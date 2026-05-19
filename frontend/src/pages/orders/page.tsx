@@ -2013,9 +2013,11 @@ function useOrdersPageContent() {
       return;
     }
     if (createRecheck?.requires_recheck && !createRecheck.can_create_order) {
+      const blockingReason = createRecheck?.blocking_reasons?.[0];
       setCreateError(
-        createRecheck?.blocking_reasons?.[0] ??
-          l("orders_error_recheck_incomplete"),
+        blockingReason
+          ? localizedBlockingReason(blockingReason)
+          : l("orders_error_recheck_incomplete"),
       );
       return;
     }
@@ -3242,8 +3244,10 @@ function useOrdersPageContent() {
                           value={
                             orderDetail.process_gates.debt_management
                               ?.blocking_reason
-                              ? orderDetail.process_gates.debt_management
-                                  .blocking_reason
+                              ? localizedBlockingReason(
+                                  orderDetail.process_gates.debt_management
+                                    .blocking_reason,
+                                )
                               : orderDetail.process_gates.debt_hold
                                 ? `${orderDetail.process_gates.overdue_invoice_count} ${l("orders_uberfallige_rechnung_en")}`
                                 : l("orders_keine_uberfalligen_forderungen")

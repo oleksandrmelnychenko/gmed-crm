@@ -114,6 +114,10 @@ function localizedName(
   return localized?.trim() || item.name_en?.trim() || readableCode(item.code, "");
 }
 
+function localizedFallback(lang: Lang, de: string, ru: string) {
+  return lang === "de" ? de : ru;
+}
+
 function staffRoleSelectLabel(
   role: ProviderStaffRoleItem,
   labels: Record<string, string>,
@@ -139,18 +143,18 @@ function personTypeLabel(
   uiText: Record<string, string>,
 ) {
   return value === "doctor"
-    ? uiLabel(uiText, "providers_doctor", labelFrom(labels, "providers_doctors", "Doctor"))
-    : uiLabel(uiText, "providers_staff", "Staff");
+    ? uiLabel(uiText, "providers_doctor", labelFrom(labels, "common_doctor", labels.common_not_set ?? "-"))
+    : uiLabel(uiText, "providers_staff", labels.common_not_set ?? "-");
 }
 
 function genderLabel(value: ProviderPersonGender, labels: Record<string, string>) {
   switch (value) {
     case "male":
-      return labelFrom(labels, "gender_male", "Male");
+      return labelFrom(labels, "gender_male", labels.common_unknown ?? "-");
     case "female":
-      return labelFrom(labels, "gender_female", "Female");
+      return labelFrom(labels, "gender_female", labels.common_unknown ?? "-");
     default:
-      return labelFrom(labels, "common_unknown", "Unknown");
+      return labelFrom(labels, "common_unknown", "-");
   }
 }
 
@@ -158,8 +162,14 @@ function roleLabel(
   row: ProviderPeopleRow,
   labels: Record<string, string>,
   uiText: Record<string, string>,
+  lang: Lang,
 ) {
-  if (row.role_label) return row.role_label;
+  if (row.person_type === "staff") {
+    const localized = lang === "de" ? row.role_name_de : row.role_name_ru;
+    if (localized?.trim()) return localized.trim();
+  } else if (row.role_label?.trim()) {
+    return row.role_label.trim();
+  }
   if (row.person_type === "doctor" && row.role_code) return doctorRoleLabel(row.role_code);
   if (row.role_code) {
     const staffLabelKey = STAFF_ROLE_LABEL_KEYS[row.role_code];
@@ -206,18 +216,18 @@ function specializationSummary(row: ProviderPeopleRow, lang: Lang, fallback: str
 function countLabel(key: string, labels: Record<string, string>, uiText: Record<string, string>) {
   switch (key) {
     case "patient_count":
-      return labelFrom(labels, "providers_linked_patients", "Patients");
+      return labelFrom(labels, "providers_linked_patients", labels.common_not_set ?? "-");
     case "appointment_count":
-      return labelFrom(labels, "providers_appointments", "Appointments");
+      return labelFrom(labels, "providers_appointments", labels.common_not_set ?? "-");
     case "leistung_count":
     case "service_count":
-      return labelFrom(labels, "providers_services", "Services");
+      return labelFrom(labels, "providers_services", labels.common_not_set ?? "-");
     case "concierge_count":
-      return labelFrom(labels, "appointments_linked_concierge", "Concierge");
+      return labelFrom(labels, "appointments_linked_concierge", labels.common_not_set ?? "-");
     case "order_count":
-      return uiLabel(uiText, "orders_title", "Orders");
+      return uiLabel(uiText, "orders_title", labels.common_not_set ?? "-");
     case "interaction_count":
-      return uiLabel(uiText, "providers_activity_items", "Activity");
+      return uiLabel(uiText, "providers_activity_items", labels.common_not_set ?? "-");
     default:
       return readableCode(key.replace(/_count$/, ""), key);
   }
@@ -304,7 +314,7 @@ function PersonIdentityCell({
           <PersonTypeBadge labels={labels} row={row} uiText={uiText} />
         </div>
         <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
-          {roleLabel(row, labels, uiText)}
+          {roleLabel(row, labels, uiText, lang)}
         </div>
       </div>
     </div>
@@ -367,7 +377,7 @@ function buildPeopleColumns(
   return [
     {
       id: "person",
-      label: uiLabel(uiText, "providers_people_person", "Person"),
+      label: uiLabel(uiText, "providers_people_person", localizedFallback(lang, "Person", "Человек")),
       accessor: (row) => row.name,
       filterType: "text",
       searchable: true,
@@ -380,7 +390,7 @@ function buildPeopleColumns(
     },
     {
       id: "person_type",
-      label: uiLabel(uiText, "providers_people_type", "Person type"),
+      label: uiLabel(uiText, "providers_people_type", localizedFallback(lang, "Personentyp", "Тип человека")),
       accessor: (row) => personTypeLabel(row.person_type, labels, uiText),
       filterType: "enum",
       filterOptions: [
@@ -394,7 +404,7 @@ function buildPeopleColumns(
     },
     {
       id: "provider",
-      label: labels.providers_title ?? "Provider",
+      label: labels.providers_title ?? localizedFallback(lang, "Provider", "Провайдер"),
       accessor: (row) => row.provider_name,
       filterType: "text",
       searchable: true,
@@ -412,8 +422,8 @@ function buildPeopleColumns(
     },
     {
       id: "role",
-      label: uiLabel(uiText, "providers_people_role", "Role"),
-      accessor: (row) => roleLabel(row, labels, uiText),
+      label: uiLabel(uiText, "providers_people_role", localizedFallback(lang, "Funktion", "Должность")),
+      accessor: (row) => roleLabel(row, labels, uiText, lang),
       filterType: "text",
       searchable: true,
       sortable: true,
@@ -421,7 +431,7 @@ function buildPeopleColumns(
       group: "identity",
       render: (row) => (
         <div className="truncate text-xs text-muted-foreground">
-          {roleLabel(row, labels, uiText)}
+          {roleLabel(row, labels, uiText, lang)}
           {row.subrole ? (
             <span className="ml-1 text-[10px] text-muted-foreground/75">
               {readableCode(row.subrole, "")}
@@ -432,7 +442,7 @@ function buildPeopleColumns(
     },
     {
       id: "gender",
-      label: uiLabel(uiText, "patients_gender", "Gender"),
+      label: uiLabel(uiText, "patients_gender", labels.patients_gender ?? localizedFallback(lang, "Geschlecht", "Пол")),
       accessor: (row) => genderLabel(row.gender, labels),
       filterType: "enum",
       filterOptions: [
@@ -451,7 +461,7 @@ function buildPeopleColumns(
     },
     {
       id: "fachbereich",
-      label: labels.providers_fachbereich ?? "Department",
+      label: labels.providers_fachbereich ?? localizedFallback(lang, "Fachbereich", "Специализация"),
       accessor: (row) => row.fachbereich,
       filterType: "text",
       searchable: true,
@@ -466,7 +476,7 @@ function buildPeopleColumns(
     },
     {
       id: "specializations",
-      label: uiLabel(uiText, "providers_doctor_specializations", "Specializations"),
+      label: uiLabel(uiText, "providers_doctor_specializations", localizedFallback(lang, "Spezialisierungen", "Специализации")),
       accessor: (row) => specializationSummary(row, lang, ""),
       filterType: "text",
       searchable: true,
@@ -481,7 +491,7 @@ function buildPeopleColumns(
     },
     {
       id: "contacts",
-      label: uiLabel(uiText, "providers_contacts", "Contacts"),
+      label: uiLabel(uiText, "providers_contacts", localizedFallback(lang, "Kontakte", "Контакты")),
       accessor: (row) => contactSummary(row, ""),
       filterType: "text",
       searchable: true,
@@ -502,7 +512,7 @@ function buildPeopleColumns(
     },
     {
       id: "counts",
-      label: uiLabel(uiText, "providers_people_counts", "Counts"),
+      label: uiLabel(uiText, "providers_people_counts", localizedFallback(lang, "Kennzahlen", "Показатели")),
       accessor: (row) => visibleCounts(row).map((count) => count.value).join(" "),
       filterType: "number",
       sortable: false,
@@ -512,7 +522,7 @@ function buildPeopleColumns(
     },
     {
       id: "last_interaction_at",
-      label: labels.providers_last_activity ?? "Last activity",
+      label: labels.providers_last_activity ?? localizedFallback(lang, "Letzte Aktivität", "Последняя активность"),
       accessor: (row) => row.last_interaction_at,
       filterType: "date",
       sortable: true,
@@ -659,7 +669,7 @@ function FiltersBar({
   onFiltersChange: (filters: ProviderPeopleFilters) => void;
   onResetFilters?: () => void;
 }) {
-  const allLabel = labels.providers_all ?? "All";
+  const allLabel = labels.providers_all ?? localizedFallback(lang, "Alle", "Все");
   const roleOptions = buildRoleOptions(filters, labels, uiText, staffRoles, lang);
   const setFilter = <K extends keyof ProviderPeopleFilters>(
     key: K,
@@ -677,20 +687,23 @@ function FiltersBar({
     <div className="space-y-2">
       <div className="grid gap-1.5 md:grid-cols-[minmax(190px,1.35fr)_repeat(3,minmax(118px,0.8fr))_auto] md:items-end">
         <label className="min-w-0">
-          <FieldLabel>{labels.common_search ?? "Search"}</FieldLabel>
+          <FieldLabel>{labels.common_search ?? localizedFallback(lang, "Suchen", "Поиск")}</FieldLabel>
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={filters.search}
               onChange={(event) => setFilter("search", event.target.value)}
-              placeholder={labels.common_search_placeholder ?? "Search by name, provider, role"}
+              placeholder={
+                labels.common_search_placeholder ??
+                localizedFallback(lang, "Nach Name, Provider oder Funktion suchen", "Поиск по имени, провайдеру или должности")
+              }
               className="h-8 rounded-md bg-background pl-8 text-xs"
             />
           </div>
         </label>
 
         <SelectField
-          label={uiLabel(uiText, "providers_people_type", "Person type")}
+          label={uiLabel(uiText, "providers_people_type", localizedFallback(lang, "Personentyp", "Тип человека"))}
           value={filters.personType}
           onChange={(value) =>
             setFilter("personType", value as ProviderPeopleFilters["personType"])
@@ -702,7 +715,7 @@ function FiltersBar({
         </SelectField>
 
         <SelectField
-          label={labels.providers_title ?? "Provider"}
+          label={labels.providers_title ?? localizedFallback(lang, "Provider", "Провайдер")}
           value={filters.providerId}
           onChange={(value) => setFilter("providerId", value)}
         >
@@ -715,7 +728,7 @@ function FiltersBar({
         </SelectField>
 
         <SelectField
-          label={labels.providers_type ?? "Provider type"}
+          label={labels.providers_type ?? localizedFallback(lang, "Providertyp", "Тип провайдера")}
           value={filters.providerType}
           onChange={(value) =>
             setFilter("providerType", value as ProviderPeopleFilters["providerType"])
@@ -734,19 +747,19 @@ function FiltersBar({
           onClick={reset}
         >
           <RotateCcw className="size-3.5" />
-          {labels.common_reset ?? "Reset"}
+          {labels.common_reset ?? localizedFallback(lang, "Zurücksetzen", "Сбросить")}
         </Button>
       </div>
 
       <div className="grid gap-1.5 md:grid-cols-4">
         <TextFilterField
-          label={labels.providers_fachbereich ?? "Department"}
-          placeholder={labels.providers_fachbereich ?? "Department"}
+          label={labels.providers_fachbereich ?? localizedFallback(lang, "Fachbereich", "Специализация")}
+          placeholder={labels.providers_fachbereich ?? localizedFallback(lang, "Fachbereich", "Специализация")}
           value={filters.fachbereich}
           onChange={(value) => setFilter("fachbereich", value)}
         />
         <SelectField
-          label={uiLabel(uiText, "providers_doctor_specializations", "Specializations")}
+          label={uiLabel(uiText, "providers_doctor_specializations", localizedFallback(lang, "Spezialisierungen", "Специализации"))}
           value={filters.specialization}
           onChange={(value) => setFilter("specialization", value)}
         >
@@ -760,7 +773,7 @@ function FiltersBar({
             ))}
         </SelectField>
         <SelectField
-          label={uiLabel(uiText, "providers_people_role", "Role")}
+          label={uiLabel(uiText, "providers_people_role", localizedFallback(lang, "Funktion", "Должность"))}
           value={filters.role}
           onChange={(value) => setFilter("role", value)}
         >
@@ -772,7 +785,7 @@ function FiltersBar({
           ))}
         </SelectField>
         <SelectField
-          label={labels.patients_title ?? "Patients"}
+          label={labels.patients_title ?? localizedFallback(lang, "Patienten", "Пациенты")}
           value={filters.patientId}
           onChange={(value) => setFilter("patientId", value)}
         >
@@ -790,10 +803,12 @@ function FiltersBar({
 
 function ErrorBanner({
   error,
+  lang,
   labels,
   onRetry,
 }: {
   error: string;
+  lang: Lang;
   labels: Record<string, string>;
   onRetry?: () => void;
 }) {
@@ -808,7 +823,7 @@ function ErrorBanner({
           className="h-8 border-rose-200 bg-white/70 text-rose-700 hover:bg-white"
           onClick={onRetry}
         >
-          {labels.common_retry ?? "Retry"}
+          {labels.common_retry ?? localizedFallback(lang, "Erneut versuchen", "Повторить")}
         </Button>
       ) : null}
     </div>
@@ -848,7 +863,7 @@ function MobilePeopleCards({
   if (rows.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-border bg-muted/30 px-5 py-6 text-sm text-muted-foreground md:hidden">
-        {labels.common_no_results ?? "No results"}
+        {labels.common_no_results ?? localizedFallback(lang, "Keine Ergebnisse", "Нет результатов")}
       </div>
     );
   }
@@ -876,7 +891,7 @@ function MobilePeopleCards({
                 <PersonTypeBadge labels={labels} row={row} uiText={uiText} />
               </div>
               <p className="mt-1 truncate text-xs text-muted-foreground">
-                {roleLabel(row, labels, uiText)}
+                {roleLabel(row, labels, uiText, lang)}
               </p>
               <p className="mt-2 truncate text-xs text-muted-foreground">
                 {row.provider_name}
@@ -896,13 +911,13 @@ function MobilePeopleCards({
           <div className="mt-3 space-y-1.5 text-xs text-muted-foreground">
             <p className="line-clamp-2">
               <span className="font-medium text-foreground/75">
-                {labels.providers_fachbereich ?? "Department"}:{" "}
+                {labels.providers_fachbereich ?? localizedFallback(lang, "Fachbereich", "Специализация")}:{" "}
               </span>
               {specializationSummary(row, lang, labels.common_not_set ?? "-")}
             </p>
             <p className="line-clamp-2">
               <span className="font-medium text-foreground/75">
-                {uiLabel(uiText, "providers_contacts", "Contacts")}:{" "}
+                {uiLabel(uiText, "providers_contacts", localizedFallback(lang, "Kontakte", "Контакты"))}:{" "}
               </span>
               {contactSummary(row, labels.common_not_set ?? "-")}
             </p>
@@ -921,7 +936,7 @@ function MobilePeopleCards({
               onClick={() => onOpenPerson(row.person_id, row)}
             >
               <UserRound className="size-3.5" />
-              {uiLabel(uiText, "providers_people_open_person", "Open person")}
+              {uiLabel(uiText, "providers_people_open_person", localizedFallback(lang, "Person öffnen", "Открыть человека"))}
             </Button>
             <Button
               type="button"
@@ -931,7 +946,7 @@ function MobilePeopleCards({
               onClick={() => onOpenProvider(row.provider_id, row)}
             >
               <Building2 className="size-3.5" />
-              {uiLabel(uiText, "providers_open_provider", "Open provider")}
+              {uiLabel(uiText, "providers_open_provider", localizedFallback(lang, "Provider öffnen", "Открыть провайдера"))}
             </Button>
           </div>
         </article>
@@ -964,8 +979,8 @@ export function ProviderPeopleCatalog({
     return options.length > 0 ? options : deriveProviderOptions(rows);
   }, [providers, rows]);
   const columns = useMemo(() => buildPeopleColumns(labels, uiText, lang), [labels, lang, uiText]);
-  const title = uiLabel(uiText, "providers_people_catalog", "People catalog");
-  const countLabelText = uiLabel(uiText, "providers_people_count", "people");
+  const title = uiLabel(uiText, "providers_people_catalog", localizedFallback(lang, "Ärzte und Personal", "Врачи и персонал"));
+  const countLabelText = uiLabel(uiText, "providers_people_count", localizedFallback(lang, "Personen", "людей"));
 
   return (
     <section className={cn("space-y-3", className)}>
@@ -992,7 +1007,7 @@ export function ProviderPeopleCatalog({
         onResetFilters={onResetFilters}
       />
 
-      {error && !loading ? <ErrorBanner error={error} labels={labels} onRetry={onRetry} /> : null}
+      {error && !loading ? <ErrorBanner error={error} lang={lang} labels={labels} onRetry={onRetry} /> : null}
 
       <div className="hidden md:block">
         <DataTableSurface
@@ -1002,7 +1017,7 @@ export function ProviderPeopleCatalog({
           defaultFrozenColumns={DEFAULT_FROZEN_COLUMNS}
           defaultHiddenColumns={DEFAULT_HIDDEN_COLUMNS}
           dictionary={labels}
-          emptyState={labels.common_no_results ?? "No results"}
+          emptyState={labels.common_no_results ?? localizedFallback(lang, "Keine Ergebnisse", "Нет результатов")}
           footer={({ visibleRows, totalCount }) => (
             <span className="tabular-nums">
               {visibleRows.length === totalCount
@@ -1011,11 +1026,11 @@ export function ProviderPeopleCatalog({
             </span>
           )}
           groupLabels={{
-            activity: uiLabel(uiText, "providers_activity_items", "Activity"),
-            clinical: labels.providers_fachbereich ?? "Clinical",
-            contact: uiLabel(uiText, "providers_contacts", "Contacts"),
-            identity: uiLabel(uiText, "providers_people_person", "Person"),
-            provider: labels.providers_title ?? "Provider",
+            activity: uiLabel(uiText, "providers_activity_items", localizedFallback(lang, "Aktivität", "Активность")),
+            clinical: labels.providers_fachbereich ?? localizedFallback(lang, "Fachbereich", "Специализация"),
+            contact: uiLabel(uiText, "providers_contacts", localizedFallback(lang, "Kontakte", "Контакты")),
+            identity: uiLabel(uiText, "providers_people_person", localizedFallback(lang, "Person", "Человек")),
+            provider: labels.providers_title ?? localizedFallback(lang, "Provider", "Провайдер"),
           }}
           loading={loading}
           maxFrozenColumns={2}
@@ -1025,14 +1040,14 @@ export function ProviderPeopleCatalog({
               type="button"
               variant="ghost"
               size="icon-sm"
-              title={uiLabel(uiText, "providers_open_provider", "Open provider")}
-              aria-label={`${uiLabel(uiText, "providers_open_provider", "Open provider")}: ${row.provider_name}`}
+              title={uiLabel(uiText, "providers_open_provider", localizedFallback(lang, "Provider öffnen", "Открыть провайдера"))}
+              aria-label={`${uiLabel(uiText, "providers_open_provider", localizedFallback(lang, "Provider öffnen", "Открыть провайдера"))}: ${row.provider_name}`}
               onClick={() => onOpenProvider(row.provider_id, row)}
             >
               <ArrowUpRight className="size-3.5" />
             </Button>
           )}
-          rowActionsLabel={labels.table_actions ?? "Actions"}
+          rowActionsLabel={labels.table_actions ?? localizedFallback(lang, "Aktionen", "Действия")}
           rowActionsWidth={48}
           rowId={(row) => `${row.person_type}:${row.person_id}:${row.provider_id}`}
           storageKey="provider-people-catalog"

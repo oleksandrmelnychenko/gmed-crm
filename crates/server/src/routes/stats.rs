@@ -77,8 +77,11 @@ struct PatientManagerRiskAlert {
     patient_id: String,
     patient_label: String,
     severity: &'static str,
+    title_key: &'static str,
     title: String,
+    reason_codes: Vec<String>,
     reasons: Vec<String>,
+    reason_details: Vec<RiskReasonDetail>,
     open_case_count: i64,
     open_appointment_count: i64,
     overdue_appointment_count: i64,
@@ -114,8 +117,11 @@ struct BillingRiskAlert {
     patient_id: String,
     patient_label: String,
     severity: &'static str,
+    title_key: &'static str,
     title: String,
+    reason_codes: Vec<String>,
     reasons: Vec<String>,
+    reason_details: Vec<RiskReasonDetail>,
     phase: String,
     billing_release_status: String,
     package_coverage_status: String,
@@ -125,6 +131,57 @@ struct BillingRiskAlert {
     service_gross: String,
     invoiced_total: String,
     exposure_gap: String,
+}
+
+#[derive(Clone, Serialize)]
+struct RiskReasonDetail {
+    code: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    count: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    amount: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    billing_release_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    package_coverage_status: Option<String>,
+}
+
+impl RiskReasonDetail {
+    fn code(code: &'static str) -> Self {
+        Self {
+            code,
+            count: None,
+            amount: None,
+            billing_release_status: None,
+            package_coverage_status: None,
+        }
+    }
+
+    fn count(code: &'static str, count: i64) -> Self {
+        Self {
+            count: Some(count),
+            ..Self::code(code)
+        }
+    }
+
+    fn amount(code: &'static str, amount: String) -> Self {
+        Self {
+            amount: Some(amount),
+            ..Self::code(code)
+        }
+    }
+
+    fn billing_blocked(billing_release_status: String, package_coverage_status: String) -> Self {
+        Self {
+            billing_release_status: Some(billing_release_status),
+            package_coverage_status: Some(package_coverage_status),
+            ..Self::code("risk.billing.reason.billing_release_blocked")
+        }
+    }
+}
+
+fn risk_reason_codes(details: &[RiskReasonDetail]) -> Vec<String> {
+    details.iter().map(|item| item.code.to_string()).collect()
 }
 
 fn decimal_to_string(value: Decimal) -> String {
@@ -2480,7 +2537,7 @@ async fn load_report_medical_providers(state: &AppState) -> Result<Vec<Value>, s
                     SELECT COALESCE(json_agg(item.label ORDER BY item.label), '[]'::json)
                     FROM (
                         SELECT
-                            COALESCE(NULLIF(TRIM(pd.fachbereich), ''), 'General') AS label,
+                            COALESCE(NULLIF(TRIM(pd.fachbereich), ''), 'provider_specialty.unknown') AS label,
                             COUNT(*) AS usage_count
                         FROM provider_doctors pd
                         WHERE pd.provider_id = p.id
@@ -2493,7 +2550,7 @@ async fn load_report_medical_providers(state: &AppState) -> Result<Vec<Value>, s
                     SELECT COALESCE(json_agg(item.label ORDER BY item.label), '[]'::json)
                     FROM (
                         SELECT
-                            COALESCE(NULLIF(TRIM(ol.description), ''), 'Unnamed service') AS label,
+                            COALESCE(NULLIF(TRIM(ol.description), ''), 'order_service.unnamed') AS label,
                             COUNT(*) AS usage_count
                         FROM order_leistungen ol
                         WHERE ol.provider_id = p.id
@@ -2592,7 +2649,7 @@ async fn load_report_provider_costs(
                     p.name AS provider_name,
                     p.address_city,
                     p.address_country,
-                    COALESCE(NULLIF(TRIM(ol.description), ''), 'Unnamed service') AS service_label,
+                    COALESCE(NULLIF(TRIM(ol.description), ''), 'order_service.unnamed') AS service_label,
                     (ol.unit_price * (1 + (ol.vat_rate / 100)))::numeric AS unit_gross,
                     COALESCE(ol.approved_at, ol.delivered_at, ol.created_at) AS effective_at
                 FROM order_leistungen ol
@@ -3161,7 +3218,7 @@ async fn load_report_non_medical_providers(
                             FROM service_catalog s
                             WHERE s.provider_id = p.id
                             UNION
-                            SELECT INITCAP(REPLACE(cs.service_kind, '_', ' ')) AS label
+                            SELECT 'concierge_service_kind.' || cs.service_kind AS label
                             FROM concierge_services cs
                             WHERE cs.provider_id = p.id
                         ) labels
@@ -4340,38 +4397,54 @@ async fn load_patient_manager_risks(
             || open_case_count >= 2
             || (open_case_count >= 1 && open_appointment_count >= 2);
 
-        let mut reasons = Vec::new();
+        let mut reason_details = Vec::new();
         if high_risk_label {
-            reasons.push("Patient carries the `high_risk` functional label".to_string());
+            reason_details.push(RiskReasonDetail::code(
+                "risk.patient_manager.reason.high_risk_label",
+            ));
         }
         if fall_risk_label {
-            reasons.push("Patient carries the `fall_risk` functional label".to_string());
+            reason_details.push(RiskReasonDetail::code(
+                "risk.patient_manager.reason.fall_risk_label",
+            ));
         }
         if open_case_count >= 2 {
-            reasons.push("Multiple open clinical cases require close coordination".to_string());
-        } else if open_case_count >= 1 && reasons.is_empty() {
-            reasons.push("Open clinical case still needs active coordination".to_string());
+            reason_details.push(RiskReasonDetail::count(
+                "risk.patient_manager.reason.multiple_open_cases",
+                open_case_count,
+            ));
+        } else if open_case_count >= 1 && reason_details.is_empty() {
+            reason_details.push(RiskReasonDetail::count(
+                "risk.patient_manager.reason.open_case",
+                open_case_count,
+            ));
         }
         if overdue_appointment_count > 0 {
-            reasons.push(format!(
-                "{overdue_appointment_count} open appointment(s) are already overdue"
+            reason_details.push(RiskReasonDetail::count(
+                "risk.patient_manager.reason.overdue_appointments",
+                overdue_appointment_count,
             ));
         }
         if open_appointment_count >= 3 {
-            reasons.push(format!(
-                "{open_appointment_count} open appointments create coordination pressure"
+            reason_details.push(RiskReasonDetail::count(
+                "risk.patient_manager.reason.open_appointments_pressure",
+                open_appointment_count,
             ));
         }
         if overdue_task_count > 0 {
-            reasons.push(format!("{overdue_task_count} PM task(s) are overdue"));
+            reason_details.push(RiskReasonDetail::count(
+                "risk.patient_manager.reason.overdue_pm_tasks",
+                overdue_task_count,
+            ));
         }
         if overdue_checklist_count > 0 {
-            reasons.push(format!(
-                "{overdue_checklist_count} workflow checklist item(s) are overdue"
+            reason_details.push(RiskReasonDetail::count(
+                "risk.patient_manager.reason.overdue_checklist_items",
+                overdue_checklist_count,
             ));
         }
 
-        if reasons.is_empty() {
+        if reason_details.is_empty() {
             continue;
         }
 
@@ -4398,12 +4471,18 @@ async fn load_patient_manager_risks(
         overdue_tasks += overdue_task_count;
         overdue_checklists += overdue_checklist_count;
 
+        let reason_codes = risk_reason_codes(&reason_details);
+        let reasons = reason_codes.clone();
+
         alerts.push(PatientManagerRiskAlert {
             patient_id: patient_id.to_string(),
             patient_label,
             severity,
-            title: "Care coordination risk".to_string(),
+            title_key: "risk.patient_manager.care_coordination",
+            title: "risk.patient_manager.care_coordination".to_string(),
+            reason_codes,
             reasons,
+            reason_details,
             open_case_count,
             open_appointment_count,
             overdue_appointment_count,
@@ -4569,39 +4648,41 @@ async fn load_billing_risks(state: &AppState) -> Result<BillingRiskPayload, sqlx
             .try_get::<i64, _>("unpaid_advance_invoice_count")
             .unwrap_or(0);
 
-        let mut reasons = Vec::new();
+        let mut reason_details = Vec::new();
         if overdue_invoices > 0 {
-            reasons.push(format!(
-                "{overdue_invoices} overdue invoice(s) require immediate follow-up"
+            reason_details.push(RiskReasonDetail::count(
+                "risk.billing.reason.overdue_invoices",
+                overdue_invoices,
             ));
         }
         if unpaid_advance_invoice_count > 0 {
-            reasons.push(format!(
-                "{unpaid_advance_invoice_count} advance invoice(s) remain unpaid"
+            reason_details.push(RiskReasonDetail::count(
+                "risk.billing.reason.unpaid_advance_invoices",
+                unpaid_advance_invoice_count,
             ));
         }
         if outstanding_balance > Decimal::ZERO {
-            reasons.push(format!(
-                "Outstanding balance is {}",
-                decimal_to_string(outstanding_balance)
+            reason_details.push(RiskReasonDetail::amount(
+                "risk.billing.reason.outstanding_balance",
+                decimal_to_string(outstanding_balance),
             ));
         }
         if exposure_gap > Decimal::ZERO {
-            reasons.push(format!(
-                "Delivered scope exceeds invoiced volume by {}",
-                decimal_to_string(exposure_gap)
+            reason_details.push(RiskReasonDetail::amount(
+                "risk.billing.reason.exposure_gap",
+                decimal_to_string(exposure_gap),
             ));
         }
         let blocked_order =
             billing_release_status != "granted" && package_coverage_status != "covered";
         if blocked_order {
-            reasons.push(format!(
-                "Billing release is `{}` while package coverage is `{}`",
-                billing_release_status, package_coverage_status
+            reason_details.push(RiskReasonDetail::billing_blocked(
+                billing_release_status.clone(),
+                package_coverage_status.clone(),
             ));
         }
 
-        if reasons.is_empty() {
+        if reason_details.is_empty() {
             continue;
         }
 
@@ -4626,14 +4707,20 @@ async fn load_billing_risks(state: &AppState) -> Result<BillingRiskPayload, sqlx
         outstanding_balance_total += outstanding_balance;
         exposure_gap_total += exposure_gap;
 
+        let reason_codes = risk_reason_codes(&reason_details);
+        let reasons = reason_codes.clone();
+
         alerts.push(BillingRiskAlert {
             order_id: order_id.to_string(),
             order_number: row.try_get::<String, _>("order_number").unwrap_or_default(),
             patient_id: patient_id.to_string(),
             patient_label,
             severity,
-            title: "Financial exposure risk".to_string(),
+            title_key: "risk.billing.financial_exposure",
+            title: "risk.billing.financial_exposure".to_string(),
+            reason_codes,
             reasons,
+            reason_details,
             phase,
             billing_release_status,
             package_coverage_status,

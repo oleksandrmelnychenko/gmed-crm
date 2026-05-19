@@ -165,19 +165,30 @@ async fn provider_people_returns_doctors_staff_counts_and_patient_filter() {
     .await
     .unwrap();
 
+    let staff_role = format!("staff_role_{}", Uuid::new_v4().simple());
+    sqlx::query(
+        r#"INSERT INTO provider_staff_roles (code, name_en, name_de, name_ru)
+           VALUES ($1, 'English desk role', 'Empfang', 'Registratura')"#,
+    )
+    .bind(&staff_role)
+    .execute(&pool)
+    .await
+    .unwrap();
+
     let staff_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO provider_staff (
                 provider_id, first_name, last_name, display_name,
                 role, department, gender, status, is_active
            ) VALUES (
                 $1, 'Marta', $2, $3,
-                'secretary', 'front desk', 'female', 'active', TRUE
+                $4, 'front desk', 'female', 'active', TRUE
            )
            RETURNING id"#,
     )
     .bind(provider_id)
     .bind(format!("Staff {tag}"))
     .bind(format!("Marta Staff {tag}"))
+    .bind(&staff_role)
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -241,7 +252,14 @@ async fn provider_people_returns_doctors_staff_counts_and_patient_filter() {
         .find(|item| item["person_type"] == "staff" && item["staff_id"] == staff_id.to_string())
         .expect("staff read model");
     assert_eq!(staff["provider"]["id"], provider_id.to_string());
-    assert_eq!(staff["role"], "secretary");
+    assert_eq!(staff["role"], staff_role);
+    assert_eq!(staff["role_code"], staff_role);
+    assert_eq!(staff["role_label"], "Empfang");
+    assert_eq!(
+        staff["role_label_key"],
+        format!("provider_staff_role.{staff_role}")
+    );
+    assert_eq!(staff["role_name_de"], "Empfang");
     assert_eq!(staff["gender"], "female");
     assert_eq!(staff["patient_count"], 0);
     assert_eq!(staff["appointment_count"], 0);
@@ -281,7 +299,7 @@ async fn provider_people_returns_doctors_staff_counts_and_patient_filter() {
         &app,
         "GET",
         &format!(
-            "/api/v1/provider-people?provider_id={provider_id}&person_type=staff&role=secretary"
+            "/api/v1/provider-people?provider_id={provider_id}&person_type=staff&role={staff_role}"
         ),
         &bearer,
         None,

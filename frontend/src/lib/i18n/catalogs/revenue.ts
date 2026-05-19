@@ -475,7 +475,9 @@ const revenueReportsTextDe = {
           serviceMix: "Leistungsmix",
           patientCountryMix: "Patientenländer",
           noSpecialtyData: "Keine Fachgebietsdaten",
+          unknownSpecialty: "Ohne Fachgebiet",
           noDeliveredServicesYet: "Noch keine erbrachten Leistungen",
+          unnamedService: "Unbenannte Leistung",
           noCountryData: "Keine Länderdaten",
           samples: "Stichproben",
           latestVsFirst: "Aktuell vs. zuerst",
@@ -520,7 +522,7 @@ const revenueReportsTextRu: RevenueReportsText = {
         noRecentActivity: "Недавней активности нет",
         unknown: "Неизвестно",
         weightedHidden: "Взвешенная сумма скрыта",
-        clearDrillDown: "Сбросить drill-down",
+        clearDrillDown: "Сбросить детализацию",
         drillIntoDoctors: "Провалиться к врачам",
         openProvider: "Открыть провайдера",
         financialMetricsVisible: "Финансовые метрики видимы",
@@ -532,7 +534,7 @@ const revenueReportsTextRu: RevenueReportsText = {
           medical_providers: "Медицинские провайдеры",
           provider_costs: "Динамика стоимости провайдеров",
           billing_kpis: "KPI биллинга",
-          doctors: "Drill-down по врачам",
+          doctors: "Детализация по врачам",
           non_medical_providers: "Немедицинские провайдеры",
           sales_kpis: "KPI продаж",
         },
@@ -558,7 +560,7 @@ const revenueReportsTextRu: RevenueReportsText = {
           paid14d: "Оплачено за 14 дн.",
           dunningShare: "Доля претензий",
           avgServiceToInvoice: "Среднее от услуги до счёта",
-          selfPayShare: "Доля self-pay",
+          selfPayShare: "Доля самооплаты",
           averageInvoiceGross: "Средний счёт брутто",
           overdueInvoices: "Просроченные счета",
           costPassthroughShare: "Доля проходных расходов",
@@ -608,18 +610,18 @@ const revenueReportsTextRu: RevenueReportsText = {
           debtWorkflows: "Сценарии взыскания",
           escalationSplit: "Структура эскалаций",
           workflowOpenReview: (open: number, review: number) =>
-            `${open} открыто / ${review} review в течение 7 дн.`,
+            `${open} открыто / ${review} на проверке в течение 7 дн.`,
           escalationSplitValue: (plans: number, escalated: number) =>
             `${plans} платёжных планов / ${escalated} эскалировано`,
           followupTitle: "Прогноз сопровождения",
           followupDescription:
-            "Вехи, которые должны наступить в ближайшие 30 дней на основе текущего состояния follow-up по заказам.",
+            "Вехи, которые должны наступить в ближайшие 30 дней на основе текущего состояния сопровождения по заказам.",
           activeFollowupOrders: "Активные заказы сопровождения",
           oneWeekOneMonthSixMonth: "1н / 1м / 6м",
           doctorPackageResults: "Врач / окончание пакета / результаты",
           clinicCapacityTitle: "Загрузка клиник на ближайшие 30 дней",
           clinicCapacityDescription:
-            "Прогноз нагрузки на клиники по запланированным/подтверждённым приёмам и follow-up спросу.",
+            "Прогноз нагрузки на клиники по запланированным и подтверждённым приёмам, а также спросу на сопровождение.",
           clinicCapacityBadge: (clinics: number, appointments: number) =>
             `${clinics} клиник / ${appointments} приёмов`,
           doctors: (count: number) => `${count} врачей`,
@@ -630,7 +632,7 @@ const revenueReportsTextRu: RevenueReportsText = {
         clinicReport: {
           title: "Отчёт по клиникам",
           description:
-            "Медицинские партнёрские клиники, ранжированные по недавней активности, оказанным позициям, скорости ответа и качественным сигналам из feedback и завершения follow-up.",
+            "Медицинские партнёрские клиники, ранжированные по недавней активности, оказанным позициям, скорости ответа и качественным сигналам из отзывов и завершения сопровождения.",
           empty: "Данных для отчёта по клиникам пока нет.",
         },
         serviceTypeReport: {
@@ -642,7 +644,7 @@ const revenueReportsTextRu: RevenueReportsText = {
         medicalProviders: {
           title: "Эффективность медицинских провайдеров",
           description:
-            "Партнёрский обзор активности клиник и выручки для service mix, географии пациентов и sales-сравнений без детализации по пациентам.",
+            "Партнёрский обзор активности клиник и выручки по структуре услуг, географии пациентов и сравнениям продаж без детализации по пациентам.",
           empty: "Данных по медицинским провайдерам пока нет.",
         },
         providerCosts: {
@@ -654,7 +656,7 @@ const revenueReportsTextRu: RevenueReportsText = {
         nonMedicalProviders: {
           title: "Отчёт по немедицинским провайдерам",
           description:
-            "Консьерж-ориентированный объём партнёров по портфелю услуг, текущей нагрузке запросов, охвату пациентов и feedback.",
+            "Консьерж-ориентированный объём партнёров по портфелю услуг, текущей нагрузке запросов, охвату пациентов и отзывам.",
           empty: "Данных по немедицинским провайдерам пока нет.",
         },
         countries: {
@@ -666,10 +668,10 @@ const revenueReportsTextRu: RevenueReportsText = {
             `${patients} активных пациентов · ${orders} активных заказов`,
         },
         doctors: {
-          title: "Drill-down по врачам",
+          title: "Детализация по врачам",
           description:
-            "Активность врачей, охват пациентов, скорость ответа и качественные сигналы на основе прямого feedback и выполнения follow-up. Drill-down по клинике сужает выборку до одного провайдера.",
-          empty: "Для выбранного scope данных по врачам пока нет.",
+            "Активность врачей, охват пациентов, скорость ответа и качественные сигналы на основе прямых отзывов и выполнения сопровождения. Детализация по клинике сужает выборку до одного провайдера.",
+          empty: "Для выбранной области данных по врачам пока нет.",
         },
         visibility: {
           title: "Видимость",
@@ -688,12 +690,12 @@ const revenueReportsTextRu: RevenueReportsText = {
           clinicResponseTime: "Скорость ответа клиники",
           doctorResponseTime: "Скорость ответа врача",
           writtenFindings: "Письменные заключения",
-          followupCompletion: "Завершение follow-up",
+          followupCompletion: "Завершение сопровождения",
           clinicalOutcome: "Клинический результат",
           experienceBundle: "Комплекс впечатлений",
           answeredOpen: (answered: number, open: number) =>
             `${answered} отвечено · ${open} открыто`,
-          linkedArztbrief: (count: number) => `${count} связанных Arztbrief`,
+          linkedArztbrief: (count: number) => `${count} связанных врачебных писем`,
           followupOrders: (done: number, total: number) => `${done}/${total} заказов`,
           yes: "да",
           partial: "частично",
@@ -711,7 +713,9 @@ const revenueReportsTextRu: RevenueReportsText = {
           serviceMix: "Микс услуг",
           patientCountryMix: "Страны пациентов",
           noSpecialtyData: "Нет данных по специализациям",
+          unknownSpecialty: "Без специализации",
           noDeliveredServicesYet: "Оказанных услуг пока нет",
+          unnamedService: "Услуга без названия",
           noCountryData: "Нет данных по странам",
           samples: "Выборки",
           latestVsFirst: "Последнее vs первое",

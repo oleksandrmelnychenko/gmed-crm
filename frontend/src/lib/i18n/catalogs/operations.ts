@@ -743,9 +743,9 @@ export const operationsRu: OperationsTranslations = {
   orders_external_invoice_cancel: "Отменить",
   orders_create_title: "Создать заказ",
   orders_create_description:
-    "Выберите пациента, проверьте re-check существующего клиента и добавьте intake-заметку для нового заказа.",
+    "Выберите пациента, проверьте повторную проверку существующего клиента и добавьте заметку по потребности для нового заказа.",
   orders_patient_fallback: "Пациент",
-  orders_intake_note: "Заметка по потребности / intake",
+  orders_intake_note: "Заметка по потребности",
   orders_add_service_title: "Добавить услугу",
   orders_service_description: "Описание",
   orders_service_notes: "Заметки",
@@ -776,9 +776,9 @@ export const operationsRu: OperationsTranslations = {
   appointment_follow_up_preset_post_1w_label: "1 неделя",
   appointment_follow_up_preset_post_1m_label: "1 месяц",
   appointment_follow_up_preset_post_6m_label: "6 месяцев",
-  appointment_follow_up_preset_post_1w_title: "Контрольный follow-up через 1 неделю",
-  appointment_follow_up_preset_post_1m_title: "Контрольный follow-up через 1 месяц",
-  appointment_follow_up_preset_post_6m_title: "Контрольный follow-up через 6 месяцев",
+  appointment_follow_up_preset_post_1w_title: "Контроль через 1 неделю",
+  appointment_follow_up_preset_post_1m_title: "Контроль через 1 месяц",
+  appointment_follow_up_preset_post_6m_title: "Контроль через 6 месяцев",
   appointments_linked_patient_id: "ID пациента",
   appointments_linked_email: "Электронная почта",
   appointments_linked_concierge: "Консьерж",
@@ -798,7 +798,7 @@ export const operationsRu: OperationsTranslations = {
   lead_compliance_documents_sent: "Документы отправлены",
   lead_compliance_signed: "Подписано",
   lead_compliance_rejected: "Отклонено",
-  lead_failed_outcome: "Исход failed lead",
+  lead_failed_outcome: "Исход неуспешного лида",
   lead_failed_outcome_none: "Нет",
   lead_failed_outcome_archived: "Архивирован",
   lead_failed_outcome_delete_anonymized: "Удалён и анонимизирован",
@@ -850,26 +850,26 @@ export const operationsRu: OperationsTranslations = {
   lead_ok: "ОК",
   lead_missing: "Не хватает",
   lead_blocking_reasons: "Причины блокировки",
-  lead_workflow_title: "Рабочий процесс лида",
+  lead_workflow_title: "Процесс лида",
   lead_workflow_description:
-    "Соберите недостающие данные, затем переведите лид в qualified и создайте пациента.",
+    "Соберите недостающие данные, затем квалифицируйте лид и создайте пациента.",
   lead_workflow_progress: "{completed}/{total} готово",
   lead_workflow_ready_count: "Готово",
   lead_workflow_missing_count: "Нужно сделать",
   lead_workflow_complete_gate_title: "Данные для квалификации",
   lead_workflow_complete_gate_description:
     "Проверьте контакт, дату рождения, юридический пол, compliance и согласия.",
-  lead_workflow_qualify_title: "Перевести в Qualified",
+  lead_workflow_qualify_title: "Квалифицировать",
   lead_workflow_qualify_description:
     "Доступно только когда все проверки квалификации закрыты.",
   lead_workflow_convert_title: "Создать пациента",
   lead_workflow_convert_description:
-    "После квалификации CRM создаст карточку пациента и стандартный workflow.",
-  lead_workflow_failed_title: "Закрыть как failed lead",
+    "После квалификации CRM создаст карточку пациента и стандартный процесс.",
+  lead_workflow_failed_title: "Закрыть как неуспешный лид",
   lead_workflow_failed_description:
     "Если лид не подходит, обработайте архив или анонимизацию контролируемо.",
   lead_workflow_open_gate: "Открыть данные",
-  lead_workflow_mark_qualified: "Отметить qualified",
+  lead_workflow_mark_qualified: "Отметить квалифицированным",
   lead_workflow_open_failed: "Открыть обработку",
   lead_workflow_locked: "Заблокировано",
   lead_workflow_done: "Готово",
@@ -892,11 +892,11 @@ export const operationsRu: OperationsTranslations = {
     "Нет согласия с правилами приватности",
   lead_readiness_reason_healthcare_missing: "Нет медицинского согласия",
   lead_readiness_reason_lead_must_be_qualified:
-    "Перед созданием пациента лид должен быть qualified",
+    "Перед созданием пациента лид должен быть квалифицирован",
   lead_readiness_reason_already_converted: "Лид уже конвертирован",
   lead_section_lifecycle: "Жизненный цикл лида",
   lead_lifecycle_description:
-    "Последовательная история квалификации, обработки failed lead и конверсии.",
+    "Последовательная история квалификации, обработки неуспешного лида и конверсии.",
   lead_current_stage: "Текущий этап",
   lead_entered_at: "Вошёл в этап",
   lead_qualification_gate_data: "Данные гейта квалификации",
@@ -919,7 +919,7 @@ export const operationsRu: OperationsTranslations = {
   lead_healthcare_consent_available: "Согласие на медицинскую обработку есть",
   lead_privacy_practices_accepted: "Правила приватности приняты",
   lead_save_gate_data: "Сохранить данные гейта",
-  lead_failed_resolution_title: "Обработка failed lead",
+  lead_failed_resolution_title: "Обработка неуспешного лида",
   lead_failed_resolution_description:
     "Используйте контролируемый архив или удаление с анонимизацией вместо прямого архивирования.",
   lead_resolution: "Решение",
@@ -931,7 +931,7 @@ export const operationsRu: OperationsTranslations = {
   lead_delete_and_anonymize: "Удалить и анонимизировать",
   lead_delete_warning:
     "Лид остаётся в журнале аудита, но персональные данные и вложения удаляются.",
-  lead_save_failed_resolution: "Сохранить обработку failed lead",
+  lead_save_failed_resolution: "Сохранить обработку неуспешного лида",
   lead_section_eligibility_path: "Путь и критерии",
   lead_section_health_concern: "Здоровье и запрос",
   lead_section_services_insurance: "Услуги и страхование",
@@ -999,11 +999,11 @@ export const operationsRu: OperationsTranslations = {
   lead_empty_description:
     "Измените фильтры или создайте новый лид через боковой сценарий.",
   lead_create_description:
-    "Зафиксируйте данные intake и сохраните единый поток квалификации.",
+    "Зафиксируйте данные первичного обращения и сохраните единый поток квалификации.",
   lead_convert_dialog_title: "Конвертировать лид в пациента?",
   lead_convert_dialog_start: "Будет создана карточка пациента для",
   lead_convert_dialog_end:
-    "с назначением patient manager и подготовкой стандартного workflow-чеклиста. Сам лид перейдёт в статус",
+    "с назначением пациент-менеджера и подготовкой стандартного чек-листа процесса. Сам лид перейдёт в статус",
   lead_create_patient: "Создать пациента",
   lead_convert_success_opening:
     "Пациент {patientPid} создан. Открывается карточка...",
