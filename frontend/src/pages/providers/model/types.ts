@@ -1,6 +1,6 @@
 export type ProviderType = "medical" | "non_medical";
 export type ProviderOrganizationLevel = "organization" | "clinic" | "department" | "unit";
-export type ServicePriceType = "fixed" | "range" | "on_request";
+type ServicePriceType = "fixed" | "range" | "on_request";
 export type ProviderPersonGender = "male" | "female" | "unknown";
 export type DoctorRoleCode =
   | "clinical_director"
@@ -44,7 +44,7 @@ export type PersonContact = {
   notes: string | null;
 };
 
-export type ProviderContact = {
+type ProviderContact = {
   id: string | null;
   contact_kind: "phone" | "email";
   contact_type: "work" | "department" | "other";
@@ -64,7 +64,7 @@ export type PersonContactFormState = {
   notes: string;
 };
 
-export type DoctorContactFormState = PersonContactFormState;
+type DoctorContactFormState = PersonContactFormState;
 
 export type ProviderContactFormState = {
   id: string;
@@ -217,7 +217,7 @@ export type ProviderStaff = {
   updated_at: string;
 };
 
-export type ProviderChild = {
+type ProviderChild = {
   id: string;
   name: string;
   provider_type: ProviderType;

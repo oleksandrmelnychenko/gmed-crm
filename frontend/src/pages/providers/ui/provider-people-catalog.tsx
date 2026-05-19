@@ -65,6 +65,10 @@ type ProviderOption = {
 
 const DEFAULT_HIDDEN_COLUMNS = ["gender", "contacts", "last_interaction_at"];
 const DEFAULT_FROZEN_COLUMNS = ["person"];
+const EMPTY_PATIENT_OPTIONS: readonly ProviderPeoplePatientOption[] = [];
+const EMPTY_PROVIDER_OPTIONS: readonly ProviderSummary[] = [];
+const EMPTY_SPECIALIZATION_OPTIONS: readonly SpecializationItem[] = [];
+const EMPTY_STAFF_ROLE_OPTIONS: readonly ProviderStaffRoleItem[] = [];
 
 const STAFF_ROLE_LABEL_KEYS: Record<string, string> = {
   administration: "providers_staff_role_administration",
@@ -671,6 +675,14 @@ function FiltersBar({
 }) {
   const allLabel = labels.providers_all ?? localizedFallback(lang, "Alle", "Все");
   const roleOptions = buildRoleOptions(filters, labels, uiText, staffRoles, lang);
+  const activeSpecializationOptions = specializations.flatMap((item) => {
+    if (!item.is_active) return [];
+    return [{
+      id: item.id,
+      label: specializationLabelForItem(item, lang),
+      value: item.code || item.name_en,
+    }];
+  });
   const setFilter = <K extends keyof ProviderPeopleFilters>(
     key: K,
     value: ProviderPeopleFilters[K],
@@ -764,13 +776,11 @@ function FiltersBar({
           onChange={(value) => setFilter("specialization", value)}
         >
           <option value="">{allLabel}</option>
-          {specializations
-            .filter((item) => item.is_active)
-            .map((item) => (
-              <option key={item.id} value={item.code || item.name_en}>
-                {specializationLabelForItem(item, lang)}
-              </option>
-            ))}
+          {activeSpecializationOptions.map((option) => (
+            <option key={option.id} value={option.value}>
+              {option.label}
+            </option>
+          ))}
         </SelectField>
         <SelectField
           label={uiLabel(uiText, "providers_people_role", localizedFallback(lang, "Funktion", "Должность"))}
@@ -960,11 +970,11 @@ export function ProviderPeopleCatalog({
   error,
   filters,
   loading = false,
-  patients = [],
-  providers = [],
+  patients = EMPTY_PATIENT_OPTIONS,
+  providers = EMPTY_PROVIDER_OPTIONS,
   rows,
-  specializations = [],
-  staffRoles = [],
+  specializations = EMPTY_SPECIALIZATION_OPTIONS,
+  staffRoles = EMPTY_STAFF_ROLE_OPTIONS,
   onFiltersChange,
   onOpenPerson,
   onOpenProvider,

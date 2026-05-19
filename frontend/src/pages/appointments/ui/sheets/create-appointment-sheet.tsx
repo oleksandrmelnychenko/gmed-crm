@@ -683,14 +683,13 @@ function useCreateAppointmentSheetContent({
                 </div>
                 {form.appointmentType === "medical" ? (
                   <div className="space-y-2">
-                    <label
-                      htmlFor="appointment-skip-provider-binding"
-                      className="flex items-start gap-3 rounded-lg border border-border/60 bg-card px-3 py-2 text-sm text-foreground"
-                    >
+                    <div className="flex items-start gap-3 rounded-lg border border-border/60 bg-card px-3 py-2 text-sm text-foreground">
                       <input
                         id="appointment-skip-provider-binding"
                         type="checkbox"
                         checked={form.skipMedicalProviderBinding}
+                        aria-labelledby="appointment-skip-provider-binding-label"
+                        aria-describedby="appointment-skip-provider-binding-hint"
                         onChange={(event) =>
                           setForm((current) => ({
                             ...current,
@@ -701,14 +700,20 @@ function useCreateAppointmentSheetContent({
                         className={cn(checkboxClass, "mt-0.5")}
                       />
                       <span>
-                        <span className="block font-medium text-foreground">
+                        <span
+                          id="appointment-skip-provider-binding-label"
+                          className="block font-medium text-foreground"
+                        >
                           {appointmentText("appointments_medical_provider_opt_out")}
                         </span>
-                        <span className="block text-xs text-muted-foreground">
+                        <span
+                          id="appointment-skip-provider-binding-hint"
+                          className="block text-xs text-muted-foreground"
+                        >
                           {appointmentText("appointments_medical_provider_opt_out_hint")}
                         </span>
                       </span>
-                    </label>
+                    </div>
                     {!form.providerId && !form.skipMedicalProviderBinding ? (
                       <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                         {appointmentText("appointments_medical_provider_required_hint")}

@@ -706,14 +706,15 @@ test.describe("staff live workflows", () => {
     await requestDialog
       .getByRole("button", { name: /Übersetzung anfordern|Request translation/i })
       .click();
-    const createdTranslationRequest = await createTranslationResponse.then(
-      async (response) => response.json() as Promise<{ id: string }>,
-    );
-
-    const translationRequest = await translationRequestSurface(
-      sheet,
-      "Patient-safe English version for portal handoff.",
-    );
+    const [createdTranslationRequest, translationRequest] = await Promise.all([
+      createTranslationResponse.then(
+        async (response) => response.json() as Promise<{ id: string }>,
+      ),
+      translationRequestSurface(
+        sheet,
+        "Patient-safe English version for portal handoff.",
+      ),
+    ]);
     await clickTranslationAction(page, translationRequest, /^Starten$|^Start$/i);
     await expect(translationRequest.getByText(/In Bearbeitung|In Progress/i).first()).toBeVisible();
 
@@ -904,12 +905,13 @@ test.describe("staff live workflows", () => {
       page.getByRole("heading", { name: /Feedback und NPS|Feedback and NPS/i }),
     ).toBeVisible();
 
-    const feedbackRow = page
+    const patientFeedbackRows = page
       .getByRole("row")
-      .filter({ hasText: scenario.patient.patient_id })
-      .filter({ hasText: /Patientenportal|Patient portal/i })
-      .filter({ hasText: "9" })
-      .first();
+      .filter({ hasText: scenario.patient.patient_id });
+    const portalFeedbackRows = patientFeedbackRows.filter({
+      hasText: /Patientenportal|Patient portal/i,
+    });
+    const feedbackRow = portalFeedbackRows.filter({ hasText: "9" }).first();
     await expect(feedbackRow).toBeVisible();
     await feedbackRow.click();
 
@@ -924,9 +926,10 @@ test.describe("staff live workflows", () => {
     await reviewSheet.getByRole("button", { name: /Prüfung speichern|Save review/i }).click();
 
     await expect(reviewSheet).toHaveCount(0);
-    const reviewedRow = page
+    const reviewedPatientRows = page
       .getByRole("row")
-      .filter({ hasText: scenario.patient.patient_id })
+      .filter({ hasText: scenario.patient.patient_id });
+    const reviewedRow = reviewedPatientRows
       .filter({ hasText: /Geprüft|Reviewed/i })
       .first();
     await expect(reviewedRow).toBeVisible();

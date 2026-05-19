@@ -95,6 +95,12 @@ const sectionCardClass = appointmentElevatedSectionCardClassName;
 const selectClassName = appointmentSelectControlClassName;
 const textareaClassName = appointmentTextareaControlClassName;
 
+type DoctorFollowUpFormSetter = (
+  value:
+    | DoctorFollowUpFormState
+    | ((current: DoctorFollowUpFormState) => DoctorFollowUpFormState),
+) => void;
+
 function withEllipsis(text: string) {
   return text.trim().endsWith("...") ? text : `${text.trim()}...`;
 }
@@ -227,193 +233,19 @@ function AppointmentDoctorFollowUpSectionContent({
         </span>
       </div>
       <div className="mt-4 grid gap-4 xl:grid-cols-2">
-        <div className="space-y-4">
-          <div className={appointmentSoftPanelClassName}>
-            <AppointmentDotLabel>{t.common_search}</AppointmentDotLabel>
-            <div className="mt-3 space-y-3">
-              {reminders.length === 0 ? (
-                <EmptyState text={tr.common_not_set} />
-              ) : (
-                reminders.map((item) => (
-                  <div
-                    key={item.id}
-                    className={appointmentWhiteRowClassName}
-                  >
-                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-zinc-900">
-                          {item.title.replace(`${DOCTOR_FOLLOW_UP_PREFIX} `, "")}
-                        </p>
-                        <p className="mt-1 text-xs text-zinc-500">
-                          {item.user_name} · {formatDateTimeLabel(item.remind_at)}
-                        </p>
-                      </div>
-                      {item.is_completed ? (
-                        <span className="text-xs font-medium text-emerald-700">
-                          {t.common_completed} {formatDateTimeLabel(item.completed_at)}
-                        </span>
-                      ) : (
-                        <span className="text-xs font-medium text-amber-700">
-                          {t.common_pending}
-                        </span>
-                      )}
-                    </div>
-                    {item.description ? (
-                      <p className="mt-3 whitespace-pre-line text-sm text-zinc-600">
-                        {item.description}
-                      </p>
-                    ) : null}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-          <div className={appointmentSoftPanelClassName}>
-            <AppointmentDotLabel>{t.appointments_task_trail}</AppointmentDotLabel>
-            <div className="mt-3 space-y-3">
-              {tasks.length === 0 ? (
-                <EmptyState text={tr.common_not_set} />
-              ) : (
-                tasks.map((task) => (
-                  <div
-                    key={task.id}
-                    className={appointmentWhiteRowClassName}
-                  >
-                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-zinc-900">
-                          {task.title.replace(`${DOCTOR_FOLLOW_UP_PREFIX} `, "")}
-                        </p>
-                        <p className="mt-1 text-xs text-zinc-500">
-                          {task.assigned_to_name} · {taskStatusLabel(task.status)} ·{" "}
-                          {taskPriorityLabel(task.priority)}
-                        </p>
-                      </div>
-                      <span className="text-xs text-zinc-500">
-                        {task.due_date ? formatDateTimeLabel(task.due_date) : t.common_not_set}
-                      </span>
-                    </div>
-                    {task.description ? (
-                      <p className="mt-3 whitespace-pre-line text-sm text-zinc-600">
-                        {task.description}
-                      </p>
-                    ) : null}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
+        <DoctorFollowUpTrailColumn
+          reminders={reminders}
+          tasks={tasks}
+          emptyText={tr.common_not_set}
+        />
         {canManageReminders ? (
-          <form
+          <DoctorFollowUpCreateForm
+            assignees={assignees}
+            form={form}
+            submitBusy={submitBusy}
+            setForm={setForm}
             onSubmit={handleSubmit}
-            className={`space-y-4 ${appointmentSoftPanelClassName}`}
-          >
-            <Field label={tr.appointments_title_col}>
-              <Input
-                value={form.title}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, title: event.target.value }))
-                }
-                placeholder={withEllipsis(tr.appointments_title_col)}
-                className={appointmentSlateInputClassName}
-                required
-              />
-            </Field>
-            <Field label={t.patients_assign_owner}>
-              <NativeComboboxSelect
-                value={form.assigneeId}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    assigneeId: event.target.value,
-                  }))
-                }
-                className={selectClassName}
-                required
-              >
-                <option value="">{tr.common_not_set}</option>
-                {assignees.map((member) => (
-                  <option key={member.id} value={member.id}>
-                    {member.name} · {roleLabel(member.role)}
-                  </option>
-                ))}
-              </NativeComboboxSelect>
-            </Field>
-            <Field label={tr.invoices_due_at}>
-              <Input
-                type="datetime-local"
-                value={form.dueAt}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, dueAt: event.target.value }))
-                }
-                className={appointmentSlateInputClassName}
-                required
-              />
-            </Field>
-            <Field label={tr.patients_notes}>
-              <textarea
-                value={form.notes}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, notes: event.target.value }))
-                }
-                className={textareaClassName}
-                rows={5}
-                placeholder={withEllipsis(tr.patients_notes)}
-              />
-            </Field>
-            <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
-              <label className={appointmentToggleCardClassName}>
-                <input
-                  type="checkbox"
-                  checked={form.createTask}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      createTask: event.target.checked,
-                    }))
-                  }
-                  className={cn(checkboxClass, "mt-0.5")}
-                />
-                <span>
-                  {t.appointments_doctor_follow_up_mirror_task}
-                </span>
-              </label>
-              <Field label={tr.appointments_title_col}>
-                <NativeComboboxSelect
-                  value={form.taskPriority}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      taskPriority: event.target.value,
-                    }))
-                  }
-                  className={selectClassName}
-                  disabled={!form.createTask}
-                >
-                  {TASK_PRIORITY_OPTIONS.map((value) => (
-                    <option key={value} value={value}>
-                      {taskPriorityLabel(value)}
-                    </option>
-                  ))}
-                </NativeComboboxSelect>
-              </Field>
-            </div>
-            <div className="flex justify-end">
-              <Button
-                type="submit"
-                disabled={
-                  submitBusy ||
-                  !form.title.trim() ||
-                  !form.assigneeId ||
-                  !form.dueAt
-                }
-              >
-                {submitBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                {t.appointments_doctor_follow_up_create}
-              </Button>
-            </div>
-          </form>
+          />
         ) : (
           <div className={appointmentSoftPanelClassName}>
             <EmptyState text={tr.common_not_set} />
@@ -421,6 +253,216 @@ function AppointmentDoctorFollowUpSectionContent({
         )}
       </div>
     </section>
+  );
+}
+
+function DoctorFollowUpTrailColumn({
+  reminders,
+  tasks,
+  emptyText,
+}: {
+  reminders: ReminderEntry[];
+  tasks: TaskEntry[];
+  emptyText: string;
+}) {
+  const { t } = useLang();
+
+  return (
+    <div className="space-y-4">
+      <div className={appointmentSoftPanelClassName}>
+        <AppointmentDotLabel>{t.common_search}</AppointmentDotLabel>
+        <div className="mt-3 space-y-3">
+          {reminders.length === 0 ? (
+            <EmptyState text={emptyText} />
+          ) : (
+            reminders.map((item) => (
+              <div key={item.id} className={appointmentWhiteRowClassName}>
+                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-zinc-900">
+                      {item.title.replace(`${DOCTOR_FOLLOW_UP_PREFIX} `, "")}
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {item.user_name} В· {formatDateTimeLabel(item.remind_at)}
+                    </p>
+                  </div>
+                  {item.is_completed ? (
+                    <span className="text-xs font-medium text-emerald-700">
+                      {t.common_completed} {formatDateTimeLabel(item.completed_at)}
+                    </span>
+                  ) : (
+                    <span className="text-xs font-medium text-amber-700">
+                      {t.common_pending}
+                    </span>
+                  )}
+                </div>
+                {item.description ? (
+                  <p className="mt-3 whitespace-pre-line text-sm text-zinc-600">
+                    {item.description}
+                  </p>
+                ) : null}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+      <div className={appointmentSoftPanelClassName}>
+        <AppointmentDotLabel>{t.appointments_task_trail}</AppointmentDotLabel>
+        <div className="mt-3 space-y-3">
+          {tasks.length === 0 ? (
+            <EmptyState text={emptyText} />
+          ) : (
+            tasks.map((task) => (
+              <div key={task.id} className={appointmentWhiteRowClassName}>
+                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-zinc-900">
+                      {task.title.replace(`${DOCTOR_FOLLOW_UP_PREFIX} `, "")}
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {task.assigned_to_name} В· {taskStatusLabel(task.status)} В·{" "}
+                      {taskPriorityLabel(task.priority)}
+                    </p>
+                  </div>
+                  <span className="text-xs text-zinc-500">
+                    {task.due_date
+                      ? formatDateTimeLabel(task.due_date)
+                      : t.common_not_set}
+                  </span>
+                </div>
+                {task.description ? (
+                  <p className="mt-3 whitespace-pre-line text-sm text-zinc-600">
+                    {task.description}
+                  </p>
+                ) : null}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DoctorFollowUpCreateForm({
+  assignees,
+  form,
+  submitBusy,
+  setForm,
+  onSubmit,
+}: {
+  assignees: StaffOption[];
+  form: DoctorFollowUpFormState;
+  submitBusy: boolean;
+  setForm: DoctorFollowUpFormSetter;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const { t } = useLang();
+  const tr = t as unknown as Record<string, string>;
+
+  return (
+    <form
+      onSubmit={onSubmit}
+      className={`space-y-4 ${appointmentSoftPanelClassName}`}
+    >
+      <Field label={tr.appointments_title_col}>
+        <Input
+          value={form.title}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, title: event.target.value }))
+          }
+          placeholder={withEllipsis(tr.appointments_title_col)}
+          className={appointmentSlateInputClassName}
+          required
+        />
+      </Field>
+      <Field label={t.patients_assign_owner}>
+        <NativeComboboxSelect
+          value={form.assigneeId}
+          onChange={(event) =>
+            setForm((current) => ({
+              ...current,
+              assigneeId: event.target.value,
+            }))
+          }
+          className={selectClassName}
+          required
+        >
+          <option value="">{tr.common_not_set}</option>
+          {assignees.map((member) => (
+            <option key={member.id} value={member.id}>
+              {member.name} В· {roleLabel(member.role)}
+            </option>
+          ))}
+        </NativeComboboxSelect>
+      </Field>
+      <Field label={tr.invoices_due_at}>
+        <Input
+          type="datetime-local"
+          value={form.dueAt}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, dueAt: event.target.value }))
+          }
+          className={appointmentSlateInputClassName}
+          required
+        />
+      </Field>
+      <Field label={tr.patients_notes}>
+        <textarea
+          value={form.notes}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, notes: event.target.value }))
+          }
+          className={textareaClassName}
+          rows={5}
+          placeholder={withEllipsis(tr.patients_notes)}
+        />
+      </Field>
+      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
+        <label className={appointmentToggleCardClassName}>
+          <input
+            type="checkbox"
+            checked={form.createTask}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                createTask: event.target.checked,
+              }))
+            }
+            className={cn(checkboxClass, "mt-0.5")}
+          />
+          <span>{t.appointments_doctor_follow_up_mirror_task}</span>
+        </label>
+        <Field label={tr.appointments_title_col}>
+          <NativeComboboxSelect
+            value={form.taskPriority}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                taskPriority: event.target.value,
+              }))
+            }
+            className={selectClassName}
+            disabled={!form.createTask}
+          >
+            {TASK_PRIORITY_OPTIONS.map((value) => (
+              <option key={value} value={value}>
+                {taskPriorityLabel(value)}
+              </option>
+            ))}
+          </NativeComboboxSelect>
+        </Field>
+      </div>
+      <div className="flex justify-end">
+        <Button
+          type="submit"
+          disabled={submitBusy || !form.title.trim() || !form.assigneeId || !form.dueAt}
+        >
+          {submitBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+          {t.appointments_doctor_follow_up_create}
+        </Button>
+      </div>
+    </form>
   );
 }
 

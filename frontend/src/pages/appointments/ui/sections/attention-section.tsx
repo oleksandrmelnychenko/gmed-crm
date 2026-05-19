@@ -35,14 +35,17 @@ function AppointmentAttentionSection({
         </span>
       </div>
       <div className="mt-4 space-y-3">
-        {attention.reasons.map((reason, index) => (
-          <div
-            key={`${reason}-${index}`}
-            className="rounded-xl border border-amber-200/80 bg-amber-50/80 px-4 py-3 text-sm text-amber-900"
-          >
-            {attentionReasonLabel(reason, attention.reason_details?.[index])}
-          </div>
-        ))}
+        {attention.reasons.map((reason, index) => {
+          const reasonDetail = attention.reason_details?.[index];
+          return (
+            <div
+              key={`${reason}:${reasonDetail ?? ""}`}
+              className="rounded-xl border border-amber-200/80 bg-amber-50/80 px-4 py-3 text-sm text-amber-900"
+            >
+              {attentionReasonLabel(reason, reasonDetail)}
+            </div>
+          );
+        })}
       </div>
       {attention.next_due_at ? (
         <p className="mt-4 text-xs text-muted-foreground">

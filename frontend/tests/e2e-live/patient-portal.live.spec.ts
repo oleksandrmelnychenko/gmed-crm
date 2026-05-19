@@ -596,11 +596,10 @@ test.describe("patient portal live workflows", () => {
       await expect(successNotice).toBeVisible();
     }
 
-    const feedbackRow = page
+    const generalFeedbackRows = page
       .getByRole("row")
-      .filter({ hasText: /Allgemeines Feedback|General feedback/i })
-      .filter({ hasText: "10" })
-      .first();
+      .filter({ hasText: /Allgemeines Feedback|General feedback/i });
+    const feedbackRow = generalFeedbackRows.filter({ hasText: "10" }).first();
     if (await feedbackRow.isVisible().catch(() => false)) {
       await feedbackRow.click();
       const detail = page.getByRole("dialog", {

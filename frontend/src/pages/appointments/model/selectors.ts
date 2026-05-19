@@ -271,6 +271,18 @@ const EXTERNAL_HANDOFF_PREFIX = "External handoff:";
 const BILLING_HANDOFF_PREFIX = "Billing handoff:";
 const FINDINGS_CHECKLIST_PREFIX = "[Findings]";
 const INCOMING_DATA_CHECKLIST_PREFIX = "[Incoming data]";
+const INTERPRETER_MOBILE_AGENDA_DATE_FORMATTERS = {
+  de: new Intl.DateTimeFormat("de-DE", {
+    weekday: "long",
+    day: "2-digit",
+    month: "short",
+  }),
+  default: new Intl.DateTimeFormat("ru-RU", {
+    weekday: "long",
+    day: "2-digit",
+    month: "short",
+  }),
+} as const;
 
 function buildSlotLabel(detail: TimelineDetail) {
   return detail.time_start
@@ -380,12 +392,11 @@ function formatInterpreterMobileAgendaDateLabel(
 ) {
   if (date === todayDate) return todayLabel;
   try {
-    const locale = getLang() === "de" ? "de-DE" : "ru-RU";
-    return new Intl.DateTimeFormat(locale, {
-      weekday: "long",
-      day: "2-digit",
-      month: "short",
-    }).format(new Date(`${date}T00:00:00`));
+    const formatter =
+      getLang() === "de"
+        ? INTERPRETER_MOBILE_AGENDA_DATE_FORMATTERS.de
+        : INTERPRETER_MOBILE_AGENDA_DATE_FORMATTERS.default;
+    return formatter.format(new Date(`${date}T00:00:00`));
   } catch {
     return date;
   }

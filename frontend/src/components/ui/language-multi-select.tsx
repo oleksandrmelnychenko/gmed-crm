@@ -52,6 +52,29 @@ function languageOptionLabel(option: LanguageOption, lang: "de" | "ru") {
   return lang === "de" ? option.labelDe : option.labelRu;
 }
 
+function hasBaseLanguageOption(value: string) {
+  const key = normalizeLanguageKey(value);
+  for (const option of LANGUAGE_OPTIONS) {
+    if (normalizeLanguageKey(option.value) === key) return true;
+  }
+
+  return false;
+}
+
+function selectedOptionValues(
+  options: Array<{ value: string; label: string }>,
+  selectedKeys: Set<string>,
+) {
+  const values: string[] = [];
+  for (const option of options) {
+    if (selectedKeys.has(normalizeLanguageKey(option.value))) {
+      values.push(option.value);
+    }
+  }
+
+  return values;
+}
+
 export function languageLabel(value: string, lang: "de" | "ru") {
   const key = normalizeLanguageKey(value);
   const option = LANGUAGE_OPTIONS.find((item) => normalizeLanguageKey(item.value) === key);
@@ -76,14 +99,12 @@ export function LanguageMultiSelect({
   const { t, lang } = useLang();
   const selected = splitLanguageValue(value);
   const selectedKeys = new Set(selected.map(normalizeLanguageKey));
-  const customOptions = selected
-    .filter(
-      (item) =>
-        !LANGUAGE_OPTIONS.some(
-          (option) => normalizeLanguageKey(option.value) === normalizeLanguageKey(item),
-        ),
-    )
-    .map((item) => ({ value: item, label: item }));
+  const customOptions: Array<{ value: string; label: string }> = [];
+  for (const item of selected) {
+    if (!hasBaseLanguageOption(item)) {
+      customOptions.push({ value: item, label: item });
+    }
+  }
   const options = [
     ...customOptions,
     ...LANGUAGE_OPTIONS.map((option) => ({
@@ -123,9 +144,7 @@ export function LanguageMultiSelect({
         onChange={(event) => toggleLanguage(event.target.value)}
         className={className}
         disabled={disabled || options.length === 0}
-        selectedValues={options
-          .filter((option) => selectedKeys.has(normalizeLanguageKey(option.value)))
-          .map((option) => option.value)}
+        selectedValues={selectedOptionValues(options, selectedKeys)}
         showValueIndicator={false}
         hidePlaceholderOption
         title={selected.map((item) => languageLabel(item, lang)).join(", ") || placeholder}

@@ -135,7 +135,7 @@ describe("weekly availability helpers", () => {
   it("parses existing compact weekday ranges into a weekly schedule", () => {
     const schedule = parseWeeklyAvailability("Mo-Fr 08:00-17:00");
 
-    expect(schedule.filter((day) => day.enabled).map((day) => day.day)).toEqual([
+    expect(schedule.flatMap((day) => (day.enabled ? [day.day] : []))).toEqual([
       "mon",
       "tue",
       "wed",

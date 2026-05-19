@@ -95,12 +95,6 @@ export function fetchProviders(path: string) {
   });
 }
 
-export function fetchSpecializations() {
-  return apiFetch<SpecializationItem[]>("/providers/specializations").then((items) =>
-    items.map(normalizeSpecializationItem),
-  );
-}
-
 export function fetchSpecializationsForAdmin() {
   return apiFetch<SpecializationItem[]>("/providers/specializations?include_inactive=true").then((items) =>
     items.map(normalizeSpecializationItem),

@@ -25,18 +25,6 @@ type ProviderDynamicOptions = {
   fachbereiche: FilterOption[];
 };
 
-export const DEFAULT_PROVIDER_HIDDEN_COLUMNS: string[] = [
-  "phone",
-  "email",
-  "tax_id",
-  "rating",
-  "last_interaction_at",
-  "created_at",
-];
-
-export const DEFAULT_PROVIDER_FROZEN_COLUMNS: string[] = ["provider"];
-export const MAX_PROVIDER_FROZEN_COLUMNS = 3;
-
 function optionsFrom(values: Iterable<string>): FilterOption[] {
   return Array.from(values)
     .sort((a, b) => a.localeCompare(b))

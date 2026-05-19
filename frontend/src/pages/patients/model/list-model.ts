@@ -65,7 +65,7 @@ export type DoctorOption = {
   fachbereich: string | null;
 };
 
-export type PatientContact = {
+type PatientContact = {
   id: string | null;
   contact_kind: "phone" | "email";
   contact_type: "work" | "private" | "other";

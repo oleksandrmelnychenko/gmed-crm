@@ -98,7 +98,11 @@ export const DOCTOR_TITLE_OPTIONS = [
   { value: "Dipl.-Med.", sortOrder: 60 },
 ] as const;
 
-const DOCTOR_TITLE_PARSE_OPTIONS = [...DOCTOR_TITLE_OPTIONS].sort(
+const DOCTOR_TITLE_OPTIONS_BY_KEY = new Map(
+  DOCTOR_TITLE_OPTIONS.map((option) => [normalizeDoctorTitleKey(option.value), option]),
+);
+
+const DOCTOR_TITLE_PARSE_OPTIONS = DOCTOR_TITLE_OPTIONS.toSorted(
   (left, right) => right.value.length - left.value.length,
 );
 
@@ -110,18 +114,21 @@ function splitDoctorTitleSegment(segment: string) {
   const original = segment.trim();
   if (!original) return [];
 
-  const exact = DOCTOR_TITLE_OPTIONS.find(
-    (option) => normalizeDoctorTitleKey(option.value) === normalizeDoctorTitleKey(original),
-  );
+  const exact = DOCTOR_TITLE_OPTIONS_BY_KEY.get(normalizeDoctorTitleKey(original));
   if (exact) return [exact.value];
 
   const parts: string[] = [];
   let remaining = original;
 
   while (remaining) {
-    const match = DOCTOR_TITLE_PARSE_OPTIONS.find((option) =>
-      normalizeDoctorTitleKey(remaining).startsWith(normalizeDoctorTitleKey(option.value)),
-    );
+    let match: (typeof DOCTOR_TITLE_PARSE_OPTIONS)[number] | undefined;
+    const remainingKey = normalizeDoctorTitleKey(remaining);
+    for (const option of DOCTOR_TITLE_PARSE_OPTIONS) {
+      if (remainingKey.startsWith(normalizeDoctorTitleKey(option.value))) {
+        match = option;
+        break;
+      }
+    }
     if (!match) break;
     parts.push(match.value);
     remaining = remaining.slice(match.value.length).trim();
@@ -132,41 +139,47 @@ function splitDoctorTitleSegment(segment: string) {
 }
 
 export function splitDoctorTitleValue(value: string | null | undefined) {
-  const parts = (value ?? "")
-    .split(",")
-    .flatMap(splitDoctorTitleSegment)
-    .map((item) => item.trim())
-    .filter(Boolean);
+  const parts: string[] = [];
+  for (const segment of (value ?? "").split(",")) {
+    for (const item of splitDoctorTitleSegment(segment)) {
+      const trimmed = item.trim();
+      if (trimmed) parts.push(trimmed);
+    }
+  }
   return sortDoctorTitleValues(parts);
 }
 
 function doctorTitleSortOrder(value: string) {
   const key = normalizeDoctorTitleKey(value);
-  const option = DOCTOR_TITLE_OPTIONS.find(
-    (item) => normalizeDoctorTitleKey(item.value) === key,
-  );
-  return option?.sortOrder ?? 1000;
+  return DOCTOR_TITLE_OPTIONS_BY_KEY.get(key)?.sortOrder ?? 1000;
 }
 
-export function sortDoctorTitleValues(values: readonly string[]) {
+function sortDoctorTitleValues(values: readonly string[]) {
   const seen = new Set<string>();
-  return values
-    .map((value, index) => ({
-      value: value.trim(),
-      key: normalizeDoctorTitleKey(value),
+  const normalized: {
+    value: string;
+    key: string;
+    sortOrder: number;
+    index: number;
+  }[] = [];
+
+  for (let index = 0; index < values.length; index += 1) {
+    const value = values[index]?.trim() ?? "";
+    const key = normalizeDoctorTitleKey(value);
+    if (!value || seen.has(key)) continue;
+    seen.add(key);
+    normalized.push({
+      value,
+      key,
       sortOrder: doctorTitleSortOrder(value),
       index,
-    }))
-    .filter((item) => {
-      if (!item.value || seen.has(item.key)) return false;
-      seen.add(item.key);
-      return true;
-    })
-    .sort((left, right) => left.sortOrder - right.sortOrder || left.index - right.index)
+    });
+  }
+
+  return normalized
+    .toSorted((left, right) => left.sortOrder - right.sortOrder || left.index - right.index)
     .map((item) => {
-      const canonical = DOCTOR_TITLE_OPTIONS.find(
-        (option) => normalizeDoctorTitleKey(option.value) === item.key,
-      );
+      const canonical = DOCTOR_TITLE_OPTIONS_BY_KEY.get(item.key);
       return canonical?.value ?? item.value;
     });
 }
@@ -215,7 +228,7 @@ export type WeeklyAvailabilityDay = {
   intervals: WeeklyAvailabilityInterval[];
 };
 
-export const WEEKLY_AVAILABILITY_DAYS: readonly WeeklyAvailabilityDayCode[] = [
+const WEEKLY_AVAILABILITY_DAYS: readonly WeeklyAvailabilityDayCode[] = [
   "mon",
   "tue",
   "wed",
@@ -312,7 +325,7 @@ export function weeklyAvailabilityDayLabel(day: WeeklyAvailabilityDayCode, lang:
   return WEEKLY_DAY_LABELS[lang][day];
 }
 
-export function blankWeeklyAvailability(): WeeklyAvailabilityDay[] {
+function blankWeeklyAvailability(): WeeklyAvailabilityDay[] {
   return WEEKLY_AVAILABILITY_DAYS.map((day) => ({
     day,
     enabled: false,
@@ -629,9 +642,11 @@ function parseCommaList(value: string) {
 }
 
 function specializationsToText(items?: { name_en?: string | null; code?: string }[], fallback = "") {
-  const labels = (items ?? [])
-    .map((item) => item.code || item.name_en || "")
-    .filter(Boolean);
+  const labels: string[] = [];
+  for (const item of items ?? []) {
+    const label = item.code || item.name_en || "";
+    if (label) labels.push(label);
+  }
   return labels.length ? labels.join(", ") : fallback;
 }
 
@@ -1165,7 +1180,7 @@ export function humanizeCode(value: string) {
   return formatEnumLabelFromKeys(value, PROVIDER_CODE_LABEL_KEYS, translations);
 }
 
-export function moneyLabel(price: string, currency: string) {
+function moneyLabel(price: string, currency: string) {
   const numeric = Number.parseFloat(price);
   if (!Number.isFinite(numeric)) return `${price} ${currency}`.trim();
   try {

@@ -1,7 +1,6 @@
 import {
   memo,
   useCallback,
-  useEffect,
   useState,
   type FormEvent,
 } from "react";
@@ -56,6 +55,16 @@ function isGuardianOrParentRelation(value: string) {
   return value.trim() === "guardian" || value.trim() === "parent";
 }
 
+function normalizeMinorGuardianRelation(
+  form: PatientEditFormState,
+): PatientEditFormState {
+  const age = computeAge(form.birthDate);
+  if (age === null || age >= 18 || isGuardianOrParentRelation(form.emergencyContactRelation)) {
+    return form;
+  }
+  return { ...form, emergencyContactRelation: "guardian" };
+}
+
 function PatientProfileEditorSheet(props: PatientProfileEditorSheetProps) {
   return (
     <PatientProfileEditorSheetContent
@@ -91,12 +100,6 @@ function PatientProfileEditorFormSections({
     dictionary.patient_relation_type_parent ??
     text.patients_detail_parent ??
     "Parent";
-
-  useEffect(() => {
-    if (isMinor && !isGuardianOrParentRelation(form.emergencyContactRelation)) {
-      updateField("emergencyContactRelation", "guardian");
-    }
-  }, [form.emergencyContactRelation, isMinor, updateField]);
 
   function handleBirthDateChange(value: string) {
     updateField("birthDate", value);
@@ -198,7 +201,6 @@ function PatientProfileEditorFormSections({
                   />
                 </FormField>
               </FormSection>
-
               <FormSection title={dictionary.patient_profile_editor_contact}>
                 <div className="grid gap-3 md:grid-cols-3">
                   <FormField
@@ -229,7 +231,6 @@ function PatientProfileEditorFormSections({
                   </FormField>
                 </div>
               </FormSection>
-
               <FormSection title={dictionary.patient_profile_editor_address}>
                 <FormField label={dictionary.patient_profile_editor_street}>
                   <Input
@@ -262,7 +263,6 @@ function PatientProfileEditorFormSections({
                   </FormField>
                 </div>
               </FormSection>
-
               <FormSection title={dictionary.patient_profile_editor_insurance}>
                 <div className="grid gap-3 md:grid-cols-3">
                   <FormField label={dictionary.patient_profile_editor_insurance_provider}>
@@ -366,99 +366,156 @@ function PatientProfileEditorFormSections({
                 </div>
               </FormSection>
 
-              <FormSection
-                title={dictionary.patients_legal_status}
-                accessory={<LegalStatusPill status={form.legalStatus} />}
-              >
-                <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                  {[
-                    {
-                      key: "dsgvoSigned",
-                      label: dictionary.patient_profile_editor_dsgvo_signed,
-                    },
-                    {
-                      key: "confidentialityReleaseSigned",
-                      label: dictionary.patient_profile_editor_confidentiality_released,
-                    },
-                    {
-                      key: "identityVerified",
-                      label: dictionary.patient_profile_editor_identity_verified,
-                    },
-                    {
-                      key: "documentPackComplete",
-                      label: dictionary.patient_profile_editor_document_pack_complete,
-                    },
-                    {
-                      key: "complianceCompleted",
-                      label: dictionary.patient_profile_editor_readiness_confirmed,
-                    },
-                  ].map((item) => {
-                    const key = item.key as keyof PatientLegalStatus;
-                    return (
-                      <label
-                        key={item.key}
-                        className="flex items-center gap-2 rounded-lg border border-border/50 bg-card px-2.5 py-2 text-[12.5px] text-foreground cursor-pointer hover:bg-muted/40 transition-colors"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={Boolean(form.legalStatus[key])}
-                          onChange={(event) =>
-                            updateLegalStatusField(
-                              key,
-                              event.target.checked as PatientLegalStatus[typeof key]
-                            )
-                          }
-                          className={checkboxClass}
-                        />
-                        {item.label}
-                      </label>
-                    );
-                  })}
-                </div>
-                <FormField label={dictionary.patient_profile_editor_contract_status}>
-                  <NativeComboboxSelect
-                    value={form.legalStatus.contractStatus}
+              <PatientProfileLegalStatusSection
+                dictionary={dictionary}
+                form={form}
+                statusLabel={statusLabel}
+                updateLegalStatusField={updateLegalStatusField}
+              />
 
-
-                    onChange={(event) => updateLegalStatusField("contractStatus", event.target.value ?? "")} className={cn("w-full", formInputClassName)}>
-                      {PATIENT_CONTRACT_STATUS_OPTIONS.map((status) => (
-                        <option key={status} value={status}>
-                          {statusLabel(status)}
-                        </option>
-                      ))}
-                    </NativeComboboxSelect>
-                </FormField>
-                <FormField label={dictionary.patient_profile_editor_notes}>
-                  <textarea
-                    className={formTextareaClassName}
-                    value={form.legalStatus.notes}
-                    onChange={(event) => updateLegalStatusField("notes", event.target.value)}
-                    placeholder={dictionary.patient_profile_editor_pending_signatures_missing_ids_open_compliance_questions}
-                  />
-                </FormField>
-              </FormSection>
-
-              <FormSection title={dictionary.patient_profile_editor_cave_warnings}>
-                <textarea
-                  className={formTextareaClassName}
-                  value={form.clinicalWarnings}
-                  onChange={(event) =>
-                    updateField("clinicalWarnings", event.target.value)
-                  }
-                  placeholder={dictionary.patient_profile_editor_persistent_clinical_warnings_or_safety_alerts}
-                />
-              </FormSection>
-
-              <FormSection title={dictionary.patient_profile_editor_notes}>
-                <textarea
-                  className={formTextareaClassName}
-                  value={form.notes}
-                  onChange={(event) => updateField("notes", event.target.value)}
-                />
-              </FormSection>
+              <PatientProfileNotesSections
+                dictionary={dictionary}
+                form={form}
+                updateField={updateField}
+              />
         </div>
   );
 }
+
+function PatientProfileLegalStatusSection({
+  dictionary,
+  form,
+  statusLabel,
+  updateLegalStatusField,
+}: {
+  dictionary: Record<string, string> & { uiText?: Record<string, string> };
+  form: PatientEditFormState;
+  statusLabel: (status: string) => string;
+  updateLegalStatusField: <K extends keyof PatientLegalStatus>(
+    field: K,
+    value: PatientLegalStatus[K],
+  ) => void;
+}) {
+  type PatientLegalStatusFlag =
+    | "dsgvoSigned"
+    | "confidentialityReleaseSigned"
+    | "identityVerified"
+    | "documentPackComplete"
+    | "complianceCompleted";
+  const legalStatusItems: Array<{
+    key: PatientLegalStatusFlag;
+    label: string;
+  }> = [
+    {
+      key: "dsgvoSigned",
+      label: dictionary.patient_profile_editor_dsgvo_signed,
+    },
+    {
+      key: "confidentialityReleaseSigned",
+      label: dictionary.patient_profile_editor_confidentiality_released,
+    },
+    {
+      key: "identityVerified",
+      label: dictionary.patient_profile_editor_identity_verified,
+    },
+    {
+      key: "documentPackComplete",
+      label: dictionary.patient_profile_editor_document_pack_complete,
+    },
+    {
+      key: "complianceCompleted",
+      label: dictionary.patient_profile_editor_readiness_confirmed,
+    },
+  ];
+
+  return (
+    <FormSection
+      title={dictionary.patients_legal_status}
+      accessory={<LegalStatusPill status={form.legalStatus} />}
+    >
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+        {legalStatusItems.map((item) => (
+          <label
+            key={item.key}
+            className="flex items-center gap-2 rounded-lg border border-border/50 bg-card px-2.5 py-2 text-[12.5px] text-foreground cursor-pointer hover:bg-muted/40 transition-colors"
+          >
+            <input
+              type="checkbox"
+              checked={Boolean(form.legalStatus[item.key])}
+              onChange={(event) =>
+                updateLegalStatusField(item.key, event.target.checked)
+              }
+              className={checkboxClass}
+            />
+            {item.label}
+          </label>
+        ))}
+      </div>
+      <FormField label={dictionary.patient_profile_editor_contract_status}>
+        <NativeComboboxSelect
+          value={form.legalStatus.contractStatus}
+          onChange={(event) =>
+            updateLegalStatusField("contractStatus", event.target.value ?? "")
+          }
+          className={cn("w-full", formInputClassName)}
+        >
+          {PATIENT_CONTRACT_STATUS_OPTIONS.map((status) => (
+            <option key={status} value={status}>
+              {statusLabel(status)}
+            </option>
+          ))}
+        </NativeComboboxSelect>
+      </FormField>
+      <FormField label={dictionary.patient_profile_editor_notes}>
+        <textarea
+          className={formTextareaClassName}
+          value={form.legalStatus.notes}
+          onChange={(event) => updateLegalStatusField("notes", event.target.value)}
+          placeholder={
+            dictionary.patient_profile_editor_pending_signatures_missing_ids_open_compliance_questions
+          }
+        />
+      </FormField>
+    </FormSection>
+  );
+}
+
+function PatientProfileNotesSections({
+  dictionary,
+  form,
+  updateField,
+}: {
+  dictionary: Record<string, string> & { uiText?: Record<string, string> };
+  form: PatientEditFormState;
+  updateField: <K extends keyof PatientEditFormState>(
+    field: K,
+    value: PatientEditFormState[K],
+  ) => void;
+}) {
+  return (
+    <>
+      <FormSection title={dictionary.patient_profile_editor_cave_warnings}>
+        <textarea
+          className={formTextareaClassName}
+          value={form.clinicalWarnings}
+          onChange={(event) => updateField("clinicalWarnings", event.target.value)}
+          placeholder={
+            dictionary.patient_profile_editor_persistent_clinical_warnings_or_safety_alerts
+          }
+        />
+      </FormSection>
+
+      <FormSection title={dictionary.patient_profile_editor_notes}>
+        <textarea
+          className={formTextareaClassName}
+          value={form.notes}
+          onChange={(event) => updateField("notes", event.target.value)}
+        />
+      </FormSection>
+    </>
+  );
+}
+
 function PatientProfileEditorSheetContent({
   open,
   patientId,
@@ -470,7 +527,7 @@ function PatientProfileEditorSheetContent({
   onError,
 }: PatientProfileEditorSheetProps) {
   const [form, setForm] = useState<PatientEditFormState | null>(() =>
-    open && detail ? patientToEditForm(detail) : null,
+    open && detail ? normalizeMinorGuardianRelation(patientToEditForm(detail)) : null,
   );
   const [busy, setBusy] = useState(false);
 

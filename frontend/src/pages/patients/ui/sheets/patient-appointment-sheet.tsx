@@ -96,6 +96,12 @@ type FormState = {
   notes: string;
 };
 
+type PatientAppointmentTranslations = ReturnType<typeof useLang>["t"];
+type PatientAppointmentText = (key: string) => string;
+type PatientAppointmentFormSetter = (
+  value: FormState | ((current: FormState) => FormState),
+) => void;
+
 function blankForm(): FormState {
   return {
     title: "",
@@ -136,6 +142,294 @@ export function PatientAppointmentSheet({
   );
 }
 
+function PatientAppointmentBasicsSection({
+  form,
+  providers,
+  setForm,
+  l,
+}: {
+  form: FormState;
+  providers: ProviderSummary[];
+  setForm: PatientAppointmentFormSetter;
+  l: PatientAppointmentText;
+}) {
+  return (
+    <FormSection title={l("patients_appointment")}>
+      <FormField label={l("patients_title")} htmlFor="patient-appointment-title">
+        <Input
+          id="patient-appointment-title"
+          value={form.title}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, title: event.target.value }))
+          }
+          className={inputClass}
+          required
+        />
+      </FormField>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <FormField label={l("patients_appointment_type")} htmlFor="patient-appointment-type">
+          <NativeComboboxSelect
+            id="patient-appointment-type"
+            value={form.appointmentType}
+            onChange={(event) => {
+              const appointmentType =
+                (event.target.value as AppointmentKind) ?? form.appointmentType;
+              setForm((current) => {
+                const currentProvider =
+                  providers.find((item) => item.id === current.providerId) ?? null;
+                const shouldClearProvider =
+                  appointmentType === "internal" ||
+                  (appointmentType === "medical" &&
+                    currentProvider !== null &&
+                    currentProvider.provider_type !== "medical");
+                return {
+                  ...current,
+                  appointmentType,
+                  carePathKind:
+                    appointmentType === "medical" ? current.carePathKind : "regular",
+                  providerId: shouldClearProvider ? "" : current.providerId,
+                  doctorId: shouldClearProvider ? "" : current.doctorId,
+                  skipMedicalProviderBinding:
+                    appointmentType === "medical"
+                      ? current.skipMedicalProviderBinding
+                      : false,
+                };
+              });
+            }}
+            className={cn("w-full", selectClass)}
+          >
+            {TYPE_OPTIONS.map((option) => (
+              <option key={option} value={option}>
+                {typeLabel(option, l)}
+              </option>
+            ))}
+          </NativeComboboxSelect>
+        </FormField>
+        <FormField
+          label={l("patients_appointment_care_path")}
+          htmlFor="patient-appointment-care-path"
+        >
+          <NativeComboboxSelect
+            id="patient-appointment-care-path"
+            value={form.carePathKind}
+            disabled={form.appointmentType !== "medical"}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                carePathKind: (event.target.value as CarePathKind) ?? current.carePathKind,
+              }))
+            }
+            className={cn("w-full", selectClass)}
+          >
+            {CARE_PATH_KIND_OPTIONS.map((option) => (
+              <option key={option} value={option}>
+                {carePathLabel(option, l)}
+              </option>
+            ))}
+          </NativeComboboxSelect>
+        </FormField>
+      </div>
+    </FormSection>
+  );
+}
+
+function PatientAppointmentScheduleSection({
+  doctors,
+  form,
+  providerOptions,
+  providers,
+  selectedProvider,
+  setForm,
+  t,
+  l,
+}: {
+  doctors: DoctorOption[];
+  form: FormState;
+  providerOptions: ProviderSummary[];
+  providers: ProviderSummary[];
+  selectedProvider: ProviderSummary | null;
+  setForm: PatientAppointmentFormSetter;
+  t: PatientAppointmentTranslations;
+  l: PatientAppointmentText;
+}) {
+  return (
+    <FormSection title={l("patients_time_and_place")}>
+      <div className="grid gap-3 md:grid-cols-3">
+        <FormField label={l("patients_date")} htmlFor="patient-appointment-date">
+          <Input
+            id="patient-appointment-date"
+            type="date"
+            value={form.date}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, date: event.target.value }))
+            }
+            className={inputClass}
+            required
+          />
+        </FormField>
+        <FormField label={l("patients_start")} htmlFor="patient-appointment-time-start">
+          <Input
+            id="patient-appointment-time-start"
+            type="time"
+            value={form.timeStart}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, timeStart: event.target.value }))
+            }
+            className={inputClass}
+          />
+        </FormField>
+        <FormField label={l("patients_end")} htmlFor="patient-appointment-time-end">
+          <Input
+            id="patient-appointment-time-end"
+            type="time"
+            value={form.timeEnd}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, timeEnd: event.target.value }))
+            }
+            className={inputClass}
+          />
+        </FormField>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <FormField label={t.common_provider} htmlFor="patient-appointment-provider">
+          <NativeComboboxSelect
+            id="patient-appointment-provider"
+            value={form.providerId}
+            disabled={form.appointmentType === "internal"}
+            onChange={(event) => {
+              const providerId = event.target.value;
+              const provider = providers.find((item) => item.id === providerId);
+              setForm((current) => ({
+                ...current,
+                providerId,
+                doctorId: "",
+                skipMedicalProviderBinding: providerId
+                  ? false
+                  : current.skipMedicalProviderBinding,
+                location:
+                  provider && !current.location.trim()
+                    ? providerLabel(provider)
+                    : current.location,
+              }));
+            }}
+            className={cn("w-full", selectClass)}
+          >
+            <option value="">{t.common_not_set}</option>
+            {providerOptions.map((provider) => (
+              <option key={provider.id} value={provider.id}>
+                {providerLabel(provider)}
+              </option>
+            ))}
+          </NativeComboboxSelect>
+        </FormField>
+        <FormField label={t.common_doctor} htmlFor="patient-appointment-doctor">
+          <NativeComboboxSelect
+            id="patient-appointment-doctor"
+            value={form.doctorId}
+            disabled={!form.providerId}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                doctorId: event.target.value,
+              }))
+            }
+            className={cn("w-full", selectClass)}
+          >
+            <option value="">{t.common_not_set}</option>
+            {doctors.map((doctor) => (
+              <option key={doctor.id} value={doctor.id}>
+                {doctorLabel(doctor)}
+              </option>
+            ))}
+          </NativeComboboxSelect>
+        </FormField>
+      </div>
+
+      {form.appointmentType === "medical" ? (
+        <div className="space-y-2">
+          <div className="flex items-start gap-3 rounded-lg border border-border/60 bg-card px-3 py-2 text-sm text-foreground">
+            <input
+              id="patient-appointment-skip-provider-binding"
+              type="checkbox"
+              checked={form.skipMedicalProviderBinding}
+              disabled={Boolean(form.providerId)}
+              aria-labelledby="patient-appointment-skip-provider-binding-label"
+              aria-describedby="patient-appointment-skip-provider-binding-hint"
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  skipMedicalProviderBinding: event.target.checked,
+                }))
+              }
+              className={cn(checkboxClass, "mt-0.5")}
+            />
+            <span>
+              <span
+                id="patient-appointment-skip-provider-binding-label"
+                className="block font-medium text-foreground"
+              >
+                {l("appointments_medical_provider_opt_out")}
+              </span>
+              <span
+                id="patient-appointment-skip-provider-binding-hint"
+                className="block text-xs text-muted-foreground"
+              >
+                {l("appointments_medical_provider_opt_out_hint")}
+              </span>
+            </span>
+          </div>
+          {!form.providerId && !form.skipMedicalProviderBinding ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              {l("appointments_medical_provider_required_hint")}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <FormField label={l("patients_location")} htmlFor="patient-appointment-location">
+        <Input
+          id="patient-appointment-location"
+          value={form.location}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, location: event.target.value }))
+          }
+          placeholder={
+            selectedProvider ? providerLabel(selectedProvider) : l("patients_location")
+          }
+          className={inputClass}
+        />
+      </FormField>
+    </FormSection>
+  );
+}
+
+function PatientAppointmentAdditionalSection({
+  form,
+  setForm,
+  l,
+}: {
+  form: FormState;
+  setForm: PatientAppointmentFormSetter;
+  l: PatientAppointmentText;
+}) {
+  return (
+    <FormSection title={l("patients_additional")}>
+      <FormField label={l("appointments_notes")} htmlFor="patient-appointment-notes">
+        <textarea
+          id="patient-appointment-notes"
+          className={appointmentTextareaClassName}
+          value={form.notes}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, notes: event.target.value }))
+          }
+        />
+      </FormField>
+    </FormSection>
+  );
+}
+
 function PatientAppointmentSheetContent({
   patientId,
   open,
@@ -152,11 +446,18 @@ function PatientAppointmentSheetContent({
   const [form, setForm] = useState<FormState>(blankForm);
   const [busy, setBusy] = useState(false);
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
-  const [doctors, setDoctors] = useState<DoctorOption[]>([]);
+  const [doctorOptionsState, setDoctorOptionsState] = useState<{
+    providerId: string;
+    doctors: DoctorOption[];
+  }>({ providerId: "", doctors: [] });
   const selectedProvider = useMemo(
     () => providers.find((provider) => provider.id === form.providerId) ?? null,
     [form.providerId, providers],
   );
+  const doctors =
+    doctorOptionsState.providerId === form.providerId
+      ? doctorOptionsState.doctors
+      : [];
   const providerOptions = useMemo(
     () =>
       form.appointmentType === "medical"
@@ -183,43 +484,22 @@ function PatientAppointmentSheetContent({
   }, [open]);
 
   useEffect(() => {
-    if (!form.providerId) {
-      setDoctors([]);
-      setForm((current) =>
-        current.doctorId ? { ...current, doctorId: "" } : current,
-      );
-      return;
-    }
+    if (!form.providerId) return;
 
     let active = true;
+    const providerId = form.providerId;
     void getProviderDoctors(form.providerId)
       .then((rows) => {
-        if (active) setDoctors(rows);
+        if (active) setDoctorOptionsState({ providerId, doctors: rows });
       })
       .catch(() => {
-        if (active) setDoctors([]);
+        if (active) setDoctorOptionsState({ providerId, doctors: [] });
       });
 
     return () => {
       active = false;
     };
   }, [form.providerId]);
-
-  useEffect(() => {
-    if (
-      form.appointmentType !== "medical" ||
-      !selectedProvider ||
-      selectedProvider.provider_type === "medical"
-    ) {
-      return;
-    }
-
-    setForm((current) => ({
-      ...current,
-      providerId: "",
-      doctorId: "",
-    }));
-  }, [form.appointmentType, selectedProvider]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -305,233 +585,23 @@ function PatientAppointmentSheetContent({
         </>
       }
     >
-      <FormSection title={l("patients_appointment")}>
-        <FormField label={l("patients_title")} htmlFor="patient-appointment-title">
-          <Input
-            id="patient-appointment-title"
-            value={form.title}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, title: event.target.value }))
-            }
-            className={inputClass}
-            required
-          />
-        </FormField>
-
-        <div className="grid gap-3 md:grid-cols-2">
-          <FormField label={l("patients_appointment_type")} htmlFor="patient-appointment-type">
-            <NativeComboboxSelect
-              id="patient-appointment-type"
-              value={form.appointmentType}
-              onChange={(event) => {
-                const appointmentType =
-                  (event.target.value as AppointmentKind) ?? form.appointmentType;
-                setForm((current) => ({
-                  ...current,
-                  appointmentType,
-                  carePathKind:
-                    appointmentType === "medical" ? current.carePathKind : "regular",
-                  providerId: appointmentType === "internal" ? "" : current.providerId,
-                  doctorId: appointmentType === "internal" ? "" : current.doctorId,
-                  skipMedicalProviderBinding:
-                    appointmentType === "medical"
-                      ? current.skipMedicalProviderBinding
-                      : false,
-                }));
-              }}
-              className={cn("w-full", selectClass)}
-            >
-              {TYPE_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {typeLabel(option, l)}
-                </option>
-              ))}
-            </NativeComboboxSelect>
-          </FormField>
-          <FormField
-            label={l("patients_appointment_care_path")}
-            htmlFor="patient-appointment-care-path"
-          >
-            <NativeComboboxSelect
-              id="patient-appointment-care-path"
-              value={form.carePathKind}
-              disabled={form.appointmentType !== "medical"}
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  carePathKind: (event.target.value as CarePathKind) ?? current.carePathKind,
-                }))
-              }
-              className={cn("w-full", selectClass)}
-            >
-              {CARE_PATH_KIND_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {carePathLabel(option, l)}
-                </option>
-              ))}
-            </NativeComboboxSelect>
-          </FormField>
-        </div>
-      </FormSection>
-
-      <FormSection title={l("patients_time_and_place")}>
-        <div className="grid gap-3 md:grid-cols-3">
-          <FormField label={l("patients_date")} htmlFor="patient-appointment-date">
-            <Input
-              id="patient-appointment-date"
-              type="date"
-              value={form.date}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, date: event.target.value }))
-              }
-              className={inputClass}
-              required
-            />
-          </FormField>
-          <FormField label={l("patients_start")} htmlFor="patient-appointment-time-start">
-            <Input
-              id="patient-appointment-time-start"
-              type="time"
-              value={form.timeStart}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, timeStart: event.target.value }))
-              }
-              className={inputClass}
-            />
-          </FormField>
-          <FormField label={l("patients_end")} htmlFor="patient-appointment-time-end">
-            <Input
-              id="patient-appointment-time-end"
-              type="time"
-              value={form.timeEnd}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, timeEnd: event.target.value }))
-              }
-              className={inputClass}
-            />
-          </FormField>
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-2">
-          <FormField label={t.common_provider} htmlFor="patient-appointment-provider">
-            <NativeComboboxSelect
-              id="patient-appointment-provider"
-              value={form.providerId}
-              disabled={form.appointmentType === "internal"}
-              onChange={(event) => {
-                const providerId = event.target.value;
-                const provider = providers.find((item) => item.id === providerId);
-                setForm((current) => ({
-                  ...current,
-                  providerId,
-                  doctorId: "",
-                  skipMedicalProviderBinding: providerId
-                    ? false
-                    : current.skipMedicalProviderBinding,
-                  location:
-                    provider && !current.location.trim()
-                      ? providerLabel(provider)
-                      : current.location,
-                }));
-              }}
-              className={cn("w-full", selectClass)}
-            >
-              <option value="">{t.common_not_set}</option>
-              {providerOptions.map((provider) => (
-                <option key={provider.id} value={provider.id}>
-                  {providerLabel(provider)}
-                </option>
-              ))}
-            </NativeComboboxSelect>
-          </FormField>
-          <FormField label={t.common_doctor} htmlFor="patient-appointment-doctor">
-            <NativeComboboxSelect
-              id="patient-appointment-doctor"
-              value={form.doctorId}
-              disabled={!form.providerId}
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  doctorId: event.target.value,
-                }))
-              }
-              className={cn("w-full", selectClass)}
-            >
-              <option value="">{t.common_not_set}</option>
-              {doctors.map((doctor) => (
-                <option key={doctor.id} value={doctor.id}>
-                  {doctorLabel(doctor)}
-                </option>
-              ))}
-            </NativeComboboxSelect>
-          </FormField>
-        </div>
-
-        {form.appointmentType === "medical" ? (
-          <div className="space-y-2">
-            <label
-              htmlFor="patient-appointment-skip-provider-binding"
-              className="flex items-start gap-3 rounded-lg border border-border/60 bg-card px-3 py-2 text-sm text-foreground"
-            >
-              <input
-                id="patient-appointment-skip-provider-binding"
-                type="checkbox"
-                checked={form.skipMedicalProviderBinding}
-                disabled={Boolean(form.providerId)}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    skipMedicalProviderBinding: event.target.checked,
-                  }))
-                }
-                className={cn(checkboxClass, "mt-0.5")}
-              />
-              <span>
-                <span className="block font-medium text-foreground">
-                  {l("appointments_medical_provider_opt_out")}
-                </span>
-                <span className="block text-xs text-muted-foreground">
-                  {l("appointments_medical_provider_opt_out_hint")}
-                </span>
-              </span>
-            </label>
-            {!form.providerId && !form.skipMedicalProviderBinding ? (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                {l("appointments_medical_provider_required_hint")}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-
-        <FormField label={l("patients_location")} htmlFor="patient-appointment-location">
-          <Input
-            id="patient-appointment-location"
-            value={form.location}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, location: event.target.value }))
-            }
-            placeholder={
-              selectedProvider
-                ? providerLabel(selectedProvider)
-                : l("patients_location")
-            }
-            className={inputClass}
-          />
-        </FormField>
-      </FormSection>
-
-      <FormSection title={l("patients_additional")}>
-        <FormField label={l("appointments_notes")} htmlFor="patient-appointment-notes">
-          <textarea
-            id="patient-appointment-notes"
-            className={appointmentTextareaClassName}
-            value={form.notes}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, notes: event.target.value }))
-            }
-          />
-        </FormField>
-      </FormSection>
+      <PatientAppointmentBasicsSection
+        form={form}
+        providers={providers}
+        setForm={setForm}
+        l={l}
+      />
+      <PatientAppointmentScheduleSection
+        doctors={doctors}
+        form={form}
+        providerOptions={providerOptions}
+        providers={providers}
+        selectedProvider={selectedProvider}
+        setForm={setForm}
+        t={t}
+        l={l}
+      />
+      <PatientAppointmentAdditionalSection form={form} setForm={setForm} l={l} />
     </PatientSheetScaffold>
   );
 }

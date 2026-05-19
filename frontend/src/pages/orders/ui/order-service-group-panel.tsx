@@ -1,6 +1,6 @@
 ﻿import { useMemo, useState, type FormEvent } from "react";
 
-import type { ReactNode } from "react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -84,6 +84,13 @@ type OrderServiceGroupWizardProps = {
   onCreate: (input: CreateOrderServiceGroupInput) => void | Promise<void>;
   onCreated?: () => void;
 };
+
+type WizardFormSetter = Dispatch<SetStateAction<WizardForm>>;
+
+type UpdateWizardParticipant = (
+  index: number,
+  patch: Partial<WizardParticipant>,
+) => void;
 
 let wizardParticipantSequence = 0;
 
@@ -354,6 +361,10 @@ function titleWithDot(title: ReactNode) {
   );
 }
 
+function uiTextLabel(translations: Translations, key: string) {
+  return translations.uiText[key] ?? key;
+}
+
 export function OrderServiceGroupWizard({
   providers,
   providerDoctors,
@@ -365,7 +376,6 @@ export function OrderServiceGroupWizard({
   onCreated,
 }: OrderServiceGroupWizardProps) {
   const { t } = useLang();
-  const l = (key: string) => t.uiText[key] ?? key;
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<WizardForm>(createBlankWizardForm);
   const [localError, setLocalError] = useState("");
@@ -441,194 +451,23 @@ export function OrderServiceGroupWizard({
   }
 
   const formMarkup = (
-    <form onSubmit={(event) => void handleSubmit(event)} className="space-y-4">
-      {(error || localError) ? (
-        <Banner tone="error" withIcon>{error ?? localError}</Banner>
-      ) : null}
-      <SheetSectionCard title={l("orders_basis")}>
-        <div className="grid gap-3 md:grid-cols-4">
-          <Field label={t.orders_service_group_title} className="md:col-span-2">
-            <Input
-              value={form.group_title}
-              onChange={(event) => setForm((current) => ({ ...current, group_title: event.target.value }))}
-              className={inputClass}
-              placeholder={t.orders_service_group_title_placeholder}
-            />
-          </Field>
-          <Field label={t.orders_service_group_service_date}>
-            <Input
-              type="date"
-              value={form.service_date}
-              onChange={(event) => setForm((current) => ({ ...current, service_date: event.target.value }))}
-              className={inputClass}
-            />
-          </Field>
-          <Field label={t.orders_service_group_description}>
-            <Input
-              value={form.description}
-              onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
-              className={inputClass}
-            />
-          </Field>
-        </div>
-      </SheetSectionCard>
-
-      <SheetSectionCard title={l("orders_kosten")}>
-        <div className="grid gap-3 md:grid-cols-4">
-          <Field label={t.orders_service_group_quantity}>
-            <Input
-              value={form.quantity}
-              onChange={(event) => setForm((current) => ({ ...current, quantity: event.target.value }))}
-              className={inputClass}
-            />
-          </Field>
-          <Field label={t.orders_service_group_unit_price}>
-            <Input
-              value={form.unit_price}
-              onChange={(event) => setForm((current) => ({ ...current, unit_price: event.target.value }))}
-              className={inputClass}
-            />
-          </Field>
-          <Field label={t.orders_service_group_vat_percent}>
-            <Input
-              value={form.vat_rate}
-              onChange={(event) => setForm((current) => ({ ...current, vat_rate: event.target.value }))}
-              className={inputClass}
-            />
-          </Field>
-          <Field label={t.orders_service_group_currency}>
-            <Input
-              value={form.currency}
-              onChange={(event) => setForm((current) => ({ ...current, currency: event.target.value }))}
-              className={inputClass}
-            />
-          </Field>
-        </div>
-      </SheetSectionCard>
-
-      <SheetSectionCard
-        title={t.orders_service_group_doctors}
-        description={formatCountMessage(
-          t.orders_service_group_wizard_preview_summary,
-          selectedDoctorCount,
-        )}
-        action={
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="rounded-lg"
-            onClick={() =>
-              setForm((current) => ({
-                ...current,
-                participants: [...current.participants, createBlankParticipant()],
-              }))
-            }
-          >
-            {t.orders_service_group_add_doctor}
-          </Button>
-        }
-      >
-        <div className="space-y-2">
-          {form.participants.map((participant, index) => {
-            const doctors = participant.provider_id
-              ? providerDoctors[participant.provider_id] ?? []
-              : [];
-            return (
-              <div
-                key={participant.clientKey}
-                className="grid gap-2 rounded-xl border border-border/50 bg-card/70 p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]"
-              >
-                <Field label={t.orders_service_group_provider}>
-                  <NativeComboboxSelect
-                    value={participant.provider_id}
-                    onChange={(event) => {
-                      const providerId = event.target.value;
-                      updateParticipant(index, {
-                        provider_id: providerId,
-                        doctor_id: "",
-                      });
-                      if (providerId) void onLoadProviderDoctors?.(providerId);
-                    }}
-                    className={selectClass}
-                  >
-                    <option value="">{t.orders_service_group_select_provider}</option>
-                    {providers.map((provider) => (
-                      <option key={provider.id} value={provider.id}>
-                        {provider.name}
-                      </option>
-                    ))}
-                  </NativeComboboxSelect>
-                </Field>
-                <Field label={t.orders_service_group_doctor}>
-                  <NativeComboboxSelect
-                    value={participant.doctor_id}
-                    onChange={(event) =>
-                      updateParticipant(index, { doctor_id: event.target.value })
-                    }
-                    className={selectClass}
-                    disabled={!participant.provider_id}
-                  >
-                    <option value="">{t.orders_service_group_select_doctor}</option>
-                    {doctors.map((doctor) => (
-                      <option key={doctor.id} value={doctor.id}>
-                        {doctor.name}{doctor.fachbereich ? ` - ${doctor.fachbereich}` : ""}
-                      </option>
-                    ))}
-                  </NativeComboboxSelect>
-                </Field>
-                <Field label={t.orders_service_group_role_label}>
-                  <Input
-                    value={participant.role_label}
-                    onChange={(event) =>
-                      updateParticipant(index, { role_label: event.target.value })
-                    }
-                    className={inputClass}
-                    placeholder={t.orders_service_group_role_placeholder}
-                  />
-                </Field>
-                <div className="flex items-end">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="rounded-lg"
-                    disabled={form.participants.length === 1}
-                    onClick={() =>
-                      setForm((current) => ({
-                        ...current,
-                        participants: current.participants.filter(
-                          (_, participantIndex) => participantIndex !== index,
-                        ),
-                      }))
-                    }
-                  >
-                    {t.orders_service_group_remove}
-                  </Button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </SheetSectionCard>
-
-      <SheetSectionCard title={t.orders_service_group_preview}>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className={tokens.text.muted}>
-            {formatCountMessage(t.orders_service_group_wizard_preview_summary, selectedDoctorCount)}
-          </p>
-          <CountBadge>
-            {duplicateDoctorCount > 0 ? t.orders_service_group_duplicates : t.orders_service_group_ready}
-          </CountBadge>
-        </div>
-      </SheetSectionCard>
-
-      <div className="flex justify-end">
-        <Button type="submit" className="rounded-lg" disabled={creating}>
-          {creating ? t.orders_service_group_creating : t.orders_service_group_save_preview}
-        </Button>
-      </div>
-    </form>
+    <OrderServiceGroupWizardForm
+      form={form}
+      translations={t}
+      basisTitle={uiTextLabel(t, "orders_basis")}
+      costTitle={uiTextLabel(t, "orders_kosten")}
+      providers={providers}
+      providerDoctors={providerDoctors}
+      creating={creating}
+      error={error}
+      localError={localError}
+      selectedDoctorCount={selectedDoctorCount}
+      duplicateDoctorCount={duplicateDoctorCount}
+      setForm={setForm}
+      onSubmit={(event) => void handleSubmit(event)}
+      onLoadProviderDoctors={onLoadProviderDoctors}
+      onUpdateParticipant={updateParticipant}
+    />
   );
 
   if (embedded) {
@@ -655,6 +494,414 @@ export function OrderServiceGroupWizard({
       </p>
       {!open ? null : formMarkup}
     </Section>
+  );
+}
+
+function OrderServiceGroupWizardForm({
+  form,
+  translations: t,
+  basisTitle,
+  costTitle,
+  providers,
+  providerDoctors,
+  creating,
+  error,
+  localError,
+  selectedDoctorCount,
+  duplicateDoctorCount,
+  setForm,
+  onSubmit,
+  onLoadProviderDoctors,
+  onUpdateParticipant,
+}: {
+  form: WizardForm;
+  translations: Translations;
+  basisTitle: ReactNode;
+  costTitle: ReactNode;
+  providers: ProviderOption[];
+  providerDoctors: Record<string, DoctorOption[]>;
+  creating: boolean;
+  error?: string | null;
+  localError: string;
+  selectedDoctorCount: number;
+  duplicateDoctorCount: number;
+  setForm: WizardFormSetter;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onLoadProviderDoctors?: (providerId: string) => void | Promise<void>;
+  onUpdateParticipant: UpdateWizardParticipant;
+}) {
+  return (
+    <form onSubmit={onSubmit} className="space-y-4">
+      {error || localError ? (
+        <Banner tone="error" withIcon>{error ?? localError}</Banner>
+      ) : null}
+
+      <WizardBasicsSection
+        form={form}
+        setForm={setForm}
+        title={basisTitle}
+        translations={t}
+      />
+      <WizardCostSection
+        form={form}
+        setForm={setForm}
+        title={costTitle}
+        translations={t}
+      />
+      <WizardParticipantsSection
+        form={form}
+        setForm={setForm}
+        providers={providers}
+        providerDoctors={providerDoctors}
+        selectedDoctorCount={selectedDoctorCount}
+        translations={t}
+        onLoadProviderDoctors={onLoadProviderDoctors}
+        onUpdateParticipant={onUpdateParticipant}
+      />
+      <WizardPreviewSection
+        duplicateDoctorCount={duplicateDoctorCount}
+        selectedDoctorCount={selectedDoctorCount}
+        translations={t}
+      />
+      <WizardSubmitActions creating={creating} translations={t} />
+    </form>
+  );
+}
+
+function WizardBasicsSection({
+  form,
+  setForm,
+  title,
+  translations: t,
+}: {
+  form: WizardForm;
+  setForm: WizardFormSetter;
+  title: ReactNode;
+  translations: Translations;
+}) {
+  return (
+    <SheetSectionCard title={title}>
+      <div className="grid gap-3 md:grid-cols-4">
+        <Field label={t.orders_service_group_title} className="md:col-span-2">
+          <Input
+            value={form.group_title}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                group_title: event.target.value,
+              }))
+            }
+            className={inputClass}
+            placeholder={t.orders_service_group_title_placeholder}
+          />
+        </Field>
+        <Field label={t.orders_service_group_service_date}>
+          <Input
+            type="date"
+            value={form.service_date}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                service_date: event.target.value,
+              }))
+            }
+            className={inputClass}
+          />
+        </Field>
+        <Field label={t.orders_service_group_description}>
+          <Input
+            value={form.description}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                description: event.target.value,
+              }))
+            }
+            className={inputClass}
+          />
+        </Field>
+      </div>
+    </SheetSectionCard>
+  );
+}
+
+function WizardCostSection({
+  form,
+  setForm,
+  title,
+  translations: t,
+}: {
+  form: WizardForm;
+  setForm: WizardFormSetter;
+  title: ReactNode;
+  translations: Translations;
+}) {
+  return (
+    <SheetSectionCard title={title}>
+      <div className="grid gap-3 md:grid-cols-4">
+        <Field label={t.orders_service_group_quantity}>
+          <Input
+            value={form.quantity}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                quantity: event.target.value,
+              }))
+            }
+            className={inputClass}
+          />
+        </Field>
+        <Field label={t.orders_service_group_unit_price}>
+          <Input
+            value={form.unit_price}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                unit_price: event.target.value,
+              }))
+            }
+            className={inputClass}
+          />
+        </Field>
+        <Field label={t.orders_service_group_vat_percent}>
+          <Input
+            value={form.vat_rate}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                vat_rate: event.target.value,
+              }))
+            }
+            className={inputClass}
+          />
+        </Field>
+        <Field label={t.orders_service_group_currency}>
+          <Input
+            value={form.currency}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                currency: event.target.value,
+              }))
+            }
+            className={inputClass}
+          />
+        </Field>
+      </div>
+    </SheetSectionCard>
+  );
+}
+
+function WizardParticipantsSection({
+  form,
+  setForm,
+  providers,
+  providerDoctors,
+  selectedDoctorCount,
+  translations: t,
+  onLoadProviderDoctors,
+  onUpdateParticipant,
+}: {
+  form: WizardForm;
+  setForm: WizardFormSetter;
+  providers: ProviderOption[];
+  providerDoctors: Record<string, DoctorOption[]>;
+  selectedDoctorCount: number;
+  translations: Translations;
+  onLoadProviderDoctors?: (providerId: string) => void | Promise<void>;
+  onUpdateParticipant: UpdateWizardParticipant;
+}) {
+  function addParticipant() {
+    setForm((current) => ({
+      ...current,
+      participants: [...current.participants, createBlankParticipant()],
+    }));
+  }
+
+  function removeParticipant(index: number) {
+    setForm((current) => ({
+      ...current,
+      participants: current.participants.filter(
+        (_, participantIndex) => participantIndex !== index,
+      ),
+    }));
+  }
+
+  return (
+    <SheetSectionCard
+      title={t.orders_service_group_doctors}
+      description={formatCountMessage(
+        t.orders_service_group_wizard_preview_summary,
+        selectedDoctorCount,
+      )}
+      action={
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="rounded-lg"
+          onClick={addParticipant}
+        >
+          {t.orders_service_group_add_doctor}
+        </Button>
+      }
+    >
+      <div className="space-y-2">
+        {form.participants.map((participant, index) => (
+          <WizardParticipantRow
+            key={participant.clientKey}
+            participant={participant}
+            index={index}
+            doctors={
+              participant.provider_id
+                ? providerDoctors[participant.provider_id] ?? []
+                : []
+            }
+            providers={providers}
+            translations={t}
+            canRemove={form.participants.length > 1}
+            onLoadProviderDoctors={onLoadProviderDoctors}
+            onRemove={() => removeParticipant(index)}
+            onUpdateParticipant={onUpdateParticipant}
+          />
+        ))}
+      </div>
+    </SheetSectionCard>
+  );
+}
+
+function WizardParticipantRow({
+  participant,
+  index,
+  doctors,
+  providers,
+  translations: t,
+  canRemove,
+  onLoadProviderDoctors,
+  onRemove,
+  onUpdateParticipant,
+}: {
+  participant: WizardParticipant;
+  index: number;
+  doctors: DoctorOption[];
+  providers: ProviderOption[];
+  translations: Translations;
+  canRemove: boolean;
+  onLoadProviderDoctors?: (providerId: string) => void | Promise<void>;
+  onRemove: () => void;
+  onUpdateParticipant: UpdateWizardParticipant;
+}) {
+  function handleProviderChange(providerId: string) {
+    onUpdateParticipant(index, {
+      provider_id: providerId,
+      doctor_id: "",
+    });
+    if (providerId) void onLoadProviderDoctors?.(providerId);
+  }
+
+  return (
+    <div className="grid gap-2 rounded-xl border border-border/50 bg-card/70 p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
+      <Field label={t.orders_service_group_provider}>
+        <NativeComboboxSelect
+          value={participant.provider_id}
+          onChange={(event) => handleProviderChange(event.target.value)}
+          className={selectClass}
+        >
+          <option value="">{t.orders_service_group_select_provider}</option>
+          {providers.map((provider) => (
+            <option key={provider.id} value={provider.id}>
+              {provider.name}
+            </option>
+          ))}
+        </NativeComboboxSelect>
+      </Field>
+      <Field label={t.orders_service_group_doctor}>
+        <NativeComboboxSelect
+          value={participant.doctor_id}
+          onChange={(event) =>
+            onUpdateParticipant(index, { doctor_id: event.target.value })
+          }
+          className={selectClass}
+          disabled={!participant.provider_id}
+        >
+          <option value="">{t.orders_service_group_select_doctor}</option>
+          {doctors.map((doctor) => (
+            <option key={doctor.id} value={doctor.id}>
+              {doctor.name}
+              {doctor.fachbereich ? ` - ${doctor.fachbereich}` : ""}
+            </option>
+          ))}
+        </NativeComboboxSelect>
+      </Field>
+      <Field label={t.orders_service_group_role_label}>
+        <Input
+          value={participant.role_label}
+          onChange={(event) =>
+            onUpdateParticipant(index, { role_label: event.target.value })
+          }
+          className={inputClass}
+          placeholder={t.orders_service_group_role_placeholder}
+        />
+      </Field>
+      <div className="flex items-end">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="rounded-lg"
+          disabled={!canRemove}
+          onClick={onRemove}
+        >
+          {t.orders_service_group_remove}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function WizardPreviewSection({
+  duplicateDoctorCount,
+  selectedDoctorCount,
+  translations: t,
+}: {
+  duplicateDoctorCount: number;
+  selectedDoctorCount: number;
+  translations: Translations;
+}) {
+  return (
+    <SheetSectionCard title={t.orders_service_group_preview}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className={tokens.text.muted}>
+          {formatCountMessage(
+            t.orders_service_group_wizard_preview_summary,
+            selectedDoctorCount,
+          )}
+        </p>
+        <CountBadge>
+          {duplicateDoctorCount > 0
+            ? t.orders_service_group_duplicates
+            : t.orders_service_group_ready}
+        </CountBadge>
+      </div>
+    </SheetSectionCard>
+  );
+}
+
+function WizardSubmitActions({
+  creating,
+  translations: t,
+}: {
+  creating: boolean;
+  translations: Translations;
+}) {
+  return (
+    <div className="flex justify-end">
+      <Button type="submit" className="rounded-lg" disabled={creating}>
+        {creating
+          ? t.orders_service_group_creating
+          : t.orders_service_group_save_preview}
+      </Button>
+    </div>
   );
 }
 

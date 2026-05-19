@@ -372,15 +372,19 @@ export async function loginViaUi(page: Page, email: string, password: string) {
     ]);
     const emailInput = page.locator("#email");
     const passwordInput = page.locator("#password");
-    await emailInput.fill(email);
-    await expect(emailInput).toHaveValue(email);
-    await passwordInput.fill(password);
-    await expect(passwordInput).toHaveValue(password);
+    await emailInput
+      .fill(email)
+      .then(() => expect(emailInput).toHaveValue(email));
+    await passwordInput
+      .fill(password)
+      .then(() => expect(passwordInput).toHaveValue(password));
     try {
-      await page.getByRole("button", { name: /Anmelden|Войти/i }).click();
-      await page.waitForURL((url) => url.pathname !== "/login", {
-        timeout: 30_000,
-      });
+      await Promise.all([
+        page.waitForURL((url) => url.pathname !== "/login", {
+          timeout: 30_000,
+        }),
+        page.getByRole("button", { name: /Anmelden|Войти/i }).click(),
+      ]);
       await expect(
         page.getByRole("button", { name: /Abmelden|Выйти|Logout/i }),
       ).toBeVisible({ timeout: 30_000 });
@@ -428,17 +432,18 @@ export async function loginViaApi(
         throw new Error(result.message ?? `Unexpected login status: ${result.status}`);
       }
 
-      await page.addInitScript(
-        ({ accessToken, refreshToken }) => {
-          window.localStorage.setItem("gmed_access_token", accessToken);
-          window.localStorage.setItem("gmed_refresh_token", refreshToken);
-        },
-        {
-          accessToken: result.access_token,
-          refreshToken: result.refresh_token,
-        },
-      );
-      await page.goto("/");
+      await page
+        .addInitScript(
+          ({ accessToken, refreshToken }) => {
+            window.localStorage.setItem("gmed_access_token", accessToken);
+            window.localStorage.setItem("gmed_refresh_token", refreshToken);
+          },
+          {
+            accessToken: result.access_token,
+            refreshToken: result.refresh_token,
+          },
+        )
+        .then(() => page.goto("/"));
       await expect(
         page.getByRole("button", { name: /Abmelden|Выйти|Logout/i }),
       ).toBeVisible({ timeout: 30_000 });

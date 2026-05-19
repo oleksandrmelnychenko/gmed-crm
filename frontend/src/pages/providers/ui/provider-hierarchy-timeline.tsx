@@ -363,7 +363,7 @@ export function ProviderHierarchyTimeline({
           {tr.providers_hierarchy_timeline_empty ?? tr.common_no_results}
         </div>
       ) : (
-        <div className="px-4 py-4">
+        <div className="p-4">
           <div className="space-y-2">
             {timelineItems.map((item) => (
               <Fragment key={item.node.provider.id}>

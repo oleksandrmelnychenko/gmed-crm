@@ -62,6 +62,8 @@ type NativeComboboxSelectProps = Omit<
   value?: PrimitiveValue | readonly string[] | null
 }
 
+const EMPTY_SELECTED_VALUES: readonly PrimitiveValue[] = []
+
 function textFromNode(node: React.ReactNode): string {
   if (node == null || typeof node === "boolean") {
     return ""
@@ -143,7 +145,7 @@ function ComboboxSelect({
   defaultValue,
   onValueChange,
   options,
-  selectedValues = [],
+  selectedValues = EMPTY_SELECTED_VALUES,
   showValueIndicator = true,
   hidePlaceholderOption = false,
   id,

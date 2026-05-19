@@ -195,6 +195,55 @@ const PROVIDER_REALTIME_EVENTS = [
   "provider.staff_deleted",
 ] as const;
 
+type ContactWithPrimary = {
+  id: string;
+  contactKind: "phone" | "email";
+  isPrimary: boolean;
+};
+
+function normalizePrimaryContacts<T extends ContactWithPrimary>(contacts: T[]): T[] {
+  const firstByKind = new Map<T["contactKind"], string>();
+  const primaryByKind = new Map<T["contactKind"], string>();
+
+  for (const contact of contacts) {
+    if (!firstByKind.has(contact.contactKind)) {
+      firstByKind.set(contact.contactKind, contact.id);
+    }
+    if (contact.isPrimary && !primaryByKind.has(contact.contactKind)) {
+      primaryByKind.set(contact.contactKind, contact.id);
+    }
+  }
+
+  return contacts.map((contact) => {
+    const primaryId = primaryByKind.get(contact.contactKind) ?? firstByKind.get(contact.contactKind);
+    const isPrimary = primaryId === contact.id;
+    return contact.isPrimary === isPrimary ? contact : { ...contact, isPrimary };
+  });
+}
+
+function applyContactPatch<T extends ContactWithPrimary>(
+  contacts: T[],
+  contactId: string,
+  patch: Partial<T>,
+): T[] {
+  let changedKind: T["contactKind"] | null = null;
+
+  for (const contact of contacts) {
+    if (contact.id === contactId) {
+      changedKind = patch.contactKind ?? contact.contactKind;
+      break;
+    }
+  }
+
+  return contacts.map((contact) => {
+    const next = contact.id === contactId ? { ...contact, ...patch } : contact;
+    if (patch.isPrimary && changedKind && next.id !== contactId && next.contactKind === changedKind) {
+      return { ...next, isPrimary: false };
+    }
+    return next;
+  });
+}
+
 function cardClass(extra?: string) {
   return cn(
     "rounded-[1.75rem] border border-border/70 bg-card",
@@ -334,9 +383,15 @@ function SpecializationMultiSelect({
         ? selectedLabels[0] ?? selectPlaceholder
         : `${selectPlaceholder}: ${selected.length}`;
   const compactSelectedOptionValues = useMemo(
-    () => options
-      .filter((option) => selectedKeys.has(normalizeSpecializationKey(option.value)))
-      .map((option) => option.value),
+    () => {
+      const values: string[] = [];
+      for (const option of options) {
+        if (selectedKeys.has(normalizeSpecializationKey(option.value))) {
+          values.push(option.value);
+        }
+      }
+      return values;
+    },
     [options, selectedKeys],
   );
 
@@ -517,6 +572,33 @@ function DoctorTitleMultiSelect({
   );
 }
 
+type WeeklyAvailabilitySchedule = ReturnType<typeof parseWeeklyAvailability>;
+type WeeklyAvailabilityRow = WeeklyAvailabilitySchedule[number];
+
+function weeklyAvailabilityIntervalItems(row: WeeklyAvailabilityRow) {
+  const seen = new Map<string, number>();
+  const items: Array<{
+    interval: WeeklyAvailabilityRow["intervals"][number];
+    intervalIndex: number;
+    key: string;
+  }> = [];
+  let intervalIndex = 0;
+
+  for (const interval of row.intervals) {
+    const baseKey = `${row.day}-${interval.start}-${interval.end}`;
+    const duplicateCount = seen.get(baseKey) ?? 0;
+    seen.set(baseKey, duplicateCount + 1);
+    items.push({
+      interval,
+      intervalIndex,
+      key: duplicateCount === 0 ? baseKey : `${baseKey}-${duplicateCount + 1}`,
+    });
+    intervalIndex += 1;
+  }
+
+  return items;
+}
+
 function WeeklyAvailabilityEditor({
   value,
   disabled,
@@ -623,16 +705,16 @@ function WeeklyAvailabilityEditor({
           </div>
           {row.enabled ? (
             <div className="space-y-1.5">
-              {row.intervals.map((interval, index) => (
+              {weeklyAvailabilityIntervalItems(row).map(({ interval, intervalIndex, key }) => (
                 <div
-                  key={`${row.day}-${index}`}
+                  key={key}
                   className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_28px] items-center gap-1.5"
                 >
                   <Input
                     type="time"
                     value={interval.start}
                     onChange={(event) =>
-                      updateInterval(row.day, index, "start", event.target.value)
+                      updateInterval(row.day, intervalIndex, "start", event.target.value)
                     }
                     className={cn(shellInputClassName, "h-8 min-w-0 px-1.5 text-xs")}
                     disabled={disabled}
@@ -642,7 +724,7 @@ function WeeklyAvailabilityEditor({
                     type="time"
                     value={interval.end}
                     onChange={(event) =>
-                      updateInterval(row.day, index, "end", event.target.value)
+                      updateInterval(row.day, intervalIndex, "end", event.target.value)
                     }
                     className={cn(shellInputClassName, "h-8 min-w-0 px-1.5 text-xs")}
                     disabled={disabled}
@@ -653,7 +735,7 @@ function WeeklyAvailabilityEditor({
                     variant="outline"
                     size="icon-sm"
                     className="h-8 w-7 rounded-lg bg-muted/20"
-                    onClick={() => removeInterval(row.day, index)}
+                    onClick={() => removeInterval(row.day, intervalIndex)}
                     disabled={disabled}
                     title={t.common_remove}
                     aria-label={t.common_remove}
@@ -761,9 +843,13 @@ function isDoctorRoleCode(value: string | null | undefined): value is DoctorRole
 }
 
 function providerPeopleSpecializationsToText(row: ProviderPeopleRow) {
-  const labels = row.specializations
-    .map((item) => item.code || item.name_en || "")
-    .filter(Boolean);
+  const labels: string[] = [];
+  for (const item of row.specializations) {
+    const label = item.code || item.name_en || "";
+    if (label) {
+      labels.push(label);
+    }
+  }
   return labels.length > 0 ? labels.join(", ") : row.fachbereich ?? "";
 }
 
@@ -807,12 +893,7 @@ function providerPeopleContactsToForm(row: ProviderPeopleRow): DoctorFormState["
     }
   }
 
-  return contacts.map((contact, _index, all) => {
-    const sameKind = all.filter((item) => item.contactKind === contact.contactKind);
-    const firstPrimary = sameKind.find((item) => item.isPrimary);
-    if (firstPrimary) return { ...contact, isPrimary: contact.id === firstPrimary.id };
-    return { ...contact, isPrimary: sameKind[0]?.id === contact.id };
-  });
+  return normalizePrimaryContacts(contacts);
 }
 
 function providerPeopleDoctorToForm(row: ProviderPeopleRow): DoctorFormState {
@@ -875,6 +956,10 @@ type ProvidersPageState = {
   specializationError: string;
   staffRoles: ProviderStaffRoleItem[];
   parentProviderOptions: ProviderSummary[];
+  peopleRows: ProviderPeopleRow[];
+  peoplePatientOptions: ProviderPeoplePatientOption[];
+  peopleBusy: boolean;
+  peopleError: string;
   createOpen: boolean;
   createBusy: boolean;
   createError: string;
@@ -993,10 +1078,6 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     role: searchParams.get("people_role") ?? "",
     patientId: searchParams.get("people_patient") ?? "",
   }));
-  const [peopleRows, setPeopleRows] = useState<ProviderPeopleRow[]>([]);
-  const [peoplePatientOptions, setPeoplePatientOptions] = useState<ProviderPeoplePatientOption[]>([]);
-  const [peopleBusy, setPeopleBusy] = useState(false);
-  const [peopleError, setPeopleError] = useState("");
   const [peopleVersion, setPeopleVersion] = useState(0);
   type PersistedProviderFilters = Pick<
     ProviderFilters,
@@ -1089,6 +1170,10 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
         specializationError: "",
         staffRoles: [],
         parentProviderOptions: [],
+        peopleRows: [],
+        peoplePatientOptions: [],
+        peopleBusy: false,
+        peopleError: "",
         createOpen: false,
         createBusy: false,
         createError: "",
@@ -1139,6 +1224,10 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     specializationError,
     staffRoles,
     parentProviderOptions,
+    peopleRows,
+    peoplePatientOptions,
+    peopleBusy,
+    peopleError,
     createOpen,
     createBusy,
     createError,
@@ -1197,8 +1286,6 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     setProvidersPageField("specializationError", value);
   const setStaffRoles = (value: SetStateAction<ProviderStaffRoleItem[]>) =>
     setProvidersPageField("staffRoles", value);
-  const setParentProviderOptions = (value: SetStateAction<ProviderSummary[]>) =>
-    setProvidersPageField("parentProviderOptions", value);
   const setCreateOpen = (value: SetStateAction<boolean>) =>
     setProvidersPageField("createOpen", value);
   const setCreateBusy = (value: SetStateAction<boolean>) =>
@@ -1499,20 +1586,19 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     }
 
     let cancelled = false;
-    setPeopleBusy(true);
-    setPeopleError("");
+    dispatchPageState({ peopleBusy: true, peopleError: "" });
 
     void fetchProviderPeople(peopleFilters)
       .then((items) => {
         if (cancelled) return;
-        setPeopleRows(items);
+        dispatchPageState({ peopleRows: items, peopleBusy: false });
       })
       .catch((error: unknown) => {
         if (cancelled) return;
-        setPeopleError(error instanceof Error ? error.message : t.common_failed_load);
-      })
-      .finally(() => {
-        if (!cancelled) setPeopleBusy(false);
+        dispatchPageState({
+          peopleBusy: false,
+          peopleError: error instanceof Error ? error.message : t.common_failed_load,
+        });
       });
 
     return () => {
@@ -1538,17 +1624,21 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     ])
       .then(([specializationItems, providerItems, roleItems, patientItems]) => {
         if (cancelled) return;
-        setSpecializations(specializationItems);
-        setParentProviderOptions(providerItems);
-        setStaffRoles(roleItems);
-        setPeoplePatientOptions(patientItems);
+        dispatchPageState({
+          specializations: specializationItems,
+          parentProviderOptions: providerItems,
+          staffRoles: roleItems,
+          peoplePatientOptions: patientItems,
+        });
       })
       .catch(() => {
         if (cancelled) return;
-        setSpecializations([]);
-        setParentProviderOptions([]);
-        setStaffRoles([]);
-        setPeoplePatientOptions([]);
+        dispatchPageState({
+          specializations: [],
+          parentProviderOptions: [],
+          staffRoles: [],
+          peoplePatientOptions: [],
+        });
       });
     return () => {
       cancelled = true;
@@ -2819,10 +2909,9 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     onOpenAppointments={() => window.open(`/appointments?provider=${detail.id}`, "_blank", "noopener,noreferrer")}
                   />
 
-                  <ProviderChildrenSection
-                    children={detail.children}
-                    onOpenProvider={openProvider}
-                  />
+                  <ProviderChildrenSection onOpenProvider={openProvider}>
+                    {detail.children}
+                  </ProviderChildrenSection>
 
                 {permissions.canManageRegistry || permissions.canViewPage ? (
                   <form
@@ -4195,9 +4284,13 @@ function specializationText(
   fallback?: string | null,
   lang: "de" | "ru" = "de",
 ) {
-  const labels = (specializations ?? [])
-    .map((item) => specializationOptionLabel(item as SpecializationItem, lang) || "")
-    .filter(Boolean);
+  const labels: string[] = [];
+  for (const item of specializations ?? []) {
+    const label = specializationOptionLabel(item as SpecializationItem, lang);
+    if (label) {
+      labels.push(label);
+    }
+  }
   if (labels.length) return labels.join(", ");
   return fallback ? specializationLabelForValue(fallback, specializations ?? [], lang) : "";
 }
@@ -4252,8 +4345,11 @@ function DoctorSection({
   onEditRelationship: (sourceDoctorId: string, relationship: DoctorRelationship) => void;
   onDeleteRelationship: (sourceDoctorId: string, relationshipId: string, doctorName: string) => void;
 }) {
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
+  const title = detail.provider_type === "non_medical"
+    ? l("providers_contacts")
+    : t.providers_doctors;
 
   return (
     <section className="space-y-3 rounded-xl border border-border/70 bg-card p-3.5">
@@ -4261,9 +4357,7 @@ function DoctorSection({
         <div className="flex min-w-0 items-center gap-2">
           <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
           <h3 className="truncate text-sm font-semibold text-foreground">
-            {detail.provider_type === "non_medical"
-              ? l("providers_contacts")
-              : t.providers_doctors}
+            {title}
           </h3>
           <span className="shrink-0 text-xs font-medium text-muted-foreground">
             {detail.doctors.length}
@@ -4288,272 +4382,449 @@ function DoctorSection({
       {detail.doctors.length === 0 ? (
         <div className="mt-4">
           <EmptyPanel
-            title={t.providers_doctors}
+            title={title}
             text={t.providers_no_patients}
           />
         </div>
       ) : (
         <div className="mt-4 space-y-3">
-          {detail.doctors.map((doctor) => {
-            const specializations = specializationText(doctor.specializations, doctor.fachbereich, lang);
-            const contacts = contactSummary(doctor.contacts, doctor.phone, doctor.email);
-            const roleLabel = doctor.role_label || (doctor.role_code ? doctorRoleLabel(doctor.role_code) : "");
-            const subrole = doctor.subrole?.trim() ?? "";
-            return (
-            <details
+          {detail.doctors.map((doctor) => (
+            <DoctorCard
               key={doctor.id}
-              className="group overflow-hidden rounded-[1.4rem] border border-border bg-card"
-            >
-              <summary className="grid cursor-pointer list-none gap-4 p-4 transition hover:bg-muted/20 md:grid-cols-[minmax(0,1fr)_160px] [&::-webkit-details-marker]:hidden">
-                <div className="flex min-w-0 gap-3">
-                  <div className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted/30 text-sm font-medium text-muted-foreground">
-                    <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-foreground">
-                      {doctorListDisplayName(doctor, lang)}
-                    </p>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      <Badge
-                        variant="outline"
-                        className="rounded-full border-border bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-                      >
-                        {specializations || t.common_not_set}
-                      </Badge>
-                      {roleLabel ? (
-                        <Badge
-                          variant="outline"
-                          className="rounded-full border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700"
-                        >
-                          {roleLabel}
-                        </Badge>
-                      ) : null}
-                      {subrole ? (
-                        <Badge
-                          variant="outline"
-                          className="rounded-full border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700"
-                        >
-                          {subrole}
-                        </Badge>
-                      ) : null}
-                      <Badge
-                        variant="outline"
-                        className="rounded-full border-border bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-                      >
-                        {personGenderLabel(doctor.gender)}
-                      </Badge>
-                      {doctor.languages.map((language) => (
-                        <Badge
-                          key={`${doctor.id}-${language}`}
-                          variant="outline"
-                          className="rounded-full border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"
-                        >
-                          {languageLabel(language, lang)}
-                        </Badge>
-                      ))}
-                    </div>
-                    <p className="mt-2 text-xs leading-snug text-muted-foreground">
-                      {contacts || t.common_not_set}
-                    </p>
-                    {doctor.opening_hours ? (
-                      <p className="mt-1 text-xs leading-snug text-muted-foreground">
-                        {l("providers_opening_hours")}:{" "}
-                        <span className="font-medium text-foreground">
-                          {formatWeeklyAvailabilityDisplay(doctor.opening_hours, lang)}
-                        </span>
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-                <div className="flex flex-col items-stretch justify-end gap-2 border-t border-dashed border-border pt-3 md:border-l md:border-t-0 md:pl-4 md:pt-0">
-                  {canManage ? (
-                    <>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 w-full justify-center rounded-lg bg-muted/20"
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          onEdit(doctor);
-                        }}
-                      >
-                        {l("patients_edit")}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 w-full justify-center rounded-lg bg-muted/20"
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          onNewRelationship(doctor.id);
-                        }}
-                      >
-                        <Plus className="size-3.5" />
-                        {l("providers_relationship_add_short")}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 w-full justify-center rounded-lg gap-1.5 border-rose-200 bg-rose-50/40 text-rose-700 hover:bg-rose-50"
-                        disabled={busy}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          onDelete(doctor.id, doctor.name);
-                        }}
-                      >
-                        <Trash2 className="size-3.5" />
-                        {l("patients_delete")}
-                      </Button>
-                    </>
-                  ) : null}
-                </div>
-              </summary>
-
-              <div className="grid border-t border-border bg-muted/10 sm:grid-cols-2 lg:grid-cols-[1.1fr_1fr_1fr_0.5fr_0.5fr]">
-                <div className="border-b border-border px-4 py-3 sm:border-r lg:border-b-0">
-                  <p className="text-xs text-muted-foreground">{l("providers_doctor_specializations")}</p>
-                  <p className="mt-1 text-sm font-semibold text-foreground">
-                    {specializations || t.common_not_set}
-                  </p>
-                </div>
-                <div className="border-b border-border px-4 py-3 sm:border-r lg:border-b-0">
-                  <p className="text-xs text-muted-foreground">{l("providers_license")}</p>
-                  <div className="mt-1 flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-semibold text-foreground">
-                      {doctor.license_number || t.common_not_set}
-                    </span>
-                    <Badge
-                      variant="outline"
-                      className="rounded-full border-border bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-                    >
-                      {doctor.licensing_country || t.common_not_set}
-                    </Badge>
-                  </div>
-                </div>
-                <div className="border-b border-border px-4 py-3 lg:border-b-0 lg:border-r">
-                  <p className="text-xs text-muted-foreground">{l("providers_valid_until")}</p>
-                  <p className="mt-1 text-sm font-semibold text-foreground">
-                    {compactDate(doctor.licensing_valid_until, t.common_not_set)}
-                  </p>
-                </div>
-                <div className="border-b border-border px-4 py-3 sm:border-b-0 sm:border-r">
-                  <p className="text-xs text-muted-foreground">{l("providers_patients")}</p>
-                  <p className="mt-1 text-sm font-semibold text-foreground">{doctor.patient_count}</p>
-                </div>
-                <div className="px-4 py-3">
-                  <p className="text-xs text-muted-foreground">{l("providers_slots")}</p>
-                  <p className="mt-1 text-sm font-semibold text-foreground">{doctor.appointment_count}</p>
-                </div>
-              </div>
-
-              <div className="border-t border-border bg-card px-4 py-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-xs font-medium text-muted-foreground">
-                    {l("providers_doctor_relationships")}
-                  </p>
-                  {canManage ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-8 rounded-lg bg-muted/20"
-                      onClick={() => onNewRelationship(doctor.id)}
-                    >
-                      <Plus className="size-3.5" />
-                      {l("providers_relationship_add")}
-                    </Button>
-                  ) : null}
-                </div>
-                {doctor.relationships.length === 0 ? (
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    {l("providers_relationships_empty")}
-                  </p>
-                ) : (
-                  <div className="mt-2 space-y-2">
-                    {doctor.relationships.map((relationship) => (
-                      <div
-                        key={relationship.id}
-                        className="grid gap-3 rounded-lg border border-border/70 bg-muted/10 p-3 md:grid-cols-[minmax(0,1fr)_160px]"
-                      >
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-foreground">
-                            {relationship.target_doctor_title ? `${relationship.target_doctor_title} ` : ""}
-                            {relationship.target_doctor_name}
-                          </p>
-                          <div className="mt-1 flex flex-wrap gap-1.5">
-                            <Badge
-                              variant="outline"
-                              className="rounded-full border-border bg-card px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-                            >
-                              {relationship.target_provider_name}
-                            </Badge>
-                            <Badge
-                              variant="outline"
-                              className="rounded-full border-border bg-card px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-                            >
-                              {doctorRelationshipTypeLabel(relationship.relationship_type)}
-                            </Badge>
-                            {!relationship.is_active ? (
-                              <Badge
-                                variant="outline"
-                                className="rounded-full border-border bg-card px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-                              >
-                                {t.common_inactive}
-                              </Badge>
-                            ) : null}
-                          </div>
-                          <p className="mt-2 text-xs leading-snug text-muted-foreground">
-                            {relationship.description || relationship.notes || t.common_not_set}
-                          </p>
-                        </div>
-                        {canManage ? (
-                          <div className="flex flex-col justify-end gap-2 border-t border-dashed border-border pt-3 md:border-l md:border-t-0 md:pl-4 md:pt-0">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="h-8 w-full justify-center rounded-lg bg-muted/20"
-                              disabled={relationshipBusy}
-                              onClick={() => onEditRelationship(doctor.id, relationship)}
-                            >
-                              {l("patients_edit")}
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="h-8 w-full justify-center rounded-lg gap-1.5 border-rose-200 bg-rose-50/40 text-rose-700 hover:bg-rose-50"
-                              disabled={relationshipBusy}
-                              onClick={() =>
-                                onDeleteRelationship(
-                                  doctor.id,
-                                  relationship.id,
-                                  relationship.target_doctor_name,
-                                )
-                              }
-                            >
-                              <Trash2 className="size-3.5" />
-                              {l("patients_delete")}
-                            </Button>
-                          </div>
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </details>
-            );
-          })}
+              doctor={doctor}
+              busy={busy}
+              canManage={canManage}
+              relationshipBusy={relationshipBusy}
+              onDelete={onDelete}
+              onDeleteRelationship={onDeleteRelationship}
+              onEdit={onEdit}
+              onEditRelationship={onEditRelationship}
+              onNewRelationship={onNewRelationship}
+            />
+          ))}
         </div>
       )}
     </section>
+  );
+}
+
+function DoctorCard({
+  doctor,
+  busy,
+  canManage,
+  relationshipBusy,
+  onDelete,
+  onDeleteRelationship,
+  onEdit,
+  onEditRelationship,
+  onNewRelationship,
+}: {
+  doctor: DoctorSummary;
+  busy: boolean;
+  canManage: boolean;
+  relationshipBusy: boolean;
+  onDelete: (doctorId: string, doctorName: string) => void;
+  onDeleteRelationship: (sourceDoctorId: string, relationshipId: string, doctorName: string) => void;
+  onEdit: (doctor: DoctorSummary) => void;
+  onEditRelationship: (sourceDoctorId: string, relationship: DoctorRelationship) => void;
+  onNewRelationship: (sourceDoctorId: string) => void;
+}) {
+  const { lang } = useLang();
+  const specializations = specializationText(doctor.specializations, doctor.fachbereich, lang);
+  const contacts = contactSummary(doctor.contacts, doctor.phone, doctor.email);
+  const roleLabel = doctor.role_label || (doctor.role_code ? doctorRoleLabel(doctor.role_code) : "");
+  const subrole = doctor.subrole?.trim() ?? "";
+
+  return (
+    <details className="group overflow-hidden rounded-[1.4rem] border border-border bg-card">
+      <DoctorCardSummary
+        busy={busy}
+        canManage={canManage}
+        contacts={contacts}
+        doctor={doctor}
+        roleLabel={roleLabel}
+        specializations={specializations}
+        subrole={subrole}
+        onDelete={onDelete}
+        onEdit={onEdit}
+        onNewRelationship={onNewRelationship}
+      />
+      <DoctorMetrics doctor={doctor} specializations={specializations} />
+      <DoctorRelationships
+        canManage={canManage}
+        doctor={doctor}
+        relationshipBusy={relationshipBusy}
+        onDeleteRelationship={onDeleteRelationship}
+        onEditRelationship={onEditRelationship}
+        onNewRelationship={onNewRelationship}
+      />
+    </details>
+  );
+}
+
+function DoctorCardSummary({
+  busy,
+  canManage,
+  contacts,
+  doctor,
+  roleLabel,
+  specializations,
+  subrole,
+  onDelete,
+  onEdit,
+  onNewRelationship,
+}: {
+  busy: boolean;
+  canManage: boolean;
+  contacts: string;
+  doctor: DoctorSummary;
+  roleLabel: string;
+  specializations: string;
+  subrole: string;
+  onDelete: (doctorId: string, doctorName: string) => void;
+  onEdit: (doctor: DoctorSummary) => void;
+  onNewRelationship: (sourceDoctorId: string) => void;
+}) {
+  const { t, lang } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+
+  return (
+    <summary className="grid cursor-pointer list-none gap-4 p-4 transition hover:bg-muted/20 md:grid-cols-[minmax(0,1fr)_160px] [&::-webkit-details-marker]:hidden">
+      <div className="flex min-w-0 gap-3">
+        <div className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted/30 text-sm font-medium text-muted-foreground">
+          <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-foreground">
+            {doctorListDisplayName(doctor, lang)}
+          </p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <Badge
+              variant="outline"
+              className="rounded-full border-border bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+            >
+              {specializations || t.common_not_set}
+            </Badge>
+            {roleLabel ? (
+              <Badge
+                variant="outline"
+                className="rounded-full border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700"
+              >
+                {roleLabel}
+              </Badge>
+            ) : null}
+            {subrole ? (
+              <Badge
+                variant="outline"
+                className="rounded-full border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700"
+              >
+                {subrole}
+              </Badge>
+            ) : null}
+            <Badge
+              variant="outline"
+              className="rounded-full border-border bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+            >
+              {personGenderLabel(doctor.gender)}
+            </Badge>
+            {doctor.languages.map((language) => (
+              <Badge
+                key={`${doctor.id}-${language}`}
+                variant="outline"
+                className="rounded-full border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"
+              >
+                {languageLabel(language, lang)}
+              </Badge>
+            ))}
+          </div>
+          <p className="mt-2 text-xs leading-snug text-muted-foreground">
+            {contacts || t.common_not_set}
+          </p>
+          {doctor.opening_hours ? (
+            <p className="mt-1 text-xs leading-snug text-muted-foreground">
+              {l("providers_opening_hours")}:{" "}
+              <span className="font-medium text-foreground">
+                {formatWeeklyAvailabilityDisplay(doctor.opening_hours, lang)}
+              </span>
+            </p>
+          ) : null}
+        </div>
+      </div>
+      <DoctorSummaryActions
+        busy={busy}
+        canManage={canManage}
+        doctor={doctor}
+        onDelete={onDelete}
+        onEdit={onEdit}
+        onNewRelationship={onNewRelationship}
+      />
+    </summary>
+  );
+}
+
+function DoctorSummaryActions({
+  busy,
+  canManage,
+  doctor,
+  onDelete,
+  onEdit,
+  onNewRelationship,
+}: {
+  busy: boolean;
+  canManage: boolean;
+  doctor: DoctorSummary;
+  onDelete: (doctorId: string, doctorName: string) => void;
+  onEdit: (doctor: DoctorSummary) => void;
+  onNewRelationship: (sourceDoctorId: string) => void;
+}) {
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+
+  return (
+    <div className="flex flex-col items-stretch justify-end gap-2 border-t border-dashed border-border pt-3 md:border-l md:border-t-0 md:pl-4 md:pt-0">
+      {canManage ? (
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 w-full justify-center rounded-lg bg-muted/20"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onEdit(doctor);
+            }}
+          >
+            {l("patients_edit")}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 w-full justify-center rounded-lg bg-muted/20"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onNewRelationship(doctor.id);
+            }}
+          >
+            <Plus className="size-3.5" />
+            {l("providers_relationship_add_short")}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 w-full justify-center rounded-lg gap-1.5 border-rose-200 bg-rose-50/40 text-rose-700 hover:bg-rose-50"
+            disabled={busy}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onDelete(doctor.id, doctor.name);
+            }}
+          >
+            <Trash2 className="size-3.5" />
+            {l("patients_delete")}
+          </Button>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function DoctorMetrics({
+  doctor,
+  specializations,
+}: {
+  doctor: DoctorSummary;
+  specializations: string;
+}) {
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+
+  return (
+    <div className="grid border-t border-border bg-muted/10 sm:grid-cols-2 lg:grid-cols-[1.1fr_1fr_1fr_0.5fr_0.5fr]">
+      <div className="border-b border-border px-4 py-3 sm:border-r lg:border-b-0">
+        <p className="text-xs text-muted-foreground">{l("providers_doctor_specializations")}</p>
+        <p className="mt-1 text-sm font-semibold text-foreground">
+          {specializations || t.common_not_set}
+        </p>
+      </div>
+      <div className="border-b border-border px-4 py-3 sm:border-r lg:border-b-0">
+        <p className="text-xs text-muted-foreground">{l("providers_license")}</p>
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          <span className="text-sm font-semibold text-foreground">
+            {doctor.license_number || t.common_not_set}
+          </span>
+          <Badge
+            variant="outline"
+            className="rounded-full border-border bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+          >
+            {doctor.licensing_country || t.common_not_set}
+          </Badge>
+        </div>
+      </div>
+      <div className="border-b border-border px-4 py-3 lg:border-b-0 lg:border-r">
+        <p className="text-xs text-muted-foreground">{l("providers_valid_until")}</p>
+        <p className="mt-1 text-sm font-semibold text-foreground">
+          {compactDate(doctor.licensing_valid_until, t.common_not_set)}
+        </p>
+      </div>
+      <div className="border-b border-border px-4 py-3 sm:border-b-0 sm:border-r">
+        <p className="text-xs text-muted-foreground">{l("providers_patients")}</p>
+        <p className="mt-1 text-sm font-semibold text-foreground">{doctor.patient_count}</p>
+      </div>
+      <div className="px-4 py-3">
+        <p className="text-xs text-muted-foreground">{l("providers_slots")}</p>
+        <p className="mt-1 text-sm font-semibold text-foreground">{doctor.appointment_count}</p>
+      </div>
+    </div>
+  );
+}
+
+function DoctorRelationships({
+  canManage,
+  doctor,
+  relationshipBusy,
+  onDeleteRelationship,
+  onEditRelationship,
+  onNewRelationship,
+}: {
+  canManage: boolean;
+  doctor: DoctorSummary;
+  relationshipBusy: boolean;
+  onDeleteRelationship: (sourceDoctorId: string, relationshipId: string, doctorName: string) => void;
+  onEditRelationship: (sourceDoctorId: string, relationship: DoctorRelationship) => void;
+  onNewRelationship: (sourceDoctorId: string) => void;
+}) {
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+
+  return (
+    <div className="border-t border-border bg-card px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-medium text-muted-foreground">
+          {l("providers_doctor_relationships")}
+        </p>
+        {canManage ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-lg bg-muted/20"
+            onClick={() => onNewRelationship(doctor.id)}
+          >
+            <Plus className="size-3.5" />
+            {l("providers_relationship_add")}
+          </Button>
+        ) : null}
+      </div>
+      {doctor.relationships.length === 0 ? (
+        <p className="mt-2 text-sm text-muted-foreground">
+          {l("providers_relationships_empty")}
+        </p>
+      ) : (
+        <div className="mt-2 space-y-2">
+          {doctor.relationships.map((relationship) => (
+            <DoctorRelationshipCard
+              key={relationship.id}
+              doctorId={doctor.id}
+              canManage={canManage}
+              relationship={relationship}
+              relationshipBusy={relationshipBusy}
+              onDeleteRelationship={onDeleteRelationship}
+              onEditRelationship={onEditRelationship}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DoctorRelationshipCard({
+  doctorId,
+  canManage,
+  relationship,
+  relationshipBusy,
+  onDeleteRelationship,
+  onEditRelationship,
+}: {
+  doctorId: string;
+  canManage: boolean;
+  relationship: DoctorRelationship;
+  relationshipBusy: boolean;
+  onDeleteRelationship: (sourceDoctorId: string, relationshipId: string, doctorName: string) => void;
+  onEditRelationship: (sourceDoctorId: string, relationship: DoctorRelationship) => void;
+}) {
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+
+  return (
+    <div className="grid gap-3 rounded-lg border border-border/70 bg-muted/10 p-3 md:grid-cols-[minmax(0,1fr)_160px]">
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-foreground">
+          {relationship.target_doctor_title ? `${relationship.target_doctor_title} ` : ""}
+          {relationship.target_doctor_name}
+        </p>
+        <div className="mt-1 flex flex-wrap gap-1.5">
+          <Badge
+            variant="outline"
+            className="rounded-full border-border bg-card px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+          >
+            {relationship.target_provider_name}
+          </Badge>
+          <Badge
+            variant="outline"
+            className="rounded-full border-border bg-card px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+          >
+            {doctorRelationshipTypeLabel(relationship.relationship_type)}
+          </Badge>
+          {!relationship.is_active ? (
+            <Badge
+              variant="outline"
+              className="rounded-full border-border bg-card px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+            >
+              {t.common_inactive}
+            </Badge>
+          ) : null}
+        </div>
+        <p className="mt-2 text-xs leading-snug text-muted-foreground">
+          {relationship.description || relationship.notes || t.common_not_set}
+        </p>
+      </div>
+      {canManage ? (
+        <div className="flex flex-col justify-end gap-2 border-t border-dashed border-border pt-3 md:border-l md:border-t-0 md:pl-4 md:pt-0">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 w-full justify-center rounded-lg bg-muted/20"
+            disabled={relationshipBusy}
+            onClick={() => onEditRelationship(doctorId, relationship)}
+          >
+            {l("patients_edit")}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 w-full justify-center rounded-lg gap-1.5 border-rose-200 bg-rose-50/40 text-rose-700 hover:bg-rose-50"
+            disabled={relationshipBusy}
+            onClick={() =>
+              onDeleteRelationship(
+                doctorId,
+                relationship.id,
+                relationship.target_doctor_name,
+              )
+            }
+          >
+            <Trash2 className="size-3.5" />
+            {l("patients_delete")}
+          </Button>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -5109,38 +5380,19 @@ function ProviderFormFields({
   const providerType = forceNonMedical ? "non_medical" : form.providerType;
   const isMedicalProvider = providerType === "medical";
   const canManageSpecializations = Boolean(onManageSpecializations) && !disabled && isMedicalProvider;
-  const normalizeProviderContacts = (contacts: ProviderFormState["contacts"]) =>
-    contacts.map((contact, _index, all) => {
-      const sameKind = all.filter((item) => item.contactKind === contact.contactKind);
-      const firstPrimary = sameKind.find((item) => item.isPrimary);
-      if (firstPrimary) {
-        return { ...contact, isPrimary: contact.id === firstPrimary.id };
-      }
-      return { ...contact, isPrimary: sameKind[0]?.id === contact.id };
-    });
+
   const updateProviderContact = (
     contactId: string,
     patch: Partial<ProviderContactFormState>,
   ) => {
     if (!onContactsChange) return;
-    const changedContacts = form.contacts.map((contact) => {
-      if (contact.id !== contactId) return contact;
-      return { ...contact, ...patch };
-    }).map((contact, _index, all) => {
-      if (!patch.isPrimary) return contact;
-      const changed = all.find((item) => item.id === contactId);
-      if (!changed || contact.contactKind !== changed.contactKind || contact.id === contactId) {
-        return contact;
-      }
-      return { ...contact, isPrimary: false };
-    });
-    onContactsChange(normalizeProviderContacts(changedContacts));
+    onContactsChange(normalizePrimaryContacts(applyContactPatch(form.contacts, contactId, patch)));
   };
   const addProviderContact = () => {
     if (!onContactsChange) return;
     const hasPhone = form.contacts.some((contact) => contact.contactKind === "phone");
     const contactKind = hasPhone ? "email" : "phone";
-    onContactsChange(normalizeProviderContacts([
+    onContactsChange(normalizePrimaryContacts([
       ...form.contacts,
       {
         id: makeContactFormId("provider-contact"),
@@ -5156,10 +5408,95 @@ function ProviderFormFields({
   };
   const removeProviderContact = (contactId: string) => {
     if (!onContactsChange) return;
-    onContactsChange(normalizeProviderContacts(form.contacts.filter((contact) => contact.id !== contactId)));
+    onContactsChange(normalizePrimaryContacts(form.contacts.filter((contact) => contact.id !== contactId)));
   };
 
   const profileFields = (
+    <ProviderProfileFields
+      canManageSpecializations={canManageSpecializations}
+      disabled={disabled}
+      forceNonMedical={forceNonMedical}
+      form={form}
+      isMedicalProvider={isMedicalProvider}
+      parentOptions={parentOptions}
+      providerType={providerType}
+      specializations={specializations}
+      onChange={onChange}
+      onManageSpecializations={onManageSpecializations}
+    />
+  );
+  const addressFields = (
+    <ProviderAddressFields form={form} disabled={disabled} onChange={onChange} />
+  );
+  const contactFields = (
+    <ProviderContactFields
+      contacts={form.contacts}
+      disabled={disabled}
+      onAdd={addProviderContact}
+      onRemove={removeProviderContact}
+      onUpdate={updateProviderContact}
+    />
+  );
+  const contractFields = (
+    <ProviderContractFields form={form} disabled={disabled} onChange={onChange} />
+  );
+
+  if (grouped) {
+    return (
+      <div className="space-y-3">
+        <Section title={l("providers_provider_profile")}>
+          {profileFields}
+        </Section>
+        <Section title={l("patients_address")}>
+          {addressFields}
+        </Section>
+        <Section title={l("patients_contact")}>
+          {contactFields}
+        </Section>
+        <Section title={l("providers_contract_and_notes")}>
+          {contractFields}
+        </Section>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {profileFields}
+      {addressFields}
+      {contactFields}
+      {contractFields}
+    </div>
+  );
+}
+
+function ProviderProfileFields({
+  canManageSpecializations,
+  disabled,
+  forceNonMedical,
+  form,
+  isMedicalProvider,
+  parentOptions,
+  providerType,
+  specializations,
+  onChange,
+  onManageSpecializations,
+}: {
+  canManageSpecializations: boolean;
+  disabled: boolean;
+  forceNonMedical: boolean;
+  form: ProviderFormState;
+  isMedicalProvider: boolean;
+  parentOptions: ProviderSummary[];
+  providerType: ProviderFormState["providerType"];
+  specializations: SpecializationItem[];
+  onChange: (field: keyof ProviderFormState, value: string) => void;
+  onManageSpecializations?: () => void;
+}) {
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+
+  return (
     <>
       <div className="grid gap-4 md:grid-cols-3">
         <Field label={l("patients_display_name")}>
@@ -5297,8 +5634,20 @@ function ProviderFormFields({
       ) : null}
     </>
   );
+}
 
-  const addressFields = (
+function ProviderAddressFields({
+  form,
+  disabled,
+  onChange,
+}: {
+  form: ProviderFormState;
+  disabled: boolean;
+  onChange: (field: keyof ProviderFormState, value: string) => void;
+}) {
+  const { t } = useLang();
+
+  return (
     <>
       <Field label={t.providers_street}>
         <Input
@@ -5337,11 +5686,28 @@ function ProviderFormFields({
       </div>
     </>
   );
+}
 
-  const contactFields = (
+function ProviderContactFields({
+  contacts,
+  disabled,
+  onAdd,
+  onRemove,
+  onUpdate,
+}: {
+  contacts: ProviderFormState["contacts"];
+  disabled: boolean;
+  onAdd: () => void;
+  onRemove: (contactId: string) => void;
+  onUpdate: (contactId: string, patch: Partial<ProviderContactFormState>) => void;
+}) {
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+
+  return (
     <>
       <div className="space-y-2">
-        {form.contacts.map((contact) => (
+        {contacts.map((contact) => (
           <div
             key={contact.id}
             className="grid gap-2 rounded-lg border border-border/70 bg-card/50 p-2 md:grid-cols-[112px_132px_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_92px_36px]"
@@ -5350,7 +5716,7 @@ function ProviderFormFields({
               <NativeComboboxSelect
                 value={contact.contactKind}
                 onChange={(event) =>
-                  updateProviderContact(contact.id, {
+                  onUpdate(contact.id, {
                     contactKind: event.target.value === "email" ? "email" : "phone",
                   })
                 }
@@ -5365,7 +5731,7 @@ function ProviderFormFields({
               <NativeComboboxSelect
                 value={contact.contactType}
                 onChange={(event) =>
-                  updateProviderContact(contact.id, {
+                  onUpdate(contact.id, {
                     contactType:
                       event.target.value === "department" || event.target.value === "other"
                         ? event.target.value
@@ -5383,7 +5749,7 @@ function ProviderFormFields({
             <Field label={l("providers_contact_label")}>
               <Input
                 value={contact.label}
-                onChange={(event) => updateProviderContact(contact.id, { label: event.target.value })}
+                onChange={(event) => onUpdate(contact.id, { label: event.target.value })}
                 className={shellInputClassName}
                 disabled={disabled}
               />
@@ -5391,7 +5757,7 @@ function ProviderFormFields({
             <Field label={l("providers_staff_department")}>
               <Input
                 value={contact.department}
-                onChange={(event) => updateProviderContact(contact.id, { department: event.target.value })}
+                onChange={(event) => onUpdate(contact.id, { department: event.target.value })}
                 className={shellInputClassName}
                 disabled={disabled}
               />
@@ -5400,7 +5766,7 @@ function ProviderFormFields({
               <Input
                 type={contact.contactKind === "email" ? "email" : "text"}
                 value={contact.value}
-                onChange={(event) => updateProviderContact(contact.id, { value: event.target.value })}
+                onChange={(event) => onUpdate(contact.id, { value: event.target.value })}
                 className={shellInputClassName}
                 disabled={disabled}
               />
@@ -5410,7 +5776,7 @@ function ProviderFormFields({
                 type="checkbox"
                 checked={contact.isPrimary}
                 onChange={(event) =>
-                  updateProviderContact(contact.id, { isPrimary: event.target.checked })
+                  onUpdate(contact.id, { isPrimary: event.target.checked })
                 }
                 className={checkboxClass}
                 disabled={disabled}
@@ -5424,7 +5790,7 @@ function ProviderFormFields({
                 size="icon-sm"
                 title={t.common_remove}
                 aria-label={t.common_remove}
-                onClick={() => removeProviderContact(contact.id)}
+                onClick={() => onRemove(contact.id)}
                 disabled={disabled}
               >
                 <Trash2 className="size-3.5" />
@@ -5438,7 +5804,7 @@ function ProviderFormFields({
             variant="outline"
             size="sm"
             className="h-8 rounded-lg bg-muted/20"
-            onClick={addProviderContact}
+            onClick={onAdd}
           >
             <Plus className="size-3.5" />
             {l("providers_contact_add")}
@@ -5447,8 +5813,21 @@ function ProviderFormFields({
       </div>
     </>
   );
+}
 
-  const contractFields = (
+function ProviderContractFields({
+  form,
+  disabled,
+  onChange,
+}: {
+  form: ProviderFormState;
+  disabled: boolean;
+  onChange: (field: keyof ProviderFormState, value: string) => void;
+}) {
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+
+  return (
     <>
       <Field label={t.providers_contract}>
         <textarea
@@ -5473,34 +5852,6 @@ function ProviderFormFields({
       </Field>
     </>
   );
-
-  if (grouped) {
-    return (
-      <div className="space-y-3">
-        <Section title={l("providers_provider_profile")}>
-          {profileFields}
-        </Section>
-        <Section title={l("patients_address")}>
-          {addressFields}
-        </Section>
-        <Section title={l("patients_contact")}>
-          {contactFields}
-        </Section>
-        <Section title={l("providers_contract_and_notes")}>
-          {contractFields}
-        </Section>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      {profileFields}
-      {addressFields}
-      {contactFields}
-      {contractFields}
-    </div>
-  );
 }
 
 function DoctorFormFields({
@@ -5514,50 +5865,16 @@ function DoctorFormFields({
   onChange: (field: keyof DoctorFormState, value: string) => void;
   onContactsChange: (contacts: DoctorFormState["contacts"]) => void;
 }) {
-  const { t } = useLang();
-  const l = (key: string) => t.uiText[key] ?? key;
-  const doctorRoleOptions: Array<{ value: Exclude<DoctorFormState["roleCode"], "">; label: string }> = [
-    { value: "clinical_director", label: l("providers_doctor_role_clinical_director") },
-    { value: "chefarzt", label: l("providers_doctor_role_chefarzt") },
-    { value: "oberarzt", label: l("providers_doctor_role_oberarzt") },
-    { value: "facharzt", label: l("providers_doctor_role_facharzt") },
-    { value: "assistenzarzt", label: l("providers_doctor_role_assistenzarzt") },
-    { value: "other", label: l("providers_doctor_role_other") },
-  ];
-  const normalizeContacts = (contacts: DoctorFormState["contacts"]) =>
-    contacts.map((contact, _index, all) => {
-      const sameKind = all.filter((item) => item.contactKind === contact.contactKind);
-      const firstPrimary = sameKind.find((item) => item.isPrimary);
-      if (firstPrimary) {
-        return { ...contact, isPrimary: contact.id === firstPrimary.id };
-      }
-      return { ...contact, isPrimary: sameKind[0]?.id === contact.id };
-    });
   const updateContact = (
     contactId: string,
     patch: Partial<DoctorFormState["contacts"][number]>,
   ) => {
-    const changedContacts = form.contacts.map((contact) => {
-        if (contact.id !== contactId) return contact;
-        const next = { ...contact, ...patch };
-        if (patch.isPrimary) {
-          return next;
-        }
-        return next;
-      }).map((contact, _index, all) => {
-        if (!patch.isPrimary) return contact;
-        const changed = all.find((item) => item.id === contactId);
-        if (!changed || contact.contactKind !== changed.contactKind || contact.id === contactId) {
-          return contact;
-        }
-        return { ...contact, isPrimary: false };
-      });
-    onContactsChange(normalizeContacts(changedContacts));
+    onContactsChange(normalizePrimaryContacts(applyContactPatch(form.contacts, contactId, patch)));
   };
   const addContact = () => {
     const hasPhone = form.contacts.some((contact) => contact.contactKind === "phone");
     const contactKind = hasPhone ? "email" : "phone";
-    onContactsChange(normalizeContacts([
+    onContactsChange(normalizePrimaryContacts([
       ...form.contacts,
       {
         id: makeContactFormId("contact"),
@@ -5570,242 +5887,318 @@ function DoctorFormFields({
     ]));
   };
   const removeContact = (contactId: string) => {
-    onContactsChange(normalizeContacts(form.contacts.filter((contact) => contact.id !== contactId)));
+    onContactsChange(normalizePrimaryContacts(form.contacts.filter((contact) => contact.id !== contactId)));
   };
 
   return (
     <div className="space-y-3">
-      <Section title={l("providers_doctor_profile")}>
-        <div className="grid gap-4 md:grid-cols-2">
-          <Field label={t.patients_first_name}>
+      <DoctorProfileFields form={form} specializations={specializations} onChange={onChange} />
+      <DoctorContactFields
+        contacts={form.contacts}
+        onAdd={addContact}
+        onRemove={removeContact}
+        onUpdate={updateContact}
+      />
+      <DoctorLicenseFields form={form} onChange={onChange} />
+      <DoctorNotesFields notes={form.notes} onChange={(value) => onChange("notes", value)} />
+    </div>
+  );
+}
+
+function DoctorProfileFields({
+  form,
+  specializations,
+  onChange,
+}: {
+  form: DoctorFormState;
+  specializations: SpecializationItem[];
+  onChange: (field: keyof DoctorFormState, value: string) => void;
+}) {
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+  const doctorRoleOptions: Array<{ value: Exclude<DoctorFormState["roleCode"], "">; label: string }> = [
+    { value: "clinical_director", label: l("providers_doctor_role_clinical_director") },
+    { value: "chefarzt", label: l("providers_doctor_role_chefarzt") },
+    { value: "oberarzt", label: l("providers_doctor_role_oberarzt") },
+    { value: "facharzt", label: l("providers_doctor_role_facharzt") },
+    { value: "assistenzarzt", label: l("providers_doctor_role_assistenzarzt") },
+    { value: "other", label: l("providers_doctor_role_other") },
+  ];
+
+  return (
+    <Section title={l("providers_doctor_profile")}>
+      <div className="grid gap-4 md:grid-cols-2">
+        <Field label={t.patients_first_name}>
+          <Input
+            value={form.firstName}
+            onChange={(event) => onChange("firstName", event.target.value)}
+            className={shellInputClassName}
+          />
+        </Field>
+        <Field label={t.patients_last_name}>
+          <Input
+            value={form.lastName}
+            onChange={(event) => onChange("lastName", event.target.value)}
+            className={shellInputClassName}
+          />
+        </Field>
+        <Field label={l("patients_display_name")}>
+          <Input
+            value={form.name}
+            onChange={(event) => onChange("name", event.target.value)}
+            className={shellInputClassName}
+            placeholder={l("patients_display_name")}
+          />
+        </Field>
+        <Field label={t.providers_doctor_title}>
+          <DoctorTitleMultiSelect
+            value={form.title}
+            onChange={(nextValue) => onChange("title", nextValue)}
+          />
+        </Field>
+        <Field label={l("providers_doctor_role")}>
+          <NativeComboboxSelect
+            value={form.roleCode}
+            onChange={(event) => onChange("roleCode", event.target.value)}
+            className={formSelectClassName}
+          >
+            <option value="">{t.common_not_set}</option>
+            {doctorRoleOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </NativeComboboxSelect>
+        </Field>
+        {form.roleCode === "other" ? (
+          <Field label={l("providers_doctor_role_custom")}>
             <Input
-              value={form.firstName}
-              onChange={(event) => onChange("firstName", event.target.value)}
+              value={form.roleLabel}
+              onChange={(event) => onChange("roleLabel", event.target.value)}
               className={shellInputClassName}
             />
           </Field>
-          <Field label={t.patients_last_name}>
-            <Input
-              value={form.lastName}
-              onChange={(event) => onChange("lastName", event.target.value)}
-              className={shellInputClassName}
+        ) : null}
+        <Field label={l("providers_doctor_subrole")}>
+          <Input
+            value={form.subrole}
+            onChange={(event) => onChange("subrole", event.target.value)}
+            className={shellInputClassName}
+            placeholder="Stellvertretender Klinikdirektor"
+          />
+        </Field>
+        <Field label={t.patients_gender}>
+          <NativeComboboxSelect
+            value={form.gender}
+            onChange={(event) =>
+              onChange(
+                "gender",
+                event.target.value === "male" || event.target.value === "female"
+                  ? event.target.value
+                  : "unknown",
+              )
+            }
+            className={formSelectClassName}
+          >
+            <option value="unknown">{t.common_unknown}</option>
+            <option value="male">{t.gender_male}</option>
+            <option value="female">{t.gender_female}</option>
+          </NativeComboboxSelect>
+        </Field>
+        <Field label={l("providers_doctor_specializations")}>
+          <SpecializationMultiSelect
+            value={form.specializations}
+            items={specializations}
+            onChange={(nextValue) => {
+              onChange("specializations", nextValue);
+              onChange("fachbereich", firstSpecializationValue(nextValue));
+            }}
+          />
+        </Field>
+        <Field label={l("providers_languages")}>
+          <LanguageMultiSelect
+            value={form.languages}
+            onChange={(nextValue) => onChange("languages", nextValue)}
+            className={formSelectClassName}
+            placeholder={l("patients_languages_select_placeholder")}
+          />
+        </Field>
+        <div className="md:col-span-2">
+          <FieldGroup label={l("providers_opening_hours")}>
+            <WeeklyAvailabilityEditor
+              value={form.openingHours}
+              onChange={(nextValue) => onChange("openingHours", nextValue)}
             />
-          </Field>
-          <Field label={l("patients_display_name")}>
-            <Input
-              value={form.name}
-              onChange={(event) => onChange("name", event.target.value)}
-              className={shellInputClassName}
-              placeholder={l("patients_display_name")}
-            />
-          </Field>
-          <Field label={t.providers_doctor_title}>
-            <DoctorTitleMultiSelect
-              value={form.title}
-              onChange={(nextValue) => onChange("title", nextValue)}
-            />
-          </Field>
-          <Field label={l("providers_doctor_role")}>
-            <NativeComboboxSelect
-              value={form.roleCode}
-              onChange={(event) => onChange("roleCode", event.target.value)}
-              className={formSelectClassName}
-            >
-              <option value="">{t.common_not_set}</option>
-              {doctorRoleOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </NativeComboboxSelect>
-          </Field>
-          {form.roleCode === "other" ? (
-            <Field label={l("providers_doctor_role_custom")}>
+          </FieldGroup>
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+function DoctorContactFields({
+  contacts,
+  onAdd,
+  onRemove,
+  onUpdate,
+}: {
+  contacts: DoctorFormState["contacts"];
+  onAdd: () => void;
+  onRemove: (contactId: string) => void;
+  onUpdate: (contactId: string, patch: Partial<DoctorFormState["contacts"][number]>) => void;
+}) {
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+
+  return (
+    <Section title={l("providers_contacts")}>
+      <div className="space-y-2">
+        {contacts.map((contact) => (
+          <div
+            key={contact.id}
+            className="grid gap-2 rounded-lg border border-border/70 bg-card/50 p-2 md:grid-cols-[132px_132px_minmax(0,1fr)_92px_36px]"
+          >
+            <Field label={l("providers_contact_kind")}>
+              <NativeComboboxSelect
+                value={contact.contactKind}
+                onChange={(event) =>
+                  onUpdate(contact.id, {
+                    contactKind: event.target.value === "email" ? "email" : "phone",
+                  })
+                }
+                className={formSelectClassName}
+              >
+                <option value="phone">{t.field_phone}</option>
+                <option value="email">{t.field_email}</option>
+              </NativeComboboxSelect>
+            </Field>
+            <Field label={l("providers_contact_type")}>
+              <NativeComboboxSelect
+                value={contact.contactType}
+                onChange={(event) =>
+                  onUpdate(contact.id, {
+                    contactType:
+                      event.target.value === "private" || event.target.value === "other"
+                        ? event.target.value
+                        : "work",
+                  })
+                }
+                className={formSelectClassName}
+              >
+                <option value="work">{l("providers_contact_type_work")}</option>
+                <option value="private">{l("providers_contact_type_private")}</option>
+                <option value="other">{l("providers_contact_type_other")}</option>
+              </NativeComboboxSelect>
+            </Field>
+            <Field label={l("providers_contact_value")}>
               <Input
-                value={form.roleLabel}
-                onChange={(event) => onChange("roleLabel", event.target.value)}
+                type={contact.contactKind === "email" ? "email" : "text"}
+                value={contact.value}
+                onChange={(event) => onUpdate(contact.id, { value: event.target.value })}
                 className={shellInputClassName}
               />
             </Field>
-          ) : null}
-          <Field label={l("providers_doctor_subrole")}>
-            <Input
-              value={form.subrole}
-              onChange={(event) => onChange("subrole", event.target.value)}
-              className={shellInputClassName}
-              placeholder="Stellvertretender Klinikdirektor"
-            />
-          </Field>
-          <Field label={t.patients_gender}>
-            <NativeComboboxSelect
-              value={form.gender}
-              onChange={(event) =>
-                onChange(
-                  "gender",
-                  event.target.value === "male" || event.target.value === "female"
-                    ? event.target.value
-                    : "unknown",
-                )
-              }
-              className={formSelectClassName}
-            >
-              <option value="unknown">{t.common_unknown}</option>
-              <option value="male">{t.gender_male}</option>
-              <option value="female">{t.gender_female}</option>
-            </NativeComboboxSelect>
-          </Field>
-          <Field label={l("providers_doctor_specializations")}>
-            <SpecializationMultiSelect
-              value={form.specializations}
-              items={specializations}
-              onChange={(nextValue) => {
-                onChange("specializations", nextValue);
-                onChange("fachbereich", firstSpecializationValue(nextValue));
-              }}
-            />
-          </Field>
-          <Field label={l("providers_languages")}>
-            <LanguageMultiSelect
-              value={form.languages}
-              onChange={(nextValue) => onChange("languages", nextValue)}
-              className={formSelectClassName}
-              placeholder={l("patients_languages_select_placeholder")}
-            />
-          </Field>
-          <div className="md:col-span-2">
-            <FieldGroup label={l("providers_opening_hours")}>
-              <WeeklyAvailabilityEditor
-                value={form.openingHours}
-                onChange={(nextValue) => onChange("openingHours", nextValue)}
+            <label className="flex min-h-[58px] items-end gap-2 pb-1.5 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={contact.isPrimary}
+                onChange={(event) =>
+                  onUpdate(contact.id, { isPrimary: event.target.checked })
+                }
+                className={checkboxClass}
               />
-            </FieldGroup>
-          </div>
-        </div>
-      </Section>
-
-      <Section title={l("providers_contacts")}>
-        <div className="space-y-2">
-          {form.contacts.map((contact) => (
-            <div
-              key={contact.id}
-              className="grid gap-2 rounded-lg border border-border/70 bg-card/50 p-2 md:grid-cols-[132px_132px_minmax(0,1fr)_92px_36px]"
-            >
-              <Field label={l("providers_contact_kind")}>
-                <NativeComboboxSelect
-                  value={contact.contactKind}
-                  onChange={(event) =>
-                    updateContact(contact.id, {
-                      contactKind: event.target.value === "email" ? "email" : "phone",
-                    })
-                  }
-                  className={formSelectClassName}
-                >
-                  <option value="phone">{t.field_phone}</option>
-                  <option value="email">{t.field_email}</option>
-                </NativeComboboxSelect>
-              </Field>
-              <Field label={l("providers_contact_type")}>
-                <NativeComboboxSelect
-                  value={contact.contactType}
-                  onChange={(event) =>
-                    updateContact(contact.id, {
-                      contactType:
-                        event.target.value === "private" || event.target.value === "other"
-                          ? event.target.value
-                          : "work",
-                    })
-                  }
-                  className={formSelectClassName}
-                >
-                  <option value="work">{l("providers_contact_type_work")}</option>
-                  <option value="private">{l("providers_contact_type_private")}</option>
-                  <option value="other">{l("providers_contact_type_other")}</option>
-                </NativeComboboxSelect>
-              </Field>
-              <Field label={l("providers_contact_value")}>
-                <Input
-                  type={contact.contactKind === "email" ? "email" : "text"}
-                  value={contact.value}
-                  onChange={(event) => updateContact(contact.id, { value: event.target.value })}
-                  className={shellInputClassName}
-                />
-              </Field>
-              <label className="flex min-h-[58px] items-end gap-2 pb-1.5 text-xs text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={contact.isPrimary}
-                  onChange={(event) =>
-                    updateContact(contact.id, { isPrimary: event.target.checked })
-                  }
-                  className={checkboxClass}
-                />
-                {l("providers_contact_primary")}
-              </label>
-              <div className="flex items-end pb-0.5">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon-sm"
-                  title={t.common_remove}
-                  aria-label={t.common_remove}
-                  onClick={() => removeContact(contact.id)}
-                >
-                  <Trash2 className="size-3.5" />
-                </Button>
-              </div>
+              {l("providers_contact_primary")}
+            </label>
+            <div className="flex items-end pb-0.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                title={t.common_remove}
+                aria-label={t.common_remove}
+                onClick={() => onRemove(contact.id)}
+              >
+                <Trash2 className="size-3.5" />
+              </Button>
             </div>
-          ))}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-8 rounded-lg bg-muted/20"
-            onClick={addContact}
-          >
-            <Plus className="size-3.5" />
-            {l("providers_contact_add")}
-          </Button>
-        </div>
-      </Section>
+          </div>
+        ))}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 rounded-lg bg-muted/20"
+          onClick={onAdd}
+        >
+          <Plus className="size-3.5" />
+          {l("providers_contact_add")}
+        </Button>
+      </div>
+    </Section>
+  );
+}
 
-      <Section title={l("providers_license")}>
-        <div className="grid gap-4 md:grid-cols-3">
-          <Field label={l("providers_license_number")}>
-            <Input
-              value={form.licenseNumber}
-              onChange={(event) => onChange("licenseNumber", event.target.value)}
-              className={shellInputClassName}
-            />
-          </Field>
-          <Field label={l("providers_licensing_country")}>
-            <Input
-              value={form.licensingCountry}
-              onChange={(event) => onChange("licensingCountry", event.target.value)}
-              className={shellInputClassName}
-            />
-          </Field>
-          <Field label={l("providers_license_valid_until")}>
-            <Input
-              type="date"
-              value={form.licensingValidUntil}
-              onChange={(event) => onChange("licensingValidUntil", event.target.value)}
-              className={shellInputClassName}
-            />
-          </Field>
-        </div>
-      </Section>
+function DoctorLicenseFields({
+  form,
+  onChange,
+}: {
+  form: DoctorFormState;
+  onChange: (field: keyof DoctorFormState, value: string) => void;
+}) {
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
 
-      <Section title={l("appointments_notes")}>
-        <Field label={t.providers_notes}>
-          <textarea
-            value={form.notes}
-            onChange={(event) => onChange("notes", event.target.value)}
-            className={textareaClassName}
-            rows={3}
+  return (
+    <Section title={l("providers_license")}>
+      <div className="grid gap-4 md:grid-cols-3">
+        <Field label={l("providers_license_number")}>
+          <Input
+            value={form.licenseNumber}
+            onChange={(event) => onChange("licenseNumber", event.target.value)}
+            className={shellInputClassName}
           />
         </Field>
-      </Section>
-    </div>
+        <Field label={l("providers_licensing_country")}>
+          <Input
+            value={form.licensingCountry}
+            onChange={(event) => onChange("licensingCountry", event.target.value)}
+            className={shellInputClassName}
+          />
+        </Field>
+        <Field label={l("providers_license_valid_until")}>
+          <Input
+            type="date"
+            value={form.licensingValidUntil}
+            onChange={(event) => onChange("licensingValidUntil", event.target.value)}
+            className={shellInputClassName}
+          />
+        </Field>
+      </div>
+    </Section>
+  );
+}
+
+function DoctorNotesFields({
+  notes,
+  onChange,
+}: {
+  notes: string;
+  onChange: (value: string) => void;
+}) {
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+
+  return (
+    <Section title={l("appointments_notes")}>
+      <Field label={t.providers_notes}>
+        <textarea
+          value={notes}
+          onChange={(event) => onChange(event.target.value)}
+          className={textareaClassName}
+          rows={3}
+        />
+      </Field>
+    </Section>
   );
 }
 
@@ -5825,36 +6218,16 @@ function StaffFormFields({
   const selectableRoles = staffRoles.filter((role) => role.is_active || role.code === form.role);
   const hasCustomRole =
     Boolean(form.role) && !selectableRoles.some((role) => role.code === form.role);
-  const normalizeContacts = (contacts: StaffFormState["contacts"]) =>
-    contacts.map((contact, _index, all) => {
-      const sameKind = all.filter((item) => item.contactKind === contact.contactKind);
-      const firstPrimary = sameKind.find((item) => item.isPrimary);
-      if (firstPrimary) {
-        return { ...contact, isPrimary: contact.id === firstPrimary.id };
-      }
-      return { ...contact, isPrimary: sameKind[0]?.id === contact.id };
-    });
   const updateContact = (
     contactId: string,
     patch: Partial<StaffFormState["contacts"][number]>,
   ) => {
-    const changedContacts = form.contacts.map((contact) => {
-        if (contact.id !== contactId) return contact;
-        return { ...contact, ...patch };
-      }).map((contact, _index, all) => {
-        if (!patch.isPrimary) return contact;
-        const changed = all.find((item) => item.id === contactId);
-        if (!changed || contact.contactKind !== changed.contactKind || contact.id === contactId) {
-          return contact;
-        }
-        return { ...contact, isPrimary: false };
-      });
-    onContactsChange(normalizeContacts(changedContacts));
+    onContactsChange(normalizePrimaryContacts(applyContactPatch(form.contacts, contactId, patch)));
   };
   const addContact = () => {
     const hasPhone = form.contacts.some((contact) => contact.contactKind === "phone");
     const contactKind = hasPhone ? "email" : "phone";
-    onContactsChange(normalizeContacts([
+    onContactsChange(normalizePrimaryContacts([
       ...form.contacts,
       {
         id: makeContactFormId("contact"),
@@ -5867,7 +6240,7 @@ function StaffFormFields({
     ]));
   };
   const removeContact = (contactId: string) => {
-    onContactsChange(normalizeContacts(form.contacts.filter((contact) => contact.id !== contactId)));
+    onContactsChange(normalizePrimaryContacts(form.contacts.filter((contact) => contact.id !== contactId)));
   };
 
   return (
