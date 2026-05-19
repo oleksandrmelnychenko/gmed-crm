@@ -36,6 +36,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
+import { LanguageMultiSelect, languageLabel } from "@/components/ui/language-multi-select";
 import {
   AdminInlineMetric,
   AdminSheetScaffold,
@@ -4347,7 +4348,7 @@ function DoctorSection({
                           variant="outline"
                           className="rounded-full border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"
                         >
-                          {language}
+                          {languageLabel(language, lang)}
                         </Badge>
                       ))}
                     </div>
@@ -5590,7 +5591,7 @@ function DoctorFormFields({
               className={shellInputClassName}
             />
           </Field>
-          <Field label={t.providers_doctors}>
+          <Field label={l("patients_display_name")}>
             <Input
               value={form.name}
               onChange={(event) => onChange("name", event.target.value)}
@@ -5664,11 +5665,11 @@ function DoctorFormFields({
             />
           </Field>
           <Field label={l("providers_languages")}>
-            <Input
+            <LanguageMultiSelect
               value={form.languages}
-              onChange={(event) => onChange("languages", event.target.value)}
-              className={shellInputClassName}
-              placeholder={l("providers_de_en_uk")}
+              onChange={(nextValue) => onChange("languages", nextValue)}
+              className={formSelectClassName}
+              placeholder={l("patients_languages_select_placeholder")}
             />
           </Field>
           <div className="md:col-span-2">
