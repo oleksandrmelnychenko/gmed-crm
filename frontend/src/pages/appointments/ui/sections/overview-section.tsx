@@ -143,14 +143,14 @@ function AppointmentOverviewSection({
         </div>
         <div className="min-w-0 overflow-hidden rounded-xl border border-border/50 bg-muted/25 px-4 py-3 text-sm text-muted-foreground">
           <OverviewInfoLine
-            icon={MapPin}
-            label={detail.location || tr.common_not_set}
+            icon={Stethoscope}
+            label={detail.provider_name || tr.common_not_set}
           />
         </div>
         <div className="min-w-0 overflow-hidden rounded-xl border border-border/50 bg-muted/25 px-4 py-3 text-sm text-muted-foreground">
           <OverviewInfoLine
-            icon={Stethoscope}
-            label={detail.provider_name || tr.common_not_set}
+            icon={MapPin}
+            label={detail.location || tr.common_not_set}
           />
         </div>
       </div>

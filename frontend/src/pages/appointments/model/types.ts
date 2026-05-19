@@ -190,6 +190,7 @@ export type AppointmentDetail = AppointmentListItem & {
   followup_notes: string | null;
   notes: string | null;
   order_id: string | null;
+  order_number: string | null;
   recurrence_parent_series_id: string | null;
   recurrence_split_from_appointment_id: string | null;
   recurrence_split_from_index: number | null;

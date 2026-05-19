@@ -174,7 +174,6 @@ function LinkedRecordsSheet({
                   value: readLinkedPreviewValue(record, [
                     "order_number",
                     "number",
-                    "id",
                   ]),
                 },
                 {

@@ -3167,7 +3167,7 @@ async fn get_appointment(
     }
 
     match sqlx::query(
-        r#"SELECT a.id, a.patient_id, a.provider_id, a.doctor_id, a.order_id, a.interpreter_id,
+        r#"SELECT a.id, a.patient_id, a.provider_id, a.doctor_id, a.order_id, o.order_number, a.interpreter_id,
                   a.owner_user_id,
                   a.appointment_type, a.care_path_kind, a.title, a.date, a.time_start, a.time_end, a.location,
                   a.category, a.status, a.interpreter_response, a.checklist_phase,
@@ -3194,6 +3194,7 @@ async fn get_appointment(
            JOIN patients p ON p.id = a.patient_id
            LEFT JOIN providers pr ON pr.id = a.provider_id
            LEFT JOIN provider_doctors d ON d.id = a.doctor_id
+           LEFT JOIN orders o ON o.id = a.order_id
            LEFT JOIN users u ON u.id = a.interpreter_id
            LEFT JOIN users owner ON owner.id = a.owner_user_id
            WHERE a.id = $1"#,
@@ -3403,9 +3404,7 @@ async fn update_appointment(
     if !is_valid_appointment_type(&appointment_type) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid appointment_type");
     }
-    if appointment_type != current_type
-        && !matches!(auth.role, Role::Ceo | Role::PatientManager)
-    {
+    if appointment_type != current_type && !matches!(auth.role, Role::Ceo | Role::PatientManager) {
         return err(
             StatusCode::FORBIDDEN,
             "Only CEO or patient manager can change appointment type",
@@ -3420,7 +3419,10 @@ async fn update_appointment(
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid checklist_phase");
     }
     if checklist_phase != current_checklist_phase
-        && !matches!(auth.role, Role::Ceo | Role::PatientManager | Role::Concierge)
+        && !matches!(
+            auth.role,
+            Role::Ceo | Role::PatientManager | Role::Concierge
+        )
     {
         return err(
             StatusCode::FORBIDDEN,
@@ -3428,7 +3430,8 @@ async fn update_appointment(
         );
     }
 
-    if auth.role == Role::Concierge && !matches!(appointment_type.as_str(), "non_medical" | "internal")
+    if auth.role == Role::Concierge
+        && !matches!(appointment_type.as_str(), "non_medical" | "internal")
     {
         return err(
             StatusCode::FORBIDDEN,
@@ -6435,6 +6438,7 @@ fn build_appointment_detail_json(
         "owner_name": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("owner_name").unwrap_or_default() },
         "owner_role": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("owner_role").unwrap_or_default() },
         "order_id": if blocked { None::<Uuid> } else { row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default() },
+        "order_number": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("order_number").unwrap_or_default() },
         "recurrence_series_id": if blocked { None::<Uuid> } else { row.try_get::<Option<Uuid>, _>("recurrence_series_id").unwrap_or_default() },
         "recurrence_frequency": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("recurrence_frequency").unwrap_or_default() },
         "recurrence_interval": if blocked { None::<i32> } else { row.try_get::<Option<i32>, _>("recurrence_interval").unwrap_or_default() },

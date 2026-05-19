@@ -4,6 +4,7 @@ import { useLang } from "@/lib/i18n";
 import {
   appointmentText,
   appointmentTypeLabel,
+  carePathKindLabel,
   checklistPhaseLabel,
   responseLabel,
   roleLabel,
@@ -54,8 +55,10 @@ function AppointmentSnapshotSection({
   if (detail.order_id) {
     snapshotCards.push({
       label: orderLabel,
-      value: detail.order_id,
-      meta: detail.category || formatAppointmentDateTimeLabel(detail.created_at),
+      value: detail.order_number || tr.common_not_set,
+      meta: detail.care_path_kind
+        ? carePathKindLabel(detail.care_path_kind)
+        : formatAppointmentDateTimeLabel(detail.created_at),
     });
   }
 
