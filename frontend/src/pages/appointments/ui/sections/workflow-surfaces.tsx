@@ -55,6 +55,7 @@ import {
 } from "@/pages/appointments/model/form-factories";
 import {
   appointmentText,
+  checklistPhaseLabel,
   followUpPresetLabel,
   followUpPresetTitle,
   reportApprovalLabel,
@@ -110,19 +111,6 @@ const selectClassName = appointmentSelectControlClassName;
 const textareaClassName = appointmentTextareaControlClassName;
 const workflowInlineBadgeClassName =
   "inline-flex h-6 shrink-0 items-center rounded-full border border-border/60 bg-muted/25 px-2.5 text-[11px] font-medium text-foreground";
-
-function checklistPhaseLabel(phase: string) {
-  switch (phase) {
-    case "preparation":
-      return appointmentText("appointments_preparation");
-    case "execution":
-      return appointmentText("appointments_execution");
-    case "followup":
-      return appointmentText("appointments_follow_up_2");
-    default:
-      return appointmentText("appointments_unknown_phase");
-  }
-}
 
 function withEllipsis(value: string | null | undefined) {
   const normalized = String(value ?? "").trim();

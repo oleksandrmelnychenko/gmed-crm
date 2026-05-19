@@ -160,7 +160,9 @@ struct UpdateAppointment {
     doctor_id: Option<Uuid>,
     owner_user_id: Option<Uuid>,
     interpreter_id: Option<Uuid>,
+    appointment_type: Option<String>,
     care_path_kind: Option<String>,
+    checklist_phase: Option<String>,
     title: String,
     date: String,
     time_start: Option<String>,
@@ -1757,50 +1759,93 @@ async fn list_attention_items(
                     row.try_get("next_communication_due_at").unwrap_or_default();
 
                 let mut reasons = Vec::new();
+                let mut reason_details = Vec::new();
+                let mut push_reason = |
+                    key: &str,
+                    fallback: String,
+                    values: serde_json::Value,
+                | {
+                    reasons.push(fallback.clone());
+                    reason_details.push(serde_json::json!({
+                        "key": key,
+                        "fallback": fallback,
+                        "values": values,
+                    }));
+                };
                 if appointment_date < today && !matches!(status.as_str(), "completed" | "cancelled")
                 {
-                    reasons.push("Past visit is still not closed".to_string());
+                    push_reason(
+                        "appointments_attention_reason_past_visit_still_not_closed",
+                        "Past visit is still not closed".to_string(),
+                        serde_json::json!({}),
+                    );
                 }
                 if appointment_date >= today
                     && appointment_date <= preparation_window_end
                     && open_checklist_count > 0
                 {
-                    reasons.push(format!(
-                        "{open_checklist_count} preparation or follow-up checklist item(s) remain open"
-                    ));
+                    push_reason(
+                        "appointments_attention_reason_preparation_checklist_open_count",
+                        format!("{open_checklist_count} preparation or follow-up checklist item(s) remain open"),
+                        serde_json::json!({ "count": open_checklist_count }),
+                    );
                 }
                 if appointment_date >= today
                     && appointment_date <= preparation_window_end
                     && interpreter_id.is_some()
                     && interpreter_response.as_deref() != Some("accepted")
                 {
-                    reasons.push("Interpreter confirmation is still pending".to_string());
+                    push_reason(
+                        "appointments_attention_reason_interpreter_confirmation_pending",
+                        "Interpreter confirmation is still pending".to_string(),
+                        serde_json::json!({}),
+                    );
                 }
                 if overdue_reminder_count > 0 {
-                    reasons.push(format!("{overdue_reminder_count} reminder(s) are overdue"));
+                    push_reason(
+                        "appointments_attention_reason_overdue_reminders_count",
+                        format!("{overdue_reminder_count} reminder(s) are overdue"),
+                        serde_json::json!({ "count": overdue_reminder_count }),
+                    );
                 }
                 if appointment_date < today && open_task_count > 0 {
-                    reasons.push(format!("{open_task_count} operational task(s) remain open"));
+                    push_reason(
+                        "appointments_attention_reason_open_tasks_count",
+                        format!("{open_task_count} operational task(s) remain open"),
+                        serde_json::json!({ "count": open_task_count }),
+                    );
                 }
                 if appointment_date < today && open_checklist_count > 0 {
-                    reasons.push(format!(
-                        "{open_checklist_count} visit-processing checklist item(s) remain open"
-                    ));
+                    push_reason(
+                        "appointments_attention_reason_visit_processing_checklist_open_count",
+                        format!("{open_checklist_count} visit-processing checklist item(s) remain open"),
+                        serde_json::json!({ "count": open_checklist_count }),
+                    );
                 }
                 if appointment_date < today && open_communication_count > 0 {
-                    reasons.push(format!(
-                        "{open_communication_count} external communication thread(s) remain open"
-                    ));
+                    push_reason(
+                        "appointments_attention_reason_open_communication_threads_count",
+                        format!("{open_communication_count} external communication thread(s) remain open"),
+                        serde_json::json!({ "count": open_communication_count }),
+                    );
                 }
                 if interpreter_id.is_some()
                     && appointment_date <= today
                     && latest_report_status.as_deref() != Some("approved")
                 {
-                    reasons.push("Interpreter report or approval is still pending".to_string());
+                    push_reason(
+                        "appointments_attention_reason_interpreter_report_pending",
+                        "Interpreter report or approval is still pending".to_string(),
+                        serde_json::json!({}),
+                    );
                 }
                 if appointment_date < today && open_reminder_count > 0 && overdue_reminder_count == 0
                 {
-                    reasons.push(format!("{open_reminder_count} reminder(s) are still active"));
+                    push_reason(
+                        "appointments_attention_reason_active_reminders_count",
+                        format!("{open_reminder_count} reminder(s) are still active"),
+                        serde_json::json!({ "count": open_reminder_count }),
+                    );
                 }
 
                 if reasons.is_empty() {
@@ -1817,6 +1862,7 @@ async fn list_attention_items(
                 if let Some(object) = item.as_object_mut() {
                     object.insert("attention_score".to_string(), serde_json::json!(reasons.len()));
                     object.insert("reasons".to_string(), serde_json::json!(reasons));
+                    object.insert("reason_details".to_string(), serde_json::json!(reason_details));
                     object.insert("next_due_at".to_string(), serde_json::json!(next_due_at));
                 }
                 items.push(item);
@@ -2374,6 +2420,10 @@ fn is_valid_appointment_status(value: &str) -> bool {
         value,
         "planned" | "confirmed" | "in_progress" | "completed" | "cancelled"
     )
+}
+
+fn is_valid_checklist_phase(value: &str) -> bool {
+    matches!(value, "preparation" | "execution" | "followup" | "done")
 }
 
 fn is_valid_recurrence_frequency(value: &str) -> bool {
@@ -3243,7 +3293,7 @@ async fn update_appointment(
     }
 
     let current = match sqlx::query(
-        r#"SELECT patient_id, appointment_type, care_path_kind, status, provider_id, doctor_id, owner_user_id,
+        r#"SELECT patient_id, appointment_type, care_path_kind, status, checklist_phase, provider_id, doctor_id, owner_user_id,
                   interpreter_id, interpreter_response, title, date, time_start, time_end,
                   location, order_id, category, notes, recurrence_series_id, recurrence_index,
                   recurrence_frequency, recurrence_interval, recurrence_count, recurrence_until
@@ -3273,6 +3323,9 @@ async fn update_appointment(
         .try_get("care_path_kind")
         .unwrap_or_else(|_| "regular".to_string());
     let current_status: String = current.try_get("status").unwrap_or_else(|_| String::new());
+    let current_checklist_phase: String = current
+        .try_get("checklist_phase")
+        .unwrap_or_else(|_| "preparation".to_string());
     let current_provider_id: Option<Uuid> = current.try_get("provider_id").unwrap_or_default();
     let current_doctor_id: Option<Uuid> = current.try_get("doctor_id").unwrap_or_default();
     let current_owner_user_id: Option<Uuid> = current.try_get("owner_user_id").unwrap_or_default();
@@ -3343,7 +3396,39 @@ async fn update_appointment(
         Err(resp) => return resp,
     }
 
-    if auth.role == Role::Concierge && !matches!(current_type.as_str(), "non_medical" | "internal")
+    let appointment_type = match body.appointment_type.clone() {
+        Some(value) => value.trim().to_lowercase().replace('-', "_"),
+        None => current_type.clone(),
+    };
+    if !is_valid_appointment_type(&appointment_type) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid appointment_type");
+    }
+    if appointment_type != current_type
+        && !matches!(auth.role, Role::Ceo | Role::PatientManager)
+    {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Only CEO or patient manager can change appointment type",
+        );
+    }
+
+    let checklist_phase = match body.checklist_phase.clone() {
+        Some(value) => value.trim().to_lowercase().replace('-', "_"),
+        None => current_checklist_phase.clone(),
+    };
+    if !is_valid_checklist_phase(&checklist_phase) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid checklist_phase");
+    }
+    if checklist_phase != current_checklist_phase
+        && !matches!(auth.role, Role::Ceo | Role::PatientManager | Role::Concierge)
+    {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Only CEO, patient manager or concierge can change checklist phase",
+        );
+    }
+
+    if auth.role == Role::Concierge && !matches!(appointment_type.as_str(), "non_medical" | "internal")
     {
         return err(
             StatusCode::FORBIDDEN,
@@ -3355,7 +3440,7 @@ async fn update_appointment(
         None => current_care_path_kind.clone(),
     };
     if let Err(message) =
-        validate_care_path_kind_for_appointment_type(&current_type, &care_path_kind)
+        validate_care_path_kind_for_appointment_type(&appointment_type, &care_path_kind)
     {
         return err(StatusCode::UNPROCESSABLE_ENTITY, message);
     }
@@ -3716,7 +3801,9 @@ async fn update_appointment(
                    recurrence_frequency = $13,
                    recurrence_interval = $14,
                    recurrence_count = $15,
-                   recurrence_until = $16
+                   recurrence_until = $16,
+                   appointment_type = $17,
+                   checklist_phase = $18
                WHERE id = $1"#,
         )
         .bind(target.id)
@@ -3735,6 +3822,8 @@ async fn update_appointment(
         .bind(resolved_recurrence_interval)
         .bind(resolved_recurrence_count)
         .bind(resolved_recurrence_until_date)
+        .bind(&appointment_type)
+        .bind(&checklist_phase)
         .execute(&mut *tx)
         .await
         {
@@ -3803,7 +3892,7 @@ async fn update_appointment(
                 owner_user_id,
                 body.interpreter_id,
                 current_order_id,
-                &current_type,
+                &appointment_type,
                 &title,
                 target_date,
                 time_start,
@@ -3921,7 +4010,7 @@ async fn update_appointment(
         )
         .await;
     }
-    if current_type == "non_medical" {
+    if appointment_type == "non_medical" {
         for (appointment_id, target_patient_id, target_date) in &created_targets {
             if let Err(resp) = bootstrap_concierge_workflow(
                 &state,
@@ -3996,7 +4085,9 @@ async fn update_appointment(
             "previous_time_end": current_time_end,
             "previous_location": current_location,
             "previous_title": current_title,
+            "previous_appointment_type": current_type,
             "previous_care_path_kind": current_care_path_kind,
+            "previous_checklist_phase": current_checklist_phase,
             "provider_id": body.provider_id,
             "doctor_id": body.doctor_id,
             "owner_user_id": owner_user_id,
@@ -4006,7 +4097,9 @@ async fn update_appointment(
             "time_end": time_end,
             "location": location,
             "title": title,
+            "appointment_type": appointment_type,
             "care_path_kind": care_path_kind,
+            "checklist_phase": checklist_phase,
             "recurrence_frequency": resolved_recurrence_frequency,
             "recurrence_interval": resolved_recurrence_interval,
             "recurrence_count": resolved_recurrence_count,

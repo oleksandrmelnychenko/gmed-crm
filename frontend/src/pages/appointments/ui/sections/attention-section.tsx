@@ -1,6 +1,10 @@
 import { memo } from "react";
 
-import { attentionIssueLabel, appointmentText } from "@/pages/appointments/model/labels";
+import {
+  attentionIssueLabel,
+  appointmentText,
+  attentionReasonLabel,
+} from "@/pages/appointments/model/labels";
 import { formatAppointmentDateTimeLabel } from "@/pages/appointments/model/runtime-formatters";
 import type { AppointmentAttentionItem } from "@/pages/appointments/model/types";
 
@@ -31,12 +35,12 @@ function AppointmentAttentionSection({
         </span>
       </div>
       <div className="mt-4 space-y-3">
-        {attention.reasons.map((reason) => (
+        {attention.reasons.map((reason, index) => (
           <div
-            key={reason}
+            key={`${reason}-${index}`}
             className="rounded-xl border border-amber-200/80 bg-amber-50/80 px-4 py-3 text-sm text-amber-900"
           >
-            {reason}
+            {attentionReasonLabel(reason, attention.reason_details?.[index])}
           </div>
         ))}
       </div>

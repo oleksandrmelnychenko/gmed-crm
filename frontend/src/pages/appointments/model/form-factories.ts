@@ -33,6 +33,8 @@ export function blankAppointmentForm(): AppointmentFormState {
     interpreterId: "",
     appointmentType: "medical",
     carePathKind: "regular",
+    status: "planned",
+    checklistPhase: "preparation",
     title: "",
     date: today,
     timeStart: "",
@@ -60,6 +62,8 @@ export function buildEditAppointmentForm(
     interpreterId: detail.interpreter_id ?? "",
     appointmentType: detail.type,
     carePathKind: detail.care_path_kind ?? "regular",
+    status: detail.status,
+    checklistPhase: detail.checklist_phase || "preparation",
     title: detail.title,
     date: detail.date,
     timeStart: detail.time_start ?? "",
@@ -103,6 +107,8 @@ export function buildFollowUpVisitForm(
     interpreterId: detail.interpreter_id ?? "",
     appointmentType: detail.type,
     carePathKind: "followup",
+    status: "planned",
+    checklistPhase: "preparation",
     title: detail.category
       ? `${detail.category} ${followUpLabel}`
       : `${followUpLabel}: ${detail.title}`,

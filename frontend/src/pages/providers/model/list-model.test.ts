@@ -7,6 +7,9 @@ import {
   buildProvidersQuery,
   doctorListDisplayName,
   formatDoctorTitleValue,
+  formatWeeklyAvailabilityDisplay,
+  formatWeeklyAvailabilityValue,
+  parseWeeklyAvailability,
   splitDoctorTitleValue,
   toDoctorPayload,
   toProviderPayload,
@@ -125,5 +128,39 @@ describe("doctor title helpers", () => {
 
     expect(doctorListDisplayName(doctor, "de")).toBe("Herr Prof. Dr. JOHN REMBO");
     expect(doctorListDisplayName(doctor, "ru")).toBe("Prof. Dr. JOHN REMBO");
+  });
+});
+
+describe("weekly availability helpers", () => {
+  it("parses existing compact weekday ranges into a weekly schedule", () => {
+    const schedule = parseWeeklyAvailability("Mo-Fr 08:00-17:00");
+
+    expect(schedule.filter((day) => day.enabled).map((day) => day.day)).toEqual([
+      "mon",
+      "tue",
+      "wed",
+      "thu",
+      "fri",
+    ]);
+    expect(schedule.find((day) => day.day === "mon")?.intervals).toEqual([
+      { start: "08:00", end: "17:00" },
+    ]);
+  });
+
+  it("formats full weekly availability with multiple intervals per day", () => {
+    const value = formatWeeklyAvailabilityValue([
+      { day: "mon", enabled: true, intervals: [{ start: "08:00", end: "12:00" }, { start: "13:00", end: "17:00" }] },
+      { day: "tue", enabled: true, intervals: [{ start: "09:00", end: "16:00" }] },
+      { day: "wed", enabled: false, intervals: [] },
+      { day: "thu", enabled: false, intervals: [] },
+      { day: "fri", enabled: false, intervals: [] },
+      { day: "sat", enabled: false, intervals: [] },
+      { day: "sun", enabled: false, intervals: [] },
+    ]);
+
+    expect(value).toBe("Mon 08:00-12:00, 13:00-17:00; Tue 09:00-16:00");
+    expect(formatWeeklyAvailabilityDisplay(value, "ru")).toBe(
+      "Пн 08:00-12:00, 13:00-17:00; Вт 09:00-16:00",
+    );
   });
 });

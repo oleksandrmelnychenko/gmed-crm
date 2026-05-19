@@ -10,6 +10,7 @@ import {
 } from "@/lib/i18n";
 import type {
   AppointmentCarePathKind,
+  AppointmentAttentionReason,
   AppointmentCommunicationChannel,
   AppointmentCommunicationStatus,
   AppointmentCommunicationTarget,
@@ -298,10 +299,96 @@ export function responseLabel(value: InterpreterResponse | string | null | undef
   return labelFromKeys(value, INTERPRETER_RESPONSE_LABEL_KEYS);
 }
 
+export function checklistPhaseLabel(phase: string | null | undefined) {
+  switch (phase) {
+    case "preparation":
+      return appointmentText("appointments_preparation");
+    case "execution":
+      return appointmentText("appointments_execution");
+    case "followup":
+      return appointmentText("appointments_follow_up_2");
+    case "done":
+      return appointmentText("appointments_done");
+    default:
+      return appointmentText("appointments_unknown_phase");
+  }
+}
+
 export function attentionIssueLabel(count: number) {
   return count === 1
     ? appointmentText("appointments_open_issue")
     : appointmentText("appointments_open_issues");
+}
+
+const ATTENTION_LEGACY_REASON_LABEL_KEYS: Record<string, string> = {
+  "Past visit is still not closed":
+    "appointments_attention_reason_past_visit_still_not_closed",
+  "Interpreter confirmation is still pending":
+    "appointments_attention_reason_interpreter_confirmation_pending",
+  "Interpreter report or approval is still pending":
+    "appointments_attention_reason_interpreter_report_pending",
+};
+
+const ATTENTION_LEGACY_COUNT_REASON_PATTERNS: Array<{
+  pattern: RegExp;
+  key: string;
+}> = [
+  {
+    pattern: /^(\d+) preparation or follow-up checklist item\(s\) remain open$/,
+    key: "appointments_attention_reason_preparation_checklist_open_count",
+  },
+  {
+    pattern: /^(\d+) reminder\(s\) are overdue$/,
+    key: "appointments_attention_reason_overdue_reminders_count",
+  },
+  {
+    pattern: /^(\d+) operational task\(s\) remain open$/,
+    key: "appointments_attention_reason_open_tasks_count",
+  },
+  {
+    pattern: /^(\d+) visit-processing checklist item\(s\) remain open$/,
+    key: "appointments_attention_reason_visit_processing_checklist_open_count",
+  },
+  {
+    pattern: /^(\d+) external communication thread\(s\) remain open$/,
+    key: "appointments_attention_reason_open_communication_threads_count",
+  },
+  {
+    pattern: /^(\d+) reminder\(s\) are still active$/,
+    key: "appointments_attention_reason_active_reminders_count",
+  },
+];
+
+function knownAttentionReasonLabel(key: string, values?: Record<string, string | number | boolean | null | undefined> | null) {
+  const translated = appointmentText(key, values ?? undefined);
+  return translated === key ? "" : translated;
+}
+
+export function attentionReasonLabel(
+  reason: string,
+  detail?: AppointmentAttentionReason,
+) {
+  if (detail?.key) {
+    const translated = knownAttentionReasonLabel(detail.key, detail.values);
+    if (translated) return translated;
+  }
+
+  const legacyKey = ATTENTION_LEGACY_REASON_LABEL_KEYS[reason];
+  if (legacyKey) {
+    const translated = knownAttentionReasonLabel(legacyKey);
+    if (translated) return translated;
+  }
+
+  for (const candidate of ATTENTION_LEGACY_COUNT_REASON_PATTERNS) {
+    const match = reason.match(candidate.pattern);
+    if (!match) continue;
+    const translated = knownAttentionReasonLabel(candidate.key, {
+      count: Number(match[1]),
+    });
+    if (translated) return translated;
+  }
+
+  return detail?.fallback || reason;
 }
 
 export function reportApprovalLabel(status: string) {

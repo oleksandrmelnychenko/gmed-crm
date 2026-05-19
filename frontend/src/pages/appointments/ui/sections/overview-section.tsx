@@ -3,10 +3,12 @@ import {
   ChevronDown,
   Clock3,
   MapPin,
+  Pencil,
   Stethoscope,
   type LucideIcon,
 } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
@@ -34,9 +36,13 @@ import {
 
 function AppointmentOverviewSection({
   detail,
+  canEdit = false,
+  onEdit,
   onOpenDetail,
 }: {
   detail: AppointmentDetail;
+  canEdit?: boolean;
+  onEdit?: () => void;
   onOpenDetail: (id: string) => void;
 }) {
   const { t } = useLang();
@@ -82,7 +88,7 @@ function AppointmentOverviewSection({
             {detail.id}
           </p>
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2 sm:max-w-[40%] sm:justify-end">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 sm:max-w-[40%] sm:justify-end">
           <span
             className={cn(
               "rounded-full border px-2.5 py-1 text-[10.5px] font-semibold",
@@ -95,6 +101,19 @@ function AppointmentOverviewSection({
             <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[10.5px] font-semibold text-violet-700">
               {carePathKindLabel(detail.care_path_kind)}
             </span>
+          ) : null}
+          {canEdit && onEdit ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="size-8 rounded-lg"
+              onClick={onEdit}
+              aria-label={t.common_edit}
+              title={t.common_edit}
+            >
+              <Pencil className="size-3.5" />
+            </Button>
           ) : null}
         </div>
       </div>

@@ -4,6 +4,7 @@ import { useLang } from "@/lib/i18n";
 import {
   appointmentText,
   appointmentTypeLabel,
+  checklistPhaseLabel,
   responseLabel,
   roleLabel,
 } from "@/pages/appointments/model/labels";
@@ -22,7 +23,7 @@ function AppointmentSnapshotSection({
   const snapshotCards = [
     {
       label: t.orders_phase,
-      value: detail.checklist_phase || tr.phase_discovery,
+      value: checklistPhaseLabel(detail.checklist_phase),
       meta: appointmentTypeLabel(detail.type, tr),
     },
     {

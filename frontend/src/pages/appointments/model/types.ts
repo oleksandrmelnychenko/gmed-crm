@@ -198,9 +198,16 @@ export type AppointmentDetail = AppointmentListItem & {
   created_at: string;
 };
 
+export type AppointmentAttentionReason = {
+  key: string;
+  fallback?: string | null;
+  values?: Record<string, string | number | boolean | null | undefined> | null;
+};
+
 export type AppointmentAttentionItem = AppointmentListItem & {
   attention_score: number;
   reasons: string[];
+  reason_details?: AppointmentAttentionReason[];
   next_due_at: string | null;
 };
 
@@ -517,6 +524,8 @@ export type AppointmentFormState = {
   interpreterId: string;
   appointmentType: AppointmentKind;
   carePathKind: AppointmentCarePathKind;
+  status: AppointmentStatus;
+  checklistPhase: string;
   title: string;
   date: string;
   timeStart: string;

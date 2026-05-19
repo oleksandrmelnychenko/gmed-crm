@@ -1,4 +1,5 @@
 import {
+  attentionReasonLabel,
   appointmentText,
   responseLabel,
   roleLabel,
@@ -57,12 +58,13 @@ export function operationalScopeReason(
       return item.owner_role
         ? `${tr?.patients_assign_owner ?? appointmentText("appointments_owner")} · ${roleLabel(item.owner_role)}`
         : appointmentText("appointments_owned_by_me");
-    case "needs_attention":
-      return (
-        attentionIndex?.get(item.id)?.reasons[0] ||
-        (tr?.common_error ??
-          appointmentText("appointments_operational_follow_up_required"))
-      );
+    case "needs_attention": {
+      const attention = attentionIndex?.get(item.id);
+      return attention?.reasons[0]
+        ? attentionReasonLabel(attention.reasons[0], attention.reason_details?.[0])
+        : (tr?.common_error ??
+            appointmentText("appointments_operational_follow_up_required"));
+    }
     case "pending_interpreter":
       return item.interpreter_name
         ? `${item.interpreter_name} · ${responseLabel(item.interpreter_response ?? "pending")}`

@@ -44,6 +44,7 @@ import {
 } from "@/pages/appointments/model/constants";
 import {
   appointmentText,
+  checklistPhaseLabel,
   findingsArtifactLabel,
   incomingDataCategoryLabel,
   incomingDataSourceLabel,
@@ -80,19 +81,6 @@ import {
 const clinicalInputClassName = appointmentFilterControlClassName;
 const clinicalSelectClassName = appointmentSelectControlClassName;
 const clinicalTextareaClassName = appointmentTextareaControlClassName;
-
-function checklistPhaseLabel(phase: string) {
-  switch (phase) {
-    case "preparation":
-      return appointmentText("appointments_preparation");
-    case "execution":
-      return appointmentText("appointments_execution");
-    case "followup":
-      return appointmentText("appointments_follow_up_2");
-    default:
-      return appointmentText("appointments_unknown_phase");
-  }
-}
 
 function withEllipsis(value: string) {
   return value.endsWith("...") || value.endsWith("…") ? value : `${value}…`;

@@ -42,7 +42,7 @@ export const INTERPRETER_RESPONSE_OPTIONS: InterpreterResponse[] = [
   "discussion",
 ];
 
-export const CHECKLIST_PHASES = ["preparation", "execution", "followup"] as const;
+export const CHECKLIST_PHASES = ["preparation", "execution", "followup", "done"] as const;
 
 export const TASK_STATUS_OPTIONS = [
   "open",

@@ -94,10 +94,13 @@ import {
   doctorListDisplayName,
   doctorRelationshipTypeLabel,
   doctorRoleLabel,
+  formatWeeklyAvailabilityDisplay,
+  formatWeeklyAvailabilityValue,
   humanizeCode,
   joinDoctorTitleValue,
   makeContactFormId,
   normalizeDoctorTitleKey,
+  parseWeeklyAvailability,
   patientLabel,
   personGenderLabel,
   providerMeta,
@@ -113,6 +116,7 @@ import {
   toProviderPayload,
   toServicePayload,
   toStaffPayload,
+  weeklyAvailabilityDayLabel,
 } from "./model/list-model";
 import {
   normalizeSpecializationLabelKey,
@@ -212,6 +216,17 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
       </span>
       {children}
     </label>
+  );
+}
+
+function FieldGroup({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-[11.5px] font-medium leading-tight text-muted-foreground">
+        {label}
+      </span>
+      {children}
+    </div>
   );
 }
 
@@ -497,6 +512,174 @@ function DoctorTitleMultiSelect({
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function WeeklyAvailabilityEditor({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+}) {
+  const { t, lang } = useLang();
+  const schedule = useMemo(() => parseWeeklyAvailability(value), [value]);
+  const closedLabel = lang === "de" ? "Geschlossen" : "Закрыто";
+  const addIntervalLabel = lang === "de" ? "Zeit hinzufügen" : "Добавить время";
+  const fromLabel = lang === "de" ? "Von" : "С";
+  const toLabel = lang === "de" ? "Bis" : "До";
+  const defaultInterval = { start: "09:00", end: "17:00" };
+  const addOneHour = (time: string) => {
+    const [hourText, minuteText] = time.split(":");
+    const hour = Number(hourText);
+    const minute = Number(minuteText);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour >= 23) {
+      return "23:59";
+    }
+    return `${(hour + 1).toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
+  };
+  const nextInterval = (intervals: typeof schedule[number]["intervals"]) => {
+    const previous = intervals.at(-1);
+    if (!previous?.end) return defaultInterval;
+    const end = addOneHour(previous.end);
+    return previous.end < end ? { start: previous.end, end } : defaultInterval;
+  };
+
+  const commit = (nextSchedule: typeof schedule) => {
+    onChange(formatWeeklyAvailabilityValue(nextSchedule));
+  };
+  const updateDay = (
+    day: typeof schedule[number]["day"],
+    update: (current: typeof schedule[number]) => typeof schedule[number],
+  ) => {
+    commit(schedule.map((row) => (row.day === day ? update(row) : row)));
+  };
+  const toggleDay = (day: typeof schedule[number]["day"], enabled: boolean) => {
+    updateDay(day, (row) => ({
+      ...row,
+      enabled,
+      intervals: enabled
+        ? row.intervals.length > 0
+          ? row.intervals
+          : [defaultInterval]
+        : [],
+    }));
+  };
+  const updateInterval = (
+    day: typeof schedule[number]["day"],
+    index: number,
+    field: "start" | "end",
+    nextValue: string,
+  ) => {
+    updateDay(day, (row) => ({
+      ...row,
+      enabled: true,
+      intervals: row.intervals.map((interval, intervalIndex) =>
+        intervalIndex === index ? { ...interval, [field]: nextValue } : interval,
+      ),
+    }));
+  };
+  const addInterval = (day: typeof schedule[number]["day"]) => {
+    updateDay(day, (row) => ({
+      ...row,
+      enabled: true,
+      intervals: [...row.intervals, nextInterval(row.intervals)],
+    }));
+  };
+  const removeInterval = (day: typeof schedule[number]["day"], index: number) => {
+    updateDay(day, (row) => {
+      const intervals = row.intervals.filter((_, intervalIndex) => intervalIndex !== index);
+      return {
+        ...row,
+        enabled: intervals.length > 0,
+        intervals,
+      };
+    });
+  };
+
+  return (
+    <div className="grid gap-2 rounded-lg border border-border/70 bg-card/50 p-2 sm:grid-cols-2 lg:grid-cols-4">
+      {schedule.map((row) => (
+        <div
+          key={row.day}
+          className="space-y-2 rounded-md border border-border/60 bg-background/70 p-2"
+        >
+          <div className="flex h-7 items-center gap-2">
+            <input
+              type="checkbox"
+              checked={row.enabled}
+              onChange={(event) => toggleDay(row.day, event.target.checked)}
+              className={checkboxClass}
+              disabled={disabled}
+              aria-label={weeklyAvailabilityDayLabel(row.day, lang)}
+            />
+            <span className="text-sm font-medium text-foreground">
+              {weeklyAvailabilityDayLabel(row.day, lang)}
+            </span>
+          </div>
+          {row.enabled ? (
+            <div className="space-y-1.5">
+              {row.intervals.map((interval, index) => (
+                <div
+                  key={`${row.day}-${index}`}
+                  className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_28px] items-center gap-1.5"
+                >
+                  <Input
+                    type="time"
+                    value={interval.start}
+                    onChange={(event) =>
+                      updateInterval(row.day, index, "start", event.target.value)
+                    }
+                    className={cn(shellInputClassName, "h-8 min-w-0 px-1.5 text-xs")}
+                    disabled={disabled}
+                    aria-label={`${weeklyAvailabilityDayLabel(row.day, lang)} ${fromLabel}`}
+                  />
+                  <Input
+                    type="time"
+                    value={interval.end}
+                    onChange={(event) =>
+                      updateInterval(row.day, index, "end", event.target.value)
+                    }
+                    className={cn(shellInputClassName, "h-8 min-w-0 px-1.5 text-xs")}
+                    disabled={disabled}
+                    aria-label={`${weeklyAvailabilityDayLabel(row.day, lang)} ${toLabel}`}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon-sm"
+                    className="h-8 w-7 rounded-lg bg-muted/20"
+                    onClick={() => removeInterval(row.day, index)}
+                    disabled={disabled}
+                    title={t.common_remove}
+                    aria-label={t.common_remove}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </div>
+              ))}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 w-full justify-center rounded-lg bg-muted/20 px-2 text-xs"
+                onClick={() => addInterval(row.day)}
+                disabled={disabled}
+              >
+                <Plus className="size-3.5 shrink-0" />
+                {addIntervalLabel}
+              </Button>
+            </div>
+          ) : (
+            <div className="flex h-8 items-center text-xs text-muted-foreground">
+              {closedLabel}
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -3936,7 +4119,7 @@ function ProviderSheetHero({
               {detail.email || t.common_not_set}
             </HeroInfoLine>
             <HeroInfoLine icon={CalendarClock}>
-              {detail.opening_hours || t.common_not_set}
+              {formatWeeklyAvailabilityDisplay(detail.opening_hours, lang) || t.common_not_set}
             </HeroInfoLine>
             <HeroInfoLine icon={BadgeCheck}>
               {detail.tax_id || t.common_not_set}
@@ -4174,7 +4357,9 @@ function DoctorSection({
                     {doctor.opening_hours ? (
                       <p className="mt-1 text-xs leading-snug text-muted-foreground">
                         {l("providers_opening_hours")}:{" "}
-                        <span className="font-medium text-foreground">{doctor.opening_hours}</span>
+                        <span className="font-medium text-foreground">
+                          {formatWeeklyAvailabilityDisplay(doctor.opening_hours, lang)}
+                        </span>
                       </p>
                     ) : null}
                   </div>
@@ -4484,7 +4669,9 @@ function StaffSection({
                     {staff.opening_hours ? (
                       <p className="mt-1 text-xs leading-snug text-muted-foreground">
                         {l("providers_opening_hours")}:{" "}
-                        <span className="font-medium text-foreground">{staff.opening_hours}</span>
+                        <span className="font-medium text-foreground">
+                          {formatWeeklyAvailabilityDisplay(staff.opening_hours, lang)}
+                        </span>
                       </p>
                     ) : null}
                   </div>
@@ -5015,7 +5202,7 @@ function ProviderFormFields({
         </Field>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2">
         <Field label={l("providers_tax_id")}>
           <Input
             value={form.taxId}
@@ -5035,17 +5222,15 @@ function ProviderFormFields({
             disabled={disabled}
           />
         </Field>
-
-        <Field label={l("providers_opening_hours")}>
-          <Input
-            value={form.openingHours}
-            onChange={(event) => onChange("openingHours", event.target.value)}
-            className={shellInputClassName}
-            placeholder={l("providers_opening_hours_placeholder")}
-            disabled={disabled}
-          />
-        </Field>
       </div>
+
+      <FieldGroup label={l("providers_opening_hours")}>
+        <WeeklyAvailabilityEditor
+          value={form.openingHours}
+          onChange={(nextValue) => onChange("openingHours", nextValue)}
+          disabled={disabled}
+        />
+      </FieldGroup>
 
       <div className="grid gap-4 md:grid-cols-2">
         <Field label={l("providers_organization_level")}>
@@ -5486,14 +5671,14 @@ function DoctorFormFields({
               placeholder={l("providers_de_en_uk")}
             />
           </Field>
-          <Field label={l("providers_opening_hours")}>
-            <Input
-              value={form.openingHours}
-              onChange={(event) => onChange("openingHours", event.target.value)}
-              className={shellInputClassName}
-              placeholder={l("providers_opening_hours_placeholder")}
-            />
-          </Field>
+          <div className="md:col-span-2">
+            <FieldGroup label={l("providers_opening_hours")}>
+              <WeeklyAvailabilityEditor
+                value={form.openingHours}
+                onChange={(nextValue) => onChange("openingHours", nextValue)}
+              />
+            </FieldGroup>
+          </div>
         </div>
       </Section>
 
@@ -5763,14 +5948,14 @@ function StaffFormFields({
               <option value="unknown">{l("providers_staff_unknown")}</option>
             </NativeComboboxSelect>
           </Field>
-          <Field label={l("providers_opening_hours")}>
-            <Input
-              value={form.openingHours}
-              onChange={(event) => onChange("openingHours", event.target.value)}
-              className={shellInputClassName}
-              placeholder={l("providers_opening_hours_placeholder")}
-            />
-          </Field>
+          <div className="md:col-span-2">
+            <FieldGroup label={l("providers_opening_hours")}>
+              <WeeklyAvailabilityEditor
+                value={form.openingHours}
+                onChange={(nextValue) => onChange("openingHours", nextValue)}
+              />
+            </FieldGroup>
+          </div>
         </div>
       </Section>
 

@@ -1,4 +1,4 @@
-import { Suspense, lazy, memo } from "react";
+import { Suspense, lazy, memo, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import { Banner, Section } from "@/components/ui-shell";
@@ -222,6 +222,13 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
 }: AppointmentDesktopDetailWorkspaceContentProps) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
+  const [overviewEditAppointmentId, setOverviewEditAppointmentId] = useState<string | null>(null);
+  const overviewEditOpen = Boolean(
+    detail?.id && overviewEditAppointmentId === detail.id,
+  );
+  const handleOverviewEditOpenChange = (open: boolean) => {
+    setOverviewEditAppointmentId(open ? detail?.id ?? null : null);
+  };
   const {
     canSubmitInterpreterReport,
     canResubmitRejectedReport,
@@ -291,8 +298,26 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
       ) : null}
       <MemoizedAppointmentOverviewSection
         detail={detail}
+        canEdit={permissions.canEditSchedule}
+        onEdit={() => setOverviewEditAppointmentId(detail.id)}
         onOpenDetail={onOpenDetail}
       />
+      {permissions.canEditSchedule ? (
+        <Suspense fallback={null}>
+          <LazyEditAppointmentSection
+            detail={detail}
+            appointments={appointments}
+            providers={providers}
+            staff={staff}
+            interpreters={interpreters}
+            permissions={permissions}
+            showSummary={false}
+            open={overviewEditOpen}
+            onOpenChange={handleOverviewEditOpenChange}
+            onSaved={onEditSaved}
+          />
+        </Suspense>
+      ) : null}
 
       {showOverviewDetails ? (
         <>
@@ -428,6 +453,7 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
                       providers={providers}
                       staff={staff}
                       interpreters={interpreters}
+                      permissions={permissions}
                       onSaved={onEditSaved}
                     />
                   ) : null

@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import { AdminSheetScaffold } from "@/components/admin-page-patterns";
@@ -184,6 +184,13 @@ function useAppointmentMobileDetailSheetContentContent({
   onEditSaved,
 }: AppointmentMobileDetailSheetContentProps) {
   const { t } = useLang();
+  const [overviewEditAppointmentId, setOverviewEditAppointmentId] = useState<string | null>(null);
+  const overviewEditOpen = Boolean(
+    detail?.id && overviewEditAppointmentId === detail.id,
+  );
+  const handleOverviewEditOpenChange = (open: boolean) => {
+    setOverviewEditAppointmentId(open ? detail?.id ?? null : null);
+  };
   const {
     canSubmitInterpreterReport,
     canResubmitRejectedReport,
@@ -212,8 +219,24 @@ function useAppointmentMobileDetailSheetContentContent({
             <div className="space-y-6 pt-5">
               <MemoizedAppointmentOverviewSection
                 detail={detail}
+                canEdit={permissions.canEditSchedule}
+                onEdit={() => setOverviewEditAppointmentId(detail.id)}
                 onOpenDetail={openDetailSheet}
               />
+              {permissions.canEditSchedule ? (
+                <MemoizedEditAppointmentSection
+                  detail={detail}
+                  appointments={appointments}
+                  providers={providers}
+                  staff={staff}
+                  interpreters={interpreters}
+                  permissions={permissions}
+                  showSummary={false}
+                  open={overviewEditOpen}
+                  onOpenChange={handleOverviewEditOpenChange}
+                  onSaved={onEditSaved}
+                />
+              ) : null}
               <MemoizedAppointmentSnapshotSection detail={detail} />
               {detailAttention ? (
                 <MemoizedAppointmentAttentionSection attention={detailAttention} />
@@ -396,17 +419,6 @@ function useAppointmentMobileDetailSheetContentContent({
                     />
                   ) : null}
                 </>
-              ) : null}
-
-              {permissions.canEditSchedule ? (
-                <MemoizedEditAppointmentSection
-                  detail={detail}
-                  appointments={appointments}
-                  providers={providers}
-                  staff={staff}
-                  interpreters={interpreters}
-                  onSaved={onEditSaved}
-                />
               ) : null}
 
               {permissions.canViewReport ? (

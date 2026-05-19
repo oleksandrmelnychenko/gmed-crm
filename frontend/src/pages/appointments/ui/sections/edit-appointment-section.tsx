@@ -23,6 +23,7 @@ import {
   appointmentSelectControlClassName,
   appointmentSlateInputClassName,
 } from "@/pages/appointments/appearance/surface-appearance";
+import { updateAppointmentStatus } from "@/pages/appointments/data/appointment-mutations";
 import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
 import { useDebouncedValue } from "@/pages/appointments/data/use-debounced-value";
 import { buildConflictQuery } from "@/pages/appointments/model/query-builders";
@@ -31,10 +32,13 @@ import {
 } from "@/pages/appointments/model/form-factories";
 import {
   appointmentText,
+  appointmentTypeLabel,
   carePathKindLabel,
+  checklistPhaseLabel,
   doctorLabel,
   normalizeCarePathKindForAppointmentType,
   roleLabel,
+  statusLabel,
 } from "@/pages/appointments/model/labels";
 import {
   buildLocalScheduleWarnings,
@@ -48,7 +52,9 @@ import type {
   AppointmentCarePathKind,
   AppointmentDetail,
   AppointmentFormState,
+  AppointmentKind,
   AppointmentListItem,
+  AppointmentPermissions,
   AppointmentRecurrenceFrequency,
   AppointmentRecurringActionScope,
   ConflictSummary,
@@ -57,7 +63,12 @@ import type {
   ProviderSummary,
   StaffOption,
 } from "@/pages/appointments/model/types";
-import { CARE_PATH_KIND_OPTIONS } from "@/pages/appointments/model/constants";
+import {
+  CARE_PATH_KIND_OPTIONS,
+  CHECKLIST_PHASES,
+  STATUS_OPTIONS,
+  TYPE_OPTIONS,
+} from "@/pages/appointments/model/constants";
 import {
   AppointmentEditorSheet,
   Field,
@@ -73,6 +84,13 @@ type EditAppointmentSectionProps = {
   providers: ProviderSummary[];
   staff: StaffOption[];
   interpreters: InterpreterOption[];
+  permissions?: Pick<
+    AppointmentPermissions,
+    "canEditSchedule" | "canManageStatus" | "canManageChecklist"
+  >;
+  showSummary?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   onSaved: (notice: string) => void;
 };
 
@@ -196,6 +214,10 @@ function useEditAppointmentSectionContentContent({
   providers,
   staff,
   interpreters,
+  permissions,
+  showSummary = true,
+  open,
+  onOpenChange,
   onSaved,
 }: EditAppointmentSectionProps) {
   const { t } = useLang();
@@ -209,7 +231,11 @@ function useEditAppointmentSectionContentContent({
       detail,
       createEditAppointmentSectionState,
     );
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [internalSheetOpen, setInternalSheetOpen] = useState(false);
+  const sheetOpen = open ?? internalSheetOpen;
+  const canManageStatus = permissions?.canManageStatus ?? false;
+  const canManageChecklist = permissions?.canManageChecklist ?? false;
+  const canEditAppointmentType = canManageStatus;
   const setForm = (value: SetStateAction<AppointmentFormState>) =>
     dispatchEditState(createEditAppointmentFieldAction("form", value));
   const setRecurrenceScope = (
@@ -358,36 +384,51 @@ function useEditAppointmentSectionContentContent({
           return;
         }
       }
+      const updatePayload: Record<string, unknown> = {
+        provider_id: form.providerId || null,
+        doctor_id: form.doctorId || null,
+        owner_user_id: form.ownerUserId || null,
+        interpreter_id: form.interpreterId || null,
+        care_path_kind: normalizeCarePathKindForAppointmentType(
+          form.appointmentType,
+          form.carePathKind,
+        ),
+        title: form.title.trim(),
+        date: form.date,
+        time_start: form.timeStart || null,
+        time_end: form.timeEnd || null,
+        location: form.location.trim() || null,
+        recurrence_frequency: applyRecurrenceRule ? form.repeatFrequency : null,
+        recurrence_interval: applyRecurrenceRule ? repeatInterval : null,
+        recurrence_count: applyRecurrenceRule ? repeatCount : null,
+        recurrence_until:
+          applyRecurrenceRule && form.repeatUntil ? form.repeatUntil : null,
+        recurrence_scope: detail.recurrence_frequency
+          ? recurrenceScope
+          : "single",
+      };
+      if (canEditAppointmentType) {
+        updatePayload.appointment_type = form.appointmentType;
+      }
+      if (canManageChecklist) {
+        updatePayload.checklist_phase = form.checklistPhase;
+      }
+
       const result = await apiFetch<{
         ok: boolean;
         conflicts?: ConflictSummary;
       }>(`/appointments/${detail.id}/update`, {
         method: "POST",
-        body: JSON.stringify({
-          provider_id: form.providerId || null,
-          doctor_id: form.doctorId || null,
-          owner_user_id: form.ownerUserId || null,
-          interpreter_id: form.interpreterId || null,
-          care_path_kind: normalizeCarePathKindForAppointmentType(
-            detail.type,
-            form.carePathKind,
-          ),
-          title: form.title.trim(),
-          date: form.date,
-          time_start: form.timeStart || null,
-          time_end: form.timeEnd || null,
-          location: form.location.trim() || null,
-          recurrence_frequency: applyRecurrenceRule ? form.repeatFrequency : null,
-          recurrence_interval: applyRecurrenceRule ? repeatInterval : null,
-          recurrence_count: applyRecurrenceRule ? repeatCount : null,
-          recurrence_until:
-            applyRecurrenceRule && form.repeatUntil ? form.repeatUntil : null,
-          recurrence_scope: detail.recurrence_frequency
-            ? recurrenceScope
-            : "single",
-        }),
+        body: JSON.stringify(updatePayload),
       });
-      setSheetOpen(false);
+      if (canManageStatus && form.status !== detail.status) {
+        await updateAppointmentStatus(
+          detail.id,
+          form.status,
+          detail.recurrence_frequency ? recurrenceScope : "single",
+        );
+      }
+      handleSheetOpenChange(false);
       onSaved(buildScheduleNotice(result.conflicts, localWarnings));
     } catch (submitError) {
       setError(
@@ -414,7 +455,11 @@ function useEditAppointmentSectionContentContent({
   }
 
   function handleSheetOpenChange(open: boolean) {
-    setSheetOpen(open);
+    if (onOpenChange) {
+      onOpenChange(open);
+    } else {
+      setInternalSheetOpen(open);
+    }
     if (open) {
       setError("");
       return;
@@ -444,6 +489,7 @@ function useEditAppointmentSectionContentContent({
 
   return (
     <>
+      {showSummary ? (
       <section className="rounded-xl border border-border bg-card p-6">
         <div className="flex items-start justify-between gap-4">
           <h2 className={tokens.text.sectionTitle}>
@@ -472,6 +518,18 @@ function useEditAppointmentSectionContentContent({
               value={carePathKindLabel(form.carePathKind)}
             />
             <EditOverviewLine
+              label={appointmentText("appointments_status")}
+              value={statusLabel(form.status)}
+            />
+            <EditOverviewLine
+              label={t.appointments_type}
+              value={appointmentTypeLabel(form.appointmentType, tr)}
+            />
+            <EditOverviewLine
+              label={t.orders_phase}
+              value={checklistPhaseLabel(form.checklistPhase)}
+            />
+            <EditOverviewLine
               label={t.appointments_date}
               value={form.date || t.common_not_set}
             />
@@ -498,6 +556,7 @@ function useEditAppointmentSectionContentContent({
           </div>
         </div>
       </section>
+      ) : null}
 
       <AppointmentEditorSheet
         open={sheetOpen}
@@ -532,7 +591,7 @@ function useEditAppointmentSectionContentContent({
         {error ? <Banner tone="error" withIcon>{error}</Banner> : null}
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
         {editSheetSectionTitle(appointmentText("appointments_appointment_and_timing"))}
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 md:grid-cols-3">
         <Field compact label={t.appointments_title_col}>
           <Input
             value={form.title}
@@ -544,6 +603,32 @@ function useEditAppointmentSectionContentContent({
             }
             className={inputClassName}
           />
+        </Field>
+        <Field compact label={t.appointments_type}>
+          <NativeComboboxSelect
+            value={form.appointmentType}
+            onChange={(event) => {
+              const appointmentType = event.target.value as AppointmentKind;
+              setForm((current) => ({
+                ...current,
+                appointmentType,
+                providerId: appointmentType === "internal" ? "" : current.providerId,
+                doctorId: appointmentType === "internal" ? "" : current.doctorId,
+                carePathKind: normalizeCarePathKindForAppointmentType(
+                  appointmentType,
+                  current.carePathKind,
+                ),
+              }));
+            }}
+            className={selectClassName}
+            disabled={!canEditAppointmentType}
+          >
+            {TYPE_OPTIONS.map((value) => (
+              <option key={value} value={value}>
+                {appointmentTypeLabel(value, tr)}
+              </option>
+            ))}
+          </NativeComboboxSelect>
         </Field>
         <Field
           compact
@@ -558,7 +643,7 @@ function useEditAppointmentSectionContentContent({
               }))
             }
             className={selectClassName}
-            disabled={detail.type !== "medical"}
+            disabled={form.appointmentType !== "medical"}
           >
             {CARE_PATH_KIND_OPTIONS.map((value) => (
               <option key={value} value={value}>
@@ -611,6 +696,49 @@ function useEditAppointmentSectionContentContent({
         </div>
         </section>
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
+        {editSheetSectionTitle(appointmentText("appointments_status_and_responsibilities"))}
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field compact label={appointmentText("appointments_status")}>
+            <NativeComboboxSelect
+              value={form.status}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  status: event.target.value as AppointmentFormState["status"],
+                }))
+              }
+              className={selectClassName}
+              disabled={!canManageStatus}
+            >
+              {STATUS_OPTIONS.map((status) => (
+                <option key={status} value={status}>
+                  {statusLabel(status)}
+                </option>
+              ))}
+            </NativeComboboxSelect>
+          </Field>
+          <Field compact label={t.orders_phase}>
+            <NativeComboboxSelect
+              value={form.checklistPhase}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  checklistPhase: event.target.value,
+                }))
+              }
+              className={selectClassName}
+              disabled={!canManageChecklist}
+            >
+              {CHECKLIST_PHASES.map((phase) => (
+                <option key={phase} value={phase}>
+                  {checklistPhaseLabel(phase)}
+                </option>
+              ))}
+            </NativeComboboxSelect>
+          </Field>
+        </div>
+        </section>
+        <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
         {editSheetSectionTitle(appointmentText("appointments_provider_and_doctor"))}
         <div className="grid gap-4 md:grid-cols-2">
           <Field compact label={t.common_provider}>
@@ -624,7 +752,7 @@ function useEditAppointmentSectionContentContent({
                 }))
               }
               className={selectClassName}
-              disabled={detail.type === "internal"}
+              disabled={form.appointmentType === "internal"}
             >
               <option value="">{t.common_not_set}</option>
               {providers.map((provider) => (

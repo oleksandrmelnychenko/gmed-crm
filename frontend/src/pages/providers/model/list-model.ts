@@ -195,6 +195,280 @@ export function doctorListDisplayName(
     .join(" ");
 }
 
+export type WeeklyAvailabilityDayCode =
+  | "mon"
+  | "tue"
+  | "wed"
+  | "thu"
+  | "fri"
+  | "sat"
+  | "sun";
+
+export type WeeklyAvailabilityInterval = {
+  start: string;
+  end: string;
+};
+
+export type WeeklyAvailabilityDay = {
+  day: WeeklyAvailabilityDayCode;
+  enabled: boolean;
+  intervals: WeeklyAvailabilityInterval[];
+};
+
+export const WEEKLY_AVAILABILITY_DAYS: readonly WeeklyAvailabilityDayCode[] = [
+  "mon",
+  "tue",
+  "wed",
+  "thu",
+  "fri",
+  "sat",
+  "sun",
+] as const;
+
+const WEEKLY_DAY_INDEX = new Map(
+  WEEKLY_AVAILABILITY_DAYS.map((day, index) => [day, index]),
+);
+
+const WEEKLY_DAY_CANONICAL_LABELS: Record<WeeklyAvailabilityDayCode, string> = {
+  mon: "Mon",
+  tue: "Tue",
+  wed: "Wed",
+  thu: "Thu",
+  fri: "Fri",
+  sat: "Sat",
+  sun: "Sun",
+};
+
+const WEEKLY_DAY_LABELS: Record<Lang, Record<WeeklyAvailabilityDayCode, string>> = {
+  de: {
+    mon: "Mo",
+    tue: "Di",
+    wed: "Mi",
+    thu: "Do",
+    fri: "Fr",
+    sat: "Sa",
+    sun: "So",
+  },
+  ru: {
+    mon: "Пн",
+    tue: "Вт",
+    wed: "Ср",
+    thu: "Чт",
+    fri: "Пт",
+    sat: "Сб",
+    sun: "Вс",
+  },
+};
+
+const WEEKLY_DAY_ALIASES = new Map<string, WeeklyAvailabilityDayCode>([
+  ["mon", "mon"],
+  ["monday", "mon"],
+  ["mo", "mon"],
+  ["montag", "mon"],
+  ["пн", "mon"],
+  ["понедельник", "mon"],
+  ["tue", "tue"],
+  ["tues", "tue"],
+  ["tuesday", "tue"],
+  ["di", "tue"],
+  ["dienstag", "tue"],
+  ["вт", "tue"],
+  ["вторник", "tue"],
+  ["wed", "wed"],
+  ["wednesday", "wed"],
+  ["mi", "wed"],
+  ["mittwoch", "wed"],
+  ["ср", "wed"],
+  ["среда", "wed"],
+  ["thu", "thu"],
+  ["thur", "thu"],
+  ["thurs", "thu"],
+  ["thursday", "thu"],
+  ["do", "thu"],
+  ["donnerstag", "thu"],
+  ["чт", "thu"],
+  ["четверг", "thu"],
+  ["fri", "fri"],
+  ["friday", "fri"],
+  ["fr", "fri"],
+  ["freitag", "fri"],
+  ["пт", "fri"],
+  ["пятница", "fri"],
+  ["sat", "sat"],
+  ["saturday", "sat"],
+  ["sa", "sat"],
+  ["samstag", "sat"],
+  ["сб", "sat"],
+  ["суббота", "sat"],
+  ["sun", "sun"],
+  ["sunday", "sun"],
+  ["so", "sun"],
+  ["sonntag", "sun"],
+  ["вс", "sun"],
+  ["воскресенье", "sun"],
+]);
+
+export function weeklyAvailabilityDayLabel(day: WeeklyAvailabilityDayCode, lang: Lang) {
+  return WEEKLY_DAY_LABELS[lang][day];
+}
+
+export function blankWeeklyAvailability(): WeeklyAvailabilityDay[] {
+  return WEEKLY_AVAILABILITY_DAYS.map((day) => ({
+    day,
+    enabled: false,
+    intervals: [],
+  }));
+}
+
+function normalizeWeeklyDayToken(value: string) {
+  return value.trim().replace(/\./g, "").toLocaleLowerCase();
+}
+
+function weeklyDayFromToken(value: string) {
+  return WEEKLY_DAY_ALIASES.get(normalizeWeeklyDayToken(value));
+}
+
+function weeklyDayRange(
+  startDay: WeeklyAvailabilityDayCode,
+  endDay: WeeklyAvailabilityDayCode,
+) {
+  const startIndex = WEEKLY_DAY_INDEX.get(startDay) ?? 0;
+  const endIndex = WEEKLY_DAY_INDEX.get(endDay) ?? startIndex;
+  if (startIndex <= endIndex) {
+    return WEEKLY_AVAILABILITY_DAYS.slice(startIndex, endIndex + 1);
+  }
+  return [
+    ...WEEKLY_AVAILABILITY_DAYS.slice(startIndex),
+    ...WEEKLY_AVAILABILITY_DAYS.slice(0, endIndex + 1),
+  ];
+}
+
+function normalizeAvailabilityTime(value: string) {
+  const match = value.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return "";
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return "";
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return "";
+  return `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
+}
+
+function normalizeAvailabilityIntervals(
+  intervals: readonly WeeklyAvailabilityInterval[],
+) {
+  const seen = new Set<string>();
+  return intervals.flatMap((interval) => {
+    const start = normalizeAvailabilityTime(interval.start);
+    const end = normalizeAvailabilityTime(interval.end);
+    const key = `${start}-${end}`;
+    if (!start || !end || seen.has(key)) return [];
+    seen.add(key);
+    return [{ start, end }];
+  });
+}
+
+function parseAvailabilityIntervals(value: string) {
+  const intervals: WeeklyAvailabilityInterval[] = [];
+  const matcher = /(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})/g;
+  let match = matcher.exec(value);
+  while (match) {
+    intervals.push({
+      start: match[1] ?? "",
+      end: match[2] ?? "",
+    });
+    match = matcher.exec(value);
+  }
+  return normalizeAvailabilityIntervals(intervals);
+}
+
+function applyAvailabilitySegment(
+  schedule: Map<WeeklyAvailabilityDayCode, WeeklyAvailabilityDay>,
+  days: readonly WeeklyAvailabilityDayCode[],
+  intervals: readonly WeeklyAvailabilityInterval[],
+) {
+  const normalizedIntervals = normalizeAvailabilityIntervals(intervals);
+  if (normalizedIntervals.length === 0) return false;
+  for (const day of days) {
+    schedule.set(day, {
+      day,
+      enabled: true,
+      intervals: normalizedIntervals,
+    });
+  }
+  return true;
+}
+
+export function parseWeeklyAvailability(value: string | null | undefined) {
+  const schedule = new Map<WeeklyAvailabilityDayCode, WeeklyAvailabilityDay>(
+    blankWeeklyAvailability().map((day) => [day.day, day]),
+  );
+  const source = (value ?? "").trim();
+  if (!source) return Array.from(schedule.values());
+
+  let parsedAny = false;
+  for (const segment of source.split(";")) {
+    const trimmed = segment.trim();
+    if (!trimmed) continue;
+
+    const rangeMatch = trimmed.match(/^([^\d\s,;:]+)\s*[-–]\s*([^\d\s,;:]+)\s+(.+)$/u);
+    if (rangeMatch) {
+      const startDay = weeklyDayFromToken(rangeMatch[1] ?? "");
+      const endDay = weeklyDayFromToken(rangeMatch[2] ?? "");
+      const intervals = parseAvailabilityIntervals(rangeMatch[3] ?? "");
+      if (startDay && endDay) {
+        parsedAny = applyAvailabilitySegment(
+          schedule,
+          weeklyDayRange(startDay, endDay),
+          intervals,
+        ) || parsedAny;
+        continue;
+      }
+    }
+
+    const singleMatch = trimmed.match(/^([^\d\s,;:]+)\s+(.+)$/u);
+    if (!singleMatch) continue;
+    const day = weeklyDayFromToken(singleMatch[1] ?? "");
+    if (!day) continue;
+    parsedAny = applyAvailabilitySegment(
+      schedule,
+      [day],
+      parseAvailabilityIntervals(singleMatch[2] ?? ""),
+    ) || parsedAny;
+  }
+
+  return parsedAny ? Array.from(schedule.values()) : blankWeeklyAvailability();
+}
+
+export function formatWeeklyAvailabilityValue(days: readonly WeeklyAvailabilityDay[]) {
+  return WEEKLY_AVAILABILITY_DAYS.flatMap((day) => {
+    const row = days.find((item) => item.day === day);
+    if (!row?.enabled) return [];
+    const intervals = normalizeAvailabilityIntervals(row.intervals);
+    if (intervals.length === 0) return [];
+    const hours = intervals.map((interval) => `${interval.start}-${interval.end}`).join(", ");
+    return [`${WEEKLY_DAY_CANONICAL_LABELS[day]} ${hours}`];
+  }).join("; ");
+}
+
+export function formatWeeklyAvailabilityDisplay(
+  value: string | null | undefined,
+  lang: Lang,
+) {
+  const source = (value ?? "").trim();
+  if (!source) return "";
+  const formatted = formatWeeklyAvailabilityValue(parseWeeklyAvailability(source));
+  if (!formatted) return source;
+  return parseWeeklyAvailability(formatted)
+    .flatMap((row) => {
+      if (!row.enabled) return [];
+      const intervals = normalizeAvailabilityIntervals(row.intervals);
+      if (intervals.length === 0) return [];
+      const hours = intervals.map((interval) => `${interval.start}-${interval.end}`).join(", ");
+      return [`${weeklyAvailabilityDayLabel(row.day, lang)} ${hours}`];
+    })
+    .join("; ");
+}
+
 const COMPACT_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-GB", {
   day: "2-digit",
   month: "short",
