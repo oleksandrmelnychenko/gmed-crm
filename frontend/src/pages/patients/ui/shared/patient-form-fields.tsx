@@ -26,12 +26,14 @@ type PatientFormFieldsProps = {
   form: PatientFormState;
   onChange: (field: keyof PatientFormState, value: string) => void;
   includeBirthAndGender?: boolean;
+  readOnly?: boolean;
 };
 
 export function PatientFormFields({
   form,
   onChange,
   includeBirthAndGender = false,
+  readOnly = false,
 }: PatientFormFieldsProps) {
   const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
@@ -42,10 +44,11 @@ export function PatientFormFields({
   const parentLabel = t.patient_relation_type_parent ?? l("patients_detail_parent");
 
   useEffect(() => {
+    if (readOnly) return;
     if (isMinor && !isGuardianOrParentRelation(form.emergencyContactRelation)) {
       onChange("emergencyContactRelation", "guardian");
     }
-  }, [form.emergencyContactRelation, isMinor, onChange]);
+  }, [form.emergencyContactRelation, isMinor, onChange, readOnly]);
 
   function handleBirthDateChange(value: string) {
     onChange("birthDate", value);
@@ -68,6 +71,7 @@ export function PatientFormFields({
               value={form.title}
               onChange={(event) => onChange("title", event.target.value)}
               className={formInputClassName}
+              disabled={readOnly}
             />
           </Field>
           <Field label={t.patients_first_name}>
@@ -75,6 +79,7 @@ export function PatientFormFields({
               value={form.firstName}
               onChange={(event) => onChange("firstName", event.target.value)}
               className={formInputClassName}
+              disabled={readOnly}
               required
             />
           </Field>
@@ -83,6 +88,7 @@ export function PatientFormFields({
               value={form.lastName}
               onChange={(event) => onChange("lastName", event.target.value)}
               className={formInputClassName}
+              disabled={readOnly}
               required
             />
           </Field>
@@ -96,12 +102,13 @@ export function PatientFormFields({
                 value={form.birthDate}
                 onChange={(event) => handleBirthDateChange(event.target.value)}
                 className={formInputClassName}
+                disabled={readOnly}
                 required
               />
             </Field>
             <Field label={t.patients_gender}>
               <NativeComboboxSelect value={form.gender}
-                onChange={(event) => onChange("gender", event.target.value ?? "male")} className={cn("w-full", formInputClassName)}>
+                onChange={(event) => onChange("gender", event.target.value ?? "male")} className={cn("w-full", formInputClassName)} disabled={readOnly}>
                   <option value="male">{t.gender_male}</option>
                   <option value="female">{t.gender_female}</option>
                   <option value="diverse">{t.gender_diverse}</option>
@@ -122,6 +129,7 @@ export function PatientFormFields({
               value={form.nationality}
               onChange={(value) => onChange("nationality", value)}
               placeholder={notSetLabel}
+              disabled={readOnly}
             />
           </Field>
           <Field label={t.patients_residence_country}>
@@ -129,6 +137,7 @@ export function PatientFormFields({
               value={form.residenceCountry}
               onChange={(value) => onChange("residenceCountry", value)}
               placeholder={notSetLabel}
+              disabled={readOnly}
             />
           </Field>
         </div>
@@ -138,6 +147,7 @@ export function PatientFormFields({
             value={form.languages}
             onChange={(next) => onChange("languages", next)}
             placeholder={l("patients_languages_select_placeholder")}
+            disabled={readOnly}
           />
         </Field>
 
@@ -145,6 +155,7 @@ export function PatientFormFields({
           <FunctionalLabelChips
             value={form.functionalLabels}
             onChange={(next) => onChange("functionalLabels", next)}
+            disabled={readOnly}
           />
         </Field>
       </FormSection>
@@ -156,6 +167,7 @@ export function PatientFormFields({
               value={form.phonePrimary}
               onChange={(event) => onChange("phonePrimary", event.target.value)}
               className={formInputClassName}
+              disabled={readOnly}
             />
           </Field>
           <Field label={t.patients_phone_secondary}>
@@ -163,6 +175,7 @@ export function PatientFormFields({
               value={form.phoneSecondary}
               onChange={(event) => onChange("phoneSecondary", event.target.value)}
               className={formInputClassName}
+              disabled={readOnly}
             />
           </Field>
           <Field label={t.patients_email}>
@@ -171,6 +184,7 @@ export function PatientFormFields({
               value={form.email}
               onChange={(event) => onChange("email", event.target.value)}
               className={formInputClassName}
+              disabled={readOnly}
             />
           </Field>
         </div>
@@ -182,6 +196,7 @@ export function PatientFormFields({
             value={form.addressStreet}
             onChange={(event) => onChange("addressStreet", event.target.value)}
             className={formInputClassName}
+            disabled={readOnly}
           />
         </Field>
 
@@ -191,6 +206,7 @@ export function PatientFormFields({
               value={form.addressCity}
               onChange={(event) => onChange("addressCity", event.target.value)}
               className={formInputClassName}
+              disabled={readOnly}
             />
           </Field>
           <Field label={t.patients_address_zip}>
@@ -198,6 +214,7 @@ export function PatientFormFields({
               value={form.addressZip}
               onChange={(event) => onChange("addressZip", event.target.value)}
               className={formInputClassName}
+              disabled={readOnly}
             />
           </Field>
           <Field label={t.patients_address_country}>
@@ -205,6 +222,7 @@ export function PatientFormFields({
               value={form.addressCountry}
               onChange={(value) => onChange("addressCountry", value)}
               placeholder={notSetLabel}
+              disabled={readOnly}
             />
           </Field>
         </div>
@@ -217,6 +235,7 @@ export function PatientFormFields({
               value={form.insuranceProvider}
               onChange={(event) => onChange("insuranceProvider", event.target.value)}
               className={formInputClassName}
+              disabled={readOnly}
             />
           </Field>
           <Field label={t.patients_insurance_number}>
@@ -224,11 +243,12 @@ export function PatientFormFields({
               value={form.insuranceNumber}
               onChange={(event) => onChange("insuranceNumber", event.target.value)}
               className={formInputClassName}
+              disabled={readOnly}
             />
           </Field>
           <Field label={t.patients_insurance_type}>
             <NativeComboboxSelect value={form.insuranceType}
-              onChange={(event) => onChange("insuranceType", event.target.value ?? "")} className={cn("w-full", formInputClassName)}>
+              onChange={(event) => onChange("insuranceType", event.target.value ?? "")} className={cn("w-full", formInputClassName)} disabled={readOnly}>
                 <option value="">{t.common_not_set}</option>
                 <option value="private">{t.insurance_private}</option>
                 <option value="public">{t.insurance_public}</option>
@@ -253,6 +273,7 @@ export function PatientFormFields({
               value={form.emergencyContactName}
               onChange={(event) => onChange("emergencyContactName", event.target.value)}
               className={formInputClassName}
+              disabled={readOnly}
               required={isMinor}
             />
           </Field>
@@ -261,6 +282,7 @@ export function PatientFormFields({
               value={form.emergencyContactPhone}
               onChange={(event) => onChange("emergencyContactPhone", event.target.value)}
               className={formInputClassName}
+              disabled={readOnly}
               required={isMinor}
             />
           </Field>
@@ -276,6 +298,7 @@ export function PatientFormFields({
                   onChange("emergencyContactRelation", event.target.value ?? "guardian")
                 }
                 className={cn("w-full", formInputClassName)}
+                disabled={readOnly}
                 required
               >
                 <option value="guardian">{guardianLabel}</option>
@@ -286,6 +309,7 @@ export function PatientFormFields({
                 value={form.emergencyContactRelation}
                 onChange={(event) => onChange("emergencyContactRelation", event.target.value)}
                 className={formInputClassName}
+                disabled={readOnly}
               />
             )}
           </Field>
@@ -297,6 +321,7 @@ export function PatientFormFields({
           value={form.notes}
           onChange={(event) => onChange("notes", event.target.value)}
           className={textareaClassName}
+          disabled={readOnly}
           rows={4}
         />
       </FormSection>

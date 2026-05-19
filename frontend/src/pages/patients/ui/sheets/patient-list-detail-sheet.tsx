@@ -220,7 +220,11 @@ function PatientProfileSection({
         </div>
       </section>
 
-      <PatientFormFields form={form} onChange={onChange} />
+      <PatientFormFields
+        form={form}
+        onChange={canEdit ? onChange : () => undefined}
+        readOnly={!canEdit}
+      />
 
       {!canEdit ? (
         <p className="text-[12px] text-muted-foreground italic">
@@ -460,7 +464,7 @@ function PatientDetailSheet({
           : dictionary.patients_title || dictionary.patients_subtitle
       }
       width="detail-wide"
-      onSubmit={detail ? handleSubmit : undefined}
+      onSubmit={detail && canCreateEdit ? handleSubmit : undefined}
       footer={
         detail && !hideFooterActions ? (
           <>

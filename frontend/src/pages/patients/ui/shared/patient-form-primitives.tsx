@@ -130,11 +130,13 @@ export function CountrySelect({
   onChange,
   placeholder,
   required,
+  disabled = false,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
   required?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <NativeComboboxSelect
@@ -142,6 +144,7 @@ export function CountrySelect({
       onChange={(event) => onChange(event.target.value)}
       className={cn("w-full", formInputClassName)}
       required={required}
+      disabled={disabled}
     >
       <option value="">{placeholder}</option>
       {optionsWithCurrent(COUNTRY_OPTIONS, value).map((option) => (
@@ -157,16 +160,19 @@ export function NationalitySelect({
   value,
   onChange,
   placeholder,
+  disabled = false,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
+  disabled?: boolean;
 }) {
   return (
     <NativeComboboxSelect
       value={value}
       onChange={(event) => onChange(event.target.value)}
       className={cn("w-full", formInputClassName)}
+      disabled={disabled}
     >
       <option value="">{placeholder}</option>
       {optionsWithCurrent(NATIONALITY_OPTIONS, value).map((option) => (
@@ -182,10 +188,12 @@ export function LanguageChips({
   value,
   onChange,
   placeholder,
+  disabled = false,
 }: {
   value: string;
   onChange: (next: string) => void;
   placeholder: string;
+  disabled?: boolean;
 }) {
   const selected = splitSelectedOptions(value);
   const selectedKeys = new Set(selected.map(normalizeSelectKey));
@@ -212,6 +220,7 @@ export function LanguageChips({
         value=""
         onChange={(event) => addLanguage(event.target.value)}
         className={cn("w-full", formInputClassName)}
+        disabled={disabled}
       >
         <option value="">{placeholder}</option>
         {availableOptions.map((option) => (
@@ -227,7 +236,11 @@ export function LanguageChips({
               key={item}
               type="button"
               onClick={() => removeLanguage(item)}
-              className="h-7 rounded-full border border-border bg-card px-2.5 text-[12px] font-medium text-foreground transition-colors hover:border-foreground/30 hover:bg-muted/40"
+              disabled={disabled}
+              className={cn(
+                "h-7 rounded-full border border-border bg-card px-2.5 text-[12px] font-medium text-foreground transition-colors hover:border-foreground/30 hover:bg-muted/40",
+                disabled && "cursor-default opacity-80 hover:border-border hover:bg-card",
+              )}
               title={optionLabel(LANGUAGE_OPTIONS, item)}
             >
               {optionLabel(LANGUAGE_OPTIONS, item)} x
@@ -311,9 +324,11 @@ function functionalLabelOptions(lang: FunctionalLabelLang): { value: string; lab
 export function FunctionalLabelChips({
   value,
   onChange,
+  disabled = false,
 }: {
   value: string;
   onChange: (next: string) => void;
+  disabled?: boolean;
 }) {
   const { lang } = useLang();
   const options = functionalLabelOptions(lang);
@@ -331,11 +346,13 @@ export function FunctionalLabelChips({
             key={opt.value}
             type="button"
             onClick={() => toggle(opt.value)}
+            disabled={disabled}
             className={cn(
               "h-7 rounded-full border px-2.5 text-[12px] font-medium transition-colors",
               checked
                 ? functionalLabelChipClass(opt.value)
-                : "bg-card text-muted-foreground border-border hover:text-foreground hover:border-foreground/30"
+                : "bg-card text-muted-foreground border-border hover:text-foreground hover:border-foreground/30",
+              disabled && "cursor-default opacity-80 hover:text-muted-foreground hover:border-border",
             )}
           >
             {opt.label}

@@ -1802,9 +1802,9 @@ function useStaffAppointmentsPageContent() {
         detailError={linkedPatientDetailError}
         dictionary={tr as unknown as PatientsDictionary}
         detailControls={{
-          canCreateEdit: patientSheetPermissions.canCreateEdit,
+          canCreateEdit: false,
           canViewAssignments: patientSheetPermissions.canViewAssignments,
-          canManageAssignments: patientSheetPermissions.canManageAssignments,
+          canManageAssignments: false,
           hideFooterActions: true,
           hideWorkspaceActions: true,
         }}

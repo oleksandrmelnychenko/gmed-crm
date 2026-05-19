@@ -138,16 +138,16 @@ function AppointmentOverviewSection({
         ) : null}
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-3">
-        <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-3 text-sm text-muted-foreground">
+        <div className="min-w-0 overflow-hidden rounded-xl border border-border/50 bg-muted/25 px-4 py-3 text-sm text-muted-foreground">
           <OverviewInfoLine icon={Clock3} label={formatAppointmentSlotLabel(detail)} />
         </div>
-        <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-3 text-sm text-muted-foreground">
+        <div className="min-w-0 overflow-hidden rounded-xl border border-border/50 bg-muted/25 px-4 py-3 text-sm text-muted-foreground">
           <OverviewInfoLine
             icon={MapPin}
             label={detail.location || tr.common_not_set}
           />
         </div>
-        <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-3 text-sm text-muted-foreground">
+        <div className="min-w-0 overflow-hidden rounded-xl border border-border/50 bg-muted/25 px-4 py-3 text-sm text-muted-foreground">
           <OverviewInfoLine
             icon={Stethoscope}
             label={detail.provider_name || tr.common_not_set}
@@ -358,9 +358,12 @@ function OverviewInfoLine({
   label: string;
 }) {
   return (
-    <div className="inline-flex items-center gap-2 text-foreground">
-      <Icon className="size-4 text-muted-foreground" />
-      <span className="truncate">{label}</span>
+    <div
+      className="inline-flex max-w-full min-w-0 items-center gap-2 text-foreground"
+      title={label}
+    >
+      <Icon className="size-4 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
     </div>
   );
 }
