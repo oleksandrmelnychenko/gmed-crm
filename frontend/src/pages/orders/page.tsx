@@ -3060,7 +3060,7 @@ function useOrdersPageContent() {
                 description={tx.orders_subtitle}
               />
             ) : (
-              <div className="space-y-4 rounded-xl p-4">
+              <div className="space-y-4 rounded-xl">
                 <section className="overflow-hidden rounded-xl border border-border bg-card">
                   <div className="relative p-4">
                     <span
@@ -5882,7 +5882,7 @@ function useOrdersPageContent() {
                 />
               }
               headerClassName="px-4 py-3"
-              bodyClassName="min-h-0 overscroll-y-contain px-4 py-2 space-y-4"
+              bodyClassName="min-h-0 overscroll-y-contain space-y-4 px-5 py-4"
             >
               {externalInvoiceError ? (
                 <Banner tone="error" withIcon>
@@ -6054,7 +6054,7 @@ function useOrdersPageContent() {
             title={t.orders_service_group_wizard_title}
             description={t.orders_service_group_wizard_steps}
             headerClassName="px-4 py-3"
-            bodyClassName="min-h-0 overscroll-y-contain px-4 py-2 space-y-4"
+            bodyClassName="min-h-0 overscroll-y-contain space-y-4 px-5 py-4"
           >
             <OrderServiceGroupWizard
               embedded
@@ -6091,7 +6091,7 @@ function useOrdersPageContent() {
                 />
               }
               headerClassName="px-4 py-3"
-              bodyClassName="min-h-0 overscroll-y-contain px-4 py-2 space-y-4"
+              bodyClassName="min-h-0 overscroll-y-contain space-y-4 px-5 py-4"
             >
               <FormSection title={l("orders_workflow_punkt")}>
                 <Field
@@ -6216,7 +6216,7 @@ function useOrdersPageContent() {
                 />
               }
             >
-              <div className="space-y-4 rounded-xl p-4">
+              <div className="space-y-4 rounded-xl">
                 {createError ? (
                   <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                     {createError}
@@ -6499,7 +6499,7 @@ function useOrdersPageContent() {
                 />
               }
               headerClassName="px-4 py-3"
-              bodyClassName="min-h-0 overscroll-y-contain px-4 py-2 space-y-4"
+              bodyClassName="min-h-0 overscroll-y-contain space-y-4 px-5 py-4"
             >
             {leistungError ? (
               <Banner tone="error" withIcon>{leistungError}</Banner>

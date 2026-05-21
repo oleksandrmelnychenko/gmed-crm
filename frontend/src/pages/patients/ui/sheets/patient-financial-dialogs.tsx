@@ -185,7 +185,7 @@ function ContractCreateDialog({
   return (
     <PatientSheetScaffold open={contractCreateOpen} onOpenChange={onContractCreateOpenChange} width="narrow" onSubmit={onContractCreateSubmit}
       title={l("patients_create_framework_contract")}
-      bodyClassName="px-4 py-4 space-y-3"
+      bodyClassName="space-y-4 px-5 py-4"
       footer={
         <ContractCreateFooter
           busy={contractBusy}
@@ -287,7 +287,7 @@ function ContractStatusDialog({
       onSubmit={onContractStatusSubmit}
       title={l("patients_update_contract_status")}
       description={l("patients_adjust_lifecycle_and_validity_dates_without_leaving_the")}
-      bodyClassName="px-4 py-4 space-y-3"
+      bodyClassName="space-y-4 px-5 py-4"
       footer={
         <>
           <Button
@@ -418,7 +418,7 @@ function InvoiceManagerDialog({
       onSubmit={onInvoiceStatusSubmit}
       title={l("patients_manage_invoice")}
       description={l("patients_update_billing_status_and_continue_dunning_flow_directly")}
-      bodyClassName="px-4 py-4 space-y-3"
+      bodyClassName="space-y-4 px-5 py-4"
       footer={
         <>
           <Button

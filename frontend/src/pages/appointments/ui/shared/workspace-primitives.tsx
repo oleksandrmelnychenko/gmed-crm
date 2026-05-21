@@ -99,7 +99,7 @@ export function AppointmentEditorSheet({
       title={title}
       description={description}
       headerClassName="px-4 py-3"
-      bodyClassName="min-h-0 overscroll-y-contain px-4 py-4 space-y-4"
+      bodyClassName="min-h-0 overscroll-y-contain space-y-4 px-5 py-4"
       footer={<SheetActionsFooter>{footer}</SheetActionsFooter>}
     >
       {children}
@@ -154,8 +154,9 @@ export function AppointmentPreviewSheet({
           description={description}
           headerClassName={cn("px-4 py-3", headerClassName)}
           bodyClassName={cn(
-            "min-h-0 overscroll-y-contain px-4 py-4 space-y-4",
+            "min-h-0 overscroll-y-contain",
             bodyClassName,
+            "space-y-4 px-5 py-4",
           )}
         >
           {children}

@@ -408,7 +408,7 @@ function usePatientInvoicesPageContent() {
             title={detail ? detail.invoice_number : t.portal_invoices_invoice_detail}
             description={t.portal_invoices_commercial_totals_line_items_and_payment_proof_handoff_for_the_s}
             headerClassName="px-4 py-3"
-            bodyClassName="min-h-0 overscroll-y-contain px-4 py-2"
+            bodyClassName="min-h-0 overscroll-y-contain space-y-4 px-5 py-4"
           >
             <div className="space-y-6">
             {detailBusy ? (

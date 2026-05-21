@@ -207,7 +207,7 @@ function useAppointmentMobileDetailSheetContentContent({
       <AdminSheetScaffold
         title={t.appointments_title}
         headerClassName="px-4 py-3"
-        bodyClassName="flex-1 overflow-y-auto overscroll-y-contain px-4 pb-6 pt-4"
+        bodyClassName="flex-1 overflow-y-auto overscroll-y-contain space-y-4 px-5 py-4"
       >
         {detailLoading ? (
             <div className="flex min-h-[320px] items-center justify-center text-muted-foreground">

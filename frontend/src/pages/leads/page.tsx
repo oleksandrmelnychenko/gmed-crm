@@ -982,18 +982,19 @@ function useLeadsPageContent() {
           })}
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
-        {detailLoading ? (
-          <div className="flex min-h-[320px] items-center justify-center text-sm text-zinc-500">
-            <LoaderCircle className="mr-2 size-4 animate-spin" />
-            {t.lead_loading_detail}
-          </div>
-        ) : detailError ? (
-          <div className="pt-1">
-            <Banner tone="error">{detailError}</Banner>
-          </div>
-        ) : detail ? (
-          <div className="space-y-6">
+      <div className="flex-1 overflow-y-auto space-y-4 px-5 py-4">
+        <div className="space-y-4 rounded-xl">
+          {detailLoading ? (
+            <div className="flex min-h-[320px] items-center justify-center text-sm text-zinc-500">
+              <LoaderCircle className="mr-2 size-4 animate-spin" />
+              {t.lead_loading_detail}
+            </div>
+          ) : detailError ? (
+            <div className="pt-1">
+              <Banner tone="error">{detailError}</Banner>
+            </div>
+          ) : detail ? (
+            <div className="space-y-6">
             {paneTab === "overview" ? (
               <>
                 <section className={cardClass("p-5")}>
@@ -1889,12 +1890,13 @@ function useLeadsPageContent() {
                 </section>
               </>
             ) : null}
-          </div>
-        ) : (
-          <div className="flex min-h-[320px] items-center justify-center text-sm text-zinc-500">
-            {t.lead_select_from_queue}
-          </div>
-        )}
+            </div>
+          ) : (
+            <div className="flex min-h-[320px] items-center justify-center text-sm text-zinc-500">
+              {t.lead_select_from_queue}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -2232,7 +2234,7 @@ function useLeadsPageContent() {
                 />
               )}
             >
-              <div className="space-y-4 rounded-xl p-4">
+              <div className="space-y-4 rounded-xl">
                 {createError ? <ShellBanner tone="error">{createError}</ShellBanner> : null}
 
                 <section className={cardClass("p-5")}>

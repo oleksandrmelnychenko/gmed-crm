@@ -823,7 +823,7 @@ function usePatientInvoicesTabContent({
         width="form-heavy"
         onSubmit={handleAssignPackage}
         title={t.patient_invoices_assign_package}
-        bodyClassName="px-4 py-4 space-y-3"
+        bodyClassName="space-y-4 px-5 py-4"
         footer={
           <>
             <Button
@@ -996,7 +996,7 @@ function usePatientInvoicesTabContent({
         width="form-heavy"
         onSubmit={handleConsumePackage}
         title={t.patient_invoices_record_consumption}
-        bodyClassName="px-4 py-4 space-y-3"
+        bodyClassName="space-y-4 px-5 py-4"
         footer={
           <>
             <Button

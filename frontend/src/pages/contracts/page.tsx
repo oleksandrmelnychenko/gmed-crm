@@ -2183,7 +2183,7 @@ function useContractsPageContent() {
                 />
               }
             >
-              <div className="space-y-4 rounded-xl p-4">
+              <div className="space-y-4 rounded-xl">
                 {agencyServiceFormError ? <ShellBanner tone="error">{agencyServiceFormError}</ShellBanner> : null}
                 <section className="rounded-xl border border-border bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.basicData)}</h2>
@@ -2339,7 +2339,7 @@ function useContractsPageContent() {
                 />
               }
             >
-              <div className="space-y-4 rounded-xl p-4">
+              <div className="space-y-4 rounded-xl">
                 {createContractError ? <ShellBanner tone="error">{createContractError}</ShellBanner> : null}
                 <section className="rounded-xl border border-border bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.contractPatientStatus)}</h2>
@@ -2463,7 +2463,7 @@ function useContractsPageContent() {
                 />
               }
             >
-              <div className="space-y-4 rounded-xl p-4">
+              <div className="space-y-4 rounded-xl">
                 {createQuoteError ? <ShellBanner tone="error">{createQuoteError}</ShellBanner> : null}
                 <section className="rounded-xl border border-border bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.quoteOrderSection)}</h2>
@@ -2554,7 +2554,7 @@ function useContractsPageContent() {
             title={contractDetail ? `${contractDetail.contract_number} / ${contractDetail.patient_name}` : t.contracts_framework}
             description={text.contractSheetDescription}
           >
-            <div className="space-y-4 rounded-xl p-4">
+            <div className="space-y-4 rounded-xl">
               {contractDetailLoading ? (
                 <LoadingState label={t.common_loading} />
               ) : contractDetailError ? (
@@ -2775,7 +2775,7 @@ function useContractsPageContent() {
             title={quoteDetail ? `${quoteDetail.quote_number} / ${quoteDetail.patient_name}` : text.quotesTab}
             description={text.quoteSheetDescription}
           >
-            <div className="space-y-4 rounded-xl p-4">
+            <div className="space-y-4 rounded-xl">
               {quoteDetailLoading ? (
                 <LoadingState label={t.common_loading} />
               ) : quoteDetailError ? (

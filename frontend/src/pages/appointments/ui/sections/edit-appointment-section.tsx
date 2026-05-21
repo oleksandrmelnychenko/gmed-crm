@@ -632,7 +632,7 @@ function useEditAppointmentSectionContentContent({
           </>
         }
       >
-        <div className="space-y-4 rounded-xl p-4">
+        <div className="space-y-4 rounded-xl">
         {error ? <Banner tone="error" withIcon>{error}</Banner> : null}
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
         {editSheetSectionTitle(appointmentText("appointments_appointment_and_timing"))}

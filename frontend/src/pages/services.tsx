@@ -6,6 +6,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  type ReactNode,
   type FormEvent,
   useReducer,
   type SetStateAction,
@@ -322,21 +323,81 @@ function ServiceDetailField({
   value?: string | null;
   multiline?: boolean;
 }) {
-  const displayValue = value?.trim() || "—";
+  const displayValue = value?.trim() || "-";
 
   return (
-    <div className="rounded-xl border border-border/70 bg-muted/20 p-3">
-      <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+    <ServiceSummaryLine label={label} value={displayValue} multiline={multiline} />
+  );
+}
+
+function serviceDetailValue(value?: ReactNode) {
+  if (typeof value === "string") return value.trim() || "-";
+  if (value === null || value === undefined || value === false) return "-";
+  return value;
+}
+
+function ServiceMiniMetric({
+  label,
+  value,
+}: {
+  label: string;
+  value?: ReactNode;
+}) {
+  const displayValue = serviceDetailValue(value);
+
+  return (
+    <div className="flex min-w-[210px] flex-1 items-center justify-between gap-3 rounded-full border border-border bg-muted/20 px-4 py-2">
+      <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
         {label}
+      </span>
+      <span className="flex min-w-0 max-w-[58%] justify-end text-right text-sm font-semibold leading-none text-foreground">
+        {displayValue}
+      </span>
+    </div>
+  );
+}
+
+function ServiceSummaryLine({
+  label,
+  value,
+  multiline = false,
+}: {
+  label: string;
+  value?: ReactNode;
+  multiline?: boolean;
+}) {
+  const displayValue = serviceDetailValue(value);
+
+  if (multiline) {
+    return (
+      <div className="rounded-lg px-2 py-1.5">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="min-w-0 shrink-0 truncate text-xs font-medium text-muted-foreground">
+            {label}
+          </span>
+          <span className="h-px min-w-6 flex-1 bg-border/70" />
+        </div>
+        <div className="mt-1.5 whitespace-pre-wrap break-words text-sm font-medium leading-6 text-foreground">
+          {displayValue}
+        </div>
       </div>
-      <div
+    );
+  }
+
+  return (
+    <div className="flex min-w-0 items-center gap-3 rounded-lg px-2 py-1.5">
+      <span className="min-w-0 shrink-0 truncate text-xs font-medium text-muted-foreground">
+        {label}
+      </span>
+      <span className="h-px min-w-6 flex-1 bg-border/70" />
+      <span
         className={cn(
-          "mt-1 text-sm text-foreground",
-          multiline ? "whitespace-pre-wrap leading-relaxed" : "truncate",
+          "min-w-0 max-w-[58%] truncate text-right text-sm font-semibold leading-none text-foreground",
+          typeof displayValue === "string" ? undefined : "flex justify-end",
         )}
       >
         {displayValue}
-      </div>
+      </span>
     </div>
   );
 }
@@ -1243,49 +1304,47 @@ function useStaffServicesPageContent() {
               bodyClassName="space-y-4 px-5 py-4"
             >
               <Section title={t.staff_services_create_section_service}>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <ServiceDetailField label={t.staff_services_column_status} value={serviceStatusLabel(selectedService.status, t)} />
-                  <ServiceDetailField label={t.staff_services_column_billing} value={billingStatusLabel(selectedService.billing_status, t)} />
-                  <ServiceDetailField label={t.staff_services_column_patient} value={`${selectedService.patient_name} (${selectedService.patient_pid})`} />
-                  <ServiceDetailField label={t.staff_services_column_source} value={serviceSourceLabel(selectedService.request_source, t)} />
-                  <div className="rounded-xl border border-border/70 bg-muted/20 p-3">
-                    <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                      {t.services_category}
-                    </div>
-                    <div className="mt-1 flex min-w-0">
+                <div className="grid gap-2 md:grid-cols-2">
+                  <ServiceMiniMetric label={t.staff_services_column_status} value={serviceStatusLabel(selectedService.status, t)} />
+                  <ServiceMiniMetric label={t.staff_services_column_billing} value={billingStatusLabel(selectedService.billing_status, t)} />
+                  <ServiceMiniMetric label={t.staff_services_column_patient} value={`${selectedService.patient_name} (${selectedService.patient_pid})`} />
+                  <ServiceMiniMetric label={t.staff_services_column_source} value={serviceSourceLabel(selectedService.request_source, t)} />
+                  <ServiceMiniMetric
+                    label={t.services_category}
+                    value={
                       <ServiceTaxonomyBadge
                         label={serviceTaxonomyLabel(selectedService, lang)}
                         fallback={t.common_not_set}
                       />
-                    </div>
-                  </div>
+                    }
+                  />
                 </div>
               </Section>
 
               <Section title={t.staff_services_create_section_schedule}>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-1.5">
                   <ServiceDetailField label={t.staff_services_form_start} value={selectedService.starts_at ? formatPortalDateTime(selectedService.starts_at) : null} />
                   <ServiceDetailField label={t.staff_services_form_end} value={selectedService.ends_at ? formatPortalDateTime(selectedService.ends_at) : null} />
                 </div>
               </Section>
 
               <Section title={t.staff_services_create_section_assignment}>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-1.5">
                   <ServiceDetailField label={t.staff_services_form_provider} value={selectedService.provider_name} />
                   <ServiceDetailField label={t.staff_services_form_concierge} value={selectedService.assigned_concierge_name} />
                 </div>
               </Section>
 
               <Section title={t.staff_services_create_section_finance}>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <ServiceDetailField label={t.staff_services_form_cost_estimate} value={selectedService.cost_estimate ? formatPortalCurrency(selectedService.cost_estimate) : null} />
-                  <ServiceDetailField label={t.staff_services_form_actual_cost} value={selectedService.actual_cost ? formatPortalCurrency(selectedService.actual_cost) : null} />
-                  <ServiceDetailField label={t.staff_services_form_currency} value={selectedService.currency} />
+                <div className="grid gap-2 md:grid-cols-3">
+                  <ServiceMiniMetric label={t.staff_services_form_cost_estimate} value={selectedService.cost_estimate ? formatPortalCurrency(selectedService.cost_estimate) : null} />
+                  <ServiceMiniMetric label={t.staff_services_form_actual_cost} value={selectedService.actual_cost ? formatPortalCurrency(selectedService.actual_cost) : null} />
+                  <ServiceMiniMetric label={t.staff_services_form_currency} value={selectedService.currency} />
                 </div>
               </Section>
 
               <Section title={t.staff_services_create_section_vendor_notes}>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-1.5">
                   <ServiceDetailField label={t.staff_services_form_booking_reference} value={selectedService.booking_reference} />
                   <ServiceDetailField label={t.staff_services_form_vendor} value={selectedService.vendor_name} />
                   <ServiceDetailField label={t.staff_services_form_vendor_contact} value={selectedService.vendor_contact} />
@@ -1320,7 +1379,7 @@ function useStaffServicesPageContent() {
                 />
               }
             >
-              <div className="space-y-3 rounded-xl p-4">
+              <div className="space-y-4 rounded-xl">
                 {createError ? (
                   <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
                     {createError}
@@ -1619,7 +1678,8 @@ function useStaffServicesPageContent() {
                     </label>
                   </div>
                 </Section>
-              </div>            </AdminSheetScaffold>
+              </div>
+            </AdminSheetScaffold>
           </form>
         </SheetContent>
       </Sheet>

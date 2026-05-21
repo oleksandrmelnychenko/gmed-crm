@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { Children, cloneElement, isValidElement, type ReactNode } from "react";
 import { LoaderCircle, type LucideIcon } from "lucide-react";
 
 import { CountBadge } from "@/components/ui-shell";
@@ -7,6 +7,54 @@ import { SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
 type MetricTone = "sky" | "emerald" | "amber" | "slate" | "rose";
+
+const SHEET_BODY_WRAPPER_BASE_CLASS = "space-y-4 rounded-xl";
+
+function resolveSheetBodyWrapperClassName({
+  bodyWrapperClassName,
+}: {
+  bodyWrapperClassName?: string;
+}) {
+  return bodyWrapperClassName ?? SHEET_BODY_WRAPPER_BASE_CLASS;
+}
+
+function getSheetBodyWrapperElement(children: ReactNode) {
+  const nodes = Children.toArray(children);
+
+  if (nodes.length !== 1) return null;
+
+  const [node] = nodes;
+
+  if (!isValidElement<{ className?: unknown }>(node) || node.type !== "div") {
+    return null;
+  }
+
+  const { className } = node.props;
+
+  if (typeof className !== "string") return null;
+
+  const hasSpacing = /\bspace-y-[234568]\b/.test(className);
+  const hasWrapperShape = /\brounded-xl\b/.test(className);
+  const hasFrame = /\b(border|shadow|ring)\b/.test(className);
+
+  return hasSpacing && hasWrapperShape && !hasFrame ? node : null;
+}
+
+function SheetBodyContent({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className: string;
+}) {
+  const wrapper = getSheetBodyWrapperElement(children);
+
+  if (wrapper) {
+    return cloneElement(wrapper, { className });
+  }
+
+  return <div className={className}>{children}</div>;
+}
 
 export function AdminToolbar({
   children,
@@ -127,6 +175,7 @@ export function AdminSheetScaffold({
   className,
   headerClassName,
   bodyClassName,
+  bodyWrapperClassName,
   hideHeader = false,
 }: {
   title: ReactNode;
@@ -136,9 +185,13 @@ export function AdminSheetScaffold({
   className?: string;
   headerClassName?: string;
   bodyClassName?: string;
+  bodyWrapperClassName?: string;
   hideHeader?: boolean;
 }) {
   void description;
+  const resolvedBodyWrapperClassName = resolveSheetBodyWrapperClassName({
+    bodyWrapperClassName,
+  });
 
   return (
     <div className={cn("flex flex-1 min-h-0 flex-col", className)}>
@@ -148,9 +201,14 @@ export function AdminSheetScaffold({
         </SheetHeader>
       )}
       <div
-        className={cn("flex-1 overflow-y-auto px-4 py-2 space-y-4", bodyClassName)}
+        className={cn(
+          "flex-1 overflow-y-auto space-y-4 px-5 py-4",
+          bodyClassName,
+        )}
       >
-        {children}
+        <SheetBodyContent className={resolvedBodyWrapperClassName}>
+          {children}
+        </SheetBodyContent>
       </div>
       {footer}
     </div>

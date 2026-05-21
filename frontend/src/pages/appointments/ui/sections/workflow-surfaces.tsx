@@ -150,7 +150,7 @@ function WorkflowSectionAccessory({
 }
 
 function WorkflowSheetBody({ children }: { children: ReactNode }) {
-  return <div className="space-y-4 rounded-xl p-4">{children}</div>;
+  return <div className="space-y-4 rounded-xl">{children}</div>;
 }
 
 function WorkflowSheetSection({

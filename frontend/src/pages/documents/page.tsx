@@ -2328,7 +2328,7 @@ function StaffDocumentsPage({
                 />
               )}
             >
-              <div className="space-y-4 rounded-xl p-4">
+              <div className="space-y-4 rounded-xl">
                 {generateError ? (
                   <Banner tone="error">{generateError}</Banner>
                 ) : null}
@@ -2678,7 +2678,7 @@ function StaffDocumentsPage({
                 />
               )}
             >
-              <div className="space-y-4 rounded-xl p-4">
+              <div className="space-y-4 rounded-xl">
                 {uploadError ? <Banner tone="error">{uploadError}</Banner> : null}
                 {!canManage ? (
                   <Banner tone="warning">
@@ -3001,7 +3001,7 @@ function StaffDocumentsPage({
                 />
               )}
             >
-              <div className="space-y-4 rounded-xl p-4">
+              <div className="space-y-4 rounded-xl">
                 {shareError ? <Banner tone="error">{shareError}</Banner> : null}
                 {selectedDocumentIds.length > 1 ? (
                   <div className="rounded-xl border border-sky-200 bg-sky-50/80 px-4 py-3 text-sm font-medium text-sky-900">
@@ -3165,7 +3165,7 @@ function StaffDocumentsPage({
                 )}
               >
                 {saveError ? <Banner tone="error">{saveError}</Banner> : null}
-                <div className="space-y-4 rounded-xl p-4">
+                <div className="space-y-4 rounded-xl">
                   <DocumentSheetSection title={t.documents_section_metadata}>
                     <div className="grid gap-4 md:grid-cols-2">
                   <Field label={t.orders_patient}>

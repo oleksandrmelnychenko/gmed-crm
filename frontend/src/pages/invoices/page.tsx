@@ -1859,7 +1859,7 @@ function useStaffInvoicesPageContent() {
                 />
               )}
             >
-              <div className="space-y-4 rounded-xl p-4">
+              <div className="space-y-4 rounded-xl">
                 {createError ? <ShellBanner tone="error">{createError}</ShellBanner> : null}
                 <section className="rounded-xl border border-border bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.createQuoteSection)}</h2>
@@ -1967,7 +1967,7 @@ function useStaffInvoicesPageContent() {
             description={text.detailSheetDescription}
           >
             {detailBusy ? <LoadingState label={t.common_loading} /> : detailError ? <ShellBanner tone="error">{detailError}</ShellBanner> : !detail ? <EmptyState title={text.noInvoiceSelected} description={text.noInvoiceSelectedDescription} /> : (
-              <div className="space-y-4 rounded-xl p-4">
+              <div className="space-y-4 rounded-xl">
                 <section className="rounded-xl border border-border bg-card">
                   <div className="relative overflow-hidden p-4">
                     <span

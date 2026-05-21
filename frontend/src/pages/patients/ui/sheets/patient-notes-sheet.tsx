@@ -85,7 +85,7 @@ function PatientNotesSheetContent({
       title={l("patients_edit_notes")}
       width="narrow"
       onSubmit={handleSubmit}
-      bodyClassName="px-4 py-4 space-y-3"
+      bodyClassName="space-y-4 px-5 py-4"
       footer={
         <>
           <Button

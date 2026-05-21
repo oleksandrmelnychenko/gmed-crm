@@ -86,7 +86,7 @@ export function PatientDocumentsPreviewSheet({
           {t.patient_preview_documents_title}
         </span>
       }
-      bodyClassName="px-4 py-3 space-y-3"
+      bodyClassName="space-y-4 px-5 py-4"
     >
       <PreviewSection
         title={t.uiText.patients_preview_list}
@@ -197,7 +197,7 @@ export function PatientContractsPreviewSheet({
           {t.patient_preview_contracts_title}
         </span>
       }
-      bodyClassName="px-4 py-3 space-y-3"
+      bodyClassName="space-y-4 px-5 py-4"
     >
       <PreviewSection
         title={t.uiText.patients_preview_list_2}
@@ -308,7 +308,7 @@ export function PatientInvoicesPreviewSheet({
           {t.patient_preview_invoices_title}
         </span>
       }
-      bodyClassName="px-4 py-3 space-y-3"
+      bodyClassName="space-y-4 px-5 py-4"
     >
       <PreviewSection
         title={t.uiText.patients_preview_list_3}

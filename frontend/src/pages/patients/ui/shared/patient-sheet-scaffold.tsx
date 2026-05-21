@@ -46,7 +46,11 @@ export function PatientSheetScaffold({
       title={title}
       description={description}
       headerClassName={cn("px-4 py-3", headerClassName)}
-      bodyClassName={cn("min-h-0 overscroll-y-contain px-4 py-2 space-y-4", bodyClassName)}
+      bodyClassName={cn(
+        "min-h-0 overscroll-y-contain",
+        bodyClassName,
+        "space-y-4 px-5 py-4",
+      )}
       footer={footer ? <SheetActionsFooter>{footer}</SheetActionsFooter> : undefined}
     >
       {children}

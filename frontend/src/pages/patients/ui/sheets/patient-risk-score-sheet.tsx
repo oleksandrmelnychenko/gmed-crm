@@ -169,7 +169,7 @@ export function PatientRiskScoreSheet({
       maxWidthClassName="sm:max-w-[540px]"
       onSubmit={handleSubmit}
       title={l("patients_add_risk_score")}
-      bodyClassName="px-4 py-4 space-y-3"
+      bodyClassName="space-y-4 px-5 py-4"
       footer={
         <>
           <Button

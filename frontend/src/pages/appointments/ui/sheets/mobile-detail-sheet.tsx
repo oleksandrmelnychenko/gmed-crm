@@ -42,7 +42,7 @@ export function MobileDetailSheet({
               <AdminSheetScaffold
                 title={title}
                 headerClassName="px-4 py-3"
-                bodyClassName="flex min-h-0 flex-1 items-center justify-center px-4 pb-6 pt-4 text-muted-foreground"
+                bodyClassName="flex min-h-0 flex-1 items-center justify-center space-y-4 px-5 py-4 text-muted-foreground"
               >
                 <div className="flex items-center justify-center">
                   <LoaderCircle className="mr-2 size-4 animate-spin" />

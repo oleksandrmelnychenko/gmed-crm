@@ -41,7 +41,7 @@ function LinkedDocumentsSheet({
       title={appointmentText("appointments_documents")}
       description={appointmentText("appointments_documents_from_the_current_appointment_context")}
       maxWidthClassName="sm:max-w-[760px]"
-      bodyClassName="px-4 pb-6 pt-4"
+      bodyClassName="space-y-4 px-5 py-4"
     >
       {loading ? (
         <div className="flex min-h-[220px] items-center justify-center text-sm text-muted-foreground">

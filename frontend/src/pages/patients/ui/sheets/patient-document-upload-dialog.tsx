@@ -146,7 +146,7 @@ function PatientDocumentUploadDialog({
       onSubmit={handleSubmit}
       title={l("patients_upload_patient_document")}
       description={l("patients_files_uploaded_here_are_linked_directly_to_this_patient")}
-      bodyClassName="px-4 py-4 space-y-3"
+      bodyClassName="space-y-4 px-5 py-4"
       footer={
         <DocumentUploadFooter
           busy={busy}

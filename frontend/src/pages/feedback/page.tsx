@@ -1912,7 +1912,7 @@ function useStaffFeedbackWorkspaceContent() {
                   />
                 }
               >
-                <div className="space-y-4 rounded-xl p-4">
+                <div className="space-y-4 rounded-xl">
                   {feedbackCard(activeReview, t, true)}
 
                   <section className="rounded-xl border border-border bg-card p-6">

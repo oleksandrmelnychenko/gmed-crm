@@ -62,7 +62,7 @@ export function CaseItemEditSheet({
             title={title}
             description={description}
             headerClassName="px-5 py-4"
-            bodyClassName="px-5 py-5 space-y-4"
+            bodyClassName="space-y-4 px-5 py-4"
             footer={
               <div className="shrink-0 border-t border-border bg-muted/25 px-5 py-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">

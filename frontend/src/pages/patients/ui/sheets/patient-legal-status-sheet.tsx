@@ -124,7 +124,7 @@ function PatientLegalStatusSheetContent({
       title={t.patient_legal_sheet_title}
       maxWidthClassName="sm:max-w-[480px]"
       onSubmit={handleSubmit}
-      bodyClassName="px-4 py-4 space-y-3"
+      bodyClassName="space-y-4 px-5 py-4"
       footer={
         <>
           <Button

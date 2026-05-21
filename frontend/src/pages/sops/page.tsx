@@ -1073,7 +1073,7 @@ function useSopsPageContent() {
                 description={text.noSelectionDescription}
               />
             ) : (
-              <div className="space-y-4 rounded-xl p-4">
+              <div className="space-y-4 rounded-xl">
                 <section className="relative overflow-hidden rounded-xl border border-border bg-card">
                   <span
                     aria-hidden
@@ -1247,7 +1247,7 @@ function useSopsPageContent() {
               }
             >
               {formError ? <ShellBanner tone="error">{formError}</ShellBanner> : null}
-              <div className="space-y-4 rounded-xl p-4">
+              <div className="space-y-4 rounded-xl">
                 <DetailSection title={text.detailOverview}>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field label={text.formTitle}>

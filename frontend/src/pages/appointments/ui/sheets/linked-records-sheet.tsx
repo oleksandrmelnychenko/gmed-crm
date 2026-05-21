@@ -300,7 +300,7 @@ function LinkedRecordsSheet({
       onOpenChange={onOpenChange}
       title={title}
       maxWidthClassName="sm:max-w-[540px]"
-      bodyClassName="px-4 pb-6 pt-4"
+      bodyClassName="space-y-4 px-5 py-4"
     >
       {content}
     </AppointmentPreviewSheet>
