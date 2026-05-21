@@ -33,10 +33,12 @@ import {
 } from "../../model/list-formatters";
 import {
   blankPatientForm,
+  patientContactFormsToPayload,
   parseLanguages,
   patientToForm,
   toOptional,
   type PatientAssignment,
+  type PatientContactFormState,
   type PatientDetail,
   type PatientFormState,
   type PatientsDictionary,
@@ -183,6 +185,7 @@ type PatientProfileSectionProps = {
   form: PatientFormState;
   canEdit: boolean;
   onChange: (field: keyof PatientFormState, value: string) => void;
+  onContactsChange: (contacts: PatientContactFormState[]) => void;
 };
 
 function PatientProfileSection({
@@ -190,6 +193,7 @@ function PatientProfileSection({
   form,
   canEdit,
   onChange,
+  onContactsChange,
 }: PatientProfileSectionProps) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
@@ -223,6 +227,8 @@ function PatientProfileSection({
       <PatientFormFields
         form={form}
         onChange={canEdit ? onChange : () => undefined}
+        onContactsChange={canEdit ? onContactsChange : undefined}
+        contactMode="multiple"
         readOnly={!canEdit}
       />
 
@@ -418,13 +424,15 @@ function PatientDetailSheet({
     });
 
     try {
+      const contactPayload = patientContactFormsToPayload(form.contacts);
       await updatePatient(detail.id, {
         title: toOptional(form.title),
         first_name: toOptional(form.firstName),
         last_name: toOptional(form.lastName),
-        phone_primary: toOptional(form.phonePrimary),
-        phone_secondary: toOptional(form.phoneSecondary),
-        email: toOptional(form.email),
+        phone_primary: toOptional(contactPayload.phonePrimary),
+        phone_secondary: toOptional(contactPayload.phoneSecondary),
+        email: toOptional(contactPayload.email),
+        contacts: contactPayload.contacts,
         nationality: toOptional(form.nationality),
         residence_country: toOptional(form.residenceCountry),
         languages: parseLanguages(form.languages),
@@ -514,6 +522,9 @@ function PatientDetailSheet({
             canEdit={canCreateEdit}
             onChange={(field, value) =>
               setForm((current) => ({ ...current, [field]: value }))
+            }
+            onContactsChange={(contacts) =>
+              setForm((current) => ({ ...current, contacts }))
             }
           />
           {canViewAssignments ? (

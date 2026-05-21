@@ -16,8 +16,8 @@ use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
 use gmed_domain::role::Role;
-use sqlx::Row;
 use sqlx::types::Json as SqlxJson;
+use sqlx::{Postgres, Row, Transaction};
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -169,6 +169,7 @@ struct UpdatePatientRequest {
     phone_primary: Option<Value>,
     phone_secondary: Option<Value>,
     email: Option<Value>,
+    contacts: Option<Vec<PatientContactRequest>>,
     nationality: Option<Value>,
     residence_country: Option<Value>,
     languages: Option<Vec<String>>,
@@ -603,6 +604,38 @@ fn normalize_patient_contacts(
     }
 
     normalized
+}
+
+fn patient_contact_legacy_values(
+    contacts: &[NormalizedPatientContact],
+) -> (Option<String>, Option<String>, Option<String>) {
+    let phone_primary = contacts
+        .iter()
+        .find(|contact| contact.contact_kind == "phone" && contact.is_primary)
+        .or_else(|| {
+            contacts
+                .iter()
+                .find(|contact| contact.contact_kind == "phone")
+        })
+        .map(|contact| contact.value.clone());
+    let phone_secondary = contacts
+        .iter()
+        .find(|contact| {
+            contact.contact_kind == "phone"
+                && Some(contact.value.as_str()) != phone_primary.as_deref()
+        })
+        .map(|contact| contact.value.clone());
+    let email = contacts
+        .iter()
+        .find(|contact| contact.contact_kind == "email" && contact.is_primary)
+        .or_else(|| {
+            contacts
+                .iter()
+                .find(|contact| contact.contact_kind == "email")
+        })
+        .map(|contact| contact.value.clone());
+
+    (phone_primary, phone_secondary, email)
 }
 
 fn validate_optional_patient_select(
@@ -1370,6 +1403,49 @@ async fn load_patient_contacts(
         .collect())
 }
 
+async fn replace_patient_contacts_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    patient_id: Uuid,
+    contacts: &[NormalizedPatientContact],
+) -> Result<(), axum::response::Response> {
+    sqlx::query("DELETE FROM patient_contacts WHERE patient_id = $1")
+        .bind(patient_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, patient_id = %patient_id, "Failed to clear patient contacts");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update patient contacts",
+            )
+        })?;
+
+    for contact in contacts {
+        sqlx::query(
+            r#"INSERT INTO patient_contacts (
+                    patient_id, contact_kind, contact_type, value, is_primary, notes
+               ) VALUES ($1, $2, $3, $4, $5, $6)"#,
+        )
+        .bind(patient_id)
+        .bind(&contact.contact_kind)
+        .bind(&contact.contact_type)
+        .bind(&contact.value)
+        .bind(contact.is_primary)
+        .bind(contact.notes.as_deref())
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, patient_id = %patient_id, "Failed to insert patient contact");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update patient contacts",
+            )
+        })?;
+    }
+
+    Ok(())
+}
+
 async fn create_patient(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -1675,6 +1751,15 @@ async fn update_patient(
         }
     };
 
+    let contacts_patch = body.contacts;
+    if let Some(contacts) = contacts_patch.as_ref() {
+        for contact in contacts {
+            if let Err(message) = validate_patient_contact_payload(contact) {
+                return err(StatusCode::UNPROCESSABLE_ENTITY, message);
+            }
+        }
+    }
+
     let first = match body.first_name.as_deref() {
         Some(value) => {
             let trimmed = value.trim();
@@ -1740,7 +1825,7 @@ async fn update_patient(
         Ok(value) => value,
         Err(response) => return response,
     };
-    let phone_primary = match normalize_patient_text_patch(
+    let mut phone_primary = match normalize_patient_text_patch(
         body.phone_primary,
         current.try_get("phone_primary").unwrap_or_default(),
         "phone_primary",
@@ -1748,7 +1833,7 @@ async fn update_patient(
         Ok(value) => value,
         Err(response) => return response,
     };
-    let phone_secondary = match normalize_patient_text_patch(
+    let mut phone_secondary = match normalize_patient_text_patch(
         body.phone_secondary,
         current.try_get("phone_secondary").unwrap_or_default(),
         "phone_secondary",
@@ -1756,7 +1841,7 @@ async fn update_patient(
         Ok(value) => value,
         Err(response) => return response,
     };
-    let email = match normalize_patient_text_patch(
+    let mut email = match normalize_patient_text_patch(
         body.email,
         current.try_get("email").unwrap_or_default(),
         "email",
@@ -1764,6 +1849,20 @@ async fn update_patient(
         Ok(value) => value,
         Err(response) => return response,
     };
+    let normalized_contacts = contacts_patch.map(|contacts| {
+        let contacts = normalize_patient_contacts(
+            Some(contacts),
+            phone_primary.as_deref(),
+            phone_secondary.as_deref(),
+            email.as_deref(),
+        );
+        let (derived_phone_primary, derived_phone_secondary, derived_email) =
+            patient_contact_legacy_values(&contacts);
+        phone_primary = derived_phone_primary;
+        phone_secondary = derived_phone_secondary;
+        email = derived_email;
+        contacts
+    });
     let current_nationality: Option<String> = current.try_get("nationality").unwrap_or_default();
     let nationality = match normalize_patient_text_patch(
         body.nationality,
@@ -2000,6 +2099,17 @@ async fn update_patient(
         .and_then(|value| value.0.get("compliance_completed").and_then(Value::as_bool))
         .unwrap_or(false);
 
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to begin patient update transaction");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update patient",
+            );
+        }
+    };
+
     let result = sqlx::query(
         r#"UPDATE patients SET
             title = $2,
@@ -2056,7 +2166,7 @@ async fn update_patient(
     .bind(notes)
     .bind(clinical_warnings_supplied)
     .bind(clinical_warnings.flatten())
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await;
 
     let audit_context = serde_json::json!({
@@ -2071,6 +2181,19 @@ async fn update_patient(
 
     match result {
         Ok(_) => {
+            if let Some(contacts) = normalized_contacts.as_ref()
+                && let Err(response) =
+                    replace_patient_contacts_tx(&mut tx, patient_uuid, contacts).await
+            {
+                return response;
+            }
+            if let Err(e) = tx.commit().await {
+                tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to commit patient update transaction");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update patient",
+                );
+            }
             state.audit_sender.try_send(audit::domain_event(
                 "update_patient",
                 Some(auth.user_id),

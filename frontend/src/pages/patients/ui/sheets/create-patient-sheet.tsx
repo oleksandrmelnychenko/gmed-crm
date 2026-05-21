@@ -14,9 +14,9 @@ import { createPatient } from "../../data/patient-mutations";
 import {
   blankPatientForm,
   computeAge,
+  patientContactFormsToPayload,
   parseLanguages,
   toOptional,
-  type PatientContactFormState,
   type PatientFormState,
   type PatientsDictionary,
 } from "../../model/list-model";
@@ -54,36 +54,6 @@ function createPatientSheetReducer(
 function guardianRelationType(value: string) {
   const trimmed = value.trim();
   return trimmed === "parent" ? "parent" : "guardian";
-}
-
-function contactsToCreatePayload(contacts: PatientContactFormState[]) {
-  const normalized = contacts.flatMap((contact) => {
-    const value = contact.value.trim();
-    if (!value) return [];
-    return [
-      {
-        contact_kind: contact.contactKind,
-        contact_type: contact.contactType,
-        value,
-        is_primary: contact.isPrimary,
-        notes: toOptional(contact.notes),
-      },
-    ];
-  });
-  const phones = normalized.filter((contact) => contact.contact_kind === "phone");
-  const emails = normalized.filter((contact) => contact.contact_kind === "email");
-  const primaryPhone = phones.find((contact) => contact.is_primary) ?? phones[0];
-  const secondaryPhone =
-    phones.find((contact) => contact !== primaryPhone) ??
-    phones.find((contact) => contact.value !== primaryPhone?.value);
-  const primaryEmail = emails.find((contact) => contact.is_primary) ?? emails[0];
-
-  return {
-    contacts: normalized,
-    phonePrimary: primaryPhone?.value ?? "",
-    phoneSecondary: secondaryPhone?.value ?? "",
-    email: primaryEmail?.value ?? "",
-  };
 }
 
 function CreatePatientSheet({
@@ -130,7 +100,7 @@ function CreatePatientSheet({
 
     try {
       const age = computeAge(form.birthDate);
-      const contactPayload = contactsToCreatePayload(form.contacts);
+      const contactPayload = patientContactFormsToPayload(form.contacts);
       const patientRelations =
         age !== null && age < 18 && form.emergencyContactName.trim()
           ? [

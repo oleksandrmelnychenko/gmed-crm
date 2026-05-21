@@ -1330,7 +1330,10 @@ fn document_text_extraction_message(status: &str, method: Option<&str>) -> Optio
     }
 }
 
-fn document_text_extraction_message_key(status: &str, method: Option<&str>) -> Option<&'static str> {
+fn document_text_extraction_message_key(
+    status: &str,
+    method: Option<&str>,
+) -> Option<&'static str> {
     match (status, method.unwrap_or_default()) {
         ("unsupported", "ocr_unavailable") => Some("ocr_unavailable"),
         ("unsupported", "windows_ocr") | ("unsupported", "tesseract_cli") => Some("ocr_no_text"),

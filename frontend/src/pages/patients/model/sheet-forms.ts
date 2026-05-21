@@ -1,7 +1,11 @@
 import type { PatientLegalStatus } from "./legal-status";
 import { normalizePatientLegalStatus } from "./legal-status";
 
-import type { PatientDetail } from "./list-model";
+import {
+  patientContactsToForm,
+  type PatientContactFormState,
+  type PatientDetail,
+} from "./list-model";
 import type { DocumentStatus, DocumentVisibility, RelationItem } from "./detail-tab-types";
 
 export type RelationFormState = {
@@ -35,6 +39,7 @@ export type PatientEditFormState = {
   phonePrimary: string;
   phoneSecondary: string;
   email: string;
+  contacts: PatientContactFormState[];
   nationality: string;
   residenceCountry: string;
   languages: string;
@@ -101,6 +106,7 @@ export function patientToEditForm(detail: PatientDetail): PatientEditFormState {
     phonePrimary: detail.phone_primary ?? "",
     phoneSecondary: detail.phone_secondary ?? "",
     email: detail.email ?? "",
+    contacts: patientContactsToForm(detail),
     nationality: detail.nationality ?? "",
     residenceCountry: detail.residence_country ?? "",
     languages: detail.languages?.join(", ") ?? "",

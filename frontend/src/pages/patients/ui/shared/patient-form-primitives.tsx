@@ -24,55 +24,57 @@ export const textareaClassName = textareaClass;
 
 type PatientSelectOption = {
   value: string;
-  label: string;
+  fallbackLabel: string;
+  countryCode?: string;
+  labelKey?: string;
 };
 
 const COUNTRY_OPTIONS: PatientSelectOption[] = [
-  { value: "Germany", label: "Germany" },
-  { value: "Ukraine", label: "Ukraine" },
-  { value: "Austria", label: "Austria" },
-  { value: "Switzerland", label: "Switzerland" },
-  { value: "Poland", label: "Poland" },
-  { value: "Czech Republic", label: "Czech Republic" },
-  { value: "Denmark", label: "Denmark" },
-  { value: "Latvia", label: "Latvia" },
-  { value: "Greece", label: "Greece" },
-  { value: "Turkey", label: "Turkey" },
-  { value: "United Arab Emirates", label: "United Arab Emirates" },
-  { value: "Saudi Arabia", label: "Saudi Arabia" },
-  { value: "Egypt", label: "Egypt" },
-  { value: "Nigeria", label: "Nigeria" },
-  { value: "Ghana", label: "Ghana" },
-  { value: "Brazil", label: "Brazil" },
-  { value: "China", label: "China" },
-  { value: "Russia", label: "Russia" },
-  { value: "Pakistan", label: "Pakistan" },
-  { value: "United Kingdom", label: "United Kingdom" },
-  { value: "United States", label: "United States" },
+  { value: "Germany", fallbackLabel: "Germany", countryCode: "DE" },
+  { value: "Ukraine", fallbackLabel: "Ukraine", countryCode: "UA" },
+  { value: "Austria", fallbackLabel: "Austria", countryCode: "AT" },
+  { value: "Switzerland", fallbackLabel: "Switzerland", countryCode: "CH" },
+  { value: "Poland", fallbackLabel: "Poland", countryCode: "PL" },
+  { value: "Czech Republic", fallbackLabel: "Czech Republic", countryCode: "CZ" },
+  { value: "Denmark", fallbackLabel: "Denmark", countryCode: "DK" },
+  { value: "Latvia", fallbackLabel: "Latvia", countryCode: "LV" },
+  { value: "Greece", fallbackLabel: "Greece", countryCode: "GR" },
+  { value: "Turkey", fallbackLabel: "Turkey", countryCode: "TR" },
+  { value: "United Arab Emirates", fallbackLabel: "United Arab Emirates", countryCode: "AE" },
+  { value: "Saudi Arabia", fallbackLabel: "Saudi Arabia", countryCode: "SA" },
+  { value: "Egypt", fallbackLabel: "Egypt", countryCode: "EG" },
+  { value: "Nigeria", fallbackLabel: "Nigeria", countryCode: "NG" },
+  { value: "Ghana", fallbackLabel: "Ghana", countryCode: "GH" },
+  { value: "Brazil", fallbackLabel: "Brazil", countryCode: "BR" },
+  { value: "China", fallbackLabel: "China", countryCode: "CN" },
+  { value: "Russia", fallbackLabel: "Russia", countryCode: "RU" },
+  { value: "Pakistan", fallbackLabel: "Pakistan", countryCode: "PK" },
+  { value: "United Kingdom", fallbackLabel: "United Kingdom", countryCode: "GB" },
+  { value: "United States", fallbackLabel: "United States", countryCode: "US" },
 ];
 
 const NATIONALITY_OPTIONS: PatientSelectOption[] = [
-  { value: "German", label: "German" },
-  { value: "Ukrainian", label: "Ukrainian" },
-  { value: "Austrian", label: "Austrian" },
-  { value: "Swiss", label: "Swiss" },
-  { value: "Polish", label: "Polish" },
-  { value: "Czech", label: "Czech" },
-  { value: "Danish", label: "Danish" },
-  { value: "Latvian", label: "Latvian" },
-  { value: "Greek", label: "Greek" },
-  { value: "Turkish", label: "Turkish" },
-  { value: "Emirati", label: "Emirati" },
-  { value: "Saudi", label: "Saudi" },
-  { value: "Egyptian", label: "Egyptian" },
-  { value: "Nigerian", label: "Nigerian" },
-  { value: "Ghanaian", label: "Ghanaian" },
-  { value: "Brazilian", label: "Brazilian" },
-  { value: "Chinese", label: "Chinese" },
-  { value: "Russian", label: "Russian" },
-  { value: "Pakistani", label: "Pakistani" },
-  { value: "British", label: "British" },
-  { value: "American", label: "American" },
+  { value: "German", fallbackLabel: "German", labelKey: "patients_nationality_german" },
+  { value: "Ukrainian", fallbackLabel: "Ukrainian", labelKey: "patients_nationality_ukrainian" },
+  { value: "Austrian", fallbackLabel: "Austrian", labelKey: "patients_nationality_austrian" },
+  { value: "Swiss", fallbackLabel: "Swiss", labelKey: "patients_nationality_swiss" },
+  { value: "Polish", fallbackLabel: "Polish", labelKey: "patients_nationality_polish" },
+  { value: "Czech", fallbackLabel: "Czech", labelKey: "patients_nationality_czech" },
+  { value: "Danish", fallbackLabel: "Danish", labelKey: "patients_nationality_danish" },
+  { value: "Latvian", fallbackLabel: "Latvian", labelKey: "patients_nationality_latvian" },
+  { value: "Greek", fallbackLabel: "Greek", labelKey: "patients_nationality_greek" },
+  { value: "Turkish", fallbackLabel: "Turkish", labelKey: "patients_nationality_turkish" },
+  { value: "Emirati", fallbackLabel: "Emirati", labelKey: "patients_nationality_emirati" },
+  { value: "Saudi", fallbackLabel: "Saudi", labelKey: "patients_nationality_saudi" },
+  { value: "Egyptian", fallbackLabel: "Egyptian", labelKey: "patients_nationality_egyptian" },
+  { value: "Nigerian", fallbackLabel: "Nigerian", labelKey: "patients_nationality_nigerian" },
+  { value: "Ghanaian", fallbackLabel: "Ghanaian", labelKey: "patients_nationality_ghanaian" },
+  { value: "Brazilian", fallbackLabel: "Brazilian", labelKey: "patients_nationality_brazilian" },
+  { value: "Chinese", fallbackLabel: "Chinese", labelKey: "patients_nationality_chinese" },
+  { value: "Russian", fallbackLabel: "Russian", labelKey: "patients_nationality_russian" },
+  { value: "Pakistani", fallbackLabel: "Pakistani", labelKey: "patients_nationality_pakistani" },
+  { value: "British", fallbackLabel: "British", labelKey: "patients_nationality_british" },
+  { value: "American", fallbackLabel: "American", labelKey: "patients_nationality_american" },
 ];
 
 function normalizeSelectKey(value: string) {
@@ -87,7 +89,23 @@ function optionExists(options: PatientSelectOption[], value: string) {
 function optionsWithCurrent(options: PatientSelectOption[], value: string) {
   const trimmed = value.trim();
   if (!trimmed || optionExists(options, trimmed)) return options;
-  return [{ value: trimmed, label: trimmed }, ...options];
+  return [{ value: trimmed, fallbackLabel: trimmed }, ...options];
+}
+
+function countryOptionLabel(option: PatientSelectOption, lang: "de" | "ru") {
+  if (!option.countryCode) return option.fallbackLabel;
+  try {
+    return (
+      new Intl.DisplayNames([lang], { type: "region" }).of(option.countryCode) ??
+      option.fallbackLabel
+    );
+  } catch {
+    return option.fallbackLabel;
+  }
+}
+
+function nationalityOptionLabel(option: PatientSelectOption, lang: "de" | "ru") {
+  return option.labelKey ? uiText(option.labelKey, lang) : option.fallbackLabel;
 }
 
 export function CountrySelect({
@@ -103,6 +121,7 @@ export function CountrySelect({
   required?: boolean;
   disabled?: boolean;
 }) {
+  const { lang } = useLang();
   return (
     <NativeComboboxSelect
       value={value}
@@ -114,7 +133,7 @@ export function CountrySelect({
       <option value="">{placeholder}</option>
       {optionsWithCurrent(COUNTRY_OPTIONS, value).map((option) => (
         <option key={option.value} value={option.value}>
-          {option.label}
+          {countryOptionLabel(option, lang)}
         </option>
       ))}
     </NativeComboboxSelect>
@@ -132,6 +151,7 @@ export function NationalitySelect({
   placeholder: string;
   disabled?: boolean;
 }) {
+  const { lang } = useLang();
   return (
     <NativeComboboxSelect
       value={value}
@@ -142,7 +162,7 @@ export function NationalitySelect({
       <option value="">{placeholder}</option>
       {optionsWithCurrent(NATIONALITY_OPTIONS, value).map((option) => (
         <option key={option.value} value={option.value}>
-          {option.label}
+          {nationalityOptionLabel(option, lang)}
         </option>
       ))}
     </NativeComboboxSelect>

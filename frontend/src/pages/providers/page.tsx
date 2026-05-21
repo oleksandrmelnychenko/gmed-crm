@@ -6393,7 +6393,7 @@ function DoctorProfileFields({
             value={form.subrole}
             onChange={(event) => onChange("subrole", event.target.value)}
             className={shellInputClassName}
-            placeholder="Stellvertretender Klinikdirektor"
+            placeholder={l("providers_doctor_subrole_placeholder")}
           />
         </Field>
         <Field label={t.patients_gender}>

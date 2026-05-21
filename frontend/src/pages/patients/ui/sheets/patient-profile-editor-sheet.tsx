@@ -4,6 +4,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import { Plus, Trash2 } from "lucide-react";
 
 import {
   CountrySelect,
@@ -26,7 +27,14 @@ import {
 import { cn } from "@/lib/utils";
 
 import { updatePatient } from "../../data/patient-mutations";
-import { computeAge, type PatientDetail } from "../../model/list-model";
+import {
+  computeAge,
+  makePatientContactFormId,
+  normalizePatientContactForms,
+  patientContactFormsToPayload,
+  type PatientContactFormState,
+  type PatientDetail,
+} from "../../model/list-model";
 import {
   patientToEditForm,
   type PatientEditFormState,
@@ -65,6 +73,51 @@ function normalizeMinorGuardianRelation(
   return { ...form, emergencyContactRelation: "guardian" };
 }
 
+function contactFromLegacyField(
+  contactKind: PatientContactFormState["contactKind"],
+  value: string,
+  isPrimary: boolean,
+): PatientContactFormState {
+  return {
+    id: makePatientContactFormId(`patient-${contactKind}`),
+    contactKind,
+    contactType: "private",
+    value,
+    isPrimary,
+    notes: "",
+  };
+}
+
+function patientEditFormContacts(form: PatientEditFormState): PatientContactFormState[] {
+  const contacts = (form as { contacts?: PatientContactFormState[] }).contacts;
+  if (Array.isArray(contacts)) return contacts;
+
+  const fallbackContacts: PatientContactFormState[] = [];
+  if (form.phonePrimary.trim()) {
+    fallbackContacts.push(contactFromLegacyField("phone", form.phonePrimary, true));
+  }
+  if (form.phoneSecondary.trim()) {
+    fallbackContacts.push(contactFromLegacyField("phone", form.phoneSecondary, false));
+  }
+  if (form.email.trim()) {
+    fallbackContacts.push(contactFromLegacyField("email", form.email, true));
+  }
+
+  return normalizePatientContactForms(
+    fallbackContacts.length > 0
+      ? fallbackContacts
+      : [
+          contactFromLegacyField("phone", "", true),
+          contactFromLegacyField("email", "", true),
+        ],
+  );
+}
+
+function ensurePatientEditFormContacts(form: PatientEditFormState): PatientEditFormState {
+  const contacts = patientEditFormContacts(form);
+  return contacts === form.contacts ? form : { ...form, contacts };
+}
+
 function PatientProfileEditorSheet(props: PatientProfileEditorSheetProps) {
   return (
     <PatientProfileEditorSheetContent
@@ -79,6 +132,7 @@ type PatientProfileEditorFormSectionsProps = {
   form: PatientEditFormState;
   statusLabel: (status: string) => string;
   updateField: <K extends keyof PatientEditFormState>(field: K, value: PatientEditFormState[K]) => void;
+  updateContacts: (contacts: PatientContactFormState[]) => void;
   updateLegalStatusField: <K extends keyof PatientLegalStatus>(field: K, value: PatientLegalStatus[K]) => void;
 };
 
@@ -87,6 +141,7 @@ function PatientProfileEditorFormSections({
   form,
   statusLabel,
   updateField,
+  updateContacts,
   updateLegalStatusField,
 }: PatientProfileEditorFormSectionsProps) {
   const age = computeAge(form.birthDate);
@@ -100,6 +155,56 @@ function PatientProfileEditorFormSections({
     dictionary.patient_relation_type_parent ??
     text.patients_detail_parent ??
     "Parent";
+  const label = (key: string, fallback: string) => text[key] ?? dictionary[key] ?? fallback;
+  const contacts = patientEditFormContacts(form);
+
+  function updateContact(
+    contactId: string,
+    patch: Partial<PatientContactFormState>,
+  ) {
+    const changedContact = contacts.find((contact) => contact.id === contactId);
+    const changedContactKind = patch.contactKind ?? changedContact?.contactKind;
+    const changedContacts = contacts.map((contact) => {
+      const nextContact =
+        contact.id === contactId ? { ...contact, ...patch } : contact;
+      if (
+        patch.isPrimary &&
+        contact.id !== contactId &&
+        changedContactKind &&
+        nextContact.contactKind === changedContactKind
+      ) {
+        return { ...nextContact, isPrimary: false };
+      }
+      return nextContact;
+    });
+    updateContacts(normalizePatientContactForms(changedContacts));
+  }
+
+  function addContact() {
+    const hasPhone = contacts.some((contact) => contact.contactKind === "phone");
+    const contactKind = hasPhone ? "email" : "phone";
+    updateContacts(
+      normalizePatientContactForms([
+        ...contacts,
+        {
+          id: makePatientContactFormId("patient-contact"),
+          contactKind,
+          contactType: "private",
+          value: "",
+          isPrimary: !contacts.some((contact) => contact.contactKind === contactKind),
+          notes: "",
+        },
+      ]),
+    );
+  }
+
+  function removeContact(contactId: string) {
+    updateContacts(
+      normalizePatientContactForms(
+        contacts.filter((contact) => contact.id !== contactId),
+      ),
+    );
+  }
 
   function handleBirthDateChange(value: string) {
     updateField("birthDate", value);
@@ -202,33 +307,99 @@ function PatientProfileEditorFormSections({
                 </FormField>
               </FormSection>
               <FormSection title={dictionary.patient_profile_editor_contact}>
-                <div className="grid gap-3 md:grid-cols-3">
-                  <FormField
-                    label={dictionary.patient_profile_editor_primary_phone}
+                <div className="space-y-2">
+                  {contacts.map((contact) => (
+                    <div
+                      key={contact.id}
+                      className="grid gap-2 rounded-lg border border-border/70 bg-card/50 p-2 md:grid-cols-[132px_132px_minmax(0,1fr)_92px_36px]"
+                    >
+                      <FormField label={label("providers_contact_kind", "Kind")}>
+                        <NativeComboboxSelect
+                          value={contact.contactKind}
+                          onChange={(event) =>
+                            updateContact(contact.id, {
+                              contactKind:
+                                event.target.value === "email" ? "email" : "phone",
+                            })
+                          }
+                          className={cn("w-full", formInputClassName)}
+                        >
+                          <option value="phone">{dictionary.field_phone}</option>
+                          <option value="email">{dictionary.field_email}</option>
+                        </NativeComboboxSelect>
+                      </FormField>
+                      <FormField label={label("providers_contact_type", "Type")}>
+                        <NativeComboboxSelect
+                          value={contact.contactType}
+                          onChange={(event) =>
+                            updateContact(contact.id, {
+                              contactType:
+                                event.target.value === "work" ||
+                                event.target.value === "other"
+                                  ? event.target.value
+                                  : "private",
+                            })
+                          }
+                          className={cn("w-full", formInputClassName)}
+                        >
+                          <option value="private">
+                            {label("providers_contact_type_private", "Private")}
+                          </option>
+                          <option value="work">
+                            {label("providers_contact_type_work", "Work")}
+                          </option>
+                          <option value="other">
+                            {label("providers_contact_type_other", "Other")}
+                          </option>
+                        </NativeComboboxSelect>
+                      </FormField>
+                      <FormField label={label("providers_contact_value", "Contact")}>
+                        <Input
+                          type={contact.contactKind === "email" ? "email" : "text"}
+                          value={contact.value}
+                          onChange={(event) =>
+                            updateContact(contact.id, { value: event.target.value })
+                          }
+                          className={formInputClassName}
+                        />
+                      </FormField>
+                      <label className="flex min-h-[58px] items-end gap-2 pb-1.5 text-xs text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          checked={contact.isPrimary}
+                          onChange={(event) =>
+                            updateContact(contact.id, {
+                              isPrimary: event.target.checked,
+                            })
+                          }
+                          className={checkboxClass}
+                        />
+                        {label("providers_contact_primary", "Primary")}
+                      </label>
+                      <div className="flex items-end pb-0.5">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon-sm"
+                          title={dictionary.common_remove}
+                          aria-label={dictionary.common_remove}
+                          onClick={() => removeContact(contact.id)}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 rounded-lg bg-muted/20"
+                    onClick={addContact}
                   >
-                    <Input
-                      value={form.phonePrimary}
-                      onChange={(event) => updateField("phonePrimary", event.target.value)}
-                      className={formInputClassName}
-                    />
-                  </FormField>
-                  <FormField
-                    label={dictionary.patient_profile_editor_secondary_phone}
-                  >
-                    <Input
-                      value={form.phoneSecondary}
-                      onChange={(event) => updateField("phoneSecondary", event.target.value)}
-                      className={formInputClassName}
-                    />
-                  </FormField>
-                  <FormField label={dictionary.patient_profile_editor_email}>
-                    <Input
-                      type="email"
-                      value={form.email}
-                      onChange={(event) => updateField("email", event.target.value)}
-                      className={formInputClassName}
-                    />
-                  </FormField>
+                    <Plus className="size-3.5" />
+                    {label("providers_contact_add", "Add contact")}
+                  </Button>
                 </div>
               </FormSection>
               <FormSection title={dictionary.patient_profile_editor_address}>
@@ -527,7 +698,11 @@ function PatientProfileEditorSheetContent({
   onError,
 }: PatientProfileEditorSheetProps) {
   const [form, setForm] = useState<PatientEditFormState | null>(() =>
-    open && detail ? normalizeMinorGuardianRelation(patientToEditForm(detail)) : null,
+    open && detail
+      ? normalizeMinorGuardianRelation(
+          ensurePatientEditFormContacts(patientToEditForm(detail)),
+        )
+      : null,
   );
   const [busy, setBusy] = useState(false);
 
@@ -536,6 +711,10 @@ function PatientProfileEditorSheetContent({
     value: PatientEditFormState[K]
   ) {
     setForm((current) => (current ? { ...current, [field]: value } : current));
+  }
+
+  function updateContacts(contacts: PatientContactFormState[]) {
+    setForm((current) => (current ? { ...current, contacts } : current));
   }
 
   function updateLegalStatusField<K extends keyof PatientLegalStatus>(
@@ -559,15 +738,19 @@ function PatientProfileEditorSheetContent({
       setBusy(true);
       onError("");
       try {
+        const contactPayload = patientContactFormsToPayload(
+          patientEditFormContacts(form),
+        );
         await updatePatient(patientId, {
           title: form.title,
           first_name: form.firstName,
           last_name: form.lastName,
           birth_date: form.birthDate,
           gender: form.gender,
-          phone_primary: form.phonePrimary,
-          phone_secondary: form.phoneSecondary,
-          email: form.email,
+          phone_primary: contactPayload.phonePrimary,
+          phone_secondary: contactPayload.phoneSecondary,
+          email: contactPayload.email,
+          contacts: contactPayload.contacts,
           nationality: form.nationality,
           residence_country: form.residenceCountry,
           languages: form.languages.split(",").flatMap((value) => {
@@ -647,6 +830,7 @@ function PatientProfileEditorSheetContent({
           form={form}
           statusLabel={statusLabel}
           updateField={updateField}
+          updateContacts={updateContacts}
           updateLegalStatusField={updateLegalStatusField}
         />
       ) : null}

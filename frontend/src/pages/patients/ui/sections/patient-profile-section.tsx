@@ -102,6 +102,7 @@ type NumberFormatter = (
   options?: Intl.NumberFormatOptions,
 ) => string | null;
 type ToggleHandler = (open: boolean) => void;
+type PatientProfileContact = NonNullable<PatientDetail["contacts"]>[number];
 type LegalStatusChecklistItem = {
   key: string;
   label: string;
@@ -518,24 +519,15 @@ function usePatientProfileTabContent({
         <ProfileSummaryCard
           title={t.patient_profile_contact}
         >
-          <ProfileSummaryLine
-            label={t.patients_phone_primary}
-            value={fieldValue(detail.phone_primary, t.common_not_set)}
-            onEdit={editAction}
-            editLabel={editPatientFieldLabel(t.patients_phone_primary, t.patient_profile_edit_field_aria)}
-          />
-          <ProfileSummaryLine
-            label={t.patients_phone_secondary}
-            value={fieldValue(detail.phone_secondary, t.common_not_set)}
-            onEdit={editAction}
-            editLabel={editPatientFieldLabel(t.patients_phone_secondary, t.patient_profile_edit_field_aria)}
-          />
-          <ProfileSummaryLine
-            label={t.patients_email}
-            value={fieldValue(detail.email, t.common_not_set)}
-            onEdit={editAction}
-            editLabel={editPatientFieldLabel(t.patients_email, t.patient_profile_edit_field_aria)}
-          />
+          {patientProfileContactRows(detail, t, l).map((contact) => (
+            <ProfileSummaryLine
+              key={contact.key}
+              label={contact.label}
+              value={fieldValue(contact.value, t.common_not_set)}
+              onEdit={editAction}
+              editLabel={editPatientFieldLabel(String(contact.label), t.patient_profile_edit_field_aria)}
+            />
+          ))}
         </ProfileSummaryCard>
 
         <ProfileSummaryCard
@@ -1319,4 +1311,54 @@ export function PatientProfileTab(...args: Parameters<typeof usePatientProfileTa
 
 function editPatientFieldLabel(label: string, template: string) {
   return template.replace("{label}", label);
+}
+
+function patientContactTypeLabel(type: PatientProfileContact["contact_type"], l: LocalizeFn) {
+  switch (type) {
+    case "work":
+      return l("providers_contact_type_work");
+    case "other":
+      return l("providers_contact_type_other");
+    case "private":
+    default:
+      return l("providers_contact_type_private");
+  }
+}
+
+function patientProfileContactRows(
+  detail: PatientDetail,
+  t: Translations,
+  l: LocalizeFn,
+) {
+  const contacts = (detail.contacts ?? []).filter((contact) => contact.value.trim());
+  if (contacts.length > 0) {
+    return contacts.map((contact, index) => {
+      const kindLabel = contact.contact_kind === "email" ? t.field_email : t.field_phone;
+      const typeLabel = patientContactTypeLabel(contact.contact_type, l);
+      const primaryLabel = contact.is_primary ? ` · ${l("providers_contact_primary")}` : "";
+      return {
+        key: contact.id ?? `${contact.contact_kind}-${index}-${contact.value}`,
+        label: `${kindLabel} · ${typeLabel}${primaryLabel}`,
+        value: contact.value,
+      };
+    });
+  }
+
+  return [
+    {
+      key: "phone_primary",
+      label: t.patients_phone_primary,
+      value: detail.phone_primary,
+    },
+    {
+      key: "phone_secondary",
+      label: t.patients_phone_secondary,
+      value: detail.phone_secondary,
+    },
+    {
+      key: "email",
+      label: t.patients_email,
+      value: detail.email,
+    },
+  ];
 }

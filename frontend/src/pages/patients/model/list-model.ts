@@ -83,6 +83,14 @@ export type PatientContactFormState = {
   notes: string;
 };
 
+export type PatientContactPayload = {
+  contact_kind: "phone" | "email";
+  contact_type: "work" | "private" | "other";
+  value: string;
+  is_primary: boolean;
+  notes: string | null;
+};
+
 export type PatientFilters = {
   search: string;
   activeOnly: string;
@@ -208,7 +216,7 @@ export function makePatientContactFormId(prefix = "patient-contact") {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function patientContactsToForm(detail: PatientDetail): PatientContactFormState[] {
+export function patientContactsToForm(detail: PatientDetail): PatientContactFormState[] {
   const contacts = (detail.contacts ?? []).flatMap(
     (contact, index): PatientContactFormState[] => {
       const value = contact.value.trim();
@@ -279,6 +287,38 @@ export function normalizePatientContactForms(contacts: PatientContactFormState[]
 export function toOptional(value: string) {
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
+}
+
+export function patientContactFormsToPayload(contacts: PatientContactFormState[]) {
+  const normalized: PatientContactPayload[] = normalizePatientContactForms(contacts).flatMap(
+    (contact) => {
+      const value = contact.value.trim();
+      if (!value) return [];
+      return [
+        {
+          contact_kind: contact.contactKind,
+          contact_type: contact.contactType,
+          value,
+          is_primary: contact.isPrimary,
+          notes: toOptional(contact.notes),
+        },
+      ];
+    },
+  );
+  const phones = normalized.filter((contact) => contact.contact_kind === "phone");
+  const emails = normalized.filter((contact) => contact.contact_kind === "email");
+  const primaryPhone = phones.find((contact) => contact.is_primary) ?? phones[0];
+  const secondaryPhone =
+    phones.find((contact) => contact !== primaryPhone) ??
+    phones.find((contact) => contact.value !== primaryPhone?.value);
+  const primaryEmail = emails.find((contact) => contact.is_primary) ?? emails[0];
+
+  return {
+    contacts: normalized,
+    phonePrimary: primaryPhone?.value ?? "",
+    phoneSecondary: secondaryPhone?.value ?? "",
+    email: primaryEmail?.value ?? "",
+  };
 }
 
 export function parseLanguages(value: string) {
