@@ -101,6 +101,11 @@ export interface RevenueTranslations {
   revenue_common_basic_data: string;
   revenue_common_validity_period: string;
   revenue_unit_default: string;
+  revenue_unit_package: string;
+  revenue_unit_hour: string;
+  revenue_unit_ride: string;
+  revenue_unit_day: string;
+  revenue_unit_appointment: string;
   revenue_filter_all_patients: string;
   revenue_filter_all_orders: string;
 
@@ -134,6 +139,14 @@ export interface RevenueTranslations {
   revenue_agency_service_help: string;
   revenue_agency_service_service_key: string;
   revenue_agency_service_service_name: string;
+  revenue_agency_service_catalog_treatment_organization: string;
+  revenue_agency_service_catalog_treatment_organization_description: string;
+  revenue_agency_service_catalog_interpreter_hours: string;
+  revenue_agency_service_catalog_interpreter_hours_description: string;
+  revenue_agency_service_catalog_airport_transfer: string;
+  revenue_agency_service_catalog_airport_transfer_description: string;
+  revenue_agency_service_catalog_concierge_companion: string;
+  revenue_agency_service_catalog_concierge_companion_description: string;
   revenue_agency_service_unit_label: string;
   revenue_agency_service_currency: string;
   revenue_agency_service_vat_percent: string;
@@ -856,6 +869,11 @@ export const revenueRu: RevenueTranslations = {
   revenue_common_basic_data: "Основные данные",
   revenue_common_validity_period: "Период действия",
   revenue_unit_default: "ед.",
+  revenue_unit_package: "пакет",
+  revenue_unit_hour: "час",
+  revenue_unit_ride: "поездка",
+  revenue_unit_day: "день",
+  revenue_unit_appointment: "приём",
   revenue_filter_all_patients: "Все пациенты",
   revenue_filter_all_orders: "Все заказы",
 
@@ -894,6 +912,18 @@ export const revenueRu: RevenueTranslations = {
     "Используйте стабильные ключи услуг, например `interpreter_hours`, для будущей автоматизации.",
   revenue_agency_service_service_key: "Ключ услуги",
   revenue_agency_service_service_name: "Название услуги",
+  revenue_agency_service_catalog_treatment_organization: "Организация лечения",
+  revenue_agency_service_catalog_treatment_organization_description:
+    "Координация агентства и планирование лечения.",
+  revenue_agency_service_catalog_interpreter_hours: "Услуги переводчика",
+  revenue_agency_service_catalog_interpreter_hours_description:
+    "Медицинский перевод с почасовой оплатой.",
+  revenue_agency_service_catalog_airport_transfer: "Трансфер из аэропорта",
+  revenue_agency_service_catalog_airport_transfer_description:
+    "Встреча в аэропорту или трансфер в отель через консьерж-сервис.",
+  revenue_agency_service_catalog_concierge_companion: "Сопровождение консьержа",
+  revenue_agency_service_catalog_concierge_companion_description:
+    "Дополнительная координация семьи и сопровождение на месте.",
   revenue_agency_service_unit_label: "Единица измерения",
   revenue_agency_service_currency: "Валюта",
   revenue_agency_service_vat_percent: "НДС %",
@@ -1158,6 +1188,11 @@ export const revenueDe: RevenueTranslations = {
   revenue_common_basic_data: "Stammdaten",
   revenue_common_validity_period: "Gültigkeitszeitraum",
   revenue_unit_default: "Einheit",
+  revenue_unit_package: "Paket",
+  revenue_unit_hour: "Stunde",
+  revenue_unit_ride: "Fahrt",
+  revenue_unit_day: "Tag",
+  revenue_unit_appointment: "Termin",
   revenue_filter_all_patients: "Alle Patienten",
   revenue_filter_all_orders: "Alle Aufträge",
 
@@ -1196,6 +1231,18 @@ export const revenueDe: RevenueTranslations = {
     "Verwenden Sie stabile Service-Keys wie `interpreter_hours` für künftige Automatisierungen.",
   revenue_agency_service_service_key: "Service-Key",
   revenue_agency_service_service_name: "Leistungsname",
+  revenue_agency_service_catalog_treatment_organization: "Behandlungsorganisation",
+  revenue_agency_service_catalog_treatment_organization_description:
+    "Agenturkoordination und Behandlungsplanung.",
+  revenue_agency_service_catalog_interpreter_hours: "Dolmetscherbetreuung",
+  revenue_agency_service_catalog_interpreter_hours_description:
+    "Medizinische Verdolmetschung mit Abrechnung pro Stunde.",
+  revenue_agency_service_catalog_airport_transfer: "Flughafentransfer",
+  revenue_agency_service_catalog_airport_transfer_description:
+    "Abholung am Flughafen oder Hoteltransfer durch den Concierge-Service.",
+  revenue_agency_service_catalog_concierge_companion: "Concierge-Begleitung",
+  revenue_agency_service_catalog_concierge_companion_description:
+    "Zusätzliche Familienkoordination und Begleitung vor Ort.",
   revenue_agency_service_unit_label: "Einheitsbezeichnung",
   revenue_agency_service_currency: "Währung",
   revenue_agency_service_vat_percent: "USt. %",

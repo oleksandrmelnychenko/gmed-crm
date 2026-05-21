@@ -209,6 +209,8 @@ export type PatientServicePackageItem = {
   payer_contact_name?: string | null;
   payer_contact_relationship?: string | null;
   package_item_id?: string | null;
+  service_key?: string | null;
+  agency_service_name?: string | null;
   description?: string | null;
   included_quantity: string;
   unit_label?: string | null;

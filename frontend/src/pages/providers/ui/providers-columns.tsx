@@ -502,7 +502,7 @@ export function buildProviderColumns(
     },
     {
       id: "internal_rating",
-      label: tr.providers_internal_rating ?? "Internal rating",
+      label: tr.providers_internal_rating ?? tr.providers_rating ?? notSet,
       accessor: (provider) => provider.internal_rating,
       filterType: "number",
       sortable: true,

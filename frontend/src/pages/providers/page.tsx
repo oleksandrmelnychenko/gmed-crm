@@ -47,7 +47,7 @@ import {
   Sheet,
   SheetContent,
 } from "@/components/ui/sheet";
-import { formatUiText, useLang } from "@/lib/i18n";
+import { formatUiText, uiText, useLang } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
@@ -2965,7 +2965,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   }}
                   className={cn(selectClassName, "h-8 w-[168px] bg-card text-[13px]")}
                 >
-                  <option value="">{lang === "ru" ? "Доп. фильтр" : "Zusatzfilter"}</option>
+                  <option value="">{t.table_filter}</option>
                   {filterAttributeKeys.map((key) => (
                     <option key={key} value={key}>
                       {taxonomyAttributeLabel(key, lang)}
@@ -2978,7 +2978,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     setServerFilter("taxonomyAttributeValue", event.target.value, "attr_value")
                   }
                   disabled={!filters.taxonomyAttributeKey}
-                  placeholder={lang === "ru" ? "Значение" : "Wert"}
+                  placeholder={t.common_value}
                   className="h-8 w-[160px] rounded-lg bg-card text-[13px]"
                 />
               </>
@@ -3009,7 +3009,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               onChange={(event) => setServerFilter("internalRatingGte", event.target.value, "internal_rating")}
               className={cn(selectClassName, "h-8 w-[148px] bg-card text-[13px]")}
             >
-              <option value="">{lang === "ru" ? "Рейтинг" : "Rating"}</option>
+              <option value="">{t.providers_internal_rating}</option>
               <option value="5">5+</option>
               <option value="4">4+</option>
               <option value="3">3+</option>
@@ -4038,7 +4038,7 @@ function SpecializationManagerSheet({
                           disabled={busy}
                           onClick={() => startEdit(item)}
                         >
-                          {t.uiText.patients_edit ?? "Edit"}
+                          {l("patients_edit")}
                         </Button>
                         <Button
                           type="button"
@@ -4300,7 +4300,7 @@ function StaffRoleManagerSheet({
                           disabled={busy}
                           onClick={() => startEdit(role)}
                         >
-                          {t.uiText.patients_edit ?? "Edit"}
+                          {l("patients_edit")}
                         </Button>
                         <Button
                           type="button"
@@ -4652,7 +4652,11 @@ function staffRoleDisplayName(role: ProviderStaffRoleItem | undefined, lang: "de
 }
 
 function staffRoleLabel(code: string, roles: ProviderStaffRoleItem[], lang: "de" | "ru") {
-  return staffRoleDisplayName(roles.find((role) => role.code === code), lang) || humanizeCode(code);
+  const roleLabel = staffRoleDisplayName(roles.find((role) => role.code === code), lang);
+  if (roleLabel) return roleLabel;
+  const uiTextKey = `providers_staff_role_${code}`;
+  const fallbackLabel = uiText(uiTextKey, lang);
+  return fallbackLabel === uiTextKey ? humanizeCode(code) : fallbackLabel;
 }
 
 function DoctorSection({
@@ -5299,7 +5303,7 @@ function StaffSection({
                         className="h-8 w-full justify-center rounded-lg bg-muted/20"
                         onClick={() => onEdit(staff)}
                       >
-                        {t.uiText.patients_edit ?? "Edit"}
+                        {l("patients_edit")}
                       </Button>
                       <Button
                         type="button"
@@ -5310,7 +5314,7 @@ function StaffSection({
                         onClick={() => onDelete(staff.id, staff.display_name)}
                       >
                         <Trash2 className="size-3.5" />
-                        {t.uiText.patients_delete ?? "Delete"}
+                        {l("patients_delete")}
                       </Button>
                     </div>
                   ) : null}

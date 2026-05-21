@@ -248,6 +248,7 @@ export interface Translations
   providers_zip: string;
   providers_fachbereich: string;
   providers_min_rating: string;
+  providers_internal_rating: string;
   providers_contract: string;
   providers_contract_with: string;
   providers_contract_without: string;
@@ -264,6 +265,7 @@ export interface Translations
   providers_services: string;
   providers_service_new: string;
   providers_service_detail: string;
+  providers_staff_external: string;
   providers_service_name: string;
   providers_service_price: string;
   providers_service_currency: string;

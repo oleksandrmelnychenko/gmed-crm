@@ -38,6 +38,10 @@ import {
   selectClass,
   textareaClass,
 } from "@/components/ui-shell";
+import {
+  agencyServiceNameLabel,
+  agencyServiceUnitLabel,
+} from "@/lib/agency-service-labels";
 import { apiFetch, downloadApiFile } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -70,6 +74,8 @@ type PackageCatalogItem = {
   is_active: boolean;
   items?: Array<{
     id: string;
+    service_key?: string | null;
+    agency_service_name?: string | null;
     description: string;
     included_quantity: string;
     unit_label: string;
@@ -239,6 +245,14 @@ function buildPackageGroups(servicePackages: PatientServicePackageItem[]) {
   }
 
   return Array.from(packageGroups.entries());
+}
+
+function packageItemLabel(item: PatientServicePackageItem, t: ReturnType<typeof useLang>["t"]) {
+  return agencyServiceNameLabel(
+    item.service_key,
+    item.agency_service_name ?? item.description,
+    t,
+  );
 }
 
 function moneyNumeric(value?: string | null) {
@@ -1053,7 +1067,7 @@ function usePatientInvoicesTabContent({
                   }
                   options.push(
                     <option key={item.package_item_id} value={item.package_item_id}>
-                      {item.description}
+                      {packageItemLabel(item, t)}
                     </option>,
                   );
                   return options;
@@ -1305,10 +1319,13 @@ function usePatientInvoicesTabContent({
                         >
                           <div className="flex items-start justify-between gap-3">
                             <p className="min-w-0 truncate font-medium text-foreground">
-                              {item.description ?? t.patient_invoices_package_summary}
+                              {item.package_item_id
+                                ? packageItemLabel(item, t)
+                                : t.patient_invoices_package_summary}
                             </p>
                             <span className="shrink-0 tabular-nums text-muted-foreground">
-                              {item.included_quantity} {item.unit_label ?? ""}
+                              {item.included_quantity}{" "}
+                              {agencyServiceUnitLabel(item.unit_label, t)}
                             </span>
                           </div>
                           <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">

@@ -23,6 +23,7 @@ import {
   tokens,
   type StatusTone,
 } from "@/components/ui-shell";
+import { agencyServiceNameLabel } from "@/lib/agency-service-labels";
 import { clearApiCache } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
@@ -615,11 +616,12 @@ export function PatientInvoicesPage(...args: Parameters<typeof usePatientInvoice
 
 function InvoiceLineCard({ line }: { line: PortalInvoiceLineItem }) {
   const { t } = useLang();
+  const description = agencyServiceNameLabel(undefined, line.description, t);
   return (
     <article className={cn("rounded-xl px-4 py-4", tokens.surface.mutedCard)}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold text-foreground">{line.description}</p>
+          <p className="text-sm font-semibold text-foreground">{description}</p>
           <p className={cn("mt-1", tokens.text.muted)}>
             {t.portal_invoices_qty} {line.quantity} · {t.portal_invoices_unit} {formatPortalCurrency(line.unit_price)} · {t.uiText.finance_catalog_vat_label} {line.vat_rate}%
           </p>

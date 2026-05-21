@@ -54,6 +54,7 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
+import { agencyServiceNameLabel } from "@/lib/agency-service-labels";
 import { useAuth } from "@/lib/auth";
 import {
   formatEnumLabel,
@@ -5419,6 +5420,14 @@ function useOrdersPageContent() {
                               ) : (
                                 t.orders_unlinked
                               );
+                            const agencyServiceValue =
+                              leistung.agency_service_name || leistung.agency_service_key
+                                ? agencyServiceNameLabel(
+                                    leistung.agency_service_key,
+                                    leistung.agency_service_name,
+                                    t,
+                                  )
+                                : t.orders_not_catalog_linked;
 
                             return (
                               <article
@@ -5483,8 +5492,7 @@ function useOrdersPageContent() {
                                               variant="outline"
                                               className="rounded-full border-sky-200 bg-sky-100 text-sky-700"
                                             >
-                                              {leistung.agency_service_name ||
-                                                leistung.agency_service_key}
+                                              {agencyServiceValue}
                                             </Badge>
                                           ) : null}
                                           {taxonomyLabel ? (
@@ -5569,11 +5577,7 @@ function useOrdersPageContent() {
                                   />
                                   <MiniMetric
                                     label={t.orders_agency_service}
-                                    value={
-                                      leistung.agency_service_name ||
-                                      leistung.agency_service_key ||
-                                      t.orders_not_catalog_linked
-                                    }
+                                    value={agencyServiceValue}
                                   />
                                   <MiniMetric
                                     label={t.orders_billing_source}

@@ -709,7 +709,8 @@ async fn list_patient_service_packages(
                   psp.starts_on, psp.ends_on, psp.assigned_at, psp.notes,
                   psp.payer_contact_name, psp.payer_contact_relationship,
                   o.order_number,
-                  spi.id AS package_item_id, spi.description, spi.included_quantity,
+                  spi.id AS package_item_id, COALESCE(c.service_key, spi.service_key) AS service_key,
+                  c.service_name AS agency_service_name, spi.description, spi.included_quantity,
                   spi.unit_label, spi.requires_patient_approval,
                   COALESCE(SUM(spc.quantity), 0) AS used_quantity,
                   COALESCE(SUM(spc.overage_quantity), 0) AS overage_quantity,
@@ -722,6 +723,7 @@ async fn list_patient_service_packages(
            JOIN service_packages sp ON sp.id = psp.package_id
            LEFT JOIN orders o ON o.id = psp.order_id
            LEFT JOIN service_package_items spi ON spi.package_id = sp.id
+           LEFT JOIN agency_service_catalog c ON c.id = spi.agency_service_id
            LEFT JOIN service_package_consumptions spc
                   ON spc.patient_service_package_id = psp.id
                  AND (spc.package_item_id = spi.id OR (spc.package_item_id IS NULL AND spi.id IS NULL))
@@ -729,7 +731,8 @@ async fn list_patient_service_packages(
            GROUP BY psp.id, psp.package_id, psp.order_id, sp.name, psp.status,
                     psp.starts_on, psp.ends_on, psp.assigned_at, psp.notes,
                     psp.payer_contact_name, psp.payer_contact_relationship,
-                    o.order_number, spi.id, spi.description, spi.included_quantity,
+                    o.order_number, spi.id, COALESCE(c.service_key, spi.service_key), c.service_name,
+                    spi.description, spi.included_quantity,
                     spi.unit_label, spi.requires_patient_approval
            ORDER BY psp.assigned_at DESC, spi.sort_order"#,
     )
@@ -762,6 +765,8 @@ async fn list_patient_service_packages(
                         "payer_contact_name": row.try_get::<Option<String>, _>("payer_contact_name").unwrap_or_default(),
                         "payer_contact_relationship": row.try_get::<Option<String>, _>("payer_contact_relationship").unwrap_or_default(),
                         "package_item_id": row.try_get::<Option<Uuid>, _>("package_item_id").unwrap_or_default(),
+                        "service_key": row.try_get::<Option<String>, _>("service_key").unwrap_or_default(),
+                        "agency_service_name": row.try_get::<Option<String>, _>("agency_service_name").unwrap_or_default(),
                         "description": row.try_get::<Option<String>, _>("description").unwrap_or_default(),
                         "included_quantity": decimal_to_string(included),
                         "unit_label": row.try_get::<Option<String>, _>("unit_label").unwrap_or_default(),

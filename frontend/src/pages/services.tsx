@@ -191,6 +191,7 @@ const SERVICE_BILLING_STATUS_LABEL_KEYS = {
   ready: "staff_services_billing_status_ready",
   billed: "staff_services_billing_status_billed",
   settled: "staff_services_billing_status_settled",
+  waived: "appointment_billing_status_waived",
 } satisfies Partial<Record<string, TranslationKey>>;
 
 const SERVICE_KIND_LABEL_KEYS = {
@@ -207,6 +208,7 @@ const SERVICE_SOURCE_LABEL_KEYS = {
   patient_portal: "staff_services_source_patient_portal",
   appointment_bootstrap: "staff_services_source_appointment_bootstrap",
   care_team: "staff_services_source_care_team",
+  staff: "staff_services_source_care_team",
 } satisfies Partial<Record<string, TranslationKey>>;
 
 function blankCreateServiceForm(defaultConciergeId = ""): CreateServiceFormState {

@@ -48,6 +48,11 @@ import {
   SheetContent,
 } from "@/components/ui/sheet";
 import { clearApiCache } from "@/lib/api";
+import {
+  agencyServiceDescriptionLabel,
+  agencyServiceNameLabel,
+  agencyServiceUnitLabel,
+} from "@/lib/agency-service-labels";
 import { useAuth } from "@/lib/auth";
 import { formatEnumLabelFromKeys, useLang, type TranslationKey } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
@@ -823,19 +828,24 @@ function useContractsPageContent() {
       {
         id: "service_name",
         label: text.serviceName,
-        accessor: (row) => row.service_name,
+        accessor: (row) => agencyServiceNameLabel(row.service_key, row.service_name, t),
         sortable: true,
         required: true,
         width: 260,
+        render: (row) => (
+          <span className="text-sm font-medium text-foreground">
+            {agencyServiceNameLabel(row.service_key, row.service_name, t)}
+          </span>
+        ),
       },
       {
         id: "description",
         label: text.description,
-        accessor: (row) => row.description ?? "",
+        accessor: (row) => agencyServiceDescriptionLabel(row.service_key, row.description, t),
         width: 320,
         render: (row) => (
           <span className="block max-w-[320px] truncate text-sm text-foreground">
-            {row.description?.trim() || t.common_not_set}
+            {agencyServiceDescriptionLabel(row.service_key, row.description, t)}
           </span>
         ),
       },
@@ -850,8 +860,13 @@ function useContractsPageContent() {
       {
         id: "unit_label",
         label: text.unit,
-        accessor: (row) => row.unit_label,
+        accessor: (row) => agencyServiceUnitLabel(row.unit_label, t),
         width: 120,
+        render: (row) => (
+          <span className="text-sm text-foreground">
+            {agencyServiceUnitLabel(row.unit_label, t)}
+          </span>
+        ),
       },
       {
         id: "vat_rate",
@@ -892,7 +907,7 @@ function useContractsPageContent() {
         ),
       },
     ],
-    [locale, t.common_not_set, t.users_status, text],
+    [locale, t, text],
   );
 
   const contractTableColumns = useMemo<ColumnDef<ContractItem>[]>(
@@ -1080,7 +1095,12 @@ function useContractsPageContent() {
       {
         id: "description",
         label: text.description,
-        accessor: (row) => row.description,
+        accessor: (row) => agencyServiceNameLabel(undefined, row.description, t),
+        render: (row) => (
+          <span className="text-sm text-foreground">
+            {agencyServiceNameLabel(undefined, row.description, t)}
+          </span>
+        ),
         sortable: true,
         required: true,
         width: 320,
@@ -1163,6 +1183,7 @@ function useContractsPageContent() {
       t.contracts_notes,
       t.invoices_vat,
       t.orders_cost_pass_through_badge,
+      t,
       text.description,
       text.gross,
       text.net,

@@ -150,11 +150,11 @@ function PatientProfileEditorFormSections({
   const guardianLabel =
     dictionary.patient_relation_type_guardian ??
     text.patients_detail_guardian ??
-    "Guardian";
+    dictionary.common_not_set;
   const parentLabel =
     dictionary.patient_relation_type_parent ??
     text.patients_detail_parent ??
-    "Parent";
+    dictionary.common_not_set;
   const label = (key: string, fallback: string) => text[key] ?? dictionary[key] ?? fallback;
   const contacts = patientEditFormContacts(form);
 
@@ -260,15 +260,15 @@ function PatientProfileEditorFormSections({
                       required
                       className={cn("w-full", formInputClassName)}
                     >
-                      <option value="male">{text.patients_gender_male ?? "Male"}</option>
-                      <option value="female">{text.patients_gender_female ?? "Female"}</option>
-                      <option value="diverse">{text.patients_gender_diverse ?? "Diverse"}</option>
+                      <option value="male">{text.patients_gender_male ?? dictionary.gender_male}</option>
+                      <option value="female">{text.patients_gender_female ?? dictionary.gender_female}</option>
+                      <option value="diverse">{text.patients_gender_diverse ?? dictionary.gender_diverse}</option>
                     </NativeComboboxSelect>
                   </FormField>
                 </div>
                 {isMinor ? (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                    {text.patients_minor_guardian_notice ?? "Patient is a minor. Add parent or guardian contact."}
+                    {text.patients_minor_guardian_notice ?? dictionary.patient_profile_editor_emergency_contact}
                   </div>
                 ) : null}
                 <div className="grid gap-3 md:grid-cols-2">
@@ -313,7 +313,7 @@ function PatientProfileEditorFormSections({
                       key={contact.id}
                       className="grid gap-2 rounded-lg border border-border/70 bg-card/50 p-2 md:grid-cols-[132px_132px_minmax(0,1fr)_92px_36px]"
                     >
-                      <FormField label={label("providers_contact_kind", "Kind")}>
+                      <FormField label={label("providers_contact_kind", dictionary.common_not_set)}>
                         <NativeComboboxSelect
                           value={contact.contactKind}
                           onChange={(event) =>
@@ -328,7 +328,7 @@ function PatientProfileEditorFormSections({
                           <option value="email">{dictionary.field_email}</option>
                         </NativeComboboxSelect>
                       </FormField>
-                      <FormField label={label("providers_contact_type", "Type")}>
+                      <FormField label={label("providers_contact_type", dictionary.common_not_set)}>
                         <NativeComboboxSelect
                           value={contact.contactType}
                           onChange={(event) =>
@@ -343,17 +343,17 @@ function PatientProfileEditorFormSections({
                           className={cn("w-full", formInputClassName)}
                         >
                           <option value="private">
-                            {label("providers_contact_type_private", "Private")}
+                            {label("providers_contact_type_private", dictionary.common_not_set)}
                           </option>
                           <option value="work">
-                            {label("providers_contact_type_work", "Work")}
+                            {label("providers_contact_type_work", dictionary.common_not_set)}
                           </option>
                           <option value="other">
-                            {label("providers_contact_type_other", "Other")}
+                            {label("providers_contact_type_other", dictionary.common_not_set)}
                           </option>
                         </NativeComboboxSelect>
                       </FormField>
-                      <FormField label={label("providers_contact_value", "Contact")}>
+                      <FormField label={label("providers_contact_value", dictionary.common_not_set)}>
                         <Input
                           type={contact.contactKind === "email" ? "email" : "text"}
                           value={contact.value}
@@ -374,7 +374,7 @@ function PatientProfileEditorFormSections({
                           }
                           className={checkboxClass}
                         />
-                        {label("providers_contact_primary", "Primary")}
+                        {label("providers_contact_primary", dictionary.common_not_set)}
                       </label>
                       <div className="flex items-end pb-0.5">
                         <Button
@@ -398,7 +398,7 @@ function PatientProfileEditorFormSections({
                     onClick={addContact}
                   >
                     <Plus className="size-3.5" />
-                    {label("providers_contact_add", "Add contact")}
+                    {label("providers_contact_add", dictionary.common_create)}
                   </Button>
                 </div>
               </FormSection>

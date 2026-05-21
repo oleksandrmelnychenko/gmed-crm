@@ -39,6 +39,10 @@ import {
   textareaClass,
 } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
+import {
+  agencyServiceNameLabel,
+  agencyServiceUnitLabel,
+} from "@/lib/agency-service-labels";
 import { useAuth } from "@/lib/auth";
 import {
   formatEnumLabelFromKeys,
@@ -1051,10 +1055,17 @@ function useFinanceCatalogPageContent() {
                         >
                           <div className="flex items-start justify-between gap-3">
                             <p className="min-w-0 truncate font-medium text-foreground">
-                              {packageItem.description}
+                              {packageItem.agency_service_name || packageItem.service_key
+                                ? agencyServiceNameLabel(
+                                    packageItem.service_key,
+                                    packageItem.agency_service_name,
+                                    t,
+                                  )
+                                : packageItem.description}
                             </p>
                             <span className="shrink-0 tabular-nums text-muted-foreground">
-                              {packageItem.included_quantity} {packageItem.unit_label}
+                              {packageItem.included_quantity}{" "}
+                              {agencyServiceUnitLabel(packageItem.unit_label, t)}
                             </span>
                           </div>
                           <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
@@ -1119,7 +1130,7 @@ function useFinanceCatalogPageContent() {
               >
                 <div className="min-w-0">
                   <p className="truncate font-medium text-foreground">
-                    {row.service_name}
+                    {agencyServiceNameLabel(row.service_key, row.service_name, t)}
                   </p>
                   <p className="font-mono text-xs text-muted-foreground">
                     {row.service_key}

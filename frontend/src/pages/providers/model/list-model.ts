@@ -34,8 +34,14 @@ const PROVIDER_CODE_LABEL_KEYS = {
   concierge_service: "services_title",
   medical: "providers_type_medical",
   non_medical: "providers_type_non_medical",
+  active: "common_active",
+  inactive: "common_inactive",
+  external: "providers_staff_external",
+  unknown: "common_unknown",
   internal: "operations_status_internal",
   planned: "operations_status_planned",
+  scheduled: "operations_status_planned",
+  requested: "documents_requested",
   booked: "operations_status_booked",
   confirmed: "operations_status_confirmed",
   in_progress: "operations_status_in_progress",
@@ -52,6 +58,11 @@ const PROVIDER_CODE_LABEL_KEYS = {
   chauffeur: "services_type_chauffeur",
   translation_support: "services_type_translation_support",
   other: "services_type_other",
+  regular: "appointment_care_path_regular",
+  preventive: "appointment_care_path_preventive",
+  control: "appointment_care_path_control",
+  followup: "appointment_care_path_followup",
+  follow_up: "appointment_care_path_followup",
 } satisfies Partial<Record<string, TranslationKey>>;
 
 type ContactPayload = {

@@ -24,6 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { agencyServiceNameLabel } from "@/lib/agency-service-labels";
 import { clearApiCache } from "@/lib/api";
 import { Banner as ShellBanner, PageHeader, StatusBadge, selectClass as shellSelectClassName, tokens } from "@/components/ui-shell";
 import { useAuth } from "@/lib/auth";
@@ -256,12 +257,16 @@ type ReportsWorkspacePayload = {
   financial_metrics_visible: boolean;
 };
 
-function reportBackendLabel(value: string, text: ReturnType<typeof getRevenueReportsText>) {
+function reportBackendLabel(
+  value: string,
+  text: ReturnType<typeof getRevenueReportsText>,
+  translations: ReturnType<typeof useLang>["t"],
+) {
   if (value === "provider_specialty.unknown") return text.common.unknownSpecialty;
   if (value === "order_service.unnamed") return text.common.unnamedService;
   const conciergeKind = value.match(/^concierge_service_kind\.(.+)$/)?.[1];
   if (conciergeKind) return serviceKindLabel(conciergeKind);
-  return value;
+  return agencyServiceNameLabel(undefined, value, translations);
 }
 
 function reportTaxonomyLabel(
@@ -554,14 +559,6 @@ function reportProviderTaxonomyOptions(
       if (labelOrder) return labelOrder;
       return left.node.sort_order - right.node.sort_order || left.node.code.localeCompare(right.node.code);
     });
-}
-
-function reportTaxonomyAllLabel(lang: "de" | "ru") {
-  return lang === "ru" ? "Все категории" : "Alle Kategorien";
-}
-
-function reportTaxonomyFilterLabel(lang: "de" | "ru") {
-  return lang === "ru" ? "Категория провайдера" : "Provider-Kategorie";
 }
 
 function reportTaxonomyLoadError(lang: "de" | "ru") {
@@ -949,6 +946,8 @@ function useReportsPageContent() {
     if (!selectedClinicId) return data.provider_costs;
     return data.provider_costs.filter((item) => item.provider_id === selectedClinicId);
   }, [data?.provider_costs, selectedClinicId]);
+  const taxonomyFilterLabel = t.providers_category;
+  const taxonomyAllLabel = t.providers_all;
   const clinicColumns = useMemo<ColumnDef<ClinicReportRow>[]>(
     () => [
       {
@@ -980,7 +979,7 @@ function useReportsPageContent() {
       },
       {
         id: "taxonomy",
-        label: reportTaxonomyFilterLabel(lang),
+        label: taxonomyFilterLabel,
         accessor: (row) => reportTaxonomyLabel(row, text.unknown, lang),
         width: 320,
         sortable: true,
@@ -1043,7 +1042,7 @@ function useReportsPageContent() {
         ),
       },
     ],
-    [lang, locale, providerTypeLabel, text],
+    [lang, locale, providerTypeLabel, taxonomyFilterLabel, text],
   );
   const serviceTypeColumns = useMemo<ColumnDef<ServiceTypeReportRow>[]>(
     () => [
@@ -1118,7 +1117,7 @@ function useReportsPageContent() {
       },
       {
         id: "taxonomy",
-        label: reportTaxonomyFilterLabel(lang),
+        label: taxonomyFilterLabel,
         accessor: (row) => reportTaxonomyLabel(row, text.unknown, lang),
         width: 320,
         sortable: true,
@@ -1182,20 +1181,20 @@ function useReportsPageContent() {
         ),
       },
     ],
-    [lang, locale, text],
+    [lang, locale, taxonomyFilterLabel, t, text],
   );
   const providerCostColumns = useMemo<ColumnDef<ProviderCostRow>[]>(
     () => [
       {
         id: "service",
         label: text.providerCosts.title,
-        accessor: (row) => reportBackendLabel(row.service_label, text),
+        accessor: (row) => reportBackendLabel(row.service_label, text, t),
         width: 220,
         pinned: "left",
         sortable: true,
         render: (row) => (
           <span className="text-sm font-medium text-foreground">
-            {reportBackendLabel(row.service_label, text)}
+            {reportBackendLabel(row.service_label, text, t)}
           </span>
         ),
       },
@@ -1208,7 +1207,7 @@ function useReportsPageContent() {
       },
       {
         id: "taxonomy",
-        label: reportTaxonomyFilterLabel(lang),
+        label: taxonomyFilterLabel,
         accessor: (row) => reportTaxonomyLabel(row, text.unknown, lang),
         width: 320,
         sortable: true,
@@ -1282,7 +1281,7 @@ function useReportsPageContent() {
         ),
       },
     ],
-    [lang, locale, text],
+    [lang, locale, taxonomyFilterLabel, t, text],
   );
   const nonMedicalProviderColumns = useMemo<ColumnDef<NonMedicalProviderReportRow>[]>(
     () => [
@@ -1308,7 +1307,7 @@ function useReportsPageContent() {
       },
       {
         id: "taxonomy",
-        label: reportTaxonomyFilterLabel(lang),
+        label: taxonomyFilterLabel,
         accessor: (row) => reportTaxonomyLabel(row, text.unknown, lang),
         width: 340,
         sortable: true,
@@ -1385,7 +1384,7 @@ function useReportsPageContent() {
         ),
       },
     ],
-    [lang, locale, text],
+    [lang, locale, taxonomyFilterLabel, text],
   );
   const countryColumns = useMemo<ColumnDef<CountryReportRow>[]>(
     () => [
@@ -1449,7 +1448,7 @@ function useReportsPageContent() {
       },
       {
         id: "taxonomy",
-        label: reportTaxonomyFilterLabel(lang),
+        label: taxonomyFilterLabel,
         accessor: (row) => reportTaxonomyLabel(row, text.unknown, lang),
         width: 320,
         sortable: true,
@@ -1560,7 +1559,7 @@ function useReportsPageContent() {
         ),
       },
     ],
-    [lang, locale, text],
+    [lang, locale, taxonomyFilterLabel, text],
   );
   const forecastQuotePipelineColumns = useMemo<ColumnDef<ForecastQuotePipelineRow>[]>(
     () => [
@@ -1744,8 +1743,7 @@ function useReportsPageContent() {
       { grouped: true, groupedLast: true, itemKey: "delivered-service-volume" },
     ),
   ] : [];
-  const taxonomySelectLabel = reportTaxonomyFilterLabel(lang);
-  const taxonomyAllLabel = reportTaxonomyAllLabel(lang);
+  const taxonomySelectLabel = taxonomyFilterLabel;
 
   return (
     <div className="space-y-4">
@@ -2385,7 +2383,7 @@ function useReportsPageContent() {
                       ? detail.row.name
                       : detail.kind === "doctor"
                         ? [detail.row.title, detail.row.name].filter(Boolean).join(" ")
-                        : reportBackendLabel(detail.row.service_label, text),
+                        : reportBackendLabel(detail.row.service_label, text, t),
                   )}
                   description={
                     detail.kind === "clinic"

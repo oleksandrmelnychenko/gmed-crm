@@ -52,6 +52,7 @@ import {
   textareaClass as shellTextareaClass,
   tokens,
 } from "@/components/ui-shell";
+import { agencyServiceNameLabel } from "@/lib/agency-service-labels";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import {
@@ -2333,75 +2334,83 @@ function useStaffInvoicesPageContent() {
                 <SectionCard title={text.lineItems}>
                   {!detail.line_items || detail.line_items.length === 0 ? <EmptyState title={text.noLineItems} description={text.noLineItemsDescription} /> : (
                     <div className="space-y-3">
-                      {detail.line_items.map((line, index) => (
-                        <article
-                          key={[
-                            line.description,
-                            line.quantity,
-                            line.unit_price,
-                            line.line_net,
-                            line.line_vat,
-                            line.line_gross,
-                            line.tax_profile_key ?? "",
-                          ].join("|")}
-                          className="overflow-hidden rounded-2xl border border-border bg-card"
-                        >
-                          <div className="grid lg:grid-cols-[minmax(0,1fr)_120px]">
-                            <div className="p-4">
-                              <div className="flex items-start gap-3">
-                                <div className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted/30 text-xs font-semibold text-muted-foreground">
-                                  {index + 1}
-                                </div>
-                                <div className="min-w-0">
-                                  <h3 className="text-sm font-semibold leading-snug text-foreground">{line.description}</h3>
-                                  <div className="mt-2 flex flex-wrap gap-1.5">
-                                    <StatusBadge tone="neutral">
-                                      {taxProfileLabel(
-                                        line.tax_profile_name,
-                                        line.tax_profile_key,
-                                        line.vat_source,
-                                      )}
-                                    </StatusBadge>
-                                    {line.is_cost_passthrough ? (
-                                      <StatusBadge tone="warning">{t.orders_cost_pass_through_badge}</StatusBadge>
-                                    ) : null}
+                      {detail.line_items.map((line, index) => {
+                        const lineDescription = agencyServiceNameLabel(
+                          undefined,
+                          line.description,
+                          t,
+                        );
+
+                        return (
+                          <article
+                            key={[
+                              line.description,
+                              line.quantity,
+                              line.unit_price,
+                              line.line_net,
+                              line.line_vat,
+                              line.line_gross,
+                              line.tax_profile_key ?? "",
+                            ].join("|")}
+                            className="overflow-hidden rounded-2xl border border-border bg-card"
+                          >
+                            <div className="grid lg:grid-cols-[minmax(0,1fr)_120px]">
+                              <div className="p-4">
+                                <div className="flex items-start gap-3">
+                                  <div className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted/30 text-xs font-semibold text-muted-foreground">
+                                    {index + 1}
                                   </div>
-                                  <p className="mt-1.5 max-w-2xl text-xs leading-snug text-muted-foreground">
-                                    {line.vat_source_explanation ??
-                                      `${text.vatSource}: ${vatSourceLabel(line.vat_source ?? "legacy")}`}
-                                  </p>
+                                  <div className="min-w-0">
+                                    <h3 className="text-sm font-semibold leading-snug text-foreground">{lineDescription}</h3>
+                                    <div className="mt-2 flex flex-wrap gap-1.5">
+                                      <StatusBadge tone="neutral">
+                                        {taxProfileLabel(
+                                          line.tax_profile_name,
+                                          line.tax_profile_key,
+                                          line.vat_source,
+                                        )}
+                                      </StatusBadge>
+                                      {line.is_cost_passthrough ? (
+                                        <StatusBadge tone="warning">{t.orders_cost_pass_through_badge}</StatusBadge>
+                                      ) : null}
+                                    </div>
+                                    <p className="mt-1.5 max-w-2xl text-xs leading-snug text-muted-foreground">
+                                      {line.vat_source_explanation ??
+                                        `${text.vatSource}: ${vatSourceLabel(line.vat_source ?? "legacy")}`}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="relative border-t border-border p-4 lg:border-t-0 lg:pl-5 lg:before:absolute lg:before:bottom-4 lg:before:left-0 lg:before:top-4 lg:before:border-l lg:before:border-dashed lg:before:border-border">
+                                <div className="flex flex-wrap gap-1.5 lg:justify-end">
+                                  <span className="rounded-full border border-border bg-background px-2.5 py-1 text-xs font-semibold leading-none text-foreground">
+                                    {`${t.invoices_vat} ${line.vat_rate}%`}
+                                  </span>
                                 </div>
                               </div>
                             </div>
-                            <div className="relative border-t border-border p-4 lg:border-t-0 lg:pl-5 lg:before:absolute lg:before:bottom-4 lg:before:left-0 lg:before:top-4 lg:before:border-l lg:before:border-dashed lg:before:border-border">
-                              <div className="flex flex-wrap gap-1.5 lg:justify-end">
-                                <span className="rounded-full border border-border bg-background px-2.5 py-1 text-xs font-semibold leading-none text-foreground">
-                                  {`${t.invoices_vat} ${line.vat_rate}%`}
-                                </span>
+                            <div className="grid border-t border-border bg-muted/15 sm:grid-cols-3">
+                              <div className="px-4 py-3">
+                                <div className="text-xs text-muted-foreground">{text.net}</div>
+                                <div className="mt-1 text-sm font-semibold text-foreground">{formatMoney(line.line_net)}</div>
+                              </div>
+                              <div className="border-t border-border px-4 py-3 sm:border-l sm:border-t-0">
+                                <div className="text-xs text-muted-foreground">{t.invoices_vat}</div>
+                                <div className="mt-1 text-sm font-semibold text-foreground">{formatMoney(line.line_vat)}</div>
+                              </div>
+                              <div className="border-t border-border px-4 py-3 sm:border-l sm:border-t-0">
+                                <div className="text-xs text-muted-foreground">{text.gross}</div>
+                                <div className="mt-1 text-sm font-semibold text-foreground">{formatMoney(line.line_gross)}</div>
                               </div>
                             </div>
-                          </div>
-                          <div className="grid border-t border-border bg-muted/15 sm:grid-cols-3">
-                            <div className="px-4 py-3">
-                              <div className="text-xs text-muted-foreground">{text.net}</div>
-                              <div className="mt-1 text-sm font-semibold text-foreground">{formatMoney(line.line_net)}</div>
-                            </div>
-                            <div className="border-t border-border px-4 py-3 sm:border-l sm:border-t-0">
-                              <div className="text-xs text-muted-foreground">{t.invoices_vat}</div>
-                              <div className="mt-1 text-sm font-semibold text-foreground">{formatMoney(line.line_vat)}</div>
-                            </div>
-                            <div className="border-t border-border px-4 py-3 sm:border-l sm:border-t-0">
-                              <div className="text-xs text-muted-foreground">{text.gross}</div>
-                              <div className="mt-1 text-sm font-semibold text-foreground">{formatMoney(line.line_gross)}</div>
-                            </div>
-                          </div>
-                          {line.notes ? (
-                            <div className="border-t border-border px-4 py-2 text-xs leading-snug text-muted-foreground">
-                              {line.notes}
-                            </div>
-                          ) : null}
-                        </article>
-                      ))}
+                            {line.notes ? (
+                              <div className="border-t border-border px-4 py-2 text-xs leading-snug text-muted-foreground">
+                                {line.notes}
+                              </div>
+                            ) : null}
+                          </article>
+                        );
+                      })}
                     </div>
                   )}
                 </SectionCard>
