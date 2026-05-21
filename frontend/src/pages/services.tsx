@@ -50,6 +50,10 @@ import {
 } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
+import {
+  providerMatchesTaxonomyFilter,
+  providerOptionLabel,
+} from "@/pages/appointments/model/provider-taxonomy";
 import { toRfc3339 } from "@/pages/appointments/model/workflow-helpers";
 import {
   conciergeServiceStatusTone,
@@ -112,6 +116,14 @@ type ProviderOption = {
   id: string;
   name: string;
   provider_type: string;
+  address_city?: string | null;
+  taxonomy_node_id?: string | null;
+  taxonomy_node_code?: string | null;
+  taxonomy_node_name_de?: string | null;
+  taxonomy_node_name_ru?: string | null;
+  taxonomy_node?: ProviderTaxonomyNode | null;
+  taxonomy_path?: ProviderTaxonomyNode[];
+  taxonomy_node_ids?: string[];
 };
 
 type StaffOption = {
@@ -798,6 +810,13 @@ function useStaffServicesPageContent() {
         ),
     [lang, taxonomyNodes],
   );
+  const createProviderOptions = useMemo(
+    () =>
+      providers.filter((provider) =>
+        providerMatchesTaxonomyFilter(provider, createForm.taxonomyNodeId),
+      ),
+    [createForm.taxonomyNodeId, providers],
+  );
 
   const openCreateSheet = useCallback(() => {
     setCreateError("");
@@ -1358,10 +1377,22 @@ function useStaffServicesPageContent() {
                     <NativeComboboxSelect
                       value={createForm.taxonomyNodeId}
                       onChange={(event) =>
-                        setCreateForm((current) => ({
-                          ...current,
-                          taxonomyNodeId: event.target.value,
-                        }))
+                        setCreateForm((current) => {
+                          const taxonomyNodeId = event.target.value;
+                          const selectedProviderStillFits =
+                            !current.providerId ||
+                            providers.some(
+                              (provider) =>
+                                provider.id === current.providerId &&
+                                providerMatchesTaxonomyFilter(provider, taxonomyNodeId),
+                            );
+
+                          return {
+                            ...current,
+                            taxonomyNodeId,
+                            providerId: selectedProviderStillFits ? current.providerId : "",
+                          };
+                        })
                       }
                       className={formSelectClassName}
                     >
@@ -1403,9 +1434,9 @@ function useStaffServicesPageContent() {
                         className={formSelectClassName}
                       >
                         <option value="">{t.staff_services_optional}</option>
-                        {providers.map((provider) => (
+                        {createProviderOptions.map((provider) => (
                           <option key={provider.id} value={provider.id}>
-                            {provider.name}
+                            {providerOptionLabel(provider, lang)}
                           </option>
                         ))}
                       </NativeComboboxSelect>

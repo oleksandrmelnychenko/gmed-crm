@@ -1,7 +1,4 @@
-import type {
-  AppointmentKind,
-  ProviderSummary,
-} from "@/pages/appointments/model/types";
+import type { AppointmentKind } from "@/pages/appointments/model/types";
 import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 
 type UiLanguage = "de" | "ru";
@@ -12,21 +9,50 @@ type ProviderTaxonomyOption = {
   providerKind: string;
 };
 
+type ProviderTaxonomyPathItem = {
+  id: string;
+  code?: string | null;
+  level?: string | null;
+  name_de?: string | null;
+  name_en?: string | null;
+  name_ru?: string | null;
+};
+
+type ProviderTaxonomyCarrier = {
+  id: string;
+  name: string;
+  provider_type: string;
+  address_city?: string | null;
+  taxonomy_node_id?: string | null;
+  taxonomy_node_code?: string | null;
+  taxonomy_node_name_de?: string | null;
+  taxonomy_node_name_ru?: string | null;
+  taxonomy_node?: ProviderTaxonomyPathItem | null;
+  taxonomy_path?: ProviderTaxonomyPathItem[];
+  taxonomy_node_ids?: string[];
+};
+
 function taxonomyNodeLabel(
   node: {
     code?: string | null;
     name_de?: string | null;
+    name_en?: string | null;
     name_ru?: string | null;
   },
   lang: UiLanguage,
 ) {
   if (lang === "ru") {
-    return node.name_ru || node.name_de || node.code || "";
+    return node.name_ru || node.name_de || node.name_en || node.code || "";
   }
-  return node.name_de || node.name_ru || node.code || "";
+  return node.name_de || node.name_en || node.name_ru || node.code || "";
 }
 
-function providerPrimaryTaxonomyLabel(provider: ProviderSummary, lang: UiLanguage) {
+function providerPrimaryTaxonomyLabel(provider: ProviderTaxonomyCarrier, lang: UiLanguage) {
+  const nodeLabel = provider.taxonomy_node
+    ? taxonomyNodeLabel(provider.taxonomy_node, lang)
+    : "";
+  if (nodeLabel) return nodeLabel;
+
   return taxonomyNodeLabel(
     {
       code: provider.taxonomy_node_code,
@@ -35,6 +61,26 @@ function providerPrimaryTaxonomyLabel(provider: ProviderSummary, lang: UiLanguag
     },
     lang,
   );
+}
+
+function isProviderKindRoot(node: ProviderTaxonomyPathItem) {
+  return (
+    node.level === "category" ||
+    node.code === "medical_providers" ||
+    node.code === "nonmedical_providers"
+  );
+}
+
+function providerTaxonomyPathLabel(provider: ProviderTaxonomyCarrier, lang: UiLanguage) {
+  const path = provider.taxonomy_path ?? [];
+  if (!path.length) return "";
+  const root = path[0];
+  const visiblePath = root && path.length > 1 && isProviderKindRoot(root) ? path.slice(1) : path;
+
+  return visiblePath
+    .map((item) => taxonomyNodeLabel(item, lang))
+    .filter(Boolean)
+    .join(" / ");
 }
 
 function taxonomyPathLabelFromNodes(
@@ -70,16 +116,17 @@ function providerKindMatchesAppointmentType(
   return true;
 }
 
-function providerTaxonomyIds(provider: ProviderSummary) {
+function providerTaxonomyIds(provider: ProviderTaxonomyCarrier) {
   return new Set([
     ...(provider.taxonomy_node_ids ?? []),
     ...(provider.taxonomy_path ?? []).map((node) => node.id),
+    provider.taxonomy_node?.id ?? "",
     provider.taxonomy_node_id ?? "",
   ].filter(Boolean));
 }
 
 export function providerMatchesAppointmentType(
-  provider: ProviderSummary,
+  provider: ProviderTaxonomyCarrier,
   appointmentType: AppointmentKind | string | null | undefined,
 ) {
   if (appointmentType === "internal") return false;
@@ -89,7 +136,7 @@ export function providerMatchesAppointmentType(
 }
 
 export function providerMatchesTaxonomyFilter(
-  provider: ProviderSummary,
+  provider: ProviderTaxonomyCarrier,
   taxonomyNodeId: string,
 ) {
   const selected = taxonomyNodeId.trim();
@@ -97,8 +144,24 @@ export function providerMatchesTaxonomyFilter(
   return providerTaxonomyIds(provider).has(selected);
 }
 
-export function filterProvidersForAppointmentScope(
-  providers: ProviderSummary[],
+export function providerTaxonomyDisplayLabel(
+  provider: ProviderTaxonomyCarrier,
+  lang: UiLanguage,
+) {
+  return providerTaxonomyPathLabel(provider, lang) || providerPrimaryTaxonomyLabel(provider, lang);
+}
+
+export function providerOptionLabel(provider: ProviderTaxonomyCarrier, lang: UiLanguage) {
+  const meta = [
+    provider.address_city?.trim(),
+    providerTaxonomyDisplayLabel(provider, lang),
+  ].filter(Boolean);
+
+  return meta.length ? `${provider.name} - ${meta.join(" - ")}` : provider.name;
+}
+
+export function filterProvidersForAppointmentScope<T extends ProviderTaxonomyCarrier>(
+  providers: T[],
   appointmentType: AppointmentKind | string | null | undefined,
   taxonomyNodeId = "",
 ) {
@@ -110,7 +173,7 @@ export function filterProvidersForAppointmentScope(
 }
 
 export function providerSelectionFitsAppointmentScope(
-  providers: ProviderSummary[],
+  providers: ProviderTaxonomyCarrier[],
   providerId: string,
   appointmentType: AppointmentKind | string | null | undefined,
   taxonomyNodeId = "",
@@ -125,7 +188,7 @@ export function providerSelectionFitsAppointmentScope(
 }
 
 export function providerTaxonomyFilterOptions(
-  providers: ProviderSummary[],
+  providers: ProviderTaxonomyCarrier[],
   appointmentType: AppointmentKind | string | null | undefined,
   lang: UiLanguage,
 ): ProviderTaxonomyOption[] {

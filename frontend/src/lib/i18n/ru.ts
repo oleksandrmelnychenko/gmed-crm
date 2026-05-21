@@ -1403,6 +1403,24 @@ export const ru = {
   documents_extraction_failed: "Ошибка",
   documents_extraction_unsupported: "Не поддерживается",
   documents_extraction_not_started: "Не запускалось",
+  documents_extraction_message_ocr_unavailable:
+    "OCR недоступен в этой среде. Включите Windows OCR или установите Tesseract CLI; иначе текст нужно внести вручную.",
+  documents_extraction_message_ocr_no_text:
+    "OCR не распознал читаемый текст на изображении.",
+  documents_extraction_message_ocr_failed:
+    "Не удалось распознать текст на изображении.",
+  documents_extraction_message_pdf_no_text:
+    "В PDF не найден извлекаемый текст.",
+  documents_extraction_message_pdf_failed:
+    "Не удалось извлечь текст из PDF.",
+  documents_extraction_message_html_no_text:
+    "В HTML-документе не найден извлекаемый текст.",
+  documents_extraction_message_text_no_text:
+    "В загруженном документе не найден извлекаемый текст.",
+  documents_extraction_message_unsupported_binary:
+    "Извлечение текста не поддерживается для этого типа документа.",
+  documents_extraction_message_failed:
+    "Не удалось извлечь текст из документа.",
   services_failed_load: "Не удалось загрузить дополнительные сервисы.",
   services_notice_created:
     "Запрос на сервис отправлен команде сопровождения.",

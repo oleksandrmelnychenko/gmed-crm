@@ -113,6 +113,7 @@ export type TranslationWorkspaceDraft = {
 export type DocumentTextExtraction = {
   status: string;
   method: string | null;
+  message_key?: string | null;
   message: string | null;
   extracted_text: string | null;
   has_text: boolean;

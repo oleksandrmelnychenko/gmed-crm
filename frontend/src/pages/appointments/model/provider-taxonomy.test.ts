@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   filterProvidersForAppointmentScope,
+  providerOptionLabel,
   providerSelectionFitsAppointmentScope,
   providerTaxonomyFilterOptions,
   providerTaxonomyTreeOptions,
@@ -109,6 +110,13 @@ describe("appointment provider taxonomy filters", () => {
     expect(options.map((option) => option.id)).toContain("reha-group");
     expect(options.map((option) => option.id)).toContain("pharmacy-group");
     expect(options.map((option) => option.id)).not.toContain("transport-group");
+  });
+
+  it("formats provider dropdown labels with localized taxonomy without provider root", () => {
+    expect(providerOptionLabel(chauffeurProvider, "ru")).toBe(
+      "chauffeur - Transport / Chauffeur",
+    );
+    expect(providerOptionLabel(rehaProvider, "de")).toBe("reha - Reha / Reha Kliniken");
   });
 
   it("builds appointment taxonomy options from the full taxonomy tree", () => {

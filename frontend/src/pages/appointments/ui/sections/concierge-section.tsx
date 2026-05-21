@@ -38,6 +38,10 @@ import {
   serviceStatusLabel,
 } from "@/pages/appointments/model/labels";
 import {
+  providerMatchesTaxonomyFilter,
+  providerOptionLabel,
+} from "@/pages/appointments/model/provider-taxonomy";
+import {
   formatAppointmentDateTimeLabel as formatDateTimeLabel,
   formatAppointmentMoneyLabel as formatMoneyLabel,
 } from "@/pages/appointments/model/runtime-formatters";
@@ -219,6 +223,13 @@ function useAppointmentConciergeSectionContent({
       ),
     [lang, taxonomyNodes],
   );
+  const createProviderOptions = useMemo(
+    () =>
+      nonMedicalProviders.filter((provider) =>
+        providerMatchesTaxonomyFilter(provider, form.taxonomyNodeId),
+      ),
+    [form.taxonomyNodeId, nonMedicalProviders],
+  );
 
   useEffect(() => {
     dispatchConciergeState({
@@ -372,6 +383,9 @@ function useAppointmentConciergeSectionContent({
         ) : (
           services.map((service) => {
             const draft = drafts[service.id] ?? buildServiceDraft(service);
+            const draftProviderOptions = nonMedicalProviders.filter((provider) =>
+              providerMatchesTaxonomyFilter(provider, draft.taxonomyNodeId),
+            );
             return (
               <div
                 key={service.id}
@@ -436,7 +450,7 @@ function useAppointmentConciergeSectionContent({
                             className={appointmentWhiteInputClassName}
                           />
                         </Field>
-                        <Field label={t.common_provider}>
+                        <Field label={t.staff_services_form_provider}>
                           <NativeComboboxSelect
                             value={draft.providerId}
                             onChange={(event) =>
@@ -449,9 +463,9 @@ function useAppointmentConciergeSectionContent({
                             <option value="">
                               {appointmentText("appointments_no_provider")}
                             </option>
-                            {nonMedicalProviders.map((provider) => (
+                            {draftProviderOptions.map((provider) => (
                               <option key={provider.id} value={provider.id}>
-                                {provider.name}
+                                {providerOptionLabel(provider, lang)}
                               </option>
                             ))}
                           </NativeComboboxSelect>
@@ -484,6 +498,15 @@ function useAppointmentConciergeSectionContent({
                         onChange={(event) =>
                           updateDraft(service.id, {
                             taxonomyNodeId: event.target.value,
+                            providerId:
+                              !draft.providerId ||
+                              nonMedicalProviders.some(
+                                (provider) =>
+                                  provider.id === draft.providerId &&
+                                  providerMatchesTaxonomyFilter(provider, event.target.value),
+                              )
+                                ? draft.providerId
+                                : "",
                           })
                         }
                         className={selectClassName}
@@ -522,7 +545,7 @@ function useAppointmentConciergeSectionContent({
                         className={appointmentWhiteInputClassName}
                       />
                     </Field>
-                    <Field label={tr.contracts_total}>
+                    <Field label={t.staff_services_form_actual_cost}>
                       <Input
                         type="number"
                         min="0"
@@ -534,7 +557,7 @@ function useAppointmentConciergeSectionContent({
                         className={appointmentWhiteInputClassName}
                       />
                     </Field>
-                    <Field label={tr.common_provider}>
+                    <Field label={t.staff_services_form_vendor}>
                       <Input
                         value={draft.vendorName}
                         onChange={(event) =>
@@ -543,7 +566,7 @@ function useAppointmentConciergeSectionContent({
                         className={appointmentWhiteInputClassName}
                       />
                     </Field>
-                    <Field label={tr.field_phone}>
+                    <Field label={t.staff_services_form_vendor_contact}>
                       <Input
                         value={draft.vendorContact}
                         onChange={(event) =>
@@ -593,7 +616,7 @@ function useAppointmentConciergeSectionContent({
                             ))}
                           </NativeComboboxSelect>
                         </Field>
-                        <Field label={tr.contracts_total}>
+                        <Field label={t.staff_services_form_currency}>
                           <Input
                             value={draft.currency}
                             onChange={(event) =>
@@ -607,7 +630,7 @@ function useAppointmentConciergeSectionContent({
                     ) : null}
                   </div>
                   <div className="grid gap-4 md:grid-cols-2">
-                    <Field label={tr.patients_notes}>
+                    <Field label={t.staff_services_form_service_notes}>
                       <textarea
                         value={draft.serviceNotes}
                         onChange={(event) =>
@@ -620,7 +643,7 @@ function useAppointmentConciergeSectionContent({
                       />
                     </Field>
                     {canManageConciergeBilling ? (
-                      <Field label={tr.patients_notes}>
+                      <Field label={t.staff_services_form_billing_notes}>
                         <textarea
                           value={draft.billingNotes}
                           onChange={(event) =>
@@ -676,10 +699,22 @@ function useAppointmentConciergeSectionContent({
             <NativeComboboxSelect
               value={form.taxonomyNodeId}
               onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  taxonomyNodeId: event.target.value,
-                }))
+                setForm((current) => {
+                  const taxonomyNodeId = event.target.value;
+                  const selectedProviderStillFits =
+                    !current.providerId ||
+                    nonMedicalProviders.some(
+                      (provider) =>
+                        provider.id === current.providerId &&
+                        providerMatchesTaxonomyFilter(provider, taxonomyNodeId),
+                    );
+
+                  return {
+                    ...current,
+                    taxonomyNodeId,
+                    providerId: selectedProviderStillFits ? current.providerId : "",
+                  };
+                })
               }
               className={selectClassName}
             >
@@ -704,7 +739,7 @@ function useAppointmentConciergeSectionContent({
               required
             />
           </Field>
-          <Field label={t.common_provider}>
+          <Field label={t.staff_services_form_provider}>
             <NativeComboboxSelect
               value={form.providerId}
               onChange={(event) =>
@@ -718,9 +753,9 @@ function useAppointmentConciergeSectionContent({
               <option value="">
                 {appointmentText("appointments_no_provider")}
               </option>
-              {nonMedicalProviders.map((provider) => (
+              {createProviderOptions.map((provider) => (
                 <option key={provider.id} value={provider.id}>
-                  {provider.name}
+                  {providerOptionLabel(provider, lang)}
                 </option>
               ))}
             </NativeComboboxSelect>
@@ -772,7 +807,7 @@ function useAppointmentConciergeSectionContent({
               className={appointmentWhiteInputClassName}
             />
           </Field>
-          <Field label={tr.common_provider}>
+          <Field label={t.staff_services_form_vendor}>
             <Input
               value={form.vendorName}
               onChange={(event) =>
@@ -784,7 +819,7 @@ function useAppointmentConciergeSectionContent({
               className={appointmentWhiteInputClassName}
             />
           </Field>
-          <Field label={tr.field_phone}>
+          <Field label={t.staff_services_form_vendor_contact}>
             <Input
               value={form.vendorContact}
               onChange={(event) =>
@@ -796,7 +831,7 @@ function useAppointmentConciergeSectionContent({
               className={appointmentWhiteInputClassName}
             />
           </Field>
-          <Field label={tr.contracts_total}>
+          <Field label={t.staff_services_form_cost_estimate}>
             <Input
               type="number"
               min="0"
@@ -811,7 +846,7 @@ function useAppointmentConciergeSectionContent({
               className={appointmentWhiteInputClassName}
             />
           </Field>
-          <Field label={tr.contracts_total}>
+          <Field label={t.staff_services_form_currency}>
             <Input
               value={form.currency}
               onChange={(event) =>
@@ -824,7 +859,7 @@ function useAppointmentConciergeSectionContent({
               maxLength={3}
             />
           </Field>
-          <Field label={tr.patients_notes}>
+          <Field label={t.staff_services_form_service_notes}>
             <textarea
               value={form.serviceNotes}
               onChange={(event) =>

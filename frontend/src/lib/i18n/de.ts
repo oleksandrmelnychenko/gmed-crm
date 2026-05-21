@@ -1408,6 +1408,24 @@ export const de = {
   documents_extraction_failed: "Fehlgeschlagen",
   documents_extraction_unsupported: "Nicht unterstützt",
   documents_extraction_not_started: "Nicht gestartet",
+  documents_extraction_message_ocr_unavailable:
+    "OCR ist in dieser Umgebung nicht verfügbar. Aktivieren Sie Windows-OCR oder installieren Sie Tesseract CLI; andernfalls muss der Text manuell erfasst werden.",
+  documents_extraction_message_ocr_no_text:
+    "OCR hat im Bild keinen lesbaren Text erkannt.",
+  documents_extraction_message_ocr_failed:
+    "Die Texterkennung für das Bild ist fehlgeschlagen.",
+  documents_extraction_message_pdf_no_text:
+    "Im PDF wurde kein extrahierbarer Text gefunden.",
+  documents_extraction_message_pdf_failed:
+    "Die Textextraktion aus dem PDF ist fehlgeschlagen.",
+  documents_extraction_message_html_no_text:
+    "Im HTML-Dokument wurde kein extrahierbarer Text gefunden.",
+  documents_extraction_message_text_no_text:
+    "Im hochgeladenen Dokument wurde kein extrahierbarer Text gefunden.",
+  documents_extraction_message_unsupported_binary:
+    "Textextraktion wird für diesen Dokumenttyp nicht unterstützt.",
+  documents_extraction_message_failed:
+    "Die Textextraktion aus dem Dokument ist fehlgeschlagen.",
 
   services_failed_load: "Zusatzservices konnten nicht geladen werden.",
   services_notice_created:

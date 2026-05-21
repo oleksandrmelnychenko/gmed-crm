@@ -1321,6 +1321,15 @@ export interface Translations
   documents_extraction_failed: string;
   documents_extraction_unsupported: string;
   documents_extraction_not_started: string;
+  documents_extraction_message_ocr_unavailable: string;
+  documents_extraction_message_ocr_no_text: string;
+  documents_extraction_message_ocr_failed: string;
+  documents_extraction_message_pdf_no_text: string;
+  documents_extraction_message_pdf_failed: string;
+  documents_extraction_message_html_no_text: string;
+  documents_extraction_message_text_no_text: string;
+  documents_extraction_message_unsupported_binary: string;
+  documents_extraction_message_failed: string;
 
   chat_title: string;
   chat_subtitle: string;

@@ -1316,6 +1316,8 @@ fn document_text_extraction_message(status: &str, method: Option<&str>) -> Optio
         ("unsupported", "ocr_unavailable") => Some(IMAGE_OCR_UNAVAILABLE_MESSAGE),
         ("unsupported", "windows_ocr") => Some(IMAGE_OCR_NO_TEXT_MESSAGE),
         ("unsupported", "tesseract_cli") => Some(IMAGE_OCR_NO_TEXT_MESSAGE),
+        ("unsupported", "html_text") => Some("No extractable text found in the HTML document."),
+        ("unsupported", "text_utf8") => Some("No extractable text found in the uploaded document."),
         ("unsupported", "pdf_text") => Some(PDF_TEXT_NO_TEXT_MESSAGE),
         ("unsupported", "unsupported_binary") => {
             Some("Text extraction is not supported for this document type.")
@@ -1324,6 +1326,21 @@ fn document_text_extraction_message(status: &str, method: Option<&str>) -> Optio
         ("failed", "tesseract_cli") => Some(IMAGE_OCR_FAILED_MESSAGE),
         ("failed", "pdf_text") => Some(PDF_TEXT_FAILED_MESSAGE),
         ("failed", _) => Some("Document text extraction failed."),
+        _ => None,
+    }
+}
+
+fn document_text_extraction_message_key(status: &str, method: Option<&str>) -> Option<&'static str> {
+    match (status, method.unwrap_or_default()) {
+        ("unsupported", "ocr_unavailable") => Some("ocr_unavailable"),
+        ("unsupported", "windows_ocr") | ("unsupported", "tesseract_cli") => Some("ocr_no_text"),
+        ("unsupported", "html_text") => Some("html_no_text"),
+        ("unsupported", "text_utf8") => Some("text_no_text"),
+        ("unsupported", "pdf_text") => Some("pdf_no_text"),
+        ("unsupported", "unsupported_binary") => Some("unsupported_binary"),
+        ("failed", "windows_ocr") | ("failed", "tesseract_cli") => Some("ocr_failed"),
+        ("failed", "pdf_text") => Some("pdf_failed"),
+        ("failed", _) => Some("failed"),
         _ => None,
     }
 }
@@ -6667,6 +6684,12 @@ fn document_text_extraction_json(row: &sqlx::postgres::PgRow) -> serde_json::Val
     json!({
         "status": status,
         "method": method,
+        "message_key": document_text_extraction_message_key(
+            row.try_get::<String, _>("text_extraction_status")
+                .unwrap_or_else(|_| "not_started".to_string())
+                .as_str(),
+            method.as_deref(),
+        ),
         "message": document_text_extraction_message(
             row.try_get::<String, _>("text_extraction_status")
                 .unwrap_or_else(|_| "not_started".to_string())

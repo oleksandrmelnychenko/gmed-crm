@@ -460,6 +460,79 @@ function formatExtractionStatusLabel(
   }
 }
 
+function extractionMessageKeyFromResponse(extraction: DocumentTextExtraction) {
+  const key = extraction.message_key?.trim();
+  if (key) return key;
+
+  const status = extraction.status?.trim().toLowerCase();
+  const method = extraction.method?.trim().toLowerCase();
+  if (status === "unsupported" && method === "ocr_unavailable") return "ocr_unavailable";
+  if (status === "unsupported" && (method === "windows_ocr" || method === "tesseract_cli")) {
+    return "ocr_no_text";
+  }
+  if (status === "failed" && (method === "windows_ocr" || method === "tesseract_cli")) {
+    return "ocr_failed";
+  }
+  if (status === "unsupported" && method === "pdf_text") return "pdf_no_text";
+  if (status === "failed" && method === "pdf_text") return "pdf_failed";
+  if (status === "unsupported" && method === "html_text") return "html_no_text";
+  if (status === "unsupported" && method === "text_utf8") return "text_no_text";
+  if (status === "unsupported" && method === "unsupported_binary") return "unsupported_binary";
+  if (status === "failed") return "failed";
+
+  const message = extraction.message?.trim();
+  switch (message) {
+    case "Image OCR is not available in this environment. Enable Windows OCR support or install the tesseract CLI, otherwise manual transcription is required.":
+      return "ocr_unavailable";
+    case "OCR did not detect readable text in the image.":
+      return "ocr_no_text";
+    case "Image OCR failed.":
+      return "ocr_failed";
+    case "The PDF does not expose extractable text. Manual transcription is required.":
+      return "pdf_no_text";
+    case "PDF text extraction failed.":
+      return "pdf_failed";
+    case "No extractable text found in the HTML document.":
+      return "html_no_text";
+    case "No extractable text found in the uploaded document.":
+      return "text_no_text";
+    case "Text extraction is not supported for this document type.":
+      return "unsupported_binary";
+    case "Document text extraction failed.":
+      return "failed";
+    default:
+      return "";
+  }
+}
+
+function formatExtractionMessageLabel(
+  extraction: DocumentTextExtraction,
+  tr: ReturnType<typeof runtimeTranslations>,
+) {
+  switch (extractionMessageKeyFromResponse(extraction)) {
+    case "ocr_unavailable":
+      return tr.documents_extraction_message_ocr_unavailable;
+    case "ocr_no_text":
+      return tr.documents_extraction_message_ocr_no_text;
+    case "ocr_failed":
+      return tr.documents_extraction_message_ocr_failed;
+    case "pdf_no_text":
+      return tr.documents_extraction_message_pdf_no_text;
+    case "pdf_failed":
+      return tr.documents_extraction_message_pdf_failed;
+    case "html_no_text":
+      return tr.documents_extraction_message_html_no_text;
+    case "text_no_text":
+      return tr.documents_extraction_message_text_no_text;
+    case "unsupported_binary":
+      return tr.documents_extraction_message_unsupported_binary;
+    case "failed":
+      return tr.documents_extraction_message_failed;
+    default:
+      return extraction.message || "";
+  }
+}
+
 const STAFF_DOCUMENT_REALTIME_EVENTS = [
   "document.uploaded",
   "document.payment_proof_uploaded",
@@ -3784,9 +3857,9 @@ function StaffDocumentsPage({
                     <Banner tone="error">{textExtractionError}</Banner>
                   ) : null}
                   <div className="space-y-3">
-                    {textExtraction?.message ? (
+                    {textExtraction && formatExtractionMessageLabel(textExtraction, t) ? (
                       <div className="px-1 py-1 text-sm text-amber-900">
-                        {textExtraction.message}
+                        {formatExtractionMessageLabel(textExtraction, t)}
                       </div>
                     ) : null}
                     {textExtraction?.extracted_text ? (
