@@ -1302,33 +1302,32 @@ function useLeadsPageContent() {
                     </div>
                   </div>
 
-                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <div className="mt-4 space-y-1.5">
                     {detail.readiness.checks.map((check) => (
                       <div
                         key={check.key}
-                        className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3"
+                        className="flex min-w-0 items-center gap-3 rounded-lg px-2 py-1.5"
                       >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-medium text-zinc-900">
-                              {leadReadinessCheckLabel(check, t)}
-                            </p>
-                            <p className="mt-1 text-xs uppercase tracking-[0.12em] text-zinc-500">
-                              {t.lead_blocks} {leadStageLabel(check.blocking_for, t)}
-                            </p>
-                          </div>
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              "rounded-full",
-                              check.passed
-                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                : "border-rose-200 bg-rose-50 text-rose-700"
-                            )}
-                          >
-                            {check.passed ? t.lead_ok : t.lead_missing}
-                          </Badge>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-foreground">
+                            {leadReadinessCheckLabel(check, t)}
+                          </p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {t.lead_blocks} {leadStageLabel(check.blocking_for, t)}
+                          </p>
                         </div>
+                        <span className="h-px min-w-6 flex-1 bg-border/70" />
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "shrink-0 rounded-full",
+                            check.passed
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              : "border-rose-200 bg-rose-50 text-rose-700",
+                          )}
+                        >
+                          {check.passed ? t.lead_ok : t.lead_missing}
+                        </Badge>
                       </div>
                     ))}
                   </div>
