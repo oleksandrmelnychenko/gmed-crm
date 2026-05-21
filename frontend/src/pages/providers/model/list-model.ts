@@ -525,6 +525,10 @@ export const DEFAULT_FILTERS: ProviderFilters = {
   serviceName: "",
   hasContract: "",
   ratingGte: "",
+  taxonomyNodeId: "",
+  taxonomyAttributeKey: "",
+  taxonomyAttributeValue: "",
+  internalRatingGte: "",
 };
 
 export function providerPermissions(role?: string): ProviderPermissions {
@@ -561,6 +565,10 @@ export function blankProviderForm(providerType: ProviderType = "medical"): Provi
     specializations: "",
     parentProviderId: "",
     organizationLevel: "organization",
+    taxonomyNodeId: "",
+    taxonomyAttributes: "{}",
+    internalRating: "",
+    internalRatingNote: "",
     contractText: "",
     notes: "",
   };
@@ -598,6 +606,8 @@ export function blankServiceForm(priceType: ServiceFormState["priceType"] = "fix
     id: "",
     serviceName: "",
     description: "",
+    taxonomyNodeId: "",
+    taxonomyAttributes: "{}",
     price: "",
     priceType,
     priceFrom: "",
@@ -960,6 +970,31 @@ function parseContract(value: string) {
   return { summary: trimmed };
 }
 
+function stringifyJsonRecord(value: Record<string, unknown> | null | undefined) {
+  if (!value || Object.keys(value).length === 0) return "{}";
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return "{}";
+  }
+}
+
+function parseJsonRecord(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return {};
+  const parsed = JSON.parse(trimmed);
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    ? (parsed as Record<string, unknown>)
+    : {};
+}
+
+function parseOptionalNumber(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number.parseFloat(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 export function buildProvidersQuery(filters: ProviderFilters, forceNonMedical: boolean) {
   const params = new URLSearchParams();
   const providerType = forceNonMedical ? "non_medical" : filters.providerType;
@@ -977,6 +1012,14 @@ export function buildProvidersQuery(filters: ProviderFilters, forceNonMedical: b
   if (filters.serviceName.trim()) params.set("service_name", filters.serviceName.trim());
   if (filters.hasContract) params.set("has_contract", filters.hasContract);
   if (filters.ratingGte) params.set("rating_gte", filters.ratingGte);
+  if (filters.taxonomyNodeId.trim()) params.set("taxonomy_node_id", filters.taxonomyNodeId.trim());
+  if (filters.taxonomyAttributeKey.trim()) {
+    params.set("taxonomy_attribute_key", filters.taxonomyAttributeKey.trim());
+  }
+  if (filters.taxonomyAttributeValue.trim()) {
+    params.set("taxonomy_attribute_value", filters.taxonomyAttributeValue.trim());
+  }
+  if (filters.internalRatingGte) params.set("internal_rating_gte", filters.internalRatingGte);
   const query = params.toString();
   return query ? `/providers?${query}` : "/providers";
 }
@@ -1000,6 +1043,10 @@ export function providerToForm(detail: ProviderDetail): ProviderFormState {
     specializations: specializationsToText(detail.specializations, detail.fachbereich ?? ""),
     parentProviderId: detail.parent_provider_id ?? "",
     organizationLevel: detail.organization_level ?? "organization",
+    taxonomyNodeId: detail.taxonomy_node_id ?? detail.taxonomy_node?.id ?? "",
+    taxonomyAttributes: stringifyJsonRecord(detail.taxonomy_attributes),
+    internalRating: detail.internal_rating == null ? "" : String(detail.internal_rating),
+    internalRatingNote: detail.internal_rating_note ?? "",
     contractText: stringifyContract(detail.kooperationsvertrag),
     notes: detail.notes ?? "",
   };
@@ -1037,6 +1084,8 @@ export function serviceToForm(service: ServiceItem): ServiceFormState {
     id: service.id,
     serviceName: service.service_name,
     description: service.description ?? "",
+    taxonomyNodeId: service.taxonomy_node_id ?? service.taxonomy_node?.id ?? "",
+    taxonomyAttributes: stringifyJsonRecord(service.taxonomy_attributes),
     price: service.price,
     priceType: service.price_type || "fixed",
     priceFrom: service.price_from ?? service.price ?? "",
@@ -1105,6 +1154,10 @@ export function toProviderPayload(form: ProviderFormState, forceNonMedical: bool
     specializations: isMedical ? parseCommaList(form.specializations || form.fachbereich) : [],
     parent_provider_id: toOptional(form.parentProviderId),
     organization_level: form.organizationLevel,
+    taxonomy_node_id: toOptional(form.taxonomyNodeId),
+    taxonomy_attributes: parseJsonRecord(form.taxonomyAttributes),
+    internal_rating: parseOptionalNumber(form.internalRating),
+    internal_rating_note: toOptional(form.internalRatingNote),
     kooperationsvertrag: parseContract(form.contractText),
     notes: toOptional(form.notes),
   };
@@ -1154,6 +1207,8 @@ export function toServicePayload(form: ServiceFormState, forceRange = false) {
     currency: toOptional(form.currency) ?? "EUR",
     valid_from: toOptional(form.validFrom),
     valid_to: toOptional(form.validTo),
+    taxonomy_node_id: toOptional(form.taxonomyNodeId),
+    taxonomy_attributes: parseJsonRecord(form.taxonomyAttributes),
   };
 }
 

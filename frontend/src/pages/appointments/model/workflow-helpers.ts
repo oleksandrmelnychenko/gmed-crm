@@ -31,6 +31,7 @@ export function buildServiceDraft(
 ): ConciergeServiceDraftState {
   return {
     providerId: service.provider_id ?? "",
+    taxonomyNodeId: service.taxonomy_node_id ?? "",
     assignedConciergeId: service.assigned_concierge_id ?? "",
     title: service.title,
     status: service.status,

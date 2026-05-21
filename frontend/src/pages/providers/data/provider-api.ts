@@ -5,6 +5,9 @@ import type {
   ProviderDetail,
   ProviderStaffRoleItem,
   ProviderSummary,
+  ProviderTaxonomyNode,
+  ProviderTaxonomyResponse,
+  ProviderType,
   SpecializationItem,
 } from "../model/types";
 
@@ -12,6 +15,12 @@ type JsonPayload = Record<string, unknown>;
 
 function arrayOrEmpty<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function recordOrEmpty(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 function normalizeSpecializationItem<T extends SpecializationItem>(item: T): T {
@@ -22,6 +31,29 @@ function normalizeSpecializationItem<T extends SpecializationItem>(item: T): T {
   };
 }
 
+function normalizeTaxonomyNode<T extends ProviderTaxonomyNode>(node: T): T {
+  return {
+    ...node,
+    parent_id: node.parent_id ?? null,
+    level: node.level ?? "type",
+    provider_kind: node.provider_kind ?? "medical",
+    name_de: node.name_de ?? null,
+    name_ru: node.name_ru ?? null,
+    description: node.description ?? null,
+    filter_keys: arrayOrEmpty<string>(node.filter_keys),
+    is_leaf: node.is_leaf ?? node.level === "type",
+    is_assignable: node.is_assignable ?? node.level === "type",
+    is_active: node.is_active ?? true,
+    sort_order: node.sort_order ?? 1000,
+  };
+}
+
+function normalizeNullableTaxonomyNode(value: unknown) {
+  return value && typeof value === "object"
+    ? normalizeTaxonomyNode(value as ProviderTaxonomyNode)
+    : null;
+}
+
 function normalizeProviderDetail(raw: ProviderDetail): ProviderDetail {
   return {
     ...raw,
@@ -29,6 +61,12 @@ function normalizeProviderDetail(raw: ProviderDetail): ProviderDetail {
     parent_provider_id: raw.parent_provider_id ?? null,
     parent_provider_name: raw.parent_provider_name ?? null,
     opening_hours: raw.opening_hours ?? null,
+    taxonomy_node_id: raw.taxonomy_node_id ?? raw.taxonomy_node?.id ?? null,
+    taxonomy_node: normalizeNullableTaxonomyNode(raw.taxonomy_node),
+    taxonomy_path: arrayOrEmpty<ProviderTaxonomyNode>(raw.taxonomy_path).map(normalizeTaxonomyNode),
+    taxonomy_attributes: recordOrEmpty(raw.taxonomy_attributes),
+    internal_rating: raw.internal_rating ?? null,
+    internal_rating_note: raw.internal_rating_note ?? null,
     specializations: arrayOrEmpty<ProviderDetail["specializations"][number]>(raw.specializations).map(normalizeSpecializationItem),
     contacts: arrayOrEmpty<ProviderDetail["contacts"][number]>(raw.contacts),
     doctors: arrayOrEmpty<ProviderDetail["doctors"][number]>(raw.doctors).map((doctor) => ({
@@ -47,6 +85,9 @@ function normalizeProviderDetail(raw: ProviderDetail): ProviderDetail {
     })),
     services: arrayOrEmpty<ProviderDetail["services"][number]>(raw.services).map((service) => ({
       ...service,
+      taxonomy_node_id: service.taxonomy_node_id ?? service.taxonomy_node?.id ?? null,
+      taxonomy_node: normalizeNullableTaxonomyNode(service.taxonomy_node),
+      taxonomy_attributes: recordOrEmpty(service.taxonomy_attributes),
       price: String(service.price ?? ""),
       price_type: service.price_type || "fixed",
       price_from: service.price_from === null || service.price_from === undefined ? null : String(service.price_from),
@@ -90,6 +131,12 @@ export function fetchProviders(path: string) {
       parent_provider_id: provider.parent_provider_id ?? null,
       parent_provider_name: provider.parent_provider_name ?? null,
       opening_hours: provider.opening_hours ?? null,
+      taxonomy_node_id: provider.taxonomy_node_id ?? provider.taxonomy_node?.id ?? null,
+      taxonomy_node: normalizeNullableTaxonomyNode(provider.taxonomy_node),
+      taxonomy_path: arrayOrEmpty<ProviderTaxonomyNode>(provider.taxonomy_path).map(normalizeTaxonomyNode),
+      taxonomy_attributes: recordOrEmpty(provider.taxonomy_attributes),
+      internal_rating: provider.internal_rating ?? null,
+      internal_rating_note: provider.internal_rating_note ?? null,
       specializations: arrayOrEmpty<ProviderSummary["specializations"][number]>(provider.specializations).map(normalizeSpecializationItem),
     }));
   });
@@ -99,6 +146,23 @@ export function fetchSpecializationsForAdmin() {
   return apiFetch<SpecializationItem[]>("/providers/specializations?include_inactive=true").then((items) =>
     items.map(normalizeSpecializationItem),
   );
+}
+
+export function fetchProviderTaxonomy(providerType?: ProviderType) {
+  const query = providerType ? `?provider_type=${providerType}` : "";
+  return apiFetch<unknown>(`/providers/taxonomy${query}`).then((raw): ProviderTaxonomyResponse => {
+    if (Array.isArray(raw)) {
+      const leaves = raw.map((item) => normalizeTaxonomyNode(item as ProviderTaxonomyNode));
+      return { nodes: leaves, leaves };
+    }
+    const payload = recordOrEmpty(raw);
+    const nodes = arrayOrEmpty<ProviderTaxonomyNode>(payload.nodes).map(normalizeTaxonomyNode);
+    const leaves = arrayOrEmpty<ProviderTaxonomyNode>(payload.leaves).map(normalizeTaxonomyNode);
+    return {
+      nodes: nodes.length ? nodes : leaves,
+      leaves: leaves.length ? leaves : nodes.filter((node) => node.level === "type"),
+    };
+  });
 }
 
 export function createSpecialization(payload: JsonPayload) {

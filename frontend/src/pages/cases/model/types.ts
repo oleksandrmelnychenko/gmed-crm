@@ -226,6 +226,8 @@ export type CaseDetail = {
   history?: CaseHistoryEntry[];
 };
 
+import type { SpecializationItem } from "@/pages/providers/model/types";
+
 export type PatientOption = {
   id: string;
   patient_id: string;
@@ -240,4 +242,5 @@ export type DoctorOption = {
   name: string;
   title?: string | null;
   fachbereich?: string | null;
+  specializations?: SpecializationItem[];
 };

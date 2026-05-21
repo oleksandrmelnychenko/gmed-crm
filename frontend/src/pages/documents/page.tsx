@@ -4428,7 +4428,7 @@ function StaffDocumentsPage({
                             className={shellInputClassName}
                           />
                         </Field>
-                        <Field label={t.documents_taxonomy_category}>
+                        <Field label={t.documents_classification_category}>
                           <NativeComboboxSelect
                             value={editForm.category}
                             onChange={(event) =>

@@ -165,6 +165,39 @@ async fn seed_provider_with_type(
     .unwrap()
 }
 
+async fn taxonomy_node_id(pool: &PgPool, code: &str) -> Uuid {
+    sqlx::query_scalar("SELECT id FROM provider_taxonomy_nodes WHERE code = $1")
+        .bind(code)
+        .fetch_one(pool)
+        .await
+        .unwrap_or_else(|_| panic!("taxonomy node {code} must be seeded"))
+}
+
+async fn assign_primary_provider_taxonomy(pool: &PgPool, provider_id: Uuid, code: &str) -> Uuid {
+    let taxonomy_node_id = taxonomy_node_id(pool, code).await;
+    sqlx::query(
+        r#"UPDATE provider_taxonomy_assignments
+           SET is_primary = FALSE
+           WHERE provider_id = $1"#,
+    )
+    .bind(provider_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO provider_taxonomy_assignments (provider_id, taxonomy_node_id, is_primary)
+           VALUES ($1, $2, TRUE)
+           ON CONFLICT (provider_id, taxonomy_node_id)
+           DO UPDATE SET is_primary = TRUE"#,
+    )
+    .bind(provider_id)
+    .bind(taxonomy_node_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    taxonomy_node_id
+}
+
 async fn seed_doctor(pool: &PgPool, provider_id: Uuid, tag: &str) -> Uuid {
     sqlx::query_scalar(
         r#"INSERT INTO provider_doctors (provider_id, name, fachbereich)
@@ -607,6 +640,155 @@ async fn orders_list_supports_search_phase_and_provider_doctor_filters() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["phase"], "execution");
     assert_eq!(items[0]["patient_id"], patient_id.to_string());
+}
+
+#[tokio::test]
+async fn orders_and_debt_queue_support_provider_taxonomy_filter() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("order-taxonomy-filter");
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let reha_provider_id = seed_provider(&pool, &format!("{tag}-reha")).await;
+    let reha_doctor_id = seed_doctor(&pool, reha_provider_id, &format!("{tag}-reha")).await;
+    let pharmacy_provider_id = seed_provider(&pool, &format!("{tag}-pharmacy")).await;
+    let pharmacy_doctor_id =
+        seed_doctor(&pool, pharmacy_provider_id, &format!("{tag}-pharmacy")).await;
+    assign_primary_provider_taxonomy(&pool, reha_provider_id, "medical_reha_clinics").await;
+    assign_primary_provider_taxonomy(&pool, pharmacy_provider_id, "medical_pharmacies").await;
+    let reha_group_id = taxonomy_node_id(&pool, "medical_reha_care").await;
+
+    let reha_order_id = seed_order(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("A-{tag}-reha"),
+        "execution",
+        "active",
+        &format!("Reha order {tag}"),
+    )
+    .await;
+    seed_leistung(
+        &pool,
+        reha_order_id,
+        reha_provider_id,
+        reha_doctor_id,
+        &format!("Reha service {tag}"),
+    )
+    .await;
+
+    let pharmacy_order_id = seed_order(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("A-{tag}-pharmacy"),
+        "execution",
+        "active",
+        &format!("Pharmacy order {tag}"),
+    )
+    .await;
+    seed_leistung(
+        &pool,
+        pharmacy_order_id,
+        pharmacy_provider_id,
+        pharmacy_doctor_id,
+        &format!("Pharmacy service {tag}"),
+    )
+    .await;
+
+    for order_id in [reha_order_id, pharmacy_order_id] {
+        sqlx::query(
+            r#"INSERT INTO order_debt_management (order_id, status, note, next_review_at)
+               VALUES ($1, 'payment_plan', $2, now() + interval '1 day')
+               ON CONFLICT (order_id) DO UPDATE
+               SET status = EXCLUDED.status,
+                   note = EXCLUDED.note,
+                   next_review_at = EXCLUDED.next_review_at"#,
+        )
+        .bind(order_id)
+        .bind(format!("Debt workflow {tag}"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    sqlx::query(
+        r#"INSERT INTO external_invoices (
+                order_id, patient_id, provider_id, external_invoice_number,
+                invoice_date, due_date, amount_net, amount_vat, amount_gross,
+                status, created_by
+           ) VALUES (
+                $1, $2, $3, $4,
+                $5, $6, 100.0, 19.0, 119.0,
+                'expected', $7
+           )"#,
+    )
+    .bind(reha_order_id)
+    .bind(patient_id)
+    .bind(reha_provider_id)
+    .bind(format!("EXT-{tag}-reha"))
+    .bind(parse_date("2030-02-01"))
+    .bind(parse_date("2030-02-10"))
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders?search={tag}&provider_taxonomy_node_id={reha_group_id}"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], reha_order_id.to_string());
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/debt-management?provider_taxonomy_node_id={reha_group_id}"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let debt_items = body.as_array().unwrap();
+    assert!(
+        debt_items
+            .iter()
+            .any(|item| item["order_id"] == reha_order_id.to_string())
+    );
+    assert!(
+        !debt_items
+            .iter()
+            .any(|item| item["order_id"] == pharmacy_order_id.to_string())
+    );
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{reha_order_id}"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let leistungen = detail["leistungen"].as_array().unwrap();
+    assert_eq!(
+        leistungen[0]["provider_taxonomy_node_code"],
+        "medical_reha_clinics"
+    );
+    let external_invoices = detail["external_invoices"].as_array().unwrap();
+    assert_eq!(
+        external_invoices[0]["provider_taxonomy_node_code"],
+        "medical_reha_clinics"
+    );
 }
 
 #[tokio::test]
@@ -1317,6 +1499,77 @@ async fn appointments_list_supports_context_and_date_filters() {
     assert_eq!(items[0]["status"], "confirmed");
     assert_eq!(items[0]["provider_id"], provider_id.to_string());
     assert_eq!(items[0]["doctor_id"], doctor_id.to_string());
+}
+
+#[tokio::test]
+async fn appointments_list_and_attention_support_provider_taxonomy_filter() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("apt-taxonomy-filter");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let reha_provider_id = seed_provider(&pool, &format!("{tag}-reha")).await;
+    let reha_doctor_id = seed_doctor(&pool, reha_provider_id, &format!("{tag}-reha")).await;
+    let pharmacy_provider_id = seed_provider(&pool, &format!("{tag}-pharmacy")).await;
+    let pharmacy_doctor_id =
+        seed_doctor(&pool, pharmacy_provider_id, &format!("{tag}-pharmacy")).await;
+    assign_primary_provider_taxonomy(&pool, reha_provider_id, "medical_reha_clinics").await;
+    assign_primary_provider_taxonomy(&pool, pharmacy_provider_id, "medical_pharmacies").await;
+    let reha_group_id = taxonomy_node_id(&pool, "medical_reha_care").await;
+
+    seed_appointment(
+        &pool,
+        patient_id,
+        reha_provider_id,
+        reha_doctor_id,
+        admin_id,
+        &format!("Reha appointment {tag}"),
+        "confirmed",
+        "2026-04-18",
+    )
+    .await;
+    seed_appointment(
+        &pool,
+        patient_id,
+        pharmacy_provider_id,
+        pharmacy_doctor_id,
+        admin_id,
+        &format!("Pharmacy appointment {tag}"),
+        "confirmed",
+        "2026-04-19",
+    )
+    .await;
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments?search={tag}&provider_taxonomy_node_id={reha_group_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["provider_id"], reha_provider_id.to_string());
+    assert_eq!(items[0]["title"], format!("Reha appointment {tag}"));
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/meta/attention?search={tag}&provider_taxonomy_node_id={reha_group_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let attention_items = body.as_array().unwrap();
+    assert_eq!(attention_items.len(), 1);
+    assert_eq!(
+        attention_items[0]["provider_id"],
+        reha_provider_id.to_string()
+    );
 }
 
 #[tokio::test]

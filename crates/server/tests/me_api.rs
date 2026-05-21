@@ -218,6 +218,14 @@ async fn seed_patient_assignment(
     .unwrap();
 }
 
+async fn taxonomy_node_id(pool: &PgPool, code: &str) -> Uuid {
+    sqlx::query_scalar("SELECT id FROM provider_taxonomy_nodes WHERE code = $1")
+        .bind(code)
+        .fetch_one(pool)
+        .await
+        .unwrap_or_else(|_| panic!("taxonomy node {code} must be seeded"))
+}
+
 async fn configure_required_patient_documents(pool: &PgPool, value: Value) {
     sqlx::query(
         r#"UPDATE system_settings
@@ -839,6 +847,7 @@ async fn patient_can_request_additional_service_and_assigned_staff_get_notificat
     seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
 
     let patient_bearer = auth_header_for(patient_user_id, "patient");
+    let hotel_taxonomy_id = taxonomy_node_id(&pool, "nonmedical_hotels").await;
 
     let (status, body) = json_request(
         &app,
@@ -847,6 +856,7 @@ async fn patient_can_request_additional_service_and_assigned_staff_get_notificat
         &patient_bearer,
         Some(json!({
             "service_kind": "hotel",
+            "taxonomy_node_id": hotel_taxonomy_id,
             "title": "Airport hotel stay",
             "vendor_name": "Motel One",
             "starts_at": "2026-04-18T12:00:00Z",
@@ -858,6 +868,8 @@ async fn patient_can_request_additional_service_and_assigned_staff_get_notificat
     assert_eq!(status, StatusCode::CREATED);
     let service_id = body["id"].as_str().expect("service id");
     assert_eq!(body["service_kind"], "hotel");
+    assert_eq!(body["taxonomy_node_id"], hotel_taxonomy_id.to_string());
+    assert_eq!(body["taxonomy_node_code"], "nonmedical_hotels");
     assert_eq!(body["request_source"], "patient_portal");
     assert_eq!(body["status"], "planned");
     assert_eq!(body["vendor_name"], "Motel One");
@@ -875,7 +887,28 @@ async fn patient_can_request_additional_service_and_assigned_staff_get_notificat
     let items = body.as_array().expect("service list");
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["id"], service_id);
+    assert_eq!(items[0]["taxonomy_node_id"], hotel_taxonomy_id.to_string());
+    assert_eq!(items[0]["taxonomy_node_code"], "nonmedical_hotels");
     assert_eq!(items[0]["request_source"], "patient_portal");
+
+    let medical_taxonomy_id = taxonomy_node_id(&pool, "medical_pharmacies").await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/me/concierge-services",
+        &patient_bearer,
+        Some(json!({
+            "service_kind": "hotel",
+            "taxonomy_node_id": medical_taxonomy_id,
+            "title": "Invalid medical taxonomy"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        body["message"],
+        "taxonomy_node_id must reference an active non-medical taxonomy leaf"
+    );
 
     let concierge_notifications: i64 = sqlx::query_scalar(
         r#"SELECT count(*)

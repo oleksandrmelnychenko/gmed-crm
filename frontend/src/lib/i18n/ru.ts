@@ -241,6 +241,8 @@ export const ru = {
   providers_select_hint:
     "Выберите провайдера для управления врачами, услугами и пациентами.",
   providers_type: "Тип",
+  providers_category: "Категория провайдера",
+  providers_choose_category: "Выберите категорию провайдера",
   providers_type_medical: "Медицинский",
   providers_type_non_medical: "Немедицинский",
   providers_active: "Активен",
@@ -450,6 +452,7 @@ export const ru = {
   appointments_time: "Время",
   appointments_title_col: "Название",
   appointments_type: "Тип",
+  appointments_provider_category: "Категория провайдера",
   appointments_location: "Место",
   appointments_new: "Новый приём",
   appointments_recurring_series: "Серийный приём",
@@ -1259,7 +1262,7 @@ export const ru = {
   documents_translation_start: "Начать",
   documents_translation_complete: "Завершить",
   documents_translation_cancel: "Отмена",
-  documents_taxonomy_category: "Категория таксономии",
+  documents_classification_category: "Категория документа",
   documents_choose_category: "Выберите категорию",
   documents_review_notes: "Заметки проверки",
   documents_release_internal_hint:
@@ -1288,9 +1291,9 @@ export const ru = {
   documents_generate_from_template: "Сгенерировать из шаблона",
   documents_intake_queue: "Очередь входящих документов",
   documents_intake_interpreter_hint:
-    "Загрузки переводчика и другие входящие файлы, которым ещё нужна таксономическая проверка.",
+    "Загрузки переводчика и другие входящие файлы, которым ещё нужна проверка категории.",
   documents_intake_general_hint:
-    "Неклассифицированные загрузки и портал-файлы, которым ещё нужна таксономическая проверка.",
+    "Неклассифицированные загрузки и портал-файлы, которым ещё нужна проверка категории.",
   documents_pending: "в ожидании",
   documents_loading_intake_queue: "Загрузка очереди входящих документов…",
   documents_no_intake_pending:
@@ -1431,6 +1434,8 @@ export const ru = {
   services_request_description:
     "Отправьте запрос на консьерж-сервис прямо из портала. Назначенная команда рассмотрит его и оформит на своей стороне.",
   services_form_service_type: "Тип сервиса",
+  services_category: "Категория сервиса",
+  services_all_categories: "Все категории сервиса",
   services_type_hotel: "Отель",
   services_type_transfer: "Трансфер",
   services_type_vip_terminal: "VIP-терминал",

@@ -466,7 +466,7 @@ function buildPeopleColumns(
     {
       id: "fachbereich",
       label: labels.providers_fachbereich ?? localizedFallback(lang, "Fachbereich", "Специализация"),
-      accessor: (row) => row.fachbereich,
+      accessor: (row) => specializationSummary(row, lang, ""),
       filterType: "text",
       searchable: true,
       sortable: true,
@@ -474,7 +474,7 @@ function buildPeopleColumns(
       group: "clinical",
       render: (row) => (
         <span className="truncate text-xs text-muted-foreground">
-          {row.fachbereich || notSet}
+          {specializationSummary(row, lang, notSet)}
         </span>
       ),
     },

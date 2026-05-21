@@ -42,6 +42,8 @@ import {
 } from "@/pages/patients/model/portal-shared";
 import type { PortalRecommendationItem } from "@/pages/patients/model/portal-shared";
 import { cn } from "@/lib/utils";
+import { doctorSpecialtyLabel, type SpecializationLabelLang } from "@/pages/providers/model/specialization-labels";
+import type { SpecializationItem } from "@/pages/providers/model/types";
 
 const PORTAL_RECOMMENDATION_REALTIME_EVENTS = [
   "recommendation.created",
@@ -337,6 +339,7 @@ type StaffDoctorOption = {
   name: string;
   title?: string | null;
   fachbereich?: string | null;
+  specializations?: SpecializationItem[];
 };
 
 type StaffOrderOption = {
@@ -478,7 +481,7 @@ function resolveStaffRecommendationsStateAction<T>(action: SetStateAction<T>, cu
 
 function useStaffRecommendationsWorkspaceContent() {
   const { user } = useAuth();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [staffState, dispatchStaffState] = useReducer(
     staffRecommendationsReducer,
     undefined,
@@ -878,7 +881,7 @@ function useStaffRecommendationsWorkspaceContent() {
                   <option value="">{t.patient_recommendations_staff_no_doctor_link}</option>
                   {doctors.map((doctor) => (
                     <option key={doctor.id} value={doctor.id}>
-                      {formatDoctorOption(doctor)}
+                      {formatDoctorOption(doctor, lang)}
                     </option>
                   ))}
                 </NativeComboboxSelect>
@@ -1062,8 +1065,8 @@ function formatPatientOption(patient: StaffPatientOption) {
   return [patient.patient_id, name].filter(Boolean).join(" / ") || patient.id;
 }
 
-function formatDoctorOption(doctor: StaffDoctorOption) {
-  return [doctor.title, doctor.name, doctor.provider_name, doctor.fachbereich]
+function formatDoctorOption(doctor: StaffDoctorOption, lang: SpecializationLabelLang) {
+  return [doctor.title, doctor.name, doctor.provider_name, doctorSpecialtyLabel(doctor, lang)]
     .filter(Boolean)
     .join(" / ");
 }

@@ -9,6 +9,8 @@ export function buildAppointmentsQuery(filters: FiltersState): string {
   if (filters.status) params.set("status", filters.status);
   if (filters.patientId) params.set("patient_id", filters.patientId);
   if (filters.providerId) params.set("provider_id", filters.providerId);
+  if (filters.providerTaxonomyNodeId)
+    params.set("provider_taxonomy_node_id", filters.providerTaxonomyNodeId);
   if (filters.doctorId) params.set("doctor_id", filters.doctorId);
   if (filters.ownerUserId) params.set("owner_user_id", filters.ownerUserId);
   if (filters.interpreterId)

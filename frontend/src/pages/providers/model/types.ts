@@ -35,6 +35,30 @@ export type ProviderStaffRoleItem = {
   updated_at?: string;
 };
 
+export type ProviderTaxonomyNode = {
+  id: string;
+  parent_id: string | null;
+  code: string;
+  level: "category" | "group" | "subgroup" | "type";
+  provider_kind: ProviderType;
+  name_en: string;
+  name_de: string | null;
+  name_ru: string | null;
+  description: string | null;
+  filter_keys: string[];
+  is_leaf: boolean;
+  is_assignable: boolean;
+  is_active: boolean;
+  sort_order: number;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type ProviderTaxonomyResponse = {
+  nodes: ProviderTaxonomyNode[];
+  leaves: ProviderTaxonomyNode[];
+};
+
 export type PersonContact = {
   id: string | null;
   contact_kind: "phone" | "email";
@@ -108,6 +132,10 @@ export type ProviderSummary = {
   parent_provider_id: string | null;
   parent_provider_name: string | null;
   organization_level: ProviderOrganizationLevel;
+  taxonomy_node_id?: string | null;
+  taxonomy_node?: ProviderTaxonomyNode | null;
+  taxonomy_path?: ProviderTaxonomyNode[];
+  taxonomy_attributes?: Record<string, unknown>;
   specializations: SpecializationItem[];
   is_active: boolean;
   has_contract: boolean;
@@ -119,6 +147,8 @@ export type ProviderSummary = {
   open_concierge_service_count: number;
   rating_count: number;
   avg_rating: number | null;
+  internal_rating?: number | null;
+  internal_rating_note?: string | null;
   last_interaction_at: string | null;
   created_at: string;
 };
@@ -188,6 +218,9 @@ export type ServiceItem = {
   provider_id: string;
   service_name: string;
   description: string | null;
+  taxonomy_node_id?: string | null;
+  taxonomy_node?: ProviderTaxonomyNode | null;
+  taxonomy_attributes?: Record<string, unknown>;
   price: string;
   price_type: ServicePriceType;
   price_from: string | null;
@@ -247,7 +280,13 @@ export type ProviderDetail = {
   parent_provider_id: string | null;
   parent_provider_name: string | null;
   organization_level: ProviderOrganizationLevel;
+  taxonomy_node_id: string | null;
+  taxonomy_node: ProviderTaxonomyNode | null;
+  taxonomy_path: ProviderTaxonomyNode[];
+  taxonomy_attributes: Record<string, unknown>;
   kooperationsvertrag: unknown;
+  internal_rating: number | null;
+  internal_rating_note: string | null;
   notes: string | null;
   is_active: boolean;
   created_at: string;
@@ -278,6 +317,10 @@ export type ProviderFilters = {
   serviceName: string;
   hasContract: string;
   ratingGte: string;
+  taxonomyNodeId: string;
+  taxonomyAttributeKey: string;
+  taxonomyAttributeValue: string;
+  internalRatingGte: string;
 };
 
 export type ProviderFormState = {
@@ -298,6 +341,10 @@ export type ProviderFormState = {
   specializations: string;
   parentProviderId: string;
   organizationLevel: ProviderOrganizationLevel;
+  taxonomyNodeId: string;
+  taxonomyAttributes: string;
+  internalRating: string;
+  internalRatingNote: string;
   contractText: string;
   notes: string;
 };
@@ -331,6 +378,8 @@ export type ServiceFormState = {
   id: string;
   serviceName: string;
   description: string;
+  taxonomyNodeId: string;
+  taxonomyAttributes: string;
   price: string;
   priceType: ServicePriceType;
   priceFrom: string;

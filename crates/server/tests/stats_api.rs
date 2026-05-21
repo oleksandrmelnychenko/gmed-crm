@@ -189,6 +189,39 @@ async fn seed_provider_with_type(pool: &PgPool, tag: &str, provider_type: &str) 
     .unwrap()
 }
 
+async fn taxonomy_node_id(pool: &PgPool, code: &str) -> Uuid {
+    sqlx::query_scalar("SELECT id FROM provider_taxonomy_nodes WHERE code = $1")
+        .bind(code)
+        .fetch_one(pool)
+        .await
+        .unwrap_or_else(|_| panic!("taxonomy node {code} must be seeded"))
+}
+
+async fn assign_primary_provider_taxonomy(pool: &PgPool, provider_id: Uuid, code: &str) -> Uuid {
+    let taxonomy_node_id = taxonomy_node_id(pool, code).await;
+    sqlx::query(
+        r#"UPDATE provider_taxonomy_assignments
+           SET is_primary = FALSE
+           WHERE provider_id = $1"#,
+    )
+    .bind(provider_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO provider_taxonomy_assignments (provider_id, taxonomy_node_id, is_primary)
+           VALUES ($1, $2, TRUE)
+           ON CONFLICT (provider_id, taxonomy_node_id)
+           DO UPDATE SET is_primary = TRUE"#,
+    )
+    .bind(provider_id)
+    .bind(taxonomy_node_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    taxonomy_node_id
+}
+
 async fn seed_doctor(pool: &PgPool, provider_id: Uuid, tag: &str) -> Uuid {
     sqlx::query_scalar(
         r#"INSERT INTO provider_doctors (provider_id, name, title, fachbereich)
@@ -645,8 +678,8 @@ async fn seed_concierge_service(
     billing_status: &str,
     request_source: &str,
     completed: bool,
-) {
-    sqlx::query(
+) -> Uuid {
+    sqlx::query_scalar(
         r#"INSERT INTO concierge_services (
                 patient_id, assigned_concierge_id, service_kind, title, status,
                 billing_status, request_source, completed_at, created_by
@@ -655,7 +688,8 @@ async fn seed_concierge_service(
                 $5, $6,
                 CASE WHEN $7 THEN now() ELSE NULL END,
                 $8
-           )"#,
+           )
+           RETURNING id"#,
     )
     .bind(patient_id)
     .bind(concierge_id)
@@ -665,9 +699,9 @@ async fn seed_concierge_service(
     .bind(request_source)
     .bind(completed)
     .bind(created_by)
-    .execute(pool)
+    .fetch_one(pool)
     .await
-    .unwrap();
+    .unwrap()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -856,6 +890,9 @@ async fn ceo_dashboard_exposes_supported_finance_operational_and_feedback_kpis()
     seed_patient_assignment(&pool, patient_c, pm_id, admin_id).await;
 
     let provider_id = seed_provider(&pool, &tag).await;
+    let provider_taxonomy_id =
+        assign_primary_provider_taxonomy(&pool, provider_id, "medical_pharmacies").await;
+    let concierge_taxonomy_id = taxonomy_node_id(&pool, "nonmedical_chauffeur").await;
 
     let order_a_active =
         seed_order(&pool, patient_a, admin_id, &format!("{tag}-a1"), "active").await;
@@ -963,7 +1000,7 @@ async fn ceo_dashboard_exposes_supported_finance_operational_and_feedback_kpis()
     .await;
     seed_interpreter_report(&pool, appointment_id, interpreter_id).await;
 
-    seed_concierge_service(
+    let active_concierge_service_id = seed_concierge_service(
         &pool,
         patient_a,
         concierge_id,
@@ -975,7 +1012,7 @@ async fn ceo_dashboard_exposes_supported_finance_operational_and_feedback_kpis()
         false,
     )
     .await;
-    seed_concierge_service(
+    let completed_concierge_service_id = seed_concierge_service(
         &pool,
         patient_a,
         concierge_id,
@@ -987,6 +1024,19 @@ async fn ceo_dashboard_exposes_supported_finance_operational_and_feedback_kpis()
         true,
     )
     .await;
+    sqlx::query(
+        r#"UPDATE concierge_services
+           SET taxonomy_node_id = $1
+           WHERE id = ANY($2)"#,
+    )
+    .bind(concierge_taxonomy_id)
+    .bind(vec![
+        active_concierge_service_id,
+        completed_concierge_service_id,
+    ])
+    .execute(&pool)
+    .await
+    .unwrap();
 
     seed_feedback(
         &pool,
@@ -1084,6 +1134,20 @@ async fn ceo_dashboard_exposes_supported_finance_operational_and_feedback_kpis()
             .unwrap_or_default()
             >= 1
     );
+    let taxonomy_mix = concierge_row["taxonomy_mix"].as_array().unwrap();
+    let chauffeur_mix = taxonomy_mix
+        .iter()
+        .find(|item| item["taxonomy_node_code"] == "nonmedical_chauffeur")
+        .expect("expected seeded concierge taxonomy mix row");
+    assert_eq!(
+        chauffeur_mix["taxonomy_node_id"],
+        concierge_taxonomy_id.to_string()
+    );
+    assert_eq!(
+        chauffeur_mix["taxonomy_node_name_de"],
+        "Chauffeurdienst-Provider (Privatfahrer, Limousinen, Business-Class-Transfer)"
+    );
+    assert!(chauffeur_mix["service_count"].as_i64().unwrap_or_default() >= 2);
 
     let provider_name = format!("Clinic {tag}");
     let provider_rows = body["provider_kpis"].as_array().unwrap();
@@ -1098,6 +1162,13 @@ async fn ceo_dashboard_exposes_supported_finance_operational_and_feedback_kpis()
             >= 1
     );
     assert_ne!(provider_row["gross_service_volume"], "0");
+    assert_eq!(provider_row["provider_type"], "medical");
+    assert_eq!(
+        provider_row["taxonomy_node_id"],
+        provider_taxonomy_id.to_string()
+    );
+    assert_eq!(provider_row["taxonomy_node_code"], "medical_pharmacies");
+    assert_eq!(provider_row["taxonomy_node_name_de"], "Apotheken");
 
     let _ = order_a_completed;
 }
@@ -1536,6 +1607,7 @@ async fn reports_workspace_returns_role_scoped_sections() {
 
     let patient_id = seed_patient(&pool, admin_id, &tag, "UA").await;
     let provider_id = seed_provider(&pool, &tag).await;
+    assign_primary_provider_taxonomy(&pool, provider_id, "medical_reha_clinics").await;
     let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
     let order_id = seed_order(&pool, patient_id, admin_id, &tag, "active").await;
     seed_order_service(&pool, order_id, provider_id, Some(doctor_id), &tag, 1400).await;
@@ -1657,6 +1729,23 @@ async fn reports_workspace_returns_role_scoped_sections() {
 
     let non_medical_provider_id =
         seed_provider_with_type(&pool, &format!("{tag}-travel"), "non_medical").await;
+    assign_primary_provider_taxonomy(&pool, non_medical_provider_id, "nonmedical_chauffeur").await;
+    sqlx::query(
+        r#"UPDATE providers
+           SET internal_rating = 4.5,
+               internal_rating_note = $2,
+               taxonomy_attributes = $3::jsonb
+           WHERE id = $1"#,
+    )
+    .bind(non_medical_provider_id)
+    .bind("Preferred airport transfer partner")
+    .bind(json!({
+        "vehicle_class": "limousine",
+        "passenger_capacity": "4"
+    }))
+    .execute(&pool)
+    .await
+    .unwrap();
     seed_provider_service(&pool, non_medical_provider_id, "Airport transfer").await;
     seed_order_service(
         &pool,
@@ -1779,6 +1868,15 @@ async fn reports_workspace_returns_role_scoped_sections() {
         .expect("expected non medical provider report row for sales");
     assert_eq!(non_medical_sales_row["gross_service_volume"], Value::Null);
     assert_eq!(non_medical_sales_row["service_count"], 1);
+    assert_eq!(
+        non_medical_sales_row["taxonomy_node_code"],
+        "nonmedical_chauffeur"
+    );
+    assert_eq!(non_medical_sales_row["internal_rating"], 4.5);
+    assert_eq!(
+        non_medical_sales_row["taxonomy_attributes"]["vehicle_class"],
+        "limousine"
+    );
 
     let (billing_status, billing_body) = json_request(
         &app,
@@ -1842,6 +1940,7 @@ async fn reports_workspace_returns_role_scoped_sections() {
         .iter()
         .find(|row| row["name"] == format!("Clinic {tag}"))
         .expect("expected clinic report row");
+    assert_eq!(clinic_row["taxonomy_node_code"], "medical_reha_clinics");
     assert_eq!(clinic_row["feedback_count"], 1);
     assert_eq!(clinic_row["avg_treatment_score"], 4.0);
     assert_eq!(clinic_row["avg_doctor_score"], 5.0);
@@ -1881,6 +1980,7 @@ async fn reports_workspace_returns_role_scoped_sections() {
         "1666"
     );
     assert_eq!(doctor_row["feedback_count"], 1);
+    assert_eq!(doctor_row["taxonomy_node_code"], "medical_reha_clinics");
     assert_eq!(doctor_row["avg_treatment_score"], 4.0);
     assert_eq!(doctor_row["avg_doctor_score"], 5.0);
     assert_eq!(doctor_row["avg_organization_score"], 4.0);
@@ -1911,6 +2011,28 @@ async fn reports_workspace_returns_role_scoped_sections() {
     assert_eq!(non_medical_row["feedback_count"], 1);
     assert_eq!(non_medical_row["avg_concierge_score"], 5.0);
     assert_eq!(
+        non_medical_row["taxonomy_node_code"],
+        "nonmedical_chauffeur"
+    );
+    assert!(
+        non_medical_row["taxonomy_path_label"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("Chauffeur")
+    );
+    assert!(
+        non_medical_row["taxonomy_path"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value["code"] == "nonmedical_chauffeur")
+    );
+    assert_eq!(non_medical_row["internal_rating"], 4.5);
+    assert_eq!(
+        non_medical_row["internal_rating_note"],
+        "Preferred airport transfer partner"
+    );
+    assert_eq!(
         non_medical_row["gross_service_volume"]
             .as_str()
             .unwrap_or_default(),
@@ -1924,10 +2046,73 @@ async fn reports_workspace_returns_role_scoped_sections() {
             .any(|value| value == "Airport transfer")
     );
 
+    let medical_group_taxonomy_id = taxonomy_node_id(&pool, "medical_reha_care").await;
+    let (medical_filter_status, medical_filter_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/stats/reports/workspace?taxonomy_node_id={medical_group_taxonomy_id}"),
+        &auth_header_for(billing_id, "billing"),
+        None,
+    )
+    .await;
+    assert_eq!(medical_filter_status, StatusCode::OK);
+    assert!(
+        medical_filter_body["clinics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["provider_id"] == provider_id.to_string()),
+        "medical group filter should include child clinic taxonomy"
+    );
+    assert!(
+        medical_filter_body["doctors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["provider_id"] == provider_id.to_string()),
+        "medical group filter should include child doctor provider taxonomy"
+    );
+    assert!(
+        medical_filter_body["non_medical_providers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["provider_id"] != non_medical_provider_id.to_string()),
+        "medical taxonomy filter must not leak non-medical providers"
+    );
+
+    let (non_medical_filter_status, non_medical_filter_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/reports/workspace?taxonomy_code=nonmedical_transport_logistics",
+        &auth_header_for(billing_id, "billing"),
+        None,
+    )
+    .await;
+    assert_eq!(non_medical_filter_status, StatusCode::OK);
+    assert!(
+        non_medical_filter_body["non_medical_providers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["provider_id"] == non_medical_provider_id.to_string()),
+        "non-medical group filter should include chauffeur child taxonomy"
+    );
+    assert!(
+        non_medical_filter_body["clinics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["provider_id"] != provider_id.to_string()),
+        "non-medical taxonomy filter must not leak medical providers"
+    );
+
     let (export_status, export_body, content_type, content_disposition) = text_request(
         &app,
         "GET",
-        &format!("/api/v1/stats/reports/export?section=doctors&provider_id={provider_id}"),
+        &format!(
+            "/api/v1/stats/reports/export?section=doctors&provider_id={provider_id}&taxonomy_code=medical_reha_care"
+        ),
         &auth_header_for(billing_id, "billing"),
     )
     .await;
@@ -1942,6 +2127,7 @@ async fn reports_workspace_returns_role_scoped_sections() {
     assert!(export_body.contains(&format!("Doctor {tag}")));
     assert!(export_body.contains("avg_response_hours"));
     assert!(export_body.contains("avg_findings_turnaround_hours"));
+    assert!(export_body.contains("medical_reha_clinics"));
     assert!(export_body.contains("treatment_success_yes_rate"));
     assert!(export_body.contains("followup_completion_rate"));
     assert!(export_body.contains("100.0"));
@@ -1950,7 +2136,7 @@ async fn reports_workspace_returns_role_scoped_sections() {
         text_request(
             &app,
             "GET",
-            "/api/v1/stats/reports/export?section=non_medical_providers",
+            "/api/v1/stats/reports/export?section=non_medical_providers&taxonomy_code=nonmedical_transport_logistics",
             &auth_header_for(billing_id, "billing"),
         )
         .await;
@@ -1964,6 +2150,57 @@ async fn reports_workspace_returns_role_scoped_sections() {
     assert!(non_medical_export_body.contains("Airport transfer"));
     assert!(non_medical_export_body.contains("vendor_count"));
     assert!(non_medical_export_body.contains("concierge_score"));
+    assert!(non_medical_export_body.contains("taxonomy_code"));
+    assert!(non_medical_export_body.contains("nonmedical_chauffeur"));
+    assert!(non_medical_export_body.contains("vehicle_class"));
+}
+
+#[tokio::test]
+async fn operations_dashboard_top_providers_include_taxonomy() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("ops-provider-taxonomy");
+    let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let provider_id =
+        seed_provider_with_type(&pool, &format!("{tag}-chauffeur"), "non_medical").await;
+    assign_primary_provider_taxonomy(&pool, provider_id, "nonmedical_chauffeur").await;
+
+    for index in 0..12 {
+        let patient_tag = format!("{tag}-{index}");
+        let patient_id = seed_patient(&pool, admin_id, &patient_tag, "DE").await;
+        let order_id = seed_order(&pool, patient_id, admin_id, &patient_tag, "active").await;
+        seed_non_medical_appointment(
+            &pool,
+            patient_id,
+            provider_id,
+            order_id,
+            patient_manager_id,
+            admin_id,
+            &patient_tag,
+        )
+        .await;
+    }
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/dashboard/operations?period=all",
+        &auth_header_for(patient_manager_id, "patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let row = body["top_providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == provider_id.to_string())
+        .expect("expected seeded provider in top providers");
+    assert_eq!(row["provider_type"], "non_medical");
+    assert_eq!(row["taxonomy_node_code"], "nonmedical_chauffeur");
+    assert_eq!(row["appointment_count"], 12);
 }
 
 #[tokio::test]
@@ -2275,6 +2512,7 @@ async fn provider_cost_report_tracks_historical_price_changes() {
     let sales_id = seed_user(&pool, &format!("{tag}-sales"), "sales").await;
     let patient_id = seed_patient(&pool, admin_id, &tag, "DE").await;
     let provider_id = seed_provider(&pool, &tag).await;
+    assign_primary_provider_taxonomy(&pool, provider_id, "medical_reha_clinics").await;
     let order_id = seed_order(&pool, patient_id, admin_id, &tag, "active").await;
 
     seed_order_service_at(&pool, order_id, provider_id, "Gastroscopy", 1000, 900).await;
@@ -2322,6 +2560,7 @@ async fn provider_cost_report_tracks_historical_price_changes() {
         gastroscopy["avg_unit_gross"].as_str().unwrap_or_default(),
         "1785"
     );
+    assert_eq!(gastroscopy["taxonomy_node_code"], "medical_reha_clinics");
     assert_eq!(
         gastroscopy["change_pct"].as_f64().unwrap_or_default(),
         100.0
@@ -2366,6 +2605,7 @@ async fn provider_cost_report_tracks_historical_price_changes() {
     );
     assert!(export_body.contains("Gastroscopy"));
     assert!(export_body.contains("latest_unit_gross"));
+    assert!(export_body.contains("medical_reha_clinics"));
     assert!(export_body.contains("2380"));
     assert!(export_body.contains("100.00"));
 }
@@ -2380,6 +2620,7 @@ async fn sales_medical_provider_report_exposes_partner_revenue_without_restricte
     let sales_id = seed_user(&pool, &format!("{tag}-sales"), "sales").await;
     let patient_id = seed_patient(&pool, admin_id, &tag, "UA").await;
     let provider_id = seed_provider(&pool, &tag).await;
+    assign_primary_provider_taxonomy(&pool, provider_id, "medical_reha_clinics").await;
     let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
     let order_id = seed_order(&pool, patient_id, admin_id, &tag, "active").await;
 
@@ -2445,6 +2686,7 @@ async fn sales_medical_provider_report_exposes_partner_revenue_without_restricte
         row["gross_service_volume"].as_str().unwrap_or_default(),
         "3213"
     );
+    assert_eq!(row["taxonomy_node_code"], "medical_reha_clinics");
     assert!(
         row["doctor_specialties"]
             .as_array()
@@ -2476,6 +2718,7 @@ async fn sales_medical_provider_report_exposes_partner_revenue_without_restricte
     );
     assert!(export_body.contains(&format!("Clinic {tag}")));
     assert!(export_body.contains("gross_service_volume"));
+    assert!(export_body.contains("medical_reha_clinics"));
     assert!(export_body.contains("3213"));
     assert!(export_body.contains("Cardiology"));
 }

@@ -62,7 +62,17 @@ export type OperationsPayload = {
   appointments_by_status: Record<string, number>;
   appointments_heatmap: Array<{ dow: number; hour: number; count: number }>;
   orders_by_phase_valued: Array<{ phase: string; count: number; value_eur: string }>;
-  top_providers: Array<{ id: string; name: string; patient_count: number; appointment_count: number }>;
+  top_providers: Array<{
+    id: string;
+    name: string;
+    provider_type?: string | null;
+    taxonomy_node_id?: string | null;
+    taxonomy_node_code?: string | null;
+    taxonomy_node_name_de?: string | null;
+    taxonomy_node_name_ru?: string | null;
+    patient_count: number;
+    appointment_count: number;
+  }>;
 };
 
 export type Period = "7d" | "30d" | "90d" | "12m" | "all";

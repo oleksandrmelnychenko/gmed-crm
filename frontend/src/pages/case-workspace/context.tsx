@@ -11,6 +11,7 @@ import {
 
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import type { SpecializationItem } from "@/pages/providers/model/types";
 
 export type VorerkrankungItem = {
   erkrankung: string;
@@ -224,6 +225,7 @@ export type CaseWorkspaceDoctor = {
   name: string;
   title?: string | null;
   fachbereich?: string | null;
+  specializations?: SpecializationItem[];
 };
 
 export type CaseWorkspaceSnippet = {

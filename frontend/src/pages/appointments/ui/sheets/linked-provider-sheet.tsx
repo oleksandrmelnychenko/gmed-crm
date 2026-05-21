@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { appointmentPreviewInfoCardClassName } from "@/pages/appointments/appearance/surface-appearance";
 import { appointmentText } from "@/pages/appointments/model/labels";
 import { AppointmentPreviewSheet } from "@/pages/appointments/ui/shared/workspace-primitives";
+import { specializationSummaryForItems } from "@/pages/providers/model/specialization-labels";
 import type { ProviderDetail as ProviderSheetDetail } from "@/pages/providers";
 
 function humanizeLinkedCode(value: string | null | undefined) {
@@ -60,7 +61,7 @@ function LinkedProviderOverviewSection({
   detail: ProviderSheetDetail;
   formatDateTimeLabel: (value?: string | null) => string;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const providerTypeLabel =
     detail.provider_type === "medical"
       ? appointmentText("appointments_medical")
@@ -126,7 +127,7 @@ function LinkedProviderOverviewSection({
         <div className={appointmentPreviewInfoCardClassName}>
           <InfoRow
             label={appointmentText("appointments_specialty")}
-            value={detail.fachbereich || notSet}
+            value={specializationSummaryForItems(detail.specializations, detail.fachbereich, lang, notSet)}
           />
         </div>
         <div className={appointmentPreviewInfoCardClassName}>

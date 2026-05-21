@@ -31,6 +31,11 @@ import { formatAppointmentSlotLabel as slotLabel } from "@/pages/appointments/mo
 import { buildConflictQuery } from "@/pages/appointments/model/query-builders";
 import { buildFollowUpVisitForm } from "@/pages/appointments/model/form-factories";
 import {
+  filterProvidersForAppointmentScope,
+  providerSelectionFitsAppointmentScope,
+  providerTaxonomyTreeOptions,
+} from "@/pages/appointments/model/provider-taxonomy";
+import {
   appointmentText as appointmentTextBase,
   carePathKindLabel,
   doctorLabel,
@@ -58,6 +63,7 @@ import type {
   ProviderSummary,
   StaffOption,
 } from "@/pages/appointments/model/types";
+import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 import {
   CARE_PATH_KIND_OPTIONS,
   FOLLOW_UP_PRESETS,
@@ -74,6 +80,7 @@ type AppointmentFollowUpVisitSectionProps = {
   detail: AppointmentDetail;
   appointments: AppointmentListItem[];
   providers: ProviderSummary[];
+  taxonomyNodes: ProviderTaxonomyNode[];
   staff: StaffOption[];
   interpreters: InterpreterOption[];
   defaultReminderUserId: string;
@@ -114,12 +121,13 @@ function useAppointmentFollowUpVisitSectionContent({
   detail,
   appointments,
   providers,
+  taxonomyNodes,
   staff,
   interpreters,
   defaultReminderUserId,
   onCreated,
 }: AppointmentFollowUpVisitSectionProps) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const appointmentText = (key: string) => t.uiText[key] ?? appointmentTextBase(key);
   const interpreterFieldLabel =
@@ -145,6 +153,19 @@ function useAppointmentFollowUpVisitSectionContent({
     }),
   );
   const { form, doctors, conflicts, error, busy } = sectionState;
+  const providerTaxonomyOptions = useMemo(
+    () => providerTaxonomyTreeOptions(taxonomyNodes, form.appointmentType, lang),
+    [form.appointmentType, lang, taxonomyNodes],
+  );
+  const providerOptions = useMemo(
+    () =>
+      filterProvidersForAppointmentScope(
+        providers,
+        form.appointmentType,
+        form.providerTaxonomyNodeId,
+      ),
+    [form.appointmentType, form.providerTaxonomyNodeId, providers],
+  );
   const setForm = (nextValue: SetStateAction<FollowUpVisitFormState>) => {
     dispatchSectionState((current) => ({
       form:
@@ -163,6 +184,30 @@ function useAppointmentFollowUpVisitSectionContent({
       busy: false,
     });
   }, [defaultReminderUserId, detail, tr.phase_followup]);
+
+  useEffect(() => {
+    if (
+      providerSelectionFitsAppointmentScope(
+        providers,
+        form.providerId,
+        form.appointmentType,
+        form.providerTaxonomyNodeId,
+      )
+    ) {
+      return;
+    }
+
+    setForm((current) => ({
+      ...current,
+      providerId: "",
+      doctorId: "",
+    }));
+  }, [
+    form.appointmentType,
+    form.providerId,
+    form.providerTaxonomyNodeId,
+    providers,
+  ]);
 
   useEffect(() => {
     if (!form.providerId) {
@@ -429,7 +474,36 @@ function useAppointmentFollowUpVisitSectionContent({
             />
           </Field>
         </div>
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 md:grid-cols-3">
+          <Field label={t.appointments_provider_category}>
+            <NativeComboboxSelect
+              value={form.providerTaxonomyNodeId}
+              onChange={(event) => {
+                const providerTaxonomyNodeId = event.target.value;
+                const keepProvider = providerSelectionFitsAppointmentScope(
+                  providers,
+                  form.providerId,
+                  form.appointmentType,
+                  providerTaxonomyNodeId,
+                );
+                setForm((current) => ({
+                  ...current,
+                  providerTaxonomyNodeId,
+                  providerId: keepProvider ? current.providerId : "",
+                  doctorId: keepProvider ? current.doctorId : "",
+                }));
+              }}
+              className={selectClassName}
+              disabled={form.appointmentType === "internal" || providerTaxonomyOptions.length === 0}
+            >
+              <option value="">{t.providers_all}</option>
+              {providerTaxonomyOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </NativeComboboxSelect>
+          </Field>
           <Field label={t.common_provider}>
             <NativeComboboxSelect
               value={form.providerId}
@@ -444,7 +518,7 @@ function useAppointmentFollowUpVisitSectionContent({
               disabled={form.appointmentType === "internal"}
             >
               <option value="">{t.common_not_set}</option>
-              {providers.map((provider) => (
+              {providerOptions.map((provider) => (
                 <option key={provider.id} value={provider.id}>
                   {provider.name}
                 </option>
@@ -466,7 +540,7 @@ function useAppointmentFollowUpVisitSectionContent({
               <option value="">{t.common_not_set}</option>
               {doctors.map((doctor) => (
                 <option key={doctor.id} value={doctor.id}>
-                  {doctorLabel(doctor)}
+                  {doctorLabel(doctor, lang)}
                 </option>
               ))}
             </NativeComboboxSelect>

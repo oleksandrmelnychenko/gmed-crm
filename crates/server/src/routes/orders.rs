@@ -171,6 +171,7 @@ struct ListOrdersQuery {
     status: Option<String>,
     patient_id: Option<Uuid>,
     provider_id: Option<Uuid>,
+    provider_taxonomy_node_id: Option<Uuid>,
     doctor_id: Option<Uuid>,
 }
 
@@ -179,6 +180,7 @@ struct ListDebtManagementQuery {
     status: Option<String>,
     owner_user_id: Option<Uuid>,
     open_only: Option<bool>,
+    provider_taxonomy_node_id: Option<Uuid>,
 }
 
 const EXTERNAL_INVOICE_CHECK_INTERVAL_SECS: u64 = 60 * 60 * 6;
@@ -285,6 +287,28 @@ async fn list_orders(
                       AND ol.doctor_id = $6
                 )
              )
+             AND (
+                $7::uuid IS NULL
+                OR EXISTS (
+                    WITH RECURSIVE selected_taxonomy AS (
+                        SELECT n.id
+                        FROM provider_taxonomy_nodes n
+                        WHERE n.id = $7
+                        UNION ALL
+                        SELECT child.id
+                        FROM provider_taxonomy_nodes child
+                        JOIN selected_taxonomy parent
+                          ON child.parent_id = parent.id
+                    )
+                    SELECT 1
+                    FROM order_leistungen ol
+                    JOIN provider_taxonomy_assignments pta_filter
+                      ON pta_filter.provider_id = ol.provider_id
+                    JOIN selected_taxonomy st
+                      ON st.id = pta_filter.taxonomy_node_id
+                    WHERE ol.order_id = o.id
+                )
+             )
            ORDER BY o.created_at DESC
            LIMIT 200"#,
     )
@@ -294,6 +318,7 @@ async fn list_orders(
     .bind(query.patient_id)
     .bind(query.provider_id)
     .bind(query.doctor_id)
+    .bind(query.provider_taxonomy_node_id)
     .fetch_all(&state.db)
     .await
     {
@@ -427,6 +452,28 @@ async fn list_debt_management_queue(
                           AND pa.revoked_at IS NULL
                     )
                  )
+             AND (
+                    $5::uuid IS NULL
+                    OR EXISTS (
+                        WITH RECURSIVE selected_taxonomy AS (
+                            SELECT n.id
+                            FROM provider_taxonomy_nodes n
+                            WHERE n.id = $5
+                            UNION ALL
+                            SELECT child.id
+                            FROM provider_taxonomy_nodes child
+                            JOIN selected_taxonomy parent
+                              ON child.parent_id = parent.id
+                        )
+                        SELECT 1
+                        FROM order_leistungen ol
+                        JOIN provider_taxonomy_assignments pta_filter
+                          ON pta_filter.provider_id = ol.provider_id
+                        JOIN selected_taxonomy st
+                          ON st.id = pta_filter.taxonomy_node_id
+                        WHERE ol.order_id = o.id
+                    )
+                 )
            ORDER BY overdue_invoice_count DESC,
                     dm.next_review_at NULLS LAST,
                     dm.updated_at DESC,
@@ -437,6 +484,7 @@ async fn list_debt_management_queue(
     .bind(query.owner_user_id)
     .bind(open_only)
     .bind(scope_user_id)
+    .bind(query.provider_taxonomy_node_id)
     .fetch_all(&state.db)
     .await
     {
@@ -2046,12 +2094,24 @@ async fn get_order(
                   ol.source_medical_appointment_id, ol.agency_service_id,
                   ol.external_document_id,
                   pr.name AS provider_name, d.name AS doctor_name,
+                  provider_taxonomy.id AS provider_taxonomy_node_id,
+                  provider_taxonomy.code AS provider_taxonomy_node_code,
+                  provider_taxonomy.name_de AS provider_taxonomy_node_name_de,
+                  provider_taxonomy.name_ru AS provider_taxonomy_node_name_ru,
                   catalog.service_key AS agency_service_key, catalog.service_name AS agency_service_name,
                   doc.auto_name AS external_document_auto_name,
                   doc.original_filename AS external_document_filename
            FROM order_leistungen ol
            LEFT JOIN providers pr ON pr.id = ol.provider_id
            LEFT JOIN provider_doctors d ON d.id = ol.doctor_id
+           LEFT JOIN LATERAL (
+               SELECT ptn.id, ptn.code, ptn.name_de, ptn.name_ru
+               FROM provider_taxonomy_assignments pta
+               JOIN provider_taxonomy_nodes ptn ON ptn.id = pta.taxonomy_node_id
+               WHERE pta.provider_id = pr.id
+               ORDER BY pta.is_primary DESC, ptn.sort_order, ptn.name_de
+               LIMIT 1
+           ) provider_taxonomy ON true
            LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
            LEFT JOIN documents doc ON doc.id = ol.external_document_id
            WHERE ol.order_id = $1
@@ -2078,6 +2138,10 @@ async fn get_order(
             "notes": l.try_get::<Option<String>, _>("notes").unwrap_or_default(),
             "provider_id": l.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
             "provider_name": l.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
+            "provider_taxonomy_node_id": l.try_get::<Option<Uuid>, _>("provider_taxonomy_node_id").unwrap_or_default(),
+            "provider_taxonomy_node_code": l.try_get::<Option<String>, _>("provider_taxonomy_node_code").unwrap_or_default(),
+            "provider_taxonomy_node_name_de": l.try_get::<Option<String>, _>("provider_taxonomy_node_name_de").unwrap_or_default(),
+            "provider_taxonomy_node_name_ru": l.try_get::<Option<String>, _>("provider_taxonomy_node_name_ru").unwrap_or_default(),
             "doctor_id": l.try_get::<Option<Uuid>, _>("doctor_id").unwrap_or_default(),
             "doctor_name": l.try_get::<Option<String>, _>("doctor_name").unwrap_or_default(),
             "source_interpreter_report_id": l.try_get::<Option<Uuid>, _>("source_interpreter_report_id").unwrap_or_default(),
@@ -2095,9 +2159,21 @@ async fn get_order(
         r#"SELECT ei.id, ei.provider_id, ei.external_invoice_number, ei.invoice_date,
                   ei.due_date, ei.amount_net, ei.amount_vat, ei.amount_gross, ei.currency,
                   ei.status, ei.received_at, ei.paid_at, ei.notes, ei.created_at, ei.updated_at,
-                  pr.name AS provider_name
+                  pr.name AS provider_name,
+                  provider_taxonomy.id AS provider_taxonomy_node_id,
+                  provider_taxonomy.code AS provider_taxonomy_node_code,
+                  provider_taxonomy.name_de AS provider_taxonomy_node_name_de,
+                  provider_taxonomy.name_ru AS provider_taxonomy_node_name_ru
            FROM external_invoices ei
            LEFT JOIN providers pr ON pr.id = ei.provider_id
+           LEFT JOIN LATERAL (
+               SELECT ptn.id, ptn.code, ptn.name_de, ptn.name_ru
+               FROM provider_taxonomy_assignments pta
+               JOIN provider_taxonomy_nodes ptn ON ptn.id = pta.taxonomy_node_id
+               WHERE pta.provider_id = pr.id
+               ORDER BY pta.is_primary DESC, ptn.sort_order, ptn.name_de
+               LIMIT 1
+           ) provider_taxonomy ON true
            WHERE ei.order_id = $1
            ORDER BY ei.created_at DESC"#,
     )
@@ -2112,6 +2188,10 @@ async fn get_order(
             "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
             "provider_id": row.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
             "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
+            "provider_taxonomy_node_id": row.try_get::<Option<Uuid>, _>("provider_taxonomy_node_id").unwrap_or_default(),
+            "provider_taxonomy_node_code": row.try_get::<Option<String>, _>("provider_taxonomy_node_code").unwrap_or_default(),
+            "provider_taxonomy_node_name_de": row.try_get::<Option<String>, _>("provider_taxonomy_node_name_de").unwrap_or_default(),
+            "provider_taxonomy_node_name_ru": row.try_get::<Option<String>, _>("provider_taxonomy_node_name_ru").unwrap_or_default(),
             "external_invoice_number": row.try_get::<String, _>("external_invoice_number").unwrap_or_default(),
             "invoice_date": row.try_get::<Option<chrono::NaiveDate>, _>("invoice_date").unwrap_or_default().map(|value| value.to_string()),
             "due_date": row.try_get::<Option<chrono::NaiveDate>, _>("due_date").unwrap_or_default().map(|value| value.to_string()),
@@ -3316,9 +3396,21 @@ async fn list_external_invoices(
         r#"SELECT ei.id, ei.provider_id, ei.external_invoice_number, ei.invoice_date,
                   ei.due_date, ei.amount_net, ei.amount_vat, ei.amount_gross, ei.currency,
                   ei.status, ei.received_at, ei.paid_at, ei.notes, ei.created_at, ei.updated_at,
-                  pr.name AS provider_name
+                  pr.name AS provider_name,
+                  provider_taxonomy.id AS provider_taxonomy_node_id,
+                  provider_taxonomy.code AS provider_taxonomy_node_code,
+                  provider_taxonomy.name_de AS provider_taxonomy_node_name_de,
+                  provider_taxonomy.name_ru AS provider_taxonomy_node_name_ru
            FROM external_invoices ei
            LEFT JOIN providers pr ON pr.id = ei.provider_id
+           LEFT JOIN LATERAL (
+               SELECT ptn.id, ptn.code, ptn.name_de, ptn.name_ru
+               FROM provider_taxonomy_assignments pta
+               JOIN provider_taxonomy_nodes ptn ON ptn.id = pta.taxonomy_node_id
+               WHERE pta.provider_id = pr.id
+               ORDER BY pta.is_primary DESC, ptn.sort_order, ptn.name_de
+               LIMIT 1
+           ) provider_taxonomy ON true
            WHERE ei.order_id = $1
            ORDER BY ei.created_at DESC"#,
     )
@@ -3333,6 +3425,10 @@ async fn list_external_invoices(
                     "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
                     "provider_id": row.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
                     "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
+                    "provider_taxonomy_node_id": row.try_get::<Option<Uuid>, _>("provider_taxonomy_node_id").unwrap_or_default(),
+                    "provider_taxonomy_node_code": row.try_get::<Option<String>, _>("provider_taxonomy_node_code").unwrap_or_default(),
+                    "provider_taxonomy_node_name_de": row.try_get::<Option<String>, _>("provider_taxonomy_node_name_de").unwrap_or_default(),
+                    "provider_taxonomy_node_name_ru": row.try_get::<Option<String>, _>("provider_taxonomy_node_name_ru").unwrap_or_default(),
                     "external_invoice_number": row.try_get::<String, _>("external_invoice_number").unwrap_or_default(),
                     "invoice_date": row.try_get::<Option<chrono::NaiveDate>, _>("invoice_date").unwrap_or_default().map(|value| value.to_string()),
                     "due_date": row.try_get::<Option<chrono::NaiveDate>, _>("due_date").unwrap_or_default().map(|value| value.to_string()),
@@ -3685,12 +3781,24 @@ async fn list_leistungen(
                   ol.source_interpreter_report_id, ol.source_medical_appointment_id,
                   ol.agency_service_id, ol.external_document_id,
                   pr.name AS provider_name, d.name AS doctor_name,
+                  provider_taxonomy.id AS provider_taxonomy_node_id,
+                  provider_taxonomy.code AS provider_taxonomy_node_code,
+                  provider_taxonomy.name_de AS provider_taxonomy_node_name_de,
+                  provider_taxonomy.name_ru AS provider_taxonomy_node_name_ru,
                   catalog.service_key AS agency_service_key, catalog.service_name AS agency_service_name,
                   doc.auto_name AS external_document_auto_name,
                   doc.original_filename AS external_document_filename
            FROM order_leistungen ol
            LEFT JOIN providers pr ON pr.id = ol.provider_id
            LEFT JOIN provider_doctors d ON d.id = ol.doctor_id
+           LEFT JOIN LATERAL (
+               SELECT ptn.id, ptn.code, ptn.name_de, ptn.name_ru
+               FROM provider_taxonomy_assignments pta
+               JOIN provider_taxonomy_nodes ptn ON ptn.id = pta.taxonomy_node_id
+               WHERE pta.provider_id = pr.id
+               ORDER BY pta.is_primary DESC, ptn.sort_order, ptn.name_de
+               LIMIT 1
+           ) provider_taxonomy ON true
            LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
            LEFT JOIN documents doc ON doc.id = ol.external_document_id
            WHERE ol.order_id = $1
@@ -3715,6 +3823,10 @@ async fn list_leistungen(
                     "notes": r.try_get::<Option<String>, _>("notes").unwrap_or_default(),
                     "provider_id": r.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
                     "provider_name": r.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
+                    "provider_taxonomy_node_id": r.try_get::<Option<Uuid>, _>("provider_taxonomy_node_id").unwrap_or_default(),
+                    "provider_taxonomy_node_code": r.try_get::<Option<String>, _>("provider_taxonomy_node_code").unwrap_or_default(),
+                    "provider_taxonomy_node_name_de": r.try_get::<Option<String>, _>("provider_taxonomy_node_name_de").unwrap_or_default(),
+                    "provider_taxonomy_node_name_ru": r.try_get::<Option<String>, _>("provider_taxonomy_node_name_ru").unwrap_or_default(),
                     "doctor_id": r.try_get::<Option<Uuid>, _>("doctor_id").unwrap_or_default(),
                     "doctor_name": r.try_get::<Option<String>, _>("doctor_name").unwrap_or_default(),
                     "source_interpreter_report_id": r.try_get::<Option<Uuid>, _>("source_interpreter_report_id").unwrap_or_default(),

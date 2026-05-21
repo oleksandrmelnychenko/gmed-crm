@@ -297,6 +297,10 @@ export type PortalConciergeServiceItem = {
   provider_name: string | null;
   assigned_concierge_name: string | null;
   service_kind: string;
+  taxonomy_node_id: string | null;
+  taxonomy_node_code: string | null;
+  taxonomy_node_name_de: string | null;
+  taxonomy_node_name_ru: string | null;
   title: string;
   status: string;
   booking_reference: string | null;

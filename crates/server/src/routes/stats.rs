@@ -41,10 +41,38 @@ struct PeriodQuery {
     period: Option<String>,
 }
 
+#[derive(Deserialize, Default)]
+struct ReportsWorkspaceQuery {
+    taxonomy_node_id: Option<uuid::Uuid>,
+    taxonomy_code: Option<String>,
+}
+
 #[derive(Deserialize)]
 struct ReportsExportQuery {
     section: Option<String>,
     provider_id: Option<uuid::Uuid>,
+    taxonomy_node_id: Option<uuid::Uuid>,
+    taxonomy_code: Option<String>,
+}
+
+struct ReportTaxonomyFilter {
+    node_id: Option<uuid::Uuid>,
+    code: Option<String>,
+}
+
+impl ReportTaxonomyFilter {
+    fn new(node_id: Option<uuid::Uuid>, code: Option<String>) -> Self {
+        let code = code.and_then(|value| {
+            let trimmed = value.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        });
+
+        Self { node_id, code }
+    }
+
+    fn code_param(&self) -> Option<&str> {
+        self.code.as_deref()
+    }
 }
 
 #[derive(Serialize)]
@@ -406,6 +434,7 @@ async fn my_kpis(
 async fn reports_workspace(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
+    Query(query): Query<ReportsWorkspaceQuery>,
 ) -> axum::response::Response {
     if let Err(resp) = auth.require_any_role(&[
         Role::Ceo,
@@ -449,6 +478,7 @@ async fn reports_workspace(
     );
     let include_sales_kpis = matches!(role, Role::Ceo | Role::CeoAssistant | Role::Sales);
     let can_see_financial = role.can_see_financial_data();
+    let taxonomy_filter = ReportTaxonomyFilter::new(query.taxonomy_node_id, query.taxonomy_code);
 
     let summary = match load_reports_summary(&state, can_see_financial).await {
         Ok(value) => value,
@@ -462,7 +492,7 @@ async fn reports_workspace(
     };
 
     let clinics = if include_clinics {
-        match load_report_clinics(&state, can_see_financial).await {
+        match load_report_clinics(&state, can_see_financial, &taxonomy_filter).await {
             Ok(value) => value,
             Err(e) => {
                 tracing::error!(error = %e, "load report clinics");
@@ -504,7 +534,7 @@ async fn reports_workspace(
         Vec::new()
     };
     let medical_providers = if include_medical_providers {
-        match load_report_medical_providers(&state).await {
+        match load_report_medical_providers(&state, &taxonomy_filter).await {
             Ok(value) => value,
             Err(e) => {
                 tracing::error!(error = %e, "load report medical providers");
@@ -518,7 +548,7 @@ async fn reports_workspace(
         Vec::new()
     };
     let provider_costs = if include_provider_costs {
-        match load_report_provider_costs(&state, None).await {
+        match load_report_provider_costs(&state, None, &taxonomy_filter).await {
             Ok(value) => value,
             Err(e) => {
                 tracing::error!(error = %e, "load report provider costs");
@@ -546,7 +576,7 @@ async fn reports_workspace(
         None
     };
     let doctors = if include_doctors {
-        match load_report_doctors(&state, can_see_financial, None).await {
+        match load_report_doctors(&state, can_see_financial, None, &taxonomy_filter).await {
             Ok(value) => value,
             Err(e) => {
                 tracing::error!(error = %e, "load report doctors");
@@ -560,7 +590,7 @@ async fn reports_workspace(
         Vec::new()
     };
     let non_medical_providers = if include_non_medical_providers {
-        match load_report_non_medical_providers(&state, can_see_financial).await {
+        match load_report_non_medical_providers(&state, can_see_financial, &taxonomy_filter).await {
             Ok(value) => value,
             Err(e) => {
                 tracing::error!(error = %e, "load report non medical providers");
@@ -657,6 +687,7 @@ async fn reports_export(
         .to_lowercase();
     let role = auth.role;
     let can_see_financial = role.can_see_financial_data();
+    let taxonomy_filter = ReportTaxonomyFilter::new(query.taxonomy_node_id, query.taxonomy_code);
 
     let (filename, csv_result) = match section.as_str() {
         "clinics"
@@ -667,7 +698,7 @@ async fn reports_export(
         {
             (
                 "clinic-report.csv",
-                load_report_clinics(&state, can_see_financial)
+                load_report_clinics(&state, can_see_financial, &taxonomy_filter)
                     .await
                     .map(export_clinics_csv),
             )
@@ -706,7 +737,7 @@ async fn reports_export(
         {
             (
                 "medical-provider-report.csv",
-                load_report_medical_providers(&state)
+                load_report_medical_providers(&state, &taxonomy_filter)
                     .await
                     .map(export_medical_providers_csv),
             )
@@ -719,7 +750,7 @@ async fn reports_export(
         {
             (
                 "provider-cost-report.csv",
-                load_report_provider_costs(&state, query.provider_id)
+                load_report_provider_costs(&state, query.provider_id, &taxonomy_filter)
                     .await
                     .map(export_provider_costs_csv),
             )
@@ -732,9 +763,14 @@ async fn reports_export(
         {
             (
                 "doctor-report.csv",
-                load_report_doctors(&state, can_see_financial, query.provider_id)
-                    .await
-                    .map(export_doctors_csv),
+                load_report_doctors(
+                    &state,
+                    can_see_financial,
+                    query.provider_id,
+                    &taxonomy_filter,
+                )
+                .await
+                .map(export_doctors_csv),
             )
         }
         "non_medical_providers"
@@ -745,7 +781,7 @@ async fn reports_export(
         {
             (
                 "non-medical-provider-report.csv",
-                load_report_non_medical_providers(&state, can_see_financial)
+                load_report_non_medical_providers(&state, can_see_financial, &taxonomy_filter)
                     .await
                     .map(export_non_medical_providers_csv),
             )
@@ -1636,7 +1672,34 @@ async fn load_concierge_kpis(state: &AppState) -> Result<Vec<Value>, sqlx::Error
                     FROM patient_feedback_forms f
                     WHERE f.concierge_id = u.id
                       AND f.concierge_score IS NOT NULL
-                ) AS avg_feedback_score
+                ) AS avg_feedback_score,
+                (
+                    SELECT COALESCE(
+                        jsonb_agg(
+                            jsonb_build_object(
+                                'taxonomy_node_id', mix.taxonomy_node_id,
+                                'taxonomy_node_code', mix.taxonomy_node_code,
+                                'taxonomy_node_name_de', mix.taxonomy_node_name_de,
+                                'taxonomy_node_name_ru', mix.taxonomy_node_name_ru,
+                                'service_count', mix.service_count
+                            )
+                            ORDER BY mix.service_count DESC, mix.taxonomy_node_name_de
+                        ),
+                        '[]'::jsonb
+                    )
+                    FROM (
+                        SELECT
+                            n.id AS taxonomy_node_id,
+                            n.code AS taxonomy_node_code,
+                            n.name_de AS taxonomy_node_name_de,
+                            n.name_ru AS taxonomy_node_name_ru,
+                            COUNT(*)::bigint AS service_count
+                        FROM concierge_services cs
+                        JOIN provider_taxonomy_nodes n ON n.id = cs.taxonomy_node_id
+                        WHERE cs.assigned_concierge_id = u.id
+                        GROUP BY n.id, n.code, n.name_de, n.name_ru
+                    ) mix
+                ) AS taxonomy_mix
            FROM users u
            WHERE u.role = 'concierge'
              AND u.is_active = true
@@ -1658,6 +1721,7 @@ async fn load_concierge_kpis(state: &AppState) -> Result<Vec<Value>, sqlx::Error
                 "avg_feedback_score": optional_decimal_to_f64(
                     row.try_get::<Option<Decimal>, _>("avg_feedback_score").unwrap_or_default()
                 ),
+                "taxonomy_mix": row.try_get::<Value, _>("taxonomy_mix").unwrap_or_else(|_| json!([])),
             })
         })
         .collect())
@@ -1878,6 +1942,11 @@ async fn load_provider_kpis(state: &AppState) -> Result<Vec<Value>, sqlx::Error>
         r#"SELECT
                 p.id,
                 p.name,
+                p.provider_type,
+                primary_taxonomy.id AS taxonomy_node_id,
+                primary_taxonomy.code AS taxonomy_node_code,
+                primary_taxonomy.name_de AS taxonomy_node_name_de,
+                primary_taxonomy.name_ru AS taxonomy_node_name_ru,
                 (
                     SELECT COUNT(DISTINCT a.patient_id)::bigint
                     FROM appointments a
@@ -1951,6 +2020,20 @@ async fn load_provider_kpis(state: &AppState) -> Result<Vec<Value>, sqlx::Error>
                       AND off.results_handoff_status = 'completed'
                 ) AS followup_completed_orders
            FROM providers p
+           LEFT JOIN LATERAL (
+                SELECT
+                    n.id,
+                    n.code,
+                    n.name_de,
+                    n.name_ru
+                FROM provider_taxonomy_assignments pta
+                JOIN provider_taxonomy_nodes n
+                  ON n.id = pta.taxonomy_node_id
+                WHERE pta.provider_id = p.id
+                  AND n.is_active = TRUE
+                ORDER BY pta.is_primary DESC, n.sort_order, n.name_de
+                LIMIT 1
+           ) primary_taxonomy ON TRUE
            WHERE p.is_active = true
              AND p.provider_type = 'medical'
            ORDER BY gross_service_volume DESC, appointments_90d DESC, p.name
@@ -1965,6 +2048,11 @@ async fn load_provider_kpis(state: &AppState) -> Result<Vec<Value>, sqlx::Error>
             json!({
                 "provider_id": row.try_get::<uuid::Uuid, _>("id").unwrap_or_else(|_| uuid::Uuid::nil()),
                 "name": row.try_get::<String, _>("name").unwrap_or_default(),
+                "provider_type": row.try_get::<String, _>("provider_type").unwrap_or_default(),
+                "taxonomy_node_id": row.try_get::<Option<uuid::Uuid>, _>("taxonomy_node_id").unwrap_or_default(),
+                "taxonomy_node_code": row.try_get::<Option<String>, _>("taxonomy_node_code").unwrap_or_default(),
+                "taxonomy_node_name_de": row.try_get::<Option<String>, _>("taxonomy_node_name_de").unwrap_or_default(),
+                "taxonomy_node_name_ru": row.try_get::<Option<String>, _>("taxonomy_node_name_ru").unwrap_or_default(),
                 "active_patients_90d": row.try_get::<i64, _>("active_patients_90d").unwrap_or(0),
                 "appointments_90d": row.try_get::<i64, _>("appointments_90d").unwrap_or(0),
                 "gross_service_volume": decimal_to_string(
@@ -2039,6 +2127,7 @@ async fn load_reports_summary(
 async fn load_report_clinics(
     state: &AppState,
     can_see_financial: bool,
+    taxonomy_filter: &ReportTaxonomyFilter,
 ) -> Result<Vec<Value>, sqlx::Error> {
     let rows = sqlx::query(
         r#"SELECT
@@ -2047,6 +2136,10 @@ async fn load_report_clinics(
                 p.address_city,
                 p.address_country,
                 p.provider_type,
+                primary_taxonomy.id AS taxonomy_node_id,
+                primary_taxonomy.code AS taxonomy_node_code,
+                primary_taxonomy.name_de AS taxonomy_node_name_de,
+                primary_taxonomy.name_ru AS taxonomy_node_name_ru,
                 (
                     SELECT COUNT(DISTINCT a.patient_id)::bigint
                     FROM appointments a
@@ -2259,11 +2352,52 @@ async fn load_report_clinics(
                     ) item
                 ) AS findings_sample_count
            FROM providers p
+           LEFT JOIN LATERAL (
+                SELECT
+                    n.id,
+                    n.code,
+                    n.name_de,
+                    n.name_ru
+                FROM provider_taxonomy_assignments pta
+                JOIN provider_taxonomy_nodes n
+                  ON n.id = pta.taxonomy_node_id
+                WHERE pta.provider_id = p.id
+                  AND n.provider_kind = p.provider_type
+                  AND n.is_active = TRUE
+                ORDER BY pta.is_primary DESC, n.sort_order, n.name_de
+                LIMIT 1
+           ) primary_taxonomy ON TRUE
            WHERE p.is_active = true
              AND p.provider_type = 'medical'
+             AND (
+                ($1::uuid IS NULL AND NULLIF(TRIM($2::text), '') IS NULL)
+                OR EXISTS (
+                    WITH RECURSIVE selected_taxonomy AS (
+                        SELECT n.id
+                        FROM provider_taxonomy_nodes n
+                        WHERE ($1::uuid IS NOT NULL AND n.id = $1)
+                           OR (
+                                NULLIF(TRIM($2::text), '') IS NOT NULL
+                                AND n.code = NULLIF(TRIM($2::text), '')
+                           )
+                        UNION ALL
+                        SELECT child.id
+                        FROM provider_taxonomy_nodes child
+                        JOIN selected_taxonomy parent
+                          ON child.parent_id = parent.id
+                    )
+                    SELECT 1
+                    FROM provider_taxonomy_assignments pta_filter
+                    JOIN selected_taxonomy st
+                      ON st.id = pta_filter.taxonomy_node_id
+                    WHERE pta_filter.provider_id = p.id
+                )
+             )
            ORDER BY appointments_90d DESC, active_patients_90d DESC, p.name
            LIMIT 25"#,
     )
+    .bind(taxonomy_filter.node_id)
+    .bind(taxonomy_filter.code_param())
     .fetch_all(&state.db)
     .await?;
 
@@ -2304,6 +2438,10 @@ async fn load_report_clinics(
                 "address_city": row.try_get::<Option<String>, _>("address_city").unwrap_or_default(),
                 "address_country": row.try_get::<Option<String>, _>("address_country").unwrap_or_default(),
                 "provider_type": row.try_get::<String, _>("provider_type").unwrap_or_default(),
+                "taxonomy_node_id": row.try_get::<Option<uuid::Uuid>, _>("taxonomy_node_id").unwrap_or_default(),
+                "taxonomy_node_code": row.try_get::<Option<String>, _>("taxonomy_node_code").unwrap_or_default(),
+                "taxonomy_node_name_de": row.try_get::<Option<String>, _>("taxonomy_node_name_de").unwrap_or_default(),
+                "taxonomy_node_name_ru": row.try_get::<Option<String>, _>("taxonomy_node_name_ru").unwrap_or_default(),
                 "active_patients_90d": row.try_get::<i64, _>("active_patients_90d").unwrap_or(0),
                 "appointments_90d": row.try_get::<i64, _>("appointments_90d").unwrap_or(0),
                 "delivered_items": row.try_get::<i64, _>("delivered_items").unwrap_or(0),
@@ -2475,7 +2613,10 @@ async fn load_report_service_types(
         .collect())
 }
 
-async fn load_report_medical_providers(state: &AppState) -> Result<Vec<Value>, sqlx::Error> {
+async fn load_report_medical_providers(
+    state: &AppState,
+    taxonomy_filter: &ReportTaxonomyFilter,
+) -> Result<Vec<Value>, sqlx::Error> {
     let rows = sqlx::query(
         r#"WITH patient_country AS (
                 SELECT
@@ -2493,6 +2634,10 @@ async fn load_report_medical_providers(state: &AppState) -> Result<Vec<Value>, s
                 p.name,
                 p.address_city,
                 p.address_country,
+                primary_taxonomy.id AS taxonomy_node_id,
+                primary_taxonomy.code AS taxonomy_node_code,
+                primary_taxonomy.name_de AS taxonomy_node_name_de,
+                primary_taxonomy.name_ru AS taxonomy_node_name_ru,
                 (
                     SELECT COUNT(DISTINCT a.patient_id)::bigint
                     FROM appointments a
@@ -2605,11 +2750,52 @@ async fn load_report_medical_providers(state: &AppState) -> Result<Vec<Value>, s
                     ) item
                 ) AS last_activity_at
            FROM providers p
+           LEFT JOIN LATERAL (
+                SELECT
+                    n.id,
+                    n.code,
+                    n.name_de,
+                    n.name_ru
+                FROM provider_taxonomy_assignments pta
+                JOIN provider_taxonomy_nodes n
+                  ON n.id = pta.taxonomy_node_id
+                WHERE pta.provider_id = p.id
+                  AND n.provider_kind = p.provider_type
+                  AND n.is_active = TRUE
+                ORDER BY pta.is_primary DESC, n.sort_order, n.name_de
+                LIMIT 1
+           ) primary_taxonomy ON TRUE
            WHERE p.is_active = true
              AND p.provider_type = 'medical'
+             AND (
+                ($1::uuid IS NULL AND NULLIF(TRIM($2::text), '') IS NULL)
+                OR EXISTS (
+                    WITH RECURSIVE selected_taxonomy AS (
+                        SELECT n.id
+                        FROM provider_taxonomy_nodes n
+                        WHERE ($1::uuid IS NOT NULL AND n.id = $1)
+                           OR (
+                                NULLIF(TRIM($2::text), '') IS NOT NULL
+                                AND n.code = NULLIF(TRIM($2::text), '')
+                           )
+                        UNION ALL
+                        SELECT child.id
+                        FROM provider_taxonomy_nodes child
+                        JOIN selected_taxonomy parent
+                          ON child.parent_id = parent.id
+                    )
+                    SELECT 1
+                    FROM provider_taxonomy_assignments pta_filter
+                    JOIN selected_taxonomy st
+                      ON st.id = pta_filter.taxonomy_node_id
+                    WHERE pta_filter.provider_id = p.id
+                )
+             )
            ORDER BY gross_service_volume DESC, appointments_90d DESC, p.name
            LIMIT 30"#,
     )
+    .bind(taxonomy_filter.node_id)
+    .bind(taxonomy_filter.code_param())
     .fetch_all(&state.db)
     .await?;
 
@@ -2621,6 +2807,10 @@ async fn load_report_medical_providers(state: &AppState) -> Result<Vec<Value>, s
                 "name": row.try_get::<String, _>("name").unwrap_or_default(),
                 "address_city": row.try_get::<Option<String>, _>("address_city").unwrap_or_default(),
                 "address_country": row.try_get::<Option<String>, _>("address_country").unwrap_or_default(),
+                "taxonomy_node_id": row.try_get::<Option<uuid::Uuid>, _>("taxonomy_node_id").unwrap_or_default(),
+                "taxonomy_node_code": row.try_get::<Option<String>, _>("taxonomy_node_code").unwrap_or_default(),
+                "taxonomy_node_name_de": row.try_get::<Option<String>, _>("taxonomy_node_name_de").unwrap_or_default(),
+                "taxonomy_node_name_ru": row.try_get::<Option<String>, _>("taxonomy_node_name_ru").unwrap_or_default(),
                 "active_patients_90d": row.try_get::<i64, _>("active_patients_90d").unwrap_or_default(),
                 "appointments_90d": row.try_get::<i64, _>("appointments_90d").unwrap_or_default(),
                 "active_orders": row.try_get::<i64, _>("active_orders").unwrap_or_default(),
@@ -2641,6 +2831,7 @@ async fn load_report_medical_providers(state: &AppState) -> Result<Vec<Value>, s
 async fn load_report_provider_costs(
     state: &AppState,
     provider_filter: Option<uuid::Uuid>,
+    taxonomy_filter: &ReportTaxonomyFilter,
 ) -> Result<Vec<Value>, sqlx::Error> {
     let rows = sqlx::query(
         r#"WITH scoped AS (
@@ -2649,14 +2840,57 @@ async fn load_report_provider_costs(
                     p.name AS provider_name,
                     p.address_city,
                     p.address_country,
+                    primary_taxonomy.id AS taxonomy_node_id,
+                    primary_taxonomy.code AS taxonomy_node_code,
+                    primary_taxonomy.name_de AS taxonomy_node_name_de,
+                    primary_taxonomy.name_ru AS taxonomy_node_name_ru,
                     COALESCE(NULLIF(TRIM(ol.description), ''), 'order_service.unnamed') AS service_label,
                     (ol.unit_price * (1 + (ol.vat_rate / 100)))::numeric AS unit_gross,
                     COALESCE(ol.approved_at, ol.delivered_at, ol.created_at) AS effective_at
                 FROM order_leistungen ol
                 JOIN providers p ON p.id = ol.provider_id
+                LEFT JOIN LATERAL (
+                    SELECT
+                        n.id,
+                        n.code,
+                        n.name_de,
+                        n.name_ru
+                    FROM provider_taxonomy_assignments pta
+                    JOIN provider_taxonomy_nodes n
+                      ON n.id = pta.taxonomy_node_id
+                    WHERE pta.provider_id = p.id
+                      AND n.provider_kind = p.provider_type
+                      AND n.is_active = TRUE
+                    ORDER BY pta.is_primary DESC, n.sort_order, n.name_de
+                    LIMIT 1
+                ) primary_taxonomy ON TRUE
                 WHERE ol.status IN ('delivered', 'approved', 'invoiced')
                   AND p.provider_type = 'medical'
                   AND ($1::uuid IS NULL OR p.id = $1)
+                  AND (
+                    ($2::uuid IS NULL AND NULLIF(TRIM($3::text), '') IS NULL)
+                    OR EXISTS (
+                        WITH RECURSIVE selected_taxonomy AS (
+                            SELECT n.id
+                            FROM provider_taxonomy_nodes n
+                            WHERE ($2::uuid IS NOT NULL AND n.id = $2)
+                               OR (
+                                    NULLIF(TRIM($3::text), '') IS NOT NULL
+                                    AND n.code = NULLIF(TRIM($3::text), '')
+                               )
+                            UNION ALL
+                            SELECT child.id
+                            FROM provider_taxonomy_nodes child
+                            JOIN selected_taxonomy parent
+                              ON child.parent_id = parent.id
+                        )
+                        SELECT 1
+                        FROM provider_taxonomy_assignments pta_filter
+                        JOIN selected_taxonomy st
+                          ON st.id = pta_filter.taxonomy_node_id
+                        WHERE pta_filter.provider_id = p.id
+                    )
+                  )
             ),
             summary AS (
                 SELECT
@@ -2664,6 +2898,10 @@ async fn load_report_provider_costs(
                     provider_name,
                     address_city,
                     address_country,
+                    taxonomy_node_id,
+                    taxonomy_node_code,
+                    taxonomy_node_name_de,
+                    taxonomy_node_name_ru,
                     service_label,
                     COUNT(*)::bigint AS sample_count,
                     MIN(effective_at) AS first_recorded_at,
@@ -2672,7 +2910,16 @@ async fn load_report_provider_costs(
                     ROUND(MAX(unit_gross)::numeric, 2) AS max_unit_gross,
                     ROUND(AVG(unit_gross)::numeric, 2) AS avg_unit_gross
                 FROM scoped
-                GROUP BY provider_id, provider_name, address_city, address_country, service_label
+                GROUP BY
+                    provider_id,
+                    provider_name,
+                    address_city,
+                    address_country,
+                    taxonomy_node_id,
+                    taxonomy_node_code,
+                    taxonomy_node_name_de,
+                    taxonomy_node_name_ru,
+                    service_label
             ),
             latest AS (
                 SELECT DISTINCT ON (provider_id, service_label)
@@ -2739,6 +2986,10 @@ async fn load_report_provider_costs(
                 s.provider_name,
                 s.address_city,
                 s.address_country,
+                s.taxonomy_node_id,
+                s.taxonomy_node_code,
+                s.taxonomy_node_name_de,
+                s.taxonomy_node_name_ru,
                 s.service_label,
                 s.sample_count,
                 s.first_recorded_at,
@@ -2763,6 +3014,8 @@ async fn load_report_provider_costs(
             LIMIT 60"#,
     )
     .bind(provider_filter)
+    .bind(taxonomy_filter.node_id)
+    .bind(taxonomy_filter.code_param())
     .fetch_all(&state.db)
     .await?;
 
@@ -2788,6 +3041,10 @@ async fn load_report_provider_costs(
                 "provider_name": row.try_get::<String, _>("provider_name").unwrap_or_default(),
                 "address_city": row.try_get::<Option<String>, _>("address_city").unwrap_or_default(),
                 "address_country": row.try_get::<Option<String>, _>("address_country").unwrap_or_default(),
+                "taxonomy_node_id": row.try_get::<Option<uuid::Uuid>, _>("taxonomy_node_id").unwrap_or_default(),
+                "taxonomy_node_code": row.try_get::<Option<String>, _>("taxonomy_node_code").unwrap_or_default(),
+                "taxonomy_node_name_de": row.try_get::<Option<String>, _>("taxonomy_node_name_de").unwrap_or_default(),
+                "taxonomy_node_name_ru": row.try_get::<Option<String>, _>("taxonomy_node_name_ru").unwrap_or_default(),
                 "service_label": row.try_get::<String, _>("service_label").unwrap_or_default(),
                 "sample_count": row.try_get::<i64, _>("sample_count").unwrap_or_default(),
                 "first_recorded_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("first_recorded_at").ok().map(|value| value.to_rfc3339()),
@@ -2814,6 +3071,7 @@ async fn load_report_doctors(
     state: &AppState,
     can_see_financial: bool,
     provider_filter: Option<uuid::Uuid>,
+    taxonomy_filter: &ReportTaxonomyFilter,
 ) -> Result<Vec<Value>, sqlx::Error> {
     let rows = sqlx::query(
         r#"SELECT
@@ -2822,9 +3080,32 @@ async fn load_report_doctors(
                 pd.name,
                 pd.title,
                 pd.fachbereich,
+                COALESCE((
+                    SELECT jsonb_agg(
+                        jsonb_build_object(
+                            'id', ms.id,
+                            'code', ms.code,
+                            'name_en', ms.name_en,
+                            'name_de', ms.name_de,
+                            'name_ru', ms.name_ru,
+                            'is_active', ms.is_active,
+                            'sort_order', ms.sort_order,
+                            'is_primary', ds.is_primary
+                        )
+                        ORDER BY ds.is_primary DESC, ms.sort_order, ms.name_de, ms.name_en
+                    )
+                    FROM provider_doctor_specializations ds
+                    JOIN medical_specializations ms ON ms.id = ds.specialization_id
+                    WHERE ds.doctor_id = pd.id
+                      AND ms.deleted_at IS NULL
+                ), '[]'::jsonb) AS specializations,
                 p.name AS provider_name,
                 p.address_city,
                 p.address_country,
+                primary_taxonomy.id AS taxonomy_node_id,
+                primary_taxonomy.code AS taxonomy_node_code,
+                primary_taxonomy.name_de AS taxonomy_node_name_de,
+                primary_taxonomy.name_ru AS taxonomy_node_name_ru,
                 (
                     SELECT COUNT(DISTINCT a.patient_id)::bigint
                     FROM appointments a
@@ -3031,13 +3312,54 @@ async fn load_report_doctors(
                 ) AS gross_service_volume
            FROM provider_doctors pd
            JOIN providers p ON p.id = pd.provider_id
+           LEFT JOIN LATERAL (
+                SELECT
+                    n.id,
+                    n.code,
+                    n.name_de,
+                    n.name_ru
+                FROM provider_taxonomy_assignments pta
+                JOIN provider_taxonomy_nodes n
+                  ON n.id = pta.taxonomy_node_id
+                WHERE pta.provider_id = p.id
+                  AND n.provider_kind = p.provider_type
+                  AND n.is_active = TRUE
+                ORDER BY pta.is_primary DESC, n.sort_order, n.name_de
+                LIMIT 1
+           ) primary_taxonomy ON TRUE
            WHERE p.is_active = true
              AND p.provider_type = 'medical'
              AND ($1::uuid IS NULL OR pd.provider_id = $1)
+             AND (
+                ($2::uuid IS NULL AND NULLIF(TRIM($3::text), '') IS NULL)
+                OR EXISTS (
+                    WITH RECURSIVE selected_taxonomy AS (
+                        SELECT n.id
+                        FROM provider_taxonomy_nodes n
+                        WHERE ($2::uuid IS NOT NULL AND n.id = $2)
+                           OR (
+                                NULLIF(TRIM($3::text), '') IS NOT NULL
+                                AND n.code = NULLIF(TRIM($3::text), '')
+                           )
+                        UNION ALL
+                        SELECT child.id
+                        FROM provider_taxonomy_nodes child
+                        JOIN selected_taxonomy parent
+                          ON child.parent_id = parent.id
+                    )
+                    SELECT 1
+                    FROM provider_taxonomy_assignments pta_filter
+                    JOIN selected_taxonomy st
+                      ON st.id = pta_filter.taxonomy_node_id
+                    WHERE pta_filter.provider_id = p.id
+                )
+             )
            ORDER BY appointments_90d DESC, delivered_items DESC, pd.name
            LIMIT 50"#,
     )
     .bind(provider_filter)
+    .bind(taxonomy_filter.node_id)
+    .bind(taxonomy_filter.code_param())
     .fetch_all(&state.db)
     .await?;
 
@@ -3078,9 +3400,14 @@ async fn load_report_doctors(
                 "name": row.try_get::<String, _>("name").unwrap_or_default(),
                 "title": row.try_get::<Option<String>, _>("title").unwrap_or_default(),
                 "fachbereich": row.try_get::<Option<String>, _>("fachbereich").unwrap_or_default(),
+                "specializations": row.try_get::<Value, _>("specializations").unwrap_or_else(|_| json!([])),
                 "provider_name": row.try_get::<String, _>("provider_name").unwrap_or_default(),
                 "address_city": row.try_get::<Option<String>, _>("address_city").unwrap_or_default(),
                 "address_country": row.try_get::<Option<String>, _>("address_country").unwrap_or_default(),
+                "taxonomy_node_id": row.try_get::<Option<uuid::Uuid>, _>("taxonomy_node_id").unwrap_or_default(),
+                "taxonomy_node_code": row.try_get::<Option<String>, _>("taxonomy_node_code").unwrap_or_default(),
+                "taxonomy_node_name_de": row.try_get::<Option<String>, _>("taxonomy_node_name_de").unwrap_or_default(),
+                "taxonomy_node_name_ru": row.try_get::<Option<String>, _>("taxonomy_node_name_ru").unwrap_or_default(),
                 "active_patients_90d": row.try_get::<i64, _>("active_patients_90d").unwrap_or(0),
                 "appointments_90d": row.try_get::<i64, _>("appointments_90d").unwrap_or(0),
                 "delivered_items": row.try_get::<i64, _>("delivered_items").unwrap_or(0),
@@ -3137,6 +3464,7 @@ async fn load_report_doctors(
 async fn load_report_non_medical_providers(
     state: &AppState,
     can_see_financial: bool,
+    taxonomy_filter: &ReportTaxonomyFilter,
 ) -> Result<Vec<Value>, sqlx::Error> {
     let rows = sqlx::query(
         r#"SELECT
@@ -3144,6 +3472,15 @@ async fn load_report_non_medical_providers(
                 p.name,
                 p.address_city,
                 p.address_country,
+                p.internal_rating,
+                p.internal_rating_note,
+                COALESCE(p.taxonomy_attributes, '{}'::jsonb) AS taxonomy_attributes,
+                primary_taxonomy.id AS taxonomy_node_id,
+                primary_taxonomy.code AS taxonomy_node_code,
+                primary_taxonomy.name_de AS taxonomy_node_name_de,
+                primary_taxonomy.name_ru AS taxonomy_node_name_ru,
+                COALESCE(taxonomy_path.path, '[]'::json) AS taxonomy_path,
+                taxonomy_path.path_label AS taxonomy_path_label,
                 (
                     SELECT COUNT(*)::bigint
                     FROM service_catalog s
@@ -3250,11 +3587,91 @@ async fn load_report_non_medical_providers(
                       AND ol.status IN ('delivered', 'approved', 'invoiced')
                 ) AS gross_service_volume
            FROM providers p
+           LEFT JOIN LATERAL (
+                SELECT
+                    n.id,
+                    n.code,
+                    n.name_de,
+                    n.name_ru
+                FROM provider_taxonomy_assignments pta
+                JOIN provider_taxonomy_nodes n
+                  ON n.id = pta.taxonomy_node_id
+                WHERE pta.provider_id = p.id
+                  AND n.provider_kind = 'non_medical'
+                  AND n.is_active = TRUE
+                ORDER BY pta.is_primary DESC, n.sort_order, n.name_de
+                LIMIT 1
+           ) primary_taxonomy ON TRUE
+           LEFT JOIN LATERAL (
+                WITH RECURSIVE ancestors AS (
+                    SELECT
+                        n.id,
+                        n.parent_id,
+                        n.code,
+                        n.name_de,
+                        n.name_ru,
+                        0 AS depth
+                    FROM provider_taxonomy_nodes n
+                    WHERE n.id = primary_taxonomy.id
+                    UNION ALL
+                    SELECT
+                        parent.id,
+                        parent.parent_id,
+                        parent.code,
+                        parent.name_de,
+                        parent.name_ru,
+                        child.depth + 1
+                    FROM provider_taxonomy_nodes parent
+                    JOIN ancestors child
+                      ON child.parent_id = parent.id
+                )
+                SELECT
+                    COALESCE(
+                        json_agg(
+                            json_build_object(
+                                'id', id,
+                                'code', code,
+                                'name_de', name_de,
+                                'name_ru', name_ru
+                            )
+                            ORDER BY depth DESC
+                        ),
+                        '[]'::json
+                    ) AS path,
+                    string_agg(name_de, ' / ' ORDER BY depth DESC) AS path_label
+                FROM ancestors
+           ) taxonomy_path ON TRUE
            WHERE p.is_active = true
              AND p.provider_type = 'non_medical'
+             AND (
+                ($1::uuid IS NULL AND NULLIF(TRIM($2::text), '') IS NULL)
+                OR EXISTS (
+                    WITH RECURSIVE selected_taxonomy AS (
+                        SELECT n.id
+                        FROM provider_taxonomy_nodes n
+                        WHERE ($1::uuid IS NOT NULL AND n.id = $1)
+                           OR (
+                                NULLIF(TRIM($2::text), '') IS NOT NULL
+                                AND n.code = NULLIF(TRIM($2::text), '')
+                           )
+                        UNION ALL
+                        SELECT child.id
+                        FROM provider_taxonomy_nodes child
+                        JOIN selected_taxonomy parent
+                          ON child.parent_id = parent.id
+                    )
+                    SELECT 1
+                    FROM provider_taxonomy_assignments pta_filter
+                    JOIN selected_taxonomy st
+                      ON st.id = pta_filter.taxonomy_node_id
+                    WHERE pta_filter.provider_id = p.id
+                )
+             )
            ORDER BY concierge_requests_90d DESC, appointments_90d DESC, p.name
            LIMIT 25"#,
     )
+    .bind(taxonomy_filter.node_id)
+    .bind(taxonomy_filter.code_param())
     .fetch_all(&state.db)
     .await?;
 
@@ -3275,6 +3692,15 @@ async fn load_report_non_medical_providers(
                 "name": row.try_get::<String, _>("name").unwrap_or_default(),
                 "address_city": row.try_get::<Option<String>, _>("address_city").unwrap_or_default(),
                 "address_country": row.try_get::<Option<String>, _>("address_country").unwrap_or_default(),
+                "taxonomy_node_id": row.try_get::<Option<uuid::Uuid>, _>("taxonomy_node_id").unwrap_or_default(),
+                "taxonomy_node_code": row.try_get::<Option<String>, _>("taxonomy_node_code").unwrap_or_default(),
+                "taxonomy_node_name_de": row.try_get::<Option<String>, _>("taxonomy_node_name_de").unwrap_or_default(),
+                "taxonomy_node_name_ru": row.try_get::<Option<String>, _>("taxonomy_node_name_ru").unwrap_or_default(),
+                "taxonomy_path": row.try_get::<Value, _>("taxonomy_path").unwrap_or_else(|_| json!([])),
+                "taxonomy_path_label": row.try_get::<Option<String>, _>("taxonomy_path_label").unwrap_or_default(),
+                "taxonomy_attributes": row.try_get::<Value, _>("taxonomy_attributes").unwrap_or_else(|_| json!({})),
+                "internal_rating": row.try_get::<Option<f64>, _>("internal_rating").unwrap_or_default(),
+                "internal_rating_note": row.try_get::<Option<String>, _>("internal_rating_note").unwrap_or_default(),
                 "service_count": row.try_get::<i64, _>("service_count").unwrap_or(0),
                 "active_patients_90d": row.try_get::<i64, _>("active_patients_90d").unwrap_or(0),
                 "appointments_90d": row.try_get::<i64, _>("appointments_90d").unwrap_or(0),
@@ -3649,6 +4075,8 @@ fn export_clinics_csv(rows: Vec<Value>) -> String {
         "clinic".to_string(),
         "city".to_string(),
         "country".to_string(),
+        "taxonomy_code".to_string(),
+        "taxonomy_name".to_string(),
         "doctor_count".to_string(),
         "patients_90d".to_string(),
         "appointments_90d".to_string(),
@@ -3680,6 +4108,15 @@ fn export_clinics_csv(rows: Vec<Value>) -> String {
             row["address_city"].as_str().unwrap_or_default().to_string(),
             row["address_country"]
                 .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            row["taxonomy_node_code"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            row["taxonomy_node_name_de"]
+                .as_str()
+                .or_else(|| row["taxonomy_node_name_ru"].as_str())
                 .unwrap_or_default()
                 .to_string(),
             row["doctor_count"].as_i64().unwrap_or_default().to_string(),
@@ -3836,6 +4273,8 @@ fn export_medical_providers_csv(rows: Vec<Value>) -> String {
         "provider".to_string(),
         "city".to_string(),
         "country".to_string(),
+        "taxonomy_code".to_string(),
+        "taxonomy_name".to_string(),
         "active_patients_90d".to_string(),
         "appointments_90d".to_string(),
         "active_orders".to_string(),
@@ -3887,6 +4326,15 @@ fn export_medical_providers_csv(rows: Vec<Value>) -> String {
                 .as_str()
                 .unwrap_or_default()
                 .to_string(),
+            row["taxonomy_node_code"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            row["taxonomy_node_name_de"]
+                .as_str()
+                .or_else(|| row["taxonomy_node_name_ru"].as_str())
+                .unwrap_or_default()
+                .to_string(),
             row["active_patients_90d"]
                 .as_i64()
                 .unwrap_or_default()
@@ -3927,6 +4375,8 @@ fn export_provider_costs_csv(rows: Vec<Value>) -> String {
         "service".to_string(),
         "city".to_string(),
         "country".to_string(),
+        "taxonomy_code".to_string(),
+        "taxonomy_name".to_string(),
         "sample_count".to_string(),
         "first_recorded_at".to_string(),
         "last_recorded_at".to_string(),
@@ -3974,6 +4424,15 @@ fn export_provider_costs_csv(rows: Vec<Value>) -> String {
                 .as_str()
                 .unwrap_or_default()
                 .to_string(),
+            row["taxonomy_node_code"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            row["taxonomy_node_name_de"]
+                .as_str()
+                .or_else(|| row["taxonomy_node_name_ru"].as_str())
+                .unwrap_or_default()
+                .to_string(),
             row["sample_count"].as_i64().unwrap_or_default().to_string(),
             row["first_recorded_at"]
                 .as_str()
@@ -4014,6 +4473,30 @@ fn export_provider_costs_csv(rows: Vec<Value>) -> String {
     lines.join("\n")
 }
 
+fn report_specializations_label(row: &Value) -> String {
+    let mut labels: Vec<String> = Vec::new();
+    if let Some(items) = row["specializations"].as_array() {
+        for item in items {
+            let label = item["name_de"]
+                .as_str()
+                .or_else(|| item["name_ru"].as_str())
+                .or_else(|| item["name_en"].as_str())
+                .or_else(|| item["code"].as_str())
+                .unwrap_or_default()
+                .trim();
+            if label.is_empty() || labels.iter().any(|existing| existing.as_str() == label) {
+                continue;
+            }
+            labels.push(label.to_string());
+        }
+    }
+    if labels.is_empty() {
+        row["fachbereich"].as_str().unwrap_or_default().to_string()
+    } else {
+        labels.join(", ")
+    }
+}
+
 fn export_doctors_csv(rows: Vec<Value>) -> String {
     let mut lines = vec![csv_row(&[
         "clinic".to_string(),
@@ -4022,6 +4505,8 @@ fn export_doctors_csv(rows: Vec<Value>) -> String {
         "specialty".to_string(),
         "city".to_string(),
         "country".to_string(),
+        "taxonomy_code".to_string(),
+        "taxonomy_name".to_string(),
         "patients_90d".to_string(),
         "appointments_90d".to_string(),
         "active_orders".to_string(),
@@ -4055,10 +4540,19 @@ fn export_doctors_csv(rows: Vec<Value>) -> String {
                 .to_string(),
             row["name"].as_str().unwrap_or_default().to_string(),
             row["title"].as_str().unwrap_or_default().to_string(),
-            row["fachbereich"].as_str().unwrap_or_default().to_string(),
+            report_specializations_label(&row),
             row["address_city"].as_str().unwrap_or_default().to_string(),
             row["address_country"]
                 .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            row["taxonomy_node_code"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            row["taxonomy_node_name_de"]
+                .as_str()
+                .or_else(|| row["taxonomy_node_name_ru"].as_str())
                 .unwrap_or_default()
                 .to_string(),
             row["active_patients_90d"]
@@ -4164,6 +4658,10 @@ fn export_non_medical_providers_csv(rows: Vec<Value>) -> String {
         "provider".to_string(),
         "city".to_string(),
         "country".to_string(),
+        "taxonomy_code".to_string(),
+        "taxonomy_path".to_string(),
+        "internal_rating".to_string(),
+        "taxonomy_attributes".to_string(),
         "service_count".to_string(),
         "service_focus".to_string(),
         "patients_90d".to_string(),
@@ -4189,6 +4687,11 @@ fn export_non_medical_providers_csv(rows: Vec<Value>) -> String {
                     .join(" | ")
             })
             .unwrap_or_default();
+        let taxonomy_attributes = row["taxonomy_attributes"]
+            .as_object()
+            .filter(|attributes| !attributes.is_empty())
+            .map(|_| row["taxonomy_attributes"].to_string())
+            .unwrap_or_default();
 
         lines.push(csv_row(&[
             row["name"].as_str().unwrap_or_default().to_string(),
@@ -4197,6 +4700,19 @@ fn export_non_medical_providers_csv(rows: Vec<Value>) -> String {
                 .as_str()
                 .unwrap_or_default()
                 .to_string(),
+            row["taxonomy_node_code"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            row["taxonomy_path_label"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            row["internal_rating"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
+            taxonomy_attributes,
             row["service_count"]
                 .as_i64()
                 .unwrap_or_default()
@@ -5188,12 +5704,38 @@ async fn load_top_providers(state: &AppState, clause: &str) -> Result<Vec<Value>
         r#"SELECT
                 p.id::text AS id,
                 p.name AS name,
+                p.provider_type,
+                primary_taxonomy.id AS taxonomy_node_id,
+                primary_taxonomy.code AS taxonomy_node_code,
+                primary_taxonomy.name_de AS taxonomy_node_name_de,
+                primary_taxonomy.name_ru AS taxonomy_node_name_ru,
                 COUNT(DISTINCT a.patient_id)::bigint AS patient_count,
                 COUNT(a.id)::bigint AS appointment_count
            FROM providers p
+           LEFT JOIN LATERAL (
+                SELECT
+                    n.id,
+                    n.code,
+                    n.name_de,
+                    n.name_ru
+                FROM provider_taxonomy_assignments pta
+                JOIN provider_taxonomy_nodes n
+                  ON n.id = pta.taxonomy_node_id
+                WHERE pta.provider_id = p.id
+                  AND n.is_active = TRUE
+                ORDER BY pta.is_primary DESC, n.sort_order, n.name_de
+                LIMIT 1
+           ) primary_taxonomy ON TRUE
            JOIN appointments a ON a.provider_id = p.id
            WHERE 1=1 {clause}
-           GROUP BY p.id, p.name
+           GROUP BY
+                p.id,
+                p.name,
+                p.provider_type,
+                primary_taxonomy.id,
+                primary_taxonomy.code,
+                primary_taxonomy.name_de,
+                primary_taxonomy.name_ru
            ORDER BY appointment_count DESC, patient_count DESC
            LIMIT 10"#
     );
@@ -5204,6 +5746,11 @@ async fn load_top_providers(state: &AppState, clause: &str) -> Result<Vec<Value>
             json!({
                 "id": r.try_get::<String, _>("id").unwrap_or_default(),
                 "name": r.try_get::<String, _>("name").unwrap_or_default(),
+                "provider_type": r.try_get::<String, _>("provider_type").unwrap_or_default(),
+                "taxonomy_node_id": r.try_get::<Option<uuid::Uuid>, _>("taxonomy_node_id").unwrap_or_default(),
+                "taxonomy_node_code": r.try_get::<Option<String>, _>("taxonomy_node_code").unwrap_or_default(),
+                "taxonomy_node_name_de": r.try_get::<Option<String>, _>("taxonomy_node_name_de").unwrap_or_default(),
+                "taxonomy_node_name_ru": r.try_get::<Option<String>, _>("taxonomy_node_name_ru").unwrap_or_default(),
                 "patient_count": r.try_get::<i64, _>("patient_count").unwrap_or(0),
                 "appointment_count": r.try_get::<i64, _>("appointment_count").unwrap_or(0),
             })

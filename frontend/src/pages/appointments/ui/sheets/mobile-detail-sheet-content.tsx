@@ -26,6 +26,7 @@ import type {
   StaffOption,
   TaskEntry,
 } from "@/pages/appointments/model/types";
+import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 import { MemoizedAppointmentAttentionSection } from "@/pages/appointments/ui/sections/attention-section";
 import { MemoizedAppointmentBillingHandoffSection } from "@/pages/appointments/ui/sections/billing-handoff-section";
 import {
@@ -65,6 +66,7 @@ export type AppointmentMobileDetailSheetContentProps = {
   timelineEvents: AppointmentTimelineEvent[];
   appointments: AppointmentListItem[];
   providers: ProviderSummary[];
+  taxonomyNodes: ProviderTaxonomyNode[];
   staff: StaffOption[];
   interpreters: InterpreterOption[];
   permissions: AppointmentPermissions;
@@ -132,6 +134,7 @@ function useAppointmentMobileDetailSheetContentContent({
   timelineEvents,
   appointments,
   providers,
+  taxonomyNodes,
   staff,
   interpreters,
   permissions,
@@ -228,6 +231,7 @@ function useAppointmentMobileDetailSheetContentContent({
                   detail={detail}
                   appointments={appointments}
                   providers={providers}
+                  taxonomyNodes={taxonomyNodes}
                   staff={staff}
                   interpreters={interpreters}
                   permissions={permissions}
@@ -267,6 +271,7 @@ function useAppointmentMobileDetailSheetContentContent({
                   detail={detail}
                   appointments={appointments}
                   providers={providers}
+                  taxonomyNodes={taxonomyNodes}
                   staff={staff}
                   interpreters={interpreters}
                   defaultReminderUserId={detailDefaultAssigneeId}

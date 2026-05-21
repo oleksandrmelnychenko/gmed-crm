@@ -32,7 +32,7 @@ import {
   type StatusTone,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
-import { useLang } from "@/lib/i18n";
+import { useLang, type Lang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import {
   cancelPortalService,
@@ -47,10 +47,13 @@ import {
   portalStatusLabel,
 } from "@/pages/patients/model/portal-shared";
 import type { PortalConciergeServiceItem } from "@/pages/patients/model/portal-shared";
+import { fetchProviderTaxonomy } from "@/pages/providers/data/provider-api";
+import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 import { cn } from "@/lib/utils";
 
 type ServiceRequestFormState = {
   serviceKind: string;
+  taxonomyNodeId: string;
   title: string;
   vendorName: string;
   vendorContact: string;
@@ -63,6 +66,7 @@ type ServiceRequestFormState = {
 function blankServiceRequestForm(): ServiceRequestFormState {
   return {
     serviceKind: "hotel",
+    taxonomyNodeId: "",
     title: "",
     vendorName: "",
     vendorContact: "",
@@ -75,6 +79,7 @@ function blankServiceRequestForm(): ServiceRequestFormState {
 
 type PatientServicesState = {
   services: PortalConciergeServiceItem[];
+  taxonomyLeaves: ProviderTaxonomyNode[];
   loading: boolean;
   refreshing: boolean;
   error: string;
@@ -103,6 +108,7 @@ function patientServicesReducer(
 function createPatientServicesState(): PatientServicesState {
   return {
     services: [],
+    taxonomyLeaves: [],
     loading: true,
     refreshing: false,
     error: "",
@@ -131,6 +137,20 @@ function serviceStatusBadgeTone(status: string): StatusTone {
   return "warning";
 }
 
+function taxonomyNodeLabel(node: ProviderTaxonomyNode, lang: Lang) {
+  if (lang === "ru") {
+    return node.name_ru || node.name_de || node.name_en || node.code;
+  }
+  return node.name_de || node.name_en || node.name_ru || node.code;
+}
+
+function portalServiceTaxonomyLabel(item: PortalConciergeServiceItem, lang: Lang) {
+  if (lang === "ru") {
+    return item.taxonomy_node_name_ru || item.taxonomy_node_name_de || item.taxonomy_node_code || "";
+  }
+  return item.taxonomy_node_name_de || item.taxonomy_node_name_ru || item.taxonomy_node_code || "";
+}
+
 const PORTAL_SERVICE_REALTIME_EVENTS = [
   "concierge_service.created",
   "concierge_service.updated",
@@ -140,6 +160,8 @@ const PORTAL_SERVICE_REALTIME_EVENTS = [
 
 type PatientServicesRequestSectionProps = {
   form: ServiceRequestFormState;
+  lang: Lang;
+  taxonomyLeaves: ProviderTaxonomyNode[];
   requestBusy: boolean;
   requestError: string;
   t: Record<string, string>;
@@ -149,6 +171,8 @@ type PatientServicesRequestSectionProps = {
 
 function PatientServicesRequestSection({
   form,
+  lang,
+  taxonomyLeaves,
   requestBusy,
   requestError,
   t,
@@ -181,6 +205,26 @@ function PatientServicesRequestSection({
             <option value="chauffeur">{t.services_type_chauffeur}</option>
             <option value="translation_support">{t.services_type_translation_support}</option>
             <option value="other">{t.services_type_other}</option>
+          </NativeComboboxSelect>
+        </Field>
+
+        <Field label={t.services_category}>
+          <NativeComboboxSelect
+            value={form.taxonomyNodeId}
+            onChange={(event) =>
+              onFormChange((current) => ({
+                ...current,
+                taxonomyNodeId: event.target.value ?? "",
+              }))
+            }
+            className={selectClass}
+          >
+            <option value="">{t.common_not_set}</option>
+            {taxonomyLeaves.map((node) => (
+              <option key={node.id} value={node.id}>
+                {taxonomyNodeLabel(node, lang)}
+              </option>
+            ))}
           </NativeComboboxSelect>
         </Field>
 
@@ -276,7 +320,7 @@ function PatientServicesRequestSection({
 }
 
 export function PatientServicesPage() {
-  const { t } = useLang();
+  const { lang, t } = useLang();
   const [pageState, dispatchPageState] = useReducer(
     patientServicesReducer,
     undefined,
@@ -284,6 +328,7 @@ export function PatientServicesPage() {
   );
   const {
     services,
+    taxonomyLeaves,
     loading,
     refreshing,
     error,
@@ -324,11 +369,15 @@ export function PatientServicesPage() {
       dispatchPageState({ refreshing: !initialLoad });
 
       try {
-        const rows = await fetchPortalServices();
+        const [rows, taxonomy] = await Promise.all([
+          fetchPortalServices(),
+          fetchProviderTaxonomy("non_medical"),
+        ]);
         if (cancelled) return;
         startTransition(() => {
           dispatchPageState({
             services: rows,
+            taxonomyLeaves: taxonomy.leaves.filter((node) => node.is_active && node.is_assignable),
             error: "",
             loading: false,
             refreshing: false,
@@ -373,6 +422,7 @@ export function PatientServicesPage() {
     try {
       await createPortalServiceRequest({
         service_kind: form.serviceKind,
+        taxonomy_node_id: form.taxonomyNodeId || undefined,
         title: form.title,
         vendor_name: form.vendorName || undefined,
         vendor_contact: form.vendorContact || undefined,
@@ -476,6 +526,11 @@ export function PatientServicesPage() {
                         <CountBadge>
                           {conciergeServiceKindLabel(item.service_kind)}
                         </CountBadge>
+                        {portalServiceTaxonomyLabel(item, lang) ? (
+                          <CountBadge>
+                            {portalServiceTaxonomyLabel(item, lang)}
+                          </CountBadge>
+                        ) : null}
                         <CountBadge>
                           {conciergeServiceSourceLabel(item.request_source)}
                         </CountBadge>
@@ -528,6 +583,8 @@ export function PatientServicesPage() {
 
         <PatientServicesRequestSection
           form={form}
+          lang={lang}
+          taxonomyLeaves={taxonomyLeaves}
           requestBusy={requestBusy}
           requestError={requestError}
           t={t as unknown as Record<string, string>}

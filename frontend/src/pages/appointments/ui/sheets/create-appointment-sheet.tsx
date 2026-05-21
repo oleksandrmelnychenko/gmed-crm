@@ -42,6 +42,11 @@ import {
 } from "@/pages/appointments/model/labels";
 import { buildConflictQuery } from "@/pages/appointments/model/query-builders";
 import { buildLocalScheduleWarnings, buildScheduleNotice } from "@/pages/appointments/model/schedule-warnings";
+import {
+  filterProvidersForAppointmentScope,
+  providerSelectionFitsAppointmentScope,
+  providerTaxonomyTreeOptions,
+} from "@/pages/appointments/model/provider-taxonomy";
 import type {
   AppointmentCarePathKind,
   AppointmentFormState,
@@ -55,6 +60,7 @@ import type {
   ProviderSummary,
   StaffOption,
 } from "@/pages/appointments/model/types";
+import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 import { parsePositiveIntegerInput } from "@/pages/appointments/model/workflow-helpers";
 import {
   AppointmentEditorSheet,
@@ -76,6 +82,7 @@ export type CreateAppointmentSheetProps = {
   appointments: AppointmentListItem[];
   patients: PatientSummary[];
   providers: ProviderSummary[];
+  taxonomyNodes: ProviderTaxonomyNode[];
   interpreters: InterpreterOption[];
   staff: StaffOption[];
   userId?: string;
@@ -112,13 +119,14 @@ function useCreateAppointmentSheetContent({
   appointments,
   patients,
   providers,
+  taxonomyNodes,
   interpreters,
   staff,
   userId,
   onOpenChange,
   onCreated,
 }: CreateAppointmentSheetProps) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const interpreterFieldLabel =
     tr.role_interpreter ??
@@ -193,6 +201,43 @@ function useCreateAppointmentSheetContent({
     () => providers.find((provider) => provider.id === form.providerId) ?? null,
     [form.providerId, providers],
   );
+  const providerTaxonomyOptions = useMemo(
+    () => providerTaxonomyTreeOptions(taxonomyNodes, form.appointmentType, lang),
+    [form.appointmentType, lang, taxonomyNodes],
+  );
+  const providerOptions = useMemo(
+    () =>
+      filterProvidersForAppointmentScope(
+        providers,
+        form.appointmentType,
+        form.providerTaxonomyNodeId,
+      ),
+    [form.appointmentType, form.providerTaxonomyNodeId, providers],
+  );
+
+  useEffect(() => {
+    if (
+      providerSelectionFitsAppointmentScope(
+        providers,
+        form.providerId,
+        form.appointmentType,
+        form.providerTaxonomyNodeId,
+      )
+    ) {
+      return;
+    }
+
+    setForm((current) => ({
+      ...current,
+      providerId: "",
+      doctorId: "",
+    }));
+  }, [
+    form.appointmentType,
+    form.providerId,
+    form.providerTaxonomyNodeId,
+    providers,
+  ]);
   const conflictQuery = useMemo(() => {
     if (!open || !form.patientId || !form.date) return "";
     return buildConflictQuery(
@@ -425,6 +470,7 @@ function useCreateAppointmentSheetContent({
                             event.target.value as AppointmentKind,
                           carePathKind:
                             event.target.value === "medical" ? current.carePathKind : "regular",
+                          providerTaxonomyNodeId: "",
                           providerId: event.target.value === "internal" ? "" : current.providerId,
                           doctorId: event.target.value === "internal" ? "" : current.doctorId,
                           skipMedicalProviderBinding:
@@ -629,7 +675,44 @@ function useCreateAppointmentSheetContent({
         </section>
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
                 {sectionTitle(appointmentText("appointments_provider_and_doctor"))}
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <Field compact label={t.appointments_provider_category}>
+                    <NativeComboboxSelect
+                      value={form.providerTaxonomyNodeId}
+                      onChange={(event) => {
+                        const providerTaxonomyNodeId = event.target.value;
+                        setForm((current) => ({
+                          ...current,
+                          providerTaxonomyNodeId,
+                          providerId: providerSelectionFitsAppointmentScope(
+                            providers,
+                            current.providerId,
+                            current.appointmentType,
+                            providerTaxonomyNodeId,
+                          )
+                            ? current.providerId
+                            : "",
+                          doctorId: providerSelectionFitsAppointmentScope(
+                            providers,
+                            current.providerId,
+                            current.appointmentType,
+                            providerTaxonomyNodeId,
+                          )
+                            ? current.doctorId
+                            : "",
+                        }));
+                      }}
+                      disabled={form.appointmentType === "internal" || providerTaxonomyOptions.length === 0}
+                      className={createSheetSelectClassName}
+                    >
+                      <option value="">{t.providers_all}</option>
+                      {providerTaxonomyOptions.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
                   <Field compact label={t.common_provider}>
                     <NativeComboboxSelect
                       value={form.providerId}
@@ -653,7 +736,7 @@ function useCreateAppointmentSheetContent({
                       className={createSheetSelectClassName}
                     >
                       <option value="">{t.common_not_set}</option>
-                      {providers.map((provider) => (
+                      {providerOptions.map((provider) => (
                         <option key={provider.id} value={provider.id}>
                           {providerLabel(provider)}
                         </option>
@@ -675,7 +758,7 @@ function useCreateAppointmentSheetContent({
                       <option value="">{t.common_not_set}</option>
                       {doctors.map((doctor) => (
                         <option key={doctor.id} value={doctor.id}>
-                          {doctorLabel(doctor)}
+                          {doctorLabel(doctor, lang)}
                         </option>
                       ))}
                     </NativeComboboxSelect>
@@ -828,6 +911,7 @@ export const MemoizedCreateAppointmentSheet = memo(
     prev.appointments === next.appointments &&
     prev.patients === next.patients &&
     prev.providers === next.providers &&
+    prev.taxonomyNodes === next.taxonomyNodes &&
     prev.interpreters === next.interpreters &&
     prev.staff === next.staff &&
     prev.userId === next.userId,

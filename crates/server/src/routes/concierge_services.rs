@@ -48,6 +48,7 @@ struct ListConciergeServicesQuery {
     provider_id: Option<Uuid>,
     assigned_concierge_id: Option<Uuid>,
     service_kind: Option<String>,
+    taxonomy_node_id: Option<Uuid>,
     status: Option<String>,
     billing_status: Option<String>,
     mine_only: Option<bool>,
@@ -60,6 +61,7 @@ struct CreateConciergeServiceRequest {
     provider_id: Option<Uuid>,
     assigned_concierge_id: Option<Uuid>,
     service_kind: Option<String>,
+    taxonomy_node_id: Option<Uuid>,
     title: String,
     booking_reference: Option<String>,
     vendor_name: Option<String>,
@@ -78,6 +80,7 @@ struct UpdateConciergeServiceRequest {
     provider_id: Option<Uuid>,
     assigned_concierge_id: Option<Uuid>,
     service_kind: Option<String>,
+    taxonomy_node_id: Option<Uuid>,
     title: Option<String>,
     status: Option<String>,
     billing_status: Option<String>,
@@ -96,6 +99,7 @@ struct UpdateConciergeServiceRequest {
 #[derive(Deserialize)]
 struct CreateMyConciergeServiceRequest {
     service_kind: String,
+    taxonomy_node_id: Option<Uuid>,
     title: String,
     vendor_name: Option<String>,
     vendor_contact: Option<String>,
@@ -140,15 +144,16 @@ pub(crate) async fn bootstrap_default_service(
     let assigned_concierge_id = load_first_assigned_concierge_id(state, ctx.patient_id).await?;
     let title = ctx.title.clone();
     let service_kind = derive_service_kind(ctx.category.as_deref(), &title);
+    let taxonomy_node_id = load_primary_provider_taxonomy_node_id(state, ctx.provider_id).await?;
 
     let service_id = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO concierge_services (
-                patient_id, appointment_id, provider_id, assigned_concierge_id, service_kind,
+                patient_id, appointment_id, provider_id, assigned_concierge_id, service_kind, taxonomy_node_id,
                 title, status, starts_at, ends_at, billing_status, service_notes, request_source,
                 created_by
            ) VALUES (
-                $1, $2, $3, $4, $5,
-                $6, 'planned', $7, $8, 'draft', $9, 'appointment_bootstrap', $10
+                $1, $2, $3, $4, $5, $6,
+                $7, 'planned', $8, $9, 'draft', $10, 'appointment_bootstrap', $11
            )
            RETURNING id"#,
     )
@@ -157,6 +162,7 @@ pub(crate) async fn bootstrap_default_service(
     .bind(ctx.provider_id)
     .bind(assigned_concierge_id)
     .bind(service_kind.clone())
+    .bind(taxonomy_node_id)
     .bind(title.clone())
     .bind(ctx.starts_at)
     .bind(ctx.ends_at)
@@ -211,14 +217,16 @@ pub(crate) async fn mark_services_ready_for_billing(
     if existing_count == 0 {
         let assigned_concierge_id = load_first_assigned_concierge_id(state, ctx.patient_id).await?;
         let service_kind = derive_service_kind(ctx.category.as_deref(), &ctx.title);
+        let taxonomy_node_id =
+            load_primary_provider_taxonomy_node_id(state, ctx.provider_id).await?;
         let service_id = sqlx::query_scalar::<_, Uuid>(
             r#"INSERT INTO concierge_services (
-                    patient_id, appointment_id, provider_id, assigned_concierge_id, service_kind,
+                    patient_id, appointment_id, provider_id, assigned_concierge_id, service_kind, taxonomy_node_id,
                     title, status, starts_at, ends_at, billing_status, service_notes, completed_at,
                     request_source, created_by
                ) VALUES (
-                    $1, $2, $3, $4, $5,
-                    $6, 'completed', $7, $8, 'ready', $9, now(), 'appointment_bootstrap', $10
+                    $1, $2, $3, $4, $5, $6,
+                    $7, 'completed', $8, $9, 'ready', $10, now(), 'appointment_bootstrap', $11
                )
                RETURNING id"#,
         )
@@ -227,6 +235,7 @@ pub(crate) async fn mark_services_ready_for_billing(
         .bind(ctx.provider_id)
         .bind(assigned_concierge_id)
         .bind(service_kind.clone())
+        .bind(taxonomy_node_id)
         .bind(ctx.title.clone())
         .bind(ctx.starts_at)
         .bind(ctx.ends_at)
@@ -330,17 +339,20 @@ async fn list_my_concierge_services(
 
     match sqlx::query(
         r#"SELECT cs.id, cs.patient_id, cs.appointment_id, cs.provider_id, cs.assigned_concierge_id,
-                  cs.service_kind, cs.title, cs.status, cs.booking_reference, cs.vendor_name,
+                  cs.service_kind, cs.taxonomy_node_id, cs.title, cs.status, cs.booking_reference, cs.vendor_name,
                   cs.vendor_contact, cs.starts_at, cs.ends_at, cs.cost_estimate, cs.actual_cost,
                   cs.currency, cs.billing_status, cs.service_notes, cs.billing_notes,
                   cs.completed_at, cs.billed_at, cs.created_at, cs.updated_at, cs.request_source,
                   p.patient_id AS patient_code, p.first_name, p.last_name,
                   pr.name AS provider_name,
+                  ptn.code AS taxonomy_node_code, ptn.name_de AS taxonomy_node_name_de,
+                  ptn.name_ru AS taxonomy_node_name_ru,
                   u.name AS assigned_concierge_name,
                   a.title AS appointment_title
            FROM concierge_services cs
            JOIN patients p ON p.id = cs.patient_id
            LEFT JOIN providers pr ON pr.id = cs.provider_id
+           LEFT JOIN provider_taxonomy_nodes ptn ON ptn.id = cs.taxonomy_node_id
            LEFT JOIN users u ON u.id = cs.assigned_concierge_id
            LEFT JOIN appointments a ON a.id = cs.appointment_id
            WHERE cs.patient_id = $1
@@ -424,24 +436,30 @@ async fn create_my_concierge_service(
     let normalized_vendor_name = normalize_optional_text(body.vendor_name.as_deref());
     let normalized_vendor_contact = normalize_optional_text(body.vendor_contact.as_deref());
     let normalized_notes = normalize_optional_text(body.service_notes.as_deref());
+    if let Some(taxonomy_node_id) = body.taxonomy_node_id
+        && let Err(resp) = validate_non_medical_taxonomy_node(&state, taxonomy_node_id).await
+    {
+        return resp;
+    }
 
     let service_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO concierge_services (
-                patient_id, appointment_id, provider_id, assigned_concierge_id, service_kind,
+                patient_id, appointment_id, provider_id, assigned_concierge_id, service_kind, taxonomy_node_id,
                 title, status, booking_reference, vendor_name, vendor_contact,
                 starts_at, ends_at, cost_estimate, actual_cost, currency,
                 billing_status, service_notes, billing_notes, request_source, created_by
            ) VALUES (
-                $1, NULL, NULL, $2, $3,
-                $4, 'planned', NULL, $5, $6,
-                $7, $8, $9, NULL, $10,
-                'draft', $11, NULL, 'patient_portal', $12
+                $1, NULL, NULL, $2, $3, $4,
+                $5, 'planned', NULL, $6, $7,
+                $8, $9, $10, NULL, $11,
+                'draft', $12, NULL, 'patient_portal', $13
            )
            RETURNING id"#,
     )
     .bind(patient_id)
     .bind(assigned_concierge_id)
     .bind(service_kind.as_str())
+    .bind(body.taxonomy_node_id)
     .bind(body.title.trim())
     .bind(normalized_vendor_name.clone())
     .bind(normalized_vendor_contact.clone())
@@ -472,6 +490,7 @@ async fn create_my_concierge_service(
         serde_json::json!({
             "patient_id": patient_id,
             "service_kind": service_kind.clone(),
+            "taxonomy_node_id": body.taxonomy_node_id,
             "assigned_concierge_id": assigned_concierge_id,
             "request_source": "patient_portal",
             "created_via": "patient_self_service",
@@ -699,17 +718,20 @@ async fn list_concierge_services(
 
     let rows = match sqlx::query(
         r#"SELECT cs.id, cs.patient_id, cs.appointment_id, cs.provider_id, cs.assigned_concierge_id,
-                  cs.service_kind, cs.title, cs.status, cs.booking_reference, cs.vendor_name,
+                  cs.service_kind, cs.taxonomy_node_id, cs.title, cs.status, cs.booking_reference, cs.vendor_name,
                   cs.vendor_contact, cs.starts_at, cs.ends_at, cs.cost_estimate, cs.actual_cost,
                   cs.currency, cs.billing_status, cs.service_notes, cs.billing_notes, cs.request_source,
                   cs.completed_at, cs.billed_at, cs.created_at, cs.updated_at,
                   p.patient_id AS patient_code, p.first_name, p.last_name,
                   pr.name AS provider_name,
+                  ptn.code AS taxonomy_node_code, ptn.name_de AS taxonomy_node_name_de,
+                  ptn.name_ru AS taxonomy_node_name_ru,
                   u.name AS assigned_concierge_name,
                   a.title AS appointment_title
            FROM concierge_services cs
            JOIN patients p ON p.id = cs.patient_id
            LEFT JOIN providers pr ON pr.id = cs.provider_id
+           LEFT JOIN provider_taxonomy_nodes ptn ON ptn.id = cs.taxonomy_node_id
            LEFT JOIN users u ON u.id = cs.assigned_concierge_id
            LEFT JOIN appointments a ON a.id = cs.appointment_id
            WHERE ($1::text = '%%'
@@ -718,6 +740,9 @@ async fn list_concierge_services(
                   OR COALESCE(cs.vendor_name, '') ILIKE $1
                   OR COALESCE(cs.vendor_contact, '') ILIKE $1
                   OR COALESCE(pr.name, '') ILIKE $1
+                  OR COALESCE(ptn.code, '') ILIKE $1
+                  OR COALESCE(ptn.name_de, '') ILIKE $1
+                  OR COALESCE(ptn.name_ru, '') ILIKE $1
                   OR COALESCE(a.title, '') ILIKE $1
                   OR p.first_name ILIKE $1
                   OR p.last_name ILIKE $1
@@ -729,6 +754,7 @@ async fn list_concierge_services(
              AND ($6::text IS NULL OR cs.service_kind = $6)
              AND ($7::text IS NULL OR cs.status = $7)
              AND ($8::text IS NULL OR cs.billing_status = $8)
+             AND ($9::uuid IS NULL OR cs.taxonomy_node_id = $9)
            ORDER BY COALESCE(cs.starts_at, cs.created_at) DESC, cs.created_at DESC
            LIMIT 200"#,
     )
@@ -740,6 +766,7 @@ async fn list_concierge_services(
     .bind(query.service_kind)
     .bind(query.status)
     .bind(query.billing_status)
+    .bind(query.taxonomy_node_id)
     .fetch_all(&state.db)
     .await
     {
@@ -860,6 +887,18 @@ async fn create_concierge_service(
         }
         (None, some_provider) => some_provider,
     };
+    let taxonomy_node_id = match body.taxonomy_node_id {
+        Some(taxonomy_node_id) => {
+            if let Err(resp) = validate_non_medical_taxonomy_node(&state, taxonomy_node_id).await {
+                return resp;
+            }
+            Some(taxonomy_node_id)
+        }
+        None => match load_primary_provider_taxonomy_node_id(&state, provider_id).await {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        },
+    };
 
     let assigned_concierge_id = match body.assigned_concierge_id {
         Some(user_id) => match load_active_concierge_role(&state, user_id).await {
@@ -921,15 +960,15 @@ async fn create_concierge_service(
 
     match sqlx::query(
         r#"INSERT INTO concierge_services (
-                patient_id, appointment_id, provider_id, assigned_concierge_id, service_kind,
+                patient_id, appointment_id, provider_id, assigned_concierge_id, service_kind, taxonomy_node_id,
                 title, status, booking_reference, vendor_name, vendor_contact,
                 starts_at, ends_at, cost_estimate, actual_cost, currency,
                 billing_status, service_notes, billing_notes, request_source, created_by
            ) VALUES (
-                $1, $2, $3, $4, $5,
-                $6, 'planned', $7, $8, $9,
-                $10, $11, $12, $13, $14,
-                'draft', $15, $16, 'staff', $17
+                $1, $2, $3, $4, $5, $6,
+                $7, 'planned', $8, $9, $10,
+                $11, $12, $13, $14, $15,
+                'draft', $16, $17, 'staff', $18
            ) RETURNING id"#,
     )
     .bind(body.patient_id)
@@ -937,6 +976,7 @@ async fn create_concierge_service(
     .bind(provider_id)
     .bind(assigned_concierge_id)
     .bind(service_kind.clone())
+    .bind(taxonomy_node_id)
     .bind(body.title.trim())
     .bind(body.booking_reference)
     .bind(body.vendor_name)
@@ -1065,6 +1105,11 @@ async fn update_concierge_service(
     {
         return resp;
     }
+    if let Some(taxonomy_node_id) = body.taxonomy_node_id
+        && let Err(resp) = validate_non_medical_taxonomy_node(&state, taxonomy_node_id).await
+    {
+        return resp;
+    }
     if let Some(assignee_id) = body.assigned_concierge_id {
         match load_active_concierge_role(&state, assignee_id).await {
             Ok(Some(_)) => {}
@@ -1146,7 +1191,8 @@ async fn update_concierge_service(
                service_notes = COALESCE($16, service_notes),
                billing_notes = COALESCE($17, billing_notes),
                completed_at = COALESCE($18, completed_at),
-               billed_at = COALESCE($19, billed_at)
+               billed_at = COALESCE($19, billed_at),
+               taxonomy_node_id = COALESCE($20, taxonomy_node_id)
            WHERE id = $1"#,
     )
     .bind(service_id)
@@ -1168,6 +1214,7 @@ async fn update_concierge_service(
     .bind(body.billing_notes)
     .bind(completed_at)
     .bind(billed_at)
+    .bind(body.taxonomy_node_id)
     .execute(&state.db)
     .await
     {
@@ -1222,17 +1269,20 @@ async fn load_service_row(
 ) -> Result<Option<sqlx::postgres::PgRow>, axum::response::Response> {
     sqlx::query(
         r#"SELECT cs.id, cs.patient_id, cs.appointment_id, cs.provider_id, cs.assigned_concierge_id,
-                  cs.service_kind, cs.title, cs.status, cs.booking_reference, cs.vendor_name,
+                  cs.service_kind, cs.taxonomy_node_id, cs.title, cs.status, cs.booking_reference, cs.vendor_name,
                   cs.vendor_contact, cs.starts_at, cs.ends_at, cs.cost_estimate, cs.actual_cost,
                   cs.currency, cs.billing_status, cs.service_notes, cs.billing_notes, cs.request_source,
                   cs.completed_at, cs.billed_at, cs.created_at, cs.updated_at,
                   p.patient_id AS patient_code, p.first_name, p.last_name,
                   pr.name AS provider_name,
+                  ptn.code AS taxonomy_node_code, ptn.name_de AS taxonomy_node_name_de,
+                  ptn.name_ru AS taxonomy_node_name_ru,
                   u.name AS assigned_concierge_name,
                   a.title AS appointment_title
            FROM concierge_services cs
            JOIN patients p ON p.id = cs.patient_id
            LEFT JOIN providers pr ON pr.id = cs.provider_id
+           LEFT JOIN provider_taxonomy_nodes ptn ON ptn.id = cs.taxonomy_node_id
            LEFT JOIN users u ON u.id = cs.assigned_concierge_id
            LEFT JOIN appointments a ON a.id = cs.appointment_id
            WHERE cs.id = $1"#,
@@ -1399,6 +1449,70 @@ async fn validate_non_medical_provider(
     Ok(())
 }
 
+async fn validate_non_medical_taxonomy_node(
+    state: &AppState,
+    taxonomy_node_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    let exists = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS (
+               SELECT 1
+               FROM provider_taxonomy_nodes
+               WHERE id = $1
+                 AND provider_kind = 'non_medical'
+                 AND level = 'type'
+                 AND is_active = true
+           )"#,
+    )
+    .bind(taxonomy_node_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, taxonomy_node_id = %taxonomy_node_id, "Failed to validate taxonomy node");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate taxonomy")
+    })?;
+
+    if exists {
+        Ok(())
+    } else {
+        Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "taxonomy_node_id must reference an active non-medical taxonomy leaf",
+        ))
+    }
+}
+
+async fn load_primary_provider_taxonomy_node_id(
+    state: &AppState,
+    provider_id: Option<Uuid>,
+) -> Result<Option<Uuid>, axum::response::Response> {
+    let Some(provider_id) = provider_id else {
+        return Ok(None);
+    };
+
+    sqlx::query_scalar::<_, Option<Uuid>>(
+        r#"SELECT pta.taxonomy_node_id
+           FROM provider_taxonomy_assignments pta
+           JOIN provider_taxonomy_nodes ptn ON ptn.id = pta.taxonomy_node_id
+           WHERE pta.provider_id = $1
+             AND ptn.provider_kind = 'non_medical'
+             AND ptn.level = 'type'
+             AND ptn.is_active = true
+           ORDER BY pta.is_primary DESC, ptn.sort_order
+           LIMIT 1"#,
+    )
+    .bind(provider_id)
+    .fetch_optional(&state.db)
+    .await
+    .map(|value| value.flatten())
+    .map_err(|e| {
+        tracing::error!(error = %e, provider_id = %provider_id, "Failed to load provider taxonomy node");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load provider taxonomy",
+        )
+    })
+}
+
 #[allow(clippy::result_large_err)]
 fn validate_update_fields_for_role(
     auth: &AuthUser,
@@ -1412,6 +1526,7 @@ fn validate_update_fields_for_role(
         if body.provider_id.is_some()
             || body.assigned_concierge_id.is_some()
             || body.service_kind.is_some()
+            || body.taxonomy_node_id.is_some()
             || body.title.is_some()
             || body.cost_estimate.is_some()
             || body.billing_status.is_some()
@@ -1430,6 +1545,7 @@ fn validate_update_fields_for_role(
         if body.provider_id.is_some()
             || body.assigned_concierge_id.is_some()
             || body.service_kind.is_some()
+            || body.taxonomy_node_id.is_some()
             || body.title.is_some()
             || body.status.is_some()
             || body.booking_reference.is_some()
@@ -1596,6 +1712,10 @@ fn build_portal_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
         "assigned_concierge_name": row.try_get::<Option<String>, _>("assigned_concierge_name").unwrap_or_default(),
         "service_kind": row.try_get::<String, _>("service_kind").unwrap_or_default(),
+        "taxonomy_node_id": row.try_get::<Option<Uuid>, _>("taxonomy_node_id").unwrap_or_default(),
+        "taxonomy_node_code": row.try_get::<Option<String>, _>("taxonomy_node_code").unwrap_or_default(),
+        "taxonomy_node_name_de": row.try_get::<Option<String>, _>("taxonomy_node_name_de").unwrap_or_default(),
+        "taxonomy_node_name_ru": row.try_get::<Option<String>, _>("taxonomy_node_name_ru").unwrap_or_default(),
         "title": row.try_get::<String, _>("title").unwrap_or_default(),
         "status": row.try_get::<String, _>("status").unwrap_or_default(),
         "booking_reference": row.try_get::<Option<String>, _>("booking_reference").unwrap_or_default(),
@@ -1633,6 +1753,10 @@ fn build_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "assigned_concierge_id": row.try_get::<Option<Uuid>, _>("assigned_concierge_id").unwrap_or_default(),
         "assigned_concierge_name": row.try_get::<Option<String>, _>("assigned_concierge_name").unwrap_or_default(),
         "service_kind": row.try_get::<String, _>("service_kind").unwrap_or_default(),
+        "taxonomy_node_id": row.try_get::<Option<Uuid>, _>("taxonomy_node_id").unwrap_or_default(),
+        "taxonomy_node_code": row.try_get::<Option<String>, _>("taxonomy_node_code").unwrap_or_default(),
+        "taxonomy_node_name_de": row.try_get::<Option<String>, _>("taxonomy_node_name_de").unwrap_or_default(),
+        "taxonomy_node_name_ru": row.try_get::<Option<String>, _>("taxonomy_node_name_ru").unwrap_or_default(),
         "title": row.try_get::<String, _>("title").unwrap_or_default(),
         "status": row.try_get::<String, _>("status").unwrap_or_default(),
         "booking_reference": row.try_get::<Option<String>, _>("booking_reference").unwrap_or_default(),

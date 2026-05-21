@@ -69,6 +69,7 @@ export const DEFAULT_FILTERS: OrdersFilters = {
   status: "",
   patientId: "",
   providerId: "",
+  providerTaxonomyNodeId: "",
   doctorId: "",
 };
 

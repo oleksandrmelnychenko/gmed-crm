@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatEnumLabelFromKeys, useLang, type Translations } from "@/lib/i18n";
 import { CASE_SNIPPET_CATEGORY_LABEL_KEYS } from "@/lib/i18n/catalogs/cases-clinical";
+import { doctorSpecialtyLabel, type SpecializationLabelLang } from "@/pages/providers/model/specialization-labels";
 import {
   CASE_TEXT_SNIPPET_PLACEHOLDERS,
   appendSnippetToNarrative,
@@ -29,11 +30,10 @@ import {
   textareaBaseClassName,
 } from "./primitives";
 
-function doctorOptionLabel(doctor: CaseWorkspaceDoctor) {
+function doctorOptionLabel(doctor: CaseWorkspaceDoctor, lang: SpecializationLabelLang) {
   const titlePrefix = doctor.title?.trim() ? `${doctor.title.trim()} ` : "";
-  const specialty = doctor.fachbereich?.trim()
-    ? ` · ${doctor.fachbereich.trim()}`
-    : "";
+  const specialtyLabel = doctorSpecialtyLabel(doctor, lang);
+  const specialty = specialtyLabel ? ` - ${specialtyLabel}` : "";
   return `${doctor.provider_name} | ${titlePrefix}${doctor.name}${specialty}`;
 }
 
@@ -113,7 +113,7 @@ function OverviewSectionForm({
   sectionError,
   saveOverview,
 }: OverviewSectionFormProps) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [form, setForm] = useState<CaseOverviewForm>(() =>
     initialOverviewForm(detail),
   );
@@ -204,7 +204,7 @@ function OverviewSectionForm({
               <option value="">{t.common_not_set}</option>
               {doctors.map((doctor) => (
                 <option key={doctor.id} value={doctor.id}>
-                  {doctorOptionLabel(doctor)}
+                  {doctorOptionLabel(doctor, lang)}
                 </option>
               ))}
             </NativeComboboxSelect>

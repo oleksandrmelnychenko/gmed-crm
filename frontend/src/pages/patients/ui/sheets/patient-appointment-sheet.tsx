@@ -21,6 +21,7 @@ import type {
   DoctorOption,
   ProviderSummary,
 } from "@/pages/appointments/model/types";
+import { doctorSpecialtyLabel, type SpecializationLabelLang } from "@/pages/providers/model/specialization-labels";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 type AppointmentKind = "medical" | "non_medical" | "internal";
@@ -70,10 +71,9 @@ function providerLabel(provider: ProviderSummary) {
     : provider.name;
 }
 
-function doctorLabel(doctor: DoctorOption) {
-  return doctor.fachbereich
-    ? `${doctor.name} (${doctor.fachbereich})`
-    : doctor.name;
+function doctorLabel(doctor: DoctorOption, lang: SpecializationLabelLang) {
+  const specialty = doctorSpecialtyLabel(doctor, lang);
+  return specialty ? `${doctor.name} (${specialty})` : doctor.name;
 }
 
 function todayDateString() {
@@ -243,9 +243,11 @@ function PatientAppointmentScheduleSection({
   setForm,
   t,
   l,
+  lang,
 }: {
   doctors: DoctorOption[];
   form: FormState;
+  lang: SpecializationLabelLang;
   providerOptions: ProviderSummary[];
   providers: ProviderSummary[];
   selectedProvider: ProviderSummary | null;
@@ -340,7 +342,7 @@ function PatientAppointmentScheduleSection({
             <option value="">{t.common_not_set}</option>
             {doctors.map((doctor) => (
               <option key={doctor.id} value={doctor.id}>
-                {doctorLabel(doctor)}
+                {doctorLabel(doctor, lang)}
               </option>
             ))}
           </NativeComboboxSelect>
@@ -441,7 +443,7 @@ function PatientAppointmentSheetContent({
   onOpenChange: (value: boolean) => void;
   onSaved: () => void;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   const [form, setForm] = useState<FormState>(blankForm);
   const [busy, setBusy] = useState(false);
@@ -600,6 +602,7 @@ function PatientAppointmentSheetContent({
         setForm={setForm}
         t={t}
         l={l}
+        lang={lang}
       />
       <PatientAppointmentAdditionalSection form={form} setForm={setForm} l={l} />
     </PatientSheetScaffold>

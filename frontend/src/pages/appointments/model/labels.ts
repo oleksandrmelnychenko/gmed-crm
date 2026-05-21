@@ -8,6 +8,7 @@ import {
   type TranslationKey,
   type Translations,
 } from "@/lib/i18n";
+import { doctorSpecialtyLabel, type SpecializationLabelLang } from "@/pages/providers/model/specialization-labels";
 import type {
   AppointmentCarePathKind,
   AppointmentAttentionReason,
@@ -429,10 +430,9 @@ export function patientName(patient: PatientSummary) {
   return name || patient.patient_id;
 }
 
-export function doctorLabel(doctor: DoctorOption) {
-  return doctor.fachbereich
-    ? `${doctor.name} (${doctor.fachbereich})`
-    : doctor.name;
+export function doctorLabel(doctor: DoctorOption, lang: SpecializationLabelLang = "ru") {
+  const specialty = doctorSpecialtyLabel(doctor, lang);
+  return specialty ? `${doctor.name} (${specialty})` : doctor.name;
 }
 
 export function providerLabel(provider: ProviderSummary) {

@@ -28,6 +28,7 @@ export function blankAppointmentForm(): AppointmentFormState {
   return {
     patientId: "",
     providerId: "",
+    providerTaxonomyNodeId: "",
     doctorId: "",
     ownerUserId: "",
     interpreterId: "",
@@ -57,6 +58,7 @@ export function buildEditAppointmentForm(
   return {
     patientId: detail.patient_id,
     providerId: detail.provider_id ?? "",
+    providerTaxonomyNodeId: "",
     doctorId: detail.doctor_id ?? "",
     ownerUserId: detail.owner_user_id ?? "",
     interpreterId: detail.interpreter_id ?? "",
@@ -102,6 +104,7 @@ export function buildFollowUpVisitForm(
   return {
     patientId: detail.patient_id,
     providerId: detail.provider_id ?? "",
+    providerTaxonomyNodeId: "",
     doctorId: detail.doctor_id ?? "",
     ownerUserId: detail.owner_user_id ?? "",
     interpreterId: detail.interpreter_id ?? "",
@@ -295,6 +298,7 @@ export function blankConciergeServiceForm(
 ): ConciergeServiceFormState {
   return {
     providerId: defaults?.providerId ?? "",
+    taxonomyNodeId: defaults?.taxonomyNodeId ?? "",
     assignedConciergeId: defaults?.assignedConciergeId ?? "",
     serviceKind: defaults?.serviceKind ?? "other",
     title: defaults?.title ?? "",

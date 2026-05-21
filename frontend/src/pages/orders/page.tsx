@@ -113,6 +113,11 @@ import {
   updateOrderProcessGates,
 } from "./data/order-api";
 import {
+  providerMatchesTaxonomyFilter,
+  providerTaxonomyFilterOptions,
+} from "@/pages/appointments/model/provider-taxonomy";
+import { doctorSpecialtyLabel } from "@/pages/providers/model/specialization-labels";
+import {
   DEFAULT_FILTERS,
   EXTERNAL_INVOICE_STATUSES,
   ORDER_PHASES,
@@ -396,6 +401,30 @@ function titleWithDot(title: ReactNode) {
       <span aria-hidden className="size-2 rounded-full bg-amber-500" />
       <span>{title}</span>
     </span>
+  );
+}
+
+function providerTaxonomyLabel(
+  item: {
+    provider_taxonomy_node_code?: string | null;
+    provider_taxonomy_node_name_de?: string | null;
+    provider_taxonomy_node_name_ru?: string | null;
+  },
+  lang: string,
+) {
+  if (lang === "ru") {
+    return (
+      item.provider_taxonomy_node_name_ru ||
+      item.provider_taxonomy_node_name_de ||
+      item.provider_taxonomy_node_code ||
+      ""
+    );
+  }
+  return (
+    item.provider_taxonomy_node_name_de ||
+    item.provider_taxonomy_node_name_ru ||
+    item.provider_taxonomy_node_code ||
+    ""
   );
 }
 
@@ -1023,6 +1052,17 @@ function useOrdersPageContent() {
     nextValue: SetStateAction<string | null>,
   ) => setOrdersPageField("externalInvoiceUpdatingId", nextValue);
 
+  const providerTaxonomyOptions = useMemo(
+    () => providerTaxonomyFilterOptions(providers, null, lang === "de" ? "de" : "ru"),
+    [lang, providers],
+  );
+  const providerOptions = useMemo(
+    () =>
+      providers.filter((provider) =>
+        providerMatchesTaxonomyFilter(provider, filters.providerTaxonomyNodeId),
+      ),
+    [filters.providerTaxonomyNodeId, providers],
+  );
   const filterDoctorOptions = useMemo(
     () =>
       filters.providerId ? (providerDoctors[filters.providerId] ?? []) : [],
@@ -1335,8 +1375,11 @@ function useOrdersPageContent() {
     const patientId = patientIdOverride || filters.patientId || patientContextId;
     const providerId = filters.providerId || searchParams.get("provider") || "";
     const doctorId = filters.doctorId || searchParams.get("doctor") || "";
+    const taxonomyNodeId =
+      filters.providerTaxonomyNodeId || searchParams.get("taxonomy") || "";
 
     if (patientId) params.set("patient", patientId);
+    if (taxonomyNodeId) params.set("taxonomy", taxonomyNodeId);
     if (providerId) params.set("provider", providerId);
     if (doctorId) params.set("doctor", doctorId);
     if (section !== DEFAULT_ORDER_SECTION) params.set("section", section);
@@ -1456,12 +1499,18 @@ function useOrdersPageContent() {
   }
 
   const hydrateFiltersFromRoute = useCallback(
-    (patientParam: string, providerParam: string, doctorParam: string) => {
+    (
+      patientParam: string,
+      providerParam: string,
+      doctorParam: string,
+      taxonomyParam: string,
+    ) => {
       setFilters((current) => {
         if (
           current.patientId === patientParam &&
           current.providerId === providerParam &&
-          current.doctorId === doctorParam
+          current.doctorId === doctorParam &&
+          current.providerTaxonomyNodeId === taxonomyParam
         ) {
           return current;
         }
@@ -1469,6 +1518,7 @@ function useOrdersPageContent() {
           ...current,
           patientId: patientParam,
           providerId: providerParam,
+          providerTaxonomyNodeId: taxonomyParam,
           doctorId: doctorParam,
         };
       });
@@ -1682,6 +1732,7 @@ function useOrdersPageContent() {
     const patientParam = searchParams.get("patient") ?? "";
     const providerParam = searchParams.get("provider") ?? "";
     const doctorParam = searchParams.get("doctor") ?? "";
+    const taxonomyParam = searchParams.get("taxonomy") ?? "";
     const legacyOrderParam = searchParams.get("order") ?? "";
     const createParam = searchParams.get("create") ?? "";
 
@@ -1695,7 +1746,7 @@ function useOrdersPageContent() {
 
     const orderParam = routeOrderId;
 
-    hydrateFiltersFromRoute(patientParam, providerParam, doctorParam);
+    hydrateFiltersFromRoute(patientParam, providerParam, doctorParam, taxonomyParam);
 
     if (orderParam && orderParam !== selectedOrderId) {
       openRouteOrderWorkspace(orderParam);
@@ -1791,6 +1842,9 @@ function useOrdersPageContent() {
         if (filters.status) params.set("status", filters.status);
         if (filters.patientId) params.set("patient_id", filters.patientId);
         if (filters.providerId) params.set("provider_id", filters.providerId);
+        if (filters.providerTaxonomyNodeId) {
+          params.set("provider_taxonomy_node_id", filters.providerTaxonomyNodeId);
+        }
         if (filters.doctorId) params.set("doctor_id", filters.doctorId);
 
         const queryString = params.toString();
@@ -1821,6 +1875,7 @@ function useOrdersPageContent() {
     filters.patientId,
     filters.phase,
     filters.providerId,
+    filters.providerTaxonomyNodeId,
     filters.status,
     finishOrdersLoad,
     permissions.canViewPage,
@@ -1839,7 +1894,7 @@ function useOrdersPageContent() {
 
     async function loadDebtQueue() {
       try {
-        const response = await fetchOrderDebtQueue();
+        const response = await fetchOrderDebtQueue(filters.providerTaxonomyNodeId);
         if (cancelled) return;
         applyDebtQueue(response);
       } catch (error) {
@@ -1860,6 +1915,7 @@ function useOrdersPageContent() {
     applyDebtQueue,
     canManageDebt,
     failDebtQueueLoad,
+    filters.providerTaxonomyNodeId,
     finishDebtQueueLoad,
     permissions.canViewPage,
     reloadNonce,
@@ -2516,6 +2572,7 @@ function useOrdersPageContent() {
     filters.status !== "" ||
     filters.patientId !== "" ||
     filters.providerId !== "" ||
+    filters.providerTaxonomyNodeId !== "" ||
     filters.doctorId !== "";
 
   return (
@@ -2788,6 +2845,48 @@ function useOrdersPageContent() {
           </NativeComboboxSelect>
 
           <NativeComboboxSelect
+            value={filters.providerTaxonomyNodeId || "__all__"}
+            onChange={(event) => {
+              const providerTaxonomyNodeId =
+                event.target.value && event.target.value !== "__all__"
+                  ? event.target.value
+                  : "";
+              const selectedProvider = providers.find(
+                (provider) => provider.id === filters.providerId,
+              );
+              const keepProvider =
+                !filters.providerId ||
+                !providerTaxonomyNodeId ||
+                (selectedProvider
+                  ? providerMatchesTaxonomyFilter(
+                      selectedProvider,
+                      providerTaxonomyNodeId,
+                    )
+                  : false);
+              setFilters((current) => ({
+                ...current,
+                providerTaxonomyNodeId,
+                providerId: keepProvider ? current.providerId : "",
+                doctorId: keepProvider ? current.doctorId : "",
+              }));
+              syncQuery({
+                taxonomy: providerTaxonomyNodeId || null,
+                provider: keepProvider ? filters.providerId || null : null,
+                doctor: keepProvider ? filters.doctorId || null : null,
+              });
+            }}
+            disabled={providerTaxonomyOptions.length === 0}
+            className={cn(selectClassName, "h-8 w-[220px] bg-background text-[13px]")}
+          >
+            <option value="__all__">{t.providers_category}</option>
+            {providerTaxonomyOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </NativeComboboxSelect>
+
+          <NativeComboboxSelect
             value={filters.providerId || "__all__"}
             onChange={(event) => {
               const providerId = event.target.value && event.target.value !== "__all__" ? event.target.value : "";
@@ -2801,7 +2900,7 @@ function useOrdersPageContent() {
             className={cn(selectClassName, "h-8 w-[210px] bg-background text-[13px]")}
           >
             <option value="__all__">{t.common_provider}</option>
-            {providers.map((provider) => (
+            {providerOptions.map((provider) => (
               <option key={provider.id} value={provider.id}>
                 {provider.name}
                 {provider.address_city ? ` (${provider.address_city})` : ""}
@@ -2823,7 +2922,7 @@ function useOrdersPageContent() {
             {filterDoctorOptions.map((doctor) => (
               <option key={doctor.id} value={doctor.id}>
                 {doctor.name}
-                {doctor.fachbereich ? ` (${doctor.fachbereich})` : ""}
+                {doctorSpecialtyLabel(doctor, lang) ? ` (${doctorSpecialtyLabel(doctor, lang)})` : ""}
               </option>
             ))}
           </NativeComboboxSelect>
@@ -2848,6 +2947,7 @@ function useOrdersPageContent() {
                   setFilters(DEFAULT_FILTERS);
                   syncQuery({
                     patient: null,
+                    taxonomy: null,
                     provider: null,
                     doctor: null,
                     order: null,
@@ -5259,6 +5359,10 @@ function useOrdersPageContent() {
                             const lineTotal =
                               (numberFromUnknown(leistung.quantity) ?? 0) *
                               (numberFromUnknown(leistung.unit_price) ?? 0);
+                            const taxonomyLabel = providerTaxonomyLabel(
+                              leistung,
+                              lang,
+                            );
                             const providerValue = leistung.provider_id ? (
                               <button
                                 type="button"
@@ -5381,6 +5485,11 @@ function useOrdersPageContent() {
                                             >
                                               {leistung.agency_service_name ||
                                                 leistung.agency_service_key}
+                                            </Badge>
+                                          ) : null}
+                                          {taxonomyLabel ? (
+                                            <Badge variant="outline" className="rounded-full">
+                                              {taxonomyLabel}
                                             </Badge>
                                           ) : null}
                                         </div>
@@ -5543,6 +5652,10 @@ function useOrdersPageContent() {
                               externalInvoiceUpdatingId === invoice.id;
                             const providerLabel =
                               invoice.provider_name || t.common_provider;
+                            const taxonomyLabel = providerTaxonomyLabel(
+                              invoice,
+                              lang,
+                            );
                             const providerValue = invoice.provider_id ? (
                               <button
                                 type="button"
@@ -5591,6 +5704,11 @@ function useOrdersPageContent() {
                                         </div>
                                         <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                                           {providerValue}
+                                          {taxonomyLabel ? (
+                                            <Badge variant="outline" className="rounded-full">
+                                              {taxonomyLabel}
+                                            </Badge>
+                                          ) : null}
                                         </div>
                                         <p className="mt-2 max-w-2xl text-xs leading-snug text-muted-foreground">
                                           {t.orders_external_invoice_date}:{" "}
@@ -6500,7 +6618,7 @@ function useOrdersPageContent() {
                     {leistungDoctorOptions.map((doctor) => (
                       <option key={doctor.id} value={doctor.id}>
                         {doctor.name}
-                        {doctor.fachbereich ? ` (${doctor.fachbereich})` : ""}
+                        {doctorSpecialtyLabel(doctor, lang) ? ` (${doctorSpecialtyLabel(doctor, lang)})` : ""}
                       </option>
                     ))}
                   </NativeComboboxSelect>

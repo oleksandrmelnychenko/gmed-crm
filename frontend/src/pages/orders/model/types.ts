@@ -1,3 +1,5 @@
+import type { SpecializationItem } from "@/pages/providers/model/types";
+
 export type OrderPhase = "discovery" | "intake" | "execution" | "closure" | "followup";
 export type OrderStatus = "active" | "paused" | "completed" | "cancelled";
 type LeistungStatus = "draft" | "delivered" | "approved" | "cancelled";
@@ -35,6 +37,10 @@ export type Leistung = {
   notes: string | null;
   provider_id: string | null;
   provider_name: string | null;
+  provider_taxonomy_node_id?: string | null;
+  provider_taxonomy_node_code?: string | null;
+  provider_taxonomy_node_name_de?: string | null;
+  provider_taxonomy_node_name_ru?: string | null;
   doctor_id: string | null;
   doctor_name: string | null;
   source_interpreter_report_id?: string | null;
@@ -51,6 +57,10 @@ type ExternalInvoice = {
   id: string;
   provider_id: string | null;
   provider_name: string | null;
+  provider_taxonomy_node_id?: string | null;
+  provider_taxonomy_node_code?: string | null;
+  provider_taxonomy_node_name_de?: string | null;
+  provider_taxonomy_node_name_ru?: string | null;
   external_invoice_number: string;
   invoice_date: string | null;
   due_date: string | null;
@@ -359,13 +369,27 @@ export type PatientOption = {
 export type ProviderOption = {
   id: string;
   name: string;
+  provider_type: string;
   address_city: string | null;
+  fachbereich: string | null;
+  taxonomy_node_id?: string | null;
+  taxonomy_node_code?: string | null;
+  taxonomy_node_name_de?: string | null;
+  taxonomy_node_name_ru?: string | null;
+  taxonomy_path?: Array<{
+    id: string;
+    code: string;
+    name_de: string | null;
+    name_ru: string | null;
+  }>;
+  taxonomy_node_ids?: string[];
 };
 
 export type DoctorOption = {
   id: string;
   name: string;
   fachbereich: string | null;
+  specializations?: SpecializationItem[];
 };
 
 export type ProviderDetailResponse = {
@@ -471,6 +495,7 @@ export type OrdersFilters = {
   status: string;
   patientId: string;
   providerId: string;
+  providerTaxonomyNodeId: string;
   doctorId: string;
 };
 

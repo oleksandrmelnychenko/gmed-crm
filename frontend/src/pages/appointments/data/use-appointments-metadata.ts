@@ -7,6 +7,8 @@ import type {
   ProviderSummary,
   StaffOption,
 } from "@/pages/appointments/model/types";
+import { fetchProviderTaxonomy } from "@/pages/providers/data/provider-api";
+import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 
 type UseAppointmentsMetadataOptions = {
   failedLoadMessage: string;
@@ -20,6 +22,7 @@ export function useAppointmentsMetadata({
   const [metadataState, setMetadataState] = useState({
     patients: [] as PatientSummary[],
     providers: [] as ProviderSummary[],
+    taxonomyNodes: [] as ProviderTaxonomyNode[],
     interpreters: [] as InterpreterOption[],
     staff: [] as StaffOption[],
     metadataLoading: true,
@@ -43,6 +46,7 @@ export function useAppointmentsMetadata({
           apiFetch<ProviderSummary[]>("/providers", {
             cacheTtlMs: APPOINTMENT_METADATA_CACHE_TTL_MS,
           }).catch(() => []),
+          fetchProviderTaxonomy().then((taxonomy) => taxonomy.nodes).catch(() => []),
           apiFetch<InterpreterOption[]>("/appointments/meta/interpreters", {
             cacheTtlMs: APPOINTMENT_METADATA_CACHE_TTL_MS,
           }).catch(() => []),
@@ -53,7 +57,7 @@ export function useAppointmentsMetadata({
 
       if (!active) return;
       void metadataRequest.then(
-        ([patientRows, providerRows, interpreterRows, staffRows]) => {
+        ([patientRows, providerRows, taxonomyRows, interpreterRows, staffRows]) => {
           if (!active) return;
 
           const metadataError =
@@ -66,6 +70,7 @@ export function useAppointmentsMetadata({
           setMetadataState({
             patients: patientRows,
             providers: providerRows,
+            taxonomyNodes: taxonomyRows,
             interpreters: interpreterRows,
             staff: staffRows,
             metadataLoading: false,
@@ -83,6 +88,7 @@ export function useAppointmentsMetadata({
   return {
     patients: metadataState.patients,
     providers: metadataState.providers,
+    taxonomyNodes: metadataState.taxonomyNodes,
     interpreters: metadataState.interpreters,
     staff: metadataState.staff,
     metadataLoading: metadataState.metadataLoading,

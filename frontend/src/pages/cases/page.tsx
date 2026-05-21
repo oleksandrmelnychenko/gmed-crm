@@ -67,6 +67,8 @@ import {
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
+import { doctorSpecialtyLabel, type SpecializationLabelLang } from "@/pages/providers/model/specialization-labels";
+import type { SpecializationItem } from "@/pages/providers/model/types";
 import {
   CASE_TEXT_SNIPPET_PLACEHOLDERS,
   appendSnippetToNarrative,
@@ -356,6 +358,7 @@ type DoctorOption = {
   name: string;
   title?: string | null;
   fachbereich?: string | null;
+  specializations?: SpecializationItem[];
 };
 
 type CaseFilters = {
@@ -766,9 +769,10 @@ function patientLabel(patient: PatientOption) {
   return `${name || runtimeTranslations().cases_clinical_patient_fallback} (${patient.patient_id})`;
 }
 
-function doctorOptionLabel(doctor: DoctorOption) {
+function doctorOptionLabel(doctor: DoctorOption, lang: SpecializationLabelLang) {
   const titlePrefix = doctor.title?.trim() ? `${doctor.title.trim()} ` : "";
-  const specialty = doctor.fachbereich?.trim() ? ` · ${doctor.fachbereich.trim()}` : "";
+  const specialtyLabel = doctorSpecialtyLabel(doctor, lang);
+  const specialty = specialtyLabel ? ` - ${specialtyLabel}` : "";
   return `${doctor.provider_name} | ${titlePrefix}${doctor.name}${specialty}`;
 }
 
@@ -1178,7 +1182,7 @@ function useCasesPageContent({
   embeddedSheetSide = "right",
   onCloseCaseSheet,
 }: CasesPageProps = {}) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const { user } = useAuth();
   const { staffGo } = useStaffNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -2599,7 +2603,7 @@ function useCasesPageContent({
                       <option value="__none__">{t.common_not_set}</option>
                       {doctors.map((doctor) => (
                         <option key={doctor.id} value={doctor.id}>
-                          {doctorOptionLabel(doctor)}
+                          {doctorOptionLabel(doctor, lang)}
                         </option>
                       ))}
                     </NativeComboboxSelect>
@@ -2804,7 +2808,7 @@ function useCasesPageContent({
                             <option value="__none__">{t.common_not_set}</option>
                             {doctors.map((doctor) => (
                               <option key={doctor.id} value={doctor.id}>
-                                {doctorOptionLabel(doctor)}
+                                {doctorOptionLabel(doctor, lang)}
                               </option>
                             ))}
                           </NativeComboboxSelect>
@@ -3138,7 +3142,7 @@ function useCasesPageContent({
                               <option value="__none__">{t.common_not_set}</option>
                               {doctors.map((doctor) => (
                                 <option key={doctor.id} value={doctor.id}>
-                                  {doctorOptionLabel(doctor)}
+                                  {doctorOptionLabel(doctor, lang)}
                                 </option>
                               ))}
                             </NativeComboboxSelect>
@@ -3219,7 +3223,7 @@ function useCasesPageContent({
                               <option value="__none__">{t.common_not_set}</option>
                               {doctors.map((doctor) => (
                                 <option key={doctor.id} value={doctor.id}>
-                                  {doctorOptionLabel(doctor)}
+                                  {doctorOptionLabel(doctor, lang)}
                                 </option>
                               ))}
                             </NativeComboboxSelect>

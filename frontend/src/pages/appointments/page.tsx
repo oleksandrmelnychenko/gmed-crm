@@ -150,6 +150,7 @@ const DEFAULT_FILTERS: FiltersState = {
   status: "",
   patientId: "",
   providerId: "",
+  providerTaxonomyNodeId: "",
   doctorId: "",
   ownerUserId: "",
   interpreterId: "",
@@ -385,6 +386,7 @@ function useStaffAppointmentsPageContent() {
   const {
     patients,
     providers,
+    taxonomyNodes,
     interpreters,
     staff,
     metadataLoading,
@@ -530,6 +532,7 @@ function useStaffAppointmentsPageContent() {
         status: filters.status,
         patientId: filters.patientId,
         providerId: filters.providerId,
+        providerTaxonomyNodeId: filters.providerTaxonomyNodeId,
         doctorId: filters.doctorId,
         ownerUserId: filters.ownerUserId,
         interpreterId: filters.interpreterId,
@@ -543,6 +546,7 @@ function useStaffAppointmentsPageContent() {
       filters.status,
       filters.patientId,
       filters.providerId,
+      filters.providerTaxonomyNodeId,
       filters.doctorId,
       filters.ownerUserId,
       filters.interpreterId,
@@ -1552,6 +1556,7 @@ function useStaffAppointmentsPageContent() {
             timelineEvents={timelineEvents}
             appointments={appointments}
             providers={providers}
+            taxonomyNodes={taxonomyNodes}
             staff={staff}
             interpreters={interpreters}
             permissions={permissions}
@@ -1700,6 +1705,7 @@ function useStaffAppointmentsPageContent() {
             setFilters,
             patients,
             providers,
+            taxonomyNodes,
             filterDoctors,
             staff,
             interpreters,
@@ -1781,6 +1787,7 @@ function useStaffAppointmentsPageContent() {
         appointments={appointments}
         patients={patients}
         providers={providers}
+        taxonomyNodes={taxonomyNodes}
         interpreters={interpreters}
         staff={staff}
         userId={user?.id}
@@ -1894,6 +1901,7 @@ function useStaffAppointmentsPageContent() {
           timelineEvents={timelineEvents}
           appointments={appointments}
           providers={providers}
+          taxonomyNodes={taxonomyNodes}
           staff={staff}
           interpreters={interpreters}
           permissions={permissions}

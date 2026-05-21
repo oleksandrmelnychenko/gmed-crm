@@ -24,6 +24,7 @@ import type {
   StaffOption,
   TaskEntry,
 } from "@/pages/appointments/model/types";
+import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 import { MemoizedAppointmentAttentionSection } from "@/pages/appointments/ui/sections/attention-section";
 import { MemoizedAppointmentLinksSection } from "@/pages/appointments/ui/sections/links-section";
 import { MemoizedAppointmentOverviewSection } from "@/pages/appointments/ui/sections/overview-section";
@@ -97,6 +98,7 @@ type AppointmentDesktopDetailWorkspaceContentProps = {
   timelineEvents: AppointmentTimelineEvent[];
   appointments: AppointmentListItem[];
   providers: ProviderSummary[];
+  taxonomyNodes: ProviderTaxonomyNode[];
   staff: StaffOption[];
   interpreters: InterpreterOption[];
   permissions: AppointmentPermissions;
@@ -168,6 +170,7 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
   timelineEvents,
   appointments,
   providers,
+  taxonomyNodes,
   staff,
   interpreters,
   permissions,
@@ -308,6 +311,7 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
             detail={detail}
             appointments={appointments}
             providers={providers}
+            taxonomyNodes={taxonomyNodes}
             staff={staff}
             interpreters={interpreters}
             permissions={permissions}
@@ -351,6 +355,7 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
               detail={detail}
               appointments={appointments}
               providers={providers}
+              taxonomyNodes={taxonomyNodes}
               staff={staff}
               interpreters={interpreters}
               permissions={permissions}
@@ -451,6 +456,7 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
                       detail={detail}
                       appointments={appointments}
                       providers={providers}
+                      taxonomyNodes={taxonomyNodes}
                       staff={staff}
                       interpreters={interpreters}
                       permissions={permissions}

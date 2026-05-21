@@ -22,15 +22,19 @@ import type { ColumnDef } from "@/components/data-table/types";
 import { StaffLink } from "@/components/staff-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { clearApiCache } from "@/lib/api";
-import { Banner as ShellBanner, PageHeader, StatusBadge, tokens } from "@/components/ui-shell";
+import { Banner as ShellBanner, PageHeader, StatusBadge, selectClass as shellSelectClassName, tokens } from "@/components/ui-shell";
 import { useAuth } from "@/lib/auth";
 import { formatEnumLabelFromKeys, formatUnknownValue, type TranslationKey, useLang } from "@/lib/i18n";
 import { getRevenueReportsText } from "@/lib/i18n/catalogs/revenue";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { serviceKindLabel } from "@/pages/appointments/model/labels";
+import { fetchProviderTaxonomy } from "@/pages/providers/data/provider-api";
+import { specializationSummaryForItems } from "@/pages/providers/model/specialization-labels";
+import type { ProviderTaxonomyNode, SpecializationItem } from "@/pages/providers/model/types";
 import { fetchReportsExport, fetchReportsWorkspace } from "./data/reports-api";
 import {
   formatChange,
@@ -83,7 +87,7 @@ type ClinicReportRow = {
   followup_orders_total: number;
   followup_completed_orders: number;
   followup_completion_rate?: number | null;
-};
+} & ProviderReportTaxonomyFields;
 
 type CountryReportRow = {
   country: string;
@@ -98,6 +102,13 @@ type ServiceTypeReportRow = {
   patient_count: number;
   order_count: number;
   gross_total?: string | null;
+};
+
+type ProviderReportTaxonomyFields = {
+  taxonomy_node_id?: string | null;
+  taxonomy_node_code?: string | null;
+  taxonomy_node_name_de?: string | null;
+  taxonomy_node_name_ru?: string | null;
 };
 
 type MedicalProviderReportRow = {
@@ -115,6 +126,13 @@ type MedicalProviderReportRow = {
   service_focus: string[];
   patient_country_mix: string[];
   last_activity_at?: string | null;
+} & ProviderReportTaxonomyFields;
+
+type TaxonomyPathNode = {
+  id: string;
+  code: string;
+  name_de: string;
+  name_ru?: string | null;
 };
 
 type ProviderCostTrendPoint = {
@@ -139,7 +157,7 @@ type ProviderCostRow = {
   max_unit_gross?: string | null;
   change_pct?: number | null;
   trend_points: ProviderCostTrendPoint[];
-};
+} & ProviderReportTaxonomyFields;
 
 type DoctorReportRow = {
   doctor_id: string;
@@ -147,6 +165,7 @@ type DoctorReportRow = {
   name: string;
   title?: string | null;
   fachbereich?: string | null;
+  specializations?: SpecializationItem[];
   provider_name: string;
   address_city?: string | null;
   address_country?: string | null;
@@ -173,13 +192,22 @@ type DoctorReportRow = {
   followup_completed_orders: number;
   followup_completion_rate?: number | null;
   gross_service_volume?: string | null;
-};
+} & ProviderReportTaxonomyFields;
 
 type NonMedicalProviderReportRow = {
   provider_id: string;
   name: string;
   address_city?: string | null;
   address_country?: string | null;
+  taxonomy_node_id?: string | null;
+  taxonomy_node_code?: string | null;
+  taxonomy_node_name_de?: string | null;
+  taxonomy_node_name_ru?: string | null;
+  taxonomy_path?: TaxonomyPathNode[];
+  taxonomy_path_label?: string | null;
+  taxonomy_attributes?: Record<string, unknown> | null;
+  internal_rating?: number | null;
+  internal_rating_note?: string | null;
   service_count: number;
   active_patients_90d: number;
   appointments_90d: number;
@@ -234,6 +262,50 @@ function reportBackendLabel(value: string, text: ReturnType<typeof getRevenueRep
   const conciergeKind = value.match(/^concierge_service_kind\.(.+)$/)?.[1];
   if (conciergeKind) return serviceKindLabel(conciergeKind);
   return value;
+}
+
+function reportTaxonomyLabel(
+  row: ProviderReportTaxonomyFields & { taxonomy_path_label?: string | null },
+  fallback: string,
+  lang: "de" | "ru",
+) {
+  if (lang === "ru") {
+    return row.taxonomy_node_name_ru || row.taxonomy_node_name_de || row.taxonomy_path_label || fallback;
+  }
+  return row.taxonomy_path_label || row.taxonomy_node_name_de || row.taxonomy_node_name_ru || fallback;
+}
+
+function reportDoctorSpecialtyLabel(
+  row: Pick<DoctorReportRow, "fachbereich" | "specializations">,
+  lang: "de" | "ru",
+  fallback: string,
+) {
+  return specializationSummaryForItems(row.specializations, row.fachbereich, lang, fallback);
+}
+
+function ReportTaxonomyBadge({
+  label,
+  code,
+}: {
+  label: string;
+  code?: string | null;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <Badge
+        variant="outline"
+        className="h-auto w-fit max-w-full whitespace-normal rounded-md px-2 py-1 text-left text-[11px] leading-snug"
+        title={label}
+      >
+        <span className="block whitespace-normal break-words">{label}</span>
+      </Badge>
+      {code ? (
+        <span className="break-all text-[11px] leading-snug text-muted-foreground">
+          {code}
+        </span>
+      ) : null}
+    </div>
+  );
 }
 
 type ForecastQuotePipelineRow = {
@@ -415,6 +487,89 @@ const REPORT_PROVIDER_TYPE_LABEL_KEYS = {
   non_medical: "providers_type_non_medical",
 } satisfies Partial<Record<string, TranslationKey>>;
 
+const REPORT_TAXONOMY_LEVELS = new Set<ProviderTaxonomyNode["level"]>([
+  "category",
+  "group",
+  "subgroup",
+  "type",
+]);
+
+function humanizeReportTaxonomyCode(value: string) {
+  const normalized = value.replace(/[._-]+/g, " ").trim();
+  if (!normalized) return value;
+  return normalized.replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function reportProviderTaxonomyNodeLabel(
+  node: ProviderTaxonomyNode | null | undefined,
+  lang: "de" | "ru",
+) {
+  if (!node) return "";
+  if (lang === "ru") {
+    return node.name_ru || node.name_de || node.name_en || humanizeReportTaxonomyCode(node.code);
+  }
+  return node.name_de || node.name_en || node.name_ru || humanizeReportTaxonomyCode(node.code);
+}
+
+function reportProviderTaxonomyPathLabel(
+  node: ProviderTaxonomyNode,
+  nodesById: Map<string, ProviderTaxonomyNode>,
+  lang: "de" | "ru",
+) {
+  const path: ProviderTaxonomyNode[] = [];
+  const visited = new Set<string>();
+  let current: ProviderTaxonomyNode | undefined = node;
+
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id);
+    path.unshift(current);
+    current = current.parent_id ? nodesById.get(current.parent_id) : undefined;
+  }
+
+  return path
+    .map((item) => reportProviderTaxonomyNodeLabel(item, lang))
+    .filter(Boolean)
+    .join(" / ");
+}
+
+function reportProviderTaxonomyOptions(
+  nodes: ProviderTaxonomyNode[],
+  lang: "de" | "ru",
+) {
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const locale = lang === "ru" ? "ru" : "de";
+
+  return nodes
+    .filter((node) => node.is_active && REPORT_TAXONOMY_LEVELS.has(node.level))
+    .map((node) => ({
+      node,
+      label:
+        reportProviderTaxonomyPathLabel(node, nodesById, lang) ||
+        reportProviderTaxonomyNodeLabel(node, lang),
+    }))
+    .sort((left, right) => {
+      const providerKindOrder = left.node.provider_kind.localeCompare(right.node.provider_kind);
+      if (providerKindOrder) return providerKindOrder;
+      const labelOrder = left.label.localeCompare(right.label, locale);
+      if (labelOrder) return labelOrder;
+      return left.node.sort_order - right.node.sort_order || left.node.code.localeCompare(right.node.code);
+    });
+}
+
+function reportTaxonomyAllLabel(lang: "de" | "ru") {
+  return lang === "ru" ? "Все категории" : "Alle Kategorien";
+}
+
+function reportTaxonomyFilterLabel(lang: "de" | "ru") {
+  return lang === "ru" ? "Категория провайдера" : "Provider-Kategorie";
+}
+
+function reportTaxonomyLoadError(lang: "de" | "ru") {
+  return lang === "ru"
+    ? "Не удалось загрузить категории провайдеров."
+    : "Provider-Kategorien konnten nicht geladen werden.";
+}
+
 function metricCard(
   label: string,
   value: string | number,
@@ -513,6 +668,10 @@ type ReportsPageState = {
   error: string;
   version: number;
   selectedClinicId: string;
+  selectedTaxonomyNodeId: string;
+  taxonomyNodes: ProviderTaxonomyNode[];
+  taxonomyLoading: boolean;
+  taxonomyError: string;
   exportingSection: string;
   detail: ReportDetailState;
 };
@@ -523,6 +682,10 @@ type ReportsPageAction =
   | { type: "bump-version" }
   | { type: "restricted" }
   | { type: "load-start" }
+  | { type: "taxonomy-load-start" }
+  | { type: "taxonomy-load-success"; nodes: ProviderTaxonomyNode[] }
+  | { type: "taxonomy-load-error"; message: string }
+  | { type: "set-taxonomy-filter"; value: string }
   | {
       type: "load-success";
       payload: ReportsWorkspacePayload;
@@ -538,6 +701,10 @@ const REPORTS_PAGE_INITIAL_STATE: ReportsPageState = {
   error: "",
   version: 0,
   selectedClinicId: "",
+  selectedTaxonomyNodeId: "",
+  taxonomyNodes: [],
+  taxonomyLoading: false,
+  taxonomyError: "",
   exportingSection: "",
   detail: null,
 };
@@ -554,9 +721,33 @@ function reportsPageReducer(
     case "bump-version":
       return { ...state, version: state.version + 1 };
     case "restricted":
-      return { ...state, loading: false, refreshing: false };
+      return { ...state, loading: false, refreshing: false, taxonomyLoading: false };
     case "load-start":
       return { ...state, refreshing: !state.loading };
+    case "taxonomy-load-start":
+      return { ...state, taxonomyLoading: true, taxonomyError: "" };
+    case "taxonomy-load-success":
+      return {
+        ...state,
+        taxonomyNodes: action.nodes,
+        taxonomyLoading: false,
+        taxonomyError: "",
+      };
+    case "taxonomy-load-error":
+      return {
+        ...state,
+        taxonomyNodes: [],
+        taxonomyLoading: false,
+        taxonomyError: action.message,
+      };
+    case "set-taxonomy-filter":
+      if (state.selectedTaxonomyNodeId === action.value) return state;
+      return {
+        ...state,
+        selectedTaxonomyNodeId: action.value,
+        selectedClinicId: "",
+        detail: null,
+      };
     case "load-success":
       return {
         ...state,
@@ -626,6 +817,10 @@ function useReportsPageContent() {
       error,
       version,
       selectedClinicId,
+      selectedTaxonomyNodeId,
+      taxonomyNodes,
+      taxonomyLoading,
+      taxonomyError,
       exportingSection,
       detail,
     },
@@ -639,6 +834,11 @@ function useReportsPageContent() {
   const setDetail = useCallback(
     (value: SetStateAction<ReportDetailState>) =>
       dispatchReportsState(createReportsFieldAction("detail", value)),
+    [],
+  );
+  const setSelectedTaxonomyNodeId = useCallback(
+    (value: string) =>
+      dispatchReportsState({ type: "set-taxonomy-filter", value }),
     [],
   );
 
@@ -661,7 +861,9 @@ function useReportsPageContent() {
 
       try {
         const { payload, forecastPayload } =
-          await fetchReportsWorkspace<ReportsWorkspacePayload, ForecastingPayload>();
+          await fetchReportsWorkspace<ReportsWorkspacePayload, ForecastingPayload>(
+            selectedTaxonomyNodeId,
+          );
         if (!cancelled) {
           dispatchReportsState({
             type: "load-success",
@@ -683,7 +885,36 @@ function useReportsPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [text.loadError, user?.role, version]);
+  }, [selectedTaxonomyNodeId, text.loadError, user?.role, version]);
+
+  useEffect(() => {
+    if (!roleCanOpenReports(user?.role)) return;
+
+    let cancelled = false;
+    dispatchReportsState({ type: "taxonomy-load-start" });
+
+    fetchProviderTaxonomy()
+      .then((taxonomy) => {
+        if (!cancelled) {
+          dispatchReportsState({
+            type: "taxonomy-load-success",
+            nodes: taxonomy.nodes,
+          });
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          dispatchReportsState({
+            type: "taxonomy-load-error",
+            message: err instanceof Error ? err.message : reportTaxonomyLoadError(lang),
+          });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [lang, user?.role]);
 
   const allowedSections = useMemo(
     () => new Set(data?.allowed_sections ?? []),
@@ -692,6 +923,17 @@ function useReportsPageContent() {
   const forecastSections = useMemo(
     () => new Set(forecasting?.allowed_sections ?? []),
     [forecasting?.allowed_sections],
+  );
+  const taxonomyFilterOptions = useMemo(
+    () => reportProviderTaxonomyOptions(taxonomyNodes, lang),
+    [lang, taxonomyNodes],
+  );
+  const selectedTaxonomyOption = useMemo(
+    () =>
+      taxonomyFilterOptions.find(
+        (option) => option.node.id === selectedTaxonomyNodeId,
+      ) ?? null,
+    [selectedTaxonomyNodeId, taxonomyFilterOptions],
   );
   const visibleDoctors = useMemo(() => {
     if (!data?.doctors) return [];
@@ -735,6 +977,14 @@ function useReportsPageContent() {
         accessor: (row) => row.provider_type,
         width: 160,
         render: (row) => <span className="text-xs text-foreground">{providerTypeLabel(row.provider_type)}</span>,
+      },
+      {
+        id: "taxonomy",
+        label: reportTaxonomyFilterLabel(lang),
+        accessor: (row) => reportTaxonomyLabel(row, text.unknown, lang),
+        width: 320,
+        sortable: true,
+        render: (row) => <ReportTaxonomyBadge label={reportTaxonomyLabel(row, text.unknown, lang)} />,
       },
       {
         id: "patients",
@@ -793,7 +1043,7 @@ function useReportsPageContent() {
         ),
       },
     ],
-    [locale, providerTypeLabel, text],
+    [lang, locale, providerTypeLabel, text],
   );
   const serviceTypeColumns = useMemo<ColumnDef<ServiceTypeReportRow>[]>(
     () => [
@@ -867,6 +1117,14 @@ function useReportsPageContent() {
         ),
       },
       {
+        id: "taxonomy",
+        label: reportTaxonomyFilterLabel(lang),
+        accessor: (row) => reportTaxonomyLabel(row, text.unknown, lang),
+        width: 320,
+        sortable: true,
+        render: (row) => <ReportTaxonomyBadge label={reportTaxonomyLabel(row, text.unknown, lang)} />,
+      },
+      {
         id: "patients",
         label: text.common.patients90d,
         accessor: (row) => row.active_patients_90d,
@@ -924,7 +1182,7 @@ function useReportsPageContent() {
         ),
       },
     ],
-    [locale, text],
+    [lang, locale, text],
   );
   const providerCostColumns = useMemo<ColumnDef<ProviderCostRow>[]>(
     () => [
@@ -947,6 +1205,14 @@ function useReportsPageContent() {
         accessor: (row) => row.provider_name,
         width: 220,
         render: (row) => <span className="text-xs text-foreground">{row.provider_name}</span>,
+      },
+      {
+        id: "taxonomy",
+        label: reportTaxonomyFilterLabel(lang),
+        accessor: (row) => reportTaxonomyLabel(row, text.unknown, lang),
+        width: 320,
+        sortable: true,
+        render: (row) => <ReportTaxonomyBadge label={reportTaxonomyLabel(row, text.unknown, lang)} />,
       },
       {
         id: "location",
@@ -1016,7 +1282,7 @@ function useReportsPageContent() {
         ),
       },
     ],
-    [locale, text],
+    [lang, locale, text],
   );
   const nonMedicalProviderColumns = useMemo<ColumnDef<NonMedicalProviderReportRow>[]>(
     () => [
@@ -1037,6 +1303,31 @@ function useReportsPageContent() {
         render: (row) => (
           <span className="text-xs text-foreground">
             {[row.address_city, row.address_country].filter(Boolean).join(", ") || text.locationNotSet}
+          </span>
+        ),
+      },
+      {
+        id: "taxonomy",
+        label: reportTaxonomyFilterLabel(lang),
+        accessor: (row) => reportTaxonomyLabel(row, text.unknown, lang),
+        width: 340,
+        sortable: true,
+        render: (row) => (
+          <ReportTaxonomyBadge
+            label={reportTaxonomyLabel(row, text.unknown, lang)}
+            code={row.taxonomy_node_code}
+          />
+        ),
+      },
+      {
+        id: "internal_rating",
+        label: text.common.internalRating,
+        accessor: (row) => row.internal_rating ?? -1,
+        width: 150,
+        sortable: true,
+        render: (row) => (
+          <span className="text-xs text-foreground">
+            {formatRating(row.internal_rating, text.notRated)}
           </span>
         ),
       },
@@ -1094,7 +1385,7 @@ function useReportsPageContent() {
         ),
       },
     ],
-    [locale, text],
+    [lang, locale, text],
   );
   const countryColumns = useMemo<ColumnDef<CountryReportRow>[]>(
     () => [
@@ -1132,7 +1423,7 @@ function useReportsPageContent() {
         ),
       },
     ],
-    [locale, text],
+    [lang, locale, text],
   );
   const doctorColumns = useMemo<ColumnDef<DoctorReportRow>[]>(
     () => [
@@ -1157,6 +1448,14 @@ function useReportsPageContent() {
         render: (row) => <span className="text-xs text-foreground">{row.provider_name}</span>,
       },
       {
+        id: "taxonomy",
+        label: reportTaxonomyFilterLabel(lang),
+        accessor: (row) => reportTaxonomyLabel(row, text.unknown, lang),
+        width: 320,
+        sortable: true,
+        render: (row) => <ReportTaxonomyBadge label={reportTaxonomyLabel(row, text.unknown, lang)} />,
+      },
+      {
         id: "location",
         label: text.common.location,
         accessor: (row) => `${row.address_city ?? ""} ${row.address_country ?? ""}`,
@@ -1170,9 +1469,13 @@ function useReportsPageContent() {
       {
         id: "specialty",
         label: text.common.specialties,
-        accessor: (row) => row.fachbereich ?? "",
+        accessor: (row) => reportDoctorSpecialtyLabel(row, lang, ""),
         width: 160,
-        render: (row) => <span className="text-xs text-foreground">{row.fachbereich || text.unknown}</span>,
+        render: (row) => (
+          <span className="text-xs text-foreground">
+            {reportDoctorSpecialtyLabel(row, lang, text.unknown)}
+          </span>
+        ),
       },
       {
         id: "patients",
@@ -1257,7 +1560,7 @@ function useReportsPageContent() {
         ),
       },
     ],
-    [locale, text],
+    [lang, locale, text],
   );
   const forecastQuotePipelineColumns = useMemo<ColumnDef<ForecastQuotePipelineRow>[]>(
     () => [
@@ -1392,6 +1695,7 @@ function useReportsPageContent() {
         section,
         selectedClinicId,
         text.exportError,
+        selectedTaxonomyNodeId,
       );
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
@@ -1440,25 +1744,54 @@ function useReportsPageContent() {
       { grouped: true, groupedLast: true, itemKey: "delivered-service-volume" },
     ),
   ] : [];
+  const taxonomySelectLabel = reportTaxonomyFilterLabel(lang);
+  const taxonomyAllLabel = reportTaxonomyAllLabel(lang);
 
   return (
     <div className="space-y-4">
       <PageHeader
         title={titleWithDot(text.workspaceTitle)}
         actions={
-          <Button
-            variant="outline"
-            className="h-9 rounded-lg"
-                onClick={() => dispatchReportsState({ type: "bump-version" })}
-          >
-            {refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-            {text.refresh}
-          </Button>
+          <div className="flex flex-wrap items-end justify-end gap-2">
+            <label className="flex min-w-[280px] max-w-full flex-col gap-1">
+              <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                {taxonomySelectLabel}
+              </span>
+              <NativeComboboxSelect
+                value={selectedTaxonomyOption ? selectedTaxonomyNodeId : ""}
+                onChange={(event) => setSelectedTaxonomyNodeId(event.target.value)}
+                disabled={taxonomyLoading || taxonomyFilterOptions.length === 0}
+                className={cn(
+                  shellSelectClassName,
+                  "h-9 w-[420px] max-w-[calc(100vw-2rem)] bg-card text-[13px]",
+                )}
+                title={selectedTaxonomyOption?.label ?? taxonomySelectLabel}
+              >
+                <option value="">{taxonomyAllLabel}</option>
+                {taxonomyFilterOptions.map((option) => (
+                  <option key={option.node.id} value={option.node.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </NativeComboboxSelect>
+            </label>
+            <Button
+              variant="outline"
+              className="h-9 rounded-lg"
+              onClick={() => dispatchReportsState({ type: "bump-version" })}
+            >
+              {refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+              {text.refresh}
+            </Button>
+          </div>
         }
       />
 
       {error ? (
         <ShellBanner tone="error">{error}</ShellBanner>
+      ) : null}
+      {taxonomyError ? (
+        <ShellBanner tone="warning">{taxonomyError}</ShellBanner>
       ) : null}
 
       {data ? (
@@ -2124,7 +2457,9 @@ function useReportsPageContent() {
                           </div>
                           <div className={card("p-3")}>
                             <p className="text-xs text-muted-foreground">{text.common.specialties}</p>
-                            <p className="mt-1 text-sm font-medium text-foreground">{detail.row.fachbereich || text.unknown}</p>
+                            <p className="mt-1 text-sm font-medium text-foreground">
+                              {reportDoctorSpecialtyLabel(detail.row, lang, text.unknown)}
+                            </p>
                           </div>
                           <div className={card("p-3")}>
                             <p className="text-xs text-muted-foreground">{text.common.patients90d}</p>

@@ -241,6 +241,8 @@ export const de = {
   providers_interactions_description:
     "Zeitachse der mit diesem Anbieter verbundenen Termine und Service-Interaktionen.",
   providers_type: "Typ",
+  providers_category: "Provider-Kategorie",
+  providers_choose_category: "Provider-Kategorie wählen",
   providers_type_medical: "Medizinisch",
   providers_type_non_medical: "Nicht-medizinisch",
   providers_active: "Aktiv",
@@ -450,6 +452,7 @@ export const de = {
   appointments_time: "Zeit",
   appointments_title_col: "Titel",
   appointments_type: "Typ",
+  appointments_provider_category: "Provider-Kategorie",
   appointments_location: "Ort",
   appointments_new: "Neuer Termin",
   appointments_recurring_series: "Serientermin",
@@ -1260,7 +1263,7 @@ export const de = {
   documents_translation_start: "Starten",
   documents_translation_complete: "Abschließen",
   documents_translation_cancel: "Abbrechen",
-  documents_taxonomy_category: "Taxonomie-Kategorie",
+  documents_classification_category: "Dokumentkategorie",
   documents_choose_category: "Kategorie wählen",
   documents_review_notes: "Review-Notizen",
   documents_release_internal_hint:
@@ -1289,9 +1292,9 @@ export const de = {
   documents_generate_from_template: "Aus Vorlage generieren",
   documents_intake_queue: "Dokumenten-Inbox",
   documents_intake_interpreter_hint:
-    "Dolmetscher-Uploads und andere Intake-Dateien, die noch eine Taxonomie-Prüfung brauchen.",
+    "Dolmetscher-Uploads und andere Intake-Dateien, die noch eine Kategorieprüfung brauchen.",
   documents_intake_general_hint:
-    "Unklassifizierte Uploads und Portaldateien, die noch eine Taxonomie-Prüfung brauchen.",
+    "Unklassifizierte Uploads und Portaldateien, die noch eine Kategorieprüfung brauchen.",
   documents_pending: "ausstehend",
   documents_loading_intake_queue: "Intake-Inbox wird geladen…",
   documents_no_intake_pending:
@@ -1437,6 +1440,8 @@ export const de = {
   services_request_description:
     "Senden Sie einen Concierge-Bedarf direkt aus dem Portal. Das zuständige Team prüft die Anfrage und bucht operativ.",
   services_form_service_type: "Servicetyp",
+  services_category: "Service-Kategorie",
+  services_all_categories: "Alle Service-Kategorien",
   services_type_hotel: "Hotel",
   services_type_transfer: "Transfer",
   services_type_vip_terminal: "VIP-Terminal",

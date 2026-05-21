@@ -1,3 +1,5 @@
+import type { SpecializationItem } from "@/pages/providers/model/types";
+
 export type AppointmentWorkspaceTab =
   | "overview"
   | "timeline"
@@ -249,6 +251,17 @@ export type ProviderSummary = {
   provider_type: string;
   address_city: string | null;
   fachbereich: string | null;
+  taxonomy_node_id?: string | null;
+  taxonomy_node_code?: string | null;
+  taxonomy_node_name_de?: string | null;
+  taxonomy_node_name_ru?: string | null;
+  taxonomy_path?: Array<{
+    id: string;
+    code: string;
+    name_de: string | null;
+    name_ru: string | null;
+  }>;
+  taxonomy_node_ids?: string[];
 };
 
 export type DoctorOption = {
@@ -256,6 +269,7 @@ export type DoctorOption = {
   name: string;
   title: string | null;
   fachbereich: string | null;
+  specializations?: SpecializationItem[];
 };
 
 export type StaffOption = {
@@ -345,6 +359,10 @@ export type ConciergeServiceEntry = {
   appointment_title: string | null;
   provider_id: string | null;
   provider_name: string | null;
+  taxonomy_node_id: string | null;
+  taxonomy_node_code: string | null;
+  taxonomy_node_name_de: string | null;
+  taxonomy_node_name_ru: string | null;
   assigned_concierge_id: string | null;
   assigned_concierge_name: string | null;
   service_kind: string;
@@ -510,6 +528,7 @@ export type FiltersState = {
   status: string;
   patientId: string;
   providerId: string;
+  providerTaxonomyNodeId: string;
   doctorId: string;
   ownerUserId: string;
   interpreterId: string;
@@ -520,6 +539,7 @@ export type FiltersState = {
 export type AppointmentFormState = {
   patientId: string;
   providerId: string;
+  providerTaxonomyNodeId: string;
   doctorId: string;
   ownerUserId: string;
   interpreterId: string;
@@ -673,6 +693,7 @@ export type TaskFormState = {
 
 export type ConciergeServiceFormState = {
   providerId: string;
+  taxonomyNodeId: string;
   assignedConciergeId: string;
   serviceKind: string;
   title: string;
@@ -687,6 +708,7 @@ export type ConciergeServiceFormState = {
 
 export type ConciergeServiceDraftState = {
   providerId: string;
+  taxonomyNodeId: string;
   assignedConciergeId: string;
   title: string;
   status: string;

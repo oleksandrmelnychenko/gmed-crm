@@ -15,6 +15,7 @@ import type {
   StaffOption,
   TaskEntry,
 } from "@/pages/appointments/model/types";
+import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 import { MemoizedAppointmentExternalHandoffSection } from "@/pages/appointments/ui/sections/external-handoff-section";
 import { MemoizedAppointmentFollowUpVisitSection } from "@/pages/appointments/ui/sections/follow-up-visit-section";
 import { MemoizedAppointmentHandoffSection } from "@/pages/appointments/ui/sections/handoff-section";
@@ -44,6 +45,7 @@ type AppointmentCoordinationSectionProps = {
   detail: AppointmentDetail;
   appointments: AppointmentListItem[];
   providers: ProviderSummary[];
+  taxonomyNodes: ProviderTaxonomyNode[];
   staff: StaffOption[];
   interpreters: InterpreterOption[];
   permissions: AppointmentPermissions;
@@ -73,6 +75,7 @@ function AppointmentCoordinationSection({
   detail,
   appointments,
   providers,
+  taxonomyNodes,
   staff,
   interpreters,
   permissions,
@@ -118,6 +121,7 @@ function AppointmentCoordinationSection({
           detail={detail}
           appointments={appointments}
           providers={providers}
+          taxonomyNodes={taxonomyNodes}
           staff={staff}
           interpreters={interpreters}
           defaultReminderUserId={detailDefaultAssigneeId}

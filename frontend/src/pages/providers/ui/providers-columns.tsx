@@ -5,7 +5,8 @@ import type { ColumnDef, FilterOption } from "@/components/data-table/types";
 import { cn } from "@/lib/utils";
 
 import { compactDateTime, providerTypeLabel } from "../model/list-model";
-import type { ProviderOrganizationLevel, ProviderSummary } from "../model/types";
+import { specializationSummaryForItems } from "../model/specialization-labels";
+import type { ProviderOrganizationLevel, ProviderSummary, ProviderTaxonomyNode } from "../model/types";
 
 export type ProviderTreeMeta = {
   childCount: number;
@@ -15,6 +16,7 @@ export type ProviderTreeMeta = {
 };
 
 type BuildProviderColumnsOptions = {
+  lang?: "de" | "ru";
   onToggleProviderCollapsed?: (providerId: string) => void;
   treeMetaById?: ReadonlyMap<string, ProviderTreeMeta>;
 };
@@ -31,21 +33,40 @@ function optionsFrom(values: Iterable<string>): FilterOption[] {
     .map((value) => ({ value, label: value }));
 }
 
-function deriveDynamicOptions(rows: readonly ProviderSummary[]): ProviderDynamicOptions {
+function optionsFromMap(values: ReadonlyMap<string, string>): FilterOption[] {
+  return Array.from(values.entries())
+    .sort(([, a], [, b]) => a.localeCompare(b))
+    .map(([value, label]) => ({ value, label }));
+}
+
+function providerSpecializationLabel(
+  provider: ProviderSummary,
+  lang: "de" | "ru",
+  notSet: string,
+) {
+  return specializationSummaryForItems(provider.specializations, provider.fachbereich, lang, notSet);
+}
+
+function deriveDynamicOptions(
+  rows: readonly ProviderSummary[],
+  lang: "de" | "ru",
+): ProviderDynamicOptions {
   const cities = new Set<string>();
   const countries = new Set<string>();
-  const fachbereiche = new Set<string>();
+  const fachbereiche = new Map<string, string>();
 
   for (const row of rows) {
     if (row.address_city) cities.add(row.address_city);
     if (row.address_country) countries.add(row.address_country);
-    if (row.fachbereich) fachbereiche.add(row.fachbereich);
+    if (row.fachbereich) {
+      fachbereiche.set(row.fachbereich, providerSpecializationLabel(row, lang, row.fachbereich));
+    }
   }
 
   return {
     cities: optionsFrom(cities),
     countries: optionsFrom(countries),
-    fachbereiche: optionsFrom(fachbereiche),
+    fachbereiche: optionsFromMap(fachbereiche),
   };
 }
 
@@ -70,6 +91,25 @@ function providerLevelLabel(level: ProviderOrganizationLevel, tr: Record<string,
     default:
       return level;
   }
+}
+
+function taxonomyNodeLabel(
+  node: ProviderTaxonomyNode | null | undefined,
+  lang: "de" | "ru",
+  notSet: string,
+) {
+  if (!node) return notSet;
+  if (lang === "ru") {
+    return node.name_ru || node.name_de || node.name_en || node.code || notSet;
+  }
+  return node.name_de || node.name_en || node.name_ru || node.code || notSet;
+}
+
+function taxonomyProviderLabel(provider: ProviderSummary, lang: "de" | "ru", notSet: string) {
+  if (provider.taxonomy_path?.length) {
+    return provider.taxonomy_path.map((node) => taxonomyNodeLabel(node, lang, notSet)).join(" / ");
+  }
+  return taxonomyNodeLabel(provider.taxonomy_node, lang, notSet);
 }
 
 function ProviderLevelBadge({
@@ -237,8 +277,9 @@ export function buildProviderColumns(
   rows: readonly ProviderSummary[] = [],
   options: BuildProviderColumnsOptions = {},
 ): ColumnDef<ProviderSummary>[] {
-  const dyn = deriveDynamicOptions(rows);
   const notSet = commonNotSet(tr);
+  const lang = options.lang ?? "de";
+  const dyn = deriveDynamicOptions(rows, lang);
 
   return [
     {
@@ -308,6 +349,21 @@ export function buildProviderColumns(
       render: (provider) => <ProviderTypeBadge provider={provider} tr={tr} />,
     },
     {
+      id: "taxonomy",
+      label: tr.providers_category ?? "Kategorie",
+      accessor: (provider) => taxonomyProviderLabel(provider, lang, notSet),
+      filterType: "text",
+      sortable: true,
+      searchable: true,
+      width: 240,
+      group: "registry",
+      render: (provider) => (
+        <span className="line-clamp-2 text-xs leading-snug text-muted-foreground">
+          {taxonomyProviderLabel(provider, lang, notSet)}
+        </span>
+      ),
+    },
+    {
       id: "city",
       label: tr.providers_city ?? notSet,
       accessor: (provider) => provider.address_city,
@@ -342,7 +398,7 @@ export function buildProviderColumns(
     {
       id: "fachbereich",
       label: tr.providers_fachbereich ?? notSet,
-      accessor: (provider) => provider.fachbereich,
+      accessor: (provider) => providerSpecializationLabel(provider, lang, ""),
       filterType: "enum",
       filterOptions: dyn.fachbereiche,
       sortable: true,
@@ -351,7 +407,7 @@ export function buildProviderColumns(
       group: "registry",
       render: (provider) => (
         <span className="truncate text-xs text-muted-foreground">
-          {provider.fachbereich || notSet}
+          {providerSpecializationLabel(provider, lang, notSet)}
         </span>
       ),
     },
@@ -441,6 +497,20 @@ export function buildProviderColumns(
           {provider.rating_count > 0 ? (
             <span className="ml-1 text-[10px]">({provider.rating_count})</span>
           ) : null}
+        </span>
+      ),
+    },
+    {
+      id: "internal_rating",
+      label: tr.providers_internal_rating ?? "Internal rating",
+      accessor: (provider) => provider.internal_rating,
+      filterType: "number",
+      sortable: true,
+      width: 120,
+      group: "activity",
+      render: (provider) => (
+        <span className="tabular-nums text-xs text-muted-foreground">
+          {formatRating(provider.internal_rating ?? null, notSet)}
         </span>
       ),
     },

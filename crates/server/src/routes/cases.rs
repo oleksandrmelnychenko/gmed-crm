@@ -1127,6 +1127,25 @@ async fn list_case_doctors(
 
     match sqlx::query(
         r#"SELECT d.id, d.provider_id, d.name, d.title, d.role_code, d.role_label, d.subrole, d.fachbereich,
+                  COALESCE((
+                    SELECT jsonb_agg(
+                        jsonb_build_object(
+                            'id', ms.id,
+                            'code', ms.code,
+                            'name_en', ms.name_en,
+                            'name_de', ms.name_de,
+                            'name_ru', ms.name_ru,
+                            'is_active', ms.is_active,
+                            'sort_order', ms.sort_order,
+                            'is_primary', ds.is_primary
+                        )
+                        ORDER BY ds.is_primary DESC, ms.sort_order, ms.name_de, ms.name_en
+                    )
+                    FROM provider_doctor_specializations ds
+                    JOIN medical_specializations ms ON ms.id = ds.specialization_id
+                    WHERE ds.doctor_id = d.id
+                      AND ms.deleted_at IS NULL
+                  ), '[]'::jsonb) AS specializations,
                   p.name AS provider_name
            FROM provider_doctors d
            JOIN providers p ON p.id = d.provider_id
@@ -1158,6 +1177,7 @@ async fn list_case_doctors(
                         "role_label": row.try_get::<Option<String>, _>("role_label").unwrap_or_default(),
                         "subrole": row.try_get::<Option<String>, _>("subrole").unwrap_or_default(),
                         "fachbereich": row.try_get::<Option<String>, _>("fachbereich").unwrap_or_default(),
+                        "specializations": row.try_get::<serde_json::Value, _>("specializations").unwrap_or_else(|_| serde_json::json!([])),
                     })
                 })
                 .collect::<Vec<_>>(),

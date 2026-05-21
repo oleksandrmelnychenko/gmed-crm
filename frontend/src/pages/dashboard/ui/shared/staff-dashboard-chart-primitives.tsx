@@ -146,6 +146,11 @@ function orderPhaseLabel(phase: string) {
 type TopProviderRow = {
   id: string;
   name: string;
+  provider_type?: string | null;
+  taxonomy_node_id?: string | null;
+  taxonomy_node_code?: string | null;
+  taxonomy_node_name_de?: string | null;
+  taxonomy_node_name_ru?: string | null;
   patient_count: number;
   appointment_count: number;
 };
@@ -153,6 +158,13 @@ type TopProviderRow = {
 type RankedTopProviderRow = TopProviderRow & {
   rank: number;
 };
+
+function providerTaxonomyLabel(row: TopProviderRow, fallback: string, lang: "de" | "ru") {
+  if (lang === "ru") {
+    return row.taxonomy_node_name_ru || row.taxonomy_node_name_de || row.taxonomy_node_code || fallback;
+  }
+  return row.taxonomy_node_name_de || row.taxonomy_node_name_ru || row.taxonomy_node_code || fallback;
+}
 
 export function HorizontalBars({
   data,
@@ -406,6 +418,7 @@ export function TopProvidersTable({
   tr: DashboardTranslations;
   onOpen: (id: string) => void;
 }) {
+  const lang = getLang();
   const rankedRows = useMemo<RankedTopProviderRow[]>(
     () => rows.map((row, index) => ({ ...row, rank: index + 1 })),
     [rows],
@@ -435,6 +448,17 @@ export function TopProvidersTable({
       ),
     },
     {
+      id: "taxonomy",
+      label: tr.providers_category ?? tr.providers_type ?? tr.common_unknown,
+      accessor: (row) => providerTaxonomyLabel(row, row.provider_type ?? "", lang),
+      width: 170,
+      render: (row) => (
+        <span className="block max-w-[150px] truncate rounded-full border border-border/70 bg-muted/30 px-2 py-0.5 text-[11px] text-muted-foreground">
+          {providerTaxonomyLabel(row, row.provider_type ?? tr.common_unknown, lang)}
+        </span>
+      ),
+    },
+    {
       id: "patients",
       label: tr.patients_title ?? tr.common_unknown,
       accessor: (row) => row.patient_count,
@@ -453,10 +477,13 @@ export function TopProvidersTable({
       ),
     },
   ], [
+    lang,
     tr.appointments_title,
     tr.common_provider,
     tr.common_unknown,
+    tr.providers_category,
     tr.patients_title,
+    tr.providers_type,
     tr.providers_title,
   ]);
 

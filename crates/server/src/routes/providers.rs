@@ -7,7 +7,7 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
-use sqlx::{Postgres, Row, Transaction};
+use sqlx::{Postgres, Row, Transaction, postgres::PgRow};
 use uuid::Uuid;
 
 use crate::audit::{self as audit_mod};
@@ -38,6 +38,7 @@ pub fn router() -> Router<AppState> {
             "/providers/specializations/{specialization_id}/delete",
             post(delete_specialization),
         )
+        .route("/providers/taxonomy", get(list_provider_taxonomy))
         .route(
             "/providers/staff-roles",
             get(list_provider_staff_roles).post(create_provider_staff_role),
@@ -150,11 +151,23 @@ struct ListProvidersQuery {
     service_name: Option<String>,
     has_contract: Option<bool>,
     rating_gte: Option<f64>,
+    taxonomy_node_id: Option<Uuid>,
+    taxonomy_code: Option<String>,
+    taxonomy_attribute_key: Option<String>,
+    taxonomy_attribute_value: Option<String>,
+    internal_rating_gte: Option<f64>,
+    linked_patient_id: Option<Uuid>,
 }
 
 #[derive(Deserialize)]
 struct ListSpecializationsQuery {
     include_inactive: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct ListProviderTaxonomyQuery {
+    include_inactive: Option<bool>,
+    provider_type: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -181,6 +194,12 @@ struct UpsertProviderRequest {
     specializations: Option<Vec<String>>,
     parent_provider_id: Option<Uuid>,
     organization_level: Option<String>,
+    taxonomy_node_id: Option<Uuid>,
+    taxonomy_node_ids: Option<Vec<Uuid>>,
+    primary_taxonomy_node_id: Option<Uuid>,
+    taxonomy_attributes: Option<Value>,
+    internal_rating: Option<f64>,
+    internal_rating_note: Option<String>,
     kooperationsvertrag: Option<Value>,
     notes: Option<String>,
 }
@@ -221,6 +240,8 @@ struct UpsertServiceRequest {
     currency: Option<String>,
     valid_from: Option<String>,
     valid_to: Option<String>,
+    taxonomy_node_id: Option<Uuid>,
+    taxonomy_attributes: Option<Value>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -335,11 +356,33 @@ async fn list_providers(
     let service_name_pattern = format!("%{}%", query.service_name.unwrap_or_default());
     let has_contract = query.has_contract;
     let rating_gte = query.rating_gte;
+    let taxonomy_node_id = query.taxonomy_node_id;
+    let taxonomy_code = normalize_optional(query.taxonomy_code);
+    let taxonomy_attribute_key = normalize_optional(query.taxonomy_attribute_key);
+    let taxonomy_attribute_value = normalize_optional(query.taxonomy_attribute_value);
+    let internal_rating_gte = query.internal_rating_gte;
+    let linked_patient_id = query.linked_patient_id;
 
     if let Some(ref provider_type) = provider_type
         && !is_valid_provider_type(provider_type)
     {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid provider type");
+    }
+    if internal_rating_gte.is_some_and(|value| !value.is_finite() || !(0.0..=5.0).contains(&value))
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "internal_rating_gte must be between 0 and 5",
+        );
+    }
+    if taxonomy_attribute_key
+        .as_ref()
+        .is_some_and(|value| value.len() > 120)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "taxonomy_attribute_key is too long",
+        );
     }
 
     let rows = match sqlx::query(
@@ -348,6 +391,7 @@ async fn list_providers(
                   p.phone, p.email, p.opening_hours, p.is_active, p.created_at,
                   p.parent_provider_id, parent.name AS parent_provider_name,
                   p.organization_level,
+                  p.internal_rating, p.internal_rating_note, p.taxonomy_attributes,
                   (p.kooperationsvertrag IS NOT NULL) AS has_contract,
                   (
                     SELECT COUNT(*)
@@ -421,6 +465,7 @@ async fn list_providers(
                 OR COALESCE(p.tax_id, '') ILIKE $3
                 OR COALESCE(p.address_city, '') ILIKE $3
                 OR COALESCE(p.fachbereich, '') ILIKE $3
+                OR p.taxonomy_attributes::text ILIKE $3
                 OR EXISTS (
                     SELECT 1
                     FROM provider_specializations ps
@@ -431,6 +476,17 @@ async fn list_providers(
                         OR COALESCE(ms.name_de, '') ILIKE $3
                         OR COALESCE(ms.name_ru, '') ILIKE $3
                         OR ms.code ILIKE $3
+                      )
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM provider_taxonomy_assignments pta
+                    JOIN provider_taxonomy_nodes ptn ON ptn.id = pta.taxonomy_node_id
+                    WHERE pta.provider_id = p.id
+                      AND (
+                        ptn.code ILIKE $3
+                        OR ptn.name_de ILIKE $3
+                        OR COALESCE(ptn.name_ru, '') ILIKE $3
                       )
                 )
                  OR EXISTS (
@@ -567,6 +623,82 @@ async fn list_providers(
                      WHERE f.provider_id = p.id
                  ), 0) >= $11
               )
+              AND (
+                 $13::uuid IS NULL
+                 OR EXISTS (
+                    WITH RECURSIVE assigned_taxonomy AS (
+                        SELECT ptn.id, ptn.parent_id, ptn.code
+                        FROM provider_taxonomy_assignments pta
+                        JOIN provider_taxonomy_nodes ptn ON ptn.id = pta.taxonomy_node_id
+                        WHERE pta.provider_id = p.id
+
+                        UNION ALL
+
+                        SELECT parent.id, parent.parent_id, parent.code
+                        FROM provider_taxonomy_nodes parent
+                        JOIN assigned_taxonomy child ON child.parent_id = parent.id
+                    )
+                    SELECT 1
+                    FROM assigned_taxonomy
+                    WHERE id = $13
+                 )
+              )
+              AND (
+                 $14::text IS NULL
+                 OR EXISTS (
+                    WITH RECURSIVE assigned_taxonomy AS (
+                        SELECT ptn.id, ptn.parent_id, ptn.code
+                        FROM provider_taxonomy_assignments pta
+                        JOIN provider_taxonomy_nodes ptn ON ptn.id = pta.taxonomy_node_id
+                        WHERE pta.provider_id = p.id
+
+                        UNION ALL
+
+                        SELECT parent.id, parent.parent_id, parent.code
+                        FROM provider_taxonomy_nodes parent
+                        JOIN assigned_taxonomy child ON child.parent_id = parent.id
+                    )
+                    SELECT 1
+                    FROM assigned_taxonomy
+                    WHERE code = $14
+                 )
+              )
+              AND (
+                 $15::double precision IS NULL
+                 OR COALESCE(p.internal_rating, 0) >= $15
+              )
+              AND (
+                 $16::text IS NULL
+                 OR (
+                    p.taxonomy_attributes ? $16
+                    AND (
+                        $17::text IS NULL
+                        OR COALESCE(p.taxonomy_attributes ->> $16, '') ILIKE ('%' || $17 || '%')
+                    )
+                 )
+              )
+              AND (
+                 $18::uuid IS NULL
+                 OR EXISTS (
+                    SELECT 1
+                    FROM appointments a
+                    WHERE a.provider_id = p.id
+                      AND a.patient_id = $18
+                 )
+                 OR EXISTS (
+                    SELECT 1
+                    FROM order_leistungen ol
+                    JOIN orders o ON o.id = ol.order_id
+                    WHERE ol.provider_id = p.id
+                      AND o.patient_id = $18
+                 )
+                 OR EXISTS (
+                    SELECT 1
+                    FROM concierge_services cs
+                    WHERE cs.provider_id = p.id
+                      AND cs.patient_id = $18
+                 )
+              )
             ORDER BY p.name
             LIMIT 200"#,
     )
@@ -582,6 +714,12 @@ async fn list_providers(
     .bind(has_contract)
     .bind(rating_gte)
     .bind(specialization_filters)
+    .bind(taxonomy_node_id)
+    .bind(taxonomy_code)
+    .bind(internal_rating_gte)
+    .bind(taxonomy_attribute_key)
+    .bind(taxonomy_attribute_value)
+    .bind(linked_patient_id)
     .fetch_all(&state.db)
     .await
     {
@@ -633,7 +771,15 @@ async fn list_providers(
                 );
             }
         };
-        let specializations = match load_provider_specializations_json(&state, id).await {
+        let (specializations, taxonomy) = tokio::join!(
+            load_provider_specializations_json(&state, id),
+            load_provider_taxonomy_json(&state, id),
+        );
+        let specializations = match specializations {
+            Ok(items) => items,
+            Err(resp) => return resp,
+        };
+        let taxonomy = match taxonomy {
             Ok(items) => items,
             Err(resp) => return resp,
         };
@@ -653,6 +799,11 @@ async fn list_providers(
             "parent_provider_id": row.try_get::<Option<Uuid>, _>("parent_provider_id").unwrap_or_default(),
             "parent_provider_name": row.try_get::<Option<String>, _>("parent_provider_name").unwrap_or_default(),
             "organization_level": row.try_get::<String, _>("organization_level").unwrap_or_else(|_| "organization".to_string()),
+            "taxonomy_node_id": taxonomy.get("taxonomy_node_id").cloned().unwrap_or(Value::Null),
+            "taxonomy_node": taxonomy.get("taxonomy_node").cloned().unwrap_or(Value::Null),
+            "taxonomy_path": taxonomy.get("taxonomy_path").cloned().unwrap_or_else(|| json!([])),
+            "taxonomy_node_ids": taxonomy.get("taxonomy_node_ids").cloned().unwrap_or_else(|| json!([])),
+            "taxonomy_attributes": row.try_get::<Value, _>("taxonomy_attributes").unwrap_or_else(|_| json!({})),
             "specializations": specializations,
             "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
             "has_contract": row.try_get::<bool, _>("has_contract").unwrap_or(false),
@@ -665,6 +816,8 @@ async fn list_providers(
             "open_concierge_service_count": row.try_get::<i64, _>("open_concierge_service_count").unwrap_or_default(),
             "rating_count": row.try_get::<i64, _>("rating_count").unwrap_or_default(),
             "avg_rating": row.try_get::<Option<f64>, _>("avg_rating").unwrap_or_default(),
+            "internal_rating": internal_rating_json(row.try_get::<Option<f64>, _>("internal_rating").unwrap_or_default()),
+            "internal_rating_note": row.try_get::<Option<String>, _>("internal_rating_note").unwrap_or_default(),
             "last_interaction_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("last_interaction_at").unwrap_or_default().map(|v| v.to_rfc3339()),
         }));
     }
@@ -683,11 +836,47 @@ async fn list_specializations(
         Role::Concierge,
         Role::Billing,
         Role::Sales,
+        Role::Patient,
     ]) {
         return e;
     }
 
     match load_specializations_json(&state, query.include_inactive.unwrap_or(false)).await {
+        Ok(items) => Json(items).into_response(),
+        Err(resp) => resp,
+    }
+}
+
+async fn list_provider_taxonomy(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Query(query): Query<ListProviderTaxonomyQuery>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::Concierge,
+        Role::Billing,
+        Role::Sales,
+        Role::Patient,
+    ]) {
+        return e;
+    }
+
+    let provider_type = normalize_optional(query.provider_type);
+    if let Some(ref provider_type) = provider_type
+        && !is_valid_provider_type(provider_type)
+    {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid provider type");
+    }
+
+    match load_provider_taxonomy_nodes_json(
+        &state,
+        query.include_inactive.unwrap_or(false),
+        provider_type.as_deref(),
+    )
+    .await
+    {
         Ok(items) => Json(items).into_response(),
         Err(resp) => resp,
     }
@@ -1067,7 +1256,14 @@ async fn create_provider(
     }
     let specializations = provider.specializations.clone();
     let contacts = provider.contacts.clone();
+    let taxonomy_node_ids = provider.taxonomy_node_ids.clone();
+    let primary_taxonomy_node_id = provider.primary_taxonomy_node_id;
     let provider_type = provider.provider_type.clone();
+    if let Some(ref values) = taxonomy_node_ids
+        && let Err(resp) = validate_provider_taxonomy_nodes(&state, &provider_type, values).await
+    {
+        return resp;
+    }
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -1085,12 +1281,14 @@ async fn create_provider(
                 name, provider_type, legal_name, tax_id,
                 address_street, address_city, address_zip, address_country,
                 phone, email, website, fachbereich, parent_provider_id, organization_level,
-                opening_hours, kooperationsvertrag, notes
+                opening_hours, taxonomy_attributes, internal_rating, internal_rating_note,
+                kooperationsvertrag, notes
            ) VALUES (
                 $1, $2, $3, $4,
                 $5, $6, $7, $8,
                 $9, $10, $11, $12, $13, $14,
-                $15, $16, $17
+                $15, $16, $17, $18,
+                $19, $20
            )
            RETURNING id, created_at"#,
     )
@@ -1109,6 +1307,9 @@ async fn create_provider(
     .bind(provider.parent_provider_id)
     .bind(provider.organization_level)
     .bind(provider.opening_hours)
+    .bind(provider.taxonomy_attributes.unwrap_or_else(|| json!({})))
+    .bind(provider.internal_rating)
+    .bind(provider.internal_rating_note)
     .bind(provider.kooperationsvertrag)
     .bind(provider.notes)
     .fetch_one(&mut *tx)
@@ -1136,6 +1337,17 @@ async fn create_provider(
     if let Some(values) = specializations
         && let Err(resp) =
             sync_provider_specializations_tx(&mut tx, provider_id, &provider_type, &values).await
+    {
+        return resp;
+    }
+    if let Some(values) = taxonomy_node_ids {
+        if let Err(resp) =
+            sync_provider_taxonomy_tx(&mut tx, provider_id, &values, primary_taxonomy_node_id).await
+        {
+            return resp;
+        }
+    } else if let Err(resp) =
+        ensure_provider_taxonomy_for_type_tx(&mut tx, provider_id, &provider_type).await
     {
         return resp;
     }
@@ -1205,6 +1417,7 @@ async fn get_provider(
                   parent_provider_id,
                   (SELECT name FROM providers parent WHERE parent.id = providers.parent_provider_id) AS parent_provider_name,
                   organization_level,
+                  taxonomy_attributes, internal_rating, internal_rating_note,
                   is_active, created_at, updated_at
            FROM providers
            WHERE id = $1"#,
@@ -1231,6 +1444,7 @@ async fn get_provider(
         provider_contacts,
         staff,
         children,
+        taxonomy,
     ) = tokio::join!(
         load_doctors_json(&state, provider_id),
         load_services_json(&state, provider_id),
@@ -1250,6 +1464,7 @@ async fn get_provider(
         ),
         load_provider_staff_json(&state, provider_id),
         load_provider_children_json(&state, provider_id),
+        load_provider_taxonomy_json(&state, provider_id),
     );
 
     let doctors = match doctors {
@@ -1288,6 +1503,10 @@ async fn get_provider(
         Ok(items) => items,
         Err(resp) => return resp,
     };
+    let taxonomy = match taxonomy {
+        Ok(items) => items,
+        Err(resp) => return resp,
+    };
 
     Json(json!({
         "id": provider.try_get::<Uuid, _>("id").unwrap_or(provider_id),
@@ -1309,7 +1528,14 @@ async fn get_provider(
         "parent_provider_id": provider.try_get::<Option<Uuid>, _>("parent_provider_id").unwrap_or_default(),
         "parent_provider_name": provider.try_get::<Option<String>, _>("parent_provider_name").unwrap_or_default(),
         "organization_level": provider.try_get::<String, _>("organization_level").unwrap_or_else(|_| "organization".to_string()),
+        "taxonomy_node_id": taxonomy.get("taxonomy_node_id").cloned().unwrap_or(Value::Null),
+        "taxonomy_node": taxonomy.get("taxonomy_node").cloned().unwrap_or(Value::Null),
+        "taxonomy_path": taxonomy.get("taxonomy_path").cloned().unwrap_or_else(|| json!([])),
+        "taxonomy_node_ids": taxonomy.get("taxonomy_node_ids").cloned().unwrap_or_else(|| json!([])),
+        "taxonomy_attributes": provider.try_get::<Value, _>("taxonomy_attributes").unwrap_or_else(|_| json!({})),
         "kooperationsvertrag": provider.try_get::<Option<Value>, _>("kooperationsvertrag").unwrap_or_default(),
+        "internal_rating": internal_rating_json(provider.try_get::<Option<f64>, _>("internal_rating").unwrap_or_default()),
+        "internal_rating_note": provider.try_get::<Option<String>, _>("internal_rating_note").unwrap_or_default(),
         "notes": provider.try_get::<Option<String>, _>("notes").unwrap_or_default(),
         "is_active": provider.try_get::<bool, _>("is_active").unwrap_or(true),
         "created_at": provider.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
@@ -1346,7 +1572,14 @@ async fn update_provider(
     }
     let specializations = provider.specializations.clone();
     let contacts = provider.contacts.clone();
+    let taxonomy_node_ids = provider.taxonomy_node_ids.clone();
+    let primary_taxonomy_node_id = provider.primary_taxonomy_node_id;
     let provider_type = provider.provider_type.clone();
+    if let Some(ref values) = taxonomy_node_ids
+        && let Err(resp) = validate_provider_taxonomy_nodes(&state, &provider_type, values).await
+    {
+        return resp;
+    }
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -1378,6 +1611,9 @@ async fn update_provider(
                opening_hours = $16,
                kooperationsvertrag = $17,
                notes = $18,
+               taxonomy_attributes = COALESCE($19, taxonomy_attributes),
+               internal_rating = COALESCE($20, internal_rating),
+               internal_rating_note = COALESCE($21, internal_rating_note),
                updated_at = now()
            WHERE id = $1
            RETURNING id"#,
@@ -1400,6 +1636,9 @@ async fn update_provider(
     .bind(provider.opening_hours)
     .bind(provider.kooperationsvertrag)
     .bind(provider.notes)
+    .bind(provider.taxonomy_attributes)
+    .bind(provider.internal_rating)
+    .bind(provider.internal_rating_note)
     .fetch_optional(&mut *tx)
     .await
     {
@@ -1435,6 +1674,17 @@ async fn update_provider(
     } else if let Some(values) = specializations
         && let Err(resp) =
             sync_provider_specializations_tx(&mut tx, updated_id, &provider_type, &values).await
+    {
+        return resp;
+    }
+    if let Some(values) = taxonomy_node_ids {
+        if let Err(resp) =
+            sync_provider_taxonomy_tx(&mut tx, updated_id, &values, primary_taxonomy_node_id).await
+        {
+            return resp;
+        }
+    } else if let Err(resp) =
+        ensure_provider_taxonomy_for_type_tx(&mut tx, updated_id, &provider_type).await
     {
         return resp;
     }
@@ -2878,11 +3128,16 @@ async fn get_service(
     }
 
     match sqlx::query(
-        r#"SELECT id, provider_id, service_name, description, price, currency,
-                  price_type, price_from, price_to, price_note,
-                  valid_from, valid_to, created_at
-           FROM service_catalog
-           WHERE provider_id = $1 AND id = $2"#,
+        r#"SELECT s.id, s.provider_id, s.service_name, s.description, s.price, s.currency,
+                  s.price_type, s.price_from, s.price_to, s.price_note,
+                  s.valid_from, s.valid_to, s.created_at,
+                  s.taxonomy_node_id, s.taxonomy_attributes,
+                  ptn.code AS taxonomy_node_code,
+                  ptn.name_de AS taxonomy_node_name_de,
+                  ptn.name_ru AS taxonomy_node_name_ru
+           FROM service_catalog s
+           LEFT JOIN provider_taxonomy_nodes ptn ON ptn.id = s.taxonomy_node_id
+           WHERE s.provider_id = $1 AND s.id = $2"#,
     )
     .bind(provider_id)
     .bind(service_id)
@@ -2903,6 +3158,11 @@ async fn get_service(
             "valid_from": row.try_get::<chrono::NaiveDate, _>("valid_from").map(|v| v.to_string()).unwrap_or_default(),
             "valid_to": row.try_get::<Option<chrono::NaiveDate>, _>("valid_to").unwrap_or_default().map(|v| v.to_string()),
             "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
+            "taxonomy_node_id": row.try_get::<Option<Uuid>, _>("taxonomy_node_id").unwrap_or_default(),
+            "taxonomy_node_code": row.try_get::<Option<String>, _>("taxonomy_node_code").unwrap_or_default(),
+            "taxonomy_node_name_de": row.try_get::<Option<String>, _>("taxonomy_node_name_de").unwrap_or_default(),
+            "taxonomy_node_name_ru": row.try_get::<Option<String>, _>("taxonomy_node_name_ru").unwrap_or_default(),
+            "taxonomy_attributes": row.try_get::<Value, _>("taxonomy_attributes").unwrap_or_else(|_| json!({})),
         }))
         .into_response(),
         Ok(None) => err(StatusCode::NOT_FOUND, "Service not found"),
@@ -2937,16 +3197,23 @@ async fn create_service(
             "Medical provider services require a price range",
         );
     }
+    if let Err(resp) =
+        validate_service_taxonomy_node(&state, &provider_type, service.taxonomy_node_id).await
+    {
+        return resp;
+    }
 
     let row = match sqlx::query(
         r#"INSERT INTO service_catalog (
                 provider_id, service_name, description, price,
                 price_type, price_from, price_to, price_note,
-                currency, valid_from, valid_to
+                currency, valid_from, valid_to,
+                taxonomy_node_id, taxonomy_attributes
            ) VALUES (
                 $1, $2, $3, $4,
                 $5, $6, $7, $8,
-                $9, $10, $11
+                $9, $10, $11,
+                $12, $13
            )
            RETURNING id, created_at"#,
     )
@@ -2961,6 +3228,8 @@ async fn create_service(
     .bind(service.currency)
     .bind(service.valid_from)
     .bind(service.valid_to)
+    .bind(service.taxonomy_node_id)
+    .bind(service.taxonomy_attributes)
     .fetch_one(&state.db)
     .await
     {
@@ -3039,6 +3308,11 @@ async fn update_service(
             "Medical provider services require a price range",
         );
     }
+    if let Err(resp) =
+        validate_service_taxonomy_node(&state, &provider_type, service.taxonomy_node_id).await
+    {
+        return resp;
+    }
 
     match sqlx::query(
         r#"UPDATE service_catalog
@@ -3051,7 +3325,9 @@ async fn update_service(
                price_note = $9,
                currency = $10,
                valid_from = $11,
-               valid_to = $12
+               valid_to = $12,
+               taxonomy_node_id = $13,
+               taxonomy_attributes = $14
            WHERE provider_id = $1 AND id = $2"#,
     )
     .bind(provider_id)
@@ -3066,6 +3342,8 @@ async fn update_service(
     .bind(service.currency)
     .bind(service.valid_from)
     .bind(service.valid_to)
+    .bind(service.taxonomy_node_id)
+    .bind(service.taxonomy_attributes)
     .execute(&state.db)
     .await
     {
@@ -3166,6 +3444,11 @@ struct ProviderPayload {
     specializations: Option<Vec<String>>,
     parent_provider_id: Option<Uuid>,
     organization_level: String,
+    taxonomy_node_ids: Option<Vec<Uuid>>,
+    primary_taxonomy_node_id: Option<Uuid>,
+    taxonomy_attributes: Option<Value>,
+    internal_rating: Option<f64>,
+    internal_rating_note: Option<String>,
     kooperationsvertrag: Option<Value>,
     notes: Option<String>,
 }
@@ -3204,6 +3487,8 @@ struct ServicePayload {
     currency: String,
     valid_from: chrono::NaiveDate,
     valid_to: Option<chrono::NaiveDate>,
+    taxonomy_node_id: Option<Uuid>,
+    taxonomy_attributes: Value,
 }
 
 #[derive(Clone)]
@@ -3320,6 +3605,21 @@ fn normalize_provider_payload(
         return Err("Organization level is invalid");
     }
 
+    let (taxonomy_node_ids, primary_taxonomy_node_id) = normalize_provider_taxonomy_input(
+        body.taxonomy_node_id,
+        body.taxonomy_node_ids,
+        body.primary_taxonomy_node_id,
+    );
+    let taxonomy_attributes = normalize_taxonomy_attributes(body.taxonomy_attributes)?;
+    let internal_rating = normalize_internal_rating(body.internal_rating)?;
+    let internal_rating_note = normalize_optional(body.internal_rating_note);
+    if internal_rating_note
+        .as_ref()
+        .is_some_and(|value| value.len() > 2000)
+    {
+        return Err("Internal rating note is too long");
+    }
+
     let phone = normalize_optional(body.phone);
     let email = normalize_optional(body.email);
     let opening_hours = normalize_optional(body.opening_hours);
@@ -3359,6 +3659,11 @@ fn normalize_provider_payload(
         },
         parent_provider_id: body.parent_provider_id,
         organization_level,
+        taxonomy_node_ids,
+        primary_taxonomy_node_id,
+        taxonomy_attributes,
+        internal_rating,
+        internal_rating_note,
         kooperationsvertrag: normalize_json(body.kooperationsvertrag),
         notes: normalize_optional(body.notes),
     })
@@ -3521,6 +3826,8 @@ fn normalize_service_payload(body: UpsertServiceRequest) -> Result<ServicePayloa
     {
         return Err("valid_to must be on or after valid_from");
     }
+    let taxonomy_attributes =
+        normalize_taxonomy_attributes(body.taxonomy_attributes)?.unwrap_or_else(|| json!({}));
 
     Ok(ServicePayload {
         service_name,
@@ -3533,6 +3840,8 @@ fn normalize_service_payload(body: UpsertServiceRequest) -> Result<ServicePayloa
         currency,
         valid_from,
         valid_to,
+        taxonomy_node_id: body.taxonomy_node_id,
+        taxonomy_attributes,
     })
 }
 
@@ -4019,6 +4328,63 @@ fn normalize_optional(value: Option<String>) -> Option<String> {
 
 fn normalize_json(value: Option<Value>) -> Option<Value> {
     value.and_then(|raw| if raw.is_null() { None } else { Some(raw) })
+}
+
+fn normalize_taxonomy_attributes(value: Option<Value>) -> Result<Option<Value>, &'static str> {
+    let Some(value) = normalize_json(value) else {
+        return Ok(None);
+    };
+    if !value.is_object() {
+        return Err("taxonomy_attributes must be an object");
+    }
+    Ok(Some(value))
+}
+
+fn normalize_internal_rating(value: Option<f64>) -> Result<Option<f64>, &'static str> {
+    match value {
+        Some(raw) if raw.is_finite() && (0.0..=5.0).contains(&raw) => Ok(Some(raw)),
+        Some(_) => Err("internal_rating must be between 0 and 5"),
+        None => Ok(None),
+    }
+}
+
+fn internal_rating_json(value: Option<f64>) -> serde_json::Value {
+    match value {
+        Some(raw) if raw.fract() == 0.0 => json!(raw as i64),
+        Some(raw) => json!(raw),
+        None => Value::Null,
+    }
+}
+
+fn normalize_provider_taxonomy_input(
+    taxonomy_node_id: Option<Uuid>,
+    taxonomy_node_ids: Option<Vec<Uuid>>,
+    primary_taxonomy_node_id: Option<Uuid>,
+) -> (Option<Vec<Uuid>>, Option<Uuid>) {
+    let explicit = taxonomy_node_id.is_some()
+        || taxonomy_node_ids.is_some()
+        || primary_taxonomy_node_id.is_some();
+    if !explicit {
+        return (None, None);
+    }
+
+    let primary = primary_taxonomy_node_id.or(taxonomy_node_id);
+    let mut values = taxonomy_node_ids.unwrap_or_default();
+    if let Some(value) = primary
+        && !values.iter().any(|existing| *existing == value)
+    {
+        values.insert(0, value);
+    }
+
+    let mut normalized = Vec::with_capacity(values.len());
+    for value in values {
+        if !normalized.iter().any(|existing| *existing == value) {
+            normalized.push(value);
+        }
+    }
+
+    let primary = primary.or_else(|| normalized.first().copied());
+    (Some(normalized), primary)
 }
 
 fn normalize_money(value: Option<f64>) -> Result<Option<rust_decimal::Decimal>, &'static str> {
@@ -4599,6 +4965,189 @@ async fn load_provider_specializations_json(
         .collect())
 }
 
+async fn load_provider_taxonomy_nodes_json(
+    state: &AppState,
+    include_inactive: bool,
+    provider_type: Option<&str>,
+) -> Result<serde_json::Value, axum::response::Response> {
+    let rows = sqlx::query(
+        r#"SELECT id, parent_id, code, level, provider_kind, name_de, name_ru, description,
+                  filter_keys, is_active, sort_order, created_at, updated_at,
+                  NOT EXISTS (
+                    SELECT 1
+                    FROM provider_taxonomy_nodes child
+                    WHERE child.parent_id = provider_taxonomy_nodes.id
+                      AND ($1::bool = true OR child.is_active = true)
+                  ) AS is_leaf
+           FROM provider_taxonomy_nodes
+           WHERE ($1::bool = true OR is_active = true)
+             AND ($2::text IS NULL OR provider_kind = $2)
+           ORDER BY sort_order, name_de, code"#,
+    )
+    .bind(include_inactive)
+    .bind(provider_type)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to load provider taxonomy");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load provider taxonomy",
+        )
+    })?;
+
+    let nodes = rows
+        .iter()
+        .map(|row| taxonomy_node_json(row, None))
+        .collect::<Vec<_>>();
+    let leaves = rows
+        .iter()
+        .filter(|row| row.try_get::<String, _>("level").unwrap_or_default() == "type")
+        .map(|row| taxonomy_node_json(row, None))
+        .collect::<Vec<_>>();
+
+    Ok(json!({
+        "nodes": nodes,
+        "leaves": leaves,
+    }))
+}
+
+async fn load_provider_taxonomy_json(
+    state: &AppState,
+    provider_id: Uuid,
+) -> Result<serde_json::Value, axum::response::Response> {
+    let rows = sqlx::query(
+        r#"SELECT ptn.id, ptn.parent_id, ptn.code, ptn.level, ptn.provider_kind,
+                  ptn.name_de, ptn.name_ru, ptn.description, ptn.filter_keys,
+                  ptn.is_active, ptn.sort_order, ptn.created_at, ptn.updated_at,
+                  pta.is_primary,
+                  NOT EXISTS (
+                    SELECT 1
+                    FROM provider_taxonomy_nodes child
+                    WHERE child.parent_id = ptn.id
+                      AND child.is_active = true
+                  ) AS is_leaf
+           FROM provider_taxonomy_assignments pta
+           JOIN provider_taxonomy_nodes ptn ON ptn.id = pta.taxonomy_node_id
+           WHERE pta.provider_id = $1
+           ORDER BY pta.is_primary DESC, ptn.sort_order, ptn.name_de"#,
+    )
+    .bind(provider_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, provider_id = %provider_id, "Failed to load provider taxonomy");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load provider taxonomy",
+        )
+    })?;
+
+    let nodes = rows
+        .iter()
+        .map(|row| taxonomy_node_json(row, row.try_get::<bool, _>("is_primary").ok()))
+        .collect::<Vec<_>>();
+    let primary_id = rows
+        .iter()
+        .find(|row| row.try_get::<bool, _>("is_primary").unwrap_or(false))
+        .or_else(|| rows.first())
+        .and_then(|row| row.try_get::<Uuid, _>("id").ok());
+    let primary_id_text = primary_id.map(|id| id.to_string());
+    let primary_node = primary_id_text.as_deref().and_then(|id| {
+        nodes
+            .iter()
+            .find(|node| node.get("id").and_then(Value::as_str) == Some(id))
+            .cloned()
+    });
+    let taxonomy_path = match primary_id {
+        Some(id) => load_taxonomy_path_json(state, id).await?,
+        None => Vec::new(),
+    };
+    let taxonomy_node_ids = rows
+        .iter()
+        .filter_map(|row| row.try_get::<Uuid, _>("id").ok())
+        .collect::<Vec<_>>();
+
+    Ok(json!({
+        "taxonomy_node_id": primary_id,
+        "taxonomy_node": primary_node,
+        "taxonomy_path": taxonomy_path,
+        "taxonomy_node_ids": taxonomy_node_ids,
+        "taxonomy_nodes": nodes,
+    }))
+}
+
+async fn load_taxonomy_path_json(
+    state: &AppState,
+    taxonomy_node_id: Uuid,
+) -> Result<Vec<serde_json::Value>, axum::response::Response> {
+    let rows = sqlx::query(
+        r#"WITH RECURSIVE ancestors AS (
+                SELECT id, parent_id, code, level, provider_kind, name_de, name_ru, description,
+                       filter_keys, is_active, sort_order, created_at, updated_at, 0 AS depth
+                FROM provider_taxonomy_nodes
+                WHERE id = $1
+
+                UNION ALL
+
+                SELECT parent.id, parent.parent_id, parent.code, parent.level, parent.provider_kind,
+                       parent.name_de, parent.name_ru, parent.description, parent.filter_keys,
+                       parent.is_active, parent.sort_order, parent.created_at, parent.updated_at,
+                       child.depth + 1
+                FROM provider_taxonomy_nodes parent
+                JOIN ancestors child ON child.parent_id = parent.id
+            )
+            SELECT id, parent_id, code, level, provider_kind, name_de, name_ru, description,
+                   filter_keys, is_active, sort_order, created_at, updated_at,
+                   NOT EXISTS (
+                    SELECT 1
+                    FROM provider_taxonomy_nodes child
+                    WHERE child.parent_id = ancestors.id
+                      AND child.is_active = true
+                   ) AS is_leaf
+            FROM ancestors
+            ORDER BY depth DESC"#,
+    )
+    .bind(taxonomy_node_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, taxonomy_node_id = %taxonomy_node_id, "Failed to load taxonomy path");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load provider taxonomy",
+        )
+    })?;
+
+    Ok(rows
+        .iter()
+        .map(|row| taxonomy_node_json(row, None))
+        .collect())
+}
+
+fn taxonomy_node_json(row: &PgRow, is_primary: Option<bool>) -> serde_json::Value {
+    let name_de = row.try_get::<String, _>("name_de").unwrap_or_default();
+    json!({
+        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+        "parent_id": row.try_get::<Option<Uuid>, _>("parent_id").unwrap_or_default(),
+        "code": row.try_get::<String, _>("code").unwrap_or_default(),
+        "level": row.try_get::<String, _>("level").unwrap_or_default(),
+        "provider_kind": row.try_get::<String, _>("provider_kind").unwrap_or_default(),
+        "name_en": name_de.clone(),
+        "name_de": name_de,
+        "name_ru": row.try_get::<Option<String>, _>("name_ru").unwrap_or_default(),
+        "description": row.try_get::<Option<String>, _>("description").unwrap_or_default(),
+        "filter_keys": row.try_get::<Vec<String>, _>("filter_keys").unwrap_or_default(),
+        "is_leaf": row.try_get::<bool, _>("is_leaf").unwrap_or(false),
+        "is_assignable": row.try_get::<String, _>("level").unwrap_or_default() == "type",
+        "is_primary": is_primary,
+        "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
+        "sort_order": row.try_get::<i32, _>("sort_order").unwrap_or_default(),
+        "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
+        "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
+    })
+}
+
 async fn load_doctor_specializations_json(
     state: &AppState,
     doctor_id: Uuid,
@@ -4684,6 +5233,194 @@ async fn sync_provider_specializations_tx(
         })?;
     }
     Ok(())
+}
+
+async fn validate_provider_taxonomy_nodes(
+    state: &AppState,
+    provider_type: &str,
+    values: &[Uuid],
+) -> Result<(), axum::response::Response> {
+    if values.is_empty() {
+        return Ok(());
+    }
+
+    let valid_count = sqlx::query_scalar::<_, i64>(
+        r#"SELECT COUNT(*)::bigint
+           FROM provider_taxonomy_nodes
+           WHERE id = ANY($1)
+             AND provider_kind = $2
+             AND level = 'type'
+             AND is_active = true"#,
+    )
+    .bind(values)
+    .bind(provider_type)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to validate provider taxonomy");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate provider taxonomy",
+        )
+    })?;
+
+    if valid_count == values.len() as i64 {
+        Ok(())
+    } else {
+        Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Provider taxonomy node must be an active leaf for provider type",
+        ))
+    }
+}
+
+async fn validate_service_taxonomy_node(
+    state: &AppState,
+    provider_type: &str,
+    taxonomy_node_id: Option<Uuid>,
+) -> Result<(), axum::response::Response> {
+    let Some(taxonomy_node_id) = taxonomy_node_id else {
+        return Ok(());
+    };
+
+    let exists = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS (
+               SELECT 1
+               FROM provider_taxonomy_nodes
+               WHERE id = $1
+                 AND provider_kind = $2
+                 AND level = 'type'
+                 AND is_active = true
+           )"#,
+    )
+    .bind(taxonomy_node_id)
+    .bind(provider_type)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, taxonomy_node_id = %taxonomy_node_id, "Failed to validate service taxonomy");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate service taxonomy",
+        )
+    })?;
+
+    if exists {
+        Ok(())
+    } else {
+        Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Service taxonomy node must be an active leaf for provider type",
+        ))
+    }
+}
+
+async fn sync_provider_taxonomy_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    provider_id: Uuid,
+    taxonomy_node_ids: &[Uuid],
+    primary_taxonomy_node_id: Option<Uuid>,
+) -> Result<(), axum::response::Response> {
+    sqlx::query("DELETE FROM provider_taxonomy_assignments WHERE provider_id = $1")
+        .bind(provider_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, provider_id = %provider_id, "Failed to replace provider taxonomy");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update provider taxonomy",
+            )
+        })?;
+
+    let primary = primary_taxonomy_node_id.or_else(|| taxonomy_node_ids.first().copied());
+    for taxonomy_node_id in taxonomy_node_ids {
+        sqlx::query(
+            r#"INSERT INTO provider_taxonomy_assignments (
+                    provider_id, taxonomy_node_id, is_primary
+               ) VALUES ($1, $2, $3)"#,
+        )
+        .bind(provider_id)
+        .bind(taxonomy_node_id)
+        .bind(Some(*taxonomy_node_id) == primary)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, provider_id = %provider_id, taxonomy_node_id = %taxonomy_node_id, "Failed to insert provider taxonomy");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update provider taxonomy",
+            )
+        })?;
+    }
+
+    Ok(())
+}
+
+async fn ensure_provider_taxonomy_for_type_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    provider_id: Uuid,
+    provider_type: &str,
+) -> Result<(), axum::response::Response> {
+    let has_matching_taxonomy = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS (
+               SELECT 1
+               FROM provider_taxonomy_assignments pta
+               JOIN provider_taxonomy_nodes ptn ON ptn.id = pta.taxonomy_node_id
+               WHERE pta.provider_id = $1
+                 AND ptn.provider_kind = $2
+                 AND ptn.level = 'type'
+           )"#,
+    )
+    .bind(provider_id)
+    .bind(provider_type)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, provider_id = %provider_id, "Failed to validate provider taxonomy");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update provider taxonomy",
+        )
+    })?;
+
+    if has_matching_taxonomy {
+        return Ok(());
+    }
+
+    let default_code = default_provider_taxonomy_code(provider_type);
+    let Some(default_code) = default_code else {
+        return Ok(());
+    };
+    let taxonomy_node_id = sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT id
+           FROM provider_taxonomy_nodes
+           WHERE code = $1
+             AND provider_kind = $2
+             AND level = 'type'
+             AND is_active = true"#,
+    )
+    .bind(default_code)
+    .bind(provider_type)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, provider_type = %provider_type, "Failed to load default provider taxonomy");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update provider taxonomy",
+        )
+    })?;
+
+    sync_provider_taxonomy_tx(tx, provider_id, &[taxonomy_node_id], Some(taxonomy_node_id)).await
+}
+
+fn default_provider_taxonomy_code(provider_type: &str) -> Option<&'static str> {
+    match provider_type {
+        "medical" => Some("medical_clinics_practices_specialized_centers"),
+        "non_medical" => Some("nonmedical_other"),
+        _ => None,
+    }
 }
 
 async fn clear_provider_doctor_specializations_tx(
@@ -4806,6 +5543,8 @@ async fn upsert_specialization_ids_tx(
                SET name_en = EXCLUDED.name_en,
                    name_de = COALESCE(medical_specializations.name_de, EXCLUDED.name_de),
                    name_ru = COALESCE(medical_specializations.name_ru, EXCLUDED.name_ru),
+                   is_active = TRUE,
+                   deleted_at = NULL,
                    updated_at = now()
                RETURNING id"#,
         )
@@ -5335,12 +6074,17 @@ async fn load_services_json(
     provider_id: Uuid,
 ) -> Result<Vec<serde_json::Value>, axum::response::Response> {
     let rows = sqlx::query(
-        r#"SELECT id, provider_id, service_name, description, price, currency,
-                  price_type, price_from, price_to, price_note,
-                  valid_from, valid_to, created_at
-           FROM service_catalog
-           WHERE provider_id = $1
-           ORDER BY service_name, valid_from DESC"#,
+        r#"SELECT s.id, s.provider_id, s.service_name, s.description, s.price, s.currency,
+                  s.price_type, s.price_from, s.price_to, s.price_note,
+                  s.valid_from, s.valid_to, s.created_at,
+                  s.taxonomy_node_id, s.taxonomy_attributes,
+                  ptn.code AS taxonomy_node_code,
+                  ptn.name_de AS taxonomy_node_name_de,
+                  ptn.name_ru AS taxonomy_node_name_ru
+           FROM service_catalog s
+           LEFT JOIN provider_taxonomy_nodes ptn ON ptn.id = s.taxonomy_node_id
+           WHERE s.provider_id = $1
+           ORDER BY s.service_name, s.valid_from DESC"#,
     )
     .bind(provider_id)
     .fetch_all(&state.db)
@@ -5369,6 +6113,11 @@ async fn load_services_json(
             "valid_from": row.try_get::<chrono::NaiveDate, _>("valid_from").map(|v| v.to_string()).unwrap_or_default(),
             "valid_to": row.try_get::<Option<chrono::NaiveDate>, _>("valid_to").unwrap_or_default().map(|v| v.to_string()),
             "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
+            "taxonomy_node_id": row.try_get::<Option<Uuid>, _>("taxonomy_node_id").unwrap_or_default(),
+            "taxonomy_node_code": row.try_get::<Option<String>, _>("taxonomy_node_code").unwrap_or_default(),
+            "taxonomy_node_name_de": row.try_get::<Option<String>, _>("taxonomy_node_name_de").unwrap_or_default(),
+            "taxonomy_node_name_ru": row.try_get::<Option<String>, _>("taxonomy_node_name_ru").unwrap_or_default(),
+            "taxonomy_attributes": row.try_get::<Value, _>("taxonomy_attributes").unwrap_or_else(|_| json!({})),
         }));
     }
 

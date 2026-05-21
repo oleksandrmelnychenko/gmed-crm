@@ -278,6 +278,7 @@ struct ListAppointmentsQuery {
     status: Option<String>,
     patient_id: Option<Uuid>,
     provider_id: Option<Uuid>,
+    provider_taxonomy_node_id: Option<Uuid>,
     doctor_id: Option<Uuid>,
     owner_user_id: Option<Uuid>,
     interpreter_id: Option<Uuid>,
@@ -1493,6 +1494,26 @@ async fn list_appointments(
              AND ($9::uuid IS NULL OR a.interpreter_id = $9)
              AND ($10::date IS NULL OR a.date >= $10)
              AND ($11::date IS NULL OR a.date <= $11)
+             AND (
+                $12::uuid IS NULL
+                OR EXISTS (
+                    WITH RECURSIVE selected_taxonomy AS (
+                        SELECT n.id
+                        FROM provider_taxonomy_nodes n
+                        WHERE n.id = $12
+                        UNION ALL
+                        SELECT child.id
+                        FROM provider_taxonomy_nodes child
+                        JOIN selected_taxonomy parent
+                          ON child.parent_id = parent.id
+                    )
+                    SELECT 1
+                    FROM provider_taxonomy_assignments pta_filter
+                    JOIN selected_taxonomy st
+                      ON st.id = pta_filter.taxonomy_node_id
+                    WHERE pta_filter.provider_id = a.provider_id
+                )
+             )
            ORDER BY a.date DESC, a.time_start
            LIMIT 200"#,
     )
@@ -1507,6 +1528,7 @@ async fn list_appointments(
     .bind(query.interpreter_id)
     .bind(date_from)
     .bind(date_to)
+    .bind(query.provider_taxonomy_node_id)
     .fetch_all(&state.db)
     .await
     {
@@ -1688,6 +1710,26 @@ async fn list_attention_items(
              AND ($9::uuid IS NULL OR a.interpreter_id = $9)
              AND ($10::date IS NULL OR a.date >= $10)
              AND ($11::date IS NULL OR a.date <= $11)
+             AND (
+                $12::uuid IS NULL
+                OR EXISTS (
+                    WITH RECURSIVE selected_taxonomy AS (
+                        SELECT n.id
+                        FROM provider_taxonomy_nodes n
+                        WHERE n.id = $12
+                        UNION ALL
+                        SELECT child.id
+                        FROM provider_taxonomy_nodes child
+                        JOIN selected_taxonomy parent
+                          ON child.parent_id = parent.id
+                    )
+                    SELECT 1
+                    FROM provider_taxonomy_assignments pta_filter
+                    JOIN selected_taxonomy st
+                      ON st.id = pta_filter.taxonomy_node_id
+                    WHERE pta_filter.provider_id = a.provider_id
+                )
+             )
            ORDER BY a.date DESC, a.time_start
            LIMIT 200"#,
     )
@@ -1702,6 +1744,7 @@ async fn list_attention_items(
     .bind(query.interpreter_id)
     .bind(date_from)
     .bind(date_to)
+    .bind(query.provider_taxonomy_node_id)
     .fetch_all(&state.db)
     .await
     {

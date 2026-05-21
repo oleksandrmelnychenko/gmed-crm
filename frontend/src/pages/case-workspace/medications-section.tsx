@@ -28,6 +28,7 @@ import {
   CASE_MEDICATION_TYPE_LABEL_KEYS,
   CASE_MEDICATION_TYPE_VALUES,
 } from "@/lib/i18n/catalogs/cases-clinical";
+import { doctorSpecialtyLabel, type SpecializationLabelLang } from "@/pages/providers/model/specialization-labels";
 
 import { CaseItemList } from "./case-item-list";
 import { MedicationEquivalentsPanel } from "./medication-equivalents-panel";
@@ -44,11 +45,10 @@ import {
   textareaBaseClassName,
 } from "./primitives";
 
-function doctorOptionLabel(doctor: CaseWorkspaceDoctor) {
+function doctorOptionLabel(doctor: CaseWorkspaceDoctor, lang: SpecializationLabelLang) {
   const titlePrefix = doctor.title?.trim() ? `${doctor.title.trim()} ` : "";
-  const specialty = doctor.fachbereich?.trim()
-    ? ` · ${doctor.fachbereich.trim()}`
-    : "";
+  const specialtyLabel = doctorSpecialtyLabel(doctor, lang);
+  const specialty = specialtyLabel ? ` - ${specialtyLabel}` : "";
   return `${doctor.provider_name} | ${titlePrefix}${doctor.name}${specialty}`;
 }
 
@@ -279,6 +279,7 @@ type MedicationFormContentProps = {
   disabled: boolean;
   doctors: CaseWorkspaceDoctor[];
   form: MedikamentItem;
+  lang: SpecializationLabelLang;
   setForm: (value: SetStateAction<MedikamentItem>) => void;
   t: Translations;
   updateField: <K extends keyof MedikamentItem>(field: K, value: MedikamentItem[K]) => void;
@@ -288,6 +289,7 @@ function MedicationFormContent({
   disabled,
   doctors,
   form,
+  lang,
   setForm,
   t,
   updateField,
@@ -418,7 +420,7 @@ function MedicationFormContent({
           <option value="">{t.common_not_set}</option>
           {doctors.map((doctor) => (
             <option key={doctor.id} value={doctor.id}>
-              {doctorOptionLabel(doctor)}
+              {doctorOptionLabel(doctor, lang)}
             </option>
           ))}
         </NativeComboboxSelect>
@@ -1101,7 +1103,7 @@ function useMedicationsSectionContent() {
         missingPrimaryMessage={t.cases_medications_missing_brand}
         cardContent={(item) => <MedicationCardContent item={item} t={t} />}
         formContent={(props) => (
-          <MedicationFormContent {...props} doctors={doctors} t={t} />
+          <MedicationFormContent {...props} doctors={doctors} lang={lang} t={t} />
         )}
       />
       <MedicationReferenceWorkspace

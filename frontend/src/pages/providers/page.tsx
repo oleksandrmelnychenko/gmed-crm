@@ -67,6 +67,7 @@ import {
   deleteSpecialization,
   fetchProviderDetail,
   fetchProviderStaffRoles,
+  fetchProviderTaxonomy,
   fetchProviders,
   fetchSpecializationsForAdmin,
   saveProviderDoctor,
@@ -147,6 +148,8 @@ import type {
   ServiceItem,
   StaffFormState,
   ProviderStaff,
+  ProviderTaxonomyNode,
+  ProviderType,
   SpecializationItem,
 } from "./model/types";
 import { ProviderHierarchyTimeline } from "./ui/provider-hierarchy-timeline";
@@ -498,6 +501,206 @@ function SpecializationMultiSelect({
       ) : null}
     </div>
   );
+}
+
+function taxonomyNodeLabel(node: ProviderTaxonomyNode | null | undefined, lang: "de" | "ru") {
+  if (!node) return "";
+  if (lang === "ru") {
+    return node.name_ru || node.name_de || node.name_en || humanizeCode(node.code);
+  }
+  return node.name_de || node.name_en || node.name_ru || humanizeCode(node.code);
+}
+
+function taxonomyNodeDepth(node: ProviderTaxonomyNode, nodesById: Map<string, ProviderTaxonomyNode>) {
+  let depth = 0;
+  let parentId = node.parent_id;
+  while (parentId) {
+    const parent = nodesById.get(parentId);
+    if (!parent) break;
+    depth += 1;
+    parentId = parent.parent_id;
+  }
+  return depth;
+}
+
+function taxonomyPathLabel(
+  node: ProviderTaxonomyNode | null | undefined,
+  nodes: ProviderTaxonomyNode[],
+  lang: "de" | "ru",
+  options: { omitProviderKindRoot?: boolean } = {},
+) {
+  if (!node) return "";
+  const nodesById = new Map(nodes.map((item) => [item.id, item]));
+  const path: ProviderTaxonomyNode[] = [];
+  let current: ProviderTaxonomyNode | undefined = node;
+  while (current) {
+    path.unshift(current);
+    current = current.parent_id ? nodesById.get(current.parent_id) : undefined;
+  }
+  const visiblePath =
+    options.omitProviderKindRoot && path.length > 1 && path[0]?.level === "category"
+      ? path.slice(1)
+      : path;
+  return visiblePath.map((item) => taxonomyNodeLabel(item, lang)).join(" / ");
+}
+
+function taxonomyLeafOptions(
+  nodes: ProviderTaxonomyNode[],
+  providerType: ProviderFormState["providerType"] | "",
+  lang: "de" | "ru",
+  options: { includeGroups?: boolean } = {},
+) {
+  const nodesById = new Map(nodes.map((item) => [item.id, item]));
+  return nodes
+    .filter((node) =>
+      node.is_active &&
+      (node.level === "type" ||
+        (options.includeGroups && (node.level === "group" || node.level === "subgroup"))) &&
+      (!providerType || node.provider_kind === providerType),
+    )
+    .toSorted((left, right) => {
+      const leftGroup = taxonomyPathLabel(left, nodes, lang, {
+        omitProviderKindRoot: Boolean(providerType),
+      });
+      const rightGroup = taxonomyPathLabel(right, nodes, lang, {
+        omitProviderKindRoot: Boolean(providerType),
+      });
+      return leftGroup.localeCompare(rightGroup, lang === "ru" ? "ru" : "de");
+    })
+    .map((node) => ({
+      node,
+      depth: Math.max(0, taxonomyNodeDepth(node, nodesById) - (providerType ? 1 : 0)),
+      label:
+        taxonomyPathLabel(node, nodes, lang, {
+          omitProviderKindRoot: Boolean(providerType),
+        }) || taxonomyNodeLabel(node, lang),
+    }));
+}
+
+const GENERIC_TAXONOMY_FILTER_KEYS = new Set([
+  "city",
+  "country",
+  "fachbereich",
+  "specializations",
+  "doctor_name",
+  "doctor_fachbereich",
+  "service_name",
+  "has_contract",
+  "internal_rating",
+  "linked_patient",
+]);
+
+const TAXONOMY_ATTRIBUTE_LABELS: Record<string, { de: string; ru: string }> = {
+  vehicle_class: { de: "Fahrzeugklasse", ru: "Класс автомобиля" },
+  passenger_capacity: { de: "Passagierkapazitaet", ru: "Пассажировместимость" },
+  medical_equipment: { de: "Medizinische Ausstattung", ru: "Медицинское оснащение" },
+  airport: { de: "Flughafen", ru: "Аэропорт" },
+  aircraft_type: { de: "Flugzeugtyp", ru: "Тип воздушного судна" },
+  stars: { de: "Kategorie / Sterne", ru: "Категория / звёзды" },
+  michelin_stars: { de: "Michelin-Sterne", ru: "Звёзды Michelin" },
+  room_type: { de: "Zimmertyp", ru: "Тип номера" },
+  cuisine: { de: "Kueche", ru: "Кухня" },
+  diet: { de: "Diaet / Ernaehrung", ru: "Диета / питание" },
+  language: { de: "Sprache", ru: "Язык" },
+  music_direction: { de: "Musikrichtung", ru: "Направление музыки" },
+  sport_type: { de: "Sportart", ru: "Вид спорта" },
+  government_affiliation: { de: "Staatliche Zugehoerigkeit", ru: "Государственная принадлежность" },
+  administrative_specialization: { de: "Verwaltungsspezialisierung", ru: "Административная специализация" },
+  legal_area: { de: "Rechtsgebiet", ru: "Область права" },
+};
+
+function taxonomyAttributeKeys(node: ProviderTaxonomyNode | null | undefined) {
+  return (node?.filter_keys ?? []).filter((key) => !GENERIC_TAXONOMY_FILTER_KEYS.has(key));
+}
+
+function taxonomyAttributeLabel(key: string, lang: "de" | "ru") {
+  return TAXONOMY_ATTRIBUTE_LABELS[key]?.[lang] ?? humanizeCode(key);
+}
+
+function parseTaxonomyAttributes(value: string) {
+  try {
+    const parsed = JSON.parse(value || "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    return {};
+  }
+  return {};
+}
+
+function taxonomyAttributeValue(value: string, key: string) {
+  const raw = parseTaxonomyAttributes(value)[key];
+  if (raw === null || raw === undefined) return "";
+  if (typeof raw === "string") return raw;
+  return String(raw);
+}
+
+function updateTaxonomyAttributeValue(value: string, key: string, nextValue: string) {
+  const next = parseTaxonomyAttributes(value);
+  const trimmed = nextValue.trim();
+  if (trimmed) {
+    next[key] = trimmed;
+  } else {
+    delete next[key];
+  }
+  return JSON.stringify(next, null, 2);
+}
+
+function ProviderTaxonomySelect({
+  value,
+  nodes,
+  providerType,
+  disabled,
+  includeGroups = false,
+  placeholder,
+  className,
+  onChange,
+}: {
+  value: string;
+  nodes: ProviderTaxonomyNode[];
+  providerType: ProviderFormState["providerType"] | "";
+  disabled?: boolean;
+  includeGroups?: boolean;
+  placeholder: string;
+  className?: string;
+  onChange: (value: string) => void;
+}) {
+  const { lang } = useLang();
+  const options = useMemo(
+    () => taxonomyLeafOptions(nodes, providerType, lang, { includeGroups }),
+    [includeGroups, lang, nodes, providerType],
+  );
+  const hasCurrentValue = value && options.some((option) => option.node.id === value);
+
+  return (
+    <NativeComboboxSelect
+      value={hasCurrentValue ? value : ""}
+      onChange={(event) => onChange(event.target.value)}
+      disabled={disabled || options.length === 0}
+      className={className ?? formSelectClassName}
+      title={hasCurrentValue ? options.find((option) => option.node.id === value)?.label : placeholder}
+    >
+      <option value="">{placeholder}</option>
+      {options.map((option) => (
+        <option key={option.node.id} value={option.node.id}>
+          {`${"  ".repeat(Math.max(0, option.depth - 1))}${option.label}`}
+        </option>
+      ))}
+    </NativeComboboxSelect>
+  );
+}
+
+function serviceTaxonomyLabel(
+  service: ServiceItem,
+  nodes: ProviderTaxonomyNode[],
+  lang: "de" | "ru",
+) {
+  const node =
+    service.taxonomy_node ??
+    nodes.find((item) => item.id === service.taxonomy_node_id) ??
+    null;
+  return taxonomyPathLabel(node, nodes, lang) || taxonomyNodeLabel(node, lang);
 }
 
 function DoctorTitleMultiSelect({
@@ -950,6 +1153,7 @@ type ProvidersPageState = {
   listBusy: boolean;
   listError: string;
   listVersion: number;
+  taxonomyNodes: ProviderTaxonomyNode[];
   specializations: SpecializationItem[];
   specializationDialogOpen: boolean;
   specializationBusy: boolean;
@@ -1119,6 +1323,10 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     const providerType = params.get("provider_type");
     const hasContract = params.get("contract");
     const specializations = params.get("specializations");
+    const taxonomyNodeId = params.get("taxonomy");
+    const internalRatingGte = params.get("internal_rating");
+    const taxonomyAttributeKey = params.get("attr_key");
+    const taxonomyAttributeValue = params.get("attr_value");
 
     return {
       ...base,
@@ -1135,6 +1343,10 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       hasContract:
         hasContract === "true" || hasContract === "false" ? hasContract : base.hasContract,
       specializations: specializations ?? base.specializations,
+      taxonomyNodeId: taxonomyNodeId ?? base.taxonomyNodeId,
+      taxonomyAttributeKey: taxonomyAttributeKey ?? base.taxonomyAttributeKey,
+      taxonomyAttributeValue: taxonomyAttributeValue ?? base.taxonomyAttributeValue,
+      internalRatingGte: internalRatingGte ?? base.internalRatingGte,
     };
   });
   const setFilters: typeof setFiltersState = useCallback(
@@ -1164,6 +1376,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
         listBusy: false,
         listError: "",
         listVersion: 0,
+        taxonomyNodes: [],
         specializations: [],
         specializationDialogOpen: false,
         specializationBusy: false,
@@ -1218,6 +1431,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     listBusy,
     listError,
     listVersion,
+    taxonomyNodes,
     specializations,
     specializationDialogOpen,
     specializationBusy,
@@ -1406,10 +1620,15 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 
   const { columns, metrics, sortedAndFilteredProviders } = useProvidersListTableModel({
     deferredSearch,
+    lang,
     providers,
     sortStack,
     tr,
   });
+  const selectedFilterTaxonomyNode = taxonomyNodes.find(
+    (node) => node.id === filters.taxonomyNodeId,
+  );
+  const filterAttributeKeys = taxonomyAttributeKeys(selectedFilterTaxonomyNode);
 
   function setSearch(value: string) {
     setFilters((current) => ({ ...current, search: value }));
@@ -1621,14 +1840,16 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       fetchProviders("/providers?active_only=true"),
       fetchProviderStaffRoles(true),
       fetchProviderPeoplePatients(),
+      fetchProviderTaxonomy(),
     ])
-      .then(([specializationItems, providerItems, roleItems, patientItems]) => {
+      .then(([specializationItems, providerItems, roleItems, patientItems, taxonomy]) => {
         if (cancelled) return;
         dispatchPageState({
           specializations: specializationItems,
           parentProviderOptions: providerItems,
           staffRoles: roleItems,
           peoplePatientOptions: patientItems,
+          taxonomyNodes: taxonomy.nodes,
         });
       })
       .catch(() => {
@@ -1638,6 +1859,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           parentProviderOptions: [],
           staffRoles: [],
           peoplePatientOptions: [],
+          taxonomyNodes: [],
         });
       });
     return () => {
@@ -2367,6 +2589,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                       <ProviderFormFields
                         form={providerForm}
                         specializations={specializations}
+                        taxonomyNodes={taxonomyNodes}
                         parentProviderOptions={parentProviderOptions}
                         currentProviderId={detail.id}
                         onChange={(field, value) =>
@@ -2431,6 +2654,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   <ServiceSection
                     detail={detail}
                     busy={serviceBusy}
+                    taxonomyNodes={taxonomyNodes}
                     canManage={permissions.canManageRegistry}
                     onNew={() => {
                       setServiceError("");
@@ -2521,6 +2745,8 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             busy={serviceBusy}
             error={serviceError}
             forcePriceRange={detail.provider_type === "medical"}
+            providerType={detail.provider_type}
+            taxonomyNodes={taxonomyNodes}
             onSubmit={handleServiceSubmit}
             onChange={(field, value) =>
               setServiceForm((current) => ({ ...current, [field]: value }))
@@ -2671,10 +2897,16 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   ...current,
                   providerType: nextType,
                   specializations: nextType === "non_medical" ? "" : current.specializations,
+                  taxonomyNodeId: "",
+                  taxonomyAttributeKey: "",
+                  taxonomyAttributeValue: "",
                 }));
                 syncQuery({
                   provider_type: nextType || null,
                   specializations: nextType === "non_medical" ? null : filters.specializations || null,
+                  taxonomy: null,
+                  attr_key: null,
+                  attr_value: null,
                 });
               }}
               disabled={permissions.forceNonMedical}
@@ -2684,6 +2916,73 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               <option value="medical">{t.providers_type_medical}</option>
               <option value="non_medical">{t.providers_type_non_medical}</option>
             </NativeComboboxSelect>
+
+            <div className="min-w-[240px] max-w-md flex-1 sm:flex-none">
+              <ProviderTaxonomySelect
+                value={filters.taxonomyNodeId}
+                nodes={taxonomyNodes}
+                providerType={
+                  permissions.forceNonMedical
+                    ? "non_medical"
+                    : filters.providerType === "medical" || filters.providerType === "non_medical"
+                      ? filters.providerType
+                      : ""
+                }
+                includeGroups
+                placeholder={t.providers_category}
+                className={cn(selectClassName, "h-8 w-full bg-card text-[13px]")}
+                onChange={(nextValue) => {
+                  setFilters((current) => ({
+                    ...current,
+                    taxonomyNodeId: nextValue,
+                    taxonomyAttributeKey: "",
+                    taxonomyAttributeValue: "",
+                  }));
+                  syncQuery({
+                    taxonomy: nextValue || null,
+                    attr_key: null,
+                    attr_value: null,
+                  });
+                }}
+              />
+            </div>
+
+            {filterAttributeKeys.length > 0 ? (
+              <>
+                <NativeComboboxSelect
+                  value={filters.taxonomyAttributeKey}
+                  onChange={(event) => {
+                    const nextKey = event.target.value;
+                    setFilters((current) => ({
+                      ...current,
+                      taxonomyAttributeKey: nextKey,
+                      taxonomyAttributeValue: nextKey ? current.taxonomyAttributeValue : "",
+                    }));
+                    syncQuery({
+                      attr_key: nextKey || null,
+                      attr_value: nextKey ? filters.taxonomyAttributeValue || null : null,
+                    });
+                  }}
+                  className={cn(selectClassName, "h-8 w-[168px] bg-card text-[13px]")}
+                >
+                  <option value="">{lang === "ru" ? "Доп. фильтр" : "Zusatzfilter"}</option>
+                  {filterAttributeKeys.map((key) => (
+                    <option key={key} value={key}>
+                      {taxonomyAttributeLabel(key, lang)}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+                <Input
+                  value={filters.taxonomyAttributeValue}
+                  onChange={(event) =>
+                    setServerFilter("taxonomyAttributeValue", event.target.value, "attr_value")
+                  }
+                  disabled={!filters.taxonomyAttributeKey}
+                  placeholder={lang === "ru" ? "Значение" : "Wert"}
+                  className="h-8 w-[160px] rounded-lg bg-card text-[13px]"
+                />
+              </>
+            ) : null}
 
             <NativeComboboxSelect
               value={filters.activeOnly}
@@ -2703,6 +3002,18 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               <option value="">{t.providers_contract}</option>
               <option value="true">{t.providers_contract_with}</option>
               <option value="false">{t.providers_contract_without}</option>
+            </NativeComboboxSelect>
+
+            <NativeComboboxSelect
+              value={filters.internalRatingGte}
+              onChange={(event) => setServerFilter("internalRatingGte", event.target.value, "internal_rating")}
+              className={cn(selectClassName, "h-8 w-[148px] bg-card text-[13px]")}
+            >
+              <option value="">{lang === "ru" ? "Рейтинг" : "Rating"}</option>
+              <option value="5">5+</option>
+              <option value="4">4+</option>
+              <option value="3">3+</option>
+              <option value="2">2+</option>
             </NativeComboboxSelect>
 
             <div className="min-w-[220px] max-w-sm flex-1 sm:flex-none">
@@ -2816,6 +3127,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                 <ProviderFormFields
                   form={createForm}
                   specializations={specializations}
+                  taxonomyNodes={taxonomyNodes}
                   parentProviderOptions={parentProviderOptions}
                   onChange={(field, value) =>
                     setCreateForm((current) => ({ ...current, [field]: value }))
@@ -2922,6 +3234,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     <ProviderFormFields
                       form={providerForm}
                       specializations={specializations}
+                      taxonomyNodes={taxonomyNodes}
                       parentProviderOptions={parentProviderOptions}
                       currentProviderId={detail.id}
                       onChange={(field, value) =>
@@ -2986,6 +3299,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                 <ServiceSection
                   detail={detail}
                   busy={serviceBusy}
+                  taxonomyNodes={taxonomyNodes}
                   canManage={permissions.canManageRegistry}
                   onNew={() => {
                     setServiceError("");
@@ -3078,6 +3392,8 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           busy={serviceBusy}
           error={serviceError}
           forcePriceRange={detail.provider_type === "medical"}
+          providerType={detail.provider_type}
+          taxonomyNodes={taxonomyNodes}
           onSubmit={handleServiceSubmit}
           onChange={(field, value) =>
             setServiceForm((current) => ({ ...current, [field]: value }))
@@ -3365,6 +3681,8 @@ function ProviderServiceFormSheet({
   busy,
   error,
   forcePriceRange,
+  providerType,
+  taxonomyNodes,
   onSubmit,
   onChange,
 }: {
@@ -3374,6 +3692,8 @@ function ProviderServiceFormSheet({
   busy: boolean;
   error: string;
   forcePriceRange: boolean;
+  providerType: ProviderType;
+  taxonomyNodes: ProviderTaxonomyNode[];
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onChange: (field: keyof ServiceFormState, value: string) => void;
 }) {
@@ -3401,6 +3721,8 @@ function ProviderServiceFormSheet({
               <ServiceFormFields
                 form={form}
                 forcePriceRange={forcePriceRange}
+                providerType={providerType}
+                taxonomyNodes={taxonomyNodes}
                 onChange={onChange}
               />
             </div>
@@ -4140,6 +4462,9 @@ function ProviderSheetHero({
     providerMeta(detail),
   ].filter(Boolean).join(" - ");
   const specializationLine = specializationText(detail.specializations, detail.fachbereich, lang);
+  const taxonomyLine = detail.taxonomy_path?.length
+    ? detail.taxonomy_path.map((node) => taxonomyNodeLabel(node, lang)).join(" / ")
+    : taxonomyNodeLabel(detail.taxonomy_node, lang);
 
   return (
     <section className="relative overflow-hidden rounded-xl border border-border bg-card px-7 py-4">
@@ -4189,6 +4514,14 @@ function ProviderSheetHero({
             >
               {providerOrganizationLevelLabel(detail.organization_level)}
             </Badge>
+            {taxonomyLine ? (
+              <Badge
+                variant="outline"
+                className="max-w-full rounded-full border-border bg-muted/30 px-2 py-0.5 text-xs font-medium text-muted-foreground"
+              >
+                <span className="truncate">{taxonomyLine}</span>
+              </Badge>
+            ) : null}
             {detail.parent_provider_name ? (
               <Badge
                 variant="outline"
@@ -4994,6 +5327,7 @@ function StaffSection({
 function ServiceSection({
   detail,
   busy,
+  taxonomyNodes,
   canManage,
   onNew,
   onEdit,
@@ -5001,12 +5335,13 @@ function ServiceSection({
 }: {
   detail: ProviderDetail;
   busy: boolean;
+  taxonomyNodes: ProviderTaxonomyNode[];
   canManage: boolean;
   onNew: () => void;
   onEdit: (service: ServiceItem) => void;
   onDelete: (serviceId: string, serviceName: string) => void;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   return (
     <section className="space-y-3 rounded-xl border border-border/70 bg-card p-3.5">
@@ -5051,6 +5386,11 @@ function ServiceSection({
               <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_180px_160px]">
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-foreground">{service.service_name}</p>
+                  {serviceTaxonomyLabel(service, taxonomyNodes, lang) ? (
+                    <p className="mt-1 truncate text-xs font-medium text-muted-foreground">
+                      {serviceTaxonomyLabel(service, taxonomyNodes, lang)}
+                    </p>
+                  ) : null}
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
                     {service.description || t.common_not_set}
                   </p>
@@ -5352,6 +5692,7 @@ function InteractionHistorySection({
 function ProviderFormFields({
   form,
   specializations,
+  taxonomyNodes,
   parentProviderOptions,
   currentProviderId,
   onChange,
@@ -5363,6 +5704,7 @@ function ProviderFormFields({
 }: {
   form: ProviderFormState;
   specializations: SpecializationItem[];
+  taxonomyNodes: ProviderTaxonomyNode[];
   parentProviderOptions: ProviderSummary[];
   currentProviderId?: string;
   onChange: (field: keyof ProviderFormState, value: string) => void;
@@ -5421,6 +5763,7 @@ function ProviderFormFields({
       parentOptions={parentOptions}
       providerType={providerType}
       specializations={specializations}
+      taxonomyNodes={taxonomyNodes}
       onChange={onChange}
       onManageSpecializations={onManageSpecializations}
     />
@@ -5479,6 +5822,7 @@ function ProviderProfileFields({
   parentOptions,
   providerType,
   specializations,
+  taxonomyNodes,
   onChange,
   onManageSpecializations,
 }: {
@@ -5490,11 +5834,14 @@ function ProviderProfileFields({
   parentOptions: ProviderSummary[];
   providerType: ProviderFormState["providerType"];
   specializations: SpecializationItem[];
+  taxonomyNodes: ProviderTaxonomyNode[];
   onChange: (field: keyof ProviderFormState, value: string) => void;
   onManageSpecializations?: () => void;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
+  const selectedTaxonomyNode = taxonomyNodes.find((node) => node.id === form.taxonomyNodeId);
+  const formAttributeKeys = taxonomyAttributeKeys(selectedTaxonomyNode);
 
   return (
     <>
@@ -5526,6 +5873,8 @@ function ProviderProfileFields({
             onChange={(event) => {
               const nextProviderType = event.target.value === "non_medical" ? "non_medical" : "medical";
               onChange("providerType", nextProviderType);
+              onChange("taxonomyNodeId", "");
+              onChange("taxonomyAttributes", "{}");
               if (nextProviderType !== "medical") {
                 onChange("specializations", "");
                 onChange("fachbereich", "");
@@ -5539,6 +5888,66 @@ function ProviderProfileFields({
           </NativeComboboxSelect>
         </Field>
       </div>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <Field label={t.providers_category}>
+          <ProviderTaxonomySelect
+            value={form.taxonomyNodeId}
+            nodes={taxonomyNodes}
+            providerType={providerType}
+            disabled={disabled}
+            placeholder={t.providers_choose_category}
+            onChange={(nextValue) => {
+              onChange("taxonomyNodeId", nextValue);
+              onChange("taxonomyAttributes", "{}");
+            }}
+          />
+        </Field>
+        <Field label={lang === "ru" ? "Внутренний рейтинг" : "Interne Bewertung"}>
+          <Input
+            type="number"
+            min="0"
+            max="5"
+            step="0.5"
+            value={form.internalRating}
+            onChange={(event) => onChange("internalRating", event.target.value)}
+            className={shellInputClassName}
+            disabled={disabled}
+          />
+        </Field>
+        <Field label={lang === "ru" ? "Заметка к рейтингу" : "Bewertungsnotiz"}>
+          <Input
+            value={form.internalRatingNote}
+            onChange={(event) => onChange("internalRatingNote", event.target.value)}
+            className={shellInputClassName}
+            disabled={disabled}
+          />
+        </Field>
+      </div>
+
+      {formAttributeKeys.length > 0 ? (
+        <div className="grid gap-4 md:grid-cols-3">
+          {formAttributeKeys.map((key) => (
+            <Field key={key} label={taxonomyAttributeLabel(key, lang)}>
+              <Input
+                value={taxonomyAttributeValue(form.taxonomyAttributes, key)}
+                onChange={(event) =>
+                  onChange(
+                    "taxonomyAttributes",
+                    updateTaxonomyAttributeValue(
+                      form.taxonomyAttributes,
+                      key,
+                      event.target.value,
+                    ),
+                  )
+                }
+                className={shellInputClassName}
+                disabled={disabled}
+              />
+            </Field>
+          ))}
+        </div>
+      ) : null}
 
       <div className="grid gap-4 md:grid-cols-2">
         <Field label={l("providers_tax_id")}>
@@ -6435,15 +6844,21 @@ function StaffFormFields({
 function ServiceFormFields({
   form,
   forcePriceRange,
+  providerType,
+  taxonomyNodes,
   onChange,
 }: {
   form: ServiceFormState;
   forcePriceRange: boolean;
+  providerType: ProviderType;
+  taxonomyNodes: ProviderTaxonomyNode[];
   onChange: (field: keyof ServiceFormState, value: string) => void;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   const priceType = forcePriceRange ? "range" : form.priceType;
+  const selectedTaxonomyNode = taxonomyNodes.find((node) => node.id === form.taxonomyNodeId);
+  const formAttributeKeys = taxonomyAttributeKeys(selectedTaxonomyNode);
   return (
     <div className="space-y-3">
       <Section title={l("providers_service")}>
@@ -6456,6 +6871,18 @@ function ServiceFormFields({
               required
             />
           </Field>
+          <Field label={t.services_category}>
+            <ProviderTaxonomySelect
+              value={form.taxonomyNodeId}
+              nodes={taxonomyNodes}
+              providerType={providerType}
+              placeholder={t.documents_choose_category}
+              onChange={(nextValue) => {
+                onChange("taxonomyNodeId", nextValue);
+                onChange("taxonomyAttributes", "{}");
+              }}
+            />
+          </Field>
           <Field label={t.providers_service_desc}>
             <textarea
               value={form.description}
@@ -6465,6 +6892,28 @@ function ServiceFormFields({
             />
           </Field>
         </div>
+        {formAttributeKeys.length > 0 ? (
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            {formAttributeKeys.map((key) => (
+              <Field key={key} label={taxonomyAttributeLabel(key, lang)}>
+                <Input
+                  value={taxonomyAttributeValue(form.taxonomyAttributes, key)}
+                  onChange={(event) =>
+                    onChange(
+                      "taxonomyAttributes",
+                      updateTaxonomyAttributeValue(
+                        form.taxonomyAttributes,
+                        key,
+                        event.target.value,
+                      ),
+                    )
+                  }
+                  className={shellInputClassName}
+                />
+              </Field>
+            ))}
+          </div>
+        ) : null}
       </Section>
 
       <Section title={l("providers_cost")}>

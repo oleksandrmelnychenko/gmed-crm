@@ -82,3 +82,42 @@ export function specializationLabelForValue(
   const knownLabels = knownSpecializationLabelsForValue(value);
   return knownLabels ? knownLabels[lang] : value;
 }
+
+export function specializationSummaryForItems(
+  items: readonly SpecializationLabelItem[] | null | undefined,
+  fallback: string | null | undefined,
+  lang: SpecializationLabelLang,
+  empty = "",
+) {
+  const seen = new Set<string>();
+  const labels: string[] = [];
+
+  for (const item of items ?? []) {
+    const label = specializationLabelForItem(item, lang).trim();
+    const key = normalizeSpecializationLabelKey(label);
+    if (!label || seen.has(key)) continue;
+    seen.add(key);
+    labels.push(label);
+  }
+
+  if (labels.length > 0) return labels.join(", ");
+  return fallback?.trim()
+    ? specializationLabelForValue(fallback, items ?? [], lang)
+    : empty;
+}
+
+export function doctorSpecialtyLabel(
+  doctor: {
+    fachbereich?: string | null;
+    specializations?: readonly SpecializationLabelItem[] | null;
+  },
+  lang: SpecializationLabelLang,
+  empty = "",
+) {
+  return specializationSummaryForItems(
+    doctor.specializations,
+    doctor.fachbereich,
+    lang,
+    empty,
+  );
+}

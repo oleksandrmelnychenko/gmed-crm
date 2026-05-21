@@ -2,6 +2,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { t as translateCatalog, useLang } from "@/lib/i18n";
+import { doctorSpecialtyLabel, type SpecializationLabelLang } from "@/pages/providers/model/specialization-labels";
 
 import { CaseItemList } from "./case-item-list";
 import {
@@ -21,11 +22,10 @@ function tri(lang: string, key: string) {
   return catalog.uiText[key] ?? key;
 }
 
-function doctorOptionLabel(doctor: CaseWorkspaceDoctor) {
+function doctorOptionLabel(doctor: CaseWorkspaceDoctor, lang: SpecializationLabelLang) {
   const titlePrefix = doctor.title?.trim() ? `${doctor.title.trim()} ` : "";
-  const specialty = doctor.fachbereich?.trim()
-    ? ` · ${doctor.fachbereich.trim()}`
-    : "";
+  const specialtyLabel = doctorSpecialtyLabel(doctor, lang);
+  const specialty = specialtyLabel ? ` - ${specialtyLabel}` : "";
   return `${doctor.provider_name} | ${titlePrefix}${doctor.name}${specialty}`;
 }
 
@@ -152,7 +152,7 @@ export function SurgeriesSection() {
               <option value="">{t.common_not_set}</option>
               {doctors.map((doctor) => (
                 <option key={doctor.id} value={doctor.id}>
-                  {doctorOptionLabel(doctor)}
+                  {doctorOptionLabel(doctor, lang)}
                 </option>
               ))}
             </NativeComboboxSelect>

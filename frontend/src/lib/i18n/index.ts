@@ -234,6 +234,8 @@ export interface Translations
   providers_linked_patients_description: string;
   providers_interactions_description: string;
   providers_type: string;
+  providers_category: string;
+  providers_choose_category: string;
   providers_type_medical: string;
   providers_type_non_medical: string;
   providers_active: string;
@@ -378,6 +380,7 @@ export interface Translations
   appointments_time: string;
   appointments_title_col: string;
   appointments_type: string;
+  appointments_provider_category: string;
   appointments_location: string;
   appointments_new: string;
   appointments_recurring_series: string;
@@ -1201,7 +1204,7 @@ export interface Translations
   documents_translation_start: string;
   documents_translation_complete: string;
   documents_translation_cancel: string;
-  documents_taxonomy_category: string;
+  documents_classification_category: string;
   documents_choose_category: string;
   documents_review_notes: string;
   documents_release_internal_hint: string;
@@ -1361,6 +1364,8 @@ export interface Translations
   services_request_title: string;
   services_request_description: string;
   services_form_service_type: string;
+  services_category: string;
+  services_all_categories: string;
   services_type_hotel: string;
   services_type_transfer: string;
   services_type_vip_terminal: string;

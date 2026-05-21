@@ -44,6 +44,7 @@ import { useAuth } from "@/lib/auth";
 import {
   formatEnumLabelFromKeys,
   useLang,
+  type Lang,
   type Translations,
   type TranslationKey,
 } from "@/lib/i18n";
@@ -55,6 +56,8 @@ import {
   formatPortalCurrency,
   formatPortalDateTime,
 } from "@/pages/patients/model/portal-shared";
+import { fetchProviderTaxonomy } from "@/pages/providers/data/provider-api";
+import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 
 const PatientServicesPage = lazy(() =>
   import("@/pages/patients/portal-services-page").then((module) => ({
@@ -71,6 +74,10 @@ type StaffConciergeService = {
   appointment_title: string | null;
   provider_id: string | null;
   provider_name: string | null;
+  taxonomy_node_id: string | null;
+  taxonomy_node_code: string | null;
+  taxonomy_node_name_de: string | null;
+  taxonomy_node_name_ru: string | null;
   assigned_concierge_id: string | null;
   assigned_concierge_name: string | null;
   service_kind: string;
@@ -116,6 +123,7 @@ type StaffOption = {
 type CreateServiceFormState = {
   patientId: string;
   providerId: string;
+  taxonomyNodeId: string;
   assignedConciergeId: string;
   serviceKind: string;
   title: string;
@@ -192,6 +200,7 @@ function blankCreateServiceForm(defaultConciergeId = ""): CreateServiceFormState
   return {
     patientId: "",
     providerId: "",
+    taxonomyNodeId: "",
     assignedConciergeId: defaultConciergeId,
     serviceKind: "other",
     title: "",
@@ -220,11 +229,12 @@ function optionalMoney(value: string) {
   return Number.isFinite(parsed) ? parsed : Number.NaN;
 }
 
-function buildServicesPath(filters: { search: string; mineOnly: boolean }) {
+function buildServicesPath(filters: { search: string; mineOnly: boolean; taxonomyNodeId: string }) {
   const params = new URLSearchParams();
   const search = filters.search.trim();
   if (search) params.set("search", search);
   if (filters.mineOnly) params.set("mine_only", "true");
+  if (filters.taxonomyNodeId) params.set("taxonomy_node_id", filters.taxonomyNodeId);
   const query = params.toString();
   return query ? `/concierge-services?${query}` : "/concierge-services";
 }
@@ -251,6 +261,44 @@ function serviceKindLabel(value: string, t: Translations) {
 
 function serviceSourceLabel(value: string, t: Translations) {
   return formatEnumLabelFromKeys(value, SERVICE_SOURCE_LABEL_KEYS, t);
+}
+
+function serviceTaxonomyLabel(service: StaffConciergeService, lang: Lang, fallback = "") {
+  if (lang === "ru") {
+    return (
+      service.taxonomy_node_name_ru ||
+      service.taxonomy_node_name_de ||
+      service.taxonomy_node_code ||
+      fallback
+    );
+  }
+  return (
+    service.taxonomy_node_name_de ||
+    service.taxonomy_node_name_ru ||
+    service.taxonomy_node_code ||
+    fallback
+  );
+}
+
+function taxonomyNodeLabel(node: ProviderTaxonomyNode, lang: Lang, fallback = "") {
+  if (lang === "ru") {
+    return node.name_ru || node.name_de || node.name_en || node.code || fallback;
+  }
+  return node.name_de || node.name_en || node.name_ru || node.code || fallback;
+}
+
+function ServiceTaxonomyBadge({
+  label,
+  fallback,
+}: {
+  label?: string | null;
+  fallback: string;
+}) {
+  return (
+    <Badge variant="outline" className="max-w-full rounded-full border-border/80 bg-muted/30">
+      <span className="truncate">{label?.trim() || fallback}</span>
+    </Badge>
+  );
 }
 
 function ServiceDetailField({
@@ -281,7 +329,7 @@ function ServiceDetailField({
   );
 }
 
-function buildServiceColumns(t: Translations): ColumnDef<StaffConciergeService>[] {
+function buildServiceColumns(t: Translations, lang: Lang): ColumnDef<StaffConciergeService>[] {
   return [
     {
       id: "title",
@@ -360,6 +408,20 @@ function buildServiceColumns(t: Translations): ColumnDef<StaffConciergeService>[
         <Badge variant="outline" className="rounded-full">
           {serviceKindLabel(row.service_kind, t)}
         </Badge>
+      ),
+    },
+    {
+      id: "taxonomy",
+      label: t.services_category,
+      accessor: (row) => serviceTaxonomyLabel(row, lang, t.common_not_set),
+      filterType: "text",
+      width: 180,
+      sortable: true,
+      render: (row) => (
+        <ServiceTaxonomyBadge
+          label={serviceTaxonomyLabel(row, lang)}
+          fallback={t.common_not_set}
+        />
       ),
     },
     {
@@ -463,6 +525,7 @@ type StaffServicesPageState = {
   version: number;
   search: string;
   mineOnly: boolean;
+  taxonomyNodeId: string;
   filterPredicates: FilterPredicate[];
   sortStack: SortStack;
   density: DensityLevel;
@@ -471,6 +534,7 @@ type StaffServicesPageState = {
   selectedServiceId: string | null;
   patients: PatientOption[];
   providers: ProviderOption[];
+  taxonomyNodes: ProviderTaxonomyNode[];
   conciergeStaff: StaffOption[];
   lookupError: string;
   lookupsLoading: boolean;
@@ -489,6 +553,7 @@ type StaffServicesPageAction =
       type: "lookups-success";
       patients: PatientOption[];
       providers: ProviderOption[];
+      taxonomyNodes: ProviderTaxonomyNode[];
       conciergeStaff: StaffOption[];
     }
   | { type: "lookups-error"; message: string }
@@ -509,6 +574,7 @@ const STAFF_SERVICES_INITIAL_STATE: StaffServicesPageState = {
   version: 0,
   search: "",
   mineOnly: false,
+  taxonomyNodeId: "",
   filterPredicates: [],
   sortStack: [{ field: "schedule", dir: "desc" }],
   density: "compact",
@@ -517,6 +583,7 @@ const STAFF_SERVICES_INITIAL_STATE: StaffServicesPageState = {
   selectedServiceId: null,
   patients: [],
   providers: [],
+  taxonomyNodes: [],
   conciergeStaff: [],
   lookupError: "",
   lookupsLoading: false,
@@ -544,6 +611,7 @@ function staffServicesPageReducer(
         ...state,
         patients: action.patients,
         providers: action.providers,
+        taxonomyNodes: action.taxonomyNodes,
         conciergeStaff: action.conciergeStaff,
         lookupError: "",
         lookupsLoading: false,
@@ -613,7 +681,7 @@ function createStaffServicesFieldAction<K extends keyof StaffServicesPageState>(
 }
 
 function useStaffServicesPageContent() {
-  const { t } = useLang();
+  const { lang, t } = useLang();
   const { user } = useAuth();
   const [
     {
@@ -624,6 +692,7 @@ function useStaffServicesPageContent() {
       version,
       search,
       mineOnly,
+      taxonomyNodeId,
       filterPredicates,
       sortStack,
       density,
@@ -632,6 +701,7 @@ function useStaffServicesPageContent() {
       selectedServiceId,
       patients,
       providers,
+      taxonomyNodes,
       conciergeStaff,
       lookupError,
       lookupsLoading,
@@ -650,6 +720,8 @@ function useStaffServicesPageContent() {
     setStaffServicesField("search", value);
   const setMineOnly = (value: SetStateAction<boolean>) =>
     setStaffServicesField("mineOnly", value);
+  const setTaxonomyNodeId = (value: SetStateAction<string>) =>
+    setStaffServicesField("taxonomyNodeId", value);
   const setFilterPredicates = (value: SetStateAction<FilterPredicate[]>) =>
     setStaffServicesField("filterPredicates", value);
   const setSortStack = (value: SetStateAction<SortStack>) =>
@@ -681,7 +753,7 @@ function useStaffServicesPageContent() {
     dispatchStaffServicesState({ type: "bump-version" });
   }, 250);
 
-  const baseColumns = useMemo(() => buildServiceColumns(t), [t]);
+  const baseColumns = useMemo(() => buildServiceColumns(t, lang), [lang, t]);
   const columns = useMemo<ColumnDef<StaffConciergeService>[]>(() => {
     const frozenSet = new Set(frozenColumns);
     return baseColumns.map((column) => ({
@@ -713,6 +785,18 @@ function useStaffServicesPageContent() {
   const selectedService = useMemo(
     () => items.find((item) => item.id === selectedServiceId) ?? null,
     [items, selectedServiceId],
+  );
+  const taxonomyOptions = useMemo(
+    () =>
+      taxonomyNodes
+        .filter((node) => node.is_active && node.is_leaf)
+        .toSorted((left, right) =>
+          taxonomyNodeLabel(left, lang).localeCompare(
+            taxonomyNodeLabel(right, lang),
+            lang === "ru" ? "ru" : "de",
+          ),
+        ),
+    [lang, taxonomyNodes],
   );
 
   const openCreateSheet = useCallback(() => {
@@ -749,28 +833,35 @@ function useStaffServicesPageContent() {
   }, []);
 
   useEffect(() => {
-    if (!canCreateService) return;
     let cancelled = false;
 
     async function loadLookups() {
       dispatchStaffServicesState({ type: "lookups-start" });
       try {
-        const [patientRows, providerRows, staffRows] = await Promise.all([
-          apiFetch<PatientOption[]>("/patients?active_only=true", {
-            cacheTtlMs: SERVICE_LOOKUPS_CACHE_TTL_MS,
-          }),
-          apiFetch<ProviderOption[]>("/providers?provider_type=non_medical&active_only=true", {
-            cacheTtlMs: SERVICE_LOOKUPS_CACHE_TTL_MS,
-          }),
-          apiFetch<StaffOption[]>("/appointments/meta/staff", {
-            cacheTtlMs: SERVICE_LOOKUPS_CACHE_TTL_MS,
-          }),
+        const [patientRows, providerRows, staffRows, taxonomy] = await Promise.all([
+          canCreateService
+            ? apiFetch<PatientOption[]>("/patients?active_only=true", {
+                cacheTtlMs: SERVICE_LOOKUPS_CACHE_TTL_MS,
+              })
+            : Promise.resolve([]),
+          canCreateService
+            ? apiFetch<ProviderOption[]>("/providers?provider_type=non_medical&active_only=true", {
+                cacheTtlMs: SERVICE_LOOKUPS_CACHE_TTL_MS,
+              })
+            : Promise.resolve([]),
+          canCreateService
+            ? apiFetch<StaffOption[]>("/appointments/meta/staff", {
+                cacheTtlMs: SERVICE_LOOKUPS_CACHE_TTL_MS,
+              })
+            : Promise.resolve([]),
+          fetchProviderTaxonomy("non_medical"),
         ]);
         if (cancelled) return;
         dispatchStaffServicesState({
           type: "lookups-success",
           patients: patientRows,
           providers: providerRows.filter((provider) => provider.provider_type === "non_medical"),
+          taxonomyNodes: taxonomy.leaves.filter((node) => node.is_active && node.is_leaf),
           conciergeStaff: staffRows.filter((member) => member.role === "concierge"),
         });
       } catch (err) {
@@ -799,7 +890,7 @@ function useStaffServicesPageContent() {
 
       try {
         const rows = await apiFetch<StaffConciergeService[]>(
-          buildServicesPath({ search, mineOnly }),
+          buildServicesPath({ search, mineOnly, taxonomyNodeId }),
           { cacheTtlMs: STAFF_SERVICES_CACHE_TTL_MS },
         );
         if (cancelled) return;
@@ -822,7 +913,7 @@ function useStaffServicesPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [mineOnly, search, t, version]);
+  }, [mineOnly, search, t, taxonomyNodeId, version]);
 
   async function handleCreateService(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -858,6 +949,7 @@ function useStaffServicesPageContent() {
         body: JSON.stringify({
           patient_id: createForm.patientId,
           provider_id: createForm.providerId || null,
+          taxonomy_node_id: createForm.taxonomyNodeId || null,
           assigned_concierge_id: createForm.assignedConciergeId || null,
           service_kind: createForm.serviceKind,
           title,
@@ -994,6 +1086,21 @@ function useStaffServicesPageContent() {
             {t.staff_services_mine}
           </label>
 
+          <NativeComboboxSelect
+            value={taxonomyNodeId}
+            onChange={(event) => setTaxonomyNodeId(event.target.value)}
+            className="h-8 w-auto min-w-[180px] rounded-lg bg-background text-[13px]"
+            disabled={lookupsLoading && taxonomyOptions.length === 0}
+            aria-label={t.services_category}
+          >
+            <option value="">{t.services_all_categories}</option>
+                {taxonomyOptions.map((node) => (
+                  <option key={node.id} value={node.id}>
+                    {taxonomyNodeLabel(node, lang, node.code)}
+                  </option>
+                ))}
+          </NativeComboboxSelect>
+
           <div className="ml-auto flex items-center gap-1.5">
             <span className="text-[11px] tabular-nums text-muted-foreground">
               {visibleRows.length === items.length
@@ -1122,6 +1229,17 @@ function useStaffServicesPageContent() {
                   <ServiceDetailField label={t.staff_services_column_billing} value={billingStatusLabel(selectedService.billing_status, t)} />
                   <ServiceDetailField label={t.staff_services_column_patient} value={`${selectedService.patient_name} (${selectedService.patient_pid})`} />
                   <ServiceDetailField label={t.staff_services_column_source} value={serviceSourceLabel(selectedService.request_source, t)} />
+                  <div className="rounded-xl border border-border/70 bg-muted/20 p-3">
+                    <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      {t.services_category}
+                    </div>
+                    <div className="mt-1 flex min-w-0">
+                      <ServiceTaxonomyBadge
+                        label={serviceTaxonomyLabel(selectedService, lang)}
+                        fallback={t.common_not_set}
+                      />
+                    </div>
+                  </div>
                 </div>
               </Section>
 
@@ -1232,6 +1350,29 @@ function useStaffServicesPageContent() {
                       </NativeComboboxSelect>
                     </label>
                   </div>
+
+                  <label className="block space-y-1.5 text-sm">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {t.services_category}
+                    </span>
+                    <NativeComboboxSelect
+                      value={createForm.taxonomyNodeId}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({
+                          ...current,
+                          taxonomyNodeId: event.target.value,
+                        }))
+                      }
+                      className={formSelectClassName}
+                    >
+                      <option value="">{t.staff_services_optional}</option>
+                      {taxonomyOptions.map((node) => (
+                        <option key={node.id} value={node.id}>
+                          {taxonomyNodeLabel(node, lang, node.code)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </label>
 
                   <label className="block space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
@@ -1472,4 +1613,3 @@ export function ServicesPage() {
 
   return <StaffServicesPage />;
 }
-

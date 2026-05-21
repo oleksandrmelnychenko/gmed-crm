@@ -14,6 +14,7 @@ type UseProvidersListTableModelArgs = {
   deferredSearch: string;
   filterPredicates?: readonly FilterPredicate[];
   frozenColumns?: readonly string[];
+  lang: "de" | "ru";
   onToggleProviderCollapsed?: (providerId: string) => void;
   providers: ProviderSummary[];
   sortStack: SortStack;
@@ -162,6 +163,7 @@ export function useProvidersListTableModel({
   deferredSearch,
   filterPredicates = EMPTY_FILTER_PREDICATES,
   frozenColumns = EMPTY_STRING_LIST,
+  lang,
   onToggleProviderCollapsed,
   providers,
   sortStack,
@@ -197,7 +199,10 @@ export function useProvidersListTableModel({
     );
   }, [providers]);
 
-  const accessorColumns = useMemo(() => buildProviderColumns(tr, providers), [providers, tr]);
+  const accessorColumns = useMemo(
+    () => buildProviderColumns(tr, providers, { lang }),
+    [lang, providers, tr],
+  );
 
   const accessors = useMemo(() => {
     const map: Record<string, ColumnDef<ProviderSummary>["accessor"]> = {};
@@ -243,10 +248,11 @@ export function useProvidersListTableModel({
   const baseColumns = useMemo(
     () =>
       buildProviderColumns(tr, providers, {
+        lang,
         onToggleProviderCollapsed,
         treeMetaById: treeRowsResult.treeMetaById,
       }),
-    [onToggleProviderCollapsed, providers, tr, treeRowsResult.treeMetaById],
+    [lang, onToggleProviderCollapsed, providers, tr, treeRowsResult.treeMetaById],
   );
 
   const columns = useMemo(() => {

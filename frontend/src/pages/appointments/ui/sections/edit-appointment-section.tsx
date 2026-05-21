@@ -28,6 +28,11 @@ import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
 import { useDebouncedValue } from "@/pages/appointments/data/use-debounced-value";
 import { buildConflictQuery } from "@/pages/appointments/model/query-builders";
 import {
+  filterProvidersForAppointmentScope,
+  providerSelectionFitsAppointmentScope,
+  providerTaxonomyTreeOptions,
+} from "@/pages/appointments/model/provider-taxonomy";
+import {
   buildEditAppointmentForm,
 } from "@/pages/appointments/model/form-factories";
 import {
@@ -63,6 +68,7 @@ import type {
   ProviderSummary,
   StaffOption,
 } from "@/pages/appointments/model/types";
+import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 import {
   CARE_PATH_KIND_OPTIONS,
   CHECKLIST_PHASES,
@@ -82,6 +88,7 @@ type EditAppointmentSectionProps = {
   detail: AppointmentDetail;
   appointments: AppointmentListItem[];
   providers: ProviderSummary[];
+  taxonomyNodes: ProviderTaxonomyNode[];
   staff: StaffOption[];
   interpreters: InterpreterOption[];
   permissions?: Pick<
@@ -212,6 +219,7 @@ function useEditAppointmentSectionContentContent({
   detail,
   appointments,
   providers,
+  taxonomyNodes,
   staff,
   interpreters,
   permissions,
@@ -220,7 +228,7 @@ function useEditAppointmentSectionContentContent({
   onOpenChange,
   onSaved,
 }: EditAppointmentSectionProps) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const interpreterFieldLabel =
     tr.role_interpreter ??
@@ -249,6 +257,43 @@ function useEditAppointmentSectionContentContent({
     dispatchEditState(createEditAppointmentFieldAction("error", value));
   const setBusy = (value: SetStateAction<boolean>) =>
     dispatchEditState(createEditAppointmentFieldAction("busy", value));
+  const providerTaxonomyOptions = useMemo(
+    () => providerTaxonomyTreeOptions(taxonomyNodes, form.appointmentType, lang),
+    [form.appointmentType, lang, taxonomyNodes],
+  );
+  const providerOptions = useMemo(
+    () =>
+      filterProvidersForAppointmentScope(
+        providers,
+        form.appointmentType,
+        form.providerTaxonomyNodeId,
+      ),
+    [form.appointmentType, form.providerTaxonomyNodeId, providers],
+  );
+
+  useEffect(() => {
+    if (
+      providerSelectionFitsAppointmentScope(
+        providers,
+        form.providerId,
+        form.appointmentType,
+        form.providerTaxonomyNodeId,
+      )
+    ) {
+      return;
+    }
+
+    setForm((current) => ({
+      ...current,
+      providerId: "",
+      doctorId: "",
+    }));
+  }, [
+    form.appointmentType,
+    form.providerId,
+    form.providerTaxonomyNodeId,
+    providers,
+  ]);
 
   const scheduleWarningLabels = useMemo(
     () => ({
@@ -473,7 +518,7 @@ function useEditAppointmentSectionContentContent({
     t.common_not_set;
   const selectedDoctor = doctors.find((doctor) => doctor.id === form.doctorId);
   const doctorSummary = selectedDoctor
-    ? doctorLabel(selectedDoctor)
+    ? doctorLabel(selectedDoctor, lang)
     : detail.doctor_name ?? t.common_not_set;
   const ownerSummary =
     staff.find((member) => member.id === form.ownerUserId)?.name ??
@@ -612,6 +657,7 @@ function useEditAppointmentSectionContentContent({
               setForm((current) => ({
                 ...current,
                 appointmentType,
+                providerTaxonomyNodeId: "",
                 providerId: appointmentType === "internal" ? "" : current.providerId,
                 doctorId: appointmentType === "internal" ? "" : current.doctorId,
                 carePathKind: normalizeCarePathKindForAppointmentType(
@@ -740,7 +786,36 @@ function useEditAppointmentSectionContentContent({
         </section>
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
         {editSheetSectionTitle(appointmentText("appointments_provider_and_doctor"))}
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 md:grid-cols-3">
+          <Field compact label={t.appointments_provider_category}>
+            <NativeComboboxSelect
+              value={form.providerTaxonomyNodeId}
+              onChange={(event) => {
+                const providerTaxonomyNodeId = event.target.value;
+                const keepProvider = providerSelectionFitsAppointmentScope(
+                  providers,
+                  form.providerId,
+                  form.appointmentType,
+                  providerTaxonomyNodeId,
+                );
+                setForm((current) => ({
+                  ...current,
+                  providerTaxonomyNodeId,
+                  providerId: keepProvider ? current.providerId : "",
+                  doctorId: keepProvider ? current.doctorId : "",
+                }));
+              }}
+              className={selectClassName}
+              disabled={form.appointmentType === "internal" || providerTaxonomyOptions.length === 0}
+            >
+              <option value="">{t.providers_all}</option>
+              {providerTaxonomyOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </NativeComboboxSelect>
+          </Field>
           <Field compact label={t.common_provider}>
             <NativeComboboxSelect
               value={form.providerId}
@@ -755,7 +830,7 @@ function useEditAppointmentSectionContentContent({
               disabled={form.appointmentType === "internal"}
             >
               <option value="">{t.common_not_set}</option>
-              {providers.map((provider) => (
+              {providerOptions.map((provider) => (
                 <option key={provider.id} value={provider.id}>
                   {provider.name}
                 </option>
@@ -777,7 +852,7 @@ function useEditAppointmentSectionContentContent({
               <option value="">{t.common_not_set}</option>
               {doctors.map((doctor) => (
                 <option key={doctor.id} value={doctor.id}>
-                  {doctorLabel(doctor)}
+                  {doctorLabel(doctor, lang)}
                 </option>
               ))}
             </NativeComboboxSelect>

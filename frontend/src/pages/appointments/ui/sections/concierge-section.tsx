@@ -3,6 +3,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useMemo,
   useReducer,
   type FormEvent,
   type SetStateAction,
@@ -44,6 +45,7 @@ import {
   buildServiceDraft,
   toRfc3339,
 } from "@/pages/appointments/model/workflow-helpers";
+import { fetchProviderTaxonomy } from "@/pages/providers/data/provider-api";
 import type {
   AppointmentDetail,
   ConciergeServiceDraftState,
@@ -52,6 +54,7 @@ import type {
   ProviderSummary,
   StaffOption,
 } from "@/pages/appointments/model/types";
+import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 import {
   AppointmentSectionHeading,
   EmptyState,
@@ -73,9 +76,34 @@ const sectionCardClass = appointmentElevatedSectionCardClassName;
 const selectClassName = appointmentWhiteSelectControlClassName;
 const textareaClassName = appointmentWhiteTextareaControlClassName;
 
+function taxonomyNodeLabel(node: ProviderTaxonomyNode, lang: "de" | "ru") {
+  if (lang === "ru") {
+    return node.name_ru || node.name_de || node.name_en || node.code;
+  }
+  return node.name_de || node.name_en || node.name_ru || node.code;
+}
+
+function serviceTaxonomyLabel(service: ConciergeServiceEntry, lang: "de" | "ru") {
+  if (lang === "ru") {
+    return (
+      service.taxonomy_node_name_ru ||
+      service.taxonomy_node_name_de ||
+      service.taxonomy_node_code ||
+      ""
+    );
+  }
+  return (
+    service.taxonomy_node_name_de ||
+    service.taxonomy_node_name_ru ||
+    service.taxonomy_node_code ||
+    ""
+  );
+}
+
 type ConciergeSectionState = {
   form: ConciergeServiceFormState;
   drafts: Record<string, ConciergeServiceDraftState>;
+  taxonomyNodes: ProviderTaxonomyNode[];
   submitBusy: boolean;
   actionBusy: string;
 };
@@ -129,7 +157,7 @@ function useAppointmentConciergeSectionContent({
   onRefresh,
   onError,
 }: AppointmentConciergeSectionProps) {
-  const { t } = useLang();
+  const { lang, t } = useLang();
   const tr = t as unknown as Record<string, string>;
   const appointmentText = (key: string) => t.uiText[key] ?? key;
 
@@ -158,7 +186,7 @@ function useAppointmentConciergeSectionContent({
     [conciergeStaff, detail, nonMedicalProviders],
   );
 
-  const [{ form, drafts, submitBusy, actionBusy }, dispatchConciergeState] =
+  const [{ form, drafts, taxonomyNodes, submitBusy, actionBusy }, dispatchConciergeState] =
     useReducer(
       conciergeSectionReducer,
       undefined,
@@ -167,6 +195,7 @@ function useAppointmentConciergeSectionContent({
         drafts: Object.fromEntries(
           services.map((service) => [service.id, buildServiceDraft(service)]),
         ),
+        taxonomyNodes: [],
         submitBusy: false,
         actionBusy: "",
       }),
@@ -176,10 +205,20 @@ function useAppointmentConciergeSectionContent({
   const setDrafts = (
     value: SetStateAction<Record<string, ConciergeServiceDraftState>>,
   ) => dispatchConciergeState(createConciergeFieldAction("drafts", value));
+  const setTaxonomyNodes = (value: SetStateAction<ProviderTaxonomyNode[]>) =>
+    dispatchConciergeState(createConciergeFieldAction("taxonomyNodes", value));
   const setSubmitBusy = (value: SetStateAction<boolean>) =>
     dispatchConciergeState(createConciergeFieldAction("submitBusy", value));
   const setActionBusy = (value: SetStateAction<string>) =>
     dispatchConciergeState(createConciergeFieldAction("actionBusy", value));
+
+  const taxonomyOptions = useMemo(
+    () =>
+      [...taxonomyNodes].sort((left, right) =>
+        taxonomyNodeLabel(left, lang).localeCompare(taxonomyNodeLabel(right, lang), "de"),
+      ),
+    [lang, taxonomyNodes],
+  );
 
   useEffect(() => {
     dispatchConciergeState({
@@ -194,6 +233,25 @@ function useAppointmentConciergeSectionContent({
       },
     });
   }, [buildCreateForm, services]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchProviderTaxonomy("non_medical")
+      .then((taxonomy) => {
+        if (cancelled) return;
+        setTaxonomyNodes(
+          taxonomy.leaves.filter((node) => node.is_active && node.is_leaf),
+        );
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        onError(error instanceof Error ? error.message : tr.common_failed_load);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [onError, tr.common_failed_load]);
 
   function updateDraft(
     serviceId: string,
@@ -226,6 +284,7 @@ function useAppointmentConciergeSectionContent({
           patient_id: detail.patient_id,
           appointment_id: detail.id,
           provider_id: form.providerId || null,
+          taxonomy_node_id: form.taxonomyNodeId || null,
           assigned_concierge_id: form.assignedConciergeId || null,
           service_kind: form.serviceKind,
           title: form.title.trim(),
@@ -255,6 +314,7 @@ function useAppointmentConciergeSectionContent({
       const payload = canManageConciergeBilling
         ? {
             provider_id: draft.providerId || null,
+            taxonomy_node_id: draft.taxonomyNodeId || null,
             assigned_concierge_id: draft.assignedConciergeId || null,
             title: draft.title.trim(),
             status: draft.status,
@@ -271,6 +331,7 @@ function useAppointmentConciergeSectionContent({
           }
         : {
             status: draft.status,
+            taxonomy_node_id: draft.taxonomyNodeId || null,
             booking_reference: draft.bookingReference.trim() || null,
             vendor_name: draft.vendorName.trim() || null,
             vendor_contact: draft.vendorContact.trim() || null,
@@ -326,6 +387,11 @@ function useAppointmentConciergeSectionContent({
                         <span className={appointmentMiniPillClassName}>
                           {serviceKindLabel(service.service_kind)}
                         </span>
+                        {serviceTaxonomyLabel(service, lang) ? (
+                          <span className={appointmentMiniPillClassName}>
+                            {serviceTaxonomyLabel(service, lang)}
+                          </span>
+                        ) : null}
                         <span className={appointmentMiniPillClassName}>
                           {serviceStatusLabel(service.status)}
                         </span>
@@ -412,6 +478,24 @@ function useAppointmentConciergeSectionContent({
                         </Field>
                       </>
                     ) : null}
+                    <Field label={t.services_category}>
+                      <NativeComboboxSelect
+                        value={draft.taxonomyNodeId}
+                        onChange={(event) =>
+                          updateDraft(service.id, {
+                            taxonomyNodeId: event.target.value,
+                          })
+                        }
+                        className={selectClassName}
+                      >
+                        <option value="">{tr.common_not_set}</option>
+                        {taxonomyOptions.map((node) => (
+                          <option key={node.id} value={node.id}>
+                            {taxonomyNodeLabel(node, lang)}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                    </Field>
                     <Field label={tr.users_status}>
                       <NativeComboboxSelect
                         value={draft.status}
@@ -570,7 +654,7 @@ function useAppointmentConciergeSectionContent({
       </div>
       {canManageConciergeServices ? (
         <form onSubmit={handleServiceSubmit} className="mt-5 grid gap-4 md:grid-cols-2">
-          <Field label={tr.documents_category}>
+          <Field label={t.services_form_service_type}>
             <NativeComboboxSelect
               value={form.serviceKind}
               onChange={(event) =>
@@ -584,6 +668,25 @@ function useAppointmentConciergeSectionContent({
               {CONCIERGE_SERVICE_KIND_OPTIONS.map((kind) => (
                 <option key={kind} value={kind}>
                   {serviceKindLabel(kind)}
+                </option>
+              ))}
+            </NativeComboboxSelect>
+          </Field>
+          <Field label={t.services_category}>
+            <NativeComboboxSelect
+              value={form.taxonomyNodeId}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  taxonomyNodeId: event.target.value,
+                }))
+              }
+              className={selectClassName}
+            >
+              <option value="">{tr.common_not_set}</option>
+              {taxonomyOptions.map((node) => (
+                <option key={node.id} value={node.id}>
+                  {taxonomyNodeLabel(node, lang)}
                 </option>
               ))}
             </NativeComboboxSelect>

@@ -1,6 +1,7 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
+  useMemo,
   type Dispatch,
   type SetStateAction,
 } from "react";
@@ -23,6 +24,11 @@ import {
   roleLabel,
   statusLabel,
 } from "@/pages/appointments/model/labels";
+import {
+  filterProvidersForAppointmentScope,
+  providerSelectionFitsAppointmentScope,
+  providerTaxonomyTreeOptions,
+} from "@/pages/appointments/model/provider-taxonomy";
 import type {
   DoctorOption,
   FiltersState,
@@ -31,6 +37,7 @@ import type {
   ProviderSummary,
   StaffOption,
 } from "@/pages/appointments/model/types";
+import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 import {
   AppointmentEditorSheet,
   Field,
@@ -43,6 +50,7 @@ export type SearchSheetProps = {
   setFilters: Dispatch<SetStateAction<FiltersState>>;
   patients: PatientSummary[];
   providers: ProviderSummary[];
+  taxonomyNodes: ProviderTaxonomyNode[];
   filterDoctors: DoctorOption[];
   staff: StaffOption[];
   interpreters: InterpreterOption[];
@@ -63,6 +71,7 @@ function SearchSheet({
   setFilters,
   patients,
   providers,
+  taxonomyNodes,
   filterDoctors,
   staff,
   interpreters,
@@ -71,8 +80,21 @@ function SearchSheet({
   onProviderChange,
   onDoctorChange,
 }: SearchSheetProps) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
+  const providerTaxonomyOptions = useMemo(
+    () => providerTaxonomyTreeOptions(taxonomyNodes, filters.appointmentType, lang),
+    [filters.appointmentType, lang, taxonomyNodes],
+  );
+  const providerOptions = useMemo(
+    () =>
+      filterProvidersForAppointmentScope(
+        providers,
+        filters.appointmentType,
+        filters.providerTaxonomyNodeId,
+      ),
+    [filters.appointmentType, filters.providerTaxonomyNodeId, providers],
+  );
 
   return (
     <AppointmentEditorSheet
@@ -119,12 +141,23 @@ function SearchSheet({
       <Field label={t.appointments_type}>
         <NativeComboboxSelect
           value={filters.appointmentType}
-          onChange={(event) =>
-            setFilters((current) => ({
-              ...current,
-              appointmentType: event.target.value,
-            }))
-          }
+          onChange={(event) => {
+            const appointmentType = event.target.value;
+            setFilters((current) => {
+              const keepProvider = providerSelectionFitsAppointmentScope(
+                providers,
+                current.providerId,
+                appointmentType,
+              );
+              return {
+                ...current,
+                appointmentType,
+                providerTaxonomyNodeId: "",
+                providerId: keepProvider ? current.providerId : "",
+                doctorId: keepProvider ? current.doctorId : "",
+              };
+            });
+          }}
           className={selectClass}
         >
           <option value="">{t.providers_all}</option>
@@ -189,6 +222,37 @@ function SearchSheet({
           ))}
         </NativeComboboxSelect>
       </Field>
+      <Field label={t.appointments_provider_category}>
+        <NativeComboboxSelect
+          value={filters.providerTaxonomyNodeId}
+          onChange={(event) => {
+            const providerTaxonomyNodeId = event.target.value;
+            setFilters((current) => {
+              const keepProvider = providerSelectionFitsAppointmentScope(
+                providers,
+                current.providerId,
+                current.appointmentType,
+                providerTaxonomyNodeId,
+              );
+              return {
+                ...current,
+                providerTaxonomyNodeId,
+                providerId: keepProvider ? current.providerId : "",
+                doctorId: keepProvider ? current.doctorId : "",
+              };
+            });
+          }}
+          className={selectClass}
+          disabled={filters.appointmentType === "internal" || providerTaxonomyOptions.length === 0}
+        >
+          <option value="">{tr.providers_all}</option>
+          {providerTaxonomyOptions.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.label}
+            </option>
+          ))}
+        </NativeComboboxSelect>
+      </Field>
       <Field label={t.common_provider}>
         <NativeComboboxSelect
           value={filters.providerId}
@@ -196,7 +260,7 @@ function SearchSheet({
           className={selectClass}
         >
           <option value="">{tr.providers_all}</option>
-          {providers.map((provider) => (
+          {providerOptions.map((provider) => (
             <option key={provider.id} value={provider.id}>
               {provider.name}
             </option>
@@ -213,7 +277,7 @@ function SearchSheet({
           <option value="">{t.providers_all}</option>
           {filterDoctors.map((doctor) => (
             <option key={doctor.id} value={doctor.id}>
-              {doctorLabel(doctor)}
+              {doctorLabel(doctor, lang)}
             </option>
           ))}
         </NativeComboboxSelect>

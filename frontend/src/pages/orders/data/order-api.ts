@@ -69,8 +69,16 @@ export function fetchOrders(path: string) {
   return apiFetch<OrderSummary[]>(path);
 }
 
-export function fetchOrderDebtQueue() {
-  return apiFetch<OrderDebtQueueItem[]>("/orders/debt-management");
+export function fetchOrderDebtQueue(providerTaxonomyNodeId = "") {
+  const params = new URLSearchParams();
+  const trimmedTaxonomyNodeId = providerTaxonomyNodeId.trim();
+  if (trimmedTaxonomyNodeId) {
+    params.set("provider_taxonomy_node_id", trimmedTaxonomyNodeId);
+  }
+  const query = params.toString();
+  return apiFetch<OrderDebtQueueItem[]>(
+    `/orders/debt-management${query ? `?${query}` : ""}`,
+  );
 }
 
 export async function fetchOrderWorkspace(

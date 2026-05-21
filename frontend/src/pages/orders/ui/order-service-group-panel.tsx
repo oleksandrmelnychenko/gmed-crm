@@ -22,6 +22,8 @@ import {
   type Translations,
   type TranslationKey,
 } from "@/lib/i18n";
+import { doctorSpecialtyLabel } from "@/pages/providers/model/specialization-labels";
+import type { SpecializationItem } from "@/pages/providers/model/types";
 import type {
   CreateOrderServiceGroupInput,
   OrderServiceGroup,
@@ -40,6 +42,7 @@ type DoctorOption = {
   id: string;
   name: string;
   fachbereich?: string | null;
+  specializations?: SpecializationItem[];
 };
 
 type OrderServiceGroupPanelProps = {
@@ -791,6 +794,8 @@ function WizardParticipantRow({
   onRemove: () => void;
   onUpdateParticipant: UpdateWizardParticipant;
 }) {
+  const { lang } = useLang();
+
   function handleProviderChange(providerId: string) {
     onUpdateParticipant(index, {
       provider_id: providerId,
@@ -828,7 +833,7 @@ function WizardParticipantRow({
           {doctors.map((doctor) => (
             <option key={doctor.id} value={doctor.id}>
               {doctor.name}
-              {doctor.fachbereich ? ` - ${doctor.fachbereich}` : ""}
+              {doctorSpecialtyLabel(doctor, lang) ? ` - ${doctorSpecialtyLabel(doctor, lang)}` : ""}
             </option>
           ))}
         </NativeComboboxSelect>
