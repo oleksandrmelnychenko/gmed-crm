@@ -3,7 +3,7 @@ import { useLang } from "@/lib/i18n";
 
 import { CaseItemList } from "./case-item-list";
 import { type AllergieItem, useCaseWorkspace } from "./context";
-import { Field, inputBaseClassName } from "./primitives";
+import { Field, Panel, inputBaseClassName } from "./primitives";
 
 const BLANK: AllergieItem = { allergie: "", reaktion: "" };
 
@@ -63,7 +63,7 @@ export function AllergiesSection() {
         </>
       )}
       formContent={({ form, updateField, disabled }) => (
-        <>
+        <Panel title={t.cases_clinical_section_allergies}>
           <Field
             label={t.cases_allergies_allergen}
             required
@@ -83,7 +83,7 @@ export function AllergiesSection() {
               disabled={disabled}
             />
           </Field>
-        </>
+        </Panel>
       )}
     />
   );

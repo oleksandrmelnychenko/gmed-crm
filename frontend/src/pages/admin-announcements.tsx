@@ -3,6 +3,7 @@ import { Plus, RefreshCcw } from "lucide-react";
 
 import { AdminGuideButton } from "@/components/admin-guide";
 import {
+  AdminSectionTitle,
   AdminSheetScaffold,
   SheetFormFooter,
   AdminTableCard,
@@ -174,6 +175,7 @@ function AdminAnnouncementCreateSheet({
             {createError ? <Banner tone="error">{createError}</Banner> : null}
 
             <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
+              <AdminSectionTitle>{t.ann_new}</AdminSectionTitle>
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label={`${t.field_name} *`} htmlFor="announcement-title">
                   <Input

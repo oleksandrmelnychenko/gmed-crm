@@ -296,166 +296,176 @@ function MedicationFormContent({
 }: MedicationFormContentProps) {
   return (
     <>
-      <div className="grid gap-4 md:grid-cols-2">
-        <Field label={t.cases_medications_brand_name} required>
-          <Input
-            value={form.handelsname}
-            onChange={(event) => updateField("handelsname", event.target.value)}
-            className={inputBaseClassName}
-            disabled={disabled}
-          />
-        </Field>
-        <Field label={t.cases_medications_active_ingredient}>
-          <Input
-            value={form.wirkstoff ?? ""}
-            onChange={(event) => updateField("wirkstoff", event.target.value)}
-            className={inputBaseClassName}
-            disabled={disabled}
-          />
-        </Field>
-      </div>
+      <Panel title={t.cases_medications_group_identity}>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label={t.cases_medications_brand_name} required>
+            <Input
+              value={form.handelsname}
+              onChange={(event) => updateField("handelsname", event.target.value)}
+              className={inputBaseClassName}
+              disabled={disabled}
+            />
+          </Field>
+          <Field label={t.cases_medications_active_ingredient}>
+            <Input
+              value={form.wirkstoff ?? ""}
+              onChange={(event) => updateField("wirkstoff", event.target.value)}
+              className={inputBaseClassName}
+              disabled={disabled}
+            />
+          </Field>
+        </div>
+      </Panel>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <Field label={t.cases_medications_dose}>
-          <Input
-            value={form.dosis ?? ""}
-            onChange={(event) => updateField("dosis", event.target.value)}
-            className={inputBaseClassName}
-            disabled={disabled}
-          />
-        </Field>
-        <Field label={t.cases_medications_unit}>
-          <Input
-            value={form.dosis_einheit ?? ""}
-            onChange={(event) => updateField("dosis_einheit", event.target.value)}
-            className={inputBaseClassName}
-            disabled={disabled}
-          />
-        </Field>
-        <Field label={t.cases_medications_regimen}>
-          <Input
-            value={form.einnahmeschema ?? ""}
-            onChange={(event) => updateField("einnahmeschema", event.target.value)}
-            className={inputBaseClassName}
-            disabled={disabled}
-          />
-        </Field>
-      </div>
+      <Panel title={t.cases_medications_group_dosage}>
+        <div className="grid gap-4 md:grid-cols-3">
+          <Field label={t.cases_medications_dose}>
+            <Input
+              value={form.dosis ?? ""}
+              onChange={(event) => updateField("dosis", event.target.value)}
+              className={inputBaseClassName}
+              disabled={disabled}
+            />
+          </Field>
+          <Field label={t.cases_medications_unit}>
+            <Input
+              value={form.dosis_einheit ?? ""}
+              onChange={(event) => updateField("dosis_einheit", event.target.value)}
+              className={inputBaseClassName}
+              disabled={disabled}
+            />
+          </Field>
+          <Field label={t.cases_medications_regimen}>
+            <Input
+              value={form.einnahmeschema ?? ""}
+              onChange={(event) => updateField("einnahmeschema", event.target.value)}
+              className={inputBaseClassName}
+              disabled={disabled}
+            />
+          </Field>
+        </div>
+      </Panel>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <Field label={t.cases_medications_form}>
-          <Input
-            value={form.darreichungsform ?? ""}
-            onChange={(event) => updateField("darreichungsform", event.target.value)}
-            className={inputBaseClassName}
-            disabled={disabled}
-          />
-        </Field>
-        <Field label={t.cases_medications_type}>
+      <Panel title={t.cases_medications_group_form_validity}>
+        <div className="grid gap-4 md:grid-cols-3">
+          <Field label={t.cases_medications_form}>
+            <Input
+              value={form.darreichungsform ?? ""}
+              onChange={(event) => updateField("darreichungsform", event.target.value)}
+              className={inputBaseClassName}
+              disabled={disabled}
+            />
+          </Field>
+          <Field label={t.cases_medications_type}>
+            <NativeComboboxSelect
+              value={form.med_typ ?? "permanent"}
+              onChange={(event) => updateField("med_typ", event.target.value)}
+              className={nativeSelectClassName}
+              disabled={disabled}
+            >
+              {MED_TYP_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {medicationTypeLabel(option, t)}
+                </option>
+              ))}
+              {form.med_typ && !isKnownMedicationType(form.med_typ) ? (
+                <option value={form.med_typ}>
+                  {medicationTypeLabel(form.med_typ, t)}
+                </option>
+              ) : null}
+            </NativeComboboxSelect>
+          </Field>
+          <Field label={t.cases_medications_valid_until}>
+            <Input
+              type="date"
+              value={form.expiry_date ?? ""}
+              onChange={(event) => updateField("expiry_date", event.target.value)}
+              className={inputBaseClassName}
+              disabled={disabled}
+            />
+          </Field>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label={t.cases_medications_since}>
+            <Input
+              value={form.seit ?? ""}
+              onChange={(event) => updateField("seit", event.target.value)}
+              className={inputBaseClassName}
+              disabled={disabled}
+            />
+          </Field>
+          <Field label={t.cases_medications_reason}>
+            <Input
+              value={form.grund ?? ""}
+              onChange={(event) => updateField("grund", event.target.value)}
+              className={inputBaseClassName}
+              disabled={disabled}
+            />
+          </Field>
+        </div>
+
+        {form.is_expired && form.pending_expiry_confirmation ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[12.5px] text-amber-800">
+            <div className="flex items-center gap-1.5 font-semibold">
+              <AlertTriangle className="size-3.5" />
+              {t.cases_medications_expiry_review_pending}
+            </div>
+            <p className="mt-1 leading-relaxed">
+              {t.cases_medications_expiry_review_full_editor}
+            </p>
+          </div>
+        ) : null}
+      </Panel>
+
+      <Panel title={t.cases_medications_group_prescriber}>
+        <Field label={t.cases_medications_prescriber_registry}>
           <NativeComboboxSelect
-            value={form.med_typ ?? "permanent"}
-            onChange={(event) => updateField("med_typ", event.target.value)}
+            value={form.verordnender_arzt_id ?? ""}
+            onChange={(event) => {
+              const doctorId = event.target.value;
+              const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
+              setForm((current) => ({
+                ...current,
+                verordnender_arzt_id: doctorId,
+                verordnender_arzt: selectedDoctor
+                  ? selectedDoctor.name
+                  : current.verordnender_arzt ?? "",
+              }));
+            }}
             className={nativeSelectClassName}
             disabled={disabled}
           >
-            {MED_TYP_OPTIONS.map((option) => (
-              <option key={option} value={option}>
-                {medicationTypeLabel(option, t)}
+            <option value="">{t.common_not_set}</option>
+            {doctors.map((doctor) => (
+              <option key={doctor.id} value={doctor.id}>
+                {doctorOptionLabel(doctor, lang)}
               </option>
             ))}
-            {form.med_typ && !isKnownMedicationType(form.med_typ) ? (
-              <option value={form.med_typ}>
-                {medicationTypeLabel(form.med_typ, t)}
-              </option>
-            ) : null}
           </NativeComboboxSelect>
         </Field>
-        <Field label={t.cases_medications_valid_until}>
+
+        <Field label={t.cases_medications_doctor_label}>
           <Input
-            type="date"
-            value={form.expiry_date ?? ""}
-            onChange={(event) => updateField("expiry_date", event.target.value)}
+            value={form.verordnender_arzt ?? ""}
+            onChange={(event) => updateField("verordnender_arzt", event.target.value)}
             className={inputBaseClassName}
             disabled={disabled}
           />
         </Field>
-      </div>
+      </Panel>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Field label={t.cases_medications_since}>
-          <Input
-            value={form.seit ?? ""}
-            onChange={(event) => updateField("seit", event.target.value)}
-            className={inputBaseClassName}
+      <Panel title={t.cases_medications_group_notes}>
+        <Field label={t.cases_medications_note}>
+          <textarea
+            value={form.anmerkung ?? ""}
+            onChange={(event) => updateField("anmerkung", event.target.value)}
+            className={textareaBaseClassName}
+            rows={3}
             disabled={disabled}
           />
         </Field>
-        <Field label={t.cases_medications_reason}>
-          <Input
-            value={form.grund ?? ""}
-            onChange={(event) => updateField("grund", event.target.value)}
-            className={inputBaseClassName}
-            disabled={disabled}
-          />
-        </Field>
-      </div>
-
-      <Field label={t.cases_medications_prescriber_registry}>
-        <NativeComboboxSelect
-          value={form.verordnender_arzt_id ?? ""}
-          onChange={(event) => {
-            const doctorId = event.target.value;
-            const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
-            setForm((current) => ({
-              ...current,
-              verordnender_arzt_id: doctorId,
-              verordnender_arzt: selectedDoctor
-                ? selectedDoctor.name
-                : current.verordnender_arzt ?? "",
-            }));
-          }}
-          className={nativeSelectClassName}
-          disabled={disabled}
-        >
-          <option value="">{t.common_not_set}</option>
-          {doctors.map((doctor) => (
-            <option key={doctor.id} value={doctor.id}>
-              {doctorOptionLabel(doctor, lang)}
-            </option>
-          ))}
-        </NativeComboboxSelect>
-      </Field>
-
-      <Field label={t.cases_medications_doctor_label}>
-        <Input
-          value={form.verordnender_arzt ?? ""}
-          onChange={(event) => updateField("verordnender_arzt", event.target.value)}
-          className={inputBaseClassName}
-          disabled={disabled}
-        />
-      </Field>
-
-      <Field label={t.cases_medications_note}>
-        <textarea
-          value={form.anmerkung ?? ""}
-          onChange={(event) => updateField("anmerkung", event.target.value)}
-          className={textareaBaseClassName}
-          rows={3}
-          disabled={disabled}
-        />
-      </Field>
-
-      {form.is_expired && form.pending_expiry_confirmation ? (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[12.5px] text-amber-800">
-          <div className="flex items-center gap-1.5 font-semibold">
-            <AlertTriangle className="size-3.5" />
-            {t.cases_medications_expiry_review_pending}
-          </div>
-          <p className="mt-1 leading-relaxed">
-            {t.cases_medications_expiry_review_full_editor}
-          </p>
-        </div>
-      ) : null}
+      </Panel>
     </>
   );
 }

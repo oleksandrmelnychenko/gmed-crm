@@ -45,6 +45,9 @@ export interface CasesClinicalTranslations {
   cases_clinical_section_urology: string;
   cases_clinical_section_vaccination: string;
   cases_clinical_section_history: string;
+  cases_clinical_group_procedure: string;
+  cases_clinical_group_responsible_doctor: string;
+  cases_clinical_group_notes: string;
 
   cases_clinical_snippet_category_anamnesis: string;
   cases_clinical_snippet_category_cardiology: string;
@@ -126,6 +129,11 @@ export interface CasesClinicalTranslations {
   cases_medications_description: string;
   cases_medications_sheet_create: string;
   cases_medications_sheet_edit: string;
+  cases_medications_group_identity: string;
+  cases_medications_group_dosage: string;
+  cases_medications_group_form_validity: string;
+  cases_medications_group_prescriber: string;
+  cases_medications_group_notes: string;
   cases_medications_empty_title: string;
   cases_medications_add_first: string;
   cases_medications_missing_brand: string;
@@ -204,6 +212,10 @@ export interface CasesClinicalTranslations {
   cases_pain_description: string;
   cases_pain_sheet_create: string;
   cases_pain_sheet_edit: string;
+  cases_pain_group_location_timing: string;
+  cases_pain_group_characteristics: string;
+  cases_pain_group_intensity: string;
+  cases_pain_group_course: string;
   cases_pain_empty_title: string;
   cases_pain_add_first: string;
   cases_pain_missing_location: string;
@@ -274,6 +286,9 @@ export const casesClinicalRu: CasesClinicalTranslations = {
   cases_clinical_section_urology: "Урология",
   cases_clinical_section_vaccination: "Статус вакцинации",
   cases_clinical_section_history: "История",
+  cases_clinical_group_procedure: "Данные операции",
+  cases_clinical_group_responsible_doctor: "Ответственный врач",
+  cases_clinical_group_notes: "Дополнительная информация",
 
   cases_clinical_snippet_category_anamnesis: "Анамнез",
   cases_clinical_snippet_category_cardiology: "Кардиология",
@@ -367,6 +382,11 @@ export const casesClinicalRu: CasesClinicalTranslations = {
     "Текущая медикация, дозировка, срок действия и назначивший врач.",
   cases_medications_sheet_create: "Новый медикамент",
   cases_medications_sheet_edit: "Редактировать медикамент",
+  cases_medications_group_identity: "Идентификация препарата",
+  cases_medications_group_dosage: "Дозировка и схема",
+  cases_medications_group_form_validity: "Форма, срок и причина",
+  cases_medications_group_prescriber: "Назначение",
+  cases_medications_group_notes: "Дополнительная информация",
   cases_medications_empty_title: "Медикаментов пока нет.",
   cases_medications_add_first: "Добавить первый медикамент",
   cases_medications_missing_brand: "Укажите торговое название.",
@@ -468,6 +488,10 @@ export const casesClinicalRu: CasesClinicalTranslations = {
   cases_pain_description: "Локализация, характер и интенсивность боли.",
   cases_pain_sheet_create: "Новая запись о боли",
   cases_pain_sheet_edit: "Редактировать запись о боли",
+  cases_pain_group_location_timing: "Локализация и начало",
+  cases_pain_group_characteristics: "Характер боли",
+  cases_pain_group_intensity: "Интенсивность",
+  cases_pain_group_course: "Динамика и триггеры",
   cases_pain_empty_title: "Записей о боли пока нет.",
   cases_pain_add_first: "Добавить первую запись",
   cases_pain_missing_location: "Укажите локализацию.",
@@ -539,6 +563,9 @@ export const casesClinicalDe: CasesClinicalTranslations = {
   cases_clinical_section_urology: "Urologie",
   cases_clinical_section_vaccination: "Impfstatus",
   cases_clinical_section_history: "Verlauf",
+  cases_clinical_group_procedure: "Eingriffsdaten",
+  cases_clinical_group_responsible_doctor: "Verantwortlicher Arzt",
+  cases_clinical_group_notes: "Zusätzliche Angaben",
 
   cases_clinical_snippet_category_anamnesis: "Anamnese",
   cases_clinical_snippet_category_cardiology: "Kardiologie",
@@ -633,6 +660,11 @@ export const casesClinicalDe: CasesClinicalTranslations = {
     "Aktuelle Medikation, Dosierung, Ablaufdatum und Verordner.",
   cases_medications_sheet_create: "Neues Medikament",
   cases_medications_sheet_edit: "Medikament bearbeiten",
+  cases_medications_group_identity: "Arzneimittel-Identifikation",
+  cases_medications_group_dosage: "Dosierung und Schema",
+  cases_medications_group_form_validity: "Form, Gültigkeit und Grund",
+  cases_medications_group_prescriber: "Verordnung",
+  cases_medications_group_notes: "Zusätzliche Angaben",
   cases_medications_empty_title: "Keine Medikamente erfasst.",
   cases_medications_add_first: "Erstes Medikament hinzufügen",
   cases_medications_missing_brand: "Bitte den Handelsnamen eingeben.",
@@ -732,6 +764,10 @@ export const casesClinicalDe: CasesClinicalTranslations = {
   cases_pain_description: "Schmerz-Lokalisation, Qualität und Intensität.",
   cases_pain_sheet_create: "Neuer Schmerzbefund",
   cases_pain_sheet_edit: "Schmerzbefund bearbeiten",
+  cases_pain_group_location_timing: "Lokalisation und Beginn",
+  cases_pain_group_characteristics: "Schmerzcharakter",
+  cases_pain_group_intensity: "Intensität",
+  cases_pain_group_course: "Verlauf und Auslöser",
   cases_pain_empty_title: "Keine Schmerzbefunde erfasst.",
   cases_pain_add_first: "Ersten Befund hinzufügen",
   cases_pain_missing_location: "Bitte die Lokalisation angeben.",

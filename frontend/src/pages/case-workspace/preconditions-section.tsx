@@ -6,6 +6,7 @@ import { CaseItemList } from "./case-item-list";
 import { type VorerkrankungItem, useCaseWorkspace } from "./context";
 import {
   Field,
+  Panel,
   inputBaseClassName,
   textareaBaseClassName,
 } from "./primitives";
@@ -84,7 +85,7 @@ export function PreconditionsSection() {
         </>
       )}
       formContent={({ form, updateField, disabled }) => (
-        <>
+        <Panel title={tri(lang, "case_ws_preconditions")}>
           <Field
             label={tri(lang, "case_ws_condition")}
             required
@@ -116,7 +117,7 @@ export function PreconditionsSection() {
               disabled={disabled}
             />
           </Field>
-        </>
+        </Panel>
       )}
     />
   );

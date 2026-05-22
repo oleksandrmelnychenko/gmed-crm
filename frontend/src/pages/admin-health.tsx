@@ -15,6 +15,7 @@ import {
 
 import { AdminGuideButton } from "@/components/admin-guide";
 import {
+  AdminSectionTitle,
   AdminSheetScaffold,
   AdminInlineMetric,
   AdminTableCard,
@@ -128,6 +129,7 @@ function AdminHealthDetailSheet({
           <AdminSheetScaffold title={detailMeta.title} description={detailMeta.description}>
             {detailPanel === "database" ? (
               <section className="space-y-4 rounded-xl border border-border/60 bg-card p-3.5">
+                <AdminSectionTitle>{t.health_section_database}</AdminSectionTitle>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
                     <div className="text-xs text-muted-foreground">{t.health_db_size}</div>
@@ -151,6 +153,7 @@ function AdminHealthDetailSheet({
 
             {detailPanel === "access" ? (
               <section className="space-y-4 rounded-xl border border-border/60 bg-card p-3.5">
+                <AdminSectionTitle>{t.health_section_access}</AdminSectionTitle>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
                     <div className="text-xs text-muted-foreground">{t.health_users_total}</div>
@@ -182,6 +185,7 @@ function AdminHealthDetailSheet({
 
             {detailPanel === "data" ? (
               <section className="space-y-4 rounded-xl border border-border/60 bg-card p-3.5">
+                <AdminSectionTitle>{t.health_section_data}</AdminSectionTitle>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
                     <div className="text-xs text-muted-foreground">{t.patients_title}</div>

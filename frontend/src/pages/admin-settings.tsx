@@ -18,6 +18,7 @@ import {
 import { AdminGuideButton } from "@/components/admin-guide";
 import {
   AdminInlineMetric,
+  AdminSectionTitle,
   AdminSheetScaffold,
   SheetActionsFooter,
   AdminTableCard,
@@ -994,9 +995,7 @@ function useAdminSettingsPageContent() {
             {selectedGroup ? (
               <>
                 <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
-                  <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
-                    {t.admin_system_overview}
-                  </h3>
+                  <AdminSectionTitle>{t.admin_system_overview}</AdminSectionTitle>
                   <div className="flex items-center gap-2">
                     <StatusBadge tone={groupHasChanges ? "warning" : "neutral"}>
                       {groupHasChanges ? t.common_edit : t.common_monitoring}
@@ -1014,9 +1013,7 @@ function useAdminSettingsPageContent() {
                 </section>
 
                 <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
-                  <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
-                    {t.admin_system_fields}
-                  </h3>
+                  <AdminSectionTitle>{t.admin_system_fields}</AdminSectionTitle>
                   <div className="grid gap-4 md:grid-cols-2">
                     {selectedGroup.fields.map((field) => {
                       const changed = hasFieldChanged(field.key);

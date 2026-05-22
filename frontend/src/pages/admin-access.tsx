@@ -21,6 +21,7 @@ import {
 import { AdminGuideButton, GuideSection } from "@/components/admin-guide";
 import {
   AdminInlineMetric,
+  AdminSectionTitle,
   AdminSheetScaffold,
   SheetActionsFooter,
   AdminTableCard,
@@ -695,9 +696,7 @@ function useAdminAccessPageContent() {
               <>
                 <section className={cn("space-y-3 rounded-xl p-3.5", tokens.surface.softCard)}>
                   <div className="space-y-1">
-                    <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
-                      {t.admin_system_permissions}
-                    </h3>
+                    <AdminSectionTitle>{t.admin_system_permissions}</AdminSectionTitle>
                     <p className="text-[11px] text-muted-foreground">
                       {t.admin_system_access_cycle_hint}
                     </p>
@@ -772,7 +771,7 @@ function useAdminAccessPageContent() {
                 </section>
 
                 <section className={cn("space-y-2 rounded-xl p-3.5", tokens.surface.softCard)}>
-                  <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{t.access_audit_note}</h3>
+                  <AdminSectionTitle>{t.access_audit_note}</AdminSectionTitle>
                   <p className="text-xs text-muted-foreground">{selectedFieldAuditNote}</p>
                 </section>
               </>

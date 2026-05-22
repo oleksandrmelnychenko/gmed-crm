@@ -2539,86 +2539,92 @@ function useCasesPageContent({
                     onCancel={() => setCreateOpen(false)}
                   />
                 )}
-              >
-                {createError ? <Banner tone="error">{createError}</Banner> : null}
-                <Field label={t.cases_patient} required>
-                  <NativeComboboxSelect
-                    value={createForm.patientId || "__none__"}
+            >
+              {createError ? <Banner tone="error">{createError}</Banner> : null}
+                <Panel title={t.patients_profile}>
+                  <Field label={t.cases_patient} required>
+                    <NativeComboboxSelect
+                      value={createForm.patientId || "__none__"}
 
 
-                    onChange={(event) => {
-                      const patientId = event.target.value && event.target.value !== "__none__" ? event.target.value : "";
-                      setCreateForm((current) => ({ ...current, patientId }));
-                    }} className={selectClassName}>
-                      <option value="__none__">{t.cases_patient}</option>
-                      {patients.map((patient) => (
-                        <option key={patient.id} value={patient.id}>
-                          {patientLabel(patient)}
-                        </option>
-                      ))}
-                    </NativeComboboxSelect>
-                </Field>
+                      onChange={(event) => {
+                        const patientId = event.target.value && event.target.value !== "__none__" ? event.target.value : "";
+                        setCreateForm((current) => ({ ...current, patientId }));
+                      }} className={selectClassName}>
+                        <option value="__none__">{t.cases_patient}</option>
+                        {patients.map((patient) => (
+                          <option key={patient.id} value={patient.id}>
+                            {patientLabel(patient)}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                  </Field>
+                </Panel>
 
-                <Field label={t.cases_reason} required>
-                  <Input
-                    value={createForm.hauptanfragegrund}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        hauptanfragegrund: event.target.value,
-                      }))}
-                    required
-                    className={inputClassName}
-                  />
-                </Field>
+                <Panel title={t.cases_core_anamnesis}>
+                  <Field label={t.cases_reason} required>
+                    <Input
+                      value={createForm.hauptanfragegrund}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({
+                          ...current,
+                          hauptanfragegrund: event.target.value,
+                        }))}
+                      required
+                      className={inputClassName}
+                    />
+                  </Field>
 
-                <Field label={t.cases_anamnesis} required>
-                  <textarea
-                    value={createForm.aktuelleAnamnese}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        aktuelleAnamnese: event.target.value,
-                      }))}
-                    required
-                    className={textareaClassName}
-                    rows={4}
-                  />
-                </Field>
+                  <Field label={t.cases_anamnesis} required>
+                    <textarea
+                      value={createForm.aktuelleAnamnese}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({
+                          ...current,
+                          aktuelleAnamnese: event.target.value,
+                        }))}
+                      required
+                      className={textareaClassName}
+                      rows={4}
+                    />
+                  </Field>
+                </Panel>
 
-                <Field label={t.cases_referrer}>
-                  <NativeComboboxSelect
-                    value={createForm.zuweiserDoctorId || "__none__"}
+                <Panel title={t.common_doctor}>
+                  <Field label={t.cases_referrer}>
+                    <NativeComboboxSelect
+                      value={createForm.zuweiserDoctorId || "__none__"}
 
 
-                    onChange={(event) => {
-                      const doctorId = event.target.value && event.target.value !== "__none__" ? event.target.value : "";
-                      const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
-                      setCreateForm((current) => ({
-                        ...current,
-                        zuweiserDoctorId: doctorId,
-                        zuweiser: selectedDoctor ? selectedDoctor.name : current.zuweiser,
-                      }));
-                    }} className={selectClassName}>
-                      <option value="__none__">{t.common_not_set}</option>
-                      {doctors.map((doctor) => (
-                        <option key={doctor.id} value={doctor.id}>
-                          {doctorOptionLabel(doctor, lang)}
-                        </option>
-                      ))}
-                    </NativeComboboxSelect>
-                </Field>
+                      onChange={(event) => {
+                        const doctorId = event.target.value && event.target.value !== "__none__" ? event.target.value : "";
+                        const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
+                        setCreateForm((current) => ({
+                          ...current,
+                          zuweiserDoctorId: doctorId,
+                          zuweiser: selectedDoctor ? selectedDoctor.name : current.zuweiser,
+                        }));
+                      }} className={selectClassName}>
+                        <option value="__none__">{t.common_not_set}</option>
+                        {doctors.map((doctor) => (
+                          <option key={doctor.id} value={doctor.id}>
+                            {doctorOptionLabel(doctor, lang)}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                  </Field>
 
-                <Field
-                  label={t.cases_clinical_referrer_label}
-                >
-                  <Input
-                    value={createForm.zuweiser}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({ ...current, zuweiser: event.target.value }))}
-                    className={inputClassName}
-                  />
-                </Field>
+                  <Field
+                    label={t.cases_clinical_referrer_label}
+                  >
+                    <Input
+                      value={createForm.zuweiser}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({ ...current, zuweiser: event.target.value }))}
+                      className={inputClassName}
+                    />
+                  </Field>
+                </Panel>
               </AdminSheetScaffold>
             </form>
           </SheetContent>
@@ -2934,11 +2940,9 @@ function useCasesPageContent({
                       className="h-full"
                     >
                       <div className="grid gap-6 lg:grid-cols-[1.15fr,0.85fr]">
-                        <div className="space-y-3">
-                          <div className="flex items-center justify-between gap-3">
-                            <p className="text-sm font-semibold text-foreground">
-                              {t.cases_snippets_title}
-                            </p>
+                        <Panel
+                          title={t.cases_snippets_title}
+                          action={
                             <Button
                               type="button"
                               variant="outline"
@@ -2948,7 +2952,8 @@ function useCasesPageContent({
                             >
                               {t.cases_snippets_new}
                             </Button>
-                          </div>
+                          }
+                        >
                           <div className="max-h-[26rem] space-y-3 overflow-y-auto pr-1">
                             {snippets.map((snippet) => (
                               <button
@@ -2984,8 +2989,9 @@ function useCasesPageContent({
                               </button>
                             ))}
                           </div>
-                        </div>
-                        <form onSubmit={handleSaveSnippet} className="space-y-4 rounded-xl border border-border bg-muted/20 p-4">
+                        </Panel>
+                        <Panel title={snippetForm.id ? t.common_edit : t.cases_snippets_new}>
+                        <form onSubmit={handleSaveSnippet} className="space-y-4">
                           {snippetSaveError ? (
                             <Banner tone="error">{snippetSaveError}</Banner>
                           ) : null}
@@ -3084,6 +3090,7 @@ function useCasesPageContent({
                             </Button>
                           </div>
                         </form>
+                        </Panel>
                       </div>
                     </AdminSheetScaffold>
                   </SheetContent>
@@ -4223,7 +4230,7 @@ function MetricCard({ label, value, description, icon }: MetricCardProps) {
     <div className="rounded-xl border border-border bg-card p-4">
       <div className="flex items-center justify-between gap-3">
         <span className="inline-flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-          <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+          <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
           {label}
         </span>
         <span className="rounded-lg bg-muted p-2 text-muted-foreground">{icon}</span>
@@ -4249,7 +4256,7 @@ function Panel({ title, description, action, children, className, accent = true,
             {accent ? (
               <span
                 aria-hidden
-                className="size-2 shrink-0 rounded-full bg-primary/70"
+                className="size-2 shrink-0 rounded-full bg-[var(--brand)]"
               />
             ) : null}
             <h3 className="text-[15px] font-semibold tracking-tight text-foreground">
@@ -4342,7 +4349,7 @@ function ItemEditorSection({
             )}
           >
             {populated ? (
-              <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+              <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
             ) : null}
             {count} {itemsLabel}
           </span>

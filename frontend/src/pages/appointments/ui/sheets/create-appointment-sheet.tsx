@@ -396,7 +396,7 @@ function useCreateAppointmentSheetContent({
   function sectionTitle(label: string) {
     return (
       <h3 className="inline-flex items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
-        <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+        <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
         <span>{label}</span>
       </h3>
     );

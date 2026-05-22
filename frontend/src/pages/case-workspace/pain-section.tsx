@@ -4,7 +4,7 @@ import { useLang } from "@/lib/i18n";
 
 import { CaseItemList } from "./case-item-list";
 import { type PainItem, useCaseWorkspace } from "./context";
-import { Field, inputBaseClassName } from "./primitives";
+import { Field, Panel, inputBaseClassName } from "./primitives";
 
 function parseNrs(value: string): number | null {
   const trimmed = value.trim().replace(",", ".");
@@ -109,121 +109,129 @@ export function PainSection() {
       )}
       formContent={({ form, updateField, disabled }) => (
         <>
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field label={t.cases_pain_location} required>
-              <Input
-                value={form.lokalisierung}
-                onChange={(event) => updateField("lokalisierung", event.target.value)}
-                className={inputBaseClassName}
-                disabled={disabled}
-              />
-            </Field>
-            <Field label={t.cases_pain_since_when}>
-              <Input
-                value={form.seit_wann ?? ""}
-                onChange={(event) => updateField("seit_wann", event.target.value)}
-                className={inputBaseClassName}
-                disabled={disabled}
-              />
-            </Field>
-          </div>
+          <Panel title={t.cases_pain_group_location_timing}>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label={t.cases_pain_location}>
+                <Input
+                  value={form.lokalisierung}
+                  onChange={(event) => updateField("lokalisierung", event.target.value)}
+                  className={inputBaseClassName}
+                  disabled={disabled}
+                />
+              </Field>
+              <Field label={t.cases_pain_since_when}>
+                <Input
+                  value={form.seit_wann ?? ""}
+                  onChange={(event) => updateField("seit_wann", event.target.value)}
+                  className={inputBaseClassName}
+                  disabled={disabled}
+                />
+              </Field>
+            </div>
+          </Panel>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field label={t.cases_pain_cause}>
-              <Input
-                value={form.ursache ?? ""}
-                onChange={(event) => updateField("ursache", event.target.value)}
-                className={inputBaseClassName}
-                disabled={disabled}
-              />
-            </Field>
-            <Field label={t.cases_pain_quality}>
-              <Input
-                value={form.qualitaet ?? ""}
-                onChange={(event) => updateField("qualitaet", event.target.value)}
-                className={inputBaseClassName}
-                disabled={disabled}
-              />
-            </Field>
-          </div>
+          <Panel title={t.cases_pain_group_characteristics}>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label={t.cases_pain_cause}>
+                <Input
+                  value={form.ursache ?? ""}
+                  onChange={(event) => updateField("ursache", event.target.value)}
+                  className={inputBaseClassName}
+                  disabled={disabled}
+                />
+              </Field>
+              <Field label={t.cases_pain_quality}>
+                <Input
+                  value={form.qualitaet ?? ""}
+                  onChange={(event) => updateField("qualitaet", event.target.value)}
+                  className={inputBaseClassName}
+                  disabled={disabled}
+                />
+              </Field>
+            </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field label={t.cases_pain_continuity}>
-              <Input
-                value={form.kontinuitaet ?? ""}
-                onChange={(event) => updateField("kontinuitaet", event.target.value)}
-                className={inputBaseClassName}
-                disabled={disabled}
-              />
-            </Field>
-            <Field label={t.cases_pain_evolution}>
-              <Input
-                value={form.entwicklung ?? ""}
-                onChange={(event) => updateField("entwicklung", event.target.value)}
-                className={inputBaseClassName}
-                disabled={disabled}
-              />
-            </Field>
-          </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label={t.cases_pain_continuity}>
+                <Input
+                  value={form.kontinuitaet ?? ""}
+                  onChange={(event) => updateField("kontinuitaet", event.target.value)}
+                  className={inputBaseClassName}
+                  disabled={disabled}
+                />
+              </Field>
+              <Field label={t.cases_pain_evolution}>
+                <Input
+                  value={form.entwicklung ?? ""}
+                  onChange={(event) => updateField("entwicklung", event.target.value)}
+                  className={inputBaseClassName}
+                  disabled={disabled}
+                />
+              </Field>
+            </div>
+          </Panel>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field label={t.cases_pain_nrs_current}>
-              <Input
-                value={nrsToString(form.nrs_aktuell)}
-                onChange={(event) => updateField("nrs_aktuell", parseNrs(event.target.value))}
-                className={inputBaseClassName}
-                disabled={disabled}
-                inputMode="numeric"
-              />
-            </Field>
-            <Field label={t.cases_pain_nrs_initial}>
-              <Input
-                value={nrsToString(form.nrs_anfang)}
-                onChange={(event) => updateField("nrs_anfang", parseNrs(event.target.value))}
-                className={inputBaseClassName}
-                disabled={disabled}
-                inputMode="numeric"
-              />
-            </Field>
-          </div>
+          <Panel title={t.cases_pain_group_intensity}>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label={t.cases_pain_nrs_current}>
+                <Input
+                  value={nrsToString(form.nrs_aktuell)}
+                  onChange={(event) => updateField("nrs_aktuell", parseNrs(event.target.value))}
+                  className={inputBaseClassName}
+                  disabled={disabled}
+                  inputMode="numeric"
+                />
+              </Field>
+              <Field label={t.cases_pain_nrs_initial}>
+                <Input
+                  value={nrsToString(form.nrs_anfang)}
+                  onChange={(event) => updateField("nrs_anfang", parseNrs(event.target.value))}
+                  className={inputBaseClassName}
+                  disabled={disabled}
+                  inputMode="numeric"
+                />
+              </Field>
+            </div>
+          </Panel>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field label={t.cases_pain_initial_duration}>
-              <Input
-                value={form.dauer_anfang ?? ""}
-                onChange={(event) => updateField("dauer_anfang", event.target.value)}
-                className={inputBaseClassName}
-                disabled={disabled}
-              />
-            </Field>
-            <Field label={t.cases_pain_current_duration}>
-              <Input
-                value={form.dauer_aktuell ?? ""}
-                onChange={(event) => updateField("dauer_aktuell", event.target.value)}
-                className={inputBaseClassName}
-                disabled={disabled}
-              />
-            </Field>
-          </div>
+          <Panel title={t.cases_pain_group_course}>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label={t.cases_pain_initial_duration}>
+                <Input
+                  value={form.dauer_anfang ?? ""}
+                  onChange={(event) => updateField("dauer_anfang", event.target.value)}
+                  className={inputBaseClassName}
+                  disabled={disabled}
+                />
+              </Field>
+              <Field label={t.cases_pain_current_duration}>
+                <Input
+                  value={form.dauer_aktuell ?? ""}
+                  onChange={(event) => updateField("dauer_aktuell", event.target.value)}
+                  className={inputBaseClassName}
+                  disabled={disabled}
+                />
+              </Field>
+            </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field label={t.cases_pain_radiation}>
-              <Input
-                value={form.ausstrahlung ?? ""}
-                onChange={(event) => updateField("ausstrahlung", event.target.value)}
-                className={inputBaseClassName}
-                disabled={disabled}
-              />
-            </Field>
-            <Field label={t.cases_pain_triggers}>
-              <Input
-                value={form.auftreten ?? ""}
-                onChange={(event) => updateField("auftreten", event.target.value)}
-                className={inputBaseClassName}
-                disabled={disabled}
-              />
-            </Field>
-          </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label={t.cases_pain_radiation}>
+                <Input
+                  value={form.ausstrahlung ?? ""}
+                  onChange={(event) => updateField("ausstrahlung", event.target.value)}
+                  className={inputBaseClassName}
+                  disabled={disabled}
+                />
+              </Field>
+              <Field label={t.cases_pain_triggers}>
+                <Input
+                  value={form.auftreten ?? ""}
+                  onChange={(event) => updateField("auftreten", event.target.value)}
+                  className={inputBaseClassName}
+                  disabled={disabled}
+                />
+              </Field>
+            </div>
+          </Panel>
         </>
       )}
     />

@@ -2945,35 +2945,37 @@ function StaffDocumentsPage({
               )}
             >
               {translationError ? <Banner tone="error">{translationError}</Banner> : null}
-              <Field label={t.patients_languages} required>
-                <NativeComboboxSelect
-                  value={translationForm.requestedLanguage}
-                  onChange={(event) =>
-                    setTranslationForm((current) => ({
-                      ...current,
-                      requestedLanguage: event.target.value,
-                    }))
-                  }
-                  className={selectClassName}
-                >
-                  <option value="de">{formatLanguageLabel("de")}</option>
-                  <option value="en">{formatLanguageLabel("en")}</option>
-                  <option value="uk">{formatLanguageLabel("uk")}</option>
-                </NativeComboboxSelect>
-              </Field>
-              <Field label={t.patients_notes}>
-                <textarea
-                  value={translationForm.note}
-                  onChange={(event) =>
-                    setTranslationForm((current) => ({
-                      ...current,
-                      note: event.target.value,
-                    }))
-                  }
-                  className={textareaClassName}
-                  placeholder={t.documents_translation_note_placeholder}
-                />
-              </Field>
+              <DocumentSheetSection title={t.documents_request_translation}>
+                <Field label={t.patients_languages} required>
+                  <NativeComboboxSelect
+                    value={translationForm.requestedLanguage}
+                    onChange={(event) =>
+                      setTranslationForm((current) => ({
+                        ...current,
+                        requestedLanguage: event.target.value,
+                      }))
+                    }
+                    className={selectClassName}
+                  >
+                    <option value="de">{formatLanguageLabel("de")}</option>
+                    <option value="en">{formatLanguageLabel("en")}</option>
+                    <option value="uk">{formatLanguageLabel("uk")}</option>
+                  </NativeComboboxSelect>
+                </Field>
+                <Field label={t.patients_notes}>
+                  <textarea
+                    value={translationForm.note}
+                    onChange={(event) =>
+                      setTranslationForm((current) => ({
+                        ...current,
+                        note: event.target.value,
+                      }))
+                    }
+                    className={textareaClassName}
+                    placeholder={t.documents_translation_note_placeholder}
+                  />
+                </Field>
+              </DocumentSheetSection>
             </AdminSheetScaffold>
           </form>
         </SheetContent>
@@ -5507,7 +5509,7 @@ function DocumentSheetSection({
 function titleWithDot(title: ReactNode) {
   return (
     <span className="inline-flex items-center gap-2">
-      <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+      <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
       <span>{title}</span>
     </span>
   );

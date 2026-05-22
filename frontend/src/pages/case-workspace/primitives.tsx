@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 
 import { tokens } from "@/components/ui-shell";
-import { uiText } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 type PanelProps = {
@@ -64,17 +63,10 @@ type FieldProps = {
   hint?: string;
 };
 
-export function Field({ label, children, required, hint }: FieldProps) {
+export function Field({ label, children, hint }: FieldProps) {
   return (
     <label className="flex flex-col gap-1.5">
       <span className="flex items-center gap-1.5 text-[11.5px] font-medium leading-tight text-muted-foreground">
-        {required ? (
-          <span
-            aria-hidden
-            title={uiText("case_ws_required")}
-            className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]"
-          />
-        ) : null}
         {label}
       </span>
       {children}

@@ -10,6 +10,7 @@ import { Plus, RefreshCcw, X } from "lucide-react";
 
 import { AdminGuideButton } from "@/components/admin-guide";
 import {
+  AdminSectionTitle,
   AdminSheetScaffold,
   SheetFormFooter,
   AdminTableCard,
@@ -249,6 +250,7 @@ function AdminCustomFieldCreateSheet({
           >
             {createError ? <Banner tone="error">{createError}</Banner> : null}
             <section className="space-y-4 rounded-xl border border-border/60 bg-card p-3.5">
+              <AdminSectionTitle>{t.cf_new}</AdminSectionTitle>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_entity_type}</Label>

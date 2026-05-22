@@ -12,6 +12,7 @@ import {
 } from "./context";
 import {
   Field,
+  Panel,
   inputBaseClassName,
   nativeSelectClassName,
   textareaBaseClassName,
@@ -109,74 +110,82 @@ export function SurgeriesSection() {
       )}
       formContent={({ form, setForm, updateField, disabled }) => (
         <>
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field label={tri(lang, "case_ws_date")}>
-              <Input
-                type="date"
-                value={form.datum ?? ""}
-                onChange={(event) => updateField("datum", event.target.value)}
-                className={inputBaseClassName}
+          <Panel title={t.cases_clinical_group_procedure}>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label={tri(lang, "case_ws_date")}>
+                <Input
+                  type="date"
+                  value={form.datum ?? ""}
+                  onChange={(event) => updateField("datum", event.target.value)}
+                  className={inputBaseClassName}
+                  disabled={disabled}
+                />
+              </Field>
+              <Field
+                label={tri(lang, "case_ws_reason")}
+                required
+              >
+                <Input
+                  value={form.grund}
+                  onChange={(event) => updateField("grund", event.target.value)}
+                  className={inputBaseClassName}
+                  disabled={disabled}
+                />
+              </Field>
+            </div>
+          </Panel>
+
+          <Panel title={t.cases_clinical_group_responsible_doctor}>
+            <Field
+              label={tri(lang, "case_ws_doctor_registry")}
+              hint={tri(lang, "case_ws_selecting_also_fills_the_free_text_field_below")}
+            >
+              <NativeComboboxSelect
+                value={form.arzt_id ?? ""}
+                onChange={(event) => {
+                  const doctorId = event.target.value;
+                  const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
+                  setForm((current) => ({
+                    ...current,
+                    arzt_id: doctorId,
+                    arzt: selectedDoctor ? selectedDoctor.name : current.arzt ?? "",
+                  }));
+                }}
+                className={nativeSelectClassName}
                 disabled={disabled}
-              />
+              >
+                <option value="">{t.common_not_set}</option>
+                {doctors.map((doctor) => (
+                  <option key={doctor.id} value={doctor.id}>
+                    {doctorOptionLabel(doctor, lang)}
+                  </option>
+                ))}
+              </NativeComboboxSelect>
             </Field>
             <Field
-              label={tri(lang, "case_ws_reason")}
-              required
+              label={tri(lang, "case_ws_doctor_label")}
+              hint={tri(lang, "case_ws_legacy_or_manual_fallback")}
             >
               <Input
-                value={form.grund}
-                onChange={(event) => updateField("grund", event.target.value)}
+                value={form.arzt ?? ""}
+                onChange={(event) => updateField("arzt", event.target.value)}
                 className={inputBaseClassName}
                 disabled={disabled}
               />
             </Field>
-          </div>
-          <Field
-            label={tri(lang, "case_ws_doctor_registry")}
-            hint={tri(lang, "case_ws_selecting_also_fills_the_free_text_field_below")}
-          >
-            <NativeComboboxSelect
-              value={form.arzt_id ?? ""}
-              onChange={(event) => {
-                const doctorId = event.target.value;
-                const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
-                setForm((current) => ({
-                  ...current,
-                  arzt_id: doctorId,
-                  arzt: selectedDoctor ? selectedDoctor.name : current.arzt ?? "",
-                }));
-              }}
-              className={nativeSelectClassName}
-              disabled={disabled}
-            >
-              <option value="">{t.common_not_set}</option>
-              {doctors.map((doctor) => (
-                <option key={doctor.id} value={doctor.id}>
-                  {doctorOptionLabel(doctor, lang)}
-                </option>
-              ))}
-            </NativeComboboxSelect>
-          </Field>
-          <Field
-            label={tri(lang, "case_ws_doctor_label")}
-            hint={tri(lang, "case_ws_legacy_or_manual_fallback")}
-          >
-            <Input
-              value={form.arzt ?? ""}
-              onChange={(event) => updateField("arzt", event.target.value)}
-              className={inputBaseClassName}
-              disabled={disabled}
-            />
-          </Field>
-          <Field label={tri(lang, "case_ws_note")}>
-            <textarea
-              value={form.notiz ?? ""}
-              onChange={(event) => updateField("notiz", event.target.value)}
-              className={textareaBaseClassName}
-              rows={4}
-              disabled={disabled}
-            />
-          </Field>
+          </Panel>
+
+          <Panel title={t.cases_clinical_group_notes}>
+            <Field label={tri(lang, "case_ws_note")}>
+              <textarea
+                value={form.notiz ?? ""}
+                onChange={(event) => updateField("notiz", event.target.value)}
+                className={textareaBaseClassName}
+                rows={4}
+                disabled={disabled}
+              />
+            </Field>
+          </Panel>
         </>
       )}
     />

@@ -566,6 +566,9 @@ export interface PatientsPortalTranslations {
   portal_appointments_on: string;
   portal_appointments_request_a_visit: string;
   portal_appointments_send_preferred_dates_and_context_the_care_team_reviews_and_conve: string;
+  portal_appointments_group_request_details: string;
+  portal_appointments_group_schedule_preferences: string;
+  portal_appointments_group_visit_context: string;
   portal_appointments_type: string;
   portal_appointments_medical: string;
   portal_appointments_non_medical: string;
@@ -1406,6 +1409,9 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_appointments_on: "на",
   portal_appointments_request_a_visit: "Запросить запись",
   portal_appointments_send_preferred_dates_and_context_the_care_team_reviews_and_conve: "Отправьте предпочтительные даты и контекст. Команда сопровождения рассмотрит запрос и превратит его в реальную запись.",
+  portal_appointments_group_request_details: "Параметры запроса",
+  portal_appointments_group_schedule_preferences: "Предпочтения по времени",
+  portal_appointments_group_visit_context: "Контекст визита",
   portal_appointments_type: "Тип",
   portal_appointments_medical: "Медицинский",
   portal_appointments_non_medical: "Немедицинский",
@@ -2238,6 +2244,9 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_appointments_on: "am",
   portal_appointments_request_a_visit: "Termin anfragen",
   portal_appointments_send_preferred_dates_and_context_the_care_team_reviews_and_conve: "Senden Sie bevorzugte Termine und Kontext. Das Betreuungsteam prüft die Anfrage und wandelt sie in einen echten Termin um.",
+  portal_appointments_group_request_details: "Anfragedaten",
+  portal_appointments_group_schedule_preferences: "Zeitpräferenzen",
+  portal_appointments_group_visit_context: "Besuchskontext",
   portal_appointments_type: "Typ",
   portal_appointments_medical: "Medizinisch",
   portal_appointments_non_medical: "Nicht medizinisch",

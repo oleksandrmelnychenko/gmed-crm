@@ -4,7 +4,7 @@ import { t as translateCatalog, useLang } from "@/lib/i18n";
 
 import { CaseItemList } from "./case-item-list";
 import { type SymptomItem, useCaseWorkspace } from "./context";
-import { Field, inputBaseClassName } from "./primitives";
+import { Field, Panel, inputBaseClassName } from "./primitives";
 
 function tri(lang: string, key: string) {
   const catalog = translateCatalog(lang === "de" ? "de" : "ru");
@@ -68,7 +68,7 @@ export function SymptomsSection() {
         </>
       )}
       formContent={({ form, updateField, disabled }) => (
-        <>
+        <Panel title={tri(lang, "case_ws_symptoms")}>
           <Field
             label={tri(lang, "case_ws_description")}
             required
@@ -88,7 +88,7 @@ export function SymptomsSection() {
               disabled={disabled}
             />
           </Field>
-        </>
+        </Panel>
       )}
     />
   );

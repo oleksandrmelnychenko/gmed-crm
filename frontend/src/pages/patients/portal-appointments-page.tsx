@@ -628,6 +628,7 @@ function usePatientAppointmentsPageContent() {
             </>
           }
         >
+          <Section title={t.portal_appointments_group_request_details}>
             <Field label={t.portal_appointments_type} htmlFor="portal-appointment-type">
               <NativeComboboxSelect
                 id="portal-appointment-type"
@@ -665,6 +666,8 @@ function usePatientAppointmentsPageContent() {
                 <option value="followup">{t.portal_appointments_follow_up}</option>
               </NativeComboboxSelect>
             </Field>
+          </Section>
+          <Section title={t.portal_appointments_group_schedule_preferences}>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label={t.portal_appointments_preferred_from} htmlFor="portal-appointment-preferred-from">
                 <Input
@@ -699,6 +702,8 @@ function usePatientAppointmentsPageContent() {
                 <option value="evening">{t.portal_appointments_evening}</option>
               </NativeComboboxSelect>
             </Field>
+          </Section>
+          <Section title={t.portal_appointments_group_visit_context}>
             <Field label={t.portal_appointments_specialty_or_topic} htmlFor="portal-appointment-specialty">
               <input
                 id="portal-appointment-specialty"
@@ -735,6 +740,7 @@ function usePatientAppointmentsPageContent() {
                 className={cn(textareaClass, "min-h-[100px]")}
               />
             </Field>
+          </Section>
             {requestError ? <Banner tone="error">{requestError}</Banner> : null}
         </PatientSheetScaffold>
       </section>

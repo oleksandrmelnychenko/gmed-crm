@@ -481,7 +481,7 @@ function AdminActivityDetailSheet({
             <>
               <section className={`space-y-3 rounded-xl p-3.5 ${tokens.surface.softCard}`}>
                 <h3 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                  <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+                  <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
                   <span>{t.activity_details}</span>
                 </h3>
 
@@ -520,7 +520,7 @@ function AdminActivityDetailSheet({
 
               <section className={`space-y-3 rounded-xl p-3.5 ${tokens.surface.softCard}`}>
                 <h3 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                  <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+                  <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
                   <span>{t.activity_payload}</span>
                 </h3>
                 <pre className="overflow-x-auto rounded-lg border border-border/50 bg-card/60 p-3 text-xs leading-6 text-muted-foreground">

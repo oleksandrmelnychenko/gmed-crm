@@ -23,6 +23,7 @@ import {
 import { AdminGuideButton } from "@/components/admin-guide";
 import {
   AdminInlineMetric,
+  AdminSectionTitle,
   AdminSheetScaffold,
   SheetActionsFooter,
   SheetFormFooter,
@@ -658,6 +659,7 @@ function useAdminNotificationsPageContent() {
               {formError ? <Banner tone="error">{formError}</Banner> : null}
 
               <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
+                <AdminSectionTitle>{t.notif_new}</AdminSectionTitle>
                 <div className="grid gap-3 md:grid-cols-2">
                   <Field label={`${t.notif_name} *`} htmlFor="channel-name">
                     <Input
@@ -742,6 +744,7 @@ function useAdminNotificationsPageContent() {
             {selectedChannel ? (
               <>
                 <section className={cn("space-y-3 rounded-xl p-3.5", tokens.surface.softCard)}>
+                  <AdminSectionTitle>{t.activity_details}</AdminSectionTitle>
                   <div className="flex flex-wrap items-center gap-1.5">
                     <StatusBadge
                       tone={channelTypeTone(selectedChannel.channel_type)}
@@ -771,9 +774,7 @@ function useAdminNotificationsPageContent() {
 
                 <section className={cn("space-y-3 rounded-xl p-3.5", tokens.surface.softCard)}>
                   <div className="flex items-center justify-between gap-2">
-                    <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
-                      {t.notif_config}
-                    </h3>
+                    <AdminSectionTitle>{t.notif_config}</AdminSectionTitle>
                   </div>
                   <pre className="overflow-x-auto rounded-lg border border-border/50 bg-card/60 p-3 text-xs leading-6 text-muted-foreground">
                     {prettyNotificationConfig(selectedChannel.config)}

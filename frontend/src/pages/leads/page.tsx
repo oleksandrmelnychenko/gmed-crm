@@ -145,7 +145,7 @@ const LEAD_REALTIME_EVENTS = [
 function titleWithDot(title: ReactNode) {
   return (
     <span className="inline-flex items-center gap-2">
-      <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+      <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
       <span>{title}</span>
     </span>
   );
@@ -2402,7 +2402,7 @@ function LeadField({
 function SectionTitle({ children }: { children: ReactNode }) {
   return (
     <h3 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-      <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+      <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
       <span>{children}</span>
     </h3>
   );

@@ -2862,7 +2862,7 @@ function SummaryLine({ label, value }: { label: string; value: ReactNode }) {
 function titleWithDot(title: ReactNode) {
   return (
     <span className="inline-flex items-center gap-2">
-      <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+      <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
       <span>{title}</span>
     </span>
   );

@@ -167,6 +167,29 @@ export function AdminTableCard({
   );
 }
 
+export function AdminSectionTitle({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <h3
+      className={cn(
+        "inline-flex min-w-0 items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground",
+        className,
+      )}
+    >
+      <span
+        aria-hidden
+        className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]"
+      />
+      <span className="min-w-0 truncate">{children}</span>
+    </h3>
+  );
+}
+
 export function AdminSheetScaffold({
   title,
   description,

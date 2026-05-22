@@ -20,6 +20,7 @@ import {
 import { AdminGuideButton } from "@/components/admin-guide";
 import {
   AdminInlineMetric,
+  AdminSectionTitle,
   AdminSheetScaffold,
   SheetActionsFooter,
   AdminTableCard,
@@ -1036,6 +1037,7 @@ function useAdminSecurityPageContent() {
             </Banner>
 
             <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
+              <AdminSectionTitle>{t.security_maintenance}</AdminSectionTitle>
               <Field label={t.users_status}>
                 <div>
                   <StatusBadge tone={maintEnabled ? "error" : "success"}>
@@ -1087,6 +1089,7 @@ function useAdminSecurityPageContent() {
               {ipError ? <Banner tone="error">{ipError}</Banner> : null}
 
               <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
+                <AdminSectionTitle>{t.security_ip_whitelist}</AdminSectionTitle>
                 <Field label={t.security_ip_cidr} htmlFor="whitelist-cidr">
                   <Input
                     id="whitelist-cidr"

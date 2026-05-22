@@ -171,7 +171,7 @@ const inputClassName = appointmentSlateInputClassName;
 function editSheetSectionTitle(label: string) {
   return (
     <h3 className="inline-flex items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
-      <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+      <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
       <span>{label}</span>
     </h3>
   );
@@ -180,7 +180,7 @@ function editSheetSectionTitle(label: string) {
 function editOverviewTitle(title: ReactNode) {
   return (
     <span className="inline-flex items-center gap-2">
-      <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+      <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
       <span>{title}</span>
     </span>
   );

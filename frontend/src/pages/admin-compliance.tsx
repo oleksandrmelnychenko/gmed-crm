@@ -18,6 +18,7 @@ import { useSearchParams } from "react-router-dom";
 
 import { AdminGuideButton } from "@/components/admin-guide";
 import {
+  AdminSectionTitle,
   AdminSheetScaffold,
   AdminInlineMetric,
   AdminTableCard,
@@ -1620,6 +1621,7 @@ function useAdminCompliancePageContent() {
                 description={activePatientLabel}
               >
                 <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
+                  <AdminSectionTitle>{t.compliance_consents}</AdminSectionTitle>
                   <Field label={t.compliance_consent_type_label}>
                     <NativeComboboxSelect
                       value={consentType}
@@ -1686,6 +1688,7 @@ function useAdminCompliancePageContent() {
                 description={activePatientLabel}
               >
                 <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
+                  <AdminSectionTitle>{t.compliance_privacy_requests_title}</AdminSectionTitle>
                   <Field label={t.compliance_request_type_label}>
                     <NativeComboboxSelect
                       value={privacyRequestType}
@@ -1738,6 +1741,7 @@ function useAdminCompliancePageContent() {
                   )}
                 >
                   <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
+                    <AdminSectionTitle>{t.compliance_privacy_review_queue}</AdminSectionTitle>
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge className={privacyStatusBadgeClass(reviewSheetRecord.status)}>
                         {privacyStatusLabel(reviewSheetRecord.status, t)}
