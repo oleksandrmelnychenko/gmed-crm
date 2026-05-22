@@ -102,6 +102,6 @@ export function Banner({ tone, children }: BannerProps) {
 export const inputBaseClassName =
   "h-9 w-full rounded-lg border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
 export const textareaBaseClassName =
-  "min-h-[80px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm leading-relaxed text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
+  "min-h-[80px] w-full rounded-lg border border-input px-3 py-2 text-sm leading-relaxed text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
 export const nativeSelectClassName =
   "h-9 w-full rounded-lg border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";

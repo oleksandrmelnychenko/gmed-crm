@@ -2651,7 +2651,7 @@ function StaffDocumentsPage({
                           notes: event.target.value,
                         }))
                       }
-                      className={cn(textareaClassName, "min-h-[120px] bg-background/60")}
+                      className={cn(textareaClassName, "min-h-[120px]")}
                       placeholder={t.patients_notes}
                     />
                   </Field>
@@ -2909,7 +2909,7 @@ function StaffDocumentsPage({
                           notes: event.target.value,
                         }))
                       }
-                      className={cn(textareaClassName, "min-h-[120px] bg-background/60")}
+                      className={cn(textareaClassName, "min-h-[120px]")}
                     />
                   </Field>
                 </DocumentSheetSection>
@@ -3119,7 +3119,7 @@ function StaffDocumentsPage({
                         }))
                       }
                       placeholder={t.documents_share_message_placeholder}
-                      className={cn(textareaClassName, "min-h-[140px] bg-background/60")}
+                      className={cn(textareaClassName, "min-h-[140px]")}
                     />
                   </Field>
                 </DocumentSheetSection>
@@ -3402,7 +3402,7 @@ function StaffDocumentsPage({
                               : current,
                           )
                         }
-                        className={cn(textareaClassName, "min-h-[140px] bg-background/60")}
+                        className={cn(textareaClassName, "min-h-[140px]")}
                       />
                     </Field>
                   </DocumentSheetSection>
@@ -3914,7 +3914,7 @@ function StaffDocumentsPage({
                         <textarea
                           readOnly
                           value={textExtraction.extracted_text}
-                          className={cn(textareaClassName, "min-h-[320px] bg-white leading-relaxed")}
+                          className={cn(textareaClassName, "min-h-[320px] leading-relaxed")}
                         />
                       </div>
                     ) : (
@@ -4398,7 +4398,7 @@ function StaffDocumentsPage({
                                                 translatedText: event.target.value,
                                               })
                                             }
-                                            className={cn(textareaClassName, "min-h-[260px] bg-white")}
+                                            className={cn(textareaClassName, "min-h-[260px]")}
                                             placeholder={t.documents_translated_text_placeholder}
                                           />
                                         </Field>

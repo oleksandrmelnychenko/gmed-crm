@@ -1295,7 +1295,7 @@ function useSopsPageContent() {
                       onChange={(event) =>
                         setForm((current) => ({ ...current, bodyMarkdown: event.target.value }))
                       }
-                      className={cn(textareaClassName, "min-h-[260px] bg-background/60")}
+                      className={cn(textareaClassName, "min-h-[260px]")}
                       required
                     />
                   </Field>

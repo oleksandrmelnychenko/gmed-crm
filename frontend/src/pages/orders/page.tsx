@@ -6472,7 +6472,7 @@ function useOrdersPageContent() {
                           needsDescription: event.target.value,
                         }))
                       }
-                      className={cn(textareaClassName, "min-h-[140px] bg-background/60")}
+                      className={cn(textareaClassName, "min-h-[140px]")}
                       placeholder={tx.patients_notes}
                     />
                   </Field>
