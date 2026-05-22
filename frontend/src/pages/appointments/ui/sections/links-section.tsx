@@ -89,7 +89,7 @@ function LinkedRecordTile({
       onClick={onClick}
     >
       <div className="relative z-10 min-w-0">
-        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+        <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{title}</h3>
         <p className="mt-2 line-clamp-3 text-xs leading-tight text-muted-foreground">
           {description}
         </p>

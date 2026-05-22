@@ -2096,7 +2096,7 @@ function useStaffInvoicesPageContent() {
                       onClick={() => window.open(`/patients?patient=${detail.patient_id}`, "_blank", "noopener,noreferrer")}
                     >
                       <div className="relative z-10">
-                        <h3 className="text-sm font-semibold text-foreground">{t.invoices_patient}</h3>
+                        <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{t.invoices_patient}</h3>
                         <p className="mt-2 text-xs leading-tight text-muted-foreground">
                           {text.linkedPatientCardDescription}
                         </p>
@@ -2111,7 +2111,7 @@ function useStaffInvoicesPageContent() {
                       onClick={() => window.open(`/orders?order=${detail.order_id}&patient=${detail.patient_id}`, "_blank", "noopener,noreferrer")}
                     >
                       <div className="relative z-10">
-                        <h3 className="text-sm font-semibold text-foreground">{text.linkedOrder}</h3>
+                        <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{text.linkedOrder}</h3>
                         <p className="mt-2 text-xs leading-tight text-muted-foreground">
                           {text.linkedOrderCardDescription}
                         </p>
@@ -2126,7 +2126,7 @@ function useStaffInvoicesPageContent() {
                       onClick={() => window.open(`/contracts?quote=${detail.quote_id ?? ""}&order=${detail.order_id}&patient=${detail.patient_id}&tab=quotes`, "_blank", "noopener,noreferrer")}
                     >
                       <div className="relative z-10">
-                        <h3 className="text-sm font-semibold text-foreground">{text.quotes}</h3>
+                        <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{text.quotes}</h3>
                         <p className="mt-2 text-xs leading-tight text-muted-foreground">
                           {text.linkedQuoteCardDescription}
                         </p>
@@ -2141,7 +2141,7 @@ function useStaffInvoicesPageContent() {
                       onClick={() => window.open(`/documents?order=${detail.order_id}&patient=${detail.patient_id}`, "_blank", "noopener,noreferrer")}
                     >
                       <div className="relative z-10">
-                        <h3 className="text-sm font-semibold text-foreground">{text.documents}</h3>
+                        <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{text.documents}</h3>
                         <p className="mt-2 text-xs leading-tight text-muted-foreground">
                           {text.linkedDocumentsCardDescription}
                         </p>
@@ -2444,7 +2444,7 @@ function useStaffInvoicesPageContent() {
                               <FileText className="size-4" />
                             </div>
                             <div className="min-w-0">
-                              <h3 className="truncate text-sm font-semibold text-foreground">
+                              <h3 className="truncate text-[13px] font-semibold tracking-tight text-foreground">
                                 {document.auto_name || document.original_filename || document.id}
                               </h3>
                               <p className="mt-1 line-clamp-2 text-xs leading-snug text-muted-foreground">

@@ -2648,7 +2648,7 @@ function useContractsPageContent() {
                         onClick={() => window.open(`/patients?patient=${contractDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
-                          <h3 className="text-sm font-semibold text-foreground">{t.contracts_patient}</h3>
+                          <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{t.contracts_patient}</h3>
                           <p className="mt-2 text-xs leading-tight text-muted-foreground">
                             {text.contractLinkedPatientCard}
                           </p>
@@ -2663,7 +2663,7 @@ function useContractsPageContent() {
                         onClick={() => window.open(`/orders?patient=${contractDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
-                          <h3 className="text-sm font-semibold text-foreground">{text.orders}</h3>
+                          <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{text.orders}</h3>
                           <p className="mt-2 text-xs leading-tight text-muted-foreground">
                             {text.contractLinkedOrdersCard}
                           </p>
@@ -2678,7 +2678,7 @@ function useContractsPageContent() {
                         onClick={() => window.open(`/documents?patient=${contractDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
-                          <h3 className="text-sm font-semibold text-foreground">{text.documents}</h3>
+                          <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{text.documents}</h3>
                           <p className="mt-2 text-xs leading-tight text-muted-foreground">
                             {text.contractLinkedDocumentsCard}
                           </p>
@@ -2868,7 +2868,7 @@ function useContractsPageContent() {
                         onClick={() => window.open(`/patients?patient=${quoteDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
-                          <h3 className="text-sm font-semibold text-foreground">{t.contracts_patient}</h3>
+                          <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{t.contracts_patient}</h3>
                           <p className="mt-2 text-xs leading-tight text-muted-foreground">
                             {text.quoteLinkedPatientCard}
                           </p>
@@ -2883,7 +2883,7 @@ function useContractsPageContent() {
                         onClick={() => window.open(`/orders?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
-                          <h3 className="text-sm font-semibold text-foreground">{text.order}</h3>
+                          <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{text.order}</h3>
                           <p className="mt-2 text-xs leading-tight text-muted-foreground">
                             {text.quoteLinkedOrderCard}
                           </p>
@@ -2898,7 +2898,7 @@ function useContractsPageContent() {
                         onClick={() => window.open(`/invoices?quote=${quoteDetail.id}&order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
-                          <h3 className="text-sm font-semibold text-foreground">{text.invoices}</h3>
+                          <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{text.invoices}</h3>
                           <p className="mt-2 text-xs leading-tight text-muted-foreground">
                             {text.quoteLinkedInvoicesCard}
                           </p>
@@ -2913,7 +2913,7 @@ function useContractsPageContent() {
                         onClick={() => window.open(`/documents?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
-                          <h3 className="text-sm font-semibold text-foreground">{text.documents}</h3>
+                          <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{text.documents}</h3>
                           <p className="mt-2 text-xs leading-tight text-muted-foreground">
                             {text.quoteLinkedDocumentsCard}
                           </p>

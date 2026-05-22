@@ -298,7 +298,7 @@ function useQueueSheetContent({
       {hasAppointmentRequests ? (
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold text-foreground">
+            <h2 className="text-[13px] font-semibold tracking-tight text-foreground">
               {appointmentText("appointments_portal_requests")}
             </h2>
             <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
@@ -589,7 +589,7 @@ function useQueueSheetContent({
       ) : hasAppointments ? (
         <div className="space-y-3">
           {hasAppointmentRequests ? (
-            <h2 className="text-sm font-semibold text-foreground">
+            <h2 className="text-[13px] font-semibold tracking-tight text-foreground">
               {appointmentText("appointments_appointment_queue")}
             </h2>
           ) : null}

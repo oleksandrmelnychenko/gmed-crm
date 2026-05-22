@@ -4259,7 +4259,7 @@ function Panel({ title, description, action, children, className, accent = true,
                 className="size-2 shrink-0 rounded-full bg-[var(--brand)]"
               />
             ) : null}
-            <h3 className="text-[15px] font-semibold tracking-tight text-foreground">
+            <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
               {title}
             </h3>
           </div>

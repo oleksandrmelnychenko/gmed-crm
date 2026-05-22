@@ -335,7 +335,7 @@ export function ProviderHierarchyTimeline({
     >
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
         <div className="min-w-0">
-          <h2 className="truncate text-sm font-semibold text-foreground">
+          <h2 className="truncate text-[13px] font-semibold tracking-tight text-foreground">
             {tr.providers_hierarchy_timeline_title ?? tr.providers_children ?? tr.providers_title}
           </h2>
           <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">

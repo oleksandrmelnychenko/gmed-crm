@@ -333,7 +333,7 @@ export function InterpreterMobileAgenda({
           >
             <div className="mb-3 flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-sm font-semibold text-foreground">
+                <h2 className="text-[13px] font-semibold tracking-tight text-foreground">
                   {section.label}
                 </h2>
                 <p className="text-xs text-muted-foreground">

@@ -23,7 +23,7 @@ function AppointmentAttentionSection({
         <div>
           <div className="flex items-center gap-2">
             <div className="size-2 shrink-0 rounded-full bg-amber-500" />
-            <h3 className="text-sm font-semibold text-foreground">
+            <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
               {title}
             </h3>
           </div>

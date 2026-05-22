@@ -72,7 +72,7 @@ export function ProviderChildrenSection({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
-          <h3 className="truncate text-sm font-semibold text-foreground">{title}</h3>
+          <h3 className="truncate text-[13px] font-semibold tracking-tight text-foreground">{title}</h3>
           <span className="shrink-0 text-xs font-medium tabular-nums text-muted-foreground">
             {providerChildren.length}
           </span>

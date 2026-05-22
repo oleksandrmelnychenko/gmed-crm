@@ -4375,7 +4375,7 @@ function ProviderOverviewSection({
 
   return (
     <section className="space-y-5 rounded-xl border border-border/50 bg-card/40 p-4">
-      <h3 className="text-sm font-semibold text-foreground">
+      <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
         {titleWithDot(l("providers_provider_overview"))}
       </h3>
       <div className="grid items-stretch gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-8">
@@ -4693,7 +4693,7 @@ function DoctorSection({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
-          <h3 className="truncate text-sm font-semibold text-foreground">
+          <h3 className="truncate text-[13px] font-semibold tracking-tight text-foreground">
             {title}
           </h3>
           <span className="shrink-0 text-xs font-medium text-muted-foreground">
@@ -5192,7 +5192,7 @@ function StaffSection({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
-          <h3 className="truncate text-sm font-semibold text-foreground">
+          <h3 className="truncate text-[13px] font-semibold tracking-tight text-foreground">
             {l("providers_staff")}
           </h3>
           <span className="shrink-0 text-xs font-medium text-muted-foreground">
@@ -5352,7 +5352,7 @@ function ServiceSection({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
-          <h3 className="truncate text-sm font-semibold text-foreground">
+          <h3 className="truncate text-[13px] font-semibold tracking-tight text-foreground">
             {l("providers_service_catalog")}
           </h3>
           <span className="shrink-0 text-xs font-medium text-muted-foreground">
@@ -5468,7 +5468,7 @@ function LinkedPatientsSection({
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
-          <h3 className="truncate text-sm font-semibold text-foreground">
+          <h3 className="truncate text-[13px] font-semibold tracking-tight text-foreground">
             {l("providers_linked_patients")}
           </h3>
           <span className="shrink-0 text-xs font-medium text-muted-foreground">
@@ -5563,7 +5563,7 @@ function InteractionHistorySection({
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
-          <h3 className="truncate text-sm font-semibold text-foreground">
+          <h3 className="truncate text-[13px] font-semibold tracking-tight text-foreground">
             {l("providers_interaction_history")}
           </h3>
           <span className="shrink-0 text-xs font-medium text-muted-foreground">

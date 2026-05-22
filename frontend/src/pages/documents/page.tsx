@@ -5556,7 +5556,7 @@ function SectionCard({
           >
             {icon ?? <span className="size-2 rounded-full bg-current" />}
           </span>
-          <h3 className="truncate text-sm font-semibold text-foreground">
+          <h3 className="truncate text-[13px] font-semibold tracking-tight text-foreground">
             {title}
           </h3>
         </div>

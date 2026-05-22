@@ -66,7 +66,7 @@ function AppointmentSnapshotSection({
     <section className="space-y-3 rounded-xl p-3.5 border border-border/50 bg-card/40">
       <div className="flex items-center gap-2">
         <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
-        <h3 className="text-sm font-semibold text-foreground">
+        <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
           {summaryTitle}
         </h3>
       </div>
