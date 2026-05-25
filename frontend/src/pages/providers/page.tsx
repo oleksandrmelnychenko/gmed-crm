@@ -3641,10 +3641,12 @@ function ReadOnlyContacts({
   contacts,
   fallbackPhone,
   fallbackEmail,
+  columns = 1,
 }: {
   contacts: { contact_kind: string; contact_type: string; value: string; is_primary?: boolean }[] | undefined;
   fallbackPhone?: string | null;
   fallbackEmail?: string | null;
+  columns?: 1 | 2;
 }) {
   const { t } = useLang();
   const items = [
@@ -3662,7 +3664,12 @@ function ReadOnlyContacts({
   }
 
   return (
-    <div className="space-y-1">
+    <div
+      className={cn(
+        "gap-y-1",
+        columns === 2 ? "grid gap-x-8 lg:grid-cols-2" : "space-y-1",
+      )}
+    >
       {items.map((contact, index) => (
         <ReadOnlyLine
           key={`${contact.contact_kind}-${contact.value}-${index}`}
@@ -3796,6 +3803,7 @@ function ProviderProfileReadOnlySection({ detail }: { detail: ProviderDetail }) 
             contacts={detail.contacts}
             fallbackPhone={detail.phone}
             fallbackEmail={detail.email}
+            columns={2}
           />
         </div>
       </Section>
