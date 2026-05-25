@@ -21,6 +21,7 @@ import {
   LoaderCircle,
   Mail,
   MapPin,
+  Pencil,
   Phone,
   Plus,
   RefreshCw,
@@ -142,6 +143,7 @@ import type {
   ProviderFilters,
   ProviderFormState,
   ProviderPermissions,
+  PersonContactFormState,
   ProviderStaffRoleItem,
   ProviderSummary,
   ServiceFormState,
@@ -167,12 +169,25 @@ import {
 import { clearApiCache } from "@/lib/api";
 import { useSecurePersistedState } from "@/lib/secure-persist";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
+import { CountrySelect } from "@/pages/patients/ui/shared/patient-form-primitives";
 
 const selectClassName = shellSelectClassName;
 const formSelectClassName = cn(
   shellInputClassName,
   "w-full border border-input px-2.5 py-1 text-sm font-normal text-foreground hover:bg-card focus-visible:ring-2 focus-visible:ring-ring/25"
 );
+const availabilityTimeInputClassName = cn(
+  shellInputClassName,
+  "h-8 min-w-0 appearance-none px-1.5 text-xs [color-scheme:light] [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
+);
+const providerDetailSectionClassName =
+  "border-border/70 bg-card px-5 py-4 sm:px-6 sm:py-5";
+const providerDetailPanelClassName = cn(
+  "space-y-3 rounded-xl border",
+  providerDetailSectionClassName,
+);
+const contactAddButtonClassName =
+  "h-8 rounded-lg border-[var(--brand)] bg-[var(--brand)] px-3 text-white shadow-sm hover:bg-[var(--brand)]/90 hover:text-white focus-visible:ring-[var(--brand)]/30";
 const textareaClassName = shellTextareaClass;
 const DEFAULT_PROVIDER_SORT: SortStack = [{ field: "provider", dir: "asc" }];
 const LEGACY_PROVIDER_TABLE_QUERY_KEYS = ["filters", "sort", "density", "hide"] as const;
@@ -919,7 +934,7 @@ function WeeklyAvailabilityEditor({
                     onChange={(event) =>
                       updateInterval(row.day, intervalIndex, "start", event.target.value)
                     }
-                    className={cn(shellInputClassName, "h-8 min-w-0 px-1.5 text-xs")}
+                    className={availabilityTimeInputClassName}
                     disabled={disabled}
                     aria-label={`${weeklyAvailabilityDayLabel(row.day, lang)} ${fromLabel}`}
                   />
@@ -929,7 +944,7 @@ function WeeklyAvailabilityEditor({
                     onChange={(event) =>
                       updateInterval(row.day, intervalIndex, "end", event.target.value)
                     }
-                    className={cn(shellInputClassName, "h-8 min-w-0 px-1.5 text-xs")}
+                    className={availabilityTimeInputClassName}
                     disabled={disabled}
                     aria-label={`${weeklyAvailabilityDayLabel(row.day, lang)} ${toLabel}`}
                   />
@@ -972,9 +987,9 @@ function WeeklyAvailabilityEditor({
 
 function titleWithDot(title: ReactNode) {
   return (
-    <span className="inline-flex items-center gap-2">
-      <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
-      <span>{title}</span>
+    <span className="inline-flex min-w-0 items-center gap-2">
+      <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+      <span className="min-w-0 truncate">{title}</span>
     </span>
   );
 }
@@ -1020,6 +1035,28 @@ type CatalogPersonContext = {
   personId: string;
   personType: ProviderPeoplePersonType;
 };
+
+type DoctorDetailView =
+  | {
+      source: "provider";
+      providerName: string;
+      doctor: DoctorSummary;
+    }
+  | {
+      source: "catalog";
+      row: ProviderPeopleRow;
+    };
+
+type StaffDetailView =
+  | {
+      source: "provider";
+      providerName: string;
+      staff: ProviderStaff;
+    }
+  | {
+      source: "catalog";
+      row: ProviderPeopleRow;
+    };
 
 type DoctorRelationshipFormState = {
   id: string;
@@ -1258,6 +1295,9 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     searchParams.get("mode") === "people" ? "people" : "providers",
   );
   const [catalogPersonContext, setCatalogPersonContext] = useState<CatalogPersonContext | null>(null);
+  const [providerEditOpen, setProviderEditOpen] = useState(false);
+  const [doctorDetailView, setDoctorDetailView] = useState<DoctorDetailView | null>(null);
+  const [staffDetailView, setStaffDetailView] = useState<StaffDetailView | null>(null);
   const [peopleFilters, setPeopleFilters] = useState<ProviderPeopleFilters>(() => ({
     ...DEFAULT_PROVIDER_PEOPLE_FILTERS,
     search: searchParams.get("people_search") ?? "",
@@ -1955,19 +1995,44 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
   }
 
   function openProviderPerson(row: ProviderPeopleRow) {
-    setCatalogPersonContext({
-      providerId: row.provider_id,
-      personId: row.person_id,
-      personType: row.person_type,
-    });
     if (row.person_type === "doctor") {
-      setDoctorError("");
-      setDoctorForm(providerPeopleDoctorToForm(row));
+      setDoctorDetailView({ source: "catalog", row });
+      return;
+    }
+    setStaffDetailView({ source: "catalog", row });
+  }
+
+  function editDoctorFromDetailView(view: DoctorDetailView) {
+    setDoctorDetailView(null);
+    setDoctorError("");
+    if (view.source === "provider") {
+      setDoctorForm(doctorToForm(view.doctor));
       setDoctorDialogOpen(true);
       return;
     }
+    setCatalogPersonContext({
+      providerId: view.row.provider_id,
+      personId: view.row.person_id,
+      personType: view.row.person_type,
+    });
+    setDoctorForm(providerPeopleDoctorToForm(view.row));
+    setDoctorDialogOpen(true);
+  }
+
+  function editStaffFromDetailView(view: StaffDetailView) {
+    setStaffDetailView(null);
     setStaffError("");
-    setStaffForm(providerPeopleStaffToForm(row));
+    if (view.source === "provider") {
+      setStaffForm(staffToForm(view.staff));
+      setStaffDialogOpen(true);
+      return;
+    }
+    setCatalogPersonContext({
+      providerId: view.row.provider_id,
+      personId: view.row.person_id,
+      personType: view.row.person_type,
+    });
+    setStaffForm(providerPeopleStaffToForm(view.row));
     setStaffDialogOpen(true);
   }
 
@@ -2004,12 +2069,32 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     try {
       const payload = toProviderPayload(providerForm, permissions.forceNonMedical);
       await updateProvider(detail.id, payload);
+      if (providerEditOpen) {
+        setProviderEditOpen(false);
+      }
       refreshList();
       refreshDetail();
     } catch (error) {
       setProviderError(error instanceof Error ? error.message : t.common_failed_update);
     } finally {
       setProviderBusy(false);
+    }
+  }
+
+  function openProviderEditSheet() {
+    if (!detail || !permissions.canManageRegistry) return;
+    setProviderError("");
+    setProviderForm(providerToForm(detail));
+    setProviderEditOpen(true);
+  }
+
+  function handleProviderEditOpenChange(open: boolean) {
+    setProviderEditOpen(open);
+    if (!open) {
+      setProviderError("");
+      if (detail) {
+        setProviderForm(providerToForm(detail));
+      }
     }
   }
 
@@ -2265,13 +2350,13 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     setServiceError("");
 
     try {
-      const isMedicalProvider = detail.provider_type === "medical";
       await saveProviderService(
         detail.id,
         serviceForm.id,
-        toServicePayload(serviceForm, isMedicalProvider),
+        toServicePayload(serviceForm),
       );
       setServiceDialogOpen(false);
+      const isMedicalProvider = detail.provider_type === "medical";
       setServiceForm(blankServiceForm(isMedicalProvider ? "range" : "fixed"));
       refreshList();
       refreshDetail();
@@ -2548,17 +2633,6 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   >
                     {l("providers_back_to_list")}
                   </Button>
-                  {permissions.canManageRegistry ? (
-                    <Button
-                      type="submit"
-                      form="provider-profile-form"
-                      className="h-9 rounded-lg gap-1.5"
-                      disabled={providerBusy}
-                    >
-                      {providerBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                      {providerBusy ? t.patients_saving : t.common_save}
-                    </Button>
-                  ) : null}
                 </div>
               </div>
               <div className="space-y-3 rounded-xl p-4">
@@ -2572,6 +2646,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     onActivate={() => handleToggleProvider(true)}
                     onDeactivate={() => handleToggleProvider(false)}
                     onDelete={handleDeleteProvider}
+                    onEdit={openProviderEditSheet}
                   />
 
                   <ProviderOverviewSection
@@ -2580,36 +2655,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     onOpenAppointments={() => window.open(`/appointments?provider=${detail.id}`, "_blank", "noopener,noreferrer")}
                   />
 
-                  {permissions.canManageRegistry || permissions.canViewPage ? (
-                    <form
-                      id="provider-profile-form"
-                      onSubmit={handleUpdateProvider}
-                      className="space-y-3"
-                    >
-                      <ProviderFormFields
-                        form={providerForm}
-                        specializations={specializations}
-                        taxonomyNodes={taxonomyNodes}
-                        parentProviderOptions={parentProviderOptions}
-                        currentProviderId={detail.id}
-                        onChange={(field, value) =>
-                          setProviderForm((current) => ({ ...current, [field]: value }))
-                        }
-                        onContactsChange={(contacts) =>
-                          setProviderForm((current) => ({ ...current, contacts }))
-                        }
-                        forceNonMedical={permissions.forceNonMedical}
-                        disabled={!permissions.canManageRegistry}
-                        onManageSpecializations={permissions.canManageRegistry ? openSpecializationManager : undefined}
-                        grouped
-                      />
-                      {!permissions.canManageRegistry ? (
-                        <p className="text-[12px] text-muted-foreground italic">
-                          {t.providers_edit_restricted_note}
-                        </p>
-                      ) : null}
-                    </form>
-                  ) : null}
+                  <ProviderProfileReadOnlySection detail={detail} />
 
                   <DoctorSection
                     detail={detail}
@@ -2621,6 +2667,13 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                       setDoctorForm(blankDoctorForm());
                       setDoctorDialogOpen(true);
                     }}
+                    onOpen={(doctor) =>
+                      setDoctorDetailView({
+                        source: "provider",
+                        providerName: detail.name,
+                        doctor,
+                      })
+                    }
                     onEdit={(doctor) => {
                       setDoctorError("");
                       setDoctorForm(doctorToForm(doctor));
@@ -2643,6 +2696,13 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                       setStaffForm(blankStaffForm());
                       setStaffDialogOpen(true);
                     }}
+                    onOpen={(staff) =>
+                      setStaffDetailView({
+                        source: "provider",
+                        providerName: detail.name,
+                        staff,
+                      })
+                    }
                     onEdit={(staff) => {
                       setStaffError("");
                       setStaffForm(staffToForm(staff));
@@ -2744,7 +2804,6 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             form={serviceForm}
             busy={serviceBusy}
             error={serviceError}
-            forcePriceRange={detail.provider_type === "medical"}
             providerType={detail.provider_type}
             taxonomyNodes={taxonomyNodes}
             onSubmit={handleServiceSubmit}
@@ -2771,6 +2830,54 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             }
           />
         ) : null}
+
+        {detail ? (
+          <ProviderEditFormSheet
+            open={providerEditOpen}
+            onOpenChange={handleProviderEditOpenChange}
+            form={providerForm}
+            detail={detail}
+            specializations={specializations}
+            taxonomyNodes={taxonomyNodes}
+            parentProviderOptions={parentProviderOptions}
+            permissions={permissions}
+            busy={providerBusy}
+            error={providerError}
+            onSubmit={handleUpdateProvider}
+            onChange={(field, value) =>
+              setProviderForm((current) => ({ ...current, [field]: value }))
+            }
+            onContactsChange={(contacts) =>
+              setProviderForm((current) => ({ ...current, contacts }))
+            }
+            onManageSpecializations={permissions.canManageRegistry ? openSpecializationManager : undefined}
+          />
+        ) : null}
+
+        <ProviderDoctorDetailSheet
+          open={Boolean(doctorDetailView)}
+          view={doctorDetailView}
+          canManage={permissions.canManageRegistry}
+          onOpenChange={(open) => {
+            if (!open) setDoctorDetailView(null);
+          }}
+          onEdit={editDoctorFromDetailView}
+          onNewRelationship={(doctor) => {
+            setDoctorDetailView(null);
+            openDoctorRelationshipForm(doctor.id);
+          }}
+        />
+
+        <ProviderStaffDetailSheet
+          open={Boolean(staffDetailView)}
+          view={staffDetailView}
+          staffRoles={staffRoles}
+          canManage={permissions.canManageRegistry}
+          onOpenChange={(open) => {
+            if (!open) setStaffDetailView(null);
+          }}
+          onEdit={editStaffFromDetailView}
+        />
 
         {permissions.canManageRegistry ? (
           <SpecializationManagerSheet
@@ -3266,6 +3373,13 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     setDoctorForm(blankDoctorForm());
                     setDoctorDialogOpen(true);
                   }}
+                  onOpen={(doctor) =>
+                    setDoctorDetailView({
+                      source: "provider",
+                      providerName: detail.name,
+                      doctor,
+                    })
+                  }
                   onEdit={(doctor) => {
                     setDoctorError("");
                     setDoctorForm(doctorToForm(doctor));
@@ -3288,6 +3402,13 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     setStaffForm(blankStaffForm());
                     setStaffDialogOpen(true);
                   }}
+                  onOpen={(staff) =>
+                    setStaffDetailView({
+                      source: "provider",
+                      providerName: detail.name,
+                      staff,
+                    })
+                  }
                   onEdit={(staff) => {
                     setStaffError("");
                     setStaffForm(staffToForm(staff));
@@ -3347,6 +3468,31 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
         </SheetContent>
       </Sheet>
 
+      <ProviderDoctorDetailSheet
+        open={Boolean(doctorDetailView)}
+        view={doctorDetailView}
+        canManage={permissions.canManageRegistry}
+        onOpenChange={(open) => {
+          if (!open) setDoctorDetailView(null);
+        }}
+        onEdit={editDoctorFromDetailView}
+        onNewRelationship={(doctor) => {
+          setDoctorDetailView(null);
+          openDoctorRelationshipForm(doctor.id);
+        }}
+      />
+
+      <ProviderStaffDetailSheet
+        open={Boolean(staffDetailView)}
+        view={staffDetailView}
+        staffRoles={staffRoles}
+        canManage={permissions.canManageRegistry}
+        onOpenChange={(open) => {
+          if (!open) setStaffDetailView(null);
+        }}
+        onEdit={editStaffFromDetailView}
+      />
+
       {detail || catalogPersonContext ? (
         <ProviderDoctorFormSheet
           open={doctorDialogOpen}
@@ -3391,7 +3537,6 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           form={serviceForm}
           busy={serviceBusy}
           error={serviceError}
-          forcePriceRange={detail.provider_type === "medical"}
           providerType={detail.provider_type}
           taxonomyNodes={taxonomyNodes}
           onSubmit={handleServiceSubmit}
@@ -3446,6 +3591,529 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
         />
       ) : null}
     </>
+  );
+}
+
+function ReadOnlyLine({
+  label,
+  value,
+}: {
+  label: ReactNode;
+  value: ReactNode;
+}) {
+  return (
+    <div className="flex min-w-0 items-center gap-3 py-2">
+      <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
+      <span className="h-px min-w-6 flex-1 bg-border/70" />
+      <span className="min-w-0 max-w-[58%] truncate text-right text-sm font-semibold text-foreground">
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function contactTypeDisplay(
+  contactType: string | null | undefined,
+  t: ReturnType<typeof useLang>["t"],
+) {
+  const l = (key: string) => t.uiText[key] ?? key;
+  if (contactType === "private") return l("providers_contact_type_private");
+  if (contactType === "department") return l("providers_contact_type_department");
+  if (contactType === "other") return l("providers_contact_type_other");
+  return l("providers_contact_type_work");
+}
+
+function contactAddLabel(
+  contactKind: "phone" | "email",
+  t: ReturnType<typeof useLang>["t"],
+  lang: "de" | "ru",
+) {
+  const addLabel = t.uiText.patients_add ?? "Добавить";
+  if (lang === "de") {
+    return `${contactKind === "email" ? t.field_email : t.field_phone} ${addLabel}`;
+  }
+  return contactKind === "email"
+    ? `${addLabel} электронную почту`
+    : `${addLabel} телефон`;
+}
+
+function ReadOnlyContacts({
+  contacts,
+  fallbackPhone,
+  fallbackEmail,
+}: {
+  contacts: { contact_kind: string; contact_type: string; value: string; is_primary?: boolean }[] | undefined;
+  fallbackPhone?: string | null;
+  fallbackEmail?: string | null;
+}) {
+  const { t } = useLang();
+  const items = [
+    ...(contacts ?? []),
+    ...(fallbackPhone && !(contacts ?? []).some((contact) => contact.contact_kind === "phone")
+      ? [{ contact_kind: "phone", contact_type: "work", value: fallbackPhone, is_primary: true }]
+      : []),
+    ...(fallbackEmail && !(contacts ?? []).some((contact) => contact.contact_kind === "email")
+      ? [{ contact_kind: "email", contact_type: "work", value: fallbackEmail, is_primary: true }]
+      : []),
+  ].filter((contact) => contact.value);
+
+  if (items.length === 0) {
+    return <p className="text-sm text-muted-foreground">{t.common_not_set}</p>;
+  }
+
+  return (
+    <div className="space-y-1">
+      {items.map((contact, index) => (
+        <ReadOnlyLine
+          key={`${contact.contact_kind}-${contact.value}-${index}`}
+          label={[
+            contact.contact_kind === "email" ? t.field_email : t.field_phone,
+            contactTypeDisplay(contact.contact_type, t),
+          ].join(" / ")}
+          value={contact.value}
+        />
+      ))}
+    </div>
+  );
+}
+
+function readOnlyValue(value: unknown, fallback: string) {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === "string") return value.trim() || fallback;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return fallback;
+}
+
+function contractReadOnlyValue(value: unknown, fallback: string) {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === "string") return value.trim() || fallback;
+  if (typeof value === "object") {
+    const summary = (value as { summary?: unknown }).summary;
+    return typeof summary === "string" && summary.trim() ? summary : fallback;
+  }
+  return fallback;
+}
+
+function taxonomyAttributeReadOnlyRows(detail: ProviderDetail, lang: "de" | "ru") {
+  const nodeKeys = taxonomyAttributeKeys(detail.taxonomy_node);
+  const keys = new Set([
+    ...nodeKeys,
+    ...Object.keys(detail.taxonomy_attributes ?? {}),
+  ]);
+
+  return Array.from(keys).flatMap((key) => {
+    const raw = detail.taxonomy_attributes?.[key];
+    const value =
+      raw === null || raw === undefined
+        ? ""
+        : typeof raw === "string"
+          ? raw
+          : String(raw);
+    return value.trim()
+      ? [{ label: taxonomyAttributeLabel(key, lang), value }]
+      : [];
+  });
+}
+
+function ProviderProfileReadOnlySection({ detail }: { detail: ProviderDetail }) {
+  const { t, lang } = useLang();
+  const tr = { ...t.uiText, ...t } as unknown as Record<string, string>;
+  const l = (key: string) => t.uiText[key] ?? key;
+  const fallback = t.common_not_set;
+  const taxonomyLine = detail.taxonomy_path?.length
+    ? detail.taxonomy_path.map((node) => taxonomyNodeLabel(node, lang)).join(" / ")
+    : taxonomyNodeLabel(detail.taxonomy_node, lang);
+  const specializationLine = specializationText(detail.specializations, detail.fachbereich, lang);
+  const addressLine = [
+    detail.address_street,
+    detail.address_zip,
+    detail.address_city,
+    detail.address_country,
+  ].filter(Boolean).join(", ");
+  const attributeRows = taxonomyAttributeReadOnlyRows(detail, lang);
+
+  return (
+    <div className="space-y-3">
+      <Section className={providerDetailSectionClassName} title={l("providers_provider_profile")}>
+        <div className="grid gap-x-8 gap-y-1 lg:grid-cols-2">
+          <ReadOnlyLine label={l("patients_display_name")} value={detail.name || fallback} />
+          <ReadOnlyLine label={l("providers_legal_name")} value={detail.legal_name || fallback} />
+          <ReadOnlyLine label={t.providers_type} value={providerTypeLabel(detail.provider_type, tr)} />
+          <ReadOnlyLine label={t.providers_category} value={taxonomyLine || fallback} />
+          <ReadOnlyLine
+            label={l("providers_organization_level")}
+            value={providerOrganizationLevelLabel(detail.organization_level)}
+          />
+          <ReadOnlyLine label={l("providers_parent_provider")} value={detail.parent_provider_name || fallback} />
+          <ReadOnlyLine
+            label={l("providers_opening_hours")}
+            value={formatWeeklyAvailabilityDisplay(detail.opening_hours, lang) || fallback}
+          />
+          <ReadOnlyLine
+            label={lang === "ru" ? "Внутренний рейтинг" : "Interne Bewertung"}
+            value={readOnlyValue(detail.internal_rating, fallback)}
+          />
+          <ReadOnlyLine
+            label={lang === "ru" ? "Заметка к рейтингу" : "Bewertungsnotiz"}
+            value={detail.internal_rating_note || fallback}
+          />
+          {detail.provider_type === "medical" ? (
+            <ReadOnlyLine label={t.providers_fachbereich} value={specializationLine || fallback} />
+          ) : null}
+        </div>
+      </Section>
+
+      {attributeRows.length > 0 ? (
+        <Section
+          className={providerDetailSectionClassName}
+          title={lang === "ru" ? "Атрибуты категории" : "Kategorieattribute"}
+        >
+          <div className="grid gap-x-8 gap-y-1 lg:grid-cols-2">
+            {attributeRows.map((row) => (
+              <ReadOnlyLine key={row.label} label={row.label} value={row.value} />
+            ))}
+          </div>
+        </Section>
+      ) : null}
+
+      <Section className={providerDetailSectionClassName} title={l("patients_address")}>
+        <div className="grid gap-x-8 gap-y-1 lg:grid-cols-2">
+          <ReadOnlyLine label={t.providers_street} value={detail.address_street || fallback} />
+          <ReadOnlyLine label={t.providers_zip} value={detail.address_zip || fallback} />
+          <ReadOnlyLine label={t.providers_city} value={detail.address_city || fallback} />
+          <ReadOnlyLine label={t.providers_country} value={detail.address_country || fallback} />
+          <ReadOnlyLine label={l("patients_address")} value={addressLine || fallback} />
+        </div>
+      </Section>
+
+      <Section className={providerDetailSectionClassName} title={l("patients_contact")}>
+        <div className="space-y-3">
+          <div className="grid gap-x-8 gap-y-1 lg:grid-cols-2">
+            <ReadOnlyLine label={t.providers_website} value={detail.website || fallback} />
+            <ReadOnlyLine label={l("providers_tax_id")} value={detail.tax_id || fallback} />
+          </div>
+          <ReadOnlyContacts
+            contacts={detail.contacts}
+            fallbackPhone={detail.phone}
+            fallbackEmail={detail.email}
+          />
+        </div>
+      </Section>
+
+      <Section className={providerDetailSectionClassName} title={l("providers_contract_and_notes")}>
+        <div className="grid gap-x-8 gap-y-1 lg:grid-cols-2">
+          <ReadOnlyLine
+            label={t.providers_contract}
+            value={contractReadOnlyValue(detail.kooperationsvertrag, fallback)}
+          />
+          <ReadOnlyLine label={t.providers_notes} value={detail.notes || fallback} />
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+function ProviderDoctorDetailSheet({
+  open,
+  view,
+  canManage,
+  onOpenChange,
+  onEdit,
+  onNewRelationship,
+}: {
+  open: boolean;
+  view: DoctorDetailView | null;
+  canManage: boolean;
+  onOpenChange: (open: boolean) => void;
+  onEdit: (view: DoctorDetailView) => void;
+  onNewRelationship: (doctor: DoctorSummary) => void;
+}) {
+  const { t, lang } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+  if (!view) return null;
+
+  const isProviderDoctor = view.source === "provider";
+  const doctor = isProviderDoctor ? view.doctor : null;
+  const row = view.source === "catalog" ? view.row : null;
+  const displayName = doctor
+    ? doctorListDisplayName(doctor, lang)
+    : doctorListDisplayName(
+        {
+          name: row?.name ?? "",
+          title: row?.title ?? null,
+          gender: row?.gender ?? "unknown",
+        },
+        lang,
+      );
+  const providerName = view.source === "provider" ? view.providerName : row?.provider_name ?? "";
+  const role = doctor
+    ? doctor.role_label || (doctor.role_code ? doctorRoleLabel(doctor.role_code) : "")
+    : row?.role_label || (row?.role_code ? doctorRoleLabel(row.role_code) : "");
+  const specializations = doctor
+    ? specializationText(doctor.specializations, doctor.fachbereich, lang)
+    : specializationText(row?.specializations, row?.fachbereich, lang);
+  const contacts = doctor?.contacts ?? row?.contacts;
+  const phone = doctor?.phone ?? row?.phone;
+  const email = doctor?.email ?? row?.email;
+  const openingHours = doctor?.opening_hours ?? row?.opening_hours;
+  const licenseNumber = doctor?.license_number ?? row?.license_number;
+  const licensingCountry = doctor?.licensing_country ?? row?.licensing_country;
+  const licensingValidUntil = doctor?.licensing_valid_until ?? row?.licensing_valid_until;
+  const notes = doctor?.notes ?? row?.notes;
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
+        <AdminSheetScaffold
+          title={displayName || t.providers_doctor_detail}
+          description={providerName}
+          footer={
+            canManage ? (
+              <SheetActionsFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 rounded-lg"
+                  onClick={() => onOpenChange(false)}
+                >
+                  {t.common_cancel}
+                </Button>
+                {doctor ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-9 rounded-lg"
+                    onClick={() => onNewRelationship(doctor)}
+                  >
+                    <Plus className="size-4" />
+                    {l("providers_relationship_add")}
+                  </Button>
+                ) : null}
+                <Button type="button" className="h-9 rounded-lg" onClick={() => onEdit(view)}>
+                  {l("patients_edit")}
+                </Button>
+              </SheetActionsFooter>
+            ) : null
+          }
+        >
+          <div className="space-y-3 rounded-xl p-4">
+            <Section title={l("providers_doctor_profile")}>
+              <ReadOnlyLine label={l("patients_display_name")} value={displayName || t.common_not_set} />
+              <ReadOnlyLine label={l("providers_doctor_role")} value={role || t.common_not_set} />
+              <ReadOnlyLine label={l("providers_doctor_subrole")} value={(doctor?.subrole ?? row?.subrole) || t.common_not_set} />
+              <ReadOnlyLine label={t.patients_gender} value={personGenderLabel(doctor?.gender ?? row?.gender ?? "unknown")} />
+              <ReadOnlyLine label={l("providers_doctor_specializations")} value={specializations || t.common_not_set} />
+              <ReadOnlyLine
+                label={l("providers_opening_hours")}
+                value={
+                  openingHours
+                    ? formatWeeklyAvailabilityDisplay(openingHours, lang)
+                    : t.common_not_set
+                }
+              />
+            </Section>
+            <Section title={l("providers_contacts")}>
+              <ReadOnlyContacts contacts={contacts} fallbackPhone={phone} fallbackEmail={email} />
+            </Section>
+            <Section title={l("providers_license")}>
+              <ReadOnlyLine label={l("providers_license_number")} value={licenseNumber || t.common_not_set} />
+              <ReadOnlyLine label={l("providers_licensing_country")} value={licensingCountry || t.common_not_set} />
+              <ReadOnlyLine label={l("providers_license_valid_until")} value={compactDate(licensingValidUntil, t.common_not_set)} />
+            </Section>
+            {doctor ? (
+              <Section title={l("providers_doctor_relationships")}>
+                {doctor.relationships.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">{l("providers_relationships_empty")}</p>
+                ) : (
+                  <div className="space-y-2">
+                    {doctor.relationships.map((relationship) => (
+                      <ReadOnlyLine
+                        key={relationship.id}
+                        label={doctorRelationshipTypeLabel(relationship.relationship_type)}
+                        value={[
+                          relationship.target_doctor_title,
+                          relationship.target_doctor_name,
+                          relationship.target_provider_name,
+                        ].filter(Boolean).join(" - ")}
+                      />
+                    ))}
+                  </div>
+                )}
+              </Section>
+            ) : null}
+            <Section title={l("appointments_notes")}>
+              <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">
+                {notes || t.common_not_set}
+              </p>
+            </Section>
+          </div>
+        </AdminSheetScaffold>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function ProviderStaffDetailSheet({
+  open,
+  view,
+  staffRoles,
+  canManage,
+  onOpenChange,
+  onEdit,
+}: {
+  open: boolean;
+  view: StaffDetailView | null;
+  staffRoles: ProviderStaffRoleItem[];
+  canManage: boolean;
+  onOpenChange: (open: boolean) => void;
+  onEdit: (view: StaffDetailView) => void;
+}) {
+  const { t, lang } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+  if (!view) return null;
+
+  const staff = view.source === "provider" ? view.staff : null;
+  const row = view.source === "catalog" ? view.row : null;
+  const displayName = staff?.display_name ?? row?.display_name ?? row?.name ?? t.common_not_set;
+  const providerName = view.source === "provider" ? view.providerName : row?.provider_name ?? "";
+  const role = staff
+    ? staffRoleLabel(staff.role, staffRoles, lang)
+    : row?.role_name_de && lang === "de"
+      ? row.role_name_de
+      : row?.role_name_ru && lang === "ru"
+        ? row.role_name_ru
+        : row?.role_label || (row?.role_code ? staffRoleLabel(row.role_code, staffRoles, lang) : "");
+  const contacts = staff?.contacts ?? row?.contacts;
+  const phone = row?.phone;
+  const email = row?.email;
+  const openingHours = staff?.opening_hours ?? row?.opening_hours;
+  const notes = staff?.notes ?? row?.notes;
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
+        <AdminSheetScaffold
+          title={displayName}
+          description={providerName}
+          footer={
+            canManage ? (
+              <SheetActionsFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 rounded-lg"
+                  onClick={() => onOpenChange(false)}
+                >
+                  {t.common_cancel}
+                </Button>
+                <Button type="button" className="h-9 rounded-lg" onClick={() => onEdit(view)}>
+                  {l("patients_edit")}
+                </Button>
+              </SheetActionsFooter>
+            ) : null
+          }
+        >
+          <div className="space-y-3 rounded-xl p-4">
+            <Section title={l("providers_staff_detail")}>
+              <ReadOnlyLine label={l("patients_display_name")} value={displayName} />
+              <ReadOnlyLine label={l("providers_people_role")} value={role || t.common_not_set} />
+              <ReadOnlyLine label={l("providers_staff_department")} value={(staff?.department ?? row?.department) || t.common_not_set} />
+              <ReadOnlyLine label={t.patients_gender} value={personGenderLabel(staff?.gender ?? row?.gender ?? "unknown")} />
+              <ReadOnlyLine label={t.users_status} value={humanizeCode(staff?.status ?? row?.status ?? "unknown")} />
+              <ReadOnlyLine
+                label={l("providers_opening_hours")}
+                value={
+                  openingHours
+                    ? formatWeeklyAvailabilityDisplay(openingHours, lang)
+                    : t.common_not_set
+                }
+              />
+            </Section>
+            <Section title={l("providers_contacts")}>
+              <ReadOnlyContacts contacts={contacts} fallbackPhone={phone} fallbackEmail={email} />
+            </Section>
+            <Section title={l("appointments_notes")}>
+              <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">
+                {notes || t.common_not_set}
+              </p>
+            </Section>
+          </div>
+        </AdminSheetScaffold>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function ProviderEditFormSheet({
+  open,
+  onOpenChange,
+  form,
+  detail,
+  specializations,
+  taxonomyNodes,
+  parentProviderOptions,
+  permissions,
+  busy,
+  error,
+  onSubmit,
+  onChange,
+  onContactsChange,
+  onManageSpecializations,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  form: ProviderFormState;
+  detail: ProviderDetail;
+  specializations: SpecializationItem[];
+  taxonomyNodes: ProviderTaxonomyNode[];
+  parentProviderOptions: ProviderSummary[];
+  permissions: ProviderPermissions;
+  busy: boolean;
+  error: string;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onChange: (field: keyof ProviderFormState, value: string) => void;
+  onContactsChange: (contacts: ProviderFormState["contacts"]) => void;
+  onManageSpecializations?: () => void;
+}) {
+  const { t } = useLang();
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
+        <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
+          <AdminSheetScaffold
+            title={t.patients_edit}
+            description={detail.name || t.providers_detail}
+            footer={
+              <SheetFormFooter
+                cancelLabel={t.common_cancel}
+                submitLabel={t.common_save}
+                submittingLabel={t.patients_saving}
+                submitting={busy}
+                onCancel={() => onOpenChange(false)}
+              />
+            }
+          >
+            <div className="space-y-3 rounded-xl p-4">
+              {error ? <Banner tone="error">{error}</Banner> : null}
+              <ProviderFormFields
+                form={form}
+                specializations={specializations}
+                taxonomyNodes={taxonomyNodes}
+                parentProviderOptions={parentProviderOptions}
+                currentProviderId={detail.id}
+                onChange={onChange}
+                onContactsChange={onContactsChange}
+                forceNonMedical={permissions.forceNonMedical}
+                disabled={!permissions.canManageRegistry}
+                onManageSpecializations={onManageSpecializations}
+                grouped
+              />
+            </div>
+          </AdminSheetScaffold>
+        </form>
+      </SheetContent>
+    </Sheet>
   );
 }
 
@@ -3538,6 +4206,8 @@ function ProviderDoctorRelationshipFormSheet({
   const availableTargetDoctors = targetDoctors.filter(
     (doctor) => doctor.id !== form.sourceDoctorId,
   );
+  const noAvailableTargetDoctors =
+    Boolean(form.targetProviderId) && !targetDoctorsBusy && availableTargetDoctors.length === 0;
   const submitLabel = form.id ? t.common_save : l("providers_relationship_add");
 
   return (
@@ -3556,6 +4226,7 @@ function ProviderDoctorRelationshipFormSheet({
                   targetDoctorsBusy ||
                   !form.targetProviderId ||
                   !form.targetDoctorId ||
+                  noAvailableTargetDoctors ||
                   !availableTargetDoctors.some((doctor) => doctor.id === form.targetDoctorId)
                 }
                 onCancel={() => onOpenChange(false)}
@@ -3599,22 +4270,33 @@ function ProviderDoctorRelationshipFormSheet({
                     </NativeComboboxSelect>
                   </Field>
                   <Field label={l("providers_relationship_target_doctor")}>
-                    <NativeComboboxSelect
-                      value={form.targetDoctorId}
-                      onChange={(event) => onChange({ targetDoctorId: event.target.value })}
-                      className={formSelectClassName}
-                      disabled={!form.targetProviderId || targetDoctorsBusy}
-                      required
-                    >
-                      <option value="">
-                        {targetDoctorsBusy ? l("providers_loading_provider") : t.common_select_placeholder}
-                      </option>
-                      {availableTargetDoctors.map((doctor) => (
-                        <option key={doctor.id} value={doctor.id}>
-                          {doctorListDisplayName(doctor, lang)}
+                    <div className="space-y-1.5">
+                      <NativeComboboxSelect
+                        value={form.targetDoctorId}
+                        onChange={(event) => onChange({ targetDoctorId: event.target.value })}
+                        className={formSelectClassName}
+                        disabled={!form.targetProviderId || targetDoctorsBusy || noAvailableTargetDoctors}
+                        required
+                      >
+                        <option value="">
+                          {targetDoctorsBusy ? l("providers_loading_provider") : t.common_select_placeholder}
                         </option>
-                      ))}
-                    </NativeComboboxSelect>
+                        {availableTargetDoctors.map((doctor) => (
+                          <option key={doctor.id} value={doctor.id}>
+                            {doctorListDisplayName(doctor, lang)}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                      {!form.targetProviderId ? (
+                        <p className="text-xs text-muted-foreground">
+                          {l("providers_relationship_select_target_provider_first")}
+                        </p>
+                      ) : noAvailableTargetDoctors ? (
+                        <p className="text-xs text-muted-foreground">
+                          {l("providers_relationship_no_target_doctors")}
+                        </p>
+                      ) : null}
+                    </div>
                   </Field>
                   <Field label={l("providers_relationship_type")}>
                     <NativeComboboxSelect
@@ -3680,7 +4362,6 @@ function ProviderServiceFormSheet({
   form,
   busy,
   error,
-  forcePriceRange,
   providerType,
   taxonomyNodes,
   onSubmit,
@@ -3691,7 +4372,6 @@ function ProviderServiceFormSheet({
   form: ServiceFormState;
   busy: boolean;
   error: string;
-  forcePriceRange: boolean;
   providerType: ProviderType;
   taxonomyNodes: ProviderTaxonomyNode[];
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -3720,7 +4400,6 @@ function ProviderServiceFormSheet({
               {error ? <Banner tone="error">{error}</Banner> : null}
               <ServiceFormFields
                 form={form}
-                forcePriceRange={forcePriceRange}
                 providerType={providerType}
                 taxonomyNodes={taxonomyNodes}
                 onChange={onChange}
@@ -4374,7 +5053,7 @@ function ProviderOverviewSection({
   ];
 
   return (
-    <section className="space-y-5 rounded-xl border border-border/50 bg-card/40 p-4">
+    <section className={cn(providerDetailPanelClassName, "space-y-5 bg-card/40")}>
       <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
         {titleWithDot(l("providers_provider_overview"))}
       </h3>
@@ -4445,6 +5124,7 @@ function ProviderSheetHero({
   onActivate,
   onDeactivate,
   onDelete,
+  onEdit,
 }: {
   detail: ProviderDetail;
   providerActionBusy: string | null;
@@ -4452,6 +5132,7 @@ function ProviderSheetHero({
   onActivate: () => void;
   onDeactivate: () => void;
   onDelete: () => void;
+  onEdit?: () => void;
 }) {
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
@@ -4558,6 +5239,18 @@ function ProviderSheetHero({
           </p>
           {permissions.canManageRegistry ? (
             <div className="flex flex-col gap-2">
+              {onEdit ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-full justify-center rounded-lg gap-1.5 bg-muted/20"
+                  onClick={onEdit}
+                >
+                  <Pencil className="size-3.5" />
+                  {l("patients_edit")}
+                </Button>
+              ) : null}
               <Button
                 type="button"
                 variant="outline"
@@ -4665,6 +5358,7 @@ function DoctorSection({
   relationshipBusy,
   canManage,
   onNew,
+  onOpen,
   onEdit,
   onDelete,
   onNewRelationship,
@@ -4676,6 +5370,7 @@ function DoctorSection({
   relationshipBusy: boolean;
   canManage: boolean;
   onNew: () => void;
+  onOpen: (doctor: DoctorSummary) => void;
   onEdit: (doctor: DoctorSummary) => void;
   onDelete: (doctorId: string, doctorName: string) => void;
   onNewRelationship: (sourceDoctorId: string) => void;
@@ -4689,7 +5384,7 @@ function DoctorSection({
     : t.providers_doctors;
 
   return (
-    <section className="space-y-3 rounded-xl border border-border/70 bg-card p-3.5">
+    <section className={providerDetailPanelClassName}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
@@ -4732,6 +5427,7 @@ function DoctorSection({
               busy={busy}
               canManage={canManage}
               relationshipBusy={relationshipBusy}
+              onOpen={onOpen}
               onDelete={onDelete}
               onDeleteRelationship={onDeleteRelationship}
               onEdit={onEdit}
@@ -4750,6 +5446,7 @@ function DoctorCard({
   busy,
   canManage,
   relationshipBusy,
+  onOpen,
   onDelete,
   onDeleteRelationship,
   onEdit,
@@ -4760,6 +5457,7 @@ function DoctorCard({
   busy: boolean;
   canManage: boolean;
   relationshipBusy: boolean;
+  onOpen: (doctor: DoctorSummary) => void;
   onDelete: (doctorId: string, doctorName: string) => void;
   onDeleteRelationship: (sourceDoctorId: string, relationshipId: string, doctorName: string) => void;
   onEdit: (doctor: DoctorSummary) => void;
@@ -4782,6 +5480,7 @@ function DoctorCard({
         roleLabel={roleLabel}
         specializations={specializations}
         subrole={subrole}
+        onOpen={onOpen}
         onDelete={onDelete}
         onEdit={onEdit}
         onNewRelationship={onNewRelationship}
@@ -4807,6 +5506,7 @@ function DoctorCardSummary({
   roleLabel,
   specializations,
   subrole,
+  onOpen,
   onDelete,
   onEdit,
   onNewRelationship,
@@ -4818,6 +5518,7 @@ function DoctorCardSummary({
   roleLabel: string;
   specializations: string;
   subrole: string;
+  onOpen: (doctor: DoctorSummary) => void;
   onDelete: (doctorId: string, doctorName: string) => void;
   onEdit: (doctor: DoctorSummary) => void;
   onNewRelationship: (sourceDoctorId: string) => void;
@@ -4826,7 +5527,14 @@ function DoctorCardSummary({
   const l = (key: string) => t.uiText[key] ?? key;
 
   return (
-    <summary className="grid cursor-pointer list-none gap-4 p-4 transition hover:bg-muted/20 md:grid-cols-[minmax(0,1fr)_160px] [&::-webkit-details-marker]:hidden">
+    <summary
+      className="grid cursor-pointer list-none gap-4 p-4 transition hover:bg-muted/20 md:grid-cols-[minmax(0,1fr)_160px] [&::-webkit-details-marker]:hidden"
+      onClick={(event) => {
+        if ((event.target as HTMLElement).closest("button")) return;
+        event.preventDefault();
+        onOpen(doctor);
+      }}
+    >
       <div className="flex min-w-0 gap-3">
         <div className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted/30 text-sm font-medium text-muted-foreground">
           <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
@@ -5172,6 +5880,7 @@ function StaffSection({
   canManage,
   onManageRoles,
   onNew,
+  onOpen,
   onEdit,
   onDelete,
 }: {
@@ -5181,6 +5890,7 @@ function StaffSection({
   canManage: boolean;
   onManageRoles: () => void;
   onNew: () => void;
+  onOpen: (staff: ProviderStaff) => void;
   onEdit: (staff: ProviderStaff) => void;
   onDelete: (staffId: string, staffName: string) => void;
 }) {
@@ -5188,7 +5898,7 @@ function StaffSection({
   const l = (key: string) => t.uiText[key] ?? key;
 
   return (
-    <section className="space-y-3 rounded-xl border border-border/70 bg-card p-3.5">
+    <section className={providerDetailPanelClassName}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
@@ -5239,7 +5949,16 @@ function StaffSection({
             return (
               <div
                 key={staff.id}
-                className="overflow-hidden rounded-[1.4rem] border border-border bg-card"
+                role="button"
+                tabIndex={0}
+                className="overflow-hidden rounded-[1.4rem] border border-border bg-card text-left transition hover:bg-muted/20"
+                onClick={() => onOpen(staff)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onOpen(staff);
+                  }
+                }}
               >
                 <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_180px_160px]">
                   <div className="min-w-0">
@@ -5301,7 +6020,10 @@ function StaffSection({
                         variant="outline"
                         size="sm"
                         className="h-8 w-full justify-center rounded-lg bg-muted/20"
-                        onClick={() => onEdit(staff)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onEdit(staff);
+                        }}
                       >
                         {l("patients_edit")}
                       </Button>
@@ -5311,7 +6033,10 @@ function StaffSection({
                         size="sm"
                         className="h-8 w-full justify-center rounded-lg gap-1.5 border-rose-200 bg-rose-50/40 text-rose-700 hover:bg-rose-50"
                         disabled={busy}
-                        onClick={() => onDelete(staff.id, staff.display_name)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onDelete(staff.id, staff.display_name);
+                        }}
                       >
                         <Trash2 className="size-3.5" />
                         {l("patients_delete")}
@@ -5348,7 +6073,7 @@ function ServiceSection({
   const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   return (
-    <section className="space-y-3 rounded-xl border border-border/70 bg-card p-3.5">
+    <section className={providerDetailPanelClassName}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
@@ -5464,7 +6189,7 @@ function LinkedPatientsSection({
   const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   return (
-    <section className="space-y-3 rounded-xl border border-border/70 bg-card p-3.5">
+    <section className={providerDetailPanelClassName}>
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
@@ -5559,7 +6284,7 @@ function InteractionHistorySection({
   const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   return (
-    <section className="space-y-3 rounded-xl border border-border/70 bg-card p-3.5">
+    <section className={providerDetailPanelClassName}>
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
@@ -5734,10 +6459,10 @@ function ProviderFormFields({
     if (!onContactsChange) return;
     onContactsChange(normalizePrimaryContacts(applyContactPatch(form.contacts, contactId, patch)));
   };
-  const addProviderContact = () => {
+  const addProviderContact = (preferredKind?: ProviderContactFormState["contactKind"]) => {
     if (!onContactsChange) return;
     const hasPhone = form.contacts.some((contact) => contact.contactKind === "phone");
-    const contactKind = hasPhone ? "email" : "phone";
+    const contactKind = preferredKind ?? (hasPhone ? "email" : "phone");
     onContactsChange(normalizePrimaryContacts([
       ...form.contacts,
       {
@@ -6089,10 +6814,10 @@ function ProviderAddressFields({
           />
         </Field>
         <Field label={t.providers_country}>
-          <Input
+          <CountrySelect
             value={form.addressCountry}
-            onChange={(event) => onChange("addressCountry", event.target.value)}
-            className={shellInputClassName}
+            onChange={(value) => onChange("addressCountry", value)}
+            placeholder={t.common_select_placeholder}
             disabled={disabled}
           />
         </Field>
@@ -6110,121 +6835,166 @@ function ProviderContactFields({
 }: {
   contacts: ProviderFormState["contacts"];
   disabled: boolean;
-  onAdd: () => void;
+  onAdd: (contactKind?: ProviderContactFormState["contactKind"]) => void;
   onRemove: (contactId: string) => void;
   onUpdate: (contactId: string, patch: Partial<ProviderContactFormState>) => void;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
+  const contactTypeLabel = (value: ProviderContactFormState["contactType"]) => {
+    if (value === "department") return l("providers_contact_type_department");
+    if (value === "other") return l("providers_contact_type_other");
+    return l("providers_contact_type_work");
+  };
+  const contactValueLabel = (contactKind: ProviderContactFormState["contactKind"]) =>
+    contactKind === "email" ? t.field_email : t.field_phone;
 
   return (
-    <>
-      <div className="space-y-2">
+    <div className="space-y-3">
+      <div className="space-y-3">
         {contacts.map((contact) => (
           <div
             key={contact.id}
-            className="grid gap-2 rounded-lg border border-border/70 bg-card/50 p-2 md:grid-cols-[112px_132px_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_92px_36px]"
+            className="rounded-xl border border-border/70 bg-card/50 p-3"
           >
-            <Field label={l("providers_contact_kind")}>
-              <NativeComboboxSelect
-                value={contact.contactKind}
-                onChange={(event) =>
-                  onUpdate(contact.id, {
-                    contactKind: event.target.value === "email" ? "email" : "phone",
-                  })
-                }
-                className={formSelectClassName}
-                disabled={disabled}
-              >
-                <option value="phone">{t.field_phone}</option>
-                <option value="email">{t.field_email}</option>
-              </NativeComboboxSelect>
-            </Field>
-            <Field label={l("providers_contact_type")}>
-              <NativeComboboxSelect
-                value={contact.contactType}
-                onChange={(event) =>
-                  onUpdate(contact.id, {
-                    contactType:
-                      event.target.value === "department" || event.target.value === "other"
-                        ? event.target.value
-                        : "work",
-                  })
-                }
-                className={formSelectClassName}
-                disabled={disabled}
-              >
-                <option value="work">{l("providers_contact_type_work")}</option>
-                <option value="department">{l("providers_contact_type_department")}</option>
-                <option value="other">{l("providers_contact_type_other")}</option>
-              </NativeComboboxSelect>
-            </Field>
-            <Field label={l("providers_contact_label")}>
-              <Input
-                value={contact.label}
-                onChange={(event) => onUpdate(contact.id, { label: event.target.value })}
-                className={shellInputClassName}
-                disabled={disabled}
-              />
-            </Field>
-            <Field label={l("providers_staff_department")}>
-              <Input
-                value={contact.department}
-                onChange={(event) => onUpdate(contact.id, { department: event.target.value })}
-                className={shellInputClassName}
-                disabled={disabled}
-              />
-            </Field>
-            <Field label={l("providers_contact_value")}>
-              <Input
-                type={contact.contactKind === "email" ? "email" : "text"}
-                value={contact.value}
-                onChange={(event) => onUpdate(contact.id, { value: event.target.value })}
-                className={shellInputClassName}
-                disabled={disabled}
-              />
-            </Field>
-            <label className="flex min-h-[58px] items-end gap-2 pb-1.5 text-xs text-muted-foreground">
-              <input
-                type="checkbox"
-                checked={contact.isPrimary}
-                onChange={(event) =>
-                  onUpdate(contact.id, { isPrimary: event.target.checked })
-                }
-                className={checkboxClass}
-                disabled={disabled}
-              />
-              {l("providers_contact_primary")}
-            </label>
-            <div className="flex items-end pb-0.5">
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                title={t.common_remove}
-                aria-label={t.common_remove}
-                onClick={() => onRemove(contact.id)}
-                disabled={disabled}
-              >
-                <Trash2 className="size-3.5" />
-              </Button>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/25 text-muted-foreground">
+                  {contact.contactKind === "email" ? (
+                    <Mail className="size-4" />
+                  ) : (
+                    <Phone className="size-4" />
+                  )}
+                </span>
+                <div className="min-w-0">
+                  <p className="truncate text-[13px] font-semibold tracking-tight text-foreground">
+                    {contactValueLabel(contact.contactKind)}
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {contactTypeLabel(contact.contactType)}
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={contact.isPrimary}
+                    onChange={(event) =>
+                      onUpdate(contact.id, { isPrimary: event.target.checked })
+                    }
+                    className={checkboxClass}
+                    disabled={disabled}
+                  />
+                  {l("providers_contact_primary")}
+                </label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
+                  title={t.common_remove}
+                  aria-label={t.common_remove}
+                  onClick={() => onRemove(contact.id)}
+                  disabled={disabled}
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </div>
+            </div>
+
+            <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-[150px_150px_minmax(220px,1fr)_minmax(180px,0.8fr)]">
+              <Field label={l("providers_contact_kind")}>
+                <NativeComboboxSelect
+                  value={contact.contactKind}
+                  onChange={(event) =>
+                    onUpdate(contact.id, {
+                      contactKind: event.target.value === "email" ? "email" : "phone",
+                    })
+                  }
+                  className={formSelectClassName}
+                  disabled={disabled}
+                >
+                  <option value="phone">{t.field_phone}</option>
+                  <option value="email">{t.field_email}</option>
+                </NativeComboboxSelect>
+              </Field>
+              <Field label={l("providers_contact_type")}>
+                <NativeComboboxSelect
+                  value={contact.contactType}
+                  onChange={(event) =>
+                    onUpdate(contact.id, {
+                      contactType:
+                        event.target.value === "department" || event.target.value === "other"
+                          ? event.target.value
+                          : "work",
+                    })
+                  }
+                  className={formSelectClassName}
+                  disabled={disabled}
+                >
+                  <option value="work">{l("providers_contact_type_work")}</option>
+                  <option value="department">{l("providers_contact_type_department")}</option>
+                  <option value="other">{l("providers_contact_type_other")}</option>
+                </NativeComboboxSelect>
+              </Field>
+              <Field label={contactValueLabel(contact.contactKind)}>
+                <Input
+                  type={contact.contactKind === "email" ? "email" : "tel"}
+                  value={contact.value}
+                  onChange={(event) => onUpdate(contact.id, { value: event.target.value })}
+                  className={shellInputClassName}
+                  disabled={disabled}
+                />
+              </Field>
+              <Field label={l("providers_contact_label")}>
+                <Input
+                  value={contact.label}
+                  onChange={(event) => onUpdate(contact.id, { label: event.target.value })}
+                  className={shellInputClassName}
+                  disabled={disabled}
+                />
+              </Field>
+              {contact.contactType === "department" ? (
+                <div className="md:col-span-2 xl:col-span-1">
+                  <Field label={l("providers_staff_department")}>
+                  <Input
+                    value={contact.department}
+                    onChange={(event) => onUpdate(contact.id, { department: event.target.value })}
+                    className={shellInputClassName}
+                    disabled={disabled}
+                  />
+                  </Field>
+                </div>
+              ) : null}
             </div>
           </div>
         ))}
         {!disabled ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-8 rounded-lg bg-muted/20"
-            onClick={onAdd}
-          >
-            <Plus className="size-3.5" />
-            {l("providers_contact_add")}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className={contactAddButtonClassName}
+              onClick={() => onAdd("phone")}
+            >
+              <Phone className="size-3.5" />
+              {contactAddLabel("phone", t, lang)}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className={contactAddButtonClassName}
+              onClick={() => onAdd("email")}
+            >
+              <Mail className="size-3.5" />
+              {contactAddLabel("email", t, lang)}
+            </Button>
+          </div>
         ) : null}
       </div>
-    </>
+    </div>
   );
 }
 
@@ -6284,9 +7054,9 @@ function DoctorFormFields({
   ) => {
     onContactsChange(normalizePrimaryContacts(applyContactPatch(form.contacts, contactId, patch)));
   };
-  const addContact = () => {
+  const addContact = (preferredKind?: PersonContactFormState["contactKind"]) => {
     const hasPhone = form.contacts.some((contact) => contact.contactKind === "phone");
-    const contactKind = hasPhone ? "email" : "phone";
+    const contactKind = preferredKind ?? (hasPhone ? "email" : "phone");
     onContactsChange(normalizePrimaryContacts([
       ...form.contacts,
       {
@@ -6449,6 +7219,149 @@ function DoctorProfileFields({
   );
 }
 
+function PersonContactFields({
+  contacts,
+  onAdd,
+  onRemove,
+  onUpdate,
+}: {
+  contacts: PersonContactFormState[];
+  onAdd: (contactKind?: PersonContactFormState["contactKind"]) => void;
+  onRemove: (contactId: string) => void;
+  onUpdate: (contactId: string, patch: Partial<PersonContactFormState>) => void;
+}) {
+  const { t, lang } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+  const contactTypeLabel = (value: PersonContactFormState["contactType"]) => {
+    if (value === "private") return l("providers_contact_type_private");
+    if (value === "other") return l("providers_contact_type_other");
+    return l("providers_contact_type_work");
+  };
+  const contactValueLabel = (contactKind: PersonContactFormState["contactKind"]) =>
+    contactKind === "email" ? t.field_email : t.field_phone;
+
+  return (
+    <Section title={l("providers_contacts")}>
+      <div className="space-y-3">
+        {contacts.map((contact) => (
+          <div
+            key={contact.id}
+            className="rounded-xl border border-border/70 bg-card/50 p-3"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/25 text-muted-foreground">
+                  {contact.contactKind === "email" ? (
+                    <Mail className="size-4" />
+                  ) : (
+                    <Phone className="size-4" />
+                  )}
+                </span>
+                <div className="min-w-0">
+                  <p className="truncate text-[13px] font-semibold tracking-tight text-foreground">
+                    {contactValueLabel(contact.contactKind)}
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {contactTypeLabel(contact.contactType)}
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={contact.isPrimary}
+                    onChange={(event) =>
+                      onUpdate(contact.id, { isPrimary: event.target.checked })
+                    }
+                    className={checkboxClass}
+                  />
+                  {l("providers_contact_primary")}
+                </label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
+                  title={t.common_remove}
+                  aria-label={t.common_remove}
+                  onClick={() => onRemove(contact.id)}
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </div>
+            </div>
+
+            <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-[150px_150px_minmax(220px,1fr)]">
+              <Field label={l("providers_contact_kind")}>
+                <NativeComboboxSelect
+                  value={contact.contactKind}
+                  onChange={(event) =>
+                    onUpdate(contact.id, {
+                      contactKind: event.target.value === "email" ? "email" : "phone",
+                    })
+                  }
+                  className={formSelectClassName}
+                >
+                  <option value="phone">{t.field_phone}</option>
+                  <option value="email">{t.field_email}</option>
+                </NativeComboboxSelect>
+              </Field>
+              <Field label={l("providers_contact_type")}>
+                <NativeComboboxSelect
+                  value={contact.contactType}
+                  onChange={(event) =>
+                    onUpdate(contact.id, {
+                      contactType:
+                        event.target.value === "private" || event.target.value === "other"
+                          ? event.target.value
+                          : "work",
+                    })
+                  }
+                  className={formSelectClassName}
+                >
+                  <option value="work">{l("providers_contact_type_work")}</option>
+                  <option value="private">{l("providers_contact_type_private")}</option>
+                  <option value="other">{l("providers_contact_type_other")}</option>
+                </NativeComboboxSelect>
+              </Field>
+              <Field label={contactValueLabel(contact.contactKind)}>
+                <Input
+                  type={contact.contactKind === "email" ? "email" : "tel"}
+                  value={contact.value}
+                  onChange={(event) => onUpdate(contact.id, { value: event.target.value })}
+                  className={shellInputClassName}
+                />
+              </Field>
+            </div>
+          </div>
+        ))}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className={contactAddButtonClassName}
+            onClick={() => onAdd("phone")}
+          >
+            <Phone className="size-3.5" />
+            {contactAddLabel("phone", t, lang)}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className={contactAddButtonClassName}
+            onClick={() => onAdd("email")}
+          >
+            <Mail className="size-3.5" />
+            {contactAddLabel("email", t, lang)}
+          </Button>
+        </div>
+      </div>
+    </Section>
+  );
+}
+
 function DoctorContactFields({
   contacts,
   onAdd,
@@ -6456,98 +7369,17 @@ function DoctorContactFields({
   onUpdate,
 }: {
   contacts: DoctorFormState["contacts"];
-  onAdd: () => void;
+  onAdd: (contactKind?: PersonContactFormState["contactKind"]) => void;
   onRemove: (contactId: string) => void;
   onUpdate: (contactId: string, patch: Partial<DoctorFormState["contacts"][number]>) => void;
 }) {
-  const { t } = useLang();
-  const l = (key: string) => t.uiText[key] ?? key;
-
   return (
-    <Section title={l("providers_contacts")}>
-      <div className="space-y-2">
-        {contacts.map((contact) => (
-          <div
-            key={contact.id}
-            className="grid gap-2 rounded-lg border border-border/70 bg-card/50 p-2 md:grid-cols-[132px_132px_minmax(0,1fr)_92px_36px]"
-          >
-            <Field label={l("providers_contact_kind")}>
-              <NativeComboboxSelect
-                value={contact.contactKind}
-                onChange={(event) =>
-                  onUpdate(contact.id, {
-                    contactKind: event.target.value === "email" ? "email" : "phone",
-                  })
-                }
-                className={formSelectClassName}
-              >
-                <option value="phone">{t.field_phone}</option>
-                <option value="email">{t.field_email}</option>
-              </NativeComboboxSelect>
-            </Field>
-            <Field label={l("providers_contact_type")}>
-              <NativeComboboxSelect
-                value={contact.contactType}
-                onChange={(event) =>
-                  onUpdate(contact.id, {
-                    contactType:
-                      event.target.value === "private" || event.target.value === "other"
-                        ? event.target.value
-                        : "work",
-                  })
-                }
-                className={formSelectClassName}
-              >
-                <option value="work">{l("providers_contact_type_work")}</option>
-                <option value="private">{l("providers_contact_type_private")}</option>
-                <option value="other">{l("providers_contact_type_other")}</option>
-              </NativeComboboxSelect>
-            </Field>
-            <Field label={l("providers_contact_value")}>
-              <Input
-                type={contact.contactKind === "email" ? "email" : "text"}
-                value={contact.value}
-                onChange={(event) => onUpdate(contact.id, { value: event.target.value })}
-                className={shellInputClassName}
-              />
-            </Field>
-            <label className="flex min-h-[58px] items-end gap-2 pb-1.5 text-xs text-muted-foreground">
-              <input
-                type="checkbox"
-                checked={contact.isPrimary}
-                onChange={(event) =>
-                  onUpdate(contact.id, { isPrimary: event.target.checked })
-                }
-                className={checkboxClass}
-              />
-              {l("providers_contact_primary")}
-            </label>
-            <div className="flex items-end pb-0.5">
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                title={t.common_remove}
-                aria-label={t.common_remove}
-                onClick={() => onRemove(contact.id)}
-              >
-                <Trash2 className="size-3.5" />
-              </Button>
-            </div>
-          </div>
-        ))}
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-8 rounded-lg bg-muted/20"
-          onClick={onAdd}
-        >
-          <Plus className="size-3.5" />
-          {l("providers_contact_add")}
-        </Button>
-      </div>
-    </Section>
+    <PersonContactFields
+      contacts={contacts}
+      onAdd={onAdd}
+      onRemove={onRemove}
+      onUpdate={onUpdate}
+    />
   );
 }
 
@@ -6572,10 +7404,10 @@ function DoctorLicenseFields({
           />
         </Field>
         <Field label={l("providers_licensing_country")}>
-          <Input
+          <CountrySelect
             value={form.licensingCountry}
-            onChange={(event) => onChange("licensingCountry", event.target.value)}
-            className={shellInputClassName}
+            onChange={(value) => onChange("licensingCountry", value)}
+            placeholder={t.common_select_placeholder}
           />
         </Field>
         <Field label={l("providers_license_valid_until")}>
@@ -6637,9 +7469,9 @@ function StaffFormFields({
   ) => {
     onContactsChange(normalizePrimaryContacts(applyContactPatch(form.contacts, contactId, patch)));
   };
-  const addContact = () => {
+  const addContact = (preferredKind?: PersonContactFormState["contactKind"]) => {
     const hasPhone = form.contacts.some((contact) => contact.contactKind === "phone");
-    const contactKind = hasPhone ? "email" : "phone";
+    const contactKind = preferredKind ?? (hasPhone ? "email" : "phone");
     onContactsChange(normalizePrimaryContacts([
       ...form.contacts,
       {
@@ -6746,90 +7578,12 @@ function StaffFormFields({
         </div>
       </Section>
 
-      <Section title={l("providers_contacts")}>
-        <div className="space-y-2">
-          {form.contacts.map((contact) => (
-            <div
-              key={contact.id}
-              className="grid gap-2 rounded-lg border border-border/70 bg-card/50 p-2 md:grid-cols-[132px_132px_minmax(0,1fr)_92px_36px]"
-            >
-              <Field label={l("providers_contact_kind")}>
-                <NativeComboboxSelect
-                  value={contact.contactKind}
-                  onChange={(event) =>
-                    updateContact(contact.id, {
-                      contactKind: event.target.value === "email" ? "email" : "phone",
-                    })
-                  }
-                  className={formSelectClassName}
-                >
-                  <option value="phone">{t.field_phone}</option>
-                  <option value="email">{t.field_email}</option>
-                </NativeComboboxSelect>
-              </Field>
-              <Field label={l("providers_contact_type")}>
-                <NativeComboboxSelect
-                  value={contact.contactType}
-                  onChange={(event) =>
-                    updateContact(contact.id, {
-                      contactType:
-                        event.target.value === "private" || event.target.value === "other"
-                          ? event.target.value
-                          : "work",
-                    })
-                  }
-                  className={formSelectClassName}
-                >
-                  <option value="work">{l("providers_contact_type_work")}</option>
-                  <option value="private">{l("providers_contact_type_private")}</option>
-                  <option value="other">{l("providers_contact_type_other")}</option>
-                </NativeComboboxSelect>
-              </Field>
-              <Field label={l("providers_contact_value")}>
-                <Input
-                  type={contact.contactKind === "email" ? "email" : "text"}
-                  value={contact.value}
-                  onChange={(event) => updateContact(contact.id, { value: event.target.value })}
-                  className={shellInputClassName}
-                />
-              </Field>
-              <label className="flex min-h-[58px] items-end gap-2 pb-1.5 text-xs text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={contact.isPrimary}
-                  onChange={(event) =>
-                    updateContact(contact.id, { isPrimary: event.target.checked })
-                  }
-                  className={checkboxClass}
-                />
-                {l("providers_contact_primary")}
-              </label>
-              <div className="flex items-end pb-0.5">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon-sm"
-                  title={t.common_remove}
-                  aria-label={t.common_remove}
-                  onClick={() => removeContact(contact.id)}
-                >
-                  <Trash2 className="size-3.5" />
-                </Button>
-              </div>
-            </div>
-          ))}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-8 rounded-lg bg-muted/20"
-            onClick={addContact}
-          >
-            <Plus className="size-3.5" />
-            {l("providers_contact_add")}
-          </Button>
-        </div>
-      </Section>
+      <PersonContactFields
+        contacts={form.contacts}
+        onAdd={addContact}
+        onRemove={removeContact}
+        onUpdate={updateContact}
+      />
 
       <Section title={l("appointments_notes")}>
         <Field label={t.providers_notes}>
@@ -6847,20 +7601,18 @@ function StaffFormFields({
 
 function ServiceFormFields({
   form,
-  forcePriceRange,
   providerType,
   taxonomyNodes,
   onChange,
 }: {
   form: ServiceFormState;
-  forcePriceRange: boolean;
   providerType: ProviderType;
   taxonomyNodes: ProviderTaxonomyNode[];
   onChange: (field: keyof ServiceFormState, value: string) => void;
 }) {
   const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
-  const priceType = forcePriceRange ? "range" : form.priceType;
+  const priceType = form.priceType || "fixed";
   const selectedTaxonomyNode = taxonomyNodes.find((node) => node.id === form.taxonomyNodeId);
   const formAttributeKeys = taxonomyAttributeKeys(selectedTaxonomyNode);
   return (
@@ -6927,11 +7679,10 @@ function ServiceFormFields({
               value={priceType}
               onChange={(event) => onChange("priceType", event.target.value)}
               className={formSelectClassName}
-              disabled={forcePriceRange}
             >
-              {forcePriceRange ? null : <option value="fixed">{l("providers_price_fixed")}</option>}
+              <option value="fixed">{l("providers_price_fixed")}</option>
               <option value="range">{l("providers_price_range")}</option>
-              {forcePriceRange ? null : <option value="on_request">{l("providers_price_on_request")}</option>}
+              <option value="on_request">{l("providers_price_on_request")}</option>
             </NativeComboboxSelect>
           </Field>
           {priceType === "fixed" ? (

@@ -9655,14 +9655,37 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
     .await;
     assert_eq!(status, StatusCode::CREATED);
 
-    let (status, fixed_medical_service_error) = json_request(
+    let long_relationship_notes = "x".repeat(2001);
+    let (status, relationship_notes_error) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{provider_id}/doctors/{doctor_id}/relationships"),
+        &pm_bearer,
+        Some(json!({
+            "target_doctor_id": target_doctor_id,
+            "target_provider_id": provider_id,
+            "relationship_type": "professional",
+            "notes": long_relationship_notes,
+            "is_active": true,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        relationship_notes_error["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("notes are too long")
+    );
+
+    let (status, fixed_service_body) = json_request(
         &app,
         "POST",
         &format!("/api/v1/providers/{provider_id}/services"),
         &pm_bearer,
         Some(json!({
             "service_name": "Fixed-price medical service",
-            "description": "Should be rejected for medical providers",
+            "description": "Allowed fixed price for medical providers",
             "price_type": "fixed",
             "price": 300.0,
             "currency": "EUR",
@@ -9670,13 +9693,8 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(
-        fixed_medical_service_error["message"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("price range")
-    );
+    assert_eq!(status, StatusCode::CREATED);
+    let fixed_service_id = Uuid::parse_str(fixed_service_body["id"].as_str().unwrap()).unwrap();
 
     let (status, service_body) = json_request(
         &app,
@@ -9922,6 +9940,17 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
     assert!(langs.iter().any(|l| l == "uk"));
 
     let services = detail["services"].as_array().expect("services array");
+    let fixed_service_row = services
+        .iter()
+        .find(|row| row["id"] == fixed_service_id.to_string())
+        .expect("created fixed-price service visible in provider detail");
+    assert_eq!(
+        fixed_service_row["service_name"],
+        "Fixed-price medical service"
+    );
+    assert_eq!(fixed_service_row["price_type"], "fixed");
+    assert!(fixed_service_row["price"].to_string().contains("300"));
+
     let service_row = services
         .iter()
         .find(|row| row["id"] == service_id.to_string())

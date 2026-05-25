@@ -4,7 +4,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Mail, Phone, Trash2 } from "lucide-react";
 
 import {
   CountrySelect,
@@ -58,6 +58,23 @@ type PatientProfileEditorSheetProps = {
   onSaved: () => void;
   onError: (message: string) => void;
 };
+
+const contactAddButtonClassName =
+  "h-8 rounded-lg border-[var(--brand)] bg-[var(--brand)] px-3 text-white shadow-sm hover:bg-[var(--brand)]/90 hover:text-white focus-visible:ring-[var(--brand)]/30";
+
+function contactAddLabel(
+  contactKind: PatientContactFormState["contactKind"],
+  dictionary: Record<string, string> & { uiText?: Record<string, string> },
+  lang: string,
+) {
+  const addLabel = dictionary.uiText?.patients_add ?? dictionary.patients_add ?? "Добавить";
+  if (lang === "de") {
+    return `${contactKind === "email" ? dictionary.field_email : dictionary.field_phone} ${addLabel}`;
+  }
+  return contactKind === "email"
+    ? `${addLabel} электронную почту`
+    : `${addLabel} телефон`;
+}
 
 function isGuardianOrParentRelation(value: string) {
   return value.trim() === "guardian" || value.trim() === "parent";
@@ -129,6 +146,7 @@ function PatientProfileEditorSheet(props: PatientProfileEditorSheetProps) {
 
 type PatientProfileEditorFormSectionsProps = {
   dictionary: Record<string, string> & { uiText?: Record<string, string> };
+  lang: string;
   form: PatientEditFormState;
   statusLabel: (status: string) => string;
   updateField: <K extends keyof PatientEditFormState>(field: K, value: PatientEditFormState[K]) => void;
@@ -138,6 +156,7 @@ type PatientProfileEditorFormSectionsProps = {
 
 function PatientProfileEditorFormSections({
   dictionary,
+  lang,
   form,
   statusLabel,
   updateField,
@@ -156,6 +175,13 @@ function PatientProfileEditorFormSections({
     text.patients_detail_parent ??
     dictionary.common_not_set;
   const label = (key: string, fallback: string) => text[key] ?? dictionary[key] ?? fallback;
+  const contactTypeLabel = (value: PatientContactFormState["contactType"]) => {
+    if (value === "work") return label("providers_contact_type_work", dictionary.common_not_set);
+    if (value === "other") return label("providers_contact_type_other", dictionary.common_not_set);
+    return label("providers_contact_type_private", dictionary.common_not_set);
+  };
+  const contactValueLabel = (contactKind: PatientContactFormState["contactKind"]) =>
+    contactKind === "email" ? dictionary.field_email : dictionary.field_phone;
   const contacts = patientEditFormContacts(form);
 
   function updateContact(
@@ -180,9 +206,9 @@ function PatientProfileEditorFormSections({
     updateContacts(normalizePatientContactForms(changedContacts));
   }
 
-  function addContact() {
+  function addContact(preferredKind?: PatientContactFormState["contactKind"]) {
     const hasPhone = contacts.some((contact) => contact.contactKind === "phone");
-    const contactKind = hasPhone ? "email" : "phone";
+    const contactKind = preferredKind ?? (hasPhone ? "email" : "phone");
     updateContacts(
       normalizePatientContactForms([
         ...contacts,
@@ -307,99 +333,133 @@ function PatientProfileEditorFormSections({
                 </FormField>
               </FormSection>
               <FormSection title={dictionary.patient_profile_editor_contact}>
-                <div className="space-y-2">
+                <div className="space-y-3">
                   {contacts.map((contact) => (
                     <div
                       key={contact.id}
-                      className="grid gap-2 rounded-lg border border-border/70 bg-card/50 p-2 md:grid-cols-[132px_132px_minmax(0,1fr)_92px_36px]"
+                      className="rounded-xl border border-border/70 bg-card/50 p-3"
                     >
-                      <FormField label={label("providers_contact_kind", dictionary.common_not_set)}>
-                        <NativeComboboxSelect
-                          value={contact.contactKind}
-                          onChange={(event) =>
-                            updateContact(contact.id, {
-                              contactKind:
-                                event.target.value === "email" ? "email" : "phone",
-                            })
-                          }
-                          className={cn("w-full", formInputClassName)}
-                        >
-                          <option value="phone">{dictionary.field_phone}</option>
-                          <option value="email">{dictionary.field_email}</option>
-                        </NativeComboboxSelect>
-                      </FormField>
-                      <FormField label={label("providers_contact_type", dictionary.common_not_set)}>
-                        <NativeComboboxSelect
-                          value={contact.contactType}
-                          onChange={(event) =>
-                            updateContact(contact.id, {
-                              contactType:
-                                event.target.value === "work" ||
-                                event.target.value === "other"
-                                  ? event.target.value
-                                  : "private",
-                            })
-                          }
-                          className={cn("w-full", formInputClassName)}
-                        >
-                          <option value="private">
-                            {label("providers_contact_type_private", dictionary.common_not_set)}
-                          </option>
-                          <option value="work">
-                            {label("providers_contact_type_work", dictionary.common_not_set)}
-                          </option>
-                          <option value="other">
-                            {label("providers_contact_type_other", dictionary.common_not_set)}
-                          </option>
-                        </NativeComboboxSelect>
-                      </FormField>
-                      <FormField label={label("providers_contact_value", dictionary.common_not_set)}>
-                        <Input
-                          type={contact.contactKind === "email" ? "email" : "text"}
-                          value={contact.value}
-                          onChange={(event) =>
-                            updateContact(contact.id, { value: event.target.value })
-                          }
-                          className={formInputClassName}
-                        />
-                      </FormField>
-                      <label className="flex min-h-[58px] items-end gap-2 pb-1.5 text-xs text-muted-foreground">
-                        <input
-                          type="checkbox"
-                          checked={contact.isPrimary}
-                          onChange={(event) =>
-                            updateContact(contact.id, {
-                              isPrimary: event.target.checked,
-                            })
-                          }
-                          className={checkboxClass}
-                        />
-                        {label("providers_contact_primary", dictionary.common_not_set)}
-                      </label>
-                      <div className="flex items-end pb-0.5">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon-sm"
-                          title={dictionary.common_remove}
-                          aria-label={dictionary.common_remove}
-                          onClick={() => removeContact(contact.id)}
-                        >
-                          <Trash2 className="size-3.5" />
-                        </Button>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/25 text-muted-foreground">
+                            {contact.contactKind === "email" ? (
+                              <Mail className="size-4" />
+                            ) : (
+                              <Phone className="size-4" />
+                            )}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="truncate text-[13px] font-semibold tracking-tight text-foreground">
+                              {contactValueLabel(contact.contactKind)}
+                            </p>
+                            <p className="mt-0.5 text-xs text-muted-foreground">
+                              {contactTypeLabel(contact.contactType)}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <input
+                              type="checkbox"
+                              checked={contact.isPrimary}
+                              onChange={(event) =>
+                                updateContact(contact.id, {
+                                  isPrimary: event.target.checked,
+                                })
+                              }
+                              className={checkboxClass}
+                            />
+                            {label("providers_contact_primary", dictionary.common_not_set)}
+                          </label>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon-sm"
+                            title={dictionary.common_remove}
+                            aria-label={dictionary.common_remove}
+                            onClick={() => removeContact(contact.id)}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-[150px_150px_minmax(220px,1fr)]">
+                        <FormField label={label("providers_contact_kind", dictionary.common_not_set)}>
+                          <NativeComboboxSelect
+                            value={contact.contactKind}
+                            onChange={(event) =>
+                              updateContact(contact.id, {
+                                contactKind:
+                                  event.target.value === "email" ? "email" : "phone",
+                              })
+                            }
+                            className={cn("w-full", formInputClassName)}
+                          >
+                            <option value="phone">{dictionary.field_phone}</option>
+                            <option value="email">{dictionary.field_email}</option>
+                          </NativeComboboxSelect>
+                        </FormField>
+                        <FormField label={label("providers_contact_type", dictionary.common_not_set)}>
+                          <NativeComboboxSelect
+                            value={contact.contactType}
+                            onChange={(event) =>
+                              updateContact(contact.id, {
+                                contactType:
+                                  event.target.value === "work" ||
+                                  event.target.value === "other"
+                                    ? event.target.value
+                                    : "private",
+                              })
+                            }
+                            className={cn("w-full", formInputClassName)}
+                          >
+                            <option value="private">
+                              {label("providers_contact_type_private", dictionary.common_not_set)}
+                            </option>
+                            <option value="work">
+                              {label("providers_contact_type_work", dictionary.common_not_set)}
+                            </option>
+                            <option value="other">
+                              {label("providers_contact_type_other", dictionary.common_not_set)}
+                            </option>
+                          </NativeComboboxSelect>
+                        </FormField>
+                        <FormField label={contactValueLabel(contact.contactKind)}>
+                          <Input
+                            type={contact.contactKind === "email" ? "email" : "tel"}
+                            value={contact.value}
+                            onChange={(event) =>
+                              updateContact(contact.id, { value: event.target.value })
+                            }
+                            className={formInputClassName}
+                          />
+                        </FormField>
                       </div>
                     </div>
                   ))}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-8 rounded-lg bg-muted/20"
-                    onClick={addContact}
-                  >
-                    <Plus className="size-3.5" />
-                    {label("providers_contact_add", dictionary.common_create)}
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className={contactAddButtonClassName}
+                      onClick={() => addContact("phone")}
+                    >
+                      <Phone className="size-3.5" />
+                      {contactAddLabel("phone", dictionary, lang)}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className={contactAddButtonClassName}
+                      onClick={() => addContact("email")}
+                    >
+                      <Mail className="size-3.5" />
+                      {contactAddLabel("email", dictionary, lang)}
+                    </Button>
+                  </div>
                 </div>
               </FormSection>
               <FormSection title={dictionary.patient_profile_editor_address}>
@@ -692,6 +752,7 @@ function PatientProfileEditorSheetContent({
   patientId,
   detail,
   dictionary,
+  lang,
   statusLabel,
   onOpenChange,
   onSaved,
@@ -827,6 +888,7 @@ function PatientProfileEditorSheetContent({
       {form ? (
         <PatientProfileEditorFormSections
           dictionary={dictionary}
+          lang={lang}
           form={form}
           statusLabel={statusLabel}
           updateField={updateField}

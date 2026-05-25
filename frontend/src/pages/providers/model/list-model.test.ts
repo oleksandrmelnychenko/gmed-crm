@@ -48,6 +48,62 @@ describe("toProviderPayload", () => {
     expect(payload.specializations).toEqual(["cardiology", "neurology", "oncology"]);
     expect(payload.opening_hours).toBe("Mo-Fr 08:00-17:00");
   });
+
+  it("sends provider country and primary phone/email from structured contacts", () => {
+    const form = {
+      ...blankProviderForm("medical"),
+      name: "Clinic With Contacts",
+      addressCountry: "Germany",
+      contacts: [
+        {
+          id: "phone-1",
+          contactKind: "phone",
+          contactType: "work",
+          label: "Reception",
+          department: "",
+          value: "+49 30 1000",
+          isPrimary: true,
+          notes: "",
+        },
+        {
+          id: "email-1",
+          contactKind: "email",
+          contactType: "department",
+          label: "Admissions",
+          department: "Admissions",
+          value: "admissions@clinic.example",
+          isPrimary: true,
+          notes: "",
+        },
+      ],
+    };
+
+    const payload = toProviderPayload(form, false);
+
+    expect(payload.address_country).toBe("Germany");
+    expect(payload.phone).toBe("+49 30 1000");
+    expect(payload.email).toBe("admissions@clinic.example");
+    expect(payload.contacts).toEqual([
+      {
+        contact_kind: "phone",
+        contact_type: "work",
+        label: "Reception",
+        department: null,
+        value: "+49 30 1000",
+        is_primary: true,
+        notes: null,
+      },
+      {
+        contact_kind: "email",
+        contact_type: "department",
+        label: "Admissions",
+        department: "Admissions",
+        value: "admissions@clinic.example",
+        is_primary: true,
+        notes: null,
+      },
+    ]);
+  });
 });
 
 describe("toDoctorPayload", () => {

@@ -3191,12 +3191,6 @@ async fn create_service(
         Ok(value) => value,
         Err(resp) => return resp,
     };
-    if provider_type == "medical" && service.price_type != "range" {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Medical provider services require a price range",
-        );
-    }
     if let Err(resp) =
         validate_service_taxonomy_node(&state, &provider_type, service.taxonomy_node_id).await
     {
@@ -3302,12 +3296,6 @@ async fn update_service(
         Ok(value) => value,
         Err(resp) => return resp,
     };
-    if provider_type == "medical" && service.price_type != "range" {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Medical provider services require a price range",
-        );
-    }
     if let Err(resp) =
         validate_service_taxonomy_node(&state, &provider_type, service.taxonomy_node_id).await
     {
@@ -4112,7 +4100,7 @@ fn normalize_doctor_relationship_payload(
         return Err("Doctor relationship description is too long");
     }
     let notes = normalize_optional(body.notes);
-    if notes.as_ref().is_some_and(|value| value.len() > 4000) {
+    if notes.as_ref().is_some_and(|value| value.len() > 2000) {
         return Err("Doctor relationship notes are too long");
     }
     Ok(DoctorRelationshipPayload {

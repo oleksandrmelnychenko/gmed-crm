@@ -1202,8 +1202,8 @@ export function toDoctorPayload(form: DoctorFormState) {
   };
 }
 
-export function toServicePayload(form: ServiceFormState, forceRange = false) {
-  const priceType = forceRange ? "range" : form.priceType || "fixed";
+export function toServicePayload(form: ServiceFormState) {
+  const priceType = form.priceType || "fixed";
   const fixedPrice = Number.parseFloat(form.price || form.priceFrom || "0");
   const priceFrom = Number.parseFloat(form.priceFrom || form.price || "0");
   const priceTo = Number.parseFloat(form.priceTo || form.priceFrom || form.price || "0");
