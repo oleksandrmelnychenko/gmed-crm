@@ -4,6 +4,7 @@ import * as React from "react"
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox"
 import { CheckIcon, ChevronDownIcon, SearchIcon } from "lucide-react"
 
+import { useOverlayDirtyMarker } from "@/components/ui/dismissal-guard"
 import { useLang } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
@@ -166,6 +167,7 @@ function ComboboxSelect({
   ...ariaProps
 }: ComboboxSelectProps) {
   const { t } = useLang()
+  const markOverlayDirty = useOverlayDirtyMarker()
   const normalizedValue = normalizeValue(value)
   const normalizedDefaultValue = normalizeValue(defaultValue)
   const [uncontrolledValue, setUncontrolledValue] = React.useState(
@@ -219,13 +221,17 @@ function ComboboxSelect({
     (nextValue: string | null) => {
       const next = nextValue ?? ""
 
+      if (next !== selectedValue) {
+        markOverlayDirty()
+      }
+
       if (normalizedValue == null) {
         setUncontrolledValue(next)
       }
 
       onValueChange?.(next)
     },
-    [normalizedValue, onValueChange],
+    [markOverlayDirty, normalizedValue, onValueChange, selectedValue],
   )
 
   return (
@@ -270,8 +276,16 @@ function ComboboxSelect({
         <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground" />
       </ComboboxPrimitive.Trigger>
       <ComboboxPrimitive.Portal>
-        <ComboboxPrimitive.Positioner sideOffset={4} align="start" className="isolate z-[150]">
-          <ComboboxPrimitive.Popup className="relative isolate z-[150] min-w-(--anchor-width) max-w-[min(32rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-xl duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
+        <ComboboxPrimitive.Positioner
+          data-overlay-interaction-root=""
+          sideOffset={4}
+          align="start"
+          className="isolate z-[150]"
+        >
+          <ComboboxPrimitive.Popup
+            data-overlay-interaction-root=""
+            className="relative isolate z-[150] min-w-(--anchor-width) max-w-[min(32rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-xl duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
+          >
             <div className="flex items-center gap-2 border-b border-border bg-popover px-2.5 py-2">
               <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
               <ComboboxPrimitive.Input

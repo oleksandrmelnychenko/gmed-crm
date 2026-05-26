@@ -3,7 +3,11 @@ import { LoaderCircle, type LucideIcon } from "lucide-react";
 
 import { CountBadge } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
-import { SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import {
+  SheetHeader,
+  SheetTitle,
+  useSheetDismissalGuard,
+} from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
 type MetricTone = "sky" | "emerald" | "amber" | "slate" | "rose";
@@ -255,13 +259,15 @@ export function SheetFormFooter({
   onCancel: () => void;
   onSubmit?: () => void;
 }) {
+  const handleCancel = useSheetDismissalGuard(onCancel);
+
   return (
     <div className="shrink-0 flex justify-end gap-2 bg-popover px-4 py-3">
       <Button
         type="button"
         variant="outline"
         className="h-9 rounded-lg"
-        onClick={onCancel}
+        onClick={handleCancel}
         disabled={submitting}
       >
         {cancelLabel}

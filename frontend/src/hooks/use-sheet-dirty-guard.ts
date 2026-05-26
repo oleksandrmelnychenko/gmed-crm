@@ -1,4 +1,8 @@
 import { useCallback } from "react";
+import {
+  CONFIRMED_DISMISS_REASON,
+  shouldConfirmDirtyDismiss,
+} from "@/components/ui/dismissal-guard";
 
 interface UseSheetDirtyGuardParams {
   isDirty: boolean;
@@ -6,21 +10,29 @@ interface UseSheetDirtyGuardParams {
   confirmMessage: string;
 }
 
-export function useSheetDirtyGuard({
-  isDirty,
-  onClose,
-  confirmMessage,
-}: UseSheetDirtyGuardParams) {
+export function useSheetDirtyGuard(params: UseSheetDirtyGuardParams) {
+  const { isDirty, onClose } = params;
+
   return useCallback(
-    (nextOpen: boolean) => {
+    (nextOpen: boolean, eventDetails?: { reason: string }) => {
       if (nextOpen) {
         return;
       }
-      if (isDirty && !window.confirm(confirmMessage)) {
+      if (eventDetails?.reason === CONFIRMED_DISMISS_REASON) {
+        onClose();
+        return;
+      }
+      if (
+        eventDetails &&
+        shouldConfirmDirtyDismiss(nextOpen, eventDetails.reason, isDirty)
+      ) {
+        return;
+      }
+      if (isDirty) {
         return;
       }
       onClose();
     },
-    [confirmMessage, isDirty, onClose],
+    [isDirty, onClose],
   );
 }

@@ -123,6 +123,7 @@ export interface Translations
   common_edit: string;
   common_cancel: string;
   common_confirm: string;
+  common_ok: string;
   common_yes: string;
   common_no: string;
   common_search: string;
@@ -149,6 +150,7 @@ export interface Translations
   common_monitoring: string;
   common_last_updated: string;
   common_discard_unsaved_confirm: string;
+  common_overlay_dismiss_blocked: string;
   table_filter: string;
   table_filter_search_fields: string;
   table_filter_value: string;

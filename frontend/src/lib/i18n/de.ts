@@ -118,6 +118,7 @@ export const de = {
   common_edit: "Bearbeiten",
   common_cancel: "Abbrechen",
   common_confirm: "Bestätigen",
+  common_ok: "OK",
   common_yes: "Ja",
   common_no: "Nein",
   common_search: "Suchen...",
@@ -144,6 +145,8 @@ export const de = {
   common_monitoring: "Monitoring",
   common_last_updated: "Zuletzt aktualisiert",
   common_discard_unsaved_confirm: "Nicht gespeicherte Änderungen verwerfen?",
+  common_overlay_dismiss_blocked:
+    "Nicht gespeicherte Daten gehen verloren, wenn Sie das Fenster ohne Speichern schließen.",
   table_filter: "Filter",
   table_filter_search_fields: "Felder suchen",
   table_filter_value: "Wert",

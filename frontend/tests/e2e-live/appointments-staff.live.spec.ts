@@ -80,7 +80,7 @@ const assignInterpreterButtonName = /Dolmetscher zuweisen|Assign interpreter/i;
 const addChecklistItemButtonName =
   /Checklistenpunkt hinzufügen|Add checklist item/i;
 const completeChecklistItemButtonName =
-  /Als erledigt markieren|Mark complete/i;
+  /Als erledigt(?: markieren)?|Mark complete/i;
 const acceptedResponseButtonName = /^(Angenommen|Accepted)$/i;
 const inProgressStatusButtonName = /^(Läuft|Lauft|In progress)$/i;
 const completedStatusButtonName = /^(Abgeschlossen|Completed)$/i;
@@ -99,19 +99,37 @@ function sectionWithButton(page: Page, name: RegExp) {
 async function assignInterpreter(page: Page, interpreterName: string) {
   const section = sectionWithButton(page, assignInterpreterButtonName);
   await expect(section).toBeVisible();
+  await section.getByRole("button", { name: assignInterpreterButtonName }).click();
+  const sheet = page
+    .getByRole("dialog")
+    .filter({
+      has: page.getByRole("button", { name: assignInterpreterButtonName }),
+    })
+    .last();
+  await expect(sheet).toBeVisible();
   await chooseComboboxOption(
     page,
-    section.getByRole("combobox", { name: /Dolmetscher|Interpreter/i }).last(),
+    sheet.getByRole("combobox", { name: /Dolmetscher|Interpreter/i }).last(),
     interpreterName,
   );
-  await section.getByRole("button", { name: assignInterpreterButtonName }).click();
+  await sheet.getByRole("button", { name: assignInterpreterButtonName }).click();
+  await expect(sheet).toBeHidden({ timeout: 15_000 });
 }
 
 async function addChecklistItem(page: Page, itemText: string) {
   const section = sectionWithButton(page, addChecklistItemButtonName);
   await expect(section).toBeVisible();
-  await section.locator("input[required]").first().fill(itemText);
   await section.getByRole("button", { name: addChecklistItemButtonName }).click();
+  const sheet = page
+    .getByRole("dialog")
+    .filter({
+      has: page.getByRole("button", { name: addChecklistItemButtonName }),
+    })
+    .last();
+  await expect(sheet).toBeVisible();
+  await sheet.locator("input[required]").first().fill(itemText);
+  await sheet.getByRole("button", { name: addChecklistItemButtonName }).click();
+  await expect(sheet).toBeHidden({ timeout: 15_000 });
   return section;
 }
 

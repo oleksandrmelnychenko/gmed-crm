@@ -197,6 +197,7 @@ type AdminCustomFieldCreateSheetProps = {
   fSort: string;
   fType: string;
   showCreate: boolean;
+  dirty: boolean;
   t: Record<string, string>;
   onClose: () => void;
   onCreate: (event: FormEvent) => void;
@@ -221,6 +222,7 @@ function AdminCustomFieldCreateSheet({
   fSort,
   fType,
   showCreate,
+  dirty,
   t,
   onClose,
   onCreate,
@@ -233,7 +235,7 @@ function AdminCustomFieldCreateSheet({
   onTypeChange,
 }: AdminCustomFieldCreateSheetProps) {
   return (
-    <Sheet open={showCreate} onOpenChange={onOpenChange}>
+    <Sheet open={showCreate} onOpenChange={onOpenChange} dirty={dirty}>
       <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
         <form onSubmit={onCreate} className="flex min-h-0 flex-1 flex-col">
           <AdminSheetScaffold
@@ -665,6 +667,7 @@ export function AdminCustomFieldsPage() {
         entityTypeLabel={entityTypeLabel} fieldTypeLabel={fieldTypeLabel}
         fEntity={fEntity} fKey={fKey} fLabel={fLabel}
         fOptions={fOptions} fSort={fSort} fType={fType} showCreate={showCreate}
+        dirty={createDirty}
         t={t as unknown as Record<string, string>}
         onClose={closeCreateSheet} onCreate={onCreate}
         onEntityChange={setFEntity} onKeyChange={setFKey} onLabelChange={setFLabel}

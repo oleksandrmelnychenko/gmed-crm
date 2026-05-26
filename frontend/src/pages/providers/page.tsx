@@ -4519,6 +4519,23 @@ function specializationDraftPayload(draft: SpecializationDraft) {
   };
 }
 
+function hasSpecializationDraftChanges(
+  draft: SpecializationDraft,
+  editingItem?: SpecializationItem,
+) {
+  const baseline = editingItem
+    ? specializationToDraft(editingItem)
+    : blankSpecializationDraft();
+
+  return (
+    draft.nameEn !== baseline.nameEn ||
+    draft.nameDe !== baseline.nameDe ||
+    draft.nameRu !== baseline.nameRu ||
+    draft.sortOrder !== baseline.sortOrder ||
+    draft.isActive !== baseline.isActive
+  );
+}
+
 function SpecializationManagerSheet({
   open,
   items,
@@ -4545,6 +4562,7 @@ function SpecializationManagerSheet({
   const [editingId, setEditingId] = useState("");
   const [draft, setDraft] = useState<SpecializationDraft>(() => blankSpecializationDraft());
   const editingItem = items.find((item) => item.id === editingId);
+  const isDirty = hasSpecializationDraftChanges(draft, editingItem);
 
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen) {
@@ -4590,7 +4608,7 @@ function SpecializationManagerSheet({
   }
 
   return (
-    <Sheet open={open} onOpenChange={handleOpenChange}>
+    <Sheet open={open} onOpenChange={handleOpenChange} dirty={isDirty}>
       <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
         <AdminSheetScaffold
           title={l("providers_specializations_title")}
@@ -4802,6 +4820,22 @@ function staffRoleDraftPayload(draft: StaffRoleDraft) {
   };
 }
 
+function hasStaffRoleDraftChanges(
+  draft: StaffRoleDraft,
+  editingRole?: ProviderStaffRoleItem,
+) {
+  const baseline = editingRole
+    ? staffRoleToDraft(editingRole)
+    : blankStaffRoleDraft();
+
+  return (
+    draft.nameDe !== baseline.nameDe ||
+    draft.nameRu !== baseline.nameRu ||
+    draft.sortOrder !== baseline.sortOrder ||
+    draft.isActive !== baseline.isActive
+  );
+}
+
 function StaffRoleManagerSheet({
   open,
   roles,
@@ -4826,6 +4860,7 @@ function StaffRoleManagerSheet({
   const [editingId, setEditingId] = useState("");
   const [draft, setDraft] = useState<StaffRoleDraft>(() => blankStaffRoleDraft());
   const editingRole = roles.find((role) => role.id === editingId);
+  const isDirty = hasStaffRoleDraftChanges(draft, editingRole);
 
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen) {
@@ -4855,7 +4890,7 @@ function StaffRoleManagerSheet({
   }
 
   return (
-    <Sheet open={open} onOpenChange={handleOpenChange}>
+    <Sheet open={open} onOpenChange={handleOpenChange} dirty={isDirty}>
       <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
         <AdminSheetScaffold
           title={l("providers_staff_roles_title")}

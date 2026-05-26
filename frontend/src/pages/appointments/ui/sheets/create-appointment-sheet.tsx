@@ -14,6 +14,7 @@ import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { confirmDirtyDismiss } from "@/components/ui/dismissal-guard";
 import { Input } from "@/components/ui/input";
 import {
   Banner,
@@ -61,6 +62,7 @@ import type {
   StaffOption,
 } from "@/pages/appointments/model/types";
 import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
+import { hasAppointmentFormChanges } from "@/pages/appointments/model/form-factories";
 import { parsePositiveIntegerInput } from "@/pages/appointments/model/workflow-helpers";
 import {
   AppointmentEditorSheet,
@@ -151,6 +153,16 @@ function useCreateAppointmentSheetContent({
           : nextValue,
     }));
   };
+  const isDirty = useMemo(
+    () => hasAppointmentFormChanges(form, seed),
+    [form, seed],
+  );
+
+  function requestClose() {
+    if (confirmDirtyDismiss(isDirty, t.common_overlay_dismiss_blocked)) {
+      onOpenChange(false);
+    }
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -406,6 +418,7 @@ function useCreateAppointmentSheetContent({
     <AppointmentEditorSheet
       open={open}
       onOpenChange={onOpenChange}
+      dirty={isDirty}
       title={title}
       maxWidthClassName="sm:max-w-[760px]"
       onSubmit={handleSubmit}
@@ -416,7 +429,7 @@ function useCreateAppointmentSheetContent({
             variant="outline"
             size="sm"
             className="h-8 rounded-lg"
-            onClick={() => onOpenChange(false)}
+            onClick={requestClose}
           >
             {tr.common_cancel}
           </Button>

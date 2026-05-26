@@ -9,6 +9,7 @@ import {
 import {
   authenticateApiClient,
   bootstrapAndLogin,
+  chooseComboboxOption,
   setGermanLanguage,
   type LiveApiClient,
 } from "./support/live-helpers";
@@ -68,6 +69,31 @@ async function chooseComboboxValue(page: Page, combobox: Locator, value: string)
   await combobox.click();
   await page.getByPlaceholder(/Suchen|Search|Поиск/i).last().fill(value);
   await page.keyboard.press("Enter");
+}
+
+async function chooseWholeSeries(page: Page, combobox: Locator) {
+  await chooseComboboxOption(page, combobox, /Ganze Serie|Whole series/i);
+}
+
+async function openScheduleEditor(page: Page) {
+  const scheduleSection = page
+    .locator("section")
+    .filter({
+      has: page.getByRole("heading", { name: /^Termine$/i }),
+    })
+    .last();
+  await scheduleSection.getByRole("button", { name: /Bearbeiten|Edit/i }).click();
+
+  const editor = page
+    .getByRole("dialog")
+    .filter({
+      has: page.getByRole("combobox", {
+        name: /Termin.*anwenden auf/i,
+      }),
+    })
+    .last();
+  await expect(editor).toBeVisible();
+  return editor;
 }
 
 async function fillInputFieldByLabel(
@@ -137,7 +163,7 @@ test.describe("appointments recurring live workflows", () => {
       name: /Statusänderung anwenden auf/i,
     });
     await expect(statusScopeSelect).toBeVisible();
-    await chooseComboboxValue(page, statusScopeSelect, "series");
+    await chooseWholeSeries(page, statusScopeSelect);
 
     const cancelWholeSeriesButton = page
       .getByRole("button", { name: /Ganze Serie absagen/i })
@@ -250,20 +276,19 @@ test.describe("appointments recurring live workflows", () => {
 
     const renamedTitle = `${scenario.recurring_appointment.title} – renamed`;
 
-    const scheduleScopeSelect = page.getByRole("combobox", {
+    const editor = await openScheduleEditor(page);
+
+    const scheduleScopeSelect = editor.getByRole("combobox", {
       name: /Terminänderung anwenden auf/i,
     });
     await expect(scheduleScopeSelect).toBeVisible();
 
-    const editForm = page
-      .locator("form")
-      .filter({ has: scheduleScopeSelect })
-      .first();
+    const editForm = editor.locator("form").first();
 
     const titleInput = editForm.getByLabel(/^Titel$/i).first();
     await titleInput.fill(renamedTitle);
 
-    await chooseComboboxValue(page, scheduleScopeSelect, "series");
+    await chooseWholeSeries(page, scheduleScopeSelect);
 
     await editForm.getByRole("button", { name: /^Speichern$/ }).click();
 
@@ -309,23 +334,22 @@ test.describe("appointments recurring live workflows", () => {
       scenario.recurring_appointment.title,
     );
 
-    const scheduleScopeSelect = page.getByRole("combobox", {
+    const editor = await openScheduleEditor(page);
+
+    const scheduleScopeSelect = editor.getByRole("combobox", {
       name: /Terminänderung anwenden auf/i,
     });
     await expect(scheduleScopeSelect).toBeVisible();
 
-    const editForm = page
-      .locator("form")
-      .filter({ has: scheduleScopeSelect })
-      .first();
+    const editForm = editor.locator("form").first();
 
-    await chooseComboboxValue(page, scheduleScopeSelect, "series");
-    await chooseComboboxValue(
+    await chooseWholeSeries(page, scheduleScopeSelect);
+    await chooseComboboxOption(
       page,
       editForm.getByRole("combobox", {
         name: /Wiederholungsrhythmus|Repeat frequency/i,
       }),
-      "weekly",
+      /W.chentlich|Weekly/i,
     );
     await fillInputFieldByLabel(
       editForm,

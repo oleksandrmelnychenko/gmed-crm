@@ -556,21 +556,49 @@ test.describe("patient profile live workflows", () => {
       await expect(field).toBeVisible();
       await field.fill(value);
     };
+    const chooseField = async (label: string, option: RegExp) => {
+      const field = sheet.getByText(label, { exact: true }).locator("..");
+      await chooseComboboxOption(page, field.getByRole("combobox"), option);
+    };
+    const chooseLanguage = async (option: RegExp) => {
+      const field = sheet.getByText("Sprachen", { exact: true }).locator("..");
+      await chooseComboboxOption(page, field.getByRole("combobox"), option);
+    };
+    const fillRepeatedField = async (
+      label: RegExp,
+      value: string,
+      index = 0,
+    ) => {
+      const field = sheet
+        .locator("label")
+        .filter({ hasText: label })
+        .nth(index)
+        .locator("..")
+        .getByRole("textbox")
+        .first();
+      await expect(field).toBeVisible();
+      await field.fill(value);
+    };
 
     await fillField("Anrede", "Dr.");
     await fillField("Vorname", firstName);
     await fillField("Nachname", lastName);
     await fillMuiDate(sheet, "1992-04-15");
-    await fillField("Staatsangehörigkeit", "Ukraine");
-    await fillField("Wohnsitzland", "Germany");
-    await fillField("Sprachen", "uk, de, en");
-    await fillField("Haupttelefon", "+49 30 9990001");
-    await fillField("Zweittelefon", "+49 30 9990002");
-    await fillField("E-Mail", email);
+    await chooseField("Staatsangehörigkeit", /Ukrainisch|Ukrainian/i);
+    await chooseField("Wohnsitzland", /Deutschland|Germany/i);
+    await chooseLanguage(/Ukrainisch|Ukrainian|uk/i);
+    await chooseLanguage(/Deutsch|German|de/i);
+    await chooseLanguage(/Englisch|English|en/i);
+    await fillRepeatedField(/^Telefon$/, "+49 30 9990001");
+    await sheet
+      .getByRole("button", { name: /Telefon.*Hinzuf|Add.*phone/i })
+      .click();
+    await fillRepeatedField(/^Telefon$/, "+49 30 9990002", 1);
+    await fillRepeatedField(/^E-Mail$/, email);
     await fillField("Straße", "Testweg 7");
     await fillField("Stadt", "Berlin");
     await fillField("PLZ", "10117");
-    await fillField("Land", "Germany");
+    await chooseField("Land", /Deutschland|Germany/i);
     await fillField("Versicherer", "TK");
     await fillField("Versicherungsnummer", `TK-${tag}`);
     await fillField("Notfallkontakt Name", "Olena Test");
@@ -629,7 +657,7 @@ test.describe("patient profile live workflows", () => {
       expect(detail.first_name).toBe(firstName);
       expect(detail.last_name).toBe(lastName);
       expect(detail.birth_date).toBe("1992-04-15");
-      expect(detail.nationality).toBe("Ukraine");
+      expect(detail.nationality).toBe("Ukrainian");
       expect(detail.residence_country).toBe("Germany");
       expect(detail.languages).toEqual(expect.arrayContaining(["uk", "de", "en"]));
       expect(detail.phone_primary).toBe("+49 30 9990001");

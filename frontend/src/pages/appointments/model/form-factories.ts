@@ -52,6 +52,41 @@ export function blankAppointmentForm(): AppointmentFormState {
   };
 }
 
+const APPOINTMENT_FORM_DIRTY_FIELDS: Array<keyof AppointmentFormState> = [
+  "patientId",
+  "providerId",
+  "providerTaxonomyNodeId",
+  "doctorId",
+  "ownerUserId",
+  "interpreterId",
+  "appointmentType",
+  "carePathKind",
+  "status",
+  "checklistPhase",
+  "title",
+  "date",
+  "timeStart",
+  "timeEnd",
+  "location",
+  "category",
+  "notes",
+  "skipMedicalProviderBinding",
+  "repeatEnabled",
+  "repeatFrequency",
+  "repeatInterval",
+  "repeatCount",
+  "repeatUntil",
+];
+
+export function hasAppointmentFormChanges(
+  current: AppointmentFormState,
+  initial: AppointmentFormState,
+): boolean {
+  return APPOINTMENT_FORM_DIRTY_FIELDS.some(
+    (field) => !Object.is(current[field], initial[field]),
+  );
+}
+
 export function buildEditAppointmentForm(
   detail: AppointmentDetail,
 ): AppointmentFormState {

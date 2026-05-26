@@ -65,8 +65,8 @@ test.describe("case live workflows", () => {
       name: "Anamnese-Textbausteine",
     });
     await expect(
-      snippetDialog.getByRole("heading", {
-        name: "Anamnese-Textbausteine",
+      snippetDialog.locator("[data-slot='sheet-title']", {
+        hasText: "Anamnese-Textbausteine",
       }),
     ).toBeVisible();
 

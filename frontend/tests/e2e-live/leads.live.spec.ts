@@ -16,16 +16,17 @@ function leadCard(page: Page, leadName: string) {
 
 async function openLeadDetail(page: Page, leadName: string, leadId?: string) {
   await page.goto(leadId ? `/leads?lead=${leadId}` : "/leads");
+  const headingMatcher = new RegExp(leadName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
   const card = leadCard(page, leadName);
-  await expect(card).toBeVisible();
   if (!leadId) {
+    await expect(card).toBeVisible();
     await card.click();
   }
   const detailPane = page
-    .locator("aside")
+    .locator("aside, [role='dialog']")
     .filter({
       has: page.getByRole("heading", {
-        name: new RegExp(leadName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
+        name: headingMatcher,
       }),
     })
     .last();

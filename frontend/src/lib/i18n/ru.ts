@@ -118,6 +118,7 @@ export const ru = {
   common_edit: "Изменить",
   common_cancel: "Отмена",
   common_confirm: "Подтвердить",
+  common_ok: "OK",
   common_yes: "Да",
   common_no: "Нет",
   common_search: "Поиск...",
@@ -144,6 +145,8 @@ export const ru = {
   common_monitoring: "Мониторинг",
   common_last_updated: "Последнее обновление",
   common_discard_unsaved_confirm: "Отменить несохраненные изменения?",
+  common_overlay_dismiss_blocked:
+    "Несохраненные данные будут потеряны, если закрыть окно без сохранения.",
   table_filter: "Фильтр",
   table_filter_search_fields: "Поиск полей",
   table_filter_value: "Значение",

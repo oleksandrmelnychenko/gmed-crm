@@ -675,7 +675,11 @@ function useAdminAccessPageContent() {
         ) : null}
       </div>
 
-      <Sheet open={Boolean(selectedField)} onOpenChange={handleDetailOpenChange}>
+      <Sheet
+        open={Boolean(selectedField)}
+        onOpenChange={handleDetailOpenChange}
+        dirty={saveBusyToken !== ""}
+      >
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
           <AdminSheetScaffold
             title={selectedField ? fieldLabel(selectedField) : t.access_title}
@@ -685,7 +689,7 @@ function useAdminAccessPageContent() {
                   type="button"
                   variant="outline"
                   className="h-9 rounded-lg"
-                  onClick={() => setSelectedField(null)}
+                  onClick={() => handleDetailOpenChange(false)}
                 >
                   {t.common_cancel}
                 </Button>

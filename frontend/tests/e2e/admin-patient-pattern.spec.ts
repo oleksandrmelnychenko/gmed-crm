@@ -567,7 +567,9 @@ test("admin routes stay on the patients-style shell", async ({ page }) => {
   await expect(page.locator("h1", { hasText: "Benachrichtigungskanäle" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Neuer Kanal/i })).toBeVisible();
   await page.getByRole("button", { name: /Neuer Kanal/i }).click();
-  await expect(page.getByRole("heading", { name: /Neuer Kanal/i })).toBeVisible();
+  await expect(
+    page.locator("[data-slot='sheet-title']", { hasText: /Neuer Kanal/i }),
+  ).toBeVisible();
   await page.screenshot({ path: "test-results/admin-pattern-notifications-sheet.png", fullPage: true });
   await page.keyboard.press("Escape");
   await page.getByText("Primary SMTP").click();
@@ -582,14 +584,18 @@ test("admin routes stay on the patients-style shell", async ({ page }) => {
   await expect(page.locator("h1", { hasText: "Sicherheit" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Wartungsmodus/i }).first()).toBeVisible();
   await page.getByRole("button", { name: /Wartungsmodus/i }).first().click();
-  await expect(page.getByRole("heading", { name: /Wartungsmodus/i })).toBeVisible();
+  await expect(
+    page.locator("[data-slot='sheet-title']", { hasText: /Wartungsmodus/i }),
+  ).toBeVisible();
   await page.screenshot({ path: "test-results/admin-pattern-security-sheet.png", fullPage: true });
   await page.keyboard.press("Escape");
 
   await page.goto("/admin/settings");
   await expect(page.locator("h1", { hasText: "Systemeinstellungen" })).toBeVisible();
   await page.getByRole("button", { name: /Token-Konfiguration/i }).first().click();
-  await expect(page.getByRole("heading", { name: /Token-Konfiguration/i })).toBeVisible();
+  await expect(
+    page.locator("[data-slot='sheet-title']", { hasText: /Token-Konfiguration/i }),
+  ).toBeVisible();
   await page.screenshot({ path: "test-results/admin-pattern-settings-sheet.png", fullPage: true });
 
   await page.goto("/admin/access");

@@ -251,12 +251,12 @@ test.describe("commercial live workflows", () => {
 
     await expect(
       page.getByRole("button", {
-        name: /Billing-Gate speichern|Сохранить billing-gate/i,
+        name: /Billing-Gate speichern|Abrechnungskontrolle speichern|Сохранить billing-gate/i,
       }),
     ).toBeVisible();
     await expect(
       page.getByRole("button", {
-        name: /Debt-Workflow speichern|Сохранить debt-workflow/i,
+        name: /Debt-Workflow speichern|Forderungsprozess speichern|Сохранить debt-workflow/i,
       }),
     ).toBeVisible();
 
@@ -287,8 +287,10 @@ test.describe("commercial live workflows", () => {
     ).toHaveCount(0);
 
     const billingGateSection = page
-      .getByText(/Billing entscheidet, ob die Durchfuhrung ausserhalb der Paketdeckung weiterlaufen darf\./i)
-      .locator("xpath=ancestor::*[.//button[normalize-space()='Billing-Gate speichern']][1]");
+      .getByRole("button", {
+        name: /Billing-Gate speichern|Abrechnungskontrolle speichern|Сохранить billing-gate/i,
+      })
+      .locator("xpath=ancestor::*[.//textarea][1]");
     await chooseComboboxOption(
       page,
       billingGateSection.getByRole("combobox").first(),
@@ -305,7 +307,7 @@ test.describe("commercial live workflows", () => {
     );
     await billingGateSection
       .getByRole("button", {
-        name: /Billing-Gate speichern|Сохранить billing-gate/i,
+        name: /Billing-Gate speichern|Abrechnungskontrolle speichern|Сохранить billing-gate/i,
       })
       .click();
     const billingGateResponse = await saveBillingGateResponse;
@@ -331,7 +333,7 @@ test.describe("commercial live workflows", () => {
 
     await page.goto(`/orders/${scenario.order.id}?section=phase`);
     await expect(
-      page.getByText(/Billing nur lesend|Только чтение для биллинга/i),
+      page.getByText(/Billing nur lesend|Abrechnung nur lesend|Только чтение для биллинга/i),
     ).toBeVisible();
     await expect(
       page.getByRole("button", {

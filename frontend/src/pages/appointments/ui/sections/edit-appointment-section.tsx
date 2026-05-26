@@ -1,9 +1,11 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
+  useCallback,
   useEffect,
   useMemo,
   useReducer,
+  useRef,
   useState,
   type FormEvent,
   type ReactNode,
@@ -13,6 +15,7 @@ import { LoaderCircle, Pencil } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import {
   Banner,
   tokens,
@@ -34,6 +37,7 @@ import {
 } from "@/pages/appointments/model/provider-taxonomy";
 import {
   buildEditAppointmentForm,
+  hasAppointmentFormChanges,
 } from "@/pages/appointments/model/form-factories";
 import {
   appointmentText,
@@ -78,6 +82,7 @@ import {
 import {
   AppointmentEditorSheet,
   Field,
+  type AppointmentEditorSheetOpenChangeDetails,
 } from "@/pages/appointments/ui/shared/workspace-primitives";
 import {
   ConflictPanel,
@@ -108,6 +113,11 @@ type EditAppointmentSectionState = {
   conflicts: ConflictSummary | null;
   error: string;
   busy: boolean;
+};
+
+type EditAppointmentOpenSnapshot = {
+  form: AppointmentFormState;
+  recurrenceScope: AppointmentRecurringActionScope;
 };
 
 type EditAppointmentSectionAction =
@@ -163,6 +173,12 @@ function createEditAppointmentFieldAction<K extends keyof EditAppointmentSection
       return { ...state, [field]: nextValue };
     },
   };
+}
+
+function resolveStateAction<T>(value: SetStateAction<T>, current: T) {
+  return typeof value === "function"
+    ? (value as (currentValue: T) => T)(current)
+    : value;
 }
 
 const selectClassName = appointmentSelectControlClassName;
@@ -238,17 +254,86 @@ function useEditAppointmentSectionContentContent({
       editAppointmentSectionReducer,
       detail,
       createEditAppointmentSectionState,
-    );
+  );
   const [internalSheetOpen, setInternalSheetOpen] = useState(false);
+  const [openSnapshot, setOpenSnapshot] =
+    useState<EditAppointmentOpenSnapshot | null>(null);
+  const wasSheetOpenRef = useRef(false);
+  const hasUnsavedChangesRef = useRef(false);
+  const suppressNextOutsideDismissRef = useRef(false);
+  const pendingDismissConfirmActionRef = useRef<(() => void) | null>(null);
+  const [dismissConfirmOpen, setDismissConfirmOpen] = useState(false);
   const sheetOpen = open ?? internalSheetOpen;
   const canManageStatus = permissions?.canManageStatus ?? false;
   const canManageChecklist = permissions?.canManageChecklist ?? false;
   const canEditAppointmentType = canManageStatus;
+  const hasUnsavedChanges = useMemo(
+    () =>
+      sheetOpen &&
+      openSnapshot !== null &&
+      (hasAppointmentFormChanges(form, openSnapshot.form) ||
+        recurrenceScope !== openSnapshot.recurrenceScope),
+    [form, openSnapshot, recurrenceScope, sheetOpen],
+  );
+  const createOpenSnapshot = useCallback(() => ({
+    form: { ...form },
+    recurrenceScope,
+  }), [form, recurrenceScope]);
+  useEffect(() => {
+    hasUnsavedChangesRef.current = hasUnsavedChanges;
+  }, [hasUnsavedChanges]);
+  useEffect(() => {
+    if (sheetOpen && !wasSheetOpenRef.current) {
+      setOpenSnapshot(createOpenSnapshot());
+      hasUnsavedChangesRef.current = false;
+      suppressNextOutsideDismissRef.current = false;
+      pendingDismissConfirmActionRef.current = null;
+      setDismissConfirmOpen(false);
+    }
+    if (!sheetOpen && wasSheetOpenRef.current) {
+      setOpenSnapshot(null);
+      hasUnsavedChangesRef.current = false;
+      suppressNextOutsideDismissRef.current = false;
+      pendingDismissConfirmActionRef.current = null;
+      setDismissConfirmOpen(false);
+    }
+    wasSheetOpenRef.current = sheetOpen;
+  }, [createOpenSnapshot, sheetOpen]);
   const setForm = (value: SetStateAction<AppointmentFormState>) =>
     dispatchEditState(createEditAppointmentFieldAction("form", value));
   const setRecurrenceScope = (
     value: SetStateAction<AppointmentRecurringActionScope>,
   ) => dispatchEditState(createEditAppointmentFieldAction("recurrenceScope", value));
+  const updateDirtyRef = (
+    nextForm: AppointmentFormState,
+    nextRecurrenceScope: AppointmentRecurringActionScope,
+  ) => {
+    hasUnsavedChangesRef.current =
+      sheetOpen &&
+      openSnapshot !== null &&
+      (hasAppointmentFormChanges(nextForm, openSnapshot.form) ||
+        nextRecurrenceScope !== openSnapshot.recurrenceScope);
+  };
+  const setFormFromUser = (value: SetStateAction<AppointmentFormState>) => {
+    setForm((current) => {
+      const next = resolveStateAction(value, current);
+
+      updateDirtyRef(next, recurrenceScope);
+
+      return next;
+    });
+  };
+  const setRecurrenceScopeFromUser = (
+    value: SetStateAction<AppointmentRecurringActionScope>,
+  ) => {
+    setRecurrenceScope((current) => {
+      const next = resolveStateAction(value, current);
+
+      updateDirtyRef(form, next);
+
+      return next;
+    });
+  };
   const setDoctors = (value: SetStateAction<DoctorOption[]>) =>
     dispatchEditState(createEditAppointmentFieldAction("doctors", value));
   const setConflicts = (value: SetStateAction<ConflictSummary | null>) =>
@@ -473,7 +558,7 @@ function useEditAppointmentSectionContentContent({
           detail.recurrence_frequency ? recurrenceScope : "single",
         );
       }
-      handleSheetOpenChange(false);
+      closeSheet(false);
       onSaved(buildScheduleNotice(result.conflicts, localWarnings));
     } catch (submitError) {
       setError(
@@ -487,6 +572,11 @@ function useEditAppointmentSectionContentContent({
   }
 
   function resetEditFormState() {
+    setOpenSnapshot(null);
+    hasUnsavedChangesRef.current = false;
+    suppressNextOutsideDismissRef.current = false;
+    pendingDismissConfirmActionRef.current = null;
+    setDismissConfirmOpen(false);
     dispatchEditState({
       type: "patch",
       value: {
@@ -499,18 +589,133 @@ function useEditAppointmentSectionContentContent({
     });
   }
 
-  function handleSheetOpenChange(open: boolean) {
+  function setSheetOpen(open: boolean) {
     if (onOpenChange) {
       onOpenChange(open);
     } else {
       setInternalSheetOpen(open);
     }
-    if (open) {
-      setError("");
+  }
+
+  function openSheet() {
+    setOpenSnapshot(createOpenSnapshot());
+    hasUnsavedChangesRef.current = false;
+    suppressNextOutsideDismissRef.current = false;
+    pendingDismissConfirmActionRef.current = null;
+    setDismissConfirmOpen(false);
+    setError("");
+    setSheetOpen(true);
+  }
+
+  function requestDismissConfirm(onConfirm: () => void) {
+    pendingDismissConfirmActionRef.current = onConfirm;
+    setDismissConfirmOpen(true);
+  }
+
+  function handleConfirmDismiss() {
+    const action = pendingDismissConfirmActionRef.current;
+
+    pendingDismissConfirmActionRef.current = null;
+    setDismissConfirmOpen(false);
+    action?.();
+  }
+
+  function handleCancelDismiss() {
+    pendingDismissConfirmActionRef.current = null;
+    setDismissConfirmOpen(false);
+  }
+
+  function closeSheet(
+    confirmBeforeClose: boolean,
+    eventDetails?: AppointmentEditorSheetOpenChangeDetails,
+  ) {
+    if (confirmBeforeClose && suppressNextOutsideDismissRef.current) {
+      suppressNextOutsideDismissRef.current = false;
+      eventDetails?.cancel?.();
       return;
     }
+
+    if (
+      confirmBeforeClose &&
+      (hasUnsavedChangesRef.current || hasUnsavedChanges)
+    ) {
+      eventDetails?.cancel?.();
+      requestDismissConfirm(() => closeSheet(false));
+      return;
+    }
+    setSheetOpen(false);
     resetEditFormState();
   }
+
+  function handleSheetOpenChange(
+    open: boolean,
+    eventDetails?: AppointmentEditorSheetOpenChangeDetails,
+  ) {
+    if (open) {
+      openSheet();
+      return;
+    }
+    closeSheet(true, eventDetails);
+  }
+
+  function requestSheetClose() {
+    closeSheet(true);
+  }
+
+  useEffect(() => {
+    if (!sheetOpen) {
+      return;
+    }
+
+    const handleOutsidePointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) {
+        return;
+      }
+
+      const target = event.target;
+
+      if (!(target instanceof Node)) {
+        return;
+      }
+
+      if (
+        target instanceof Element &&
+        target.closest("[data-overlay-interaction-root]")
+      ) {
+        return;
+      }
+
+      const sheetContents = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-slot="sheet-content"]'),
+      );
+      const activeSheetContent = sheetContents[sheetContents.length - 1];
+
+      if (!activeSheetContent || activeSheetContent.contains(target)) {
+        return;
+      }
+
+      if (!(hasUnsavedChangesRef.current || hasUnsavedChanges)) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      suppressNextOutsideDismissRef.current = true;
+
+      requestDismissConfirm(() => closeSheet(false));
+
+      window.setTimeout(() => {
+        suppressNextOutsideDismissRef.current = false;
+      }, 250);
+    };
+
+    document.addEventListener("pointerdown", handleOutsidePointerDown, true);
+
+    return () => {
+      document.removeEventListener("pointerdown", handleOutsidePointerDown, true);
+    };
+  }, [closeSheet, hasUnsavedChanges, sheetOpen, t.common_overlay_dismiss_blocked]);
 
   const providerSummary =
     providers.find((provider) => provider.id === form.providerId)?.name ??
@@ -545,7 +750,7 @@ function useEditAppointmentSectionContentContent({
             variant="outline"
             size="icon"
             className="size-8 rounded-lg"
-            onClick={() => handleSheetOpenChange(true)}
+            onClick={openSheet}
             aria-label={t.common_edit}
           >
             <Pencil className="size-3.5" />
@@ -606,6 +811,8 @@ function useEditAppointmentSectionContentContent({
       <AppointmentEditorSheet
         open={sheetOpen}
         onOpenChange={handleSheetOpenChange}
+        allowImplicitDismissal
+        dirty={hasUnsavedChanges}
         title={t.appointments_title}
         maxWidthClassName="sm:max-w-[760px]"
         onSubmit={handleSubmit}
@@ -616,7 +823,7 @@ function useEditAppointmentSectionContentContent({
               variant="outline"
               size="sm"
               className="h-8 rounded-lg"
-              onClick={() => handleSheetOpenChange(false)}
+              onClick={requestSheetClose}
             >
               {t.common_cancel}
             </Button>
@@ -641,7 +848,7 @@ function useEditAppointmentSectionContentContent({
           <Input
             value={form.title}
             onChange={(event) =>
-              setForm((current) => ({
+              setFormFromUser((current) => ({
                 ...current,
                 title: event.target.value,
               }))
@@ -654,7 +861,7 @@ function useEditAppointmentSectionContentContent({
             value={form.appointmentType}
             onChange={(event) => {
               const appointmentType = event.target.value as AppointmentKind;
-              setForm((current) => ({
+              setFormFromUser((current) => ({
                 ...current,
                 appointmentType,
                 providerTaxonomyNodeId: "",
@@ -683,7 +890,7 @@ function useEditAppointmentSectionContentContent({
           <NativeComboboxSelect
             value={form.carePathKind}
             onChange={(event) =>
-              setForm((current) => ({
+              setFormFromUser((current) => ({
                 ...current,
                 carePathKind: event.target.value as AppointmentCarePathKind,
               }))
@@ -705,7 +912,7 @@ function useEditAppointmentSectionContentContent({
               type="date"
               value={form.date}
               onChange={(event) =>
-                setForm((current) => ({
+                setFormFromUser((current) => ({
                   ...current,
                   date: event.target.value,
                 }))
@@ -718,7 +925,7 @@ function useEditAppointmentSectionContentContent({
               type="time"
               value={form.timeStart}
               onChange={(event) =>
-                setForm((current) => ({
+                setFormFromUser((current) => ({
                   ...current,
                   timeStart: event.target.value,
                 }))
@@ -731,7 +938,7 @@ function useEditAppointmentSectionContentContent({
               type="time"
               value={form.timeEnd}
               onChange={(event) =>
-                setForm((current) => ({
+                setFormFromUser((current) => ({
                   ...current,
                   timeEnd: event.target.value,
                 }))
@@ -748,7 +955,7 @@ function useEditAppointmentSectionContentContent({
             <NativeComboboxSelect
               value={form.status}
               onChange={(event) =>
-                setForm((current) => ({
+                setFormFromUser((current) => ({
                   ...current,
                   status: event.target.value as AppointmentFormState["status"],
                 }))
@@ -767,7 +974,7 @@ function useEditAppointmentSectionContentContent({
             <NativeComboboxSelect
               value={form.checklistPhase}
               onChange={(event) =>
-                setForm((current) => ({
+                setFormFromUser((current) => ({
                   ...current,
                   checklistPhase: event.target.value,
                 }))
@@ -798,7 +1005,7 @@ function useEditAppointmentSectionContentContent({
                   form.appointmentType,
                   providerTaxonomyNodeId,
                 );
-                setForm((current) => ({
+                setFormFromUser((current) => ({
                   ...current,
                   providerTaxonomyNodeId,
                   providerId: keepProvider ? current.providerId : "",
@@ -820,7 +1027,7 @@ function useEditAppointmentSectionContentContent({
             <NativeComboboxSelect
               value={form.providerId}
               onChange={(event) =>
-                setForm((current) => ({
+                setFormFromUser((current) => ({
                   ...current,
                   providerId: event.target.value,
                   doctorId: "",
@@ -841,7 +1048,7 @@ function useEditAppointmentSectionContentContent({
             <NativeComboboxSelect
               value={form.doctorId}
               onChange={(event) =>
-                setForm((current) => ({
+                setFormFromUser((current) => ({
                   ...current,
                   doctorId: event.target.value,
                 }))
@@ -866,7 +1073,7 @@ function useEditAppointmentSectionContentContent({
             <NativeComboboxSelect
               value={form.ownerUserId}
               onChange={(event) =>
-                setForm((current) => ({
+                setFormFromUser((current) => ({
                   ...current,
                   ownerUserId: event.target.value,
                 }))
@@ -885,7 +1092,7 @@ function useEditAppointmentSectionContentContent({
             <NativeComboboxSelect
               value={form.interpreterId}
               onChange={(event) =>
-                setForm((current) => ({
+                setFormFromUser((current) => ({
                   ...current,
                   interpreterId: event.target.value,
                 }))
@@ -905,7 +1112,7 @@ function useEditAppointmentSectionContentContent({
           <Input
             value={form.location}
             onChange={(event) =>
-              setForm((current) => ({
+              setFormFromUser((current) => ({
                 ...current,
                 location: event.target.value,
               }))
@@ -922,7 +1129,7 @@ function useEditAppointmentSectionContentContent({
               <NativeComboboxSelect
                 value={recurrenceScope}
                 onChange={(event) =>
-                  setRecurrenceScope(
+                  setRecurrenceScopeFromUser(
                     event.target.value as AppointmentRecurringActionScope,
                   )
                 }
@@ -946,7 +1153,7 @@ function useEditAppointmentSectionContentContent({
                 <NativeComboboxSelect
                   value={form.repeatFrequency}
                   onChange={(event) =>
-                    setForm((current) => ({
+                    setFormFromUser((current) => ({
                       ...current,
                       repeatFrequency:
                         event.target.value as AppointmentRecurrenceFrequency,
@@ -973,7 +1180,7 @@ function useEditAppointmentSectionContentContent({
                   pattern="[0-9]*"
                   value={form.repeatInterval}
                   onChange={(event) =>
-                    setForm((current) => ({
+                    setFormFromUser((current) => ({
                       ...current,
                       repeatInterval: event.target.value,
                     }))
@@ -991,7 +1198,7 @@ function useEditAppointmentSectionContentContent({
                   pattern="[0-9]*"
                   value={form.repeatCount}
                   onChange={(event) =>
-                    setForm((current) => ({
+                    setFormFromUser((current) => ({
                       ...current,
                       repeatCount: event.target.value,
                     }))
@@ -1011,7 +1218,7 @@ function useEditAppointmentSectionContentContent({
                   type="date"
                   value={form.repeatUntil}
                   onChange={(event) =>
-                    setForm((current) => ({
+                    setFormFromUser((current) => ({
                       ...current,
                       repeatUntil: event.target.value,
                     }))
@@ -1031,6 +1238,15 @@ function useEditAppointmentSectionContentContent({
         <ScheduleWarningsPanel warnings={localWarnings} />
         </div>
       </AppointmentEditorSheet>
+      <DirtyDismissConfirmDialog
+        open={dismissConfirmOpen}
+        title={t.common_discard_unsaved_confirm}
+        message={t.common_overlay_dismiss_blocked}
+        cancelLabel={t.common_cancel}
+        confirmLabel={t.common_ok}
+        onCancel={handleCancelDismiss}
+        onConfirm={handleConfirmDismiss}
+      />
     </>
   );
 }

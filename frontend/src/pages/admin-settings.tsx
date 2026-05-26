@@ -962,7 +962,11 @@ function useAdminSettingsPageContent() {
         ) : null}
       </div>
 
-      <Sheet open={Boolean(selectedGroup)} onOpenChange={handleGroupSheetOpenChange}>
+      <Sheet
+        open={Boolean(selectedGroup)}
+        onOpenChange={handleGroupSheetOpenChange}
+        dirty={groupHasChanges}
+      >
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[860px]">
           <AdminSheetScaffold
             title={selectedGroup ? tr[selectedGroup.titleKey] : t.settings_title}
@@ -973,7 +977,7 @@ function useAdminSettingsPageContent() {
                   type="button"
                   variant="outline"
                   className="h-9 rounded-lg"
-                  onClick={closeGroupSheet}
+                  onClick={() => handleGroupSheetOpenChange(false)}
                 >
                   {t.common_cancel}
                 </Button>

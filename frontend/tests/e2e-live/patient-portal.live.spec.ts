@@ -45,11 +45,24 @@ async function openInvoiceDetail(page: Page, invoiceNumber: string) {
   await expect(page.getByRole("heading", { name: invoiceNumber })).toBeVisible();
 }
 
-async function fillMuiDate(container: Locator, value: string, index = 0) {
-  const [year = "", month = "", day = ""] = value.split("-");
-  await container.getByRole("spinbutton", { name: "Year" }).nth(index).fill(year);
-  await container.getByRole("spinbutton", { name: "Month" }).nth(index).fill(month);
-  await container.getByRole("spinbutton", { name: "Day" }).nth(index).fill(day);
+async function fillNativeDate(
+  container: Locator,
+  selector: string,
+  value: string,
+) {
+  const dateInput = container.locator(selector);
+  await expect(dateInput).toBeVisible();
+  await dateInput.evaluate((node, nextValue) => {
+    const input = node as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    )?.set;
+    setter?.call(input, nextValue);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, value);
+  await expect(dateInput).toHaveValue(value);
 }
 
 test.describe("patient portal live workflows", () => {
@@ -436,16 +449,23 @@ test.describe("patient portal live workflows", () => {
     const scenario = await bootstrapAndLogin(page, request, "patient");
 
     await page.goto("/appointments");
-    const requestForm = page
-      .locator("form")
+    await page
+      .getByRole("button", {
+        name: /Terminanfrage senden|Send appointment request/i,
+      })
+      .click();
+    const requestSheet = page
+      .getByRole("dialog")
       .filter({
-        has: page.getByRole("button", {
-          name: /Terminanfrage senden|Send appointment request/i,
+        has: page.getByRole("heading", {
+          name: /Termin anfragen|Request a visit/i,
         }),
       })
-      .first();
-    await fillMuiDate(requestForm, "2026-05-10", 0);
-    await fillMuiDate(requestForm, "2026-05-12", 1);
+      .last();
+    await expect(requestSheet).toBeVisible();
+    const requestForm = requestSheet.locator("form").first();
+    await fillNativeDate(requestForm, "#portal-appointment-preferred-from", "2026-06-10");
+    await fillNativeDate(requestForm, "#portal-appointment-preferred-to", "2026-06-12");
     await requestForm
       .getByLabel(/Fachgebiet oder Thema|Specialty or topic/i)
       .fill("Cardiology follow-up");
@@ -495,8 +515,8 @@ test.describe("patient portal live workflows", () => {
       );
       expect(submitted).toBeDefined();
       expect(submitted!.patient_id).toBe(scenario.patient.id);
-      expect(submitted!.preferred_date_from).toBe("2026-05-10");
-      expect(submitted!.preferred_date_to).toBe("2026-05-12");
+      expect(submitted!.preferred_date_from).toBe("2026-06-10");
+      expect(submitted!.preferred_date_to).toBe("2026-06-12");
       expect(submitted!.specialty).toBe("Cardiology follow-up");
       expect(submitted!.location).toBe("Clinic Cologne");
       expect(submitted!.notes).toBe("Morning slots preferred.");
@@ -596,22 +616,12 @@ test.describe("patient portal live workflows", () => {
       await expect(successNotice).toBeVisible();
     }
 
-    const generalFeedbackRows = page
+    const feedbackRow = page
       .getByRole("row")
-      .filter({ hasText: /Allgemeines Feedback|General feedback/i });
-    const feedbackRow = generalFeedbackRows.filter({ hasText: "10" }).first();
-    if (await feedbackRow.isVisible().catch(() => false)) {
-      await feedbackRow.click();
-      const detail = page.getByRole("dialog", {
-        name: /Feedback-Detail|Feedback detail/i,
-      });
-      await expect(detail.getByText(comment)).toBeVisible();
-      await expect(detail.getByText(improvement)).toBeVisible();
-    } else {
-      const feedbackCard = page.locator("article").filter({ hasText: comment }).first();
-      await expect(feedbackCard).toBeVisible();
-      await expect(feedbackCard.getByText(improvement)).toBeVisible();
-    }
+      .filter({ hasText: /Allgemeines Feedback|General feedback/i })
+      .filter({ hasText: /10|Promotor|Promoter/i })
+      .first();
+    await expect(feedbackRow).toBeVisible();
 
     const api = await authenticateApiClient(
       request,

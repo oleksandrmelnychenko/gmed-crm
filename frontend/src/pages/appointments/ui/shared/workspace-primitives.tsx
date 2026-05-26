@@ -1,4 +1,4 @@
-import { useId, type FormEvent, type ReactNode } from "react";
+import { useId, type ComponentProps, type FormEvent, type ReactNode } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import {
@@ -12,6 +12,10 @@ import {
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { appointmentPreviewInfoCardClassName } from "@/pages/appointments/appearance/surface-appearance";
+
+export type AppointmentEditorSheetOpenChangeDetails = Parameters<
+  NonNullable<ComponentProps<typeof Sheet>["onOpenChange"]>
+>[1];
 
 export function AppointmentWorkspaceSectionIntro({
   title,
@@ -78,6 +82,8 @@ export function AppointmentClinicalToggleCard({
 export function AppointmentEditorSheet({
   open,
   onOpenChange,
+  allowImplicitDismissal,
+  dirty,
   title,
   description,
   maxWidthClassName = "sm:max-w-[560px]",
@@ -86,7 +92,12 @@ export function AppointmentEditorSheet({
   footer,
 }: {
   open: boolean;
-  onOpenChange: (open: boolean) => void;
+  onOpenChange: (
+    open: boolean,
+    eventDetails?: AppointmentEditorSheetOpenChangeDetails,
+  ) => void;
+  allowImplicitDismissal?: boolean;
+  dirty?: boolean;
   title: ReactNode;
   description?: ReactNode;
   maxWidthClassName?: string;
@@ -107,7 +118,12 @@ export function AppointmentEditorSheet({
   );
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet
+      open={open}
+      onOpenChange={onOpenChange}
+      allowImplicitDismissal={allowImplicitDismissal}
+      dirty={dirty}
+    >
       <SheetContent
         side="right"
         className={cn("w-full border-l border-border p-0", maxWidthClassName)}
