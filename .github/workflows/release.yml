@@ -6,8 +6,8 @@ name: Release
 #
 # Why a separate workflow:
 #   - The CI workflow (.github/workflows/ci.yml) does a smoke `docker
-#     build` for correctness; it does not push, sign, or build the ARM
-#     target. Mixing the two slows every PR.
+#     build` for correctness; it does not push or sign release images.
+#     Mixing the two slows every PR.
 #   - Push and OIDC permissions are scoped here so PR builds from forks
 #     never get write access to GHCR or Sigstore.
 #
@@ -42,11 +42,10 @@ env:
 
 jobs:
   build-and-sign:
-    # ubuntu-24.04-arm matches the cax21 server target so the Rust
-    # build runs natively (no QEMU emulation). If the runner is not
-    # available in this repo's billing tier, switch to ubuntu-latest
-    # + QEMU and accept the ~30-minute backend build.
-    runs-on: ubuntu-24.04-arm
+    # DEV and PROD Hetzner hosts use x86_64 CPX instances, so release
+    # images are built for linux/amd64. Add linux/arm64 only if the
+    # fleet moves back to CAX/ARM or you intentionally run mixed hosts.
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -95,7 +94,7 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
-          platforms: linux/arm64
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -144,10 +143,8 @@ jobs:
         uses: sigstore/cosign-installer@v3
 
       - name: Sign image (keyless)
-        # Sign EACH digest produced by docker/metadata-action — this
-        # is one digest per platform; we only build arm64 so it is
-        # just one ref, but the loop keeps the workflow ready for a
-        # multi-arch follow-up.
+        # Sign EACH digest produced by docker/metadata-action. We build
+        # amd64 only today; the loop stays ready for a multi-arch follow-up.
         env:
           COSIGN_EXPERIMENTAL: '1'
           DIGEST: ${{ steps.build.outputs.digest }}

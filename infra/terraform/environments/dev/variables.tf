@@ -124,6 +124,7 @@ variable "ssm_parameter_names" {
     message_encryption_key_active = string
     audit_ip_salt                 = string
     cors_origin                   = string
+    lead_intake_token             = optional(string, "")
   })
   description = "SSM parameter names with app secrets/config"
 }

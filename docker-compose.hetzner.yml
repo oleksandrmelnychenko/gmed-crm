@@ -3,9 +3,9 @@
 #
 # What it does:
 #   - Adds Caddy as the TLS-terminating edge proxy.
-#   - Drops the public port mappings on backend and frontend so the only
-#     ingress is Caddy on 80/443 (defence in depth: even if the firewall
-#     leaks, the upstream services are not reachable).
+#   - Drops the public port mappings on postgres, backend and frontend so
+#     the only ingress is Caddy on 80/443 (defence in depth: even if the
+#     firewall leaks, the upstream services are not reachable).
 #   - Turns on TRUST_FORWARDED_HEADERS for the backend so rate limiting
 #     keys off the real client IP, not the inter-container hop.
 #
@@ -17,10 +17,13 @@
 #     up -d --build
 
 services:
+  postgres:
+    ports: !reset []
+
   backend:
     # !reset clears the host port bindings declared in
-    # docker-compose.release.yml. The backend remains reachable on the
-    # internal docker network at `backend:3000`.
+    # base/release compose files. Services remain reachable on the
+    # internal docker network.
     ports: !reset []
     environment:
       TRUST_FORWARDED_HEADERS: "true"
@@ -57,10 +60,10 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      # Caddy serves the admin endpoint locally on :2019 by default; we
-      # check the public ACME-ready endpoint instead so the probe also
-      # validates the cert loop.
-      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/ || exit 1"]
+      # Caddy serves the admin endpoint locally on :2019 by default.
+      # Probe that endpoint so container health does not depend on
+      # public DNS resolution from inside the Docker network.
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:2019/config/ || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5

@@ -96,6 +96,7 @@ required_keys=(
   GMED_MESSAGE_ENCRYPTION_KEYS
   GMED_MESSAGE_ENCRYPTION_KEY_ACTIVE
   GMED_AUDIT_IP_SALT
+  GMED_LEAD_INTAKE_TOKEN
   GMED_CORS_ORIGIN
   CADDY_HOSTNAME
   ACME_EMAIL
@@ -123,6 +124,11 @@ set -a
 # shellcheck disable=SC1090
 . "$RELEASE_ENV"
 set +a
+
+if [[ "${PROD_EMPTY_DATABASE_ON_FIRST_DEPLOY:-false}" == "true" && -z "${PROD_ADMIN_PASSWORD:-}" ]]; then
+  echo "ERROR: PROD_EMPTY_DATABASE_ON_FIRST_DEPLOY=true requires PROD_ADMIN_PASSWORD in secrets.sops.yaml" >&2
+  exit 1
+fi
 
 # Ensure backup tooling is present. rclone and age are tiny; apt-get
 # install is a fast no-op when already installed.
@@ -209,17 +215,58 @@ else
   rm -f /etc/cron.d/gmed-app-healthcheck
 fi
 
+compose_cmd=(
+  docker compose
+  --env-file "$RELEASE_ENV"
+  -f docker-compose.yml
+  -f docker-compose.release.yml
+  -f docker-compose.hetzner.yml
+  -f docker-compose.prod-hetzner.yml
+  -f docker-compose.ghcr.yml
+)
+
+wait_for_compose_service_healthy() {
+  local service="$1"
+  local cid=""
+  local status=""
+
+  for attempt in {1..120}; do
+    cid="$("${compose_cmd[@]}" ps -q "$service" 2>/dev/null || true)"
+    if [[ -n "$cid" ]]; then
+      status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid" 2>/dev/null || true)"
+      if [[ "$status" == "healthy" || "$status" == "running" ]]; then
+        return 0
+      fi
+    fi
+
+    if [[ "$attempt" -eq 120 ]]; then
+      echo "ERROR: compose service '$service' did not become healthy after 120 seconds (last status: ${status:-unknown})." >&2
+      "${compose_cmd[@]}" logs --tail=100 "$service" || true
+      exit 1
+    fi
+
+    sleep 1
+  done
+}
+
 # Bring (or keep) services up. No --build: PROD pulls cosign-verified
 # images, never builds them locally. The ghcr override is layered LAST
 # so its `image:` directives win over any inherited `build:` block.
-docker compose \
-  --env-file "$RELEASE_ENV" \
-  -f docker-compose.yml \
-  -f docker-compose.release.yml \
-  -f docker-compose.hetzner.yml \
-  -f docker-compose.prod-hetzner.yml \
-  -f docker-compose.ghcr.yml \
-  up -d --remove-orphans
+"${compose_cmd[@]}" up -d --remove-orphans
+
+if [[ "${PROD_EMPTY_DATABASE_ON_FIRST_DEPLOY:-false}" == "true" ]]; then
+  sanitizer_marker="${PROD_EMPTY_DATABASE_MARKER:-/etc/gmed/prod-db-sanitized}"
+  if [[ ! -e "$sanitizer_marker" || "${PROD_EMPTY_DATABASE_FORCE:-false}" == "true" ]]; then
+    # The backend healthcheck only passes after DB migrations have run.
+    # Stop public app services while the one-time data wipe executes.
+    wait_for_compose_service_healthy backend
+    "${compose_cmd[@]}" stop caddy frontend backend
+    bash "$REPO_DIR/scripts/sanitize-prod-db.sh"
+    "${compose_cmd[@]}" up -d --remove-orphans
+  else
+    echo "Production DB sanitizer marker exists ($sanitizer_marker); data sanitizer skipped."
+  fi
+fi
 
 if [[ -x "$REPO_DIR/scripts/ensure-prod-metrics-user.sh" ]]; then
   "$REPO_DIR/scripts/ensure-prod-metrics-user.sh"

@@ -32,6 +32,7 @@ ssm_parameter_names = {
   message_encryption_key_active = "/gmed/dev/MESSAGE_ENCRYPTION_KEY_ACTIVE"
   audit_ip_salt                 = "/gmed/dev/AUDIT_IP_SALT"
   cors_origin                   = "/gmed/dev/CORS_ORIGIN"
+  lead_intake_token             = "/gmed/dev/LEAD_INTAKE_TOKEN"
 }
 
 monthly_budget_usd  = 60

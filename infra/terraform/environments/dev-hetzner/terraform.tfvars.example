@@ -8,15 +8,13 @@
 project_name = "gmed"
 environment  = "dev"
 
-# Falkenstein DC14. For Nuremberg use nbg1-dc3. DE only — the compute
-# module fails the plan otherwise.
-datacenter = "fsn1-dc14"
+# Nuremberg DC3. DE only — the compute module fails the plan otherwise.
+datacenter = "nbg1-dc3"
 
-# cax31  = ARM 8 vCPU / 16 GB ~€12.49/mo  (default — comfortable iteration)
-# cax21  = ARM 4 vCPU / 8 GB  ~€6.49/mo   (tighter, slower Rust builds)
-# cax11  = ARM 2 vCPU / 4 GB  ~€3.79/mo   (very tight)
-# cax41  = ARM 16 vCPU / 32 GB ~€24.49/mo (only if you regularly run e2e in parallel)
-server_type = "cax31"
+# cpx32 = x86_64 DEV baseline. It matches the release workflow
+# architecture, so DEV can either build locally on host or pull the same
+# digest-pinned GHCR release images as PROD.
+server_type = "cpx32"
 
 image = "ubuntu-24.04"
 

@@ -21,7 +21,7 @@ locals {
   ami_id = var.ami_id != "" ? var.ami_id : data.aws_ami.ubuntu.id
 
   ssm_parameter_arns = [
-    for name in values(var.ssm_parameter_names) :
+    for name in compact(values(var.ssm_parameter_names)) :
     "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/${trimprefix(name, "/")}"
   ]
 
@@ -127,6 +127,7 @@ resource "aws_instance" "app" {
     active_key_param   = var.ssm_parameter_names.message_encryption_key_active
     audit_salt_param   = var.ssm_parameter_names.audit_ip_salt
     cors_origin_param  = var.ssm_parameter_names.cors_origin
+    lead_token_param   = var.ssm_parameter_names.lead_intake_token
   })
 
   tags = merge(var.tags, {

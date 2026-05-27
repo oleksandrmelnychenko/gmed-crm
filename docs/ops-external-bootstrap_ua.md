@@ -32,7 +32,7 @@
 4. `scripts/resolve-ghcr-digests.sh <tag>`
    - дістає digest-pinned GHCR refs без Docker daemon;
    - друкує готові `GMED_BACKEND_IMAGE` / `GMED_FRONTEND_IMAGE` для
-     PROD SOPS bundle.
+     DEV smoke test і PROD SOPS bundle.
 
 ## Що лишається ручним або token-driven
 
@@ -85,4 +85,6 @@ scripts/bootstrap-remote-host.sh monitoring <monitoring-ip> ~/.config/sops/age/g
 scripts/resolve-ghcr-digests.sh vYYYY.MM.DD
 ```
 
-Скопіюй output у PROD `secrets.sops.yaml`, re-encrypt, commit, deploy.
+Спочатку можна скопіювати output у DEV `secrets.sops.yaml` і запустити
+`scripts/deploy-dev.sh`, потім той самий output у PROD
+`secrets.sops.yaml`, re-encrypt, commit, deploy.

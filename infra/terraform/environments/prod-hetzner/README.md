@@ -2,15 +2,16 @@
 
 Single-server PROD. The architecture intentionally mirrors DEV; what
 makes this PROD are the **operational controls** layered on top:
-distinct Hetzner project, native daily backups, no PII in DEV, manual
-deploy (no secrets in TF state).
+distinct Hetzner project, native root-disk backups, a dedicated
+Postgres Volume, encrypted off-host database backups, no PII in DEV,
+and manual deploy with no PROD secrets in TF state.
 
 - **Host:** `console.gmed-health.com` → single Hetzner server.
-- **Backups:** Hetzner native daily snapshots (7-day retention).
+- **Backups:** Hetzner native root-disk snapshots plus nightly encrypted
+  Postgres dumps to Hetzner Object Storage.
 - **Deploy:** manual via `scripts/deploy-prod.sh` after first apply.
-- **Phase 3 (started):** encrypted off-host backups to Hetzner Object
-  Storage (this commit). Next: Postgres on Hetzner Volume,
-  monitoring server, Tailscale, GHCR images.
+- **Images:** digest-pinned GHCR release images, verified by cosign
+  before Compose reconciles the stack.
 
 ## Prerequisites
 
@@ -53,6 +54,8 @@ openssl rand -base64 32   # → POSTGRES_PASSWORD
 openssl rand -base64 48   # → GMED_JWT_SECRET
 openssl rand -base64 32   # → GMED_MESSAGE_ENCRYPTION_KEYS (v1 entry)
 openssl rand -base64 32   # → GMED_AUDIT_IP_SALT
+openssl rand -base64 32   # → GMED_LEAD_INTAKE_TOKEN
+openssl rand -base64 32   # → PROD_ADMIN_PASSWORD
 
 sops -e -i secrets.sops.yaml
 ```
@@ -131,12 +134,20 @@ The script:
    Healthchecks.io `/health` ping cron if `HEALTHCHECKS_PING_URL` is
    set.
 5. `docker compose up -d` with digest-pinned GHCR images.
-6. Creates / rotates the read-only `postgres_exporter` role via
+6. If `PROD_EMPTY_DATABASE_ON_FIRST_DEPLOY=true` and
+   `/etc/gmed/prod-db-sanitized` does not exist, waits for migrations,
+   stops public app services, removes business/demo rows, and leaves
+   only `PROD_ADMIN_EMAIL`. The sanitizer also records
+   key `prod_db_sanitized_at` in `system_settings`, so a restored PROD
+   database is protected even if the host marker file is missing.
+7. Creates / rotates the read-only `postgres_exporter` role via
    `scripts/ensure-prod-metrics-user.sh`.
-7. Prunes dangling images older than 24h.
+8. Prunes dangling images older than 24h.
 
 It is idempotent — re-running on a healthy host is a `git pull` plus
-a compose reconciliation.
+a compose reconciliation. The one-time data sanitizer is marker-gated
+and will not run again unless both the marker and DB guard are
+deliberately bypassed.
 
 ### 9. Healthchecks ping cron
 
@@ -153,7 +164,7 @@ server — it only exists on your laptop / 1Password, so a server
 compromise cannot read the archive.
 
 **a. Create the bucket.** Hetzner Console → Object Storage → Create
-Bucket. Pick the same region as the server (`fsn1`). After creation,
+Bucket. Pick the same region as the server (`nbg1` by default). After creation,
 go into the bucket settings and enable **Versioning** (so a malicious
 delete creates a delete marker instead of removing history). Object
 Lock GA status varies — enable it if your region supports it, defer to
@@ -236,16 +247,17 @@ curl -v https://console.gmed-health.com/health
 
 | Resource                    | Monthly (EUR) |
 | --------------------------- | ------------- |
-| cax31 server                | 12.49         |
-| Hetzner backups (20% of $$) | 2.50          |
+| cpx42 server                | current Hetzner price |
+| Hetzner backups (20% of server) | current Hetzner price |
 | Primary IPv4                | 0.50          |
 | Postgres Volume (50 GB)     | 2.40          |
 | Object Storage (1 TB tier)  | 5.99          |
-| **Total**                   | **~23.90**    |
+| **Total**                   | check current Hetzner pricing |
 
-Cross-environment cost (DEV + PROD + Monitoring) ~€44/mo of the €70
-envelope. Headroom ~€26 for traffic spikes, larger Volume, second
-Object Storage region, or a future PROD upsize to cax41.
+Cross-environment cost depends on the selected PROD server class and
+current Hetzner pricing. Keep headroom for traffic spikes, a larger
+Volume, a second Object Storage region, or a future dedicated database
+host.
 
 ## Operations
 
@@ -372,8 +384,8 @@ sudo shred -u /etc/gmed/backup-age.key
 
 PROD never runs `docker build`. The
 [`release` workflow](../../../../.github/workflows/release.yml) builds
-`ghcr.io/<repo>-server` and `ghcr.io/<repo>-frontend` images natively
-on `ubuntu-24.04-arm`, pushes them to the GitHub Container Registry,
+`ghcr.io/<repo>-server` and `ghcr.io/<repo>-frontend` linux/amd64 images,
+pushes them to the GitHub Container Registry,
 and signs each digest with [cosign keyless](https://docs.sigstore.dev/cosign/signing/overview/)
 (no signing key to manage; the signature carries the GitHub OIDC
 certificate identity).
@@ -411,7 +423,12 @@ Pin in PROD release.env:
   GMED_FRONTEND_IMAGE=ghcr.io/oleksandrmelnychenko/gmed-crm-frontend@sha256:def456...
 ```
 
-**Step 2.** Update `secrets.sops.yaml`:
+**Step 2.** Optional but recommended: promote the same digest-pinned
+refs to DEV first by setting `GMED_BACKEND_IMAGE` and
+`GMED_FRONTEND_IMAGE` in the DEV SOPS bundle, then running
+`scripts/deploy-dev.sh` on the DEV host.
+
+**Step 3.** Update PROD `secrets.sops.yaml`:
 
 ```bash
 cd infra/terraform/environments/prod-hetzner
@@ -423,7 +440,7 @@ git commit -am "prod: pin release sha-abc123"
 git push
 ```
 
-**Step 3.** SSH to the host (via tailnet) and run the deploy script.
+**Step 4.** SSH to the host (via tailnet) and run the deploy script.
 It pulls + verifies + reconciles compose:
 
 ```bash

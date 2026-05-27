@@ -56,6 +56,7 @@ Bootstrap script expects these parameter names:
 - `MESSAGE_ENCRYPTION_KEY_ACTIVE`
 - `AUDIT_IP_SALT`
 - `CORS_ORIGIN`
+- `LEAD_INTAKE_TOKEN` if the public website should submit leads into CRM
 
 The instance role is granted read access to these parameters.
 

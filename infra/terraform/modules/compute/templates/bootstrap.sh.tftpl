@@ -49,6 +49,10 @@ MESSAGE_ENCRYPTION_KEYS="$(fetch_ssm "${keys_param}")"
 MESSAGE_ENCRYPTION_KEY_ACTIVE="$(fetch_ssm "${active_key_param}")"
 AUDIT_IP_SALT="$(fetch_ssm "${audit_salt_param}")"
 CORS_ORIGIN="$(fetch_ssm "${cors_origin_param}")"
+LEAD_INTAKE_TOKEN=""
+if [[ -n "${lead_token_param}" ]]; then
+  LEAD_INTAKE_TOKEN="$(fetch_ssm "${lead_token_param}")"
+fi
 
 cat > /opt/gmed/release.env <<EOF
 GMED_DATABASE_URL=$${DATABASE_URL}
@@ -57,6 +61,7 @@ GMED_MESSAGE_ENCRYPTION_KEYS=$${MESSAGE_ENCRYPTION_KEYS}
 GMED_MESSAGE_ENCRYPTION_KEY_ACTIVE=$${MESSAGE_ENCRYPTION_KEY_ACTIVE}
 GMED_AUDIT_IP_SALT=$${AUDIT_IP_SALT}
 GMED_CORS_ORIGIN=$${CORS_ORIGIN}
+GMED_LEAD_INTAKE_TOKEN=$${LEAD_INTAKE_TOKEN}
 BACKEND_PORT=${backend_port}
 FRONTEND_PORT=${frontend_port}
 EOF

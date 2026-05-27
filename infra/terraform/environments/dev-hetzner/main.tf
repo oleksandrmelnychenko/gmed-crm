@@ -1,15 +1,12 @@
 # Hetzner Cloud — DEV environment.
 #
-# Scope (Phase 0): one server with a hardened OS, Docker installed, and
-# inbound SSH/80/443 only. The application is NOT deployed yet; that
-# arrives in a follow-up commit together with sops-based secret
-# management and the Caddy edge proxy.
+# Scope: one server with a hardened OS, Docker, sops-based secrets,
+# Caddy edge proxy, app containers, and DEV observability sidecars.
 #
 # DEV ≠ "PROD with smaller numbers". DEV exists to validate the same
 # mechanisms (TF modules, bootstrap, firewall shape, Hetzner Project
-# isolation) before promoting them to PROD. The differences from PROD
-# are deliberately listed in tfvars (e.g. backups off, admin IP list
-# instead of Tailscale, no private network).
+# isolation) before promoting them to PROD. DEV keeps backups off and
+# allows local host builds by default; PROD uses signed GHCR images.
 
 terraform {
   required_version = ">= 1.6.0"

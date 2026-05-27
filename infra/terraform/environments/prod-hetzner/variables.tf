@@ -11,20 +11,18 @@ variable "environment" {
 variable "datacenter" {
   type        = string
   description = "Hetzner datacenter. Locked to DE in the compute module precondition."
-  default     = "fsn1-dc14"
+  default     = "nbg1-dc3"
 }
 
 variable "server_type" {
   type        = string
   description = <<-EOT
-    Hetzner Cloud server type. cax31 (8 vCPU / 16 GB ARM, ~€12.49/mo
-    + 20% native backups) is the PROD default — comfortable for app +
-    Postgres + Caddy + frontend co-tenant, with headroom for spikes
-    and for the Rust runtime to keep more state in RAM. Downsize to
-    cax21 only if Object Storage offload + monitoring show sustained
-    underutilisation.
+    Hetzner Cloud server type. cpx42 (x86_64) is the PROD default so
+    one release image architecture can run on both DEV and PROD. It is
+    comfortable for the app + Postgres + Caddy + frontend co-tenant
+    while keeping the GitHub release workflow on standard amd64 runners.
   EOT
-  default     = "cax31"
+  default     = "cpx42"
 }
 
 variable "image" {

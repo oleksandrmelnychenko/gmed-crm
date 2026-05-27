@@ -3,9 +3,9 @@
 # Mirrors the dev-hetzner composition but with PROD-grade settings:
 #
 #   - `enable_backups = true` switches on Hetzner-native daily snapshots
-#     (~20% surcharge, 7-day retention). This is the only data-protection
-#     control in Phase 2; encrypted off-host backups to Object Storage
-#     and a Postgres Volume arrive in Phase 3.
+#     for the server root disk. Postgres data lives on a dedicated
+#     Hetzner Volume and is protected by encrypted off-host pg_dump
+#     backups, not by server snapshots.
 #
 #   - `deploy_app = false`. The bootstrap script provisions the OS,
 #     installs Docker, hardens SSH/sysctl/fail2ban — and stops. It does
@@ -61,7 +61,7 @@ locals {
   name_prefix = "${var.project_name}-${var.environment}"
 
   # The Postgres volume must be in the same Hetzner location as the
-  # server. var.datacenter is "fsn1-dc14"; the location prefix is "fsn1".
+  # server. var.datacenter is "nbg1-dc3"; the location prefix is "nbg1".
   location = split("-", var.datacenter)[0]
 
   labels = {

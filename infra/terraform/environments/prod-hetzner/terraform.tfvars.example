@@ -17,13 +17,13 @@
 project_name = "gmed"
 environment  = "prod"
 
-# Falkenstein DC14. For Nuremberg use nbg1-dc3. DE only.
-datacenter = "fsn1-dc14"
+# Nuremberg DC3. DE only.
+datacenter = "nbg1-dc3"
 
-# cax31 (8 vCPU / 16 GB ARM, ~€12.49/mo + 20% native backups) is the
-# default. Comfortable for the full PROD stack on one box plus headroom
-# for spikes. Downsize to cax21 only after monitoring confirms it.
-server_type = "cax31"
+# cpx42 (x86_64) matches the release workflow architecture and keeps
+# PROD at the 16 GB RAM class. The same GHCR build can be promoted to
+# both DEV and PROD because both are amd64 hosts.
+server_type = "cpx42"
 
 image = "ubuntu-24.04"
 

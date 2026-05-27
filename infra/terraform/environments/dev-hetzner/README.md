@@ -1,6 +1,6 @@
 # DEV on Hetzner Cloud
 
-Provisions and deploys the DEV environment on Hetzner Cloud (Falkenstein).
+Provisions and deploys the DEV environment on Hetzner Cloud (Nuremberg).
 
 - **Host:** `console-dev.gmed-health.com` → single Hetzner server.
 - **Phase 0:** OS hardening, Docker, non-root user, fail2ban, sysctl.
@@ -49,6 +49,7 @@ $EDITOR secrets.sops.yaml          # fill in real values
 openssl rand -base64 48              # -> GMED_JWT_SECRET
 openssl rand -base64 32              # -> v1 key for GMED_MESSAGE_ENCRYPTION_KEYS
 openssl rand -base64 32              # -> GMED_AUDIT_IP_SALT
+openssl rand -base64 32              # -> GMED_LEAD_INTAKE_TOKEN
 
 # Encrypt in place. After this, opening the file shows ciphertext.
 sops -e -i secrets.sops.yaml
@@ -132,9 +133,9 @@ curl -v https://console-dev.gmed-health.com/health
 
 | Resource     | Monthly (EUR) |
 | ------------ | ------------- |
-| cax31 server | 12.49         |
+| cpx32 server | current Hetzner price |
 | Primary IPv4 | 0.50          |
-| **Total**    | **~13**       |
+| **Total**    | check current Hetzner pricing |
 
 Hetzner-native backups are off in DEV. Flip `enable_backups` in
 `modules/hcloud-compute` for an extra ~20% if needed.
@@ -154,20 +155,32 @@ sops secrets.sops.yaml      # add a v2 entry; flip ACTIVE to v2
 ```bash
 ssh gmed@<ip>
 cd /opt/gmed/repo
-sudo git pull
-SOPS_AGE_KEY_FILE=/etc/gmed/age.key sudo -E sops -d --output-type dotenv \
-  infra/terraform/environments/dev-hetzner/secrets.sops.yaml \
-  | sudo tee /opt/gmed/release.env > /dev/null
-sudo chmod 600 /opt/gmed/release.env
-sudo docker compose --env-file /opt/gmed/release.env \
-  -f docker-compose.yml -f docker-compose.release.yml -f docker-compose.hetzner.yml \
-  up -d
+sudo bash /opt/gmed/repo/scripts/deploy-dev.sh
 ```
 
 **Step 3.** After the new key is active, run the in-app rewrap sweep
 (`/admin/security/key-rotation` route in
 [`crates/server/src/routes/key_rotation.rs`](../../../../crates/server/src/routes/key_rotation.rs))
 to migrate stored ciphertexts.
+
+### Deploy the same release image as PROD
+
+By default `scripts/deploy-dev.sh` builds images on the DEV host from
+the checked-out branch. To smoke-test the exact GHCR release that will
+go to PROD, set both optional image pins in the DEV SOPS bundle:
+
+```bash
+GMED_BACKEND_IMAGE=ghcr.io/oleksandrmelnychenko/gmed-crm-server@sha256:...
+GMED_FRONTEND_IMAGE=ghcr.io/oleksandrmelnychenko/gmed-crm-frontend@sha256:...
+```
+
+Then re-run:
+
+```bash
+ssh gmed@console-dev.gmed-health.com sudo /opt/gmed/repo/scripts/deploy-dev.sh
+```
+
+Leave both values empty to return DEV to local host builds.
 
 ### Reset cloud-init
 
@@ -191,7 +204,7 @@ This destroys and recreates the server (the Primary IPv4 survives).
 | SSH               | admin IP allow-list         | closed; via Tailscale             |
 | Hetzner backups   | off                         | on                                |
 | Postgres location | docker volume on root disk  | dedicated server + Hetzner Volume |
-| Image build       | on host (fast iteration)    | prebuilt GHCR, cosign-verified    |
+| Image build       | on host by default; optional GHCR pins | prebuilt GHCR, cosign-verified    |
 | age key delivery  | via TF (`age_private_key`)  | out-of-band SSH post-boot         |
 | Object Lock       | off                         | on, for audit-log bucket          |
 | Real PII allowed? | never                       | yes                               |

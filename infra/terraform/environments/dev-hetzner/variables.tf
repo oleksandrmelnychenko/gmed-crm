@@ -11,13 +11,13 @@ variable "environment" {
 variable "datacenter" {
   type        = string
   description = "Hetzner datacenter. Locked to DE in the compute module precondition."
-  default     = "fsn1-dc14"
+  default     = "nbg1-dc3"
 }
 
 variable "server_type" {
   type        = string
-  description = "Hetzner Cloud server type. cax31 (8 vCPU / 16 GB ARM, ~€12.49/mo) gives comfortable iteration headroom for the Rust build chain + Docker compose stack on one box."
-  default     = "cax31"
+  description = "Hetzner Cloud server type. cpx32 (x86_64) gives comfortable DEV iteration headroom and matches the release workflow architecture."
+  default     = "cpx32"
 }
 
 variable "image" {
