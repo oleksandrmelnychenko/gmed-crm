@@ -123,6 +123,12 @@ const SopsPage = lazy(() =>
   })),
 );
 
+const SalesPeoplePage = lazy(() =>
+  import("@/pages/sales-people").then((module) => ({
+    default: module.SalesPeoplePage,
+  })),
+);
+
 const PatientDetailPage = lazy(() =>
   import("@/pages/patients/detail-entry").then((module) => ({
     default: module.PatientDetailPage,
@@ -230,6 +236,7 @@ export default function App() {
                     <Route path="chat" element={<ChatPage />} />
                     <Route path="reports" element={<ReportsPage />} />
                     <Route path="sops" element={<SopsPage />} />
+                    <Route path="sales/people" element={<SalesPeoplePage />} />
                     <Route path="leads" element={<LeadsPage />} />
                     <Route path="patients" element={<PatientsPage />} />
                     <Route path="patients/:id" element={<PatientDetailPage />} />

@@ -6,6 +6,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   type ReactNode,
   type FormEvent,
   useReducer,
@@ -881,9 +882,24 @@ function useStaffServicesPageContent() {
     [createForm.taxonomyNodeId, providers],
   );
 
+  const lastAutoTitleRef = useRef<string>("");
+
+  const handleServiceKindChange = (nextKind: string) => {
+    const nextAutoTitle = serviceKindLabel(nextKind, t);
+    const previousAutoTitle = lastAutoTitleRef.current;
+    setCreateForm((current) => {
+      const userEditedTitle =
+        current.title.trim().length > 0 && current.title !== previousAutoTitle;
+      const nextTitle = userEditedTitle ? current.title : nextAutoTitle;
+      return { ...current, serviceKind: nextKind, title: nextTitle };
+    });
+    lastAutoTitleRef.current = nextAutoTitle;
+  };
+
   const openCreateSheet = useCallback(() => {
     setCreateError("");
     setCreateForm(blankCreateServiceForm(defaultConciergeId));
+    lastAutoTitleRef.current = "";
     setCreateOpen(true);
   }, [defaultConciergeId]);
 
@@ -892,6 +908,7 @@ function useStaffServicesPageContent() {
     setCreateError("");
     setCreateBusy(false);
     setCreateForm(blankCreateServiceForm(defaultConciergeId));
+    lastAutoTitleRef.current = "";
   }, [defaultConciergeId]);
 
   const openServiceDetail = useCallback((service: StaffConciergeService) => {
@@ -1417,9 +1434,7 @@ function useStaffServicesPageContent() {
                       </span>
                       <NativeComboboxSelect
                         value={createForm.serviceKind}
-                        onChange={(event) =>
-                          setCreateForm((current) => ({ ...current, serviceKind: event.target.value }))
-                        }
+                        onChange={(event) => handleServiceKindChange(event.target.value)}
                         className={formSelectClassName}
                       >
                         {SERVICE_KIND_OPTIONS.map((kind) => (

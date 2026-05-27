@@ -44,6 +44,7 @@ export interface Translations
   nav_feedback: string;
   nav_reports: string;
   nav_learning: string;
+  nav_sales_people: string;
 
   login_title: string;
   login_email: string;
@@ -92,6 +93,33 @@ export interface Translations
   users_reset_button: string;
   users_empty_no_results: string;
   users_empty_no_users: string;
+
+  sales_people_title: string;
+  sales_people_subtitle: string;
+  sales_people_search_placeholder: string;
+  sales_people_status_all: string;
+  sales_people_table_person: string;
+  sales_people_table_role: string;
+  sales_people_table_location: string;
+  sales_people_table_languages: string;
+  sales_people_table_owner: string;
+  sales_people_table_updated: string;
+  sales_people_table_status: string;
+  sales_people_empty_title: string;
+  sales_people_empty_description: string;
+  sales_people_expand_cv: string;
+  sales_people_collapse_cv: string;
+  sales_people_tree_expand: string;
+  sales_people_tree_collapse: string;
+  sales_people_cv_tree: string;
+  sales_people_stat_total: string;
+  sales_people_stat_ready: string;
+  sales_people_stat_review: string;
+  sales_people_stat_cities: string;
+  sales_people_status_ready: string;
+  sales_people_status_review: string;
+  sales_people_status_draft: string;
+  sales_people_status_archived: string;
 
   role_ceo: string;
   role_ceo_assistant: string;

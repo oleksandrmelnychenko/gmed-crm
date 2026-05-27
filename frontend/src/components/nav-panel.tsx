@@ -64,6 +64,7 @@ const NAV_ICONS: Record<string, React.ElementType> = {
   reports: ChartSpline,
   sops: GraduationCap,
   leads: Magnet,
+  "sales/people": UsersRound,
   patients: UsersRound,
   providers: Stethoscope,
   orders: ClipboardList,
