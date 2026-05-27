@@ -1,1 +1,0 @@
-export { SalesPeoplePage } from "./page";

@@ -566,30 +566,59 @@ function taxonomyLeafOptions(
   options: { includeGroups?: boolean } = {},
 ) {
   const nodesById = new Map(nodes.map((item) => [item.id, item]));
-  return nodes
-    .filter((node) =>
-      node.is_active &&
-      (node.level === "type" ||
-        (options.includeGroups && (node.level === "group" || node.level === "subgroup"))) &&
-      (!providerType || node.provider_kind === providerType),
-    )
-    .toSorted((left, right) => {
-      const leftGroup = taxonomyPathLabel(left, nodes, lang, {
-        omitProviderKindRoot: Boolean(providerType),
-      });
-      const rightGroup = taxonomyPathLabel(right, nodes, lang, {
-        omitProviderKindRoot: Boolean(providerType),
-      });
-      return leftGroup.localeCompare(rightGroup, lang === "ru" ? "ru" : "de");
-    })
-    .map((node) => ({
-      node,
-      depth: Math.max(0, taxonomyNodeDepth(node, nodesById) - (providerType ? 1 : 0)),
-      label:
+  const childrenByParent = new Map<string | null, ProviderTaxonomyNode[]>();
+  for (const node of nodes) {
+    const list = childrenByParent.get(node.parent_id) ?? [];
+    list.push(node);
+    childrenByParent.set(node.parent_id, list);
+  }
+  const collator = new Intl.Collator(lang === "ru" ? "ru" : "de", {
+    sensitivity: "base",
+    numeric: true,
+  });
+  for (const siblings of childrenByParent.values()) {
+    siblings.sort((left, right) => {
+      if (left.sort_order !== right.sort_order) {
+        return left.sort_order - right.sort_order;
+      }
+      return collator.compare(
+        taxonomyNodeLabel(left, lang),
+        taxonomyNodeLabel(right, lang),
+      );
+    });
+  }
+
+  const result: Array<{
+    node: ProviderTaxonomyNode;
+    depth: number;
+    label: string;
+    pathLabel: string;
+  }> = [];
+  const visit = (node: ProviderTaxonomyNode) => {
+    const matchesType = !providerType || node.provider_kind === providerType;
+    const matchesLevel =
+      node.level === "type" ||
+      (options.includeGroups && (node.level === "group" || node.level === "subgroup"));
+    if (node.is_active && matchesType && matchesLevel) {
+      const pathLabel =
         taxonomyPathLabel(node, nodes, lang, {
           omitProviderKindRoot: Boolean(providerType),
-        }) || taxonomyNodeLabel(node, lang),
-    }));
+        }) || taxonomyNodeLabel(node, lang);
+      result.push({
+        node,
+        depth: Math.max(0, taxonomyNodeDepth(node, nodesById) - (providerType ? 1 : 0)),
+        label: taxonomyNodeLabel(node, lang) || pathLabel,
+        pathLabel,
+      });
+    }
+    for (const child of childrenByParent.get(node.id) ?? []) {
+      visit(child);
+    }
+  };
+  for (const root of childrenByParent.get(null) ?? []) {
+    visit(root);
+  }
+  return result;
 }
 
 const GENERIC_TAXONOMY_FILTER_KEYS = new Set([
@@ -686,20 +715,22 @@ function ProviderTaxonomySelect({
     () => taxonomyLeafOptions(nodes, providerType, lang, { includeGroups }),
     [includeGroups, lang, nodes, providerType],
   );
-  const hasCurrentValue = value && options.some((option) => option.node.id === value);
+  const currentOption = value
+    ? options.find((option) => option.node.id === value) ?? null
+    : null;
 
   return (
     <NativeComboboxSelect
-      value={hasCurrentValue ? value : ""}
+      value={currentOption ? value : ""}
       onChange={(event) => onChange(event.target.value)}
       disabled={disabled || options.length === 0}
       className={className ?? formSelectClassName}
-      title={hasCurrentValue ? options.find((option) => option.node.id === value)?.label : placeholder}
+      title={currentOption ? currentOption.pathLabel : placeholder}
     >
       <option value="">{placeholder}</option>
       {options.map((option) => (
         <option key={option.node.id} value={option.node.id}>
-          {`${"  ".repeat(Math.max(0, option.depth - 1))}${option.label}`}
+          {`${"    ".repeat(Math.max(0, option.depth - 1))}${option.label}`}
         </option>
       ))}
     </NativeComboboxSelect>

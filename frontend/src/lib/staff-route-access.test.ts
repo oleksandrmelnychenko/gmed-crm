@@ -27,7 +27,6 @@ const SAMPLE_PATHS = [
   "/orders?order=x",
   "/orders/00000000-0000-0000-0000-000000000006",
   "/leads",
-  "/sales/people",
   "/cases",
   "/cases/00000000-0000-0000-0000-000000000003",
   "/sops",
@@ -183,14 +182,6 @@ describe("canAccessStaffRoute", () => {
     expect(canAccessStaffRoute("it_admin", "/leads")).toBe(false);
   });
 
-  it("allows sales and ceo into the CV library", () => {
-    expect(canAccessStaffRoute("sales", "/sales/people")).toBe(true);
-    expect(canAccessStaffRoute("ceo", "/sales/people")).toBe(true);
-    expect(canAccessStaffRoute("patient_manager", "/sales/people")).toBe(false);
-    expect(canAccessStaffRoute("billing", "/sales/people")).toBe(false);
-    expect(canAccessStaffRoute("it_admin", "/sales/people")).toBe(false);
-  });
-
   it("blocks non-case roles from /cases (Phase F: matches list_cases allow list)", () => {
     expect(canAccessStaffRoute("ceo", "/cases")).toBe(true);
     expect(canAccessStaffRoute("patient_manager", "/cases")).toBe(true);
@@ -269,7 +260,6 @@ describe("listStaffNavItems", () => {
     expect(listStaffNavItems("patient_manager").map((item) => item.to)).not.toContain("/admin/settings");
 
     expect(listStaffNavItems("sales").map((item) => item.to)).toContain("/admin/custom-fields");
-    expect(listStaffNavItems("sales").map((item) => item.to)).toContain("/sales/people");
     expect(listStaffNavItems("sales").map((item) => item.to)).not.toContain("/admin/users");
 
     const ceoAssistantAdminItems = listStaffNavItems("ceo_assistant").reduce<

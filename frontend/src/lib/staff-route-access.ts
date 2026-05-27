@@ -109,11 +109,6 @@ const ROLES_LEADS = [
   "sales",
 ] as const satisfies readonly StaffRole[];
 
-const ROLES_SALES_PEOPLE = [
-  "ceo",
-  "sales",
-] as const satisfies readonly StaffRole[];
-
 /** `crates/server/src/routes/cases.rs:275` (`list_cases`) */
 const ROLES_CASES = [
   "ceo",
@@ -336,13 +331,6 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     path: "/leads",
     roles: ROLES_LEADS,
     nav: { section: "crm", labelKey: "leads_title" },
-  },
-  {
-    id: "sales/people",
-    match: "exact",
-    path: "/sales/people",
-    roles: ROLES_SALES_PEOPLE,
-    nav: { section: "crm", labelKey: "nav_sales_people" },
   },
   {
     id: "cases",
