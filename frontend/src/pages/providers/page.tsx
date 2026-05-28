@@ -17,6 +17,7 @@ import {
   Building2,
   CalendarClock,
   ChevronDown,
+  Copy,
   Download,
   LoaderCircle,
   Mail,
@@ -180,8 +181,10 @@ const formSelectClassName = cn(
 );
 const availabilityTimeInputClassName = cn(
   shellInputClassName,
-  "h-8 min-w-0 appearance-none px-1.5 text-xs [color-scheme:light] [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
+  "h-9 min-w-0 px-2 text-sm tabular-nums [color-scheme:light] [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70"
 );
+const AVAILABILITY_MIN_INTERVAL_MINUTES = 1;
+const AVAILABILITY_DAY_END_MINUTES = 23 * 60 + 59;
 const providerDetailSectionClassName =
   "border-border/70 bg-card px-5 py-4 sm:px-6 sm:py-5";
 const providerDetailPanelClassName = cn(
@@ -706,6 +709,88 @@ function DoctorTitleMultiSelect({
 type WeeklyAvailabilitySchedule = ReturnType<typeof parseWeeklyAvailability>;
 type WeeklyAvailabilityRow = WeeklyAvailabilitySchedule[number];
 
+function availabilityTimeToMinutes(value: string | null | undefined) {
+  if (!value) return null;
+  const match = value.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return null;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return hour * 60 + minute;
+}
+
+function availabilityMinutesToTime(value: number) {
+  const minutes = Math.min(Math.max(Math.round(value), 0), AVAILABILITY_DAY_END_MINUTES);
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  return `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
+}
+
+function availabilityClampMinutes(value: number, min: number, max: number) {
+  if (max < min) return min;
+  return Math.min(Math.max(value, min), max);
+}
+
+function availabilityMaxStartForEnd(end: string) {
+  const endMinutes = availabilityTimeToMinutes(end);
+  if (endMinutes == null) return undefined;
+  return availabilityMinutesToTime(endMinutes - AVAILABILITY_MIN_INTERVAL_MINUTES);
+}
+
+function availabilityMinEndForStart(start: string) {
+  const startMinutes = availabilityTimeToMinutes(start);
+  if (startMinutes == null) return undefined;
+  return availabilityMinutesToTime(startMinutes + AVAILABILITY_MIN_INTERVAL_MINUTES);
+}
+
+function normalizeAvailabilityEditorIntervals(
+  intervals: readonly WeeklyAvailabilityRow["intervals"][number][],
+  edit?: { index: number; field: "start" | "end" },
+) {
+  const normalized: WeeklyAvailabilityRow["intervals"] = [];
+  let previousEndMinutes = 0;
+
+  intervals.forEach((interval, index) => {
+    if (previousEndMinutes >= AVAILABILITY_DAY_END_MINUTES) return;
+
+    let startMinutes = availabilityTimeToMinutes(interval.start);
+    let endMinutes = availabilityTimeToMinutes(interval.end);
+    if (startMinutes == null && endMinutes == null) return;
+
+    startMinutes ??= previousEndMinutes;
+    endMinutes ??= startMinutes + AVAILABILITY_MIN_INTERVAL_MINUTES;
+
+    if (edit?.index === index && edit.field === "end" && endMinutes <= startMinutes) {
+      startMinutes = endMinutes - AVAILABILITY_MIN_INTERVAL_MINUTES;
+    }
+
+    const latestStartMinutes = AVAILABILITY_DAY_END_MINUTES - AVAILABILITY_MIN_INTERVAL_MINUTES;
+    startMinutes = availabilityClampMinutes(
+      startMinutes,
+      previousEndMinutes,
+      latestStartMinutes,
+    );
+
+    if (endMinutes <= startMinutes) {
+      endMinutes = startMinutes + AVAILABILITY_MIN_INTERVAL_MINUTES;
+    }
+    endMinutes = availabilityClampMinutes(
+      endMinutes,
+      startMinutes + AVAILABILITY_MIN_INTERVAL_MINUTES,
+      AVAILABILITY_DAY_END_MINUTES,
+    );
+
+    normalized.push({
+      start: availabilityMinutesToTime(startMinutes),
+      end: availabilityMinutesToTime(endMinutes),
+    });
+    previousEndMinutes = endMinutes;
+  });
+
+  return normalized;
+}
+
 function weeklyAvailabilityIntervalItems(row: WeeklyAvailabilityRow) {
   const seen = new Map<string, number>();
   const items: Array<{
@@ -740,11 +825,42 @@ function WeeklyAvailabilityEditor({
   onChange: (value: string) => void;
 }) {
   const { t, lang } = useLang();
-  const schedule = useMemo(() => parseWeeklyAvailability(value), [value]);
+  const parsedSchedule = useMemo(() => parseWeeklyAvailability(value), [value]);
+  const schedule = useMemo(
+    () =>
+      parsedSchedule.map((row) => ({
+        ...row,
+        enabled: row.enabled && row.intervals.length > 0,
+        intervals: normalizeAvailabilityEditorIntervals(row.intervals),
+      })),
+    [parsedSchedule],
+  );
+  const parsedAvailabilityValue = useMemo(
+    () => formatWeeklyAvailabilityValue(parsedSchedule),
+    [parsedSchedule],
+  );
+  const normalizedAvailabilityValue = useMemo(
+    () => formatWeeklyAvailabilityValue(schedule),
+    [schedule],
+  );
+  useEffect(() => {
+    if (parsedAvailabilityValue !== normalizedAvailabilityValue) {
+      onChange(normalizedAvailabilityValue);
+    }
+  }, [normalizedAvailabilityValue, onChange, parsedAvailabilityValue]);
   const closedLabel = lang === "de" ? "Geschlossen" : "Закрыто";
   const addIntervalLabel = lang === "de" ? "Zeit hinzufügen" : "Добавить время";
   const fromLabel = lang === "de" ? "Von" : "С";
   const toLabel = lang === "de" ? "Bis" : "До";
+  const copyDayLabel = lang === "de" ? "Auf alle Tage kopieren" : "Скопировать на все дни";
+  const everyDayLabel = lang === "de" ? "Alle Tage" : "Все дни";
+  const weekdayRangeLabel = `${weeklyAvailabilityDayLabel("mon", lang)}-${weeklyAvailabilityDayLabel("fri", lang)}`;
+  const quickPresets = [
+    { label: `${weekdayRangeLabel} 08-16`, scope: "weekdays", start: "08:00", end: "16:00" },
+    { label: `${weekdayRangeLabel} 09-18`, scope: "weekdays", start: "09:00", end: "18:00" },
+    { label: `${everyDayLabel} 09-18`, scope: "all", start: "09:00", end: "18:00" },
+    { label: "24/7", scope: "all", start: "00:00", end: "23:59" },
+  ] as const;
   const defaultInterval = { start: "09:00", end: "17:00" };
   const addOneHour = (time: string) => {
     const [hourText, minuteText] = time.split(":");
@@ -761,7 +877,6 @@ function WeeklyAvailabilityEditor({
     const end = addOneHour(previous.end);
     return previous.end < end ? { start: previous.end, end } : defaultInterval;
   };
-
   const commit = (nextSchedule: typeof schedule) => {
     onChange(formatWeeklyAvailabilityValue(nextSchedule));
   };
@@ -788,20 +903,32 @@ function WeeklyAvailabilityEditor({
     field: "start" | "end",
     nextValue: string,
   ) => {
-    updateDay(day, (row) => ({
-      ...row,
-      enabled: true,
-      intervals: row.intervals.map((interval, intervalIndex) =>
-        intervalIndex === index ? { ...interval, [field]: nextValue } : interval,
-      ),
-    }));
+    updateDay(day, (row) => {
+      const intervals = normalizeAvailabilityEditorIntervals(
+        row.intervals.map((interval, intervalIndex) =>
+          intervalIndex === index ? { ...interval, [field]: nextValue } : interval,
+        ),
+        { index, field },
+      );
+      return {
+        ...row,
+        enabled: intervals.length > 0,
+        intervals,
+      };
+    });
   };
   const addInterval = (day: typeof schedule[number]["day"]) => {
-    updateDay(day, (row) => ({
-      ...row,
-      enabled: true,
-      intervals: [...row.intervals, nextInterval(row.intervals)],
-    }));
+    updateDay(day, (row) => {
+      const intervals = normalizeAvailabilityEditorIntervals([
+        ...row.intervals,
+        nextInterval(row.intervals),
+      ]);
+      return {
+        ...row,
+        enabled: intervals.length > 0,
+        intervals,
+      };
+    });
   };
   const removeInterval = (day: typeof schedule[number]["day"], index: number) => {
     updateDay(day, (row) => {
@@ -813,73 +940,154 @@ function WeeklyAvailabilityEditor({
       };
     });
   };
+  const applyPreset = (preset: (typeof quickPresets)[number]) => {
+    commit(
+      schedule.map((row) => {
+        const applies =
+          preset.scope === "all" ||
+          row.day === "mon" ||
+          row.day === "tue" ||
+          row.day === "wed" ||
+          row.day === "thu" ||
+          row.day === "fri";
+        return applies
+          ? {
+              ...row,
+              enabled: true,
+              intervals: [{ start: preset.start, end: preset.end }],
+            }
+          : {
+              ...row,
+              enabled: false,
+              intervals: [],
+            };
+      }),
+    );
+  };
+  const copyDayToAll = (sourceRow: typeof schedule[number]) => {
+    const sourceIntervals = sourceRow.intervals.map((interval) => ({ ...interval }));
+    commit(
+      schedule.map((row) => ({
+        ...row,
+        enabled: sourceRow.enabled && sourceIntervals.length > 0,
+        intervals: sourceRow.enabled
+          ? sourceIntervals.map((interval) => ({ ...interval }))
+          : [],
+      })),
+    );
+  };
 
   return (
-    <div className="grid gap-2 rounded-lg border border-border/70 bg-card/50 p-2 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="space-y-2 rounded-lg border border-border/70 bg-card/50 p-2">
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-border/60 pb-2">
+        {quickPresets.map((preset) => (
+          <Button
+            key={`${preset.scope}-${preset.start}-${preset.end}`}
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 rounded-lg bg-background px-2 text-xs"
+            onClick={() => applyPreset(preset)}
+            disabled={disabled}
+          >
+            {preset.label}
+          </Button>
+        ))}
+      </div>
       {schedule.map((row) => (
         <div
           key={row.day}
-          className="space-y-2 rounded-md border border-border/60 bg-background/70 p-2"
+          className="grid gap-2 rounded-md border border-border/60 bg-background/70 p-2 sm:grid-cols-[6.5rem_minmax(0,1fr)]"
         >
-          <div className="flex h-7 items-center gap-2">
-            <input
-              type="checkbox"
-              checked={row.enabled}
-              onChange={(event) => toggleDay(row.day, event.target.checked)}
-              className={checkboxClass}
-              disabled={disabled}
-              aria-label={weeklyAvailabilityDayLabel(row.day, lang)}
-            />
-            <span className="text-sm font-medium text-foreground">
-              {weeklyAvailabilityDayLabel(row.day, lang)}
-            </span>
+          <div className="flex h-9 items-center justify-between gap-2">
+            <label className="flex min-w-0 items-center gap-2">
+              <input
+                type="checkbox"
+                checked={row.enabled}
+                onChange={(event) => toggleDay(row.day, event.target.checked)}
+                className={checkboxClass}
+                disabled={disabled}
+                aria-label={weeklyAvailabilityDayLabel(row.day, lang)}
+              />
+              <span className="truncate text-sm font-medium text-foreground">
+                {weeklyAvailabilityDayLabel(row.day, lang)}
+              </span>
+            </label>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="h-8 w-8"
+              onClick={() => copyDayToAll(row)}
+              disabled={disabled || !row.enabled || row.intervals.length === 0}
+              title={copyDayLabel}
+              aria-label={`${copyDayLabel}: ${weeklyAvailabilityDayLabel(row.day, lang)}`}
+            >
+              <Copy className="size-3.5" />
+            </Button>
           </div>
           {row.enabled ? (
-            <div className="space-y-1.5">
-              {weeklyAvailabilityIntervalItems(row).map(({ interval, intervalIndex, key }) => (
-                <div
-                  key={key}
-                  className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_28px] items-center gap-1.5"
-                >
-                  <Input
-                    type="time"
-                    value={interval.start}
-                    onChange={(event) =>
-                      updateInterval(row.day, intervalIndex, "start", event.target.value)
-                    }
-                    className={availabilityTimeInputClassName}
-                    disabled={disabled}
-                    aria-label={`${weeklyAvailabilityDayLabel(row.day, lang)} ${fromLabel}`}
-                  />
-                  <Input
-                    type="time"
-                    value={interval.end}
-                    onChange={(event) =>
-                      updateInterval(row.day, intervalIndex, "end", event.target.value)
-                    }
-                    className={availabilityTimeInputClassName}
-                    disabled={disabled}
-                    aria-label={`${weeklyAvailabilityDayLabel(row.day, lang)} ${toLabel}`}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon-sm"
-                    className="h-8 w-7 rounded-lg bg-muted/20"
-                    onClick={() => removeInterval(row.day, intervalIndex)}
-                    disabled={disabled}
-                    title={t.common_remove}
-                    aria-label={t.common_remove}
+            <div className="flex min-w-0 flex-wrap items-end gap-2">
+              {weeklyAvailabilityIntervalItems(row).map(({ interval, intervalIndex, key }) => {
+                const previousInterval = row.intervals[intervalIndex - 1];
+                const nextIntervalItem = row.intervals[intervalIndex + 1];
+                return (
+                  <div
+                    key={key}
+                    className="grid w-full grid-cols-[minmax(0,1fr)_minmax(0,1fr)_28px] items-end gap-2 sm:w-[18rem]"
                   >
-                    <Trash2 className="size-3.5" />
-                  </Button>
-                </div>
-              ))}
+                    <label className="flex min-w-0 flex-col gap-0.5 text-[10px] font-medium uppercase leading-tight text-muted-foreground">
+                      {fromLabel}
+                      <Input
+                        type="time"
+                        step={900}
+                        min={previousInterval?.end || undefined}
+                        max={availabilityMaxStartForEnd(interval.end)}
+                        value={interval.start}
+                        onChange={(event) =>
+                          updateInterval(row.day, intervalIndex, "start", event.target.value)
+                        }
+                        className={availabilityTimeInputClassName}
+                        disabled={disabled}
+                        aria-label={`${weeklyAvailabilityDayLabel(row.day, lang)} ${fromLabel}`}
+                      />
+                    </label>
+                    <label className="flex min-w-0 flex-col gap-0.5 text-[10px] font-medium uppercase leading-tight text-muted-foreground">
+                      {toLabel}
+                      <Input
+                        type="time"
+                        step={900}
+                        min={availabilityMinEndForStart(interval.start)}
+                        max={nextIntervalItem?.start || undefined}
+                        value={interval.end}
+                        onChange={(event) =>
+                          updateInterval(row.day, intervalIndex, "end", event.target.value)
+                        }
+                        className={availabilityTimeInputClassName}
+                        disabled={disabled}
+                        aria-label={`${weeklyAvailabilityDayLabel(row.day, lang)} ${toLabel}`}
+                      />
+                    </label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon-sm"
+                      className="h-9 w-7 rounded-lg bg-background"
+                      onClick={() => removeInterval(row.day, intervalIndex)}
+                      disabled={disabled}
+                      title={t.common_remove}
+                      aria-label={t.common_remove}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </div>
+                );
+              })}
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                className="h-7 w-full justify-center rounded-lg bg-muted/20 px-2 text-xs"
+                className="h-9 w-full justify-center rounded-lg bg-background px-2 text-xs sm:w-auto"
                 onClick={() => addInterval(row.day)}
                 disabled={disabled}
               >
@@ -888,8 +1096,19 @@ function WeeklyAvailabilityEditor({
               </Button>
             </div>
           ) : (
-            <div className="flex h-8 items-center text-xs text-muted-foreground">
-              {closedLabel}
+            <div className="flex h-9 min-w-0 items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>{closedLabel}</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 rounded-lg bg-background px-2 text-xs"
+                onClick={() => addInterval(row.day)}
+                disabled={disabled}
+              >
+                <Plus className="size-3.5 shrink-0" />
+                {addIntervalLabel}
+              </Button>
             </div>
           )}
         </div>
@@ -6544,7 +6763,7 @@ function ProviderProfileFields({
 
   return (
     <>
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2">
         <Field label={l("patients_display_name")}>
           <Input
             value={form.name}
@@ -6566,6 +6785,9 @@ function ProviderProfileFields({
           />
         </Field>
 
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
         <Field label={t.providers_type}>
           <NativeComboboxSelect
             value={providerType}
@@ -6586,27 +6808,26 @@ function ProviderProfileFields({
             <option value="non_medical">{t.providers_type_non_medical}</option>
           </NativeComboboxSelect>
         </Field>
+
+        <Field label={t.providers_category}>
+          <ProviderTaxonomyCascadeSelect
+            value={form.taxonomyNodeId}
+            nodes={taxonomyNodes}
+            providerType={providerType}
+            mode="leaf"
+            disabled={disabled}
+            placeholder={t.providers_choose_category}
+            containerClassName="w-full"
+            selectClassName={formSelectClassName}
+            onChange={(nextValue) => {
+              onChange("taxonomyNodeId", nextValue);
+              onChange("taxonomyAttributes", "{}");
+            }}
+          />
+        </Field>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <div className="md:col-span-2">
-          <Field label={t.providers_category}>
-            <ProviderTaxonomyCascadeSelect
-              value={form.taxonomyNodeId}
-              nodes={taxonomyNodes}
-              providerType={providerType}
-              mode="leaf"
-              disabled={disabled}
-              placeholder={t.providers_choose_category}
-              containerClassName="w-full"
-              selectClassName={formSelectClassName}
-              onChange={(nextValue) => {
-                onChange("taxonomyNodeId", nextValue);
-                onChange("taxonomyAttributes", "{}");
-              }}
-            />
-          </Field>
-        </div>
+      <div className="grid gap-4 md:grid-cols-2">
         <Field label={lang === "ru" ? "Внутренний рейтинг" : "Interne Bewertung"}>
           <Input
             type="number"
