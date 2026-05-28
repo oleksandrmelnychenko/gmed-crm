@@ -144,6 +144,7 @@ export interface OperationsTranslations {
   staff_services_patient_required: string;
   staff_services_title_required: string;
   staff_services_cost_invalid: string;
+  staff_services_quantity_integer_required: string;
   staff_services_currency_invalid: string;
   staff_services_create_failed: string;
   staff_services_loading: string;
@@ -639,6 +640,7 @@ export const operationsRu: OperationsTranslations = {
   staff_services_patient_required: "Пациент обязателен.",
   staff_services_title_required: "Название обязательно.",
   staff_services_cost_invalid: "Поля стоимости должны быть корректными числами.",
+  staff_services_quantity_integer_required: "Кол-во должно быть целым числом больше нуля.",
   staff_services_currency_invalid: "Валюта должна состоять из 3 букв.",
   staff_services_create_failed: "Не удалось создать консьерж-сервис.",
   staff_services_loading: "Загрузка консьерж-сервисов...",
@@ -1172,6 +1174,7 @@ export const operationsDe: OperationsTranslations = {
   staff_services_patient_required: "Patient ist erforderlich.",
   staff_services_title_required: "Titel ist erforderlich.",
   staff_services_cost_invalid: "Kostenfelder müssen gültige Zahlen sein.",
+  staff_services_quantity_integer_required: "Menge muss eine ganze Zahl größer als null sein.",
   staff_services_currency_invalid: "Währung muss aus 3 Buchstaben bestehen.",
   staff_services_create_failed: "Concierge-Service konnte nicht erstellt werden.",
   staff_services_loading: "Concierge-Services werden geladen...",

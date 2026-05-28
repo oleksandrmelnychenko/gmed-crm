@@ -930,7 +930,9 @@ async fn create_concierge_service(
 
     let provider_id = match (
         body.provider_id,
-        provider_service_pricing.as_ref().map(|service| service.provider_id),
+        provider_service_pricing
+            .as_ref()
+            .map(|service| service.provider_id),
         appointment_ctx.as_ref().and_then(|ctx| ctx.provider_id),
     ) {
         (Some(provider_id), Some(service_provider_id), _) if provider_id != service_provider_id => {
@@ -958,10 +960,12 @@ async fn create_concierge_service(
         None => provider_service_pricing
             .as_ref()
             .and_then(|service| service.taxonomy_node_id)
-            .or(match load_primary_provider_taxonomy_node_id(&state, provider_id).await {
-                Ok(value) => value,
-                Err(resp) => return resp,
-            }),
+            .or(
+                match load_primary_provider_taxonomy_node_id(&state, provider_id).await {
+                    Ok(value) => value,
+                    Err(resp) => return resp,
+                },
+            ),
     };
 
     let assigned_concierge_id = match body.assigned_concierge_id {
@@ -1038,7 +1042,11 @@ async fn create_concierge_service(
 
     let currency = body
         .currency
-        .or_else(|| provider_service_pricing.as_ref().map(|service| service.currency.clone()))
+        .or_else(|| {
+            provider_service_pricing
+                .as_ref()
+                .map(|service| service.currency.clone())
+        })
         .unwrap_or_else(|| "EUR".to_string());
     if currency.trim().len() != 3 {
         return err(
@@ -1210,7 +1218,9 @@ async fn update_concierge_service(
     };
     let provider_id_update = match (
         body.provider_id,
-        provider_service_pricing.as_ref().map(|service| service.provider_id),
+        provider_service_pricing
+            .as_ref()
+            .map(|service| service.provider_id),
     ) {
         (Some(provider_id), Some(service_provider_id)) if provider_id != service_provider_id => {
             return err(
@@ -1323,9 +1333,11 @@ async fn update_concierge_service(
         }
         _ => body.cost_estimate,
     };
-    let currency = body
-        .currency
-        .or_else(|| provider_service_pricing.as_ref().map(|service| service.currency.clone()));
+    let currency = body.currency.or_else(|| {
+        provider_service_pricing
+            .as_ref()
+            .map(|service| service.currency.clone())
+    });
 
     let completed_at = match body.status.as_deref() {
         Some("completed") => Some(chrono::Utc::now()),
@@ -1664,7 +1676,9 @@ async fn load_provider_service_pricing(
         taxonomy_node_id: row
             .try_get::<Option<Uuid>, _>("taxonomy_node_id")
             .unwrap_or_default(),
-        unit_price: row.try_get::<Option<f64>, _>("unit_price").unwrap_or_default(),
+        unit_price: row
+            .try_get::<Option<f64>, _>("unit_price")
+            .unwrap_or_default(),
         currency: row
             .try_get::<String, _>("currency")
             .unwrap_or_else(|_| "EUR".to_string()),
@@ -1859,6 +1873,9 @@ fn normalize_positive_number(
             "quantity" => Err("quantity must be greater than zero"),
             _ => Err("value must be greater than zero"),
         };
+    }
+    if field == "quantity" && value.fract().abs() > f64::EPSILON {
+        return Err("quantity must be a whole number");
     }
     Ok(value)
 }

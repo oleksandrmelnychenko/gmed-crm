@@ -25,6 +25,16 @@ const DOC_LABEL_MAP: Record<string, string> = {
   medical: "required_doc_medical",
   financial: "required_doc_financial",
   administrative: "required_doc_administrative",
+  finance: "document_category_finance",
+  consent: "document_category_consent",
+  insurance: "document_category_insurance",
+  portal_upload: "document_category_portal_upload",
+  generated: "document_category_generated",
+  clinic_correspondence: "document_category_clinic_correspondence",
+  lab_analysis: "document_category_lab_analysis",
+  translation: "document_category_translation",
+  clinic_form: "document_category_clinic_form",
+  conclusion: "document_category_conclusion",
 };
 
 function humanizeFallback(value: string): string {

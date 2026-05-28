@@ -13,7 +13,7 @@ import {
   useReducer,
   type SetStateAction,
 } from "react";
-import { Activity, ClipboardList, LoaderCircle, Plus, RefreshCw, Search, Wallet } from "lucide-react";
+import { Activity, ClipboardList, LoaderCircle, Pencil, Plus, RefreshCw, Search, Wallet } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -56,6 +56,7 @@ import { cn } from "@/lib/utils";
 import {
   providerOptionLabel,
 } from "@/pages/appointments/model/provider-taxonomy";
+import { toDateTimeLocalInput } from "@/pages/appointments/model/date-time";
 import { toRfc3339 } from "@/pages/appointments/model/workflow-helpers";
 import {
   conciergeServiceStatusTone,
@@ -161,6 +162,11 @@ type CreateServiceFormState = {
   billingNotes: string;
 };
 
+type EditServiceFormState = CreateServiceFormState & {
+  status: string;
+  billingStatus: string;
+};
+
 const STAFF_SERVICES_CACHE_TTL_MS = 10_000;
 const SERVICE_LOOKUPS_CACHE_TTL_MS = 30_000;
 const ACTIVE_SERVICE_STATUSES = new Set(["planned", "booked", "confirmed", "in_service"]);
@@ -175,6 +181,8 @@ const STAFF_SERVICES_REALTIME_EVENTS = [
 ] as const;
 const formInputClassName = shellInputClassName;
 const formSelectClassName = shellSelectClassName;
+const providerPickerContainerClassName =
+  "sm:grid-cols-[minmax(180px,0.85fr)_minmax(220px,1.15fr)]";
 const formTextareaClassName = cn(shellTextareaClassName, "min-h-24");
 const SERVICE_KIND_OPTIONS = [
   "hotel",
@@ -243,6 +251,31 @@ function blankCreateServiceForm(defaultConciergeId = ""): CreateServiceFormState
   };
 }
 
+function buildEditServiceForm(service: StaffConciergeService): EditServiceFormState {
+  return {
+    patientId: service.patient_id,
+    providerId: service.provider_id ?? "",
+    providerServiceId: service.provider_service_id ?? "",
+    taxonomyNodeId: service.taxonomy_node_id ?? "",
+    assignedConciergeId: service.assigned_concierge_id ?? "",
+    serviceKind: service.service_kind,
+    title: service.title,
+    bookingReference: service.booking_reference ?? "",
+    vendorName: service.vendor_name ?? "",
+    vendorContact: service.vendor_contact ?? "",
+    startsAt: toDateTimeLocalInput(service.starts_at),
+    endsAt: toDateTimeLocalInput(service.ends_at),
+    costEstimate: service.cost_estimate ?? "",
+    actualCost: service.actual_cost ?? "",
+    quantity: service.quantity || "1",
+    currency: service.currency || "EUR",
+    serviceNotes: service.service_notes ?? "",
+    billingNotes: service.billing_notes ?? "",
+    status: service.status,
+    billingStatus: service.billing_status,
+  };
+}
+
 function patientOptionLabel(patient: PatientOption) {
   const name = [patient.first_name, patient.last_name].filter(Boolean).join(" ");
   return name ? `${patient.patient_id} | ${name}` : patient.patient_id;
@@ -255,11 +288,11 @@ function optionalMoney(value: string) {
   return Number.isFinite(parsed) ? parsed : Number.NaN;
 }
 
-function decimalInputValue(value: string) {
+function integerInputValue(value: string) {
   const trimmed = value.trim();
-  if (!trimmed) return Number.NaN;
-  const parsed = Number(trimmed.replace(",", "."));
-  return Number.isFinite(parsed) ? parsed : Number.NaN;
+  if (!/^\d+$/.test(trimmed)) return Number.NaN;
+  const parsed = Number(trimmed);
+  return Number.isSafeInteger(parsed) ? parsed : Number.NaN;
 }
 
 function formatMoneyInput(value: number) {
@@ -290,7 +323,7 @@ function providerServiceOptionLabel(service: ServiceItem) {
 
 function calculatedServiceTotal(service: ServiceItem | null | undefined, quantityInput: string) {
   const unitPrice = providerServiceUnitPrice(service);
-  const quantity = decimalInputValue(quantityInput);
+  const quantity = integerInputValue(quantityInput);
   if (unitPrice === null || !Number.isFinite(quantity) || quantity <= 0) return null;
   return unitPrice * quantity;
 }
@@ -661,6 +694,10 @@ type StaffServicesPageState = {
   createBusy: boolean;
   createError: string;
   createForm: CreateServiceFormState;
+  editMode: boolean;
+  editBusy: boolean;
+  editError: string;
+  editForm: EditServiceFormState | null;
 };
 
 type StaffServicesPageAction =
@@ -683,7 +720,8 @@ type StaffServicesPageAction =
       type: "create-success";
       created: StaffConciergeService;
       defaultConciergeId: string;
-    };
+    }
+  | { type: "update-success"; updated: StaffConciergeService };
 
 const STAFF_SERVICES_INITIAL_STATE: StaffServicesPageState = {
   items: [],
@@ -710,6 +748,10 @@ const STAFF_SERVICES_INITIAL_STATE: StaffServicesPageState = {
   createBusy: false,
   createError: "",
   createForm: blankCreateServiceForm(),
+  editMode: false,
+  editBusy: false,
+  editError: "",
+  editForm: null,
 };
 
 function staffServicesPageReducer(
@@ -773,6 +815,19 @@ function staffServicesPageReducer(
         createOpen: false,
         version: state.version + 1,
       };
+    case "update-success":
+      return {
+        ...state,
+        items: state.items.map((item) =>
+          item.id === action.updated.id ? action.updated : item,
+        ),
+        selectedServiceId: action.updated.id,
+        editMode: false,
+        editBusy: false,
+        editError: "",
+        editForm: null,
+        version: state.version + 1,
+      };
     default:
       return state;
   }
@@ -828,6 +883,10 @@ function useStaffServicesPageContent() {
       createBusy,
       createError,
       createForm,
+      editMode,
+      editBusy,
+      editError,
+      editForm,
     },
     dispatchStaffServicesState,
   ] = useReducer(staffServicesPageReducer, STAFF_SERVICES_INITIAL_STATE);
@@ -861,14 +920,26 @@ function useStaffServicesPageContent() {
     setStaffServicesField("createError", value);
   const setCreateForm = (value: SetStateAction<CreateServiceFormState>) =>
     setStaffServicesField("createForm", value);
+  const setEditMode = (value: SetStateAction<boolean>) =>
+    setStaffServicesField("editMode", value);
+  const setEditBusy = (value: SetStateAction<boolean>) =>
+    setStaffServicesField("editBusy", value);
+  const setEditError = (value: SetStateAction<string>) =>
+    setStaffServicesField("editError", value);
+  const setEditForm = (value: SetStateAction<EditServiceFormState | null>) =>
+    setStaffServicesField("editForm", value);
   const [providerServices, setProviderServices] = useState<ServiceItem[]>([]);
   const [providerServicesLoading, setProviderServicesLoading] = useState(false);
   const [providerServicesError, setProviderServicesError] = useState("");
+  const [editProviderServices, setEditProviderServices] = useState<ServiceItem[]>([]);
+  const [editProviderServicesLoading, setEditProviderServicesLoading] = useState(false);
+  const [editProviderServicesError, setEditProviderServicesError] = useState("");
 
   const canCreateService =
     user?.role === "ceo" ||
     user?.role === "patient_manager" ||
     user?.role === "concierge";
+  const canEditService = canCreateService;
 
   useDebouncedRealtimeSubscription(STAFF_SERVICES_REALTIME_EVENTS, () => {
     clearApiCache("/concierge-services");
@@ -922,6 +993,23 @@ function useStaffServicesPageContent() {
     () => calculatedServiceTotal(selectedProviderService, createForm.quantity),
     [createForm.quantity, selectedProviderService],
   );
+  const selectedEditProviderService = useMemo(
+    () =>
+      editProviderServices.find((service) => service.id === editForm?.providerServiceId) ??
+      null,
+    [editForm?.providerServiceId, editProviderServices],
+  );
+  const selectedEditProviderServiceUnitPrice = useMemo(
+    () => providerServiceUnitPrice(selectedEditProviderService),
+    [selectedEditProviderService],
+  );
+  const selectedEditProviderServiceTotal = useMemo(
+    () =>
+      editForm
+        ? calculatedServiceTotal(selectedEditProviderService, editForm.quantity)
+        : null,
+    [editForm, selectedEditProviderService],
+  );
 
   const lastAutoTitleRef = useRef<string>("");
 
@@ -954,10 +1042,32 @@ function useStaffServicesPageContent() {
 
   const openServiceDetail = useCallback((service: StaffConciergeService) => {
     setSelectedServiceId(service.id);
+    setEditMode(false);
+    setEditError("");
+    setEditBusy(false);
+    setEditForm(null);
   }, []);
 
   const closeServiceDetail = useCallback(() => {
     setSelectedServiceId(null);
+    setEditMode(false);
+    setEditError("");
+    setEditBusy(false);
+    setEditForm(null);
+  }, []);
+
+  const openEditService = useCallback(() => {
+    if (!selectedService) return;
+    setEditError("");
+    setEditForm(buildEditServiceForm(selectedService));
+    setEditMode(true);
+  }, [selectedService]);
+
+  const closeEditService = useCallback(() => {
+    setEditMode(false);
+    setEditError("");
+    setEditBusy(false);
+    setEditForm(null);
   }, []);
 
   const handleColumnFreezeChange = useCallback((columnId: string, frozen: boolean) => {
@@ -1091,6 +1201,59 @@ function useStaffServicesPageContent() {
   useEffect(() => {
     let cancelled = false;
 
+    if (!editMode || !editForm?.providerId) {
+      setEditProviderServices([]);
+      setEditProviderServicesError("");
+      setEditProviderServicesLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setEditProviderServicesLoading(true);
+    setEditProviderServicesError("");
+    fetchProviderDetail(editForm.providerId)
+      .then((provider) => {
+        if (cancelled) return;
+        setEditProviderServices(provider.services);
+        dispatchStaffServicesState({
+          type: "update",
+          updater: (state) => {
+            if (
+              !state.editForm?.providerServiceId ||
+              provider.services.some((service) => service.id === state.editForm?.providerServiceId)
+            ) {
+              return state;
+            }
+            return {
+              ...state,
+              editForm: {
+                ...state.editForm,
+                providerServiceId: "",
+              },
+            };
+          },
+        });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setEditProviderServices([]);
+        setEditProviderServicesError(
+          err instanceof Error ? err.message : t.staff_services_lookup_failed,
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setEditProviderServicesLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [editForm?.providerId, editMode, t.staff_services_lookup_failed]);
+
+  useEffect(() => {
+    let cancelled = false;
+
     async function load() {
       dispatchStaffServicesState({ type: "services-load-start" });
 
@@ -1135,9 +1298,9 @@ function useStaffServicesPageContent() {
       return;
     }
 
-    const quantity = decimalInputValue(createForm.quantity);
+    const quantity = integerInputValue(createForm.quantity);
     if (!Number.isFinite(quantity) || quantity <= 0) {
-      setCreateError(t.staff_services_cost_invalid);
+      setCreateError(t.staff_services_quantity_integer_required);
       return;
     }
 
@@ -1199,6 +1362,79 @@ function useStaffServicesPageContent() {
       );
     } finally {
       setCreateBusy(false);
+    }
+  }
+
+  async function handleEditServiceSave() {
+    if (!selectedService || !editForm) return;
+    setEditError("");
+
+    const title = editForm.title.trim();
+    if (!title) {
+      setEditError(t.staff_services_title_required);
+      return;
+    }
+
+    const quantity = integerInputValue(editForm.quantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      setEditError(t.staff_services_quantity_integer_required);
+      return;
+    }
+
+    const calculatedCostEstimate =
+      selectedEditProviderServiceTotal === null
+        ? null
+        : Number(selectedEditProviderServiceTotal.toFixed(2));
+    const costEstimate =
+      calculatedCostEstimate ?? optionalMoney(editForm.costEstimate);
+    const actualCost = optionalMoney(editForm.actualCost);
+    if (Number.isNaN(costEstimate) || Number.isNaN(actualCost)) {
+      setEditError(t.staff_services_cost_invalid);
+      return;
+    }
+
+    const currency = editForm.currency.trim().toUpperCase() || "EUR";
+    if (currency.length !== 3) {
+      setEditError(t.staff_services_currency_invalid);
+      return;
+    }
+
+    setEditBusy(true);
+    try {
+      const updated = await apiFetch<StaffConciergeService>(
+        `/concierge-services/${selectedService.id}/update`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            provider_id: editForm.providerId || null,
+            provider_service_id: editForm.providerServiceId || null,
+            taxonomy_node_id: editForm.taxonomyNodeId || null,
+            assigned_concierge_id: editForm.assignedConciergeId || null,
+            service_kind: editForm.serviceKind,
+            title,
+            status: editForm.status,
+            billing_status: editForm.billingStatus,
+            booking_reference: editForm.bookingReference.trim() || null,
+            vendor_name: editForm.vendorName.trim() || null,
+            vendor_contact: editForm.vendorContact.trim() || null,
+            starts_at: editForm.startsAt ? toRfc3339(editForm.startsAt) : null,
+            ends_at: editForm.endsAt ? toRfc3339(editForm.endsAt) : null,
+            cost_estimate: costEstimate,
+            actual_cost: actualCost,
+            quantity,
+            unit_price: selectedEditProviderServiceUnitPrice,
+            currency,
+            service_notes: editForm.serviceNotes.trim() || null,
+            billing_notes: editForm.billingNotes.trim() || null,
+          }),
+        },
+      );
+      clearApiCache("/concierge-services");
+      dispatchStaffServicesState({ type: "update-success", updated });
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : t.common_failed_update);
+    } finally {
+      setEditBusy(false);
     }
   }
 
@@ -1441,59 +1677,510 @@ function useStaffServicesPageContent() {
               title={selectedService.title}
               description={`${selectedService.patient_name} · ${serviceKindLabel(selectedService.service_kind, t)}`}
               bodyClassName="space-y-4 px-5 py-4"
-            >
-              <Section title={t.staff_services_create_section_service}>
-                <div className="grid gap-2 md:grid-cols-2">
-                  <ServiceMiniMetric label={t.staff_services_column_status} value={serviceStatusLabel(selectedService.status, t)} />
-                  <ServiceMiniMetric label={t.staff_services_column_billing} value={billingStatusLabel(selectedService.billing_status, t)} />
-                  <ServiceMiniMetric label={t.staff_services_column_patient} value={`${selectedService.patient_name} (${selectedService.patient_pid})`} />
-                  <ServiceMiniMetric label={t.staff_services_column_source} value={serviceSourceLabel(selectedService.request_source, t)} />
-                  <ServiceMiniMetric
-                    label={t.services_category}
-                    value={
-                      <ServiceTaxonomyBadge
-                        label={serviceTaxonomyLabel(selectedService, lang)}
-                        fallback={t.common_not_set}
-                      />
-                    }
+              footer={
+                editMode && editForm ? (
+                  <SheetFormFooter
+                    cancelLabel={t.common_cancel}
+                    submitLabel={t.common_save}
+                    submittingLabel={t.common_save}
+                    submitting={editBusy}
+                    submitDisabled={editBusy || editProviderServicesLoading}
+                    onCancel={closeEditService}
+                    onSubmit={handleEditServiceSave}
                   />
+                ) : undefined
+              }
+            >
+              {editError ? (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  {editError}
                 </div>
-              </Section>
+              ) : null}
+              {editMode && editForm ? (
+                <>
+                  <Section title={t.staff_services_create_section_service}>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="space-y-1.5 text-sm">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {t.services_form_service_type}
+                        </span>
+                        <NativeComboboxSelect
+                          value={editForm.serviceKind}
+                          onChange={(event) =>
+                            setEditForm((current) =>
+                              current
+                                ? { ...current, serviceKind: event.target.value }
+                                : current,
+                            )
+                          }
+                          className={formSelectClassName}
+                        >
+                          {SERVICE_KIND_OPTIONS.map((kind) => (
+                            <option key={kind} value={kind}>
+                              {serviceKindLabel(kind, t)}
+                            </option>
+                          ))}
+                        </NativeComboboxSelect>
+                      </label>
+                      <label className="space-y-1.5 text-sm">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {t.staff_services_column_status}
+                        </span>
+                        <NativeComboboxSelect
+                          value={editForm.status}
+                          onChange={(event) =>
+                            setEditForm((current) =>
+                              current ? { ...current, status: event.target.value } : current,
+                            )
+                          }
+                          className={formSelectClassName}
+                        >
+                          {["planned", "booked", "confirmed", "in_service", "completed", "cancelled"].map((status) => (
+                            <option key={status} value={status}>
+                              {serviceStatusLabel(status, t)}
+                            </option>
+                          ))}
+                        </NativeComboboxSelect>
+                      </label>
+                      <label className="space-y-1.5 text-sm md:col-span-2">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {t.staff_services_form_title}
+                        </span>
+                        <Input
+                          value={editForm.title}
+                          onChange={(event) =>
+                            setEditForm((current) =>
+                              current ? { ...current, title: event.target.value } : current,
+                            )
+                          }
+                          className={formInputClassName}
+                          required
+                        />
+                      </label>
+                    </div>
+                  </Section>
 
-              <Section title={t.staff_services_create_section_schedule}>
-                <div className="grid gap-1.5">
-                  <ServiceDetailField label={t.staff_services_form_start} value={selectedService.starts_at ? formatPortalDateTime(selectedService.starts_at) : null} />
-                  <ServiceDetailField label={t.staff_services_form_end} value={selectedService.ends_at ? formatPortalDateTime(selectedService.ends_at) : null} />
-                </div>
-              </Section>
+                  <Section title={t.staff_services_create_section_assignment}>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="space-y-1.5 text-sm md:col-span-2">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {t.staff_services_form_provider}
+                        </span>
+                        <ProviderSelectWithTaxonomyFilter
+                          value={editForm.providerId}
+                          providers={providers}
+                          taxonomyNodes={taxonomyNodes}
+                          providerType="non_medical"
+                          taxonomyValue={editForm.taxonomyNodeId}
+                          taxonomyMode="leaf"
+                          providerPlaceholder={t.staff_services_optional}
+                          taxonomyPlaceholder={t.services_category}
+                          taxonomyAllLabel={t.services_category}
+                          containerClassName={providerPickerContainerClassName}
+                          taxonomySelectClassName={formSelectClassName}
+                          providerSelectClassName={formSelectClassName}
+                          providerLabel={(provider) => providerOptionLabel(provider, lang)}
+                          onTaxonomyChange={(taxonomyNodeId) =>
+                            setEditForm((current) =>
+                              current ? { ...current, taxonomyNodeId } : current,
+                            )
+                          }
+                          onChange={(providerId) =>
+                            setEditForm((current) =>
+                              current
+                                ? { ...current, providerId, providerServiceId: "" }
+                                : current,
+                            )
+                          }
+                        />
+                      </label>
+                      <label className="space-y-1.5 text-sm">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {t.staff_services_form_concierge}
+                        </span>
+                        <NativeComboboxSelect
+                          value={editForm.assignedConciergeId}
+                          onChange={(event) =>
+                            setEditForm((current) =>
+                              current
+                                ? { ...current, assignedConciergeId: event.target.value }
+                                : current,
+                            )
+                          }
+                          className={formSelectClassName}
+                        >
+                          <option value="">{t.staff_services_unassigned}</option>
+                          {conciergeStaff.map((member) => (
+                            <option key={member.id} value={member.id}>
+                              {member.name}
+                            </option>
+                          ))}
+                        </NativeComboboxSelect>
+                      </label>
+                    </div>
+                  </Section>
 
-              <Section title={t.staff_services_create_section_assignment}>
-                <div className="grid gap-1.5">
-                  <ServiceDetailField label={t.staff_services_form_provider} value={selectedService.provider_name} />
-                  <ServiceDetailField label={t.staff_services_form_concierge} value={selectedService.assigned_concierge_name} />
-                </div>
-              </Section>
+                  <Section title={t.staff_services_create_section_schedule}>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="space-y-1.5 text-sm">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {t.staff_services_form_start}
+                        </span>
+                        <Input
+                          type="datetime-local"
+                          value={editForm.startsAt}
+                          onChange={(event) =>
+                            setEditForm((current) =>
+                              current ? { ...current, startsAt: event.target.value } : current,
+                            )
+                          }
+                          className={formInputClassName}
+                        />
+                      </label>
+                      <label className="space-y-1.5 text-sm">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {t.staff_services_form_end}
+                        </span>
+                        <Input
+                          type="datetime-local"
+                          value={editForm.endsAt}
+                          onChange={(event) =>
+                            setEditForm((current) =>
+                              current ? { ...current, endsAt: event.target.value } : current,
+                            )
+                          }
+                          className={formInputClassName}
+                        />
+                      </label>
+                    </div>
+                  </Section>
 
-              <Section title={t.staff_services_create_section_finance}>
-                <div className="grid gap-2 md:grid-cols-3">
-                  <ServiceMiniMetric label={t.providers_services} value={selectedService.provider_service_name} />
-                  <ServiceMiniMetric label={t.invoices_workspace_quantity} value={selectedService.quantity} />
-                  <ServiceMiniMetric label={t.providers_service_price} value={selectedService.unit_price ? formatPortalCurrency(selectedService.unit_price) : null} />
-                  <ServiceMiniMetric label={t.staff_services_form_cost_estimate} value={selectedService.cost_estimate ? formatPortalCurrency(selectedService.cost_estimate) : null} />
-                  <ServiceMiniMetric label={t.staff_services_form_actual_cost} value={selectedService.actual_cost ? formatPortalCurrency(selectedService.actual_cost) : null} />
-                  <ServiceMiniMetric label={t.staff_services_form_currency} value={selectedService.currency} />
-                </div>
-              </Section>
+                  <Section title={t.staff_services_create_section_finance}>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="space-y-1.5 text-sm md:col-span-2">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {t.providers_services}
+                        </span>
+                        <NativeComboboxSelect
+                          value={editForm.providerServiceId}
+                          onChange={(event) => {
+                            const providerServiceId = event.target.value;
+                            const service =
+                              editProviderServices.find((item) => item.id === providerServiceId) ??
+                              null;
+                            const nextTotal = calculatedServiceTotal(
+                              service,
+                              editForm.quantity,
+                            );
+                            setEditForm((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    providerServiceId,
+                                    title:
+                                      !current.title.trim() && service
+                                        ? service.service_name
+                                        : current.title,
+                                    costEstimate:
+                                      nextTotal === null
+                                        ? current.costEstimate
+                                        : formatMoneyInput(nextTotal),
+                                    currency: service?.currency ?? current.currency,
+                                  }
+                                : current,
+                            );
+                          }}
+                          className={formSelectClassName}
+                          disabled={!editForm.providerId || editProviderServicesLoading}
+                        >
+                          <option value="">
+                            {editProviderServicesLoading
+                              ? t.common_loading
+                              : t.staff_services_optional}
+                          </option>
+                          {editProviderServices.map((service) => (
+                            <option key={service.id} value={service.id}>
+                              {providerServiceOptionLabel(service)}
+                            </option>
+                          ))}
+                        </NativeComboboxSelect>
+                      </label>
+                      <label className="space-y-1.5 text-sm">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {t.invoices_workspace_quantity}
+                        </span>
+                        <Input
+                          type="number"
+                          min="1"
+                          step="1"
+                          inputMode="numeric"
+                          value={editForm.quantity}
+                          onChange={(event) => {
+                            const quantity = event.target.value;
+                            if (!/^\d*$/.test(quantity)) return;
+                            const nextTotal = calculatedServiceTotal(
+                              selectedEditProviderService,
+                              quantity,
+                            );
+                            setEditForm((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    quantity,
+                                    costEstimate:
+                                      nextTotal === null
+                                        ? current.costEstimate
+                                        : formatMoneyInput(nextTotal),
+                                  }
+                                : current,
+                            );
+                          }}
+                          className={formInputClassName}
+                        />
+                      </label>
+                      <label className="space-y-1.5 text-sm">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {t.providers_service_price}
+                        </span>
+                        <Input
+                          readOnly
+                          value={
+                            selectedEditProviderServiceUnitPrice === null
+                              ? selectedService.unit_price
+                                ? formatMoneyInput(Number(selectedService.unit_price))
+                                : ""
+                              : formatMoneyInput(selectedEditProviderServiceUnitPrice)
+                          }
+                          className={formInputClassName}
+                        />
+                      </label>
+                      <label className="space-y-1.5 text-sm">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {t.staff_services_form_cost_estimate}
+                        </span>
+                        <Input
+                          inputMode="decimal"
+                          readOnly={selectedEditProviderServiceTotal !== null}
+                          value={editForm.costEstimate}
+                          onChange={(event) =>
+                            setEditForm((current) =>
+                              current
+                                ? { ...current, costEstimate: event.target.value }
+                                : current,
+                            )
+                          }
+                          className={formInputClassName}
+                        />
+                      </label>
+                      <label className="space-y-1.5 text-sm">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {t.staff_services_form_actual_cost}
+                        </span>
+                        <Input
+                          inputMode="decimal"
+                          value={editForm.actualCost}
+                          onChange={(event) =>
+                            setEditForm((current) =>
+                              current
+                                ? { ...current, actualCost: event.target.value }
+                                : current,
+                            )
+                          }
+                          className={formInputClassName}
+                        />
+                      </label>
+                      <label className="space-y-1.5 text-sm">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {t.staff_services_form_currency}
+                        </span>
+                        <Input
+                          value={editForm.currency}
+                          onChange={(event) =>
+                            setEditForm((current) =>
+                              current ? { ...current, currency: event.target.value } : current,
+                            )
+                          }
+                          className={formInputClassName}
+                          maxLength={3}
+                        />
+                      </label>
+                      <label className="space-y-1.5 text-sm">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {t.staff_services_column_billing}
+                        </span>
+                        <NativeComboboxSelect
+                          value={editForm.billingStatus}
+                          onChange={(event) =>
+                            setEditForm((current) =>
+                              current
+                                ? { ...current, billingStatus: event.target.value }
+                                : current,
+                            )
+                          }
+                          className={formSelectClassName}
+                        >
+                          {["draft", "ready", "billed", "settled", "waived"].map((status) => (
+                            <option key={status} value={status}>
+                              {billingStatusLabel(status, t)}
+                            </option>
+                          ))}
+                        </NativeComboboxSelect>
+                      </label>
+                    </div>
+                    {editProviderServicesError ? (
+                      <p className="mt-2 text-xs text-rose-600">{editProviderServicesError}</p>
+                    ) : null}
+                  </Section>
 
-              <Section title={t.staff_services_create_section_vendor_notes}>
-                <div className="grid gap-1.5">
-                  <ServiceDetailField label={t.staff_services_form_booking_reference} value={selectedService.booking_reference} />
-                  <ServiceDetailField label={t.staff_services_form_vendor} value={selectedService.vendor_name} />
-                  <ServiceDetailField label={t.staff_services_form_vendor_contact} value={selectedService.vendor_contact} />
-                  <ServiceDetailField label={t.staff_services_form_service_notes} value={selectedService.service_notes} multiline />
-                  <ServiceDetailField label={t.staff_services_form_billing_notes} value={selectedService.billing_notes} multiline />
-                </div>
-              </Section>
+                  <Section title={t.staff_services_create_section_vendor_notes}>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="space-y-1.5 text-sm">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {t.staff_services_form_booking_reference}
+                        </span>
+                        <Input
+                          value={editForm.bookingReference}
+                          onChange={(event) =>
+                            setEditForm((current) =>
+                              current
+                                ? { ...current, bookingReference: event.target.value }
+                                : current,
+                            )
+                          }
+                          className={formInputClassName}
+                        />
+                      </label>
+                      <label className="space-y-1.5 text-sm">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {t.staff_services_form_vendor}
+                        </span>
+                        <Input
+                          value={editForm.vendorName}
+                          onChange={(event) =>
+                            setEditForm((current) =>
+                              current ? { ...current, vendorName: event.target.value } : current,
+                            )
+                          }
+                          className={formInputClassName}
+                        />
+                      </label>
+                      <label className="space-y-1.5 text-sm md:col-span-2">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {t.staff_services_form_vendor_contact}
+                        </span>
+                        <Input
+                          value={editForm.vendorContact}
+                          onChange={(event) =>
+                            setEditForm((current) =>
+                              current
+                                ? { ...current, vendorContact: event.target.value }
+                                : current,
+                            )
+                          }
+                          className={formInputClassName}
+                        />
+                      </label>
+                      <label className="space-y-1.5 text-sm">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {t.staff_services_form_service_notes}
+                        </span>
+                        <textarea
+                          value={editForm.serviceNotes}
+                          onChange={(event) =>
+                            setEditForm((current) =>
+                              current
+                                ? { ...current, serviceNotes: event.target.value }
+                                : current,
+                            )
+                          }
+                          className={formTextareaClassName}
+                          rows={4}
+                        />
+                      </label>
+                      <label className="space-y-1.5 text-sm">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {t.staff_services_form_billing_notes}
+                        </span>
+                        <textarea
+                          value={editForm.billingNotes}
+                          onChange={(event) =>
+                            setEditForm((current) =>
+                              current
+                                ? { ...current, billingNotes: event.target.value }
+                                : current,
+                            )
+                          }
+                          className={formTextareaClassName}
+                          rows={4}
+                        />
+                      </label>
+                    </div>
+                  </Section>
+                </>
+              ) : (
+                <>
+                  {canEditService ? (
+                    <div className="flex justify-end">
+                      <Button type="button" size="sm" variant="outline" onClick={openEditService}>
+                        <Pencil className="size-3.5" />
+                        {t.common_edit}
+                      </Button>
+                    </div>
+                  ) : null}
+                  <Section title={t.staff_services_create_section_service}>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      <ServiceMiniMetric label={t.staff_services_column_status} value={serviceStatusLabel(selectedService.status, t)} />
+                      <ServiceMiniMetric label={t.staff_services_column_billing} value={billingStatusLabel(selectedService.billing_status, t)} />
+                      <ServiceMiniMetric label={t.staff_services_column_patient} value={`${selectedService.patient_name} (${selectedService.patient_pid})`} />
+                      <ServiceMiniMetric label={t.staff_services_column_source} value={serviceSourceLabel(selectedService.request_source, t)} />
+                      <ServiceMiniMetric
+                        label={t.services_category}
+                        value={
+                          <ServiceTaxonomyBadge
+                            label={serviceTaxonomyLabel(selectedService, lang)}
+                            fallback={t.common_not_set}
+                          />
+                        }
+                      />
+                    </div>
+                  </Section>
+
+                  <Section title={t.staff_services_create_section_schedule}>
+                    <div className="grid gap-1.5">
+                      <ServiceDetailField label={t.staff_services_form_start} value={selectedService.starts_at ? formatPortalDateTime(selectedService.starts_at) : null} />
+                      <ServiceDetailField label={t.staff_services_form_end} value={selectedService.ends_at ? formatPortalDateTime(selectedService.ends_at) : null} />
+                    </div>
+                  </Section>
+
+                  <Section title={t.staff_services_create_section_assignment}>
+                    <div className="grid gap-1.5">
+                      <ServiceDetailField label={t.staff_services_form_provider} value={selectedService.provider_name} />
+                      <ServiceDetailField label={t.staff_services_form_concierge} value={selectedService.assigned_concierge_name} />
+                    </div>
+                  </Section>
+
+                  <Section title={t.staff_services_create_section_finance}>
+                    <div className="grid gap-2 md:grid-cols-3">
+                      <ServiceMiniMetric label={t.providers_services} value={selectedService.provider_service_name} />
+                      <ServiceMiniMetric label={t.invoices_workspace_quantity} value={selectedService.quantity} />
+                      <ServiceMiniMetric label={t.providers_service_price} value={selectedService.unit_price ? formatPortalCurrency(selectedService.unit_price) : null} />
+                      <ServiceMiniMetric label={t.staff_services_form_cost_estimate} value={selectedService.cost_estimate ? formatPortalCurrency(selectedService.cost_estimate) : null} />
+                      <ServiceMiniMetric label={t.staff_services_form_actual_cost} value={selectedService.actual_cost ? formatPortalCurrency(selectedService.actual_cost) : null} />
+                      <ServiceMiniMetric label={t.staff_services_form_currency} value={selectedService.currency} />
+                    </div>
+                  </Section>
+
+                  <Section title={t.staff_services_create_section_vendor_notes}>
+                    <div className="grid gap-1.5">
+                      <ServiceDetailField label={t.staff_services_form_booking_reference} value={selectedService.booking_reference} />
+                      <ServiceDetailField label={t.staff_services_form_vendor} value={selectedService.vendor_name} />
+                      <ServiceDetailField label={t.staff_services_form_vendor_contact} value={selectedService.vendor_contact} />
+                      <ServiceDetailField label={t.staff_services_form_service_notes} value={selectedService.service_notes} multiline />
+                      <ServiceDetailField label={t.staff_services_form_billing_notes} value={selectedService.billing_notes} multiline />
+                    </div>
+                  </Section>
+                </>
+              )}
             </AdminSheetScaffold>
           ) : null}
         </SheetContent>
@@ -1657,7 +2344,8 @@ function useStaffServicesPageContent() {
                         taxonomyMode="leaf"
                         providerPlaceholder={t.staff_services_optional}
                         taxonomyPlaceholder={t.services_category}
-                        taxonomyAllLabel={t.staff_services_optional}
+                        taxonomyAllLabel={t.services_category}
+                        containerClassName={providerPickerContainerClassName}
                         taxonomySelectClassName={formSelectClassName}
                         providerSelectClassName={formSelectClassName}
                         providerLabel={(provider) => providerOptionLabel(provider, lang)}
@@ -1728,12 +2416,13 @@ function useStaffServicesPageContent() {
                       </span>
                       <Input
                         type="number"
-                        min="0.01"
-                        step="0.01"
-                        inputMode="decimal"
+                        min="1"
+                        step="1"
+                        inputMode="numeric"
                         value={createForm.quantity}
                         onChange={(event) => {
                           const quantity = event.target.value;
+                          if (!/^\d*$/.test(quantity)) return;
                           const nextTotal = calculatedServiceTotal(
                             selectedProviderService,
                             quantity,

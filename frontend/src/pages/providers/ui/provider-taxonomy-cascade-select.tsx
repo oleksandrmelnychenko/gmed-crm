@@ -88,7 +88,7 @@ export function ProviderTaxonomyCascadeSelect({
           value=""
           onChange={() => undefined}
           disabled
-          className={selectClassName}
+          className={cn("col-span-full", selectClassName)}
           title={allLabel ?? placeholder}
           aria-label={ariaLabel ?? placeholder}
         >
@@ -104,7 +104,7 @@ export function ProviderTaxonomyCascadeSelect({
         value={selectedNode ? value : ""}
         onChange={(event) => onChange(event.target.value)}
         disabled={disabled || treeOptions.length === 0}
-        className={selectClassName}
+        className={cn("col-span-full", selectClassName)}
         title={selectedTitle}
         aria-label={ariaLabel ?? placeholder}
       >
@@ -122,6 +122,7 @@ export function ProviderTaxonomyCascadeSelect({
               key={node.id}
               value={node.id}
               disabled={disabledOption}
+              data-disabled-presentation={disabledOption ? "group" : undefined}
               data-search-text={`${node.code} ${searchText}`}
             >
               <span

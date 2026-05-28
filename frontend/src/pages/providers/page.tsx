@@ -6589,22 +6589,24 @@ function ProviderProfileFields({
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
-        <Field label={t.providers_category}>
-          <ProviderTaxonomyCascadeSelect
-            value={form.taxonomyNodeId}
-            nodes={taxonomyNodes}
-            providerType={providerType}
-            mode="leaf"
-            disabled={disabled}
-            placeholder={t.providers_choose_category}
-            containerClassName="grid gap-2 sm:grid-cols-2"
-            selectClassName={formSelectClassName}
-            onChange={(nextValue) => {
-              onChange("taxonomyNodeId", nextValue);
-              onChange("taxonomyAttributes", "{}");
-            }}
-          />
-        </Field>
+        <div className="md:col-span-2">
+          <Field label={t.providers_category}>
+            <ProviderTaxonomyCascadeSelect
+              value={form.taxonomyNodeId}
+              nodes={taxonomyNodes}
+              providerType={providerType}
+              mode="leaf"
+              disabled={disabled}
+              placeholder={t.providers_choose_category}
+              containerClassName="w-full"
+              selectClassName={formSelectClassName}
+              onChange={(nextValue) => {
+                onChange("taxonomyNodeId", nextValue);
+                onChange("taxonomyAttributes", "{}");
+              }}
+            />
+          </Field>
+        </div>
         <Field label={lang === "ru" ? "Внутренний рейтинг" : "Interne Bewertung"}>
           <Input
             type="number"

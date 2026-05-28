@@ -14,6 +14,7 @@ type ComboboxSelectOption = {
   value: string
   label: React.ReactNode
   disabled?: boolean
+  disabledPresentation?: "group"
   searchText?: string
 }
 
@@ -106,6 +107,7 @@ function optionsFromChildren(children: React.ReactNode): ComboboxSelectOption[] 
     const props = child.props as React.OptionHTMLAttributes<HTMLOptionElement> & {
       children?: React.ReactNode
       "data-search-text"?: string
+      "data-disabled-presentation"?: "group"
     }
     const labelText = textFromNode(props.children)
     const value = props.value == null ? labelText : String(props.value)
@@ -114,6 +116,7 @@ function optionsFromChildren(children: React.ReactNode): ComboboxSelectOption[] 
       value,
       label: props.children ?? value,
       disabled: props.disabled,
+      disabledPresentation: props["data-disabled-presentation"],
       searchText: props["data-search-text"] ?? `${value} ${labelText}`,
     })
   })
@@ -198,6 +201,7 @@ function ComboboxSelect({
         value: selectedValue,
         label,
         disabled: true,
+        disabledPresentation: undefined,
         searchText: textFromNode(label),
       },
       ...options,
@@ -262,6 +266,7 @@ function ComboboxSelect({
         disabled={disabled}
         title={title}
         style={style}
+        data-placeholder={!selectedValue ? "" : undefined}
         onBlur={onBlur}
         onFocus={onFocus}
         className={cn(
@@ -305,13 +310,21 @@ function ComboboxSelect({
                 const isChecked =
                   selectedValueSet.has(option.value) ||
                   (showValueIndicator && option.value === selectedValue)
+                const disabledClassName = option.disabled
+                  ? option.disabledPresentation === "group"
+                    ? "data-disabled:pointer-events-none data-disabled:cursor-default"
+                    : "data-disabled:pointer-events-none data-disabled:opacity-50"
+                  : undefined
 
                 return (
                   <ComboboxPrimitive.Item
                     key={option.value}
                     value={option.value}
                     disabled={option.disabled}
-                    className="relative flex min-h-8 w-full cursor-pointer select-none items-center gap-2 rounded-md py-1.5 pr-8 pl-2 text-sm outline-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground"
+                    className={cn(
+                      "relative flex min-h-8 w-full cursor-pointer select-none items-center gap-2 rounded-md py-1.5 pr-8 pl-2 text-sm outline-none data-highlighted:bg-accent data-highlighted:text-accent-foreground",
+                      disabledClassName,
+                    )}
                   >
                     <span className="min-w-0 flex-1 truncate">{option.label}</span>
                     <span className="absolute right-2 flex size-4 items-center justify-center">

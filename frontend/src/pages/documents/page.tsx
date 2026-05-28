@@ -2183,7 +2183,7 @@ function StaffDocumentsPage({
               <option value="">{text.allCategories}</option>
               {categories.map((category) => (
                 <option key={category.key} value={category.key}>
-                  {category.label}
+                  {localizeDocumentCode(category.key, l) || category.label}
                 </option>
               ))}
             </NativeComboboxSelect>
@@ -2814,7 +2814,7 @@ function StaffDocumentsPage({
                         <option value="">{t.documents_no_category}</option>
                         {categories.map((category) => (
                           <option key={category.key} value={category.key}>
-                            {category.label}
+                            {localizeDocumentCode(category.key, l) || category.label}
                           </option>
                         ))}
                       </NativeComboboxSelect>
@@ -3296,7 +3296,7 @@ function StaffDocumentsPage({
                       <option value="">{t.documents_no_category}</option>
                       {categories.map((category) => (
                         <option key={category.key} value={category.key}>
-                          {category.label}
+                          {localizeDocumentCode(category.key, l) || category.label}
                         </option>
                       ))}
                     </NativeComboboxSelect>
@@ -4524,7 +4524,7 @@ function StaffDocumentsPage({
                             <option value="">{t.documents_choose_category}</option>
                             {categories.map((category) => (
                               <option key={category.key} value={category.key}>
-                                {category.label}
+                                {localizeDocumentCode(category.key, l) || category.label}
                               </option>
                             ))}
                           </NativeComboboxSelect>

@@ -200,3 +200,30 @@ async fn concierge_services_legacy_service_kind_still_works_without_taxonomy() {
         "legacy service_kind-only service must still be listed"
     );
 }
+
+#[tokio::test]
+async fn concierge_services_reject_fractional_quantity() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("concierge-fractional-quantity");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/concierge-services",
+        &bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "service_kind": "transfer",
+            "title": format!("Fractional quantity {tag}"),
+            "quantity": 1.5
+        })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["message"], "quantity must be a whole number");
+}
