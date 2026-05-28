@@ -364,6 +364,9 @@ struct GeneratedFrameworkContractContext {
     patient_name: String,
     patient_title: Option<String>,
     birth_date: Option<NaiveDate>,
+    patient_address: Option<String>,
+    patient_email: Option<String>,
+    patient_phone: Option<String>,
     language: String,
     auto_name: String,
     title_override: Option<String>,
@@ -1161,6 +1164,7 @@ struct DocumentBindingOverrides {
     specialties: Option<String>,
     period_from: Option<NaiveDate>,
     period_to: Option<NaiveDate>,
+    estimate_total: Option<String>,
     #[serde(default)]
     service_lines: Vec<ServiceLineInput>,
     // Appointment confirmation specifics
@@ -4775,8 +4779,27 @@ fn build_framework_contract_pdf(
         0.0,
         TreatmentPlanPdfColor::Body,
         1.0,
-        6.0,
+        1.0,
     );
+    for line in [
+        context.patient_address.clone(),
+        context.patient_email.as_deref().map(|v| format!("Email: {v}")),
+        context.patient_phone.as_deref().map(|v| format!("Tel.: {v}")),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        layout.text_block(
+            &line,
+            11.0,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Muted,
+            0.0,
+            1.0,
+        );
+    }
+    layout.spacer(5.0);
 
     if let Some(introduction) = context
         .introduction
@@ -8947,6 +8970,9 @@ async fn generate_document(
                 patient_name: patient_name.clone(),
                 patient_title: patient_title.clone(),
                 birth_date,
+                patient_address: patient_party.address_line(),
+                patient_email: patient_party.email.clone(),
+                patient_phone: patient_party.phone.clone(),
                 language: language.to_string(),
                 auto_name: auto_name.clone(),
                 title_override,
@@ -9136,7 +9162,11 @@ async fn generate_document(
                 Err(resp) => return resp,
             };
             apply_bank_overrides(&mut agency, &bindings);
-            let payer = payer_block_from_bindings(&bindings);
+            let invoice_payer = match load_invoice_payer(&state, order_id, patient_uuid).await {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
+            let payer = merge_payer(payer_block_from_bindings(&bindings), invoice_payer);
             let resolved_order_number = bindings
                 .order_number
                 .clone()
@@ -9186,7 +9216,11 @@ async fn generate_document(
                 Err(resp) => return resp,
             };
             apply_bank_overrides(&mut agency, &bindings);
-            let payer = payer_block_from_bindings(&bindings);
+            let invoice_payer = match load_invoice_payer(&state, order_id, patient_uuid).await {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
+            let payer = merge_payer(payer_block_from_bindings(&bindings), invoice_payer);
 
             let quote = if let Some(order_uuid) = order_id {
                 match load_order_quote_summary(&state, order_uuid).await {
@@ -9203,6 +9237,13 @@ async fn generate_document(
                     .unwrap_or_default()
             } else {
                 service_lines_to_items(&bindings.service_lines)
+            };
+            // When totals are not provided by the order's quote, derive them
+            // from the manually entered service lines.
+            let manual_totals = if quote.as_ref().and_then(|q| q.total_gross.clone()).is_none() {
+                compute_line_item_totals(&line_items)
+            } else {
+                None
             };
             let resolved_order_number = bindings
                 .order_number
@@ -9224,9 +9265,18 @@ async fn generate_document(
                     .clone()
                     .or_else(|| quote.as_ref().and_then(|q| q.quote_number.clone())),
                 line_items,
-                total_net: quote.as_ref().and_then(|q| q.total_net.clone()),
-                total_vat: quote.as_ref().and_then(|q| q.total_vat.clone()),
-                total_gross: quote.as_ref().and_then(|q| q.total_gross.clone()),
+                total_net: quote
+                    .as_ref()
+                    .and_then(|q| q.total_net.clone())
+                    .or_else(|| manual_totals.as_ref().map(|t| t.0.clone())),
+                total_vat: quote
+                    .as_ref()
+                    .and_then(|q| q.total_vat.clone())
+                    .or_else(|| manual_totals.as_ref().map(|t| t.1.clone())),
+                total_gross: quote
+                    .as_ref()
+                    .and_then(|q| q.total_gross.clone())
+                    .or_else(|| manual_totals.as_ref().map(|t| t.2.clone())),
                 sign_place: bindings.sign_place.clone(),
                 sign_date: bindings.sign_date,
                 generated_at,
@@ -9257,7 +9307,7 @@ async fn generate_document(
                 patient_pid: patient_pid.clone(),
                 estimate_date: bindings.sign_date.or(bindings.order_date),
                 line_items,
-                total_range: None,
+                total_range: bindings.estimate_total.clone(),
                 generated_at,
             };
             let preview = admin_preview_html(
@@ -10482,6 +10532,50 @@ fn payer_block_from_bindings(bindings: &DocumentBindingOverrides) -> DocPartyBlo
     }
 }
 
+/// Parse the first monetary amount from a free-text value, accepting German
+/// formatting ("1.234,56 EUR", "999,00 €", "100,00 EUR/Stunde").
+fn parse_eur_amount(value: &str) -> Option<f64> {
+    let mut cleaned = String::new();
+    for ch in value.chars() {
+        if ch.is_ascii_digit() || ch == ',' || ch == '.' {
+            cleaned.push(ch);
+        } else if !cleaned.is_empty() {
+            break;
+        }
+    }
+    let cleaned = cleaned.trim_matches(|c| c == ',' || c == '.');
+    if cleaned.is_empty() {
+        return None;
+    }
+    let normalized = if cleaned.contains(',') {
+        cleaned.replace('.', "").replace(',', ".")
+    } else {
+        cleaned.to_string()
+    };
+    normalized.parse::<f64>().ok()
+}
+
+fn format_eur(value: f64) -> String {
+    format!("{value:.2}").replace('.', ",") + " EUR"
+}
+
+/// Best-effort net/VAT(19%)/gross totals summed from manual service lines.
+fn compute_line_item_totals(items: &[GeneratedContractLineItem]) -> Option<(String, String, String)> {
+    let mut net = 0.0_f64;
+    for item in items {
+        if let Some(amount) =
+            parse_eur_amount(&item.line_gross).or_else(|| parse_eur_amount(&item.unit_price))
+        {
+            net += amount;
+        }
+    }
+    if net <= 0.0 {
+        return None;
+    }
+    let vat = net * 0.19;
+    Some((format_eur(net), format_eur(vat), format_eur(net + vat)))
+}
+
 fn service_lines_to_items(lines: &[ServiceLineInput]) -> Vec<GeneratedContractLineItem> {
     lines
         .iter()
@@ -10549,6 +10643,80 @@ async fn load_order_quote_summary(
             line_items,
         }
     }))
+}
+
+/// Auto-bind the third-party payer ("Kostenübernehmer") from the most recent
+/// invoice payer contact for the order (preferred) or the patient.
+async fn load_invoice_payer(
+    state: &AppState,
+    order_id: Option<Uuid>,
+    patient_id: Uuid,
+) -> Result<Option<DocPartyBlock>, axum::response::Response> {
+    let row = sqlx::query(
+        r#"SELECT payer_contact_name, payer_contact_email, payer_contact_phone
+           FROM invoices
+           WHERE patient_id = $2
+             AND payer_contact_name IS NOT NULL
+             AND length(trim(payer_contact_name)) > 0
+           ORDER BY ($1::uuid IS NOT NULL AND order_id = $1) DESC, created_at DESC
+           LIMIT 1"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_id, "load invoice payer");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load payer context",
+        )
+    })?;
+
+    Ok(row.and_then(|row| {
+        let name = row
+            .try_get::<Option<String>, _>("payer_contact_name")
+            .ok()
+            .flatten()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())?;
+        Some(DocPartyBlock {
+            name,
+            email: row
+                .try_get::<Option<String>, _>("payer_contact_email")
+                .ok()
+                .flatten(),
+            phone: row
+                .try_get::<Option<String>, _>("payer_contact_phone")
+                .ok()
+                .flatten(),
+            ..DocPartyBlock::default()
+        })
+    }))
+}
+
+/// Merge a manually entered payer with an auto-bound invoice payer: manual
+/// fields win, invoice fills the rest. Returns the manual block unchanged when
+/// no invoice payer exists.
+fn merge_payer(manual: DocPartyBlock, invoice: Option<DocPartyBlock>) -> DocPartyBlock {
+    let Some(invoice) = invoice else {
+        return manual;
+    };
+    DocPartyBlock {
+        name: if manual.name.trim().is_empty() {
+            invoice.name
+        } else {
+            manual.name
+        },
+        title: manual.title,
+        birth_date: manual.birth_date,
+        street: manual.street,
+        zip: manual.zip,
+        city: manual.city,
+        country: manual.country,
+        email: manual.email.or(invoice.email),
+        phone: manual.phone.or(invoice.phone),
+    }
 }
 
 async fn list_documents(

@@ -2784,6 +2784,7 @@ async fn ceo_can_generate_admin_document_templates_as_pdf() {
             "finance",
             json!({
                 "order_date": "2025-11-11",
+                "estimate_total": "200,00 - 2000,00 €",
                 "service_lines": [
                     {"description": "Dermatologische Untersuchung", "line_total": "100,00 - 1000,00 €"}
                 ]

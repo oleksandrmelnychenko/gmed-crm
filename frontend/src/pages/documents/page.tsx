@@ -250,6 +250,7 @@ const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
       label: "Leistungen (eine pro Zeile: Beschreibung | Preis/Spanne)",
       kind: "textarea",
     },
+    { key: "estimate_total", label: "Gesamt (Spanne)", kind: "text" },
   ],
   appointment_confirmation: [
     { key: "doc_id", label: "Doc-ID", kind: "text" },
