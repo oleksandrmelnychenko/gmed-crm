@@ -113,10 +113,8 @@ import {
   updateOrderPlanningPreparation,
   updateOrderProcessGates,
 } from "./data/order-api";
-import {
-  providerMatchesTaxonomyFilter,
-  providerTaxonomyFilterOptions,
-} from "@/pages/appointments/model/provider-taxonomy";
+import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
+import { ProviderSelectWithTaxonomyFilter } from "@/pages/providers/ui/provider-select-with-taxonomy-filter";
 import { doctorSpecialtyLabel } from "@/pages/providers/model/specialization-labels";
 import {
   DEFAULT_FILTERS,
@@ -437,6 +435,7 @@ type OrdersPageState = {
   reloadNonce: number;
   patients: PatientOption[];
   providers: ProviderOption[];
+  taxonomyNodes: ProviderTaxonomyNode[];
   providerDoctors: Record<string, DoctorOption[]>;
   orderDocuments: SupportingDocumentOption[];
   selectedOrderId: string | null;
@@ -785,6 +784,7 @@ function useOrdersPageContent() {
       reloadNonce: 0,
       patients: [],
       providers: [],
+      taxonomyNodes: [],
       providerDoctors: {},
       orderDocuments: [],
       selectedOrderId: routeOrderId || null,
@@ -879,6 +879,7 @@ function useOrdersPageContent() {
     orderServiceGroups,
     orders,
     patients,
+    taxonomyNodes,
     phaseDraft,
     phaseError,
     phaseSaving,
@@ -923,6 +924,8 @@ function useOrdersPageContent() {
     setOrdersPageField("patients", nextValue);
   const setProviders = (nextValue: SetStateAction<ProviderOption[]>) =>
     setOrdersPageField("providers", nextValue);
+  const setTaxonomyNodes = (nextValue: SetStateAction<ProviderTaxonomyNode[]>) =>
+    setOrdersPageField("taxonomyNodes", nextValue);
   const setProviderDoctors = (
     nextValue: SetStateAction<Record<string, DoctorOption[]>>,
   ) => setOrdersPageField("providerDoctors", nextValue);
@@ -1053,17 +1056,6 @@ function useOrdersPageContent() {
     nextValue: SetStateAction<string | null>,
   ) => setOrdersPageField("externalInvoiceUpdatingId", nextValue);
 
-  const providerTaxonomyOptions = useMemo(
-    () => providerTaxonomyFilterOptions(providers, null, lang === "de" ? "de" : "ru"),
-    [lang, providers],
-  );
-  const providerOptions = useMemo(
-    () =>
-      providers.filter((provider) =>
-        providerMatchesTaxonomyFilter(provider, filters.providerTaxonomyNodeId),
-      ),
-    [filters.providerTaxonomyNodeId, providers],
-  );
   const filterDoctorOptions = useMemo(
     () =>
       filters.providerId ? (providerDoctors[filters.providerId] ?? []) : [],
@@ -1550,11 +1542,13 @@ function useOrdersPageContent() {
   const applyOrderDirectory = useCallback((directory: Awaited<ReturnType<typeof fetchOrderDirectory>>) => {
     setPatients(directory.patients);
     setProviders(directory.providers);
+    setTaxonomyNodes(directory.taxonomyNodes);
   }, []);
 
   const clearOrderDirectory = useCallback(() => {
     setPatients([]);
     setProviders([]);
+    setTaxonomyNodes([]);
   }, []);
 
   const resetCreateRecheckState = useCallback(() => {
@@ -2845,52 +2839,30 @@ function useOrdersPageContent() {
             ))}
           </NativeComboboxSelect>
 
-          <NativeComboboxSelect
-            value={filters.providerTaxonomyNodeId || "__all__"}
-            onChange={(event) => {
-              const providerTaxonomyNodeId =
-                event.target.value && event.target.value !== "__all__"
-                  ? event.target.value
-                  : "";
-              const selectedProvider = providers.find(
-                (provider) => provider.id === filters.providerId,
-              );
-              const keepProvider =
-                !filters.providerId ||
-                !providerTaxonomyNodeId ||
-                (selectedProvider
-                  ? providerMatchesTaxonomyFilter(
-                      selectedProvider,
-                      providerTaxonomyNodeId,
-                    )
-                  : false);
+          <ProviderSelectWithTaxonomyFilter
+            value={filters.providerId}
+            providers={providers}
+            taxonomyNodes={taxonomyNodes}
+            taxonomyValue={filters.providerTaxonomyNodeId}
+            providerPlaceholder={t.common_provider}
+            taxonomyPlaceholder={t.providers_category}
+            taxonomyAllLabel={t.providers_category}
+            containerClassName="grid w-[420px] shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-1.5"
+            taxonomySelectClassName={cn(selectClassName, "h-8 min-w-0 bg-background text-[13px]")}
+            providerSelectClassName={cn(selectClassName, "h-8 min-w-0 bg-background text-[13px]")}
+            providerLabel={(provider) =>
+              `${provider.name}${provider.address_city ? ` (${provider.address_city})` : ""}`
+            }
+            onTaxonomyChange={(providerTaxonomyNodeId) => {
               setFilters((current) => ({
                 ...current,
                 providerTaxonomyNodeId,
-                providerId: keepProvider ? current.providerId : "",
-                doctorId: keepProvider ? current.doctorId : "",
               }));
               syncQuery({
                 taxonomy: providerTaxonomyNodeId || null,
-                provider: keepProvider ? filters.providerId || null : null,
-                doctor: keepProvider ? filters.doctorId || null : null,
               });
             }}
-            disabled={providerTaxonomyOptions.length === 0}
-            className={cn(selectClassName, "h-8 w-[220px] bg-background text-[13px]")}
-          >
-            <option value="__all__">{t.providers_category}</option>
-            {providerTaxonomyOptions.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
-            ))}
-          </NativeComboboxSelect>
-
-          <NativeComboboxSelect
-            value={filters.providerId || "__all__"}
-            onChange={(event) => {
-              const providerId = event.target.value && event.target.value !== "__all__" ? event.target.value : "";
+            onChange={(providerId) => {
               setFilters((current) => ({
                 ...current,
                 providerId,
@@ -2898,16 +2870,7 @@ function useOrdersPageContent() {
               }));
               syncQuery({ provider: providerId || null, doctor: null });
             }}
-            className={cn(selectClassName, "h-8 w-[210px] bg-background text-[13px]")}
-          >
-            <option value="__all__">{t.common_provider}</option>
-            {providerOptions.map((provider) => (
-              <option key={provider.id} value={provider.id}>
-                {provider.name}
-                {provider.address_city ? ` (${provider.address_city})` : ""}
-              </option>
-            ))}
-          </NativeComboboxSelect>
+          />
 
           <NativeComboboxSelect
             value={filters.doctorId || "__all__"}
@@ -5912,23 +5875,24 @@ function useOrdersPageContent() {
                     />
                   </Field>
                   <Field label={t.common_provider} className="md:col-span-2">
-                    <NativeComboboxSelect
+                    <ProviderSelectWithTaxonomyFilter
                       value={externalInvoiceForm.providerId}
-                      onChange={(event) =>
+                      providers={providers}
+                      taxonomyNodes={taxonomyNodes}
+                      providerPlaceholder={t.common_not_set}
+                      taxonomyPlaceholder={t.providers_category}
+                      taxonomyAllLabel={t.providers_all}
+                      containerClassName="grid-cols-1 sm:grid-cols-2"
+                      taxonomySelectClassName={selectClassName}
+                      providerSelectClassName={selectClassName}
+                      providerLabel={(provider) => provider.name}
+                      onChange={(providerId) =>
                         setExternalInvoiceForm((current) => ({
                           ...current,
-                          providerId: event.target.value,
+                          providerId,
                         }))
                       }
-                      className={selectClassName}
-                    >
-                      <option value="">{t.common_not_set}</option>
-                      {providers.map((provider) => (
-                        <option key={provider.id} value={provider.id}>
-                          {provider.name}
-                        </option>
-                      ))}
-                    </NativeComboboxSelect>
+                    />
                   </Field>
                   <Field label={t.orders_external_invoice_date}>
                     <Input
@@ -6063,6 +6027,7 @@ function useOrdersPageContent() {
             <OrderServiceGroupWizard
               embedded
               providers={providers}
+              taxonomyNodes={taxonomyNodes}
               providerDoctors={providerDoctors}
               creating={serviceGroupCreating}
               error={serviceGroupWizardError}
@@ -6583,28 +6548,29 @@ function useOrdersPageContent() {
             <OrderSheetSection title={t.orders_service_group_doctors}>
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label={t.orders_service_provider}>
-                  <NativeComboboxSelect
+                  <ProviderSelectWithTaxonomyFilter
                     value={leistungForm.providerId}
-                    onChange={(event) => {
-                      const providerId = event.target.value;
+                    providers={providers}
+                    taxonomyNodes={taxonomyNodes}
+                    providerPlaceholder={t.common_provider}
+                    taxonomyPlaceholder={t.providers_category}
+                    taxonomyAllLabel={t.providers_all}
+                    containerClassName="grid-cols-1 sm:grid-cols-2"
+                    taxonomySelectClassName={selectClassName}
+                    providerSelectClassName={selectClassName}
+                    providerLabel={(provider) =>
+                      provider.address_city
+                        ? `${provider.name} (${provider.address_city})`
+                        : provider.name
+                    }
+                    onChange={(providerId) => {
                       setLeistungForm((current) => ({
                         ...current,
                         providerId,
                         doctorId: "",
                       }));
                     }}
-                    className={selectClassName}
-                  >
-                    <option value="">{t.common_provider}</option>
-                    {providers.map((provider) => (
-                      <option key={provider.id} value={provider.id}>
-                        {provider.name}
-                        {provider.address_city
-                          ? ` (${provider.address_city})`
-                          : ""}
-                      </option>
-                    ))}
-                  </NativeComboboxSelect>
+                  />
                 </Field>
                 <Field label={t.orders_service_doctor}>
                   <NativeComboboxSelect

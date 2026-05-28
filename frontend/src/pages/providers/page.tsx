@@ -170,6 +170,8 @@ import { clearApiCache } from "@/lib/api";
 import { useSecurePersistedState } from "@/lib/secure-persist";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { CountrySelect } from "@/pages/patients/ui/shared/patient-form-primitives";
+import { ProviderSelectWithTaxonomyFilter } from "./ui/provider-select-with-taxonomy-filter";
+import { ProviderTaxonomyCascadeSelect } from "./ui/provider-taxonomy-cascade-select";
 
 const selectClassName = shellSelectClassName;
 const formSelectClassName = cn(
@@ -526,18 +528,6 @@ function taxonomyNodeLabel(node: ProviderTaxonomyNode | null | undefined, lang: 
   return node.name_de || node.name_en || node.name_ru || humanizeCode(node.code);
 }
 
-function taxonomyNodeDepth(node: ProviderTaxonomyNode, nodesById: Map<string, ProviderTaxonomyNode>) {
-  let depth = 0;
-  let parentId = node.parent_id;
-  while (parentId) {
-    const parent = nodesById.get(parentId);
-    if (!parent) break;
-    depth += 1;
-    parentId = parent.parent_id;
-  }
-  return depth;
-}
-
 function taxonomyPathLabel(
   node: ProviderTaxonomyNode | null | undefined,
   nodes: ProviderTaxonomyNode[],
@@ -557,68 +547,6 @@ function taxonomyPathLabel(
       ? path.slice(1)
       : path;
   return visiblePath.map((item) => taxonomyNodeLabel(item, lang)).join(" / ");
-}
-
-function taxonomyLeafOptions(
-  nodes: ProviderTaxonomyNode[],
-  providerType: ProviderFormState["providerType"] | "",
-  lang: "de" | "ru",
-  options: { includeGroups?: boolean } = {},
-) {
-  const nodesById = new Map(nodes.map((item) => [item.id, item]));
-  const childrenByParent = new Map<string | null, ProviderTaxonomyNode[]>();
-  for (const node of nodes) {
-    const list = childrenByParent.get(node.parent_id) ?? [];
-    list.push(node);
-    childrenByParent.set(node.parent_id, list);
-  }
-  const collator = new Intl.Collator(lang === "ru" ? "ru" : "de", {
-    sensitivity: "base",
-    numeric: true,
-  });
-  for (const siblings of childrenByParent.values()) {
-    siblings.sort((left, right) => {
-      if (left.sort_order !== right.sort_order) {
-        return left.sort_order - right.sort_order;
-      }
-      return collator.compare(
-        taxonomyNodeLabel(left, lang),
-        taxonomyNodeLabel(right, lang),
-      );
-    });
-  }
-
-  const result: Array<{
-    node: ProviderTaxonomyNode;
-    depth: number;
-    label: string;
-    pathLabel: string;
-  }> = [];
-  const visit = (node: ProviderTaxonomyNode) => {
-    const matchesType = !providerType || node.provider_kind === providerType;
-    const matchesLevel =
-      node.level === "type" ||
-      (options.includeGroups && (node.level === "group" || node.level === "subgroup"));
-    if (node.is_active && matchesType && matchesLevel) {
-      const pathLabel =
-        taxonomyPathLabel(node, nodes, lang, {
-          omitProviderKindRoot: Boolean(providerType),
-        }) || taxonomyNodeLabel(node, lang);
-      result.push({
-        node,
-        depth: Math.max(0, taxonomyNodeDepth(node, nodesById) - (providerType ? 1 : 0)),
-        label: taxonomyNodeLabel(node, lang) || pathLabel,
-        pathLabel,
-      });
-    }
-    for (const child of childrenByParent.get(node.id) ?? []) {
-      visit(child);
-    }
-  };
-  for (const root of childrenByParent.get(null) ?? []) {
-    visit(root);
-  }
-  return result;
 }
 
 const GENERIC_TAXONOMY_FILTER_KEYS = new Set([
@@ -689,52 +617,6 @@ function updateTaxonomyAttributeValue(value: string, key: string, nextValue: str
     delete next[key];
   }
   return JSON.stringify(next, null, 2);
-}
-
-function ProviderTaxonomySelect({
-  value,
-  nodes,
-  providerType,
-  disabled,
-  includeGroups = false,
-  placeholder,
-  className,
-  onChange,
-}: {
-  value: string;
-  nodes: ProviderTaxonomyNode[];
-  providerType: ProviderFormState["providerType"] | "";
-  disabled?: boolean;
-  includeGroups?: boolean;
-  placeholder: string;
-  className?: string;
-  onChange: (value: string) => void;
-}) {
-  const { lang } = useLang();
-  const options = useMemo(
-    () => taxonomyLeafOptions(nodes, providerType, lang, { includeGroups }),
-    [includeGroups, lang, nodes, providerType],
-  );
-  const currentOption = value
-    ? options.find((option) => option.node.id === value) ?? null
-    : null;
-
-  return (
-    <NativeComboboxSelect
-      value={currentOption ? value : ""}
-      onChange={(event) => onChange(event.target.value)}
-      disabled={disabled || options.length === 0}
-      className={className ?? formSelectClassName}
-      title={currentOption ? currentOption.pathLabel : placeholder}
-    >
-      <option value="">{placeholder}</option>
-      {options.map((option) => (
-        <option key={option.node.id} value={option.node.id}>
-          {`${"    ".repeat(Math.max(0, option.depth - 1))}${option.label}`}
-        </option>
-      ))}
-    </NativeComboboxSelect>
-  );
 }
 
 function serviceTaxonomyLabel(
@@ -1672,6 +1554,11 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       parent_provider_id: detail.parent_provider_id,
       parent_provider_name: detail.parent_provider_name,
       organization_level: detail.organization_level,
+      taxonomy_node_id: detail.taxonomy_node_id,
+      taxonomy_node_ids: detail.taxonomy_node_ids,
+      taxonomy_node: detail.taxonomy_node,
+      taxonomy_path: detail.taxonomy_path,
+      taxonomy_attributes: detail.taxonomy_attributes,
       specializations: detail.specializations,
       is_active: detail.is_active,
       has_contract: detail.kooperationsvertrag !== null && detail.kooperationsvertrag !== undefined,
@@ -2816,6 +2703,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             form={relationshipForm}
             sourceDoctors={detail.doctors}
             targetProviders={relationshipProviderOptions}
+            taxonomyNodes={taxonomyNodes}
             targetDoctors={relationshipTargetDoctors}
             targetDoctorsBusy={relationshipTargetDoctorsBusy}
             busy={relationshipBusy}
@@ -3055,8 +2943,8 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               <option value="non_medical">{t.providers_type_non_medical}</option>
             </NativeComboboxSelect>
 
-            <div className="min-w-[240px] max-w-md flex-1 sm:flex-none">
-              <ProviderTaxonomySelect
+            <div className="min-w-[240px] max-w-2xl flex-1 sm:flex-none">
+              <ProviderTaxonomyCascadeSelect
                 value={filters.taxonomyNodeId}
                 nodes={taxonomyNodes}
                 providerType={
@@ -3066,9 +2954,11 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                       ? filters.providerType
                       : ""
                 }
-                includeGroups
+                mode="any"
                 placeholder={t.providers_category}
-                className={cn(selectClassName, "h-8 w-full bg-card text-[13px]")}
+                allLabel={t.providers_all}
+                containerClassName="w-full"
+                selectClassName={cn(selectClassName, "h-8 min-w-[180px] flex-1 bg-card text-[13px]")}
                 onChange={(nextValue) => {
                   setFilters((current) => ({
                     ...current,
@@ -3231,6 +3121,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             filters={peopleFilters}
             patients={peoplePatientOptions}
             providers={parentProviderOptions}
+            taxonomyNodes={taxonomyNodes}
             specializations={specializations}
             staffRoles={staffRoles}
             loading={peopleBusy}
@@ -3549,6 +3440,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           form={relationshipForm}
           sourceDoctors={detail.doctors}
           targetProviders={relationshipProviderOptions}
+          taxonomyNodes={taxonomyNodes}
           targetDoctors={relationshipTargetDoctors}
           targetDoctorsBusy={relationshipTargetDoctorsBusy}
           busy={relationshipBusy}
@@ -4218,6 +4110,7 @@ function ProviderDoctorRelationshipFormSheet({
   form,
   sourceDoctors,
   targetProviders,
+  taxonomyNodes,
   targetDoctors,
   targetDoctorsBusy,
   busy,
@@ -4231,6 +4124,7 @@ function ProviderDoctorRelationshipFormSheet({
   form: DoctorRelationshipFormState;
   sourceDoctors: DoctorSummary[];
   targetProviders: ProviderSummary[];
+  taxonomyNodes: ProviderTaxonomyNode[];
   targetDoctors: DoctorSummary[];
   targetDoctorsBusy: boolean;
   busy: boolean;
@@ -4291,23 +4185,25 @@ function ProviderDoctorRelationshipFormSheet({
                       )}
                     </NativeComboboxSelect>
                   </Field>
-                  <Field label={l("providers_relationship_target_provider")}>
-                    <NativeComboboxSelect
+                  <FieldGroup label={l("providers_relationship_target_provider")}>
+                    <ProviderSelectWithTaxonomyFilter
                       value={form.targetProviderId}
-                      onChange={(event) => onTargetProviderChange(event.target.value)}
-                      className={formSelectClassName}
-                      required
-                    >
-                      <option value="">{t.common_select_placeholder}</option>
-                      {targetProviders.map((provider) => (
-                        <option key={provider.id} value={provider.id}>
-                          {[provider.name, provider.address_city, provider.address_country]
-                            .filter(Boolean)
-                            .join(" - ")}
-                        </option>
-                      ))}
-                    </NativeComboboxSelect>
-                  </Field>
+                      providers={targetProviders}
+                      taxonomyNodes={taxonomyNodes}
+                      providerPlaceholder={t.common_select_placeholder}
+                      taxonomyPlaceholder={t.providers_category}
+                      taxonomyAllLabel={t.providers_all}
+                      containerClassName="grid gap-2"
+                      taxonomySelectClassName={formSelectClassName}
+                      providerSelectClassName={formSelectClassName}
+                      providerLabel={(provider) =>
+                        [provider.name, provider.address_city, provider.address_country]
+                          .filter(Boolean)
+                          .join(" - ")
+                      }
+                      onChange={onTargetProviderChange}
+                    />
+                  </FieldGroup>
                   <Field label={l("providers_relationship_target_doctor")}>
                     <div className="space-y-1.5">
                       <NativeComboboxSelect
@@ -6693,19 +6589,24 @@ function ProviderProfileFields({
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
-        <Field label={t.providers_category}>
-          <ProviderTaxonomySelect
-            value={form.taxonomyNodeId}
-            nodes={taxonomyNodes}
-            providerType={providerType}
-            disabled={disabled}
-            placeholder={t.providers_choose_category}
-            onChange={(nextValue) => {
-              onChange("taxonomyNodeId", nextValue);
-              onChange("taxonomyAttributes", "{}");
-            }}
-          />
-        </Field>
+        <div className="md:col-span-2">
+          <Field label={t.providers_category}>
+            <ProviderTaxonomyCascadeSelect
+              value={form.taxonomyNodeId}
+              nodes={taxonomyNodes}
+              providerType={providerType}
+              mode="leaf"
+              disabled={disabled}
+              placeholder={t.providers_choose_category}
+              containerClassName="w-full"
+              selectClassName={formSelectClassName}
+              onChange={(nextValue) => {
+                onChange("taxonomyNodeId", nextValue);
+                onChange("taxonomyAttributes", "{}");
+              }}
+            />
+          </Field>
+        </div>
         <Field label={lang === "ru" ? "Внутренний рейтинг" : "Interne Bewertung"}>
           <Input
             type="number"
@@ -7702,11 +7603,14 @@ function ServiceFormFields({
             />
           </Field>
           <Field label={t.services_category}>
-            <ProviderTaxonomySelect
+            <ProviderTaxonomyCascadeSelect
               value={form.taxonomyNodeId}
               nodes={taxonomyNodes}
               providerType={providerType}
+              mode="leaf"
               placeholder={t.documents_choose_category}
+              containerClassName="grid gap-2 sm:grid-cols-2"
+              selectClassName={formSelectClassName}
               onChange={(nextValue) => {
                 onChange("taxonomyNodeId", nextValue);
                 onChange("taxonomyAttributes", "{}");

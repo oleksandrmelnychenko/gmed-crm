@@ -7,6 +7,13 @@ import {
   providerTaxonomyFilterOptions,
   providerTaxonomyTreeOptions,
 } from "./provider-taxonomy";
+import {
+  providerTaxonomyCanCommitSelection,
+  providerTaxonomyChildren,
+  providerTaxonomyKindRoot,
+  providerTaxonomyNodeLabel,
+  providerTaxonomyVisiblePathForNodeId,
+} from "@/pages/providers/model/provider-taxonomy-cascade";
 import type { ProviderSummary } from "./types";
 import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 
@@ -138,5 +145,33 @@ describe("appointment provider taxonomy filters", () => {
     ]);
     expect(options.map((option) => option.label)).toContain("Reha & Pflege / Unused");
     expect(options.map((option) => option.label).join(" ")).not.toContain("Medizinische Provider");
+  });
+
+  it("splits taxonomy paths into cascade levels without slash labels", () => {
+    const taxonomyNodes = [
+      taxonomyNode("medical", "medical_providers", "category", "medical", null, "Medizinische Provider"),
+      taxonomyNode("reha-group", "medical_reha_care", "group", "medical", "medical", "Reha & Pflege"),
+      taxonomyNode("reha-leaf", "medical_reha_clinics", "type", "medical", "reha-group", "Reha-Kliniken"),
+      taxonomyNode("nonmedical", "nonmedical_providers", "category", "non_medical", null, "Nicht-Medizinische Provider"),
+    ];
+
+    const medicalRoot = providerTaxonomyKindRoot(taxonomyNodes, "medical");
+    const firstLevel = providerTaxonomyChildren(taxonomyNodes, medicalRoot?.id ?? null, "medical");
+    const secondLevel = providerTaxonomyChildren(taxonomyNodes, "reha-group", "medical");
+    const visiblePath = providerTaxonomyVisiblePathForNodeId(taxonomyNodes, "reha-leaf", "medical");
+
+    expect(firstLevel.map((node) => providerTaxonomyNodeLabel(node, "de"))).toEqual([
+      "Reha & Pflege",
+    ]);
+    expect(secondLevel.map((node) => providerTaxonomyNodeLabel(node, "de"))).toEqual([
+      "Reha-Kliniken",
+    ]);
+    expect(visiblePath.map((node) => providerTaxonomyNodeLabel(node, "de"))).toEqual([
+      "Reha & Pflege",
+      "Reha-Kliniken",
+    ]);
+    expect(providerTaxonomyCanCommitSelection(firstLevel[0], "leaf")).toBe(false);
+    expect(providerTaxonomyCanCommitSelection(secondLevel[0], "leaf")).toBe(true);
+    expect(providerTaxonomyCanCommitSelection(firstLevel[0], "any")).toBe(true);
   });
 });

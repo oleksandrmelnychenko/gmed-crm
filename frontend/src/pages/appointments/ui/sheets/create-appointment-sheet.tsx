@@ -44,9 +44,7 @@ import {
 import { buildConflictQuery } from "@/pages/appointments/model/query-builders";
 import { buildLocalScheduleWarnings, buildScheduleNotice } from "@/pages/appointments/model/schedule-warnings";
 import {
-  filterProvidersForAppointmentScope,
   providerSelectionFitsAppointmentScope,
-  providerTaxonomyTreeOptions,
 } from "@/pages/appointments/model/provider-taxonomy";
 import type {
   AppointmentCarePathKind,
@@ -62,6 +60,7 @@ import type {
   StaffOption,
 } from "@/pages/appointments/model/types";
 import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
+import { ProviderSelectWithTaxonomyFilter } from "@/pages/providers/ui/provider-select-with-taxonomy-filter";
 import { hasAppointmentFormChanges } from "@/pages/appointments/model/form-factories";
 import { parsePositiveIntegerInput } from "@/pages/appointments/model/workflow-helpers";
 import {
@@ -213,20 +212,6 @@ function useCreateAppointmentSheetContent({
     () => providers.find((provider) => provider.id === form.providerId) ?? null,
     [form.providerId, providers],
   );
-  const providerTaxonomyOptions = useMemo(
-    () => providerTaxonomyTreeOptions(taxonomyNodes, form.appointmentType, lang),
-    [form.appointmentType, lang, taxonomyNodes],
-  );
-  const providerOptions = useMemo(
-    () =>
-      filterProvidersForAppointmentScope(
-        providers,
-        form.appointmentType,
-        form.providerTaxonomyNodeId,
-      ),
-    [form.appointmentType, form.providerTaxonomyNodeId, providers],
-  );
-
   useEffect(() => {
     if (
       providerSelectionFitsAppointmentScope(
@@ -689,48 +674,30 @@ function useCreateAppointmentSheetContent({
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
                 {sectionTitle(appointmentText("appointments_provider_and_doctor"))}
                 <div className="grid gap-4 md:grid-cols-3">
-                  <Field compact label={t.appointments_provider_category}>
-                    <NativeComboboxSelect
-                      value={form.providerTaxonomyNodeId}
-                      onChange={(event) => {
-                        const providerTaxonomyNodeId = event.target.value;
+                  <Field compact label={t.common_provider} className="md:col-span-2">
+                    <ProviderSelectWithTaxonomyFilter
+                      value={form.providerId}
+                      providers={providers}
+                      taxonomyNodes={taxonomyNodes}
+                      providerType={
+                        form.appointmentType === "medical" || form.appointmentType === "non_medical"
+                          ? form.appointmentType
+                          : ""
+                      }
+                      taxonomyValue={form.providerTaxonomyNodeId}
+                      providerPlaceholder={t.common_not_set}
+                      taxonomyPlaceholder={t.appointments_provider_category}
+                      taxonomyAllLabel={t.providers_all}
+                      taxonomySelectClassName={createSheetSelectClassName}
+                      providerSelectClassName={createSheetSelectClassName}
+                      providerLabel={(provider) => providerLabel(provider)}
+                      onTaxonomyChange={(providerTaxonomyNodeId) => {
                         setForm((current) => ({
                           ...current,
                           providerTaxonomyNodeId,
-                          providerId: providerSelectionFitsAppointmentScope(
-                            providers,
-                            current.providerId,
-                            current.appointmentType,
-                            providerTaxonomyNodeId,
-                          )
-                            ? current.providerId
-                            : "",
-                          doctorId: providerSelectionFitsAppointmentScope(
-                            providers,
-                            current.providerId,
-                            current.appointmentType,
-                            providerTaxonomyNodeId,
-                          )
-                            ? current.doctorId
-                            : "",
                         }));
                       }}
-                      disabled={form.appointmentType === "internal" || providerTaxonomyOptions.length === 0}
-                      className={createSheetSelectClassName}
-                    >
-                      <option value="">{t.providers_all}</option>
-                      {providerTaxonomyOptions.map((option) => (
-                        <option key={option.id} value={option.id}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </NativeComboboxSelect>
-                  </Field>
-                  <Field compact label={t.common_provider}>
-                    <NativeComboboxSelect
-                      value={form.providerId}
-                      onChange={(event) => {
-                        const providerId = event.target.value;
+                      onChange={(providerId) => {
                         const provider = providers.find((item) => item.id === providerId);
                         setForm((current) => ({
                           ...current,
@@ -746,15 +713,7 @@ function useCreateAppointmentSheetContent({
                         }));
                       }}
                       disabled={form.appointmentType === "internal"}
-                      className={createSheetSelectClassName}
-                    >
-                      <option value="">{t.common_not_set}</option>
-                      {providerOptions.map((provider) => (
-                        <option key={provider.id} value={provider.id}>
-                          {providerLabel(provider)}
-                        </option>
-                      ))}
-                    </NativeComboboxSelect>
+                    />
                   </Field>
                   <Field compact label={t.common_doctor}>
                     <NativeComboboxSelect

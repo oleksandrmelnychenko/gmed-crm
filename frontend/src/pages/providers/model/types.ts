@@ -133,6 +133,7 @@ export type ProviderSummary = {
   parent_provider_name: string | null;
   organization_level: ProviderOrganizationLevel;
   taxonomy_node_id?: string | null;
+  taxonomy_node_ids?: string[];
   taxonomy_node?: ProviderTaxonomyNode | null;
   taxonomy_path?: ProviderTaxonomyNode[];
   taxonomy_attributes?: Record<string, unknown>;
@@ -281,6 +282,7 @@ export type ProviderDetail = {
   parent_provider_name: string | null;
   organization_level: ProviderOrganizationLevel;
   taxonomy_node_id: string | null;
+  taxonomy_node_ids?: string[];
   taxonomy_node: ProviderTaxonomyNode | null;
   taxonomy_path: ProviderTaxonomyNode[];
   taxonomy_attributes: Record<string, unknown>;

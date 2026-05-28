@@ -36,6 +36,7 @@ import { usePatientsListTableModel } from "./ui/hooks/use-patients-list-table-mo
 import { usePatientsListViewState } from "./ui/hooks/use-patients-list-view-state";
 import { PatientsListToolbar } from "./ui/list/patients-list-toolbar";
 import { PatientsTableSurface } from "./ui/list/patients-table-surface";
+import { useProviderTaxonomyNodes } from "@/pages/providers/data/use-provider-taxonomy-nodes";
 
 const loadCreatePatientSheet = () => import("./ui/sheets/create-patient-sheet");
 const loadPatientsShortcutsDialog = () => import("./ui/list/patients-shortcuts-dialog");
@@ -162,6 +163,7 @@ export function PatientsPage() {
   const { staffGo } = useStaffNavigate();
   const permissions = useMemo(() => patientPermissions(user?.role), [user?.role]);
   const groupLabels = useMemo(() => patientColumnGroupLabels(tr), [tr]);
+  const taxonomyNodes = useProviderTaxonomyNodes();
   const showStats = true;
   const {
     clearAllFilters,
@@ -383,6 +385,7 @@ export function PatientsPage() {
           rows={patients}
           searchInputRef={searchInputRef}
           sortStack={sortStack}
+          taxonomyNodes={taxonomyNodes}
           t={tr}
         />
 

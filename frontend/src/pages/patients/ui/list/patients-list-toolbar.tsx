@@ -15,6 +15,8 @@ import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
+import { ProviderSelectWithTaxonomyFilter } from "@/pages/providers/ui/provider-select-with-taxonomy-filter";
 
 import type { PatientSummary } from "../../model/list-model";
 
@@ -22,6 +24,10 @@ type ProviderOption = {
   id: string;
   name: string;
   address_city?: string | null;
+  provider_type?: string | null;
+  taxonomy_node_id?: string | null;
+  taxonomy_node_ids?: string[];
+  taxonomy_path?: Array<{ id?: string | null }>;
 };
 
 type DoctorOption = {
@@ -71,6 +77,7 @@ type PatientsListToolbarProps = {
   rows: PatientSummary[];
   searchInputRef: RefObject<HTMLInputElement | null>;
   sortStack: SortStack;
+  taxonomyNodes: ProviderTaxonomyNode[];
   t: Record<string, string>;
 };
 
@@ -110,6 +117,7 @@ export function PatientsListToolbar({
   rows,
   searchInputRef,
   sortStack,
+  taxonomyNodes,
   t,
 }: PatientsListToolbarProps) {
   const operatorLabels = {
@@ -150,15 +158,21 @@ export function PatientsListToolbar({
           />
         </div>
 
-        <NativeComboboxSelect value={filters.providerId}
-          onChange={(event) => onProviderFilterChange(event.target.value ?? "")} className="h-8 w-[220px] bg-background text-[13px]">
-            <option value="">{t.providers_all}</option>
-            {providers.map((provider) => (
-              <option key={provider.id} value={provider.id}>
-                {provider.name}{provider.address_city ? ` · ${provider.address_city}` : ""}
-              </option>
-            ))}
-          </NativeComboboxSelect>
+        <ProviderSelectWithTaxonomyFilter
+          value={filters.providerId}
+          providers={providers}
+          taxonomyNodes={taxonomyNodes}
+          providerPlaceholder={t.providers_all}
+          taxonomyPlaceholder={t.providers_category}
+          taxonomyAllLabel={t.providers_all}
+          containerClassName="sm:grid-cols-[220px_220px]"
+          taxonomySelectClassName="h-8 bg-background text-[13px]"
+          providerSelectClassName="h-8 bg-background text-[13px]"
+          providerLabel={(provider) =>
+            provider.address_city ? `${provider.name} - ${provider.address_city}` : provider.name
+          }
+          onChange={onProviderFilterChange}
+        />
 
         <NativeComboboxSelect
           value={filters.doctorId}

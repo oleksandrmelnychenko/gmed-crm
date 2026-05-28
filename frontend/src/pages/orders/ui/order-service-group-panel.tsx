@@ -23,7 +23,8 @@ import {
   type TranslationKey,
 } from "@/lib/i18n";
 import { doctorSpecialtyLabel } from "@/pages/providers/model/specialization-labels";
-import type { SpecializationItem } from "@/pages/providers/model/types";
+import type { ProviderTaxonomyNode, SpecializationItem } from "@/pages/providers/model/types";
+import { ProviderSelectWithTaxonomyFilter } from "@/pages/providers/ui/provider-select-with-taxonomy-filter";
 import type {
   CreateOrderServiceGroupInput,
   OrderServiceGroup,
@@ -36,6 +37,10 @@ type ProviderOption = {
   id: string;
   name: string;
   address_city?: string | null;
+  provider_type?: string | null;
+  taxonomy_node_id?: string | null;
+  taxonomy_node_ids?: string[];
+  taxonomy_path?: Array<{ id?: string | null }>;
 };
 
 type DoctorOption = {
@@ -79,6 +84,7 @@ type WizardForm = {
 
 type OrderServiceGroupWizardProps = {
   providers: ProviderOption[];
+  taxonomyNodes: ProviderTaxonomyNode[];
   providerDoctors: Record<string, DoctorOption[]>;
   creating?: boolean;
   error?: string | null;
@@ -370,6 +376,7 @@ function uiTextLabel(translations: Translations, key: string) {
 
 export function OrderServiceGroupWizard({
   providers,
+  taxonomyNodes,
   providerDoctors,
   creating = false,
   error,
@@ -460,6 +467,7 @@ export function OrderServiceGroupWizard({
       basisTitle={uiTextLabel(t, "orders_basis")}
       costTitle={uiTextLabel(t, "orders_kosten")}
       providers={providers}
+      taxonomyNodes={taxonomyNodes}
       providerDoctors={providerDoctors}
       creating={creating}
       error={error}
@@ -506,6 +514,7 @@ function OrderServiceGroupWizardForm({
   basisTitle,
   costTitle,
   providers,
+  taxonomyNodes,
   providerDoctors,
   creating,
   error,
@@ -522,6 +531,7 @@ function OrderServiceGroupWizardForm({
   basisTitle: ReactNode;
   costTitle: ReactNode;
   providers: ProviderOption[];
+  taxonomyNodes: ProviderTaxonomyNode[];
   providerDoctors: Record<string, DoctorOption[]>;
   creating: boolean;
   error?: string | null;
@@ -555,6 +565,7 @@ function OrderServiceGroupWizardForm({
         form={form}
         setForm={setForm}
         providers={providers}
+        taxonomyNodes={taxonomyNodes}
         providerDoctors={providerDoctors}
         selectedDoctorCount={selectedDoctorCount}
         translations={t}
@@ -699,6 +710,7 @@ function WizardParticipantsSection({
   form,
   setForm,
   providers,
+  taxonomyNodes,
   providerDoctors,
   selectedDoctorCount,
   translations: t,
@@ -708,6 +720,7 @@ function WizardParticipantsSection({
   form: WizardForm;
   setForm: WizardFormSetter;
   providers: ProviderOption[];
+  taxonomyNodes: ProviderTaxonomyNode[];
   providerDoctors: Record<string, DoctorOption[]>;
   selectedDoctorCount: number;
   translations: Translations;
@@ -761,6 +774,7 @@ function WizardParticipantsSection({
                 : []
             }
             providers={providers}
+            taxonomyNodes={taxonomyNodes}
             translations={t}
             canRemove={form.participants.length > 1}
             onLoadProviderDoctors={onLoadProviderDoctors}
@@ -778,6 +792,7 @@ function WizardParticipantRow({
   index,
   doctors,
   providers,
+  taxonomyNodes,
   translations: t,
   canRemove,
   onLoadProviderDoctors,
@@ -788,6 +803,7 @@ function WizardParticipantRow({
   index: number;
   doctors: DoctorOption[];
   providers: ProviderOption[];
+  taxonomyNodes: ProviderTaxonomyNode[];
   translations: Translations;
   canRemove: boolean;
   onLoadProviderDoctors?: (providerId: string) => void | Promise<void>;
@@ -807,18 +823,19 @@ function WizardParticipantRow({
   return (
     <div className="grid gap-2 rounded-xl border border-border/50 bg-card/70 p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
       <Field label={t.orders_service_group_provider}>
-        <NativeComboboxSelect
+        <ProviderSelectWithTaxonomyFilter
           value={participant.provider_id}
-          onChange={(event) => handleProviderChange(event.target.value)}
-          className={selectClass}
-        >
-          <option value="">{t.orders_service_group_select_provider}</option>
-          {providers.map((provider) => (
-            <option key={provider.id} value={provider.id}>
-              {provider.name}
-            </option>
-          ))}
-        </NativeComboboxSelect>
+          providers={providers}
+          taxonomyNodes={taxonomyNodes}
+          providerPlaceholder={t.orders_service_group_select_provider}
+          taxonomyPlaceholder={t.providers_category}
+          taxonomyAllLabel={t.providers_all}
+          containerClassName="grid-cols-1"
+          taxonomySelectClassName={selectClass}
+          providerSelectClassName={selectClass}
+          providerLabel={(provider) => provider.name}
+          onChange={handleProviderChange}
+        />
       </Field>
       <Field label={t.orders_service_group_doctor}>
         <NativeComboboxSelect

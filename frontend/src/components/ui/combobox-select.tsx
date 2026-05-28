@@ -14,6 +14,7 @@ type ComboboxSelectOption = {
   value: string
   label: React.ReactNode
   disabled?: boolean
+  disabledPresentation?: "group"
   searchText?: string
 }
 
@@ -105,6 +106,8 @@ function optionsFromChildren(children: React.ReactNode): ComboboxSelectOption[] 
 
     const props = child.props as React.OptionHTMLAttributes<HTMLOptionElement> & {
       children?: React.ReactNode
+      "data-search-text"?: string
+      "data-disabled-presentation"?: "group"
     }
     const labelText = textFromNode(props.children)
     const value = props.value == null ? labelText : String(props.value)
@@ -113,7 +116,8 @@ function optionsFromChildren(children: React.ReactNode): ComboboxSelectOption[] 
       value,
       label: props.children ?? value,
       disabled: props.disabled,
-      searchText: `${value} ${labelText}`,
+      disabledPresentation: props["data-disabled-presentation"],
+      searchText: props["data-search-text"] ?? `${value} ${labelText}`,
     })
   })
 
@@ -197,6 +201,7 @@ function ComboboxSelect({
         value: selectedValue,
         label,
         disabled: true,
+        disabledPresentation: undefined,
         searchText: textFromNode(label),
       },
       ...options,
@@ -261,10 +266,11 @@ function ComboboxSelect({
         disabled={disabled}
         title={title}
         style={style}
+        data-placeholder={!selectedValue ? "" : undefined}
         onBlur={onBlur}
         onFocus={onFocus}
         className={cn(
-          "flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground transition-colors outline-none hover:bg-muted/35 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/35 disabled:cursor-not-allowed disabled:opacity-50 data-placeholder:text-muted-foreground [&_span]:min-w-0 [&_span]:truncate",
+          "flex h-9 w-full min-w-0 cursor-pointer items-center justify-between gap-2 rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground transition-colors outline-none hover:bg-muted/35 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/35 disabled:cursor-not-allowed disabled:opacity-50 data-placeholder:text-muted-foreground [&_span]:min-w-0 [&_span]:truncate",
           className,
           triggerClassName,
         )}
@@ -304,13 +310,21 @@ function ComboboxSelect({
                 const isChecked =
                   selectedValueSet.has(option.value) ||
                   (showValueIndicator && option.value === selectedValue)
+                const disabledClassName = option.disabled
+                  ? option.disabledPresentation === "group"
+                    ? "data-disabled:pointer-events-none data-disabled:cursor-default"
+                    : "data-disabled:pointer-events-none data-disabled:opacity-50"
+                  : undefined
 
                 return (
                   <ComboboxPrimitive.Item
                     key={option.value}
                     value={option.value}
                     disabled={option.disabled}
-                    className="relative flex min-h-8 w-full cursor-default select-none items-center gap-2 rounded-md py-1.5 pr-8 pl-2 text-sm outline-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground"
+                    className={cn(
+                      "relative flex min-h-8 w-full cursor-pointer select-none items-center gap-2 rounded-md py-1.5 pr-8 pl-2 text-sm outline-none data-highlighted:bg-accent data-highlighted:text-accent-foreground",
+                      disabledClassName,
+                    )}
                   >
                     <span className="min-w-0 flex-1 truncate">{option.label}</span>
                     <span className="absolute right-2 flex size-4 items-center justify-center">

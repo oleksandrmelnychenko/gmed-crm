@@ -140,7 +140,15 @@ export type PatientOption = {
   last_name?: string;
   languages?: string[];
 };
-export type ProviderOption = { id: string; name: string; address_city: string | null };
+export type ProviderOption = {
+  id: string;
+  name: string;
+  address_city: string | null;
+  provider_type?: string | null;
+  taxonomy_node_id?: string | null;
+  taxonomy_node_ids?: string[];
+  taxonomy_path?: Array<{ id?: string | null }>;
+};
 export type OrderOption = { id: string; order_number: string; patient_pid: string };
 export type AppointmentOption = {
   id: string;

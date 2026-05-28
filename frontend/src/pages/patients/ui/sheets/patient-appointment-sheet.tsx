@@ -21,7 +21,10 @@ import type {
   DoctorOption,
   ProviderSummary,
 } from "@/pages/appointments/model/types";
+import { useProviderTaxonomyNodes } from "@/pages/providers/data/use-provider-taxonomy-nodes";
 import { doctorSpecialtyLabel, type SpecializationLabelLang } from "@/pages/providers/model/specialization-labels";
+import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
+import { ProviderSelectWithTaxonomyFilter } from "@/pages/providers/ui/provider-select-with-taxonomy-filter";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 type AppointmentKind = "medical" | "non_medical" | "internal";
@@ -180,9 +183,9 @@ function PatientAppointmentBasicsSection({
                   providers.find((item) => item.id === current.providerId) ?? null;
                 const shouldClearProvider =
                   appointmentType === "internal" ||
-                  (appointmentType === "medical" &&
+                  ((appointmentType === "medical" || appointmentType === "non_medical") &&
                     currentProvider !== null &&
-                    currentProvider.provider_type !== "medical");
+                    currentProvider.provider_type !== appointmentType);
                 return {
                   ...current,
                   appointmentType,
@@ -241,6 +244,7 @@ function PatientAppointmentScheduleSection({
   providers,
   selectedProvider,
   setForm,
+  taxonomyNodes,
   t,
   l,
   lang,
@@ -252,6 +256,7 @@ function PatientAppointmentScheduleSection({
   providers: ProviderSummary[];
   selectedProvider: ProviderSummary | null;
   setForm: PatientAppointmentFormSetter;
+  taxonomyNodes: ProviderTaxonomyNode[];
   t: PatientAppointmentTranslations;
   l: PatientAppointmentText;
 }) {
@@ -296,12 +301,25 @@ function PatientAppointmentScheduleSection({
 
       <div className="grid gap-3 md:grid-cols-2">
         <FormField label={t.common_provider} htmlFor="patient-appointment-provider">
-          <NativeComboboxSelect
-            id="patient-appointment-provider"
+          <ProviderSelectWithTaxonomyFilter
             value={form.providerId}
+            providers={providerOptions}
+            taxonomyNodes={taxonomyNodes}
+            providerType={
+              form.appointmentType === "medical" || form.appointmentType === "non_medical"
+                ? form.appointmentType
+                : ""
+            }
+            providerPlaceholder={t.common_not_set}
+            taxonomyPlaceholder={t.providers_category}
+            taxonomyAllLabel={t.providers_all}
             disabled={form.appointmentType === "internal"}
-            onChange={(event) => {
-              const providerId = event.target.value;
+            containerClassName="grid-cols-1 sm:grid-cols-2"
+            taxonomySelectClassName={cn("w-full", selectClass)}
+            providerSelectClassName={cn("w-full", selectClass)}
+            providerLabel={providerLabel}
+            aria-label={t.common_provider}
+            onChange={(providerId) => {
               const provider = providers.find((item) => item.id === providerId);
               setForm((current) => ({
                 ...current,
@@ -316,15 +334,7 @@ function PatientAppointmentScheduleSection({
                     : current.location,
               }));
             }}
-            className={cn("w-full", selectClass)}
-          >
-            <option value="">{t.common_not_set}</option>
-            {providerOptions.map((provider) => (
-              <option key={provider.id} value={provider.id}>
-                {providerLabel(provider)}
-              </option>
-            ))}
-          </NativeComboboxSelect>
+          />
         </FormField>
         <FormField label={t.common_doctor} htmlFor="patient-appointment-doctor">
           <NativeComboboxSelect
@@ -448,6 +458,7 @@ function PatientAppointmentSheetContent({
   const [form, setForm] = useState<FormState>(blankForm);
   const [busy, setBusy] = useState(false);
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
+  const taxonomyNodes = useProviderTaxonomyNodes();
   const [doctorOptionsState, setDoctorOptionsState] = useState<{
     providerId: string;
     doctors: DoctorOption[];
@@ -462,8 +473,8 @@ function PatientAppointmentSheetContent({
       : [];
   const providerOptions = useMemo(
     () =>
-      form.appointmentType === "medical"
-        ? providers.filter((provider) => provider.provider_type === "medical")
+      form.appointmentType === "medical" || form.appointmentType === "non_medical"
+        ? providers.filter((provider) => provider.provider_type === form.appointmentType)
         : providers,
     [form.appointmentType, providers],
   );
@@ -600,6 +611,7 @@ function PatientAppointmentSheetContent({
         providers={providers}
         selectedProvider={selectedProvider}
         setForm={setForm}
+        taxonomyNodes={taxonomyNodes}
         t={t}
         l={l}
         lang={lang}

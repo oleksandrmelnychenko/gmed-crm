@@ -219,13 +219,15 @@ export function AppointmentPreviewSheetLoadingState({
 export function Field({
   label,
   children,
+  className,
 }: {
   label: string;
   children: ReactNode;
   compact?: boolean;
+  className?: string;
 }) {
   return (
-    <label className="flex flex-col gap-1.5">
+    <label className={cn("flex flex-col gap-1.5", className)}>
       <span className={tokens.text.label}>{label}</span>
       {children}
     </label>

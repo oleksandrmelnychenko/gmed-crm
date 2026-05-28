@@ -3,7 +3,6 @@ import {
   memo,
   useCallback,
   useEffect,
-  useMemo,
   useReducer,
   type FormEvent,
   type SetStateAction,
@@ -59,6 +58,8 @@ import type {
   StaffOption,
 } from "@/pages/appointments/model/types";
 import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
+import { ProviderSelectWithTaxonomyFilter } from "@/pages/providers/ui/provider-select-with-taxonomy-filter";
+import { ProviderTaxonomyCascadeSelect } from "@/pages/providers/ui/provider-taxonomy-cascade-select";
 import {
   AppointmentSectionHeading,
   EmptyState,
@@ -79,13 +80,6 @@ type AppointmentConciergeSectionProps = {
 const sectionCardClass = appointmentElevatedSectionCardClassName;
 const selectClassName = appointmentWhiteSelectControlClassName;
 const textareaClassName = appointmentWhiteTextareaControlClassName;
-
-function taxonomyNodeLabel(node: ProviderTaxonomyNode, lang: "de" | "ru") {
-  if (lang === "ru") {
-    return node.name_ru || node.name_de || node.name_en || node.code;
-  }
-  return node.name_de || node.name_en || node.name_ru || node.code;
-}
 
 function serviceTaxonomyLabel(service: ConciergeServiceEntry, lang: "de" | "ru") {
   if (lang === "ru") {
@@ -216,21 +210,6 @@ function useAppointmentConciergeSectionContent({
   const setActionBusy = (value: SetStateAction<string>) =>
     dispatchConciergeState(createConciergeFieldAction("actionBusy", value));
 
-  const taxonomyOptions = useMemo(
-    () =>
-      [...taxonomyNodes].sort((left, right) =>
-        taxonomyNodeLabel(left, lang).localeCompare(taxonomyNodeLabel(right, lang), "de"),
-      ),
-    [lang, taxonomyNodes],
-  );
-  const createProviderOptions = useMemo(
-    () =>
-      nonMedicalProviders.filter((provider) =>
-        providerMatchesTaxonomyFilter(provider, form.taxonomyNodeId),
-      ),
-    [form.taxonomyNodeId, nonMedicalProviders],
-  );
-
   useEffect(() => {
     dispatchConciergeState({
       type: "patch",
@@ -250,9 +229,7 @@ function useAppointmentConciergeSectionContent({
     fetchProviderTaxonomy("non_medical")
       .then((taxonomy) => {
         if (cancelled) return;
-        setTaxonomyNodes(
-          taxonomy.leaves.filter((node) => node.is_active && node.is_leaf),
-        );
+        setTaxonomyNodes(taxonomy.nodes.filter((node) => node.is_active));
       })
       .catch((error) => {
         if (cancelled) return;
@@ -383,9 +360,6 @@ function useAppointmentConciergeSectionContent({
         ) : (
           services.map((service) => {
             const draft = drafts[service.id] ?? buildServiceDraft(service);
-            const draftProviderOptions = nonMedicalProviders.filter((provider) =>
-              providerMatchesTaxonomyFilter(provider, draft.taxonomyNodeId),
-            );
             return (
               <div
                 key={service.id}
@@ -450,25 +424,31 @@ function useAppointmentConciergeSectionContent({
                             className={appointmentWhiteInputClassName}
                           />
                         </Field>
-                        <Field label={t.staff_services_form_provider}>
-                          <NativeComboboxSelect
+                        <Field label={t.staff_services_form_provider} className="md:col-span-2">
+                          <ProviderSelectWithTaxonomyFilter
                             value={draft.providerId}
-                            onChange={(event) =>
+                            providers={nonMedicalProviders}
+                            taxonomyNodes={taxonomyNodes}
+                            providerType="non_medical"
+                            taxonomyValue={draft.taxonomyNodeId}
+                            taxonomyMode="leaf"
+                            providerPlaceholder={appointmentText("appointments_no_provider")}
+                            taxonomyPlaceholder={t.services_category}
+                            taxonomyAllLabel={tr.common_not_set}
+                            taxonomySelectClassName={selectClassName}
+                            providerSelectClassName={selectClassName}
+                            providerLabel={(provider) => providerOptionLabel(provider, lang)}
+                            onTaxonomyChange={(taxonomyNodeId) =>
                               updateDraft(service.id, {
-                                providerId: event.target.value,
+                                taxonomyNodeId,
                               })
                             }
-                            className={selectClassName}
-                          >
-                            <option value="">
-                              {appointmentText("appointments_no_provider")}
-                            </option>
-                            {draftProviderOptions.map((provider) => (
-                              <option key={provider.id} value={provider.id}>
-                                {providerOptionLabel(provider, lang)}
-                              </option>
-                            ))}
-                          </NativeComboboxSelect>
+                            onChange={(providerId) =>
+                              updateDraft(service.id, {
+                                providerId,
+                              })
+                            }
+                          />
                         </Field>
                         <Field label={tr.role_concierge}>
                           <NativeComboboxSelect
@@ -492,33 +472,33 @@ function useAppointmentConciergeSectionContent({
                         </Field>
                       </>
                     ) : null}
-                    <Field label={t.services_category}>
-                      <NativeComboboxSelect
-                        value={draft.taxonomyNodeId}
-                        onChange={(event) =>
-                          updateDraft(service.id, {
-                            taxonomyNodeId: event.target.value,
-                            providerId:
-                              !draft.providerId ||
-                              nonMedicalProviders.some(
-                                (provider) =>
-                                  provider.id === draft.providerId &&
-                                  providerMatchesTaxonomyFilter(provider, event.target.value),
-                              )
-                                ? draft.providerId
-                                : "",
-                          })
-                        }
-                        className={selectClassName}
-                      >
-                        <option value="">{tr.common_not_set}</option>
-                        {taxonomyOptions.map((node) => (
-                          <option key={node.id} value={node.id}>
-                            {taxonomyNodeLabel(node, lang)}
-                          </option>
-                        ))}
-                      </NativeComboboxSelect>
-                    </Field>
+                    {!canManageConciergeBilling ? (
+                      <Field label={t.services_category}>
+                        <ProviderTaxonomyCascadeSelect
+                          value={draft.taxonomyNodeId}
+                          nodes={taxonomyNodes}
+                          providerType="non_medical"
+                          mode="leaf"
+                          placeholder={tr.common_not_set}
+                          containerClassName="grid gap-2 sm:grid-cols-2"
+                          selectClassName={selectClassName}
+                          onChange={(taxonomyNodeId) =>
+                            updateDraft(service.id, {
+                              taxonomyNodeId,
+                              providerId:
+                                !draft.providerId ||
+                                nonMedicalProviders.some(
+                                  (provider) =>
+                                    provider.id === draft.providerId &&
+                                    providerMatchesTaxonomyFilter(provider, taxonomyNodeId),
+                                )
+                                  ? draft.providerId
+                                  : "",
+                            })
+                          }
+                        />
+                      </Field>
+                    ) : null}
                     <Field label={tr.users_status}>
                       <NativeComboboxSelect
                         value={draft.status}
@@ -695,37 +675,6 @@ function useAppointmentConciergeSectionContent({
               ))}
             </NativeComboboxSelect>
           </Field>
-          <Field label={t.services_category}>
-            <NativeComboboxSelect
-              value={form.taxonomyNodeId}
-              onChange={(event) =>
-                setForm((current) => {
-                  const taxonomyNodeId = event.target.value;
-                  const selectedProviderStillFits =
-                    !current.providerId ||
-                    nonMedicalProviders.some(
-                      (provider) =>
-                        provider.id === current.providerId &&
-                        providerMatchesTaxonomyFilter(provider, taxonomyNodeId),
-                    );
-
-                  return {
-                    ...current,
-                    taxonomyNodeId,
-                    providerId: selectedProviderStillFits ? current.providerId : "",
-                  };
-                })
-              }
-              className={selectClassName}
-            >
-              <option value="">{tr.common_not_set}</option>
-              {taxonomyOptions.map((node) => (
-                <option key={node.id} value={node.id}>
-                  {taxonomyNodeLabel(node, lang)}
-                </option>
-              ))}
-            </NativeComboboxSelect>
-          </Field>
           <Field label={tr.appointments_title_col}>
             <Input
               value={form.title}
@@ -739,26 +688,33 @@ function useAppointmentConciergeSectionContent({
               required
             />
           </Field>
-          <Field label={t.staff_services_form_provider}>
-            <NativeComboboxSelect
+          <Field label={t.staff_services_form_provider} className="md:col-span-2">
+            <ProviderSelectWithTaxonomyFilter
               value={form.providerId}
-              onChange={(event) =>
+              providers={nonMedicalProviders}
+              taxonomyNodes={taxonomyNodes}
+              providerType="non_medical"
+              taxonomyValue={form.taxonomyNodeId}
+              taxonomyMode="leaf"
+              providerPlaceholder={appointmentText("appointments_no_provider")}
+              taxonomyPlaceholder={t.services_category}
+              taxonomyAllLabel={tr.common_not_set}
+              taxonomySelectClassName={selectClassName}
+              providerSelectClassName={selectClassName}
+              providerLabel={(provider) => providerOptionLabel(provider, lang)}
+              onTaxonomyChange={(taxonomyNodeId) =>
                 setForm((current) => ({
                   ...current,
-                  providerId: event.target.value,
+                  taxonomyNodeId,
                 }))
               }
-              className={selectClassName}
-            >
-              <option value="">
-                {appointmentText("appointments_no_provider")}
-              </option>
-              {createProviderOptions.map((provider) => (
-                <option key={provider.id} value={provider.id}>
-                  {providerOptionLabel(provider, lang)}
-                </option>
-              ))}
-            </NativeComboboxSelect>
+              onChange={(providerId) =>
+                setForm((current) => ({
+                  ...current,
+                  providerId,
+                }))
+              }
+            />
           </Field>
           <Field label={tr.role_concierge}>
             <NativeComboboxSelect

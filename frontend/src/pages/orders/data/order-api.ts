@@ -1,4 +1,6 @@
 import { apiFetch } from "@/lib/api";
+import { fetchProviderTaxonomy } from "@/pages/providers/data/provider-api";
+import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 
 import type {
   CreateResponse,
@@ -22,6 +24,7 @@ const ORDER_LOOKUPS_CACHE_TTL_MS = 60_000;
 export type OrderDirectory = {
   patients: PatientOption[];
   providers: ProviderOption[];
+  taxonomyNodes: ProviderTaxonomyNode[];
 };
 
 export type OrderWorkspacePayload = {
@@ -50,15 +53,16 @@ export async function fetchProviderDoctors(providerId: string): Promise<DoctorOp
 }
 
 export async function fetchOrderDirectory(): Promise<OrderDirectory> {
-  const [patients, providers] = await Promise.all([
+  const [patients, providers, taxonomy] = await Promise.all([
     apiFetch<PatientOption[]>("/patients", {
       cacheTtlMs: ORDER_LOOKUPS_CACHE_TTL_MS,
     }),
     apiFetch<ProviderOption[]>("/providers", {
       cacheTtlMs: ORDER_LOOKUPS_CACHE_TTL_MS,
     }),
+    fetchProviderTaxonomy(),
   ]);
-  return { patients, providers };
+  return { patients, providers, taxonomyNodes: taxonomy.nodes };
 }
 
 export function fetchPatientOrderRecheck(patientId: string) {
