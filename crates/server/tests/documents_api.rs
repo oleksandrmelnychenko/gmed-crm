@@ -2883,6 +2883,388 @@ async fn ceo_can_generate_admin_document_templates_as_pdf() {
 }
 
 #[tokio::test]
+async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("all-doc-templates");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    configure_patient_label_profile(&pool, patient_id).await;
+
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+    let contract_id = seed_framework_contract(&pool, patient_id, admin_id, &tag).await;
+    let order_id = seed_order_with_contract(&pool, patient_id, contract_id, admin_id, &tag).await;
+    let _quote_id = seed_quote_for_order(&pool, order_id, admin_id, &tag).await;
+    let case_id = seed_case(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("C-{tag}-ACTIVE"),
+        "open",
+        "Template coverage medication case",
+    )
+    .await;
+    seed_case_medication(
+        &pool,
+        case_id,
+        "Bisoprolol 2.5",
+        "Bisoprolol",
+        "2.5",
+        "mg",
+        "1x morgens",
+        "Dr. Template",
+        "permanent",
+        "Template coverage",
+    )
+    .await;
+
+    let expected_template_ids = [
+        "treatment_plan",
+        "medication_summary",
+        "framework_contract",
+        "visa_invitation_letter",
+        "patient_sticker_compact",
+        "patient_sticker_standard",
+        "patient_sticker_sheet",
+        "single_order",
+        "cost_coverage_declaration",
+        "cost_estimate",
+        "appointment_confirmation",
+        "consent_data_release_child",
+        "consent_data_release_single",
+    ];
+
+    let (status, catalog_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/documents/templates",
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let catalog_templates = catalog_body["templates"].as_array().unwrap();
+    for template_id in expected_template_ids {
+        assert!(
+            catalog_templates
+                .iter()
+                .any(|item| item["id"] == template_id),
+            "template catalog is missing {template_id}"
+        );
+    }
+
+    struct TemplateCase {
+        template_id: &'static str,
+        expected_art: &'static str,
+        expected_category: &'static str,
+        order_id: Option<Uuid>,
+        appointment_id: Option<Uuid>,
+        bindings: Value,
+        text_block_keys: Vec<&'static str>,
+        min_pdf_size: usize,
+    }
+
+    let cases = vec![
+        TemplateCase {
+            template_id: "treatment_plan",
+            expected_art: "treatment_plan",
+            expected_category: "generated",
+            order_id: None,
+            appointment_id: Some(appointment_id),
+            bindings: json!({}),
+            text_block_keys: vec!["fasting"],
+            min_pdf_size: 1000,
+        },
+        TemplateCase {
+            template_id: "medication_summary",
+            expected_art: "medication_summary",
+            expected_category: "generated",
+            order_id: None,
+            appointment_id: None,
+            bindings: json!({}),
+            text_block_keys: vec!["doctor_changes_only"],
+            min_pdf_size: 1000,
+        },
+        TemplateCase {
+            template_id: "framework_contract",
+            expected_art: "framework_contract",
+            expected_category: "contract",
+            order_id: Some(order_id),
+            appointment_id: None,
+            bindings: json!({}),
+            text_block_keys: vec!["contract_scope_clause"],
+            min_pdf_size: 1000,
+        },
+        TemplateCase {
+            template_id: "visa_invitation_letter",
+            expected_art: "visa_invitation",
+            expected_category: "generated",
+            order_id: Some(order_id),
+            appointment_id: Some(appointment_id),
+            bindings: json!({}),
+            text_block_keys: vec![],
+            min_pdf_size: 1000,
+        },
+        TemplateCase {
+            template_id: "patient_sticker_compact",
+            expected_art: "patient_sticker",
+            expected_category: "administrative",
+            order_id: None,
+            appointment_id: None,
+            bindings: json!({}),
+            text_block_keys: vec![],
+            min_pdf_size: 500,
+        },
+        TemplateCase {
+            template_id: "patient_sticker_standard",
+            expected_art: "patient_sticker",
+            expected_category: "administrative",
+            order_id: None,
+            appointment_id: None,
+            bindings: json!({}),
+            text_block_keys: vec![],
+            min_pdf_size: 500,
+        },
+        TemplateCase {
+            template_id: "patient_sticker_sheet",
+            expected_art: "patient_sticker",
+            expected_category: "administrative",
+            order_id: None,
+            appointment_id: None,
+            bindings: json!({}),
+            text_block_keys: vec![],
+            min_pdf_size: 500,
+        },
+        TemplateCase {
+            template_id: "single_order",
+            expected_art: "single_order",
+            expected_category: "contract",
+            order_id: Some(order_id),
+            appointment_id: None,
+            bindings: json!({
+                "order_number": "EA-ALL-1",
+                "order_date": "2026-05-01",
+                "contract_date": "2026-04-01",
+                "specialties": "Kardiologie",
+                "period_from": "2026-06-01",
+                "period_to": "2026-06-05",
+                "payer_name": "Template Payer",
+                "payer_birth_date": "1980-01-01"
+            }),
+            text_block_keys: vec![],
+            min_pdf_size: 800,
+        },
+        TemplateCase {
+            template_id: "cost_coverage_declaration",
+            expected_art: "cost_coverage_declaration",
+            expected_category: "finance",
+            order_id: Some(order_id),
+            appointment_id: None,
+            bindings: json!({
+                "order_date": "2026-05-01",
+                "contract_date": "2026-04-01",
+                "payer_name": "Template Payer",
+                "bank_iban": "DE00 0000 0000 0000 0000 00",
+                "service_lines": [
+                    {"description": "Organisation der Behandlung", "fee": "999,00 EUR"}
+                ]
+            }),
+            text_block_keys: vec![],
+            min_pdf_size: 800,
+        },
+        TemplateCase {
+            template_id: "cost_estimate",
+            expected_art: "cost_estimate",
+            expected_category: "finance",
+            order_id: Some(order_id),
+            appointment_id: None,
+            bindings: json!({
+                "order_date": "2026-05-01"
+            }),
+            text_block_keys: vec![],
+            min_pdf_size: 800,
+        },
+        TemplateCase {
+            template_id: "appointment_confirmation",
+            expected_art: "appointment_confirmation",
+            expected_category: "clinic_correspondence",
+            order_id: Some(order_id),
+            appointment_id: Some(appointment_id),
+            bindings: json!({
+                "doc_id": "ALL-1251119",
+                "passport_number": "MA1234567",
+                "passport_valid_until": "2050-01-01",
+                "period_from": "2026-06-01",
+                "clinics": [
+                    {"name": "Klinik München", "address": "Musterstr. 1, München"}
+                ],
+                "contact_phones": "0176 9999999"
+            }),
+            text_block_keys: vec![],
+            min_pdf_size: 800,
+        },
+        TemplateCase {
+            template_id: "consent_data_release_child",
+            expected_art: "consent_data_release",
+            expected_category: "consent",
+            order_id: None,
+            appointment_id: None,
+            bindings: json!({
+                "child_name": "Max Mustermann",
+                "child_birth_date": "2015-01-01",
+                "guardian_name": "Erika Mustermann",
+                "guardian2_name": "Hans Mustermann"
+            }),
+            text_block_keys: vec![],
+            min_pdf_size: 800,
+        },
+        TemplateCase {
+            template_id: "consent_data_release_single",
+            expected_art: "consent_data_release",
+            expected_category: "consent",
+            order_id: None,
+            appointment_id: None,
+            bindings: json!({
+                "child_name": "Max Mustermann",
+                "child_birth_date": "2015-01-01",
+                "guardian_name": "Erika Mustermann"
+            }),
+            text_block_keys: vec![],
+            min_pdf_size: 800,
+        },
+    ];
+
+    assert_eq!(cases.len(), expected_template_ids.len());
+
+    for case in cases {
+        let mut payload = json!({
+            "template_id": case.template_id,
+            "patient_id": patient_id,
+            "language": "de",
+            "introduction": format!("Intro for {}", case.template_id),
+            "closing_note": format!("Closing for {}", case.template_id),
+            "bindings": case.bindings,
+            "text_block_keys": case.text_block_keys,
+        });
+        if let Some(order_id) = case.order_id {
+            payload["order_id"] = json!(order_id);
+        }
+        if let Some(appointment_id) = case.appointment_id {
+            payload["appointment_id"] = json!(appointment_id);
+        }
+
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            "/api/v1/documents/generate",
+            &admin_bearer,
+            Some(payload),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "generate {}: {body:?}",
+            case.template_id
+        );
+        assert_eq!(body["language"], "de", "{}", case.template_id);
+        assert_eq!(
+            body["generated_template_id"], case.template_id,
+            "{}",
+            case.template_id
+        );
+
+        let document_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+        let preview_html = body["preview_html"].as_str().unwrap();
+        assert!(
+            !preview_html.trim().is_empty(),
+            "{} preview should not be empty",
+            case.template_id
+        );
+
+        let (status, detail_body) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents/{document_id}"),
+            &admin_bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "detail {}", case.template_id);
+        assert_eq!(
+            detail_body["art"], case.expected_art,
+            "{}",
+            case.template_id
+        );
+        assert_eq!(
+            detail_body["category"], case.expected_category,
+            "{}",
+            case.template_id
+        );
+        assert_eq!(
+            detail_body["generated_template_id"], case.template_id,
+            "{}",
+            case.template_id
+        );
+        assert_eq!(
+            detail_body["mime_type"], "application/pdf",
+            "{}",
+            case.template_id
+        );
+
+        let (status, bytes) = bytes_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents/{document_id}/download"),
+            &admin_bearer,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "download {}", case.template_id);
+        assert!(
+            bytes.starts_with(b"%PDF-"),
+            "{} is not a PDF",
+            case.template_id
+        );
+        assert!(
+            bytes.len() > case.min_pdf_size,
+            "{} PDF too small: {}",
+            case.template_id,
+            bytes.len()
+        );
+    }
+}
+
+#[tokio::test]
+async fn framework_contract_document_requires_existing_contract() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-framework-contract-missing");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "framework_contract",
+            "patient_id": patient_id,
+            "language": "de"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        body["message"],
+        "Framework contract template requires an existing framework contract in scope"
+    );
+}
+
+#[tokio::test]
 async fn cost_estimate_uses_order_quote_when_manual_lines_are_omitted() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
         return;
