@@ -1,7 +1,6 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
-  useMemo,
   type Dispatch,
   type SetStateAction,
 } from "react";
@@ -25,9 +24,7 @@ import {
   statusLabel,
 } from "@/pages/appointments/model/labels";
 import {
-  filterProvidersForAppointmentScope,
   providerSelectionFitsAppointmentScope,
-  providerTaxonomyTreeOptions,
 } from "@/pages/appointments/model/provider-taxonomy";
 import type {
   DoctorOption,
@@ -38,6 +35,7 @@ import type {
   StaffOption,
 } from "@/pages/appointments/model/types";
 import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
+import { ProviderSelectWithTaxonomyFilter } from "@/pages/providers/ui/provider-select-with-taxonomy-filter";
 import {
   AppointmentEditorSheet,
   Field,
@@ -82,19 +80,6 @@ function SearchSheet({
 }: SearchSheetProps) {
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const providerTaxonomyOptions = useMemo(
-    () => providerTaxonomyTreeOptions(taxonomyNodes, filters.appointmentType, lang),
-    [filters.appointmentType, lang, taxonomyNodes],
-  );
-  const providerOptions = useMemo(
-    () =>
-      filterProvidersForAppointmentScope(
-        providers,
-        filters.appointmentType,
-        filters.providerTaxonomyNodeId,
-      ),
-    [filters.appointmentType, filters.providerTaxonomyNodeId, providers],
-  );
 
   return (
     <AppointmentEditorSheet
@@ -222,50 +207,34 @@ function SearchSheet({
           ))}
         </NativeComboboxSelect>
       </Field>
-      <Field label={t.appointments_provider_category}>
-        <NativeComboboxSelect
-          value={filters.providerTaxonomyNodeId}
-          onChange={(event) => {
-            const providerTaxonomyNodeId = event.target.value;
+      <Field label={t.common_provider}>
+        <ProviderSelectWithTaxonomyFilter
+          value={filters.providerId}
+          providers={providers}
+          taxonomyNodes={taxonomyNodes}
+          providerType={
+            filters.appointmentType === "medical" || filters.appointmentType === "non_medical"
+              ? filters.appointmentType
+              : ""
+          }
+          taxonomyValue={filters.providerTaxonomyNodeId}
+          providerPlaceholder={tr.providers_all}
+          taxonomyPlaceholder={t.appointments_provider_category}
+          taxonomyAllLabel={tr.providers_all}
+          taxonomySelectClassName={selectClass}
+          providerSelectClassName={selectClass}
+          providerLabel={(provider) => provider.name}
+          onTaxonomyChange={(providerTaxonomyNodeId) => {
             setFilters((current) => {
-              const keepProvider = providerSelectionFitsAppointmentScope(
-                providers,
-                current.providerId,
-                current.appointmentType,
-                providerTaxonomyNodeId,
-              );
               return {
                 ...current,
                 providerTaxonomyNodeId,
-                providerId: keepProvider ? current.providerId : "",
-                doctorId: keepProvider ? current.doctorId : "",
               };
             });
           }}
-          className={selectClass}
-          disabled={filters.appointmentType === "internal" || providerTaxonomyOptions.length === 0}
-        >
-          <option value="">{tr.providers_all}</option>
-          {providerTaxonomyOptions.map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.label}
-            </option>
-          ))}
-        </NativeComboboxSelect>
-      </Field>
-      <Field label={t.common_provider}>
-        <NativeComboboxSelect
-          value={filters.providerId}
-          onChange={(event) => onProviderChange(event.target.value)}
-          className={selectClass}
-        >
-          <option value="">{tr.providers_all}</option>
-          {providerOptions.map((provider) => (
-            <option key={provider.id} value={provider.id}>
-              {provider.name}
-            </option>
-          ))}
-        </NativeComboboxSelect>
+          onChange={onProviderChange}
+          disabled={filters.appointmentType === "internal"}
+        />
       </Field>
       <Field label={t.common_doctor}>
         <NativeComboboxSelect

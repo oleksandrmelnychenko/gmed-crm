@@ -22,7 +22,6 @@ import type { ColumnDef } from "@/components/data-table/types";
 import { StaffLink } from "@/components/staff-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { agencyServiceNameLabel } from "@/lib/agency-service-labels";
 import { clearApiCache } from "@/lib/api";
@@ -36,6 +35,7 @@ import { serviceKindLabel } from "@/pages/appointments/model/labels";
 import { fetchProviderTaxonomy } from "@/pages/providers/data/provider-api";
 import { specializationSummaryForItems } from "@/pages/providers/model/specialization-labels";
 import type { ProviderTaxonomyNode, SpecializationItem } from "@/pages/providers/model/types";
+import { ProviderTaxonomyCascadeSelect } from "@/pages/providers/ui/provider-taxonomy-cascade-select";
 import { fetchReportsExport, fetchReportsWorkspace } from "./data/reports-api";
 import {
   formatChange,
@@ -492,75 +492,6 @@ const REPORT_PROVIDER_TYPE_LABEL_KEYS = {
   non_medical: "providers_type_non_medical",
 } satisfies Partial<Record<string, TranslationKey>>;
 
-const REPORT_TAXONOMY_LEVELS = new Set<ProviderTaxonomyNode["level"]>([
-  "category",
-  "group",
-  "subgroup",
-  "type",
-]);
-
-function humanizeReportTaxonomyCode(value: string) {
-  const normalized = value.replace(/[._-]+/g, " ").trim();
-  if (!normalized) return value;
-  return normalized.replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-function reportProviderTaxonomyNodeLabel(
-  node: ProviderTaxonomyNode | null | undefined,
-  lang: "de" | "ru",
-) {
-  if (!node) return "";
-  if (lang === "ru") {
-    return node.name_ru || node.name_de || node.name_en || humanizeReportTaxonomyCode(node.code);
-  }
-  return node.name_de || node.name_en || node.name_ru || humanizeReportTaxonomyCode(node.code);
-}
-
-function reportProviderTaxonomyPathLabel(
-  node: ProviderTaxonomyNode,
-  nodesById: Map<string, ProviderTaxonomyNode>,
-  lang: "de" | "ru",
-) {
-  const path: ProviderTaxonomyNode[] = [];
-  const visited = new Set<string>();
-  let current: ProviderTaxonomyNode | undefined = node;
-
-  while (current && !visited.has(current.id)) {
-    visited.add(current.id);
-    path.unshift(current);
-    current = current.parent_id ? nodesById.get(current.parent_id) : undefined;
-  }
-
-  return path
-    .map((item) => reportProviderTaxonomyNodeLabel(item, lang))
-    .filter(Boolean)
-    .join(" / ");
-}
-
-function reportProviderTaxonomyOptions(
-  nodes: ProviderTaxonomyNode[],
-  lang: "de" | "ru",
-) {
-  const nodesById = new Map(nodes.map((node) => [node.id, node]));
-  const locale = lang === "ru" ? "ru" : "de";
-
-  return nodes
-    .filter((node) => node.is_active && REPORT_TAXONOMY_LEVELS.has(node.level))
-    .map((node) => ({
-      node,
-      label:
-        reportProviderTaxonomyPathLabel(node, nodesById, lang) ||
-        reportProviderTaxonomyNodeLabel(node, lang),
-    }))
-    .sort((left, right) => {
-      const providerKindOrder = left.node.provider_kind.localeCompare(right.node.provider_kind);
-      if (providerKindOrder) return providerKindOrder;
-      const labelOrder = left.label.localeCompare(right.label, locale);
-      if (labelOrder) return labelOrder;
-      return left.node.sort_order - right.node.sort_order || left.node.code.localeCompare(right.node.code);
-    });
-}
-
 function reportTaxonomyLoadError(lang: "de" | "ru") {
   return lang === "ru"
     ? "Не удалось загрузить категории провайдеров."
@@ -920,17 +851,6 @@ function useReportsPageContent() {
   const forecastSections = useMemo(
     () => new Set(forecasting?.allowed_sections ?? []),
     [forecasting?.allowed_sections],
-  );
-  const taxonomyFilterOptions = useMemo(
-    () => reportProviderTaxonomyOptions(taxonomyNodes, lang),
-    [lang, taxonomyNodes],
-  );
-  const selectedTaxonomyOption = useMemo(
-    () =>
-      taxonomyFilterOptions.find(
-        (option) => option.node.id === selectedTaxonomyNodeId,
-      ) ?? null,
-    [selectedTaxonomyNodeId, taxonomyFilterOptions],
   );
   const visibleDoctors = useMemo(() => {
     if (!data?.doctors) return [];
@@ -1755,23 +1675,20 @@ function useReportsPageContent() {
               <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                 {taxonomySelectLabel}
               </span>
-              <NativeComboboxSelect
-                value={selectedTaxonomyOption ? selectedTaxonomyNodeId : ""}
-                onChange={(event) => setSelectedTaxonomyNodeId(event.target.value)}
-                disabled={taxonomyLoading || taxonomyFilterOptions.length === 0}
-                className={cn(
+              <ProviderTaxonomyCascadeSelect
+                value={selectedTaxonomyNodeId}
+                nodes={taxonomyNodes}
+                mode="any"
+                placeholder={taxonomySelectLabel}
+                allLabel={taxonomyAllLabel}
+                disabled={taxonomyLoading || taxonomyNodes.length === 0}
+                containerClassName="max-w-[calc(100vw-2rem)]"
+                selectClassName={cn(
                   shellSelectClassName,
-                  "h-9 w-[420px] max-w-[calc(100vw-2rem)] bg-card text-[13px]",
+                  "h-9 min-w-[200px] bg-card text-[13px]",
                 )}
-                title={selectedTaxonomyOption?.label ?? taxonomySelectLabel}
-              >
-                <option value="">{taxonomyAllLabel}</option>
-                {taxonomyFilterOptions.map((option) => (
-                  <option key={option.node.id} value={option.node.id}>
-                    {option.label}
-                  </option>
-                ))}
-              </NativeComboboxSelect>
+                onChange={setSelectedTaxonomyNodeId}
+              />
             </label>
             <Button
               variant="outline"

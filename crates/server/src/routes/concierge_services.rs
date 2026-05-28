@@ -59,6 +59,7 @@ struct CreateConciergeServiceRequest {
     patient_id: Uuid,
     appointment_id: Option<Uuid>,
     provider_id: Option<Uuid>,
+    provider_service_id: Option<Uuid>,
     assigned_concierge_id: Option<Uuid>,
     service_kind: Option<String>,
     taxonomy_node_id: Option<Uuid>,
@@ -70,6 +71,8 @@ struct CreateConciergeServiceRequest {
     ends_at: Option<String>,
     cost_estimate: Option<f64>,
     actual_cost: Option<f64>,
+    quantity: Option<f64>,
+    unit_price: Option<f64>,
     currency: Option<String>,
     service_notes: Option<String>,
     billing_notes: Option<String>,
@@ -78,6 +81,7 @@ struct CreateConciergeServiceRequest {
 #[derive(Deserialize)]
 struct UpdateConciergeServiceRequest {
     provider_id: Option<Uuid>,
+    provider_service_id: Option<Uuid>,
     assigned_concierge_id: Option<Uuid>,
     service_kind: Option<String>,
     taxonomy_node_id: Option<Uuid>,
@@ -91,6 +95,8 @@ struct UpdateConciergeServiceRequest {
     ends_at: Option<String>,
     cost_estimate: Option<f64>,
     actual_cost: Option<f64>,
+    quantity: Option<f64>,
+    unit_price: Option<f64>,
     currency: Option<String>,
     service_notes: Option<String>,
     billing_notes: Option<String>,
@@ -117,6 +123,13 @@ struct NonMedicalAppointmentContext {
     category: Option<String>,
     starts_at: Option<chrono::DateTime<chrono::Utc>>,
     ends_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+struct ProviderServicePricing {
+    provider_id: Uuid,
+    taxonomy_node_id: Option<Uuid>,
+    unit_price: Option<f64>,
+    currency: String,
 }
 
 pub(crate) async fn bootstrap_default_service(
@@ -338,13 +351,14 @@ async fn list_my_concierge_services(
     };
 
     match sqlx::query(
-        r#"SELECT cs.id, cs.patient_id, cs.appointment_id, cs.provider_id, cs.assigned_concierge_id,
+        r#"SELECT cs.id, cs.patient_id, cs.appointment_id, cs.provider_id, cs.provider_service_id, cs.assigned_concierge_id,
                   cs.service_kind, cs.taxonomy_node_id, cs.title, cs.status, cs.booking_reference, cs.vendor_name,
                   cs.vendor_contact, cs.starts_at, cs.ends_at, cs.cost_estimate, cs.actual_cost,
-                  cs.currency, cs.billing_status, cs.service_notes, cs.billing_notes,
+                  cs.quantity, cs.unit_price, cs.currency, cs.billing_status, cs.service_notes, cs.billing_notes,
                   cs.completed_at, cs.billed_at, cs.created_at, cs.updated_at, cs.request_source,
                   p.patient_id AS patient_code, p.first_name, p.last_name,
                   pr.name AS provider_name,
+                  sc.service_name AS provider_service_name,
                   ptn.code AS taxonomy_node_code, ptn.name_de AS taxonomy_node_name_de,
                   ptn.name_ru AS taxonomy_node_name_ru,
                   u.name AS assigned_concierge_name,
@@ -352,6 +366,7 @@ async fn list_my_concierge_services(
            FROM concierge_services cs
            JOIN patients p ON p.id = cs.patient_id
            LEFT JOIN providers pr ON pr.id = cs.provider_id
+           LEFT JOIN service_catalog sc ON sc.id = cs.provider_service_id
            LEFT JOIN provider_taxonomy_nodes ptn ON ptn.id = cs.taxonomy_node_id
            LEFT JOIN users u ON u.id = cs.assigned_concierge_id
            LEFT JOIN appointments a ON a.id = cs.appointment_id
@@ -717,13 +732,14 @@ async fn list_concierge_services(
     };
 
     let rows = match sqlx::query(
-        r#"SELECT cs.id, cs.patient_id, cs.appointment_id, cs.provider_id, cs.assigned_concierge_id,
+        r#"SELECT cs.id, cs.patient_id, cs.appointment_id, cs.provider_id, cs.provider_service_id, cs.assigned_concierge_id,
                   cs.service_kind, cs.taxonomy_node_id, cs.title, cs.status, cs.booking_reference, cs.vendor_name,
                   cs.vendor_contact, cs.starts_at, cs.ends_at, cs.cost_estimate, cs.actual_cost,
-                  cs.currency, cs.billing_status, cs.service_notes, cs.billing_notes, cs.request_source,
+                  cs.quantity, cs.unit_price, cs.currency, cs.billing_status, cs.service_notes, cs.billing_notes, cs.request_source,
                   cs.completed_at, cs.billed_at, cs.created_at, cs.updated_at,
                   p.patient_id AS patient_code, p.first_name, p.last_name,
                   pr.name AS provider_name,
+                  sc.service_name AS provider_service_name,
                   ptn.code AS taxonomy_node_code, ptn.name_de AS taxonomy_node_name_de,
                   ptn.name_ru AS taxonomy_node_name_ru,
                   u.name AS assigned_concierge_name,
@@ -731,6 +747,7 @@ async fn list_concierge_services(
            FROM concierge_services cs
            JOIN patients p ON p.id = cs.patient_id
            LEFT JOIN providers pr ON pr.id = cs.provider_id
+           LEFT JOIN service_catalog sc ON sc.id = cs.provider_service_id
            LEFT JOIN provider_taxonomy_nodes ptn ON ptn.id = cs.taxonomy_node_id
            LEFT JOIN users u ON u.id = cs.assigned_concierge_id
            LEFT JOIN appointments a ON a.id = cs.appointment_id
@@ -740,6 +757,7 @@ async fn list_concierge_services(
                   OR COALESCE(cs.vendor_name, '') ILIKE $1
                   OR COALESCE(cs.vendor_contact, '') ILIKE $1
                   OR COALESCE(pr.name, '') ILIKE $1
+                  OR COALESCE(sc.service_name, '') ILIKE $1
                   OR COALESCE(ptn.code, '') ILIKE $1
                   OR COALESCE(ptn.name_de, '') ILIKE $1
                   OR COALESCE(ptn.name_ru, '') ILIKE $1
@@ -754,7 +772,26 @@ async fn list_concierge_services(
              AND ($6::text IS NULL OR cs.service_kind = $6)
              AND ($7::text IS NULL OR cs.status = $7)
              AND ($8::text IS NULL OR cs.billing_status = $8)
-             AND ($9::uuid IS NULL OR cs.taxonomy_node_id = $9)
+             AND (
+                $9::uuid IS NULL
+                OR EXISTS (
+                    WITH RECURSIVE selected_taxonomy AS (
+                        SELECT n.id
+                        FROM provider_taxonomy_nodes n
+                        WHERE n.id = $9
+
+                        UNION ALL
+
+                        SELECT child.id
+                        FROM provider_taxonomy_nodes child
+                        JOIN selected_taxonomy parent
+                          ON child.parent_id = parent.id
+                    )
+                    SELECT 1
+                    FROM selected_taxonomy st
+                    WHERE st.id = cs.taxonomy_node_id
+                )
+             )
            ORDER BY COALESCE(cs.starts_at, cs.created_at) DESC, cs.created_at DESC
            LIMIT 200"#,
     )
@@ -875,17 +912,41 @@ async fn create_concierge_service(
         return resp;
     }
 
+    let provider_service_pricing = match body.provider_service_id {
+        Some(provider_service_id) => {
+            match load_provider_service_pricing(&state, provider_service_id).await {
+                Ok(Some(value)) => Some(value),
+                Ok(None) => {
+                    return err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "provider_service_id must reference an active non-medical provider service",
+                    );
+                }
+                Err(resp) => return resp,
+            }
+        }
+        None => None,
+    };
+
     let provider_id = match (
         body.provider_id,
+        provider_service_pricing.as_ref().map(|service| service.provider_id),
         appointment_ctx.as_ref().and_then(|ctx| ctx.provider_id),
     ) {
-        (Some(provider_id), _) => {
+        (Some(provider_id), Some(service_provider_id), _) if provider_id != service_provider_id => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "provider_service_id must belong to provider_id",
+            );
+        }
+        (Some(provider_id), _, _) => {
             if let Err(resp) = validate_non_medical_provider(&state, provider_id).await {
                 return resp;
             }
             Some(provider_id)
         }
-        (None, some_provider) => some_provider,
+        (None, Some(service_provider_id), _) => Some(service_provider_id),
+        (None, None, some_provider) => some_provider,
     };
     let taxonomy_node_id = match body.taxonomy_node_id {
         Some(taxonomy_node_id) => {
@@ -894,10 +955,13 @@ async fn create_concierge_service(
             }
             Some(taxonomy_node_id)
         }
-        None => match load_primary_provider_taxonomy_node_id(&state, provider_id).await {
-            Ok(value) => value,
-            Err(resp) => return resp,
-        },
+        None => provider_service_pricing
+            .as_ref()
+            .and_then(|service| service.taxonomy_node_id)
+            .or(match load_primary_provider_taxonomy_node_id(&state, provider_id).await {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            }),
     };
 
     let assigned_concierge_id = match body.assigned_concierge_id {
@@ -950,7 +1014,32 @@ async fn create_concierge_service(
         );
     }
 
-    let currency = body.currency.unwrap_or_else(|| "EUR".to_string());
+    let quantity = match normalize_positive_number(body.quantity, 1.0, "quantity") {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let unit_price = match provider_service_pricing.as_ref() {
+        Some(service) => match service.unit_price {
+            Some(value) => Some(value),
+            None => match normalize_optional_non_negative(body.unit_price, "unit_price") {
+                Ok(value) => value,
+                Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+            },
+        },
+        None => match normalize_optional_non_negative(body.unit_price, "unit_price") {
+            Ok(value) => value,
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        },
+    };
+    let cost_estimate = match unit_price {
+        Some(value) if provider_service_pricing.is_some() => Some(round_money(quantity * value)),
+        _ => body.cost_estimate,
+    };
+
+    let currency = body
+        .currency
+        .or_else(|| provider_service_pricing.as_ref().map(|service| service.currency.clone()))
+        .unwrap_or_else(|| "EUR".to_string());
     if currency.trim().len() != 3 {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -960,20 +1049,21 @@ async fn create_concierge_service(
 
     match sqlx::query(
         r#"INSERT INTO concierge_services (
-                patient_id, appointment_id, provider_id, assigned_concierge_id, service_kind, taxonomy_node_id,
+                patient_id, appointment_id, provider_id, provider_service_id, assigned_concierge_id, service_kind, taxonomy_node_id,
                 title, status, booking_reference, vendor_name, vendor_contact,
-                starts_at, ends_at, cost_estimate, actual_cost, currency,
+                starts_at, ends_at, cost_estimate, actual_cost, quantity, unit_price, currency,
                 billing_status, service_notes, billing_notes, request_source, created_by
            ) VALUES (
-                $1, $2, $3, $4, $5, $6,
-                $7, 'planned', $8, $9, $10,
-                $11, $12, $13, $14, $15,
-                'draft', $16, $17, 'staff', $18
+                $1, $2, $3, $4, $5, $6, $7,
+                $8, 'planned', $9, $10, $11,
+                $12, $13, $14, $15, $16, $17, $18,
+                'draft', $19, $20, 'staff', $21
            ) RETURNING id"#,
     )
     .bind(body.patient_id)
     .bind(body.appointment_id)
     .bind(provider_id)
+    .bind(body.provider_service_id)
     .bind(assigned_concierge_id)
     .bind(service_kind.clone())
     .bind(taxonomy_node_id)
@@ -983,8 +1073,10 @@ async fn create_concierge_service(
     .bind(body.vendor_contact)
     .bind(starts_at)
     .bind(ends_at)
-    .bind(body.cost_estimate)
+    .bind(cost_estimate)
     .bind(body.actual_cost)
+    .bind(quantity)
+    .bind(unit_price)
     .bind(currency.to_uppercase())
     .bind(body.service_notes)
     .bind(body.billing_notes)
@@ -1006,6 +1098,7 @@ async fn create_concierge_service(
                     "appointment_id": body.appointment_id,
                     "patient_id": body.patient_id,
                     "provider_id": provider_id,
+                    "provider_service_id": body.provider_service_id,
                     "assigned_concierge_id": assigned_concierge_id,
                 }),
             ));
@@ -1100,7 +1193,37 @@ async fn update_concierge_service(
             "Service title is required (max 255)",
         );
     }
-    if let Some(provider_id) = body.provider_id
+    let provider_service_pricing = match body.provider_service_id {
+        Some(provider_service_id) => {
+            match load_provider_service_pricing(&state, provider_service_id).await {
+                Ok(Some(value)) => Some(value),
+                Ok(None) => {
+                    return err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "provider_service_id must reference an active non-medical provider service",
+                    );
+                }
+                Err(resp) => return resp,
+            }
+        }
+        None => None,
+    };
+    let provider_id_update = match (
+        body.provider_id,
+        provider_service_pricing.as_ref().map(|service| service.provider_id),
+    ) {
+        (Some(provider_id), Some(service_provider_id)) if provider_id != service_provider_id => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "provider_service_id must belong to provider_id",
+            );
+        }
+        (Some(provider_id), _) => Some(provider_id),
+        (None, Some(service_provider_id)) => Some(service_provider_id),
+        (None, None) => None,
+    };
+
+    if let Some(provider_id) = provider_id_update
         && let Err(resp) = validate_non_medical_provider(&state, provider_id).await
     {
         return resp;
@@ -1160,6 +1283,50 @@ async fn update_concierge_service(
         );
     }
 
+    let quantity = match body.quantity {
+        Some(value) => match normalize_positive_number(Some(value), 1.0, "quantity") {
+            Ok(value) => Some(value),
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        },
+        None => None,
+    };
+    let unit_price = match provider_service_pricing.as_ref() {
+        Some(service) => match service.unit_price {
+            Some(value) => Some(value),
+            None => match normalize_optional_non_negative(body.unit_price, "unit_price") {
+                Ok(value) => value,
+                Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+            },
+        },
+        None => match normalize_optional_non_negative(body.unit_price, "unit_price") {
+            Ok(value) => value,
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        },
+    };
+    let existing_quantity = existing
+        .try_get::<rust_decimal::Decimal, _>("quantity")
+        .ok()
+        .and_then(|value| value.to_string().parse::<f64>().ok())
+        .unwrap_or(1.0);
+    let existing_unit_price = existing
+        .try_get::<Option<rust_decimal::Decimal>, _>("unit_price")
+        .ok()
+        .flatten()
+        .and_then(|value| value.to_string().parse::<f64>().ok());
+    let cost_estimate = match unit_price.or(existing_unit_price) {
+        Some(value)
+            if body.provider_service_id.is_some()
+                || body.quantity.is_some()
+                || body.unit_price.is_some() =>
+        {
+            Some(round_money(quantity.unwrap_or(existing_quantity) * value))
+        }
+        _ => body.cost_estimate,
+    };
+    let currency = body
+        .currency
+        .or_else(|| provider_service_pricing.as_ref().map(|service| service.currency.clone()));
+
     let completed_at = match body.status.as_deref() {
         Some("completed") => Some(chrono::Utc::now()),
         _ => None,
@@ -1192,11 +1359,14 @@ async fn update_concierge_service(
                billing_notes = COALESCE($17, billing_notes),
                completed_at = COALESCE($18, completed_at),
                billed_at = COALESCE($19, billed_at),
-               taxonomy_node_id = COALESCE($20, taxonomy_node_id)
+               taxonomy_node_id = COALESCE($20, taxonomy_node_id),
+               provider_service_id = COALESCE($21, provider_service_id),
+               quantity = COALESCE($22, quantity),
+               unit_price = COALESCE($23, unit_price)
            WHERE id = $1"#,
     )
     .bind(service_id)
-    .bind(body.provider_id)
+    .bind(provider_id_update)
     .bind(body.assigned_concierge_id)
     .bind(body.service_kind)
     .bind(body.title.map(|value| value.trim().to_string()))
@@ -1207,14 +1377,17 @@ async fn update_concierge_service(
     .bind(body.vendor_contact)
     .bind(starts_at)
     .bind(ends_at)
-    .bind(body.cost_estimate)
+    .bind(cost_estimate)
     .bind(body.actual_cost)
-    .bind(body.currency.map(|value| value.to_uppercase()))
+    .bind(currency.map(|value| value.to_uppercase()))
     .bind(body.service_notes)
     .bind(body.billing_notes)
     .bind(completed_at)
     .bind(billed_at)
     .bind(body.taxonomy_node_id)
+    .bind(body.provider_service_id)
+    .bind(quantity)
+    .bind(unit_price)
     .execute(&state.db)
     .await
     {
@@ -1268,13 +1441,14 @@ async fn load_service_row(
     service_id: Uuid,
 ) -> Result<Option<sqlx::postgres::PgRow>, axum::response::Response> {
     sqlx::query(
-        r#"SELECT cs.id, cs.patient_id, cs.appointment_id, cs.provider_id, cs.assigned_concierge_id,
+        r#"SELECT cs.id, cs.patient_id, cs.appointment_id, cs.provider_id, cs.provider_service_id, cs.assigned_concierge_id,
                   cs.service_kind, cs.taxonomy_node_id, cs.title, cs.status, cs.booking_reference, cs.vendor_name,
                   cs.vendor_contact, cs.starts_at, cs.ends_at, cs.cost_estimate, cs.actual_cost,
-                  cs.currency, cs.billing_status, cs.service_notes, cs.billing_notes, cs.request_source,
+                  cs.quantity, cs.unit_price, cs.currency, cs.billing_status, cs.service_notes, cs.billing_notes, cs.request_source,
                   cs.completed_at, cs.billed_at, cs.created_at, cs.updated_at,
                   p.patient_id AS patient_code, p.first_name, p.last_name,
                   pr.name AS provider_name,
+                  sc.service_name AS provider_service_name,
                   ptn.code AS taxonomy_node_code, ptn.name_de AS taxonomy_node_name_de,
                   ptn.name_ru AS taxonomy_node_name_ru,
                   u.name AS assigned_concierge_name,
@@ -1282,6 +1456,7 @@ async fn load_service_row(
            FROM concierge_services cs
            JOIN patients p ON p.id = cs.patient_id
            LEFT JOIN providers pr ON pr.id = cs.provider_id
+           LEFT JOIN service_catalog sc ON sc.id = cs.provider_service_id
            LEFT JOIN provider_taxonomy_nodes ptn ON ptn.id = cs.taxonomy_node_id
            LEFT JOIN users u ON u.id = cs.assigned_concierge_id
            LEFT JOIN appointments a ON a.id = cs.appointment_id
@@ -1449,6 +1624,53 @@ async fn validate_non_medical_provider(
     Ok(())
 }
 
+async fn load_provider_service_pricing(
+    state: &AppState,
+    provider_service_id: Uuid,
+) -> Result<Option<ProviderServicePricing>, axum::response::Response> {
+    let row = sqlx::query(
+        r#"SELECT s.provider_id,
+                  s.taxonomy_node_id,
+                  CASE
+                      WHEN s.price_type = 'on_request' THEN NULL
+                      WHEN s.price_type = 'range' THEN COALESCE(s.price_from, s.price)
+                      ELSE s.price
+                  END::float8 AS unit_price,
+                  s.currency
+           FROM service_catalog s
+           JOIN providers p ON p.id = s.provider_id
+           WHERE s.id = $1
+             AND p.provider_type = 'non_medical'
+             AND p.is_active = true
+             AND (s.valid_to IS NULL OR s.valid_to >= CURRENT_DATE)"#,
+    )
+    .bind(provider_service_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, provider_service_id = %provider_service_id, "Failed to load provider service pricing");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate provider service",
+        )
+    })?;
+
+    let Some(row) = row else {
+        return Ok(None);
+    };
+
+    Ok(Some(ProviderServicePricing {
+        provider_id: row.try_get::<Uuid, _>("provider_id").unwrap_or_default(),
+        taxonomy_node_id: row
+            .try_get::<Option<Uuid>, _>("taxonomy_node_id")
+            .unwrap_or_default(),
+        unit_price: row.try_get::<Option<f64>, _>("unit_price").unwrap_or_default(),
+        currency: row
+            .try_get::<String, _>("currency")
+            .unwrap_or_else(|_| "EUR".to_string()),
+    }))
+}
+
 async fn validate_non_medical_taxonomy_node(
     state: &AppState,
     taxonomy_node_id: Uuid,
@@ -1524,11 +1746,14 @@ fn validate_update_fields_for_role(
 
     if auth.role == Role::Concierge {
         if body.provider_id.is_some()
+            || body.provider_service_id.is_some()
             || body.assigned_concierge_id.is_some()
             || body.service_kind.is_some()
             || body.taxonomy_node_id.is_some()
             || body.title.is_some()
             || body.cost_estimate.is_some()
+            || body.quantity.is_some()
+            || body.unit_price.is_some()
             || body.billing_status.is_some()
             || body.billing_notes.is_some()
             || body.currency.is_some()
@@ -1543,6 +1768,7 @@ fn validate_update_fields_for_role(
 
     if auth.role == Role::Billing {
         if body.provider_id.is_some()
+            || body.provider_service_id.is_some()
             || body.assigned_concierge_id.is_some()
             || body.service_kind.is_some()
             || body.taxonomy_node_id.is_some()
@@ -1554,6 +1780,8 @@ fn validate_update_fields_for_role(
             || body.starts_at.is_some()
             || body.ends_at.is_some()
             || body.cost_estimate.is_some()
+            || body.quantity.is_some()
+            || body.unit_price.is_some()
             || body.service_notes.is_some()
             || body.currency.is_some()
         {
@@ -1618,6 +1846,41 @@ fn parse_optional_datetime(
             .map_err(|_| "Invalid datetime (RFC3339)"),
         _ => Ok(None),
     }
+}
+
+fn normalize_positive_number(
+    value: Option<f64>,
+    default_value: f64,
+    field: &'static str,
+) -> Result<f64, &'static str> {
+    let value = value.unwrap_or(default_value);
+    if !value.is_finite() || value <= 0.0 {
+        return match field {
+            "quantity" => Err("quantity must be greater than zero"),
+            _ => Err("value must be greater than zero"),
+        };
+    }
+    Ok(value)
+}
+
+fn normalize_optional_non_negative(
+    value: Option<f64>,
+    field: &'static str,
+) -> Result<Option<f64>, &'static str> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if !value.is_finite() || value < 0.0 {
+        return match field {
+            "unit_price" => Err("unit_price must be non-negative"),
+            _ => Err("value must be non-negative"),
+        };
+    }
+    Ok(Some(value))
+}
+
+fn round_money(value: f64) -> f64 {
+    (value * 100.0).round() / 100.0
 }
 
 fn is_valid_service_kind(value: &str) -> bool {
@@ -1710,6 +1973,8 @@ fn build_portal_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "appointment_title": row.try_get::<Option<String>, _>("appointment_title").unwrap_or_default(),
         "provider_id": row.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
         "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
+        "provider_service_id": row.try_get::<Option<Uuid>, _>("provider_service_id").unwrap_or_default(),
+        "provider_service_name": row.try_get::<Option<String>, _>("provider_service_name").unwrap_or_default(),
         "assigned_concierge_name": row.try_get::<Option<String>, _>("assigned_concierge_name").unwrap_or_default(),
         "service_kind": row.try_get::<String, _>("service_kind").unwrap_or_default(),
         "taxonomy_node_id": row.try_get::<Option<Uuid>, _>("taxonomy_node_id").unwrap_or_default(),
@@ -1724,6 +1989,8 @@ fn build_portal_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "starts_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("starts_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "ends_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("ends_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "cost_estimate": row.try_get::<Option<rust_decimal::Decimal>, _>("cost_estimate").unwrap_or_default().map(|value| value.round_dp(2).to_string()),
+        "quantity": row.try_get::<rust_decimal::Decimal, _>("quantity").map(|value| value.round_dp(2).normalize().to_string()).unwrap_or_else(|_| "1".to_string()),
+        "unit_price": row.try_get::<Option<rust_decimal::Decimal>, _>("unit_price").unwrap_or_default().map(|value| value.round_dp(2).to_string()),
         "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
         "service_notes": row.try_get::<Option<String>, _>("service_notes").unwrap_or_default(),
         "request_source": row.try_get::<String, _>("request_source").unwrap_or_else(|_| "staff".to_string()),
@@ -1750,6 +2017,8 @@ fn build_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "appointment_title": row.try_get::<Option<String>, _>("appointment_title").unwrap_or_default(),
         "provider_id": row.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
         "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
+        "provider_service_id": row.try_get::<Option<Uuid>, _>("provider_service_id").unwrap_or_default(),
+        "provider_service_name": row.try_get::<Option<String>, _>("provider_service_name").unwrap_or_default(),
         "assigned_concierge_id": row.try_get::<Option<Uuid>, _>("assigned_concierge_id").unwrap_or_default(),
         "assigned_concierge_name": row.try_get::<Option<String>, _>("assigned_concierge_name").unwrap_or_default(),
         "service_kind": row.try_get::<String, _>("service_kind").unwrap_or_default(),
@@ -1766,6 +2035,8 @@ fn build_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "ends_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("ends_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "cost_estimate": row.try_get::<Option<rust_decimal::Decimal>, _>("cost_estimate").unwrap_or_default().map(|value| value.round_dp(2).to_string()),
         "actual_cost": row.try_get::<Option<rust_decimal::Decimal>, _>("actual_cost").unwrap_or_default().map(|value| value.round_dp(2).to_string()),
+        "quantity": row.try_get::<rust_decimal::Decimal, _>("quantity").map(|value| value.round_dp(2).normalize().to_string()).unwrap_or_else(|_| "1".to_string()),
+        "unit_price": row.try_get::<Option<rust_decimal::Decimal>, _>("unit_price").unwrap_or_default().map(|value| value.round_dp(2).to_string()),
         "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
         "billing_status": row.try_get::<String, _>("billing_status").unwrap_or_default(),
         "service_notes": row.try_get::<Option<String>, _>("service_notes").unwrap_or_default(),

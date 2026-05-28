@@ -78,6 +78,8 @@ import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { PatientDocumentsPage } from "@/pages/patients/portal-documents-page";
 import { cn } from "@/lib/utils";
+import { useProviderTaxonomyNodes } from "@/pages/providers/data/use-provider-taxonomy-nodes";
+import { ProviderSelectWithTaxonomyFilter } from "@/pages/providers/ui/provider-select-with-taxonomy-filter";
 import {
   sensitivityBadge,
   statusBadge,
@@ -675,6 +677,7 @@ function StaffDocumentsPage({
 
   const [patients, setPatients] = useState<PatientOption[]>([]);
   const [providers, setProviders] = useState<ProviderOption[]>([]);
+  const taxonomyNodes = useProviderTaxonomyNodes();
   const [staff, setStaff] = useState<StaffOption[]>([]);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [arts, setArts] = useState<string[]>([]);
@@ -3070,23 +3073,26 @@ function StaffDocumentsPage({
                         </Field>
                       ) : (
                         <Field label={t.common_provider} required>
-                          <NativeComboboxSelect
+                          <ProviderSelectWithTaxonomyFilter
                             value={shareForm.providerId}
-                            onChange={(event) =>
+                            providers={providers}
+                            taxonomyNodes={taxonomyNodes}
+                            providerPlaceholder={t.documents_select_provider}
+                            taxonomyPlaceholder={t.providers_category}
+                            taxonomyAllLabel={t.providers_all}
+                            containerClassName="grid-cols-1 sm:grid-cols-2"
+                            taxonomySelectClassName={selectClassName}
+                            providerSelectClassName={selectClassName}
+                            providerLabel={(item) =>
+                              `${item.name} - ${item.address_city || t.documents_no_city}`
+                            }
+                            onChange={(providerId) =>
                               setShareForm((current) => ({
                                 ...current,
-                                providerId: event.target.value,
+                                providerId,
                               }))
                             }
-                            className={selectClassName}
-                          >
-                            <option value="">{t.documents_select_provider}</option>
-                            {providers.map((item) => (
-                              <option key={item.id} value={item.id}>
-                                {item.name} · {item.address_city || t.documents_no_city}
-                              </option>
-                            ))}
-                          </NativeComboboxSelect>
+                          />
                         </Field>
                       )}
                       <Field label={t.documents_source}>

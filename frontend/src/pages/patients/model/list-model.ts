@@ -56,6 +56,9 @@ export type ProviderOption = {
   name: string;
   provider_type: string;
   address_city: string | null;
+  taxonomy_node_id?: string | null;
+  taxonomy_node_ids?: string[];
+  taxonomy_path?: Array<{ id?: string | null }>;
 };
 
 export type DoctorOption = {

@@ -49,6 +49,7 @@ import {
 import type { PortalConciergeServiceItem } from "@/pages/patients/model/portal-shared";
 import { fetchProviderTaxonomy } from "@/pages/providers/data/provider-api";
 import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
+import { ProviderTaxonomyCascadeSelect } from "@/pages/providers/ui/provider-taxonomy-cascade-select";
 import { cn } from "@/lib/utils";
 
 type ServiceRequestFormState = {
@@ -137,13 +138,6 @@ function serviceStatusBadgeTone(status: string): StatusTone {
   return "warning";
 }
 
-function taxonomyNodeLabel(node: ProviderTaxonomyNode, lang: Lang) {
-  if (lang === "ru") {
-    return node.name_ru || node.name_de || node.name_en || node.code;
-  }
-  return node.name_de || node.name_en || node.name_ru || node.code;
-}
-
 function portalServiceTaxonomyLabel(item: PortalConciergeServiceItem, lang: Lang) {
   if (lang === "ru") {
     return item.taxonomy_node_name_ru || item.taxonomy_node_name_de || item.taxonomy_node_code || "";
@@ -160,7 +154,6 @@ const PORTAL_SERVICE_REALTIME_EVENTS = [
 
 type PatientServicesRequestSectionProps = {
   form: ServiceRequestFormState;
-  lang: Lang;
   taxonomyLeaves: ProviderTaxonomyNode[];
   requestBusy: boolean;
   requestError: string;
@@ -171,7 +164,6 @@ type PatientServicesRequestSectionProps = {
 
 function PatientServicesRequestSection({
   form,
-  lang,
   taxonomyLeaves,
   requestBusy,
   requestError,
@@ -209,23 +201,21 @@ function PatientServicesRequestSection({
         </Field>
 
         <Field label={t.services_category}>
-          <NativeComboboxSelect
+          <ProviderTaxonomyCascadeSelect
             value={form.taxonomyNodeId}
-            onChange={(event) =>
+            nodes={taxonomyLeaves}
+            providerType="non_medical"
+            mode="leaf"
+            placeholder={t.common_not_set}
+            containerClassName="grid gap-2 sm:grid-cols-2"
+            selectClassName={selectClass}
+            onChange={(taxonomyNodeId) =>
               onFormChange((current) => ({
                 ...current,
-                taxonomyNodeId: event.target.value ?? "",
+                taxonomyNodeId,
               }))
             }
-            className={selectClass}
-          >
-            <option value="">{t.common_not_set}</option>
-            {taxonomyLeaves.map((node) => (
-              <option key={node.id} value={node.id}>
-                {taxonomyNodeLabel(node, lang)}
-              </option>
-            ))}
-          </NativeComboboxSelect>
+          />
         </Field>
 
         <Field label={t.services_form_title} htmlFor="portal-service-title">
@@ -377,7 +367,7 @@ export function PatientServicesPage() {
         startTransition(() => {
           dispatchPageState({
             services: rows,
-            taxonomyLeaves: taxonomy.leaves.filter((node) => node.is_active && node.is_assignable),
+            taxonomyLeaves: taxonomy.nodes.filter((node) => node.is_active),
             error: "",
             loading: false,
             refreshing: false,
@@ -583,7 +573,6 @@ export function PatientServicesPage() {
 
         <PatientServicesRequestSection
           form={form}
-          lang={lang}
           taxonomyLeaves={taxonomyLeaves}
           requestBusy={requestBusy}
           requestError={requestError}

@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   ArrowUpRight,
   Building2,
@@ -18,6 +18,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { useLang, type Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { ProviderTaxonomyCascadeSelect } from "./provider-taxonomy-cascade-select";
 
 import {
   compactDateTime,
@@ -37,6 +38,7 @@ import type {
   ProviderPersonGender,
   ProviderStaffRoleItem,
   ProviderSummary,
+  ProviderTaxonomyNode,
   ProviderType,
   SpecializationItem,
 } from "../model/types";
@@ -48,6 +50,7 @@ type ProviderPeopleCatalogProps = {
   loading?: boolean;
   patients?: readonly ProviderPeoplePatientOption[];
   providers?: readonly ProviderSummary[];
+  taxonomyNodes?: readonly ProviderTaxonomyNode[];
   rows: readonly ProviderPeopleRow[];
   specializations?: readonly SpecializationItem[];
   staffRoles?: readonly ProviderStaffRoleItem[];
@@ -617,6 +620,21 @@ function providerOptionsFromProviders(providers: readonly ProviderSummary[]) {
     );
 }
 
+function providerMatchesTaxonomy(
+  provider: ProviderSummary,
+  taxonomyNodeId: string,
+) {
+  const selected = taxonomyNodeId.trim();
+  if (!selected) return true;
+
+  return new Set([
+    provider.taxonomy_node_id ?? "",
+    provider.taxonomy_node?.id ?? "",
+    ...(provider.taxonomy_node_ids ?? []),
+    ...(provider.taxonomy_path ?? []).map((node) => node.id),
+  ].filter(Boolean)).has(selected);
+}
+
 function buildRoleOptions(
   filters: ProviderPeopleFilters,
   labels: Record<string, string>,
@@ -656,6 +674,8 @@ function FiltersBar({
   labels,
   patients,
   providerOptions,
+  providers,
+  taxonomyNodes,
   specializations,
   staffRoles,
   uiText,
@@ -667,6 +687,8 @@ function FiltersBar({
   labels: Record<string, string>;
   patients: readonly ProviderPeoplePatientOption[];
   providerOptions: ProviderOption[];
+  providers: readonly ProviderSummary[];
+  taxonomyNodes: readonly ProviderTaxonomyNode[];
   specializations: readonly SpecializationItem[];
   staffRoles: readonly ProviderStaffRoleItem[];
   uiText: Record<string, string>;
@@ -674,7 +696,17 @@ function FiltersBar({
   onResetFilters?: () => void;
 }) {
   const allLabel = labels.providers_all ?? localizedFallback(lang, "Alle", "Все");
+  const [providerTaxonomyNodeId, setProviderTaxonomyNodeId] = useState("");
   const roleOptions = buildRoleOptions(filters, labels, uiText, staffRoles, lang);
+  const filteredProviderOptions = useMemo(() => {
+    if (!providerTaxonomyNodeId || providers.length === 0) return providerOptions;
+    const matchingProviderIds = new Set(
+      providers
+        .filter((provider) => providerMatchesTaxonomy(provider, providerTaxonomyNodeId))
+        .map((provider) => provider.id),
+    );
+    return providerOptions.filter((option) => matchingProviderIds.has(option.value));
+  }, [providerOptions, providerTaxonomyNodeId, providers]);
   const activeSpecializationOptions = specializations.flatMap((item) => {
     if (!item.is_active) return [];
     return [{
@@ -726,13 +758,40 @@ function FiltersBar({
           <option value="staff">{personTypeLabel("staff", labels, uiText)}</option>
         </SelectField>
 
+        <label className="min-w-0">
+          <FieldLabel>{labels.providers_category ?? allLabel}</FieldLabel>
+          <ProviderTaxonomyCascadeSelect
+            value={providerTaxonomyNodeId}
+            nodes={[...taxonomyNodes]}
+            providerType={filters.providerType}
+            mode="any"
+            placeholder={labels.providers_category ?? allLabel}
+            allLabel={allLabel}
+            selectClassName="h-8 rounded-md bg-background text-xs"
+            onChange={(nextValue) => {
+              setProviderTaxonomyNodeId(nextValue);
+              if (
+                filters.providerId &&
+                providers.length > 0 &&
+                !providers.some(
+                  (provider) =>
+                    provider.id === filters.providerId &&
+                    providerMatchesTaxonomy(provider, nextValue),
+                )
+              ) {
+                setFilter("providerId", "");
+              }
+            }}
+          />
+        </label>
+
         <SelectField
           label={labels.providers_title ?? localizedFallback(lang, "Provider", "Провайдер")}
           value={filters.providerId}
           onChange={(value) => setFilter("providerId", value)}
         >
           <option value="">{allLabel}</option>
-          {providerOptions.map((option) => (
+          {filteredProviderOptions.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
             </option>
@@ -972,6 +1031,7 @@ export function ProviderPeopleCatalog({
   loading = false,
   patients = EMPTY_PATIENT_OPTIONS,
   providers = EMPTY_PROVIDER_OPTIONS,
+  taxonomyNodes = [],
   rows,
   specializations = EMPTY_SPECIALIZATION_OPTIONS,
   staffRoles = EMPTY_STAFF_ROLE_OPTIONS,
@@ -1010,6 +1070,8 @@ export function ProviderPeopleCatalog({
         labels={labels}
         patients={patients}
         providerOptions={providerOptions}
+        providers={providers}
+        taxonomyNodes={taxonomyNodes}
         specializations={specializations}
         staffRoles={staffRoles}
         uiText={uiText}
