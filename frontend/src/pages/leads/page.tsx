@@ -69,7 +69,7 @@ import { useAuth } from "@/lib/auth";
 import { formatUiText, useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
-import type { CreateLeadBody, LeadDetail, LeadsStats, MonthlyEntry, StatusCount } from "@/lib/api/types";
+import type { CreateLeadBody, LeadDetail, LeadsStats } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 import {
   complianceTone,
@@ -174,8 +174,6 @@ type LeadsListState = {
   loading: boolean;
   error: string;
   stats: LeadsStats | null;
-  monthly: MonthlyEntry[];
-  byStatus: StatusCount[];
 };
 
 type LeadsDetailState = {
@@ -326,8 +324,6 @@ function useLeadsPageContent() {
       loading: false,
       error: "",
       stats: null,
-      monthly: [],
-      byStatus: [],
     }),
   );
   const {
@@ -336,8 +332,6 @@ function useLeadsPageContent() {
     loading,
     error,
     stats,
-    monthly,
-    byStatus,
   } = listState;
   const setVersion = (nextValue: SetStateAction<number>) => {
     dispatchListState((current) => ({
@@ -467,11 +461,6 @@ function useLeadsPageContent() {
   const filteredLeads = useMemo(
     () => filterLeadsByContact(leads, { email: filters.email, phone: filters.phone }),
     [filters.email, filters.phone, leads]
-  );
-  const maxMonthly = useMemo(() => Math.max(1, ...monthly.map((item) => item.count)), [monthly]);
-  const totalByStatus = useMemo(
-    () => byStatus.reduce((acc, item) => acc + item.count, 0),
-    [byStatus]
   );
   const leadColumns = useMemo<ColumnDef<LeadListItem>[]>(
     () => [
@@ -646,13 +635,11 @@ function useLeadsPageContent() {
     if (!permissions.canViewPage) return;
     let cancelled = false;
 
-    void fetchLeadStats().then(({ stats: statsPayload, monthly: monthlyPayload, byStatus: statusPayload }) => {
+    void fetchLeadStats().then(({ stats: statsPayload }) => {
       if (cancelled) return;
       startTransition(() => {
         dispatchListState({
           stats: statsPayload,
-          monthly: monthlyPayload,
-          byStatus: statusPayload,
         });
       });
     });
@@ -753,8 +740,6 @@ function useLeadsPageContent() {
     if (!permissions.canViewPage) return;
     clearApiCache("/leads");
     clearApiCache("/stats/leads");
-    clearApiCache("/stats/leads/monthly");
-    clearApiCache("/stats/leads/by-status");
     for (const event of events) {
       if (event.entity_type === "lead" && event.entity_id) {
         clearApiCache(`/leads/${event.entity_id}`);
@@ -1994,46 +1979,6 @@ function useLeadsPageContent() {
             description={t.common_archive}
             tone="slate"
           />
-        </div>
-
-        <div className="grid gap-4 lg:grid-cols-3">
-          <div className="rounded-[1.75rem] border border-border/70 bg-card p-5 shadow-[0_20px_60px_rgba(15,23,42,0.05)] lg:col-span-2">
-            <h2 className="mb-4 text-sm font-semibold text-zinc-900">{t.leads_monthly_growth}</h2>
-            <div className="flex h-48 items-end gap-2">
-              {monthly.map((item) => {
-                const pct = (item.count / maxMonthly) * 100;
-                const label = item.month.split("-").pop() ?? "";
-                return (
-                  <div key={item.month} className="flex flex-1 flex-col items-center gap-1">
-                    <span className="text-xs font-medium text-zinc-600">{item.count}</span>
-                    <div className="w-full rounded-t-md bg-sky-500 transition-all" style={{ height: `${pct}%`, minHeight: 4 }} />
-                    <span className="text-[10px] text-zinc-400">{label}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="rounded-[1.75rem] border border-border/70 bg-card p-5 shadow-[0_20px_60px_rgba(15,23,42,0.05)]">
-            <h2 className="mb-2 text-sm font-semibold text-zinc-900">{t.leads_by_status}</h2>
-            <p className="mb-4 text-3xl font-bold text-zinc-950">{totalByStatus}</p>
-            <div className="space-y-3">
-              {byStatus.map((item) => {
-                const pct = totalByStatus > 0 ? Math.round((item.count / totalByStatus) * 100) : 0;
-                return (
-                  <div key={item.status} className="space-y-1">
-                    <div className="flex items-center justify-between text-xs text-zinc-600">
-                      <span>{statusLabel(item.status, t)}</span>
-                      <span className="font-medium">{item.count}</span>
-                    </div>
-                    <div className="h-2 w-full rounded-full bg-zinc-100">
-                      <div className="h-2 rounded-full bg-sky-500 transition-all" style={{ width: `${pct}%` }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
         </div>
 
         {error ? <ShellBanner tone="error">{error}</ShellBanner> : null}

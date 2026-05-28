@@ -7,8 +7,6 @@ import type {
   CreateLeadBody,
   LeadDetail,
   LeadsStats,
-  MonthlyEntry,
-  StatusCount,
 } from "@/lib/api/types";
 
 import type { LeadListItem } from "../model/types";
@@ -29,18 +27,10 @@ export function fetchLeads(path: string) {
 }
 
 export async function fetchLeadStats() {
-  const [stats, monthly, byStatus] = await Promise.all([
-    apiFetch<LeadsStats>("/stats/leads", {
-      cacheTtlMs: LEAD_STATS_CACHE_TTL_MS,
-    }).catch(() => null),
-    apiFetch<MonthlyEntry[]>("/stats/leads/monthly", {
-      cacheTtlMs: LEAD_STATS_CACHE_TTL_MS,
-    }).catch(() => []),
-    apiFetch<StatusCount[]>("/stats/leads/by-status", {
-      cacheTtlMs: LEAD_STATS_CACHE_TTL_MS,
-    }).catch(() => []),
-  ]);
-  return { stats, monthly, byStatus };
+  const stats = await apiFetch<LeadsStats>("/stats/leads", {
+    cacheTtlMs: LEAD_STATS_CACHE_TTL_MS,
+  }).catch(() => null);
+  return { stats };
 }
 
 export function fetchLeadDetail(leadId: string) {
