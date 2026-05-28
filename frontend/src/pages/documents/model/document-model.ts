@@ -193,6 +193,7 @@ export function emptyGenerateForm(patientId = ""): GenerateFormState {
     ursprung: "",
     notes: "",
     textBlockKeys: [],
+    bindings: {},
   };
 }
 

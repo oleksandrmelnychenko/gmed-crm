@@ -202,6 +202,204 @@ function formatLanguageLabel(language?: string | null) {
   }
 }
 
+type BindingFieldKind = "text" | "date" | "textarea";
+type BindingFieldDef = { key: string; label: string; kind: BindingFieldKind };
+
+// Manual "binding socket" fields per generated template id. Field keys match
+// the backend `bindings` field names; `*_text` keys are parsed into arrays.
+const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
+  single_order: [
+    { key: "order_number", label: "Auftragsnummer", kind: "text" },
+    { key: "order_date", label: "Einzelauftrag vom", kind: "date" },
+    { key: "contract_date", label: "Rahmenvertrag vom", kind: "date" },
+    { key: "specialties", label: "Fachbereiche", kind: "text" },
+    { key: "period_from", label: "Zeitraum von", kind: "date" },
+    { key: "period_to", label: "Zeitraum bis", kind: "date" },
+    { key: "payer_name", label: "Kostenübernehmer (Name)", kind: "text" },
+    { key: "payer_birth_date", label: "Kostenübernehmer (geb. am)", kind: "date" },
+    { key: "sign_place", label: "Unterzeichnungsort", kind: "text" },
+    { key: "sign_date", label: "Unterzeichnungsdatum", kind: "date" },
+  ],
+  cost_coverage_declaration: [
+    { key: "order_date", label: "Einzelauftrag vom", kind: "date" },
+    { key: "contract_date", label: "Rahmenvertrag vom", kind: "date" },
+    { key: "quote_number", label: "Kostenvoranschlag-Nr.", kind: "text" },
+    { key: "payer_name", label: "Kostenübernehmer (Name)", kind: "text" },
+    { key: "payer_birth_date", label: "Kostenübernehmer (geb. am)", kind: "date" },
+    { key: "payer_street", label: "Kostenübernehmer Straße", kind: "text" },
+    { key: "payer_zip", label: "Kostenübernehmer PLZ", kind: "text" },
+    { key: "payer_city", label: "Kostenübernehmer Ort", kind: "text" },
+    { key: "payer_country", label: "Kostenübernehmer Land", kind: "text" },
+    { key: "payer_email", label: "Kostenübernehmer E-Mail", kind: "text" },
+    { key: "bank_holder", label: "Kontoinhaber", kind: "text" },
+    { key: "bank_name", label: "Bank", kind: "text" },
+    { key: "bank_swift", label: "SWIFT/BIC", kind: "text" },
+    { key: "bank_iban", label: "IBAN", kind: "text" },
+    {
+      key: "service_lines_text",
+      label: "Leistungen (eine pro Zeile: Beschreibung | Honorar | Menge | Summe)",
+      kind: "textarea",
+    },
+    { key: "sign_place", label: "Unterzeichnungsort", kind: "text" },
+    { key: "sign_date", label: "Unterzeichnungsdatum", kind: "date" },
+  ],
+  cost_estimate: [
+    { key: "order_date", label: "Datum", kind: "date" },
+    {
+      key: "service_lines_text",
+      label: "Leistungen (eine pro Zeile: Beschreibung | Preis/Spanne)",
+      kind: "textarea",
+    },
+  ],
+  appointment_confirmation: [
+    { key: "doc_id", label: "Doc-ID", kind: "text" },
+    { key: "passport_number", label: "Reisepass-Nr.", kind: "text" },
+    { key: "passport_valid_until", label: "Reisepass gültig bis", kind: "date" },
+    { key: "period_from", label: "Erste Untersuchung am", kind: "date" },
+    { key: "examination_weeks", label: "Weitere Kalenderwochen", kind: "text" },
+    {
+      key: "clinics_text",
+      label: "Kliniken (eine pro Zeile: Name | Adresse)",
+      kind: "textarea",
+    },
+    { key: "recipient_block", label: "Empfänger (Adressblock)", kind: "textarea" },
+    { key: "contact_phones", label: "Rückfragen-Telefon(e)", kind: "text" },
+    { key: "sign_place", label: "Ort", kind: "text" },
+    { key: "sign_date", label: "Datum", kind: "date" },
+  ],
+  consent_data_release_child: [
+    { key: "child_name", label: "Kind (Name)", kind: "text" },
+    { key: "child_birth_date", label: "Kind (geb. am)", kind: "date" },
+    { key: "child_address", label: "Adresse des Kindes", kind: "text" },
+    { key: "guardian_name", label: "Mutter (Name)", kind: "text" },
+    { key: "guardian_birth_date", label: "Mutter (geb. am)", kind: "date" },
+    { key: "guardian2_name", label: "Vater (Name)", kind: "text" },
+    { key: "guardian2_birth_date", label: "Vater (geb. am)", kind: "date" },
+    {
+      key: "extra_release_recipients",
+      label: "Zusätzliche Entbindung gegenüber",
+      kind: "textarea",
+    },
+  ],
+  consent_data_release_single: [
+    { key: "child_name", label: "Kind (Name)", kind: "text" },
+    { key: "child_birth_date", label: "Kind (geb. am)", kind: "date" },
+    { key: "child_address", label: "Adresse des Kindes", kind: "text" },
+    { key: "guardian_name", label: "Sorgeberechtigte/r (Name)", kind: "text" },
+    { key: "guardian_birth_date", label: "Sorgeberechtigte/r (geb. am)", kind: "date" },
+    {
+      key: "extra_release_recipients",
+      label: "Zusätzliche Entbindung gegenüber",
+      kind: "textarea",
+    },
+  ],
+};
+
+function parseBindingServiceLines(text: string) {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [description, fee, quantity, lineTotal, note] = line
+        .split("|")
+        .map((part) => part.trim());
+      return {
+        description: description ?? "",
+        fee: fee || undefined,
+        quantity: quantity || undefined,
+        line_total: lineTotal || undefined,
+        note: note || undefined,
+      };
+    })
+    .filter((item) => item.description);
+}
+
+function parseBindingClinics(text: string) {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [name, address] = line.split("|").map((part) => part.trim());
+      return { name: name ?? "", address: address || undefined };
+    })
+    .filter((item) => item.name);
+}
+
+function buildBindingsPayload(
+  bindings: Record<string, string>,
+): Record<string, unknown> | null {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(bindings)) {
+    if (key === "service_lines_text" || key === "clinics_text") continue;
+    const trimmed = (value ?? "").trim();
+    if (trimmed) out[key] = trimmed;
+  }
+  const serviceLines = parseBindingServiceLines(bindings.service_lines_text ?? "");
+  if (serviceLines.length) out.service_lines = serviceLines;
+  const clinics = parseBindingClinics(bindings.clinics_text ?? "");
+  if (clinics.length) out.clinics = clinics;
+  return Object.keys(out).length ? out : null;
+}
+
+const TEMPLATE_GROUP_ORDER = [
+  "contract",
+  "finance",
+  "consent",
+  "clinic_correspondence",
+  "administrative",
+  "medical",
+  "generated",
+  "provider",
+];
+
+function templateGroupKey(template: DocumentTemplate): string {
+  if (template.template_kind === "provider") return "provider";
+  return template.category || "generated";
+}
+
+function templateGroupLabel(key: string): string {
+  switch (key) {
+    case "contract":
+      return "Verträge";
+    case "finance":
+      return "Finanzen";
+    case "consent":
+      return "Einwilligungen";
+    case "clinic_correspondence":
+      return "Korrespondenz";
+    case "administrative":
+      return "Administrativ";
+    case "medical":
+      return "Medizinisch";
+    case "provider":
+      return "Anbieter-Vorlagen";
+    default:
+      return "Generiert";
+  }
+}
+
+function groupTemplatesForSelect(
+  templates: DocumentTemplate[],
+): [string, DocumentTemplate[]][] {
+  const groups = new Map<string, DocumentTemplate[]>();
+  for (const template of templates) {
+    const key = templateGroupKey(template);
+    const bucket = groups.get(key);
+    if (bucket) {
+      bucket.push(template);
+    } else {
+      groups.set(key, [template]);
+    }
+  }
+  return [...groups.entries()].sort(
+    ([a], [b]) =>
+      (TEMPLATE_GROUP_ORDER.indexOf(a) + 1 || 99) -
+      (TEMPLATE_GROUP_ORDER.indexOf(b) + 1 || 99),
+  );
+}
+
 function formatSensitivityLabel(value?: string | null) {
   const normalized = value?.trim().toLowerCase();
   switch (normalized) {
@@ -1341,6 +1539,13 @@ function StaffDocumentsPage({
     }
   }
 
+  function updateBindingField(key: string, value: string) {
+    setGenerateForm((current) => ({
+      ...current,
+      bindings: { ...current.bindings, [key]: value },
+    }));
+  }
+
   function applyGenerateTemplate(templateId: string) {
     const template = templates.find((item) => item.id === templateId);
     setGenerateForm((current) => {
@@ -1414,6 +1619,7 @@ function StaffDocumentsPage({
       ursprung: document.ursprung ?? "",
       notes: document.notes ?? "",
       textBlockKeys: [],
+      bindings: {},
     });
     setGenerateError("");
     setTemplateOpen(true);
@@ -1450,6 +1656,7 @@ function StaffDocumentsPage({
         ursprung: generateForm.ursprung.trim() || null,
         notes: generateForm.notes.trim() || null,
         text_block_keys: generateForm.textBlockKeys,
+        bindings: buildBindingsPayload(generateForm.bindings),
       });
       setTemplateOpen(false);
       setNotice(
@@ -2362,12 +2569,16 @@ function StaffDocumentsPage({
                   className={selectClassName}
                 >
                   <option value="">{t.documents_select_template}</option>
-                  {templates.map((template) => (
-                    <option key={template.id} value={template.id}>
-                      {template.provider_name
-                        ? `${template.label} · ${template.provider_name}`
-                        : template.label}
-                    </option>
+                  {groupTemplatesForSelect(templates).map(([groupKey, items]) => (
+                    <optgroup key={groupKey} label={templateGroupLabel(groupKey)}>
+                      {items.map((template) => (
+                        <option key={template.id} value={template.id}>
+                          {template.provider_name
+                            ? `${template.label} · ${template.provider_name}`
+                            : template.label}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </NativeComboboxSelect>
               </Field>
@@ -2566,6 +2777,39 @@ function StaffDocumentsPage({
               </Field>
                   </div>
                 </DocumentSheetSection>
+                {selectedTemplate && DOCUMENT_BINDING_FIELDS[selectedTemplate.id] ? (
+                  <DocumentSheetSection title={t.documents_section_bindings}>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      {DOCUMENT_BINDING_FIELDS[selectedTemplate.id].map((field) =>
+                        field.kind === "textarea" ? (
+                          <div key={field.key} className="md:col-span-2">
+                            <Field label={field.label}>
+                              <textarea
+                                value={generateForm.bindings[field.key] ?? ""}
+                                onChange={(event) =>
+                                  updateBindingField(field.key, event.target.value)
+                                }
+                                className={textareaClassName}
+                                rows={3}
+                              />
+                            </Field>
+                          </div>
+                        ) : (
+                          <Field key={field.key} label={field.label}>
+                            <Input
+                              type={field.kind === "date" ? "date" : "text"}
+                              value={generateForm.bindings[field.key] ?? ""}
+                              onChange={(event) =>
+                                updateBindingField(field.key, event.target.value)
+                              }
+                              className={shellInputClassName}
+                            />
+                          </Field>
+                        ),
+                      )}
+                    </div>
+                  </DocumentSheetSection>
+                ) : null}
                 {availableTemplateBlocks.length > 0 ? (
                   <DocumentSheetSection title={t.documents_text_blocks}>
                     <div className="space-y-4">

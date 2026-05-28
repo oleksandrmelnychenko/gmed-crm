@@ -17,6 +17,7 @@ export interface OperationsTranslations {
   operations_document_type: string;
   documents_section_template: string;
   documents_section_context: string;
+  documents_section_bindings: string;
   documents_section_parameters: string;
   documents_section_text_notes: string;
   documents_section_file: string;
@@ -502,6 +503,7 @@ export const operationsRu: OperationsTranslations = {
   operations_document_type: "Тип документа",
   documents_section_template: "Шаблон",
   documents_section_context: "Контекст",
+  documents_section_bindings: "Привязки (вручную)",
   documents_section_parameters: "Параметры документа",
   documents_section_text_notes: "Текст и заметки",
   documents_section_file: "Файл",
@@ -1034,6 +1036,7 @@ export const operationsDe: OperationsTranslations = {
   operations_document_type: "Dokumenttyp",
   documents_section_template: "Vorlage",
   documents_section_context: "Kontext",
+  documents_section_bindings: "Manuelle Bindungen",
   documents_section_parameters: "Dokumentparameter",
   documents_section_text_notes: "Text und Notizen",
   documents_section_file: "Datei",

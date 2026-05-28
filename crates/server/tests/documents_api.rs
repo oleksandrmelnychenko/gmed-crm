@@ -2744,6 +2744,129 @@ async fn document_templates_can_generate_treatment_plan_pdf_document() {
 }
 
 #[tokio::test]
+async fn ceo_can_generate_admin_document_templates_as_pdf() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("admin-docs");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+
+    let cases: [(&str, &str, serde_json::Value); 6] = [
+        (
+            "single_order",
+            "contract",
+            json!({
+                "order_number": "EA-2026-1",
+                "order_date": "2025-11-11",
+                "contract_date": "2025-11-11",
+                "specialties": "Gastroenterologie, Dermatologie",
+                "period_from": "2025-11-17",
+                "period_to": "2025-11-19",
+                "payer_name": "Justus Geldgeber",
+                "payer_birth_date": "2000-01-01"
+            }),
+        ),
+        (
+            "cost_coverage_declaration",
+            "finance",
+            json!({
+                "order_date": "2025-11-11",
+                "contract_date": "2025-11-11",
+                "payer_name": "Justus Geldgeber",
+                "bank_iban": "DE00 0000 0000 0000 0000 00",
+                "service_lines": [
+                    {"description": "Organisation der Behandlung", "fee": "999,00 EUR"}
+                ]
+            }),
+        ),
+        (
+            "cost_estimate",
+            "finance",
+            json!({
+                "order_date": "2025-11-11",
+                "service_lines": [
+                    {"description": "Dermatologische Untersuchung", "line_total": "100,00 - 1000,00 €"}
+                ]
+            }),
+        ),
+        (
+            "appointment_confirmation",
+            "clinic_correspondence",
+            json!({
+                "doc_id": "1251119",
+                "passport_number": "MA1234567",
+                "passport_valid_until": "2050-01-01",
+                "period_from": "2025-11-17",
+                "clinics": [
+                    {"name": "Klinik München", "address": "Musterstr. 1, München"}
+                ],
+                "contact_phones": "0176 9999999"
+            }),
+        ),
+        (
+            "consent_data_release_child",
+            "consent",
+            json!({
+                "child_name": "Max Musterman",
+                "child_birth_date": "2015-01-01",
+                "guardian_name": "Erika Musterman",
+                "guardian2_name": "Hans Musterman"
+            }),
+        ),
+        (
+            "consent_data_release_single",
+            "consent",
+            json!({
+                "child_name": "Max Musterman",
+                "child_birth_date": "2015-01-01",
+                "guardian_name": "Erika Musterman"
+            }),
+        ),
+    ];
+
+    for (template_id, expected_category, bindings) in cases {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            "/api/v1/documents/generate",
+            &admin_bearer,
+            Some(json!({
+                "template_id": template_id,
+                "patient_id": patient_id,
+                "language": "de",
+                "bindings": bindings,
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "generate {template_id}: {body:?}");
+        let document_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+
+        let (status, detail_body) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents/{document_id}"),
+            &admin_bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(detail_body["mime_type"], "application/pdf", "{template_id}");
+        assert_eq!(detail_body["category"], expected_category, "{template_id}");
+
+        let (status, bytes) = bytes_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents/{document_id}/download"),
+            &admin_bearer,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "download {template_id}");
+        assert!(bytes.starts_with(b"%PDF-"), "{template_id} is not a PDF");
+        assert!(bytes.len() > 800, "{template_id} PDF too small");
+    }
+}
+
+#[tokio::test]
 async fn ceo_assistant_can_list_document_templates_but_cannot_generate_documents() {
     let Some((app, pool, admin_id, _admin_bearer)) = test_context().await else {
         return;

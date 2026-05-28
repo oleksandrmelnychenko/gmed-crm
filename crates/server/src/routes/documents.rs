@@ -445,6 +445,148 @@ struct GeneratedProviderTemplateContext {
     generated_at: chrono::DateTime<chrono::Utc>,
 }
 
+#[derive(Clone, Default)]
+struct DocPartyBlock {
+    name: String,
+    title: Option<String>,
+    birth_date: Option<NaiveDate>,
+    street: Option<String>,
+    zip: Option<String>,
+    city: Option<String>,
+    country: Option<String>,
+    email: Option<String>,
+    phone: Option<String>,
+}
+
+impl DocPartyBlock {
+    fn address_line(&self) -> Option<String> {
+        let street = self.street.as_deref().map(str::trim).filter(|v| !v.is_empty());
+        let city = {
+            let zip = self.zip.as_deref().map(str::trim).filter(|v| !v.is_empty());
+            let city = self.city.as_deref().map(str::trim).filter(|v| !v.is_empty());
+            match (zip, city) {
+                (Some(zip), Some(city)) => Some(format!("{zip} {city}")),
+                (Some(zip), None) => Some(zip.to_string()),
+                (None, Some(city)) => Some(city.to_string()),
+                (None, None) => None,
+            }
+        };
+        let country = self.country.as_deref().map(str::trim).filter(|v| !v.is_empty());
+        let parts: Vec<String> = [street.map(ToOwned::to_owned), city, country.map(ToOwned::to_owned)]
+            .into_iter()
+            .flatten()
+            .collect();
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join(" | "))
+        }
+    }
+
+    fn name_with_title(&self) -> String {
+        match self.title.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+            Some(title) => format!("{title} {}", self.name).trim().to_string(),
+            None => self.name.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+struct AgencyContractSettings {
+    name: String,
+    address: Option<String>,
+    phone: Option<String>,
+    email: Option<String>,
+    bank_holder: Option<String>,
+    bank_name: Option<String>,
+    bank_swift: Option<String>,
+    bank_iban: Option<String>,
+}
+
+struct GeneratedSingleOrderContext {
+    language: String,
+    auto_name: String,
+    title_override: Option<String>,
+    patient_pid: String,
+    party: DocPartyBlock,
+    agency: AgencyContractSettings,
+    order_number: String,
+    order_date: Option<NaiveDate>,
+    contract_date: Option<NaiveDate>,
+    specialties: Option<String>,
+    period_from: Option<NaiveDate>,
+    period_to: Option<NaiveDate>,
+    payer: Option<DocPartyBlock>,
+    sign_place: Option<String>,
+    sign_date: Option<NaiveDate>,
+    generated_at: chrono::DateTime<chrono::Utc>,
+}
+
+struct GeneratedCostCoverageContext {
+    language: String,
+    auto_name: String,
+    title_override: Option<String>,
+    patient: DocPartyBlock,
+    payer: DocPartyBlock,
+    agency: AgencyContractSettings,
+    order_number: String,
+    order_date: Option<NaiveDate>,
+    contract_date: Option<NaiveDate>,
+    quote_number: Option<String>,
+    line_items: Vec<GeneratedContractLineItem>,
+    total_net: Option<String>,
+    total_vat: Option<String>,
+    total_gross: Option<String>,
+    sign_place: Option<String>,
+    sign_date: Option<NaiveDate>,
+    generated_at: chrono::DateTime<chrono::Utc>,
+}
+
+struct GeneratedCostEstimateContext {
+    language: String,
+    auto_name: String,
+    title_override: Option<String>,
+    patient: DocPartyBlock,
+    patient_pid: String,
+    estimate_date: Option<NaiveDate>,
+    line_items: Vec<GeneratedContractLineItem>,
+    total_range: Option<String>,
+    generated_at: chrono::DateTime<chrono::Utc>,
+}
+
+struct GeneratedAppointmentConfirmationContext {
+    language: String,
+    auto_name: String,
+    title_override: Option<String>,
+    doc_id: Option<String>,
+    patient: DocPartyBlock,
+    passport_number: Option<String>,
+    passport_valid_until: Option<NaiveDate>,
+    recipient_block: Option<String>,
+    clinics: Vec<ClinicInput>,
+    first_examination: Option<NaiveDate>,
+    examination_weeks: Option<String>,
+    contact_phones: Option<String>,
+    agency: AgencyContractSettings,
+    sign_place: Option<String>,
+    sign_date: Option<NaiveDate>,
+    generated_at: chrono::DateTime<chrono::Utc>,
+}
+
+struct GeneratedConsentContext {
+    sole_guardian: bool,
+    auto_name: String,
+    child_name: Option<String>,
+    child_birth_date: Option<NaiveDate>,
+    child_address: Option<String>,
+    guardian_name: Option<String>,
+    guardian_birth_date: Option<NaiveDate>,
+    guardian2_name: Option<String>,
+    guardian2_birth_date: Option<NaiveDate>,
+    extra_release_recipients: Option<String>,
+    generated_at: chrono::DateTime<chrono::Utc>,
+}
+
 struct StagedDocumentDelete {
     original_path: PathBuf,
     staged_path: PathBuf,
@@ -542,7 +684,7 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
         label: "Framework Contract",
         description: "Patient-facing framework contract generated from contract data and reusable clauses.",
         art: "framework_contract",
-        category: "generated",
+        category: "contract",
         default_auto_name: "Framework contract",
         default_status: "draft",
         default_visibility: "patient_visible",
@@ -615,6 +757,96 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
         file_extension: "pdf",
         is_medical: false,
         languages: &["de", "en", "uk"],
+        text_block_keys: &[],
+    },
+    DocumentTemplateDefinition {
+        id: "single_order",
+        label: "Single Order (Einzelauftrag)",
+        description: "Single order under the framework service agreement with the agreed scope of services and optional third-party cost coverage.",
+        art: "single_order",
+        category: "contract",
+        default_auto_name: "Einzelauftrag",
+        default_status: "draft",
+        default_visibility: "patient_visible",
+        mime_type: "application/pdf",
+        file_extension: "pdf",
+        is_medical: false,
+        languages: &["de", "en", "uk"],
+        text_block_keys: &[],
+    },
+    DocumentTemplateDefinition {
+        id: "cost_coverage_declaration",
+        label: "Cost Coverage Declaration (Kostenübernahmeerklärung)",
+        description: "Third-party cost coverage declaration with the fee schedule, quote totals and agency bank details.",
+        art: "cost_coverage_declaration",
+        category: "finance",
+        default_auto_name: "Kostenübernahmeerklärung",
+        default_status: "draft",
+        default_visibility: "internal",
+        mime_type: "application/pdf",
+        file_extension: "pdf",
+        is_medical: false,
+        languages: &["de", "en", "uk"],
+        text_block_keys: &[],
+    },
+    DocumentTemplateDefinition {
+        id: "cost_estimate",
+        label: "Cost Estimate (Kostenschätzung)",
+        description: "Non-binding bilingual (DE/RU) estimate of expected costs for medical examinations.",
+        art: "cost_estimate",
+        category: "finance",
+        default_auto_name: "Kostenschätzung",
+        default_status: "draft",
+        default_visibility: "patient_visible",
+        mime_type: "application/pdf",
+        file_extension: "pdf",
+        is_medical: false,
+        languages: &["de", "ru", "en", "uk"],
+        text_block_keys: &[],
+    },
+    DocumentTemplateDefinition {
+        id: "appointment_confirmation",
+        label: "Appointment Confirmation (Terminbestätigung)",
+        description: "Formal appointment confirmation letter (e.g. for the federal police / border control) listing clinics and examination dates.",
+        art: "appointment_confirmation",
+        category: "clinic_correspondence",
+        default_auto_name: "Terminbestätigung",
+        default_status: "draft",
+        default_visibility: "patient_visible",
+        mime_type: "application/pdf",
+        file_extension: "pdf",
+        is_medical: false,
+        languages: &["de", "en", "uk"],
+        text_block_keys: &[],
+    },
+    DocumentTemplateDefinition {
+        id: "consent_data_release_child",
+        label: "Data Release Consent · Child (two guardians)",
+        description: "GDPR data-transfer and confidentiality release for a minor, signed by both guardians.",
+        art: "consent_data_release",
+        category: "consent",
+        default_auto_name: "Einverständniserklärung (Kind)",
+        default_status: "draft",
+        default_visibility: "patient_visible",
+        mime_type: "application/pdf",
+        file_extension: "pdf",
+        is_medical: false,
+        languages: &["de"],
+        text_block_keys: &[],
+    },
+    DocumentTemplateDefinition {
+        id: "consent_data_release_single",
+        label: "Data Release Consent · Sole guardian",
+        description: "GDPR data-transfer and confidentiality release for a minor, signed by the sole custodian.",
+        art: "consent_data_release",
+        category: "consent",
+        default_auto_name: "Einverständniserklärung (alleiniges Sorgerecht)",
+        default_status: "draft",
+        default_visibility: "patient_visible",
+        mime_type: "application/pdf",
+        file_extension: "pdf",
+        is_medical: false,
+        languages: &["de"],
         text_block_keys: &[],
     },
 ];
@@ -888,6 +1120,86 @@ struct GenerateDocumentRequest {
     introduction: Option<String>,
     closing_note: Option<String>,
     text_block_keys: Option<Vec<String>>,
+    #[serde(default)]
+    bindings: Option<DocumentBindingOverrides>,
+}
+
+/// Optional manual binding fields ("yellow sockets") for the generated
+/// agency/legal documents. Anything not provided here falls back to data
+/// auto-bound from the CRM (patient, order, contract, quote, agency settings).
+#[derive(Deserialize, Default, Clone)]
+struct DocumentBindingOverrides {
+    // Patient / Auftraggeber party block (auto-bound from patient when omitted)
+    party_street: Option<String>,
+    party_zip: Option<String>,
+    party_city: Option<String>,
+    party_country: Option<String>,
+    party_email: Option<String>,
+    party_phone: Option<String>,
+    // Third-party payer / Kostenübernehmer
+    payer_name: Option<String>,
+    payer_birth_date: Option<NaiveDate>,
+    payer_street: Option<String>,
+    payer_zip: Option<String>,
+    payer_city: Option<String>,
+    payer_country: Option<String>,
+    payer_email: Option<String>,
+    // Agency bank details (override agency settings)
+    bank_holder: Option<String>,
+    bank_name: Option<String>,
+    bank_swift: Option<String>,
+    bank_iban: Option<String>,
+    // Contract / order meta
+    contract_date: Option<NaiveDate>,
+    order_number: Option<String>,
+    order_date: Option<NaiveDate>,
+    quote_number: Option<String>,
+    doc_id: Option<String>,
+    sign_place: Option<String>,
+    sign_date: Option<NaiveDate>,
+    // Scope of services
+    specialties: Option<String>,
+    period_from: Option<NaiveDate>,
+    period_to: Option<NaiveDate>,
+    #[serde(default)]
+    service_lines: Vec<ServiceLineInput>,
+    // Appointment confirmation specifics
+    passport_number: Option<String>,
+    passport_valid_until: Option<NaiveDate>,
+    #[serde(default)]
+    clinics: Vec<ClinicInput>,
+    examination_weeks: Option<String>,
+    recipient_block: Option<String>,
+    contact_phones: Option<String>,
+    // Consent (minor) specifics
+    child_name: Option<String>,
+    child_birth_date: Option<NaiveDate>,
+    child_address: Option<String>,
+    guardian_name: Option<String>,
+    guardian_birth_date: Option<NaiveDate>,
+    guardian2_name: Option<String>,
+    guardian2_birth_date: Option<NaiveDate>,
+    extra_release_recipients: Option<String>,
+}
+
+#[derive(Deserialize, Default, Clone)]
+struct ServiceLineInput {
+    description: String,
+    #[serde(default)]
+    fee: Option<String>,
+    #[serde(default)]
+    quantity: Option<String>,
+    #[serde(default)]
+    line_total: Option<String>,
+    #[serde(default)]
+    note: Option<String>,
+}
+
+#[derive(Deserialize, Default, Clone)]
+struct ClinicInput {
+    name: String,
+    #[serde(default)]
+    address: Option<String>,
 }
 
 struct GeneratedProviderDocumentResult {
@@ -2756,6 +3068,18 @@ fn default_generated_document_name(
         ("treatment_plan", "uk") => "План лікування",
         ("treatment_plan", "en") => "Treatment plan",
         ("treatment_plan", _) => "Behandlungsplan",
+        ("single_order", "en") => "Single order",
+        ("single_order", _) => "Einzelauftrag",
+        ("cost_coverage_declaration", "en") => "Cost coverage declaration",
+        ("cost_coverage_declaration", _) => "Kostenübernahmeerklärung",
+        ("cost_estimate", "en") => "Cost estimate",
+        ("cost_estimate", _) => "Kostenschätzung",
+        ("appointment_confirmation", "en") => "Appointment confirmation",
+        ("appointment_confirmation", _) => "Terminbestätigung",
+        ("consent_data_release_child" | "consent_data_release_single", "en") => "Data release consent",
+        ("consent_data_release_child" | "consent_data_release_single", _) => {
+            "Einverständniserklärung"
+        }
         _ => template.default_auto_name,
     };
     format!(
@@ -8034,7 +8358,8 @@ async fn generate_document(
     let patient_row = match sqlx::query(
         r#"SELECT patient_id, title, first_name, last_name, birth_date, gender,
                   languages,
-                  nationality, residence_country, insurance_provider
+                  nationality, residence_country, insurance_provider,
+                  email, phone_primary, address_street, address_city, address_zip, address_country
            FROM patients
            WHERE id = $1"#,
     )
@@ -8188,6 +8513,37 @@ async fn generate_document(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned);
+
+    let bindings = body.bindings.clone().unwrap_or_default();
+    let patient_party = DocPartyBlock {
+        name: patient_name.clone(),
+        title: patient_title.clone(),
+        birth_date,
+        street: bindings
+            .party_street
+            .clone()
+            .or_else(|| patient_row.try_get::<Option<String>, _>("address_street").ok().flatten()),
+        zip: bindings
+            .party_zip
+            .clone()
+            .or_else(|| patient_row.try_get::<Option<String>, _>("address_zip").ok().flatten()),
+        city: bindings
+            .party_city
+            .clone()
+            .or_else(|| patient_row.try_get::<Option<String>, _>("address_city").ok().flatten()),
+        country: bindings
+            .party_country
+            .clone()
+            .or_else(|| patient_row.try_get::<Option<String>, _>("address_country").ok().flatten()),
+        email: bindings
+            .party_email
+            .clone()
+            .or_else(|| patient_row.try_get::<Option<String>, _>("email").ok().flatten()),
+        phone: bindings
+            .party_phone
+            .clone()
+            .or_else(|| patient_row.try_get::<Option<String>, _>("phone_primary").ok().flatten()),
+    };
 
     let (preview_html, pdf_bytes) = match template.id {
         "treatment_plan" => {
@@ -8774,6 +9130,227 @@ async fn generate_document(
             };
             (preview_html, pdf_bytes)
         }
+        "single_order" => {
+            let mut agency = match load_agency_contract_settings(&state).await {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
+            apply_bank_overrides(&mut agency, &bindings);
+            let payer = payer_block_from_bindings(&bindings);
+            let resolved_order_number = bindings
+                .order_number
+                .clone()
+                .or_else(|| order_number.clone())
+                .unwrap_or_default();
+            let context = GeneratedSingleOrderContext {
+                language: language.to_string(),
+                auto_name: auto_name.clone(),
+                title_override: title_override.clone(),
+                patient_pid: patient_pid.clone(),
+                party: patient_party.clone(),
+                agency,
+                order_number: resolved_order_number,
+                order_date: bindings.order_date,
+                contract_date: bindings.contract_date,
+                specialties: bindings.specialties.clone(),
+                period_from: bindings.period_from,
+                period_to: bindings.period_to,
+                payer: if payer.name.trim().is_empty() {
+                    None
+                } else {
+                    Some(payer)
+                },
+                sign_place: bindings.sign_place.clone(),
+                sign_date: bindings.sign_date,
+                generated_at,
+            };
+            let preview = admin_preview_html(
+                &context
+                    .title_override
+                    .clone()
+                    .unwrap_or_else(|| admin_doc_label(&context.language, "single_order_title").to_string()),
+                &party_block_lines(&context.party),
+            );
+            let pdf_bytes = match build_single_order_pdf(&context) {
+                Ok(bytes) => bytes,
+                Err(message) => {
+                    tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build single order PDF");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, message);
+                }
+            };
+            (preview, pdf_bytes)
+        }
+        "cost_coverage_declaration" => {
+            let mut agency = match load_agency_contract_settings(&state).await {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
+            apply_bank_overrides(&mut agency, &bindings);
+            let payer = payer_block_from_bindings(&bindings);
+
+            let quote = if let Some(order_uuid) = order_id {
+                match load_order_quote_summary(&state, order_uuid).await {
+                    Ok(value) => value,
+                    Err(resp) => return resp,
+                }
+            } else {
+                None
+            };
+            let line_items = if bindings.service_lines.is_empty() {
+                quote
+                    .as_ref()
+                    .map(|q| q.line_items.clone())
+                    .unwrap_or_default()
+            } else {
+                service_lines_to_items(&bindings.service_lines)
+            };
+            let resolved_order_number = bindings
+                .order_number
+                .clone()
+                .or_else(|| order_number.clone())
+                .unwrap_or_default();
+            let context = GeneratedCostCoverageContext {
+                language: language.to_string(),
+                auto_name: auto_name.clone(),
+                title_override: title_override.clone(),
+                patient: patient_party.clone(),
+                payer,
+                agency,
+                order_number: resolved_order_number,
+                order_date: bindings.order_date,
+                contract_date: bindings.contract_date,
+                quote_number: bindings
+                    .quote_number
+                    .clone()
+                    .or_else(|| quote.as_ref().and_then(|q| q.quote_number.clone())),
+                line_items,
+                total_net: quote.as_ref().and_then(|q| q.total_net.clone()),
+                total_vat: quote.as_ref().and_then(|q| q.total_vat.clone()),
+                total_gross: quote.as_ref().and_then(|q| q.total_gross.clone()),
+                sign_place: bindings.sign_place.clone(),
+                sign_date: bindings.sign_date,
+                generated_at,
+            };
+            let preview = admin_preview_html(
+                &context
+                    .title_override
+                    .clone()
+                    .unwrap_or_else(|| admin_doc_label(&context.language, "cost_coverage_title").to_string()),
+                &cost_coverage_summary_lines(&context),
+            );
+            let pdf_bytes = match build_cost_coverage_pdf(&context) {
+                Ok(bytes) => bytes,
+                Err(message) => {
+                    tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build cost coverage PDF");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, message);
+                }
+            };
+            (preview, pdf_bytes)
+        }
+        "cost_estimate" => {
+            let line_items = service_lines_to_items(&bindings.service_lines);
+            let context = GeneratedCostEstimateContext {
+                language: language.to_string(),
+                auto_name: auto_name.clone(),
+                title_override: title_override.clone(),
+                patient: patient_party.clone(),
+                patient_pid: patient_pid.clone(),
+                estimate_date: bindings.sign_date.or(bindings.order_date),
+                line_items,
+                total_range: None,
+                generated_at,
+            };
+            let preview = admin_preview_html(
+                admin_doc_label(&context.language, "cost_estimate_title"),
+                &party_block_lines(&context.patient),
+            );
+            let pdf_bytes = match build_cost_estimate_pdf(&context) {
+                Ok(bytes) => bytes,
+                Err(message) => {
+                    tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build cost estimate PDF");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, message);
+                }
+            };
+            (preview, pdf_bytes)
+        }
+        "appointment_confirmation" => {
+            let mut agency = match load_agency_contract_settings(&state).await {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
+            apply_bank_overrides(&mut agency, &bindings);
+            let context = GeneratedAppointmentConfirmationContext {
+                language: language.to_string(),
+                auto_name: auto_name.clone(),
+                title_override: title_override.clone(),
+                doc_id: bindings.doc_id.clone(),
+                patient: patient_party.clone(),
+                passport_number: bindings.passport_number.clone(),
+                passport_valid_until: bindings.passport_valid_until,
+                recipient_block: bindings.recipient_block.clone(),
+                clinics: bindings.clinics.clone(),
+                first_examination: bindings.period_from,
+                examination_weeks: bindings.examination_weeks.clone(),
+                contact_phones: bindings.contact_phones.clone(),
+                agency,
+                sign_place: bindings.sign_place.clone(),
+                sign_date: bindings.sign_date,
+                generated_at,
+            };
+            let preview = admin_preview_html(
+                admin_doc_label(&context.language, "appointment_confirmation_title"),
+                &party_block_lines(&context.patient),
+            );
+            let pdf_bytes = match build_appointment_confirmation_pdf(&context) {
+                Ok(bytes) => bytes,
+                Err(message) => {
+                    tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build appointment confirmation PDF");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, message);
+                }
+            };
+            (preview, pdf_bytes)
+        }
+        "consent_data_release_child" | "consent_data_release_single" => {
+            let sole_guardian = template.id == "consent_data_release_single";
+            let context = GeneratedConsentContext {
+                sole_guardian,
+                auto_name: auto_name.clone(),
+                child_name: bindings.child_name.clone().or_else(|| {
+                    if patient_name.is_empty() {
+                        None
+                    } else {
+                        Some(patient_name.clone())
+                    }
+                }),
+                child_birth_date: bindings.child_birth_date.or(birth_date),
+                child_address: bindings
+                    .child_address
+                    .clone()
+                    .or_else(|| patient_party.address_line()),
+                guardian_name: bindings.guardian_name.clone(),
+                guardian_birth_date: bindings.guardian_birth_date,
+                guardian2_name: bindings.guardian2_name.clone(),
+                guardian2_birth_date: bindings.guardian2_birth_date,
+                extra_release_recipients: bindings.extra_release_recipients.clone(),
+                generated_at,
+            };
+            let preview = admin_preview_html(
+                admin_doc_label("de", "consent_title"),
+                &[context
+                    .child_name
+                    .clone()
+                    .map(|name| format!("Kind: {name}"))
+                    .unwrap_or_default()],
+            );
+            let pdf_bytes = match build_consent_pdf(&context) {
+                Ok(bytes) => bytes,
+                Err(message) => {
+                    tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build consent PDF");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, message);
+                }
+            };
+            (preview, pdf_bytes)
+        }
         _ => {
             return err(
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -8920,6 +9497,1058 @@ async fn generate_document(
         "preview_html": preview_html,
     }))
     .into_response()
+}
+
+// ---------------------------------------------------------------------------
+// Generated agency/legal documents (single order, cost coverage, cost estimate,
+// appointment confirmation, data-release consent). These reuse the shared A4
+// PDF layout (`TreatmentPlanPdfLayout`) and bundled Arial fonts.
+// ---------------------------------------------------------------------------
+
+fn fmt_de_date(date: Option<NaiveDate>) -> String {
+    date.map(|value| value.format("%d.%m.%Y").to_string())
+        .unwrap_or_else(|| "____________".to_string())
+}
+
+fn admin_doc_label(language: &str, key: &str) -> &'static str {
+    match (language, key) {
+        ("uk", "single_order_title") => "Окреме замовлення",
+        ("uk", "cost_coverage_title") => "Декларація про прийняття витрат",
+        ("uk", "cost_estimate_title") => "Орієнтовний кошторис витрат",
+        ("uk", "appointment_confirmation_title") => "Підтвердження запису",
+        ("uk", "consent_title") => "Згода на передачу даних та звільнення від таємниці",
+        ("en", "single_order_title") => "Single order",
+        ("en", "cost_coverage_title") => "Cost coverage declaration",
+        ("en", "cost_estimate_title") => "Non-binding cost estimate",
+        ("en", "appointment_confirmation_title") => "Appointment confirmation",
+        ("en", "consent_title") => "Data transfer and confidentiality release",
+        (_, "single_order_title") => "Einzelauftrag",
+        (_, "cost_coverage_title") => "Kostenübernahmeerklärung",
+        (_, "cost_estimate_title") => {
+            "Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen"
+        }
+        (_, "appointment_confirmation_title") => "Terminbestätigung",
+        (_, "consent_title") => {
+            "Einverständniserklärung zur Datenübermittlung und Schweigepflichtsentbindung"
+        }
+        _ => "",
+    }
+}
+
+async fn load_agency_contract_settings(
+    state: &AppState,
+) -> Result<AgencyContractSettings, axum::response::Response> {
+    let rows = sqlx::query(
+        r#"SELECT key, value #>> '{}' AS value_text
+           FROM system_settings
+           WHERE key IN (
+               'agency_name', 'agency_care_of', 'agency_address', 'agency_phone', 'agency_email',
+               'agency_bank_holder', 'agency_bank_name', 'agency_bank_swift', 'agency_bank_iban'
+           )"#,
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "load agency contract settings");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load agency settings",
+        )
+    })?;
+
+    let mut values: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for row in rows {
+        let key: String = row.try_get("key").unwrap_or_default();
+        let value: Option<String> = row.try_get("value_text").unwrap_or_default();
+        if let Some(value) = value {
+            let trimmed = value.trim().to_string();
+            if !trimmed.is_empty() {
+                values.insert(key, trimmed);
+            }
+        }
+    }
+
+    let name = values
+        .get("agency_name")
+        .cloned()
+        .unwrap_or_else(|| "GMED".to_string());
+    Ok(AgencyContractSettings {
+        name,
+        address: values.get("agency_address").cloned(),
+        phone: values.get("agency_phone").cloned(),
+        email: values.get("agency_email").cloned(),
+        bank_holder: values.get("agency_bank_holder").cloned(),
+        bank_name: values.get("agency_bank_name").cloned(),
+        bank_swift: values.get("agency_bank_swift").cloned(),
+        bank_iban: values.get("agency_bank_iban").cloned(),
+    })
+}
+
+fn party_block_lines(party: &DocPartyBlock) -> Vec<String> {
+    let mut lines = vec![party.name_with_title()];
+    if let Some(birth) = party.birth_date {
+        lines.push(format!("geb. am {}", birth.format("%d.%m.%Y")));
+    }
+    if let Some(address) = party.address_line() {
+        lines.push(address);
+    }
+    if let Some(email) = party.email.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        lines.push(format!("Email: {email}"));
+    }
+    if let Some(phone) = party.phone.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        lines.push(format!("Tel.: {phone}"));
+    }
+    lines
+}
+
+fn agency_block_lines(agency: &AgencyContractSettings) -> Vec<String> {
+    let mut lines = vec![format!("{} – Agentur für Patientenbetreuung", agency.name)];
+    if let Some(address) = agency.address.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        lines.push(address.to_string());
+    }
+    if let Some(email) = agency.email.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        lines.push(format!("Email: {email}"));
+    }
+    if let Some(phone) = agency.phone.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        lines.push(format!("Tel.: {phone}"));
+    }
+    lines
+}
+
+fn admin_preview_html(title: &str, lines: &[String]) -> String {
+    let body = lines
+        .iter()
+        .map(|line| format!("<p>{}</p>", escape_html(line)))
+        .collect::<String>();
+    format!(
+        "<section class=\"generated-document\"><h2>{}</h2>{}</section>",
+        escape_html(title),
+        body
+    )
+}
+
+fn new_admin_pdf() -> Result<(PdfDocument, PdfFontHandle, PdfFontHandle), &'static str> {
+    let mut font_warnings: Vec<String> = Vec::new();
+    let regular_font = ParsedFont::from_bytes(TREATMENT_PLAN_ARIAL_TTF, 0, &mut font_warnings)
+        .ok_or("Failed to load PDF font")?;
+    let bold_font = ParsedFont::from_bytes(TREATMENT_PLAN_ARIAL_BOLD_TTF, 0, &mut font_warnings)
+        .ok_or("Failed to load PDF font")?;
+    let mut document = PdfDocument::new("Generated document");
+    let regular_font_id = document.add_font(&regular_font);
+    let bold_font_id = document.add_font(&bold_font);
+    Ok((
+        document,
+        PdfFontHandle::External(regular_font_id),
+        PdfFontHandle::External(bold_font_id),
+    ))
+}
+
+fn finalize_admin_pdf(mut document: PdfDocument, layout: TreatmentPlanPdfLayout) -> Vec<u8> {
+    let pages = layout.finish();
+    let mut save_warnings: Vec<PdfWarnMsg> = Vec::new();
+    document
+        .with_pages(pages)
+        .save(&PdfSaveOptions::default(), &mut save_warnings)
+}
+
+fn admin_block(layout: &mut TreatmentPlanPdfLayout, text: &str, before: f32, after: f32) {
+    layout.text_block(
+        text,
+        11.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        before,
+        after,
+    );
+}
+
+fn admin_heading(layout: &mut TreatmentPlanPdfLayout, text: &str) {
+    layout.text_block(
+        text,
+        13.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        3.0,
+        2.0,
+    );
+}
+
+fn admin_signature_block(
+    layout: &mut TreatmentPlanPdfLayout,
+    place: Option<&str>,
+    date: Option<NaiveDate>,
+    name: &str,
+    role: &str,
+) {
+    let place = place
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("____________________");
+    layout.text_block(
+        &format!("{place}, den {}", fmt_de_date(date)),
+        11.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        6.0,
+        0.5,
+    );
+    layout.text_block(
+        "(Ort)                                          (Datum)",
+        9.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Muted,
+        0.0,
+        8.0,
+    );
+    layout.text_block(name, 11.0, true, 0.0, TreatmentPlanPdfColor::Body, 0.0, 0.5);
+    layout.text_block(
+        &format!("({role})"),
+        9.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Muted,
+        0.0,
+        2.0,
+    );
+}
+
+fn build_single_order_pdf(context: &GeneratedSingleOrderContext) -> Result<Vec<u8>, &'static str> {
+    let (document, regular, bold) = new_admin_pdf()?;
+    let footer = format!(
+        "{} · {}",
+        context.auto_name,
+        context.generated_at.format("%d.%m.%Y %H:%M UTC")
+    );
+    let mut layout = TreatmentPlanPdfLayout::new(footer, regular, bold);
+
+    let title = context.title_override.clone().unwrap_or_else(|| {
+        format!(
+            "{}. {} VOM {} ZUM RAHMENDIENSTLEISTUNGSVERTRAG VOM {}",
+            1,
+            admin_doc_label(&context.language, "single_order_title").to_uppercase(),
+            fmt_de_date(context.order_date),
+            fmt_de_date(context.contract_date)
+        )
+    });
+    layout.text_block(&title, 18.0, true, 0.0, TreatmentPlanPdfColor::Body, 0.0, 3.0);
+    if !context.order_number.trim().is_empty() {
+        layout.text_block(
+            &format!("Auftragsnummer: {}", context.order_number),
+            10.0,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Muted,
+            0.0,
+            3.0,
+        );
+    }
+
+    admin_block(&mut layout, "zwischen", 0.0, 1.0);
+    for line in party_block_lines(&context.party) {
+        admin_block(&mut layout, &line, 0.0, 0.5);
+    }
+    admin_block(&mut layout, "– nachfolgend „Auftraggeber“ genannt –", 0.5, 2.0);
+    admin_block(&mut layout, "und", 0.0, 1.0);
+    for line in agency_block_lines(&context.agency) {
+        admin_block(&mut layout, &line, 0.0, 0.5);
+    }
+    admin_block(&mut layout, "– nachfolgend „Auftragnehmer“ genannt –", 0.5, 4.0);
+
+    admin_heading(&mut layout, "Präambel");
+    admin_block(
+        &mut layout,
+        &format!(
+            "Zwischen dem Auftraggeber und Auftragnehmer wurde am {} ein Rahmendienstleistungsvertrag geschlossen. Die darin vereinbarten Beratungs- und Dienstleistungen werden auf Basis von Einzelaufträgen erbracht. Vor diesem Hintergrund vereinbaren die Vertragspartner folgenden Einzelauftrag:",
+            fmt_de_date(context.contract_date)
+        ),
+        0.0,
+        2.0,
+    );
+
+    admin_heading(&mut layout, "§ 1 Leistungsumfang");
+    let specialties = context
+        .specialties
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("den vereinbarten Fachbereichen");
+    let period = match (context.period_from, context.period_to) {
+        (Some(from), Some(to)) => format!(
+            "im Zeitraum {} bis {}",
+            from.format("%d.%m.%Y"),
+            to.format("%d.%m.%Y")
+        ),
+        _ => "im vereinbarten Zeitraum".to_string(),
+    };
+    for item in [
+        format!(
+            "Individuelle Beratung und Informationsvermittlung zu einer medizinischen Untersuchung bei Fachärzten für {specialties} {period} in München."
+        ),
+        format!(
+            "Herstellung von Kontakten und Terminvereinbarungen {period} bei Fachärzten für {specialties} sowie ggf. bei weiteren Ärzten und medizinischen Dienstleistern."
+        ),
+        "Administrative Unterstützung bei der Zusammenstellung und Übermittlung medizinischer Unterlagen zwischen dem Auftraggeber und den behandelnden Ärzten.".to_string(),
+        "Koordination und Gewährleistung einer interdisziplinären Zusammenarbeit zwischen den genannten Fachärzten und medizinischen Institutionen.".to_string(),
+        "Überwachung der Abrechnungsrichtigkeit; bei Bedarf Kostenübernahmen und Zahlungsabwicklung bei den medizinischen Anbietern.".to_string(),
+        "Kalkulation und Planung voraussichtlicher Behandlungskosten und Weiterleitung dieser Informationen an die zahlungspflichtigen Dritten.".to_string(),
+        "Professionelle sprachliche Unterstützung und Bereitstellung von Dolmetschern für den reibungslosen Informationsaustausch.".to_string(),
+        "Bei ausdrücklichem Wunsch: schriftliche Übersetzung ausgewählter Arztbriefe, Befunde und anderer Unterlagen.".to_string(),
+        "Koordination von Nachsorgeterminen und Rehabilitationsmaßnahmen.".to_string(),
+    ] {
+        layout.text_block(
+            &format!("•  {item}"),
+            11.0,
+            false,
+            4.0,
+            TreatmentPlanPdfColor::Body,
+            0.0,
+            1.0,
+        );
+    }
+
+    admin_heading(
+        &mut layout,
+        "§ 2 Vergütung und Kostenübernahme durch Dritte",
+    );
+    if let Some(payer) = context.payer.as_ref() {
+        let payer_birth = payer
+            .birth_date
+            .map(|value| format!(", geb. am {}", value.format("%d.%m.%Y")))
+            .unwrap_or_default();
+        admin_block(
+            &mut layout,
+            &format!(
+                "Die im Rahmen dieses Einzelauftrags anfallenden Kosten werden nicht vom Auftraggeber, sondern vollständig von einer dritten Person – {}{} – (nachfolgend „Kostenübernehmer“) übernommen. Der Kostenübernehmer verpflichtet sich, sämtliche aus diesem Einzelauftrag entstehenden Zahlungsverpflichtungen vollständig zu tragen.",
+                payer.name_with_title(),
+                payer_birth
+            ),
+            0.0,
+            1.5,
+        );
+        admin_block(
+            &mut layout,
+            "Alle Vertragspflichten des Auftraggebers gemäß § 2 des Rahmendienstleistungsvertrages gehen, soweit sie diesen Einzelauftrag betreffen, mit Unterzeichnung der Kostenübernahmeerklärung durch den Kostenübernehmer auf diesen über.",
+            0.0,
+            2.0,
+        );
+    } else {
+        admin_block(
+            &mut layout,
+            "Die Vergütung richtet sich nach den Regelungen des Rahmendienstleistungsvertrages und der zugehörigen Kostenübernahmeerklärung.",
+            0.0,
+            2.0,
+        );
+    }
+
+    for (heading, body) in [
+        ("§ 3 Fortgeltung", "Im Übrigen gelten die Regelungen des Rahmendienstleistungsvertrages mit allen enthaltenen Bestandteilen unverändert fort."),
+        ("§ 4 Anwendbares Recht", "Auf diesen Vertrag ist ausschließlich das deutsche Recht anzuwenden."),
+        ("§ 5 Erfüllungsort", "Erfüllungsort für sämtliche Leistungen ist München."),
+        ("§ 6 Gerichtsstand", "Ausschließlicher Gerichtsstand für alle aus dem Vertragsverhältnis entstehenden Streitigkeiten ist München, Deutschland."),
+        ("§ 7 Salvatorische Klausel", "Sollten einzelne Bestimmungen dieses Vertrages unwirksam sein oder werden, bleibt die Wirksamkeit der übrigen Bestimmungen unberührt."),
+    ] {
+        admin_heading(&mut layout, heading);
+        admin_block(&mut layout, body, 0.0, 1.0);
+    }
+
+    admin_signature_block(
+        &mut layout,
+        context.sign_place.as_deref(),
+        context.sign_date,
+        &context.agency.name,
+        "Auftragnehmer",
+    );
+    admin_signature_block(
+        &mut layout,
+        None,
+        context.sign_date,
+        &context.party.name,
+        "Auftraggeber",
+    );
+
+    let _ = &context.patient_pid;
+    Ok(finalize_admin_pdf(document, layout))
+}
+
+fn cost_coverage_summary_lines(context: &GeneratedCostCoverageContext) -> Vec<String> {
+    let mut lines = vec![
+        format!("Auftraggeber: {}", context.patient.name_with_title()),
+        format!("Kostenübernehmer: {}", context.payer.name_with_title()),
+        format!("Einzelauftrag vom: {}", fmt_de_date(context.order_date)),
+    ];
+    if let Some(total) = context.total_gross.as_deref() {
+        lines.push(format!("Gesamtsumme: {total}"));
+    }
+    let _ = &context.order_number;
+    lines
+}
+
+fn build_cost_coverage_pdf(context: &GeneratedCostCoverageContext) -> Result<Vec<u8>, &'static str> {
+    let (document, regular, bold) = new_admin_pdf()?;
+    let footer = format!(
+        "{} · {}",
+        context.auto_name,
+        context.generated_at.format("%d.%m.%Y %H:%M UTC")
+    );
+    let mut layout = TreatmentPlanPdfLayout::new(footer, regular, bold);
+
+    let title = context
+        .title_override
+        .clone()
+        .unwrap_or_else(|| admin_doc_label(&context.language, "cost_coverage_title").to_string());
+    layout.text_block(
+        &title.to_uppercase(),
+        18.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        3.0,
+    );
+    admin_block(
+        &mut layout,
+        &format!(
+            "bezüglich des 1. Einzelauftrags vom {} zwischen dem Auftragnehmer und dem Auftraggeber – {} – im Rahmen des bestehenden Rahmendienstleistungsvertrags vom {}.",
+            fmt_de_date(context.order_date),
+            context.patient.name_with_title(),
+            fmt_de_date(context.contract_date)
+        ),
+        0.0,
+        3.0,
+    );
+
+    admin_block(&mut layout, "zwischen", 0.0, 1.0);
+    for line in party_block_lines(&context.payer) {
+        admin_block(&mut layout, &line, 0.0, 0.5);
+    }
+    admin_block(&mut layout, "– nachfolgend „Kostenübernehmer“ genannt –", 0.5, 2.0);
+    admin_block(&mut layout, "und", 0.0, 1.0);
+    for line in agency_block_lines(&context.agency) {
+        admin_block(&mut layout, &line, 0.0, 0.5);
+    }
+    admin_block(&mut layout, "– nachfolgend „Auftragnehmer“ genannt –", 0.5, 3.0);
+
+    admin_heading(&mut layout, "1. Übernahme der Kosten");
+    admin_block(
+        &mut layout,
+        "Der Kostenübernehmer erklärt sich ausdrücklich bereit, sämtliche im Zusammenhang mit dem genannten Einzelauftrag entstehenden Kosten gegenüber dem Auftragnehmer zu übernehmen. Dies umfasst insbesondere alle Vergütungen, Auslagen, Spesen sowie sonstige vertraglich vereinbarte Leistungen.",
+        0.0,
+        2.0,
+    );
+
+    admin_heading(&mut layout, "2. Vergütungsvereinbarung");
+    if context.line_items.is_empty() {
+        admin_block(
+            &mut layout,
+            translated_label(&context.language, "no_services"),
+            0.0,
+            1.0,
+        );
+    } else {
+        for item in &context.line_items {
+            let mut parts = vec![item.description.clone()];
+            if !item.unit_price.trim().is_empty() {
+                parts.push(format!("Honorar: {}", item.unit_price));
+            }
+            if let Some(note) = item.notes.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+                parts.push(note.to_string());
+            }
+            layout.text_block(
+                &format!("•  {}", parts.join(" — ")),
+                11.0,
+                false,
+                4.0,
+                TreatmentPlanPdfColor::Body,
+                0.0,
+                1.0,
+            );
+        }
+        admin_block(&mut layout, "Alle angegebenen Preise zzgl. 19 % MwSt.", 1.0, 2.0);
+    }
+
+    for (heading, body) in [
+        ("3. Rechtsverbindlichkeit", "Diese Erklärung wird mit ihrer Unterzeichnung rechtsverbindlich. Der Einzelauftrag entfaltet seine Rechtswirkung gegenüber dem Auftragnehmer erst mit Zugang dieser Kostenübernahmeerklärung."),
+        ("4. Anwendbares Recht", "Auf diesen Vertrag ist ausschließlich das deutsche Recht anzuwenden."),
+        ("5. Erfüllungsort", "Erfüllungsort für sämtliche Leistungen ist München."),
+        ("6. Gerichtsstand", "Ausschließlicher Gerichtsstand für alle aus dem Vertragsverhältnis entstehenden Streitigkeiten ist München, Deutschland."),
+    ] {
+        admin_heading(&mut layout, heading);
+        admin_block(&mut layout, body, 0.0, 1.0);
+    }
+
+    // Anlage: Kostenvoranschlag
+    admin_heading(&mut layout, "Anlage: Kostenvoranschlag");
+    if let Some(quote) = context.quote_number.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        admin_block(&mut layout, &format!("Kostenvoranschlag Nr.: {quote}"), 0.0, 0.5);
+    }
+    for (label_key, value) in [
+        ("total_net", context.total_net.as_deref()),
+        ("total_vat", context.total_vat.as_deref()),
+        ("total_gross", context.total_gross.as_deref()),
+    ] {
+        if let Some(value) = value.map(str::trim).filter(|v| !v.is_empty()) {
+            admin_block(
+                &mut layout,
+                &format!("{}: {value}", translated_label(&context.language, label_key)),
+                0.0,
+                0.5,
+            );
+        }
+    }
+    let bank_lines: Vec<(&str, Option<&str>)> = vec![
+        ("Kontoinhaber", context.agency.bank_holder.as_deref()),
+        ("Bank", context.agency.bank_name.as_deref()),
+        ("SWIFT/BIC", context.agency.bank_swift.as_deref()),
+        ("IBAN", context.agency.bank_iban.as_deref()),
+    ];
+    if bank_lines.iter().any(|(_, v)| v.map(str::trim).is_some_and(|v| !v.is_empty())) {
+        admin_block(
+            &mut layout,
+            "Die angefallenen Kosten sind nach Zugang der Rechnung binnen 14 Tagen auf folgendes Konto fällig:",
+            1.5,
+            1.0,
+        );
+        for (label, value) in bank_lines {
+            if let Some(value) = value.map(str::trim).filter(|v| !v.is_empty()) {
+                admin_block(&mut layout, &format!("{label}: {value}"), 0.0, 0.5);
+            }
+        }
+    }
+
+    admin_signature_block(
+        &mut layout,
+        context.sign_place.as_deref(),
+        context.sign_date,
+        &context.agency.name,
+        "Auftragnehmer",
+    );
+    admin_signature_block(
+        &mut layout,
+        None,
+        context.sign_date,
+        &context.payer.name,
+        "Kostenübernehmer",
+    );
+
+    Ok(finalize_admin_pdf(document, layout))
+}
+
+fn build_cost_estimate_pdf(context: &GeneratedCostEstimateContext) -> Result<Vec<u8>, &'static str> {
+    let (document, regular, bold) = new_admin_pdf()?;
+    let footer = format!(
+        "{} · {}",
+        context.auto_name,
+        context.generated_at.format("%d.%m.%Y %H:%M UTC")
+    );
+    let mut layout = TreatmentPlanPdfLayout::new(footer, regular, bold);
+
+    let title = context.title_override.clone().unwrap_or_else(|| {
+        "Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen / Ориентировочный расчёт стоимости медицинских услуг".to_string()
+    });
+    layout.text_block(&title, 15.0, true, 0.0, TreatmentPlanPdfColor::Body, 0.0, 4.0);
+
+    admin_block(
+        &mut layout,
+        &format!("Datum / Дата: {}", fmt_de_date(context.estimate_date)),
+        0.0,
+        0.5,
+    );
+    admin_block(
+        &mut layout,
+        &format!("Patient / Пациент: {}", context.patient.name_with_title()),
+        0.0,
+        0.5,
+    );
+    if let Some(birth) = context.patient.birth_date {
+        admin_block(
+            &mut layout,
+            &format!("Geb. am / Дата рождения: {}", birth.format("%d.%m.%Y")),
+            0.0,
+            2.0,
+        );
+    }
+
+    admin_heading(
+        &mut layout,
+        "Medizinische Leistungen / Медицинские услуги",
+    );
+    if context.line_items.is_empty() {
+        admin_block(
+            &mut layout,
+            translated_label(&context.language, "no_services"),
+            0.0,
+            1.0,
+        );
+    } else {
+        for item in &context.line_items {
+            admin_block(&mut layout, &item.description, 1.0, 0.5);
+            if !item.line_gross.trim().is_empty() {
+                layout.text_block(
+                    &item.line_gross,
+                    11.0,
+                    true,
+                    4.0,
+                    TreatmentPlanPdfColor::Primary,
+                    0.0,
+                    1.0,
+                );
+            }
+        }
+    }
+    if let Some(total) = context.total_range.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        layout.text_block(
+            &format!("Gesamt / Общая сумма: {total}"),
+            12.0,
+            true,
+            0.0,
+            TreatmentPlanPdfColor::Body,
+            2.0,
+            3.0,
+        );
+    }
+
+    admin_block(
+        &mut layout,
+        "Rechtliche Hinweise: Die Kosten für medizinische Diagnostik und/oder Behandlung können von den angegebenen Preisen abweichen und dienen ausschließlich Informationszwecken. Es werden keine Gewährleistungen hinsichtlich Genauigkeit, Vollständigkeit oder Richtigkeit übernommen. Die Angaben entsprechen dem Stand zum Zeitpunkt der Erstellung und können durch künftige Entwicklungen überholt sein.",
+        2.0,
+        2.0,
+    );
+    let _ = &context.patient_pid;
+
+    Ok(finalize_admin_pdf(document, layout))
+}
+
+fn build_appointment_confirmation_pdf(
+    context: &GeneratedAppointmentConfirmationContext,
+) -> Result<Vec<u8>, &'static str> {
+    let (document, regular, bold) = new_admin_pdf()?;
+    let footer = format!(
+        "{} · {}",
+        context.auto_name,
+        context.generated_at.format("%d.%m.%Y %H:%M UTC")
+    );
+    let mut layout = TreatmentPlanPdfLayout::new(footer, regular, bold);
+
+    if let Some(doc_id) = context.doc_id.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        layout.text_block(
+            &format!("Doc.-ID: {doc_id}"),
+            9.0,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Muted,
+            0.0,
+            2.0,
+        );
+    }
+
+    for line in agency_block_lines(&context.agency) {
+        admin_block(&mut layout, &line, 0.0, 0.3);
+    }
+    layout.spacer(2.0);
+
+    let recipient = context
+        .recipient_block
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("An die Bundespolizei / Grenzschutz");
+    for line in recipient.lines() {
+        admin_block(&mut layout, line, 0.0, 0.3);
+    }
+    layout.spacer(2.0);
+
+    let sign_place = context
+        .sign_place
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("München");
+    admin_block(
+        &mut layout,
+        &format!("{sign_place}, {}", fmt_de_date(context.sign_date)),
+        0.0,
+        3.0,
+    );
+
+    let birth = context
+        .patient
+        .birth_date
+        .map(|value| format!(", geb. am {}", value.format("%d.%m.%Y")))
+        .unwrap_or_default();
+    let heading = context.title_override.clone().unwrap_or_else(|| {
+        format!(
+            "Terminbestätigung für {}{}",
+            context.patient.name_with_title(),
+            birth
+        )
+    });
+    layout.text_block(
+        &heading,
+        13.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        2.0,
+    );
+    admin_block(&mut layout, "Sehr geehrte Damen und Herren,", 0.0, 1.5);
+
+    let passport = match (
+        context.passport_number.as_deref().map(str::trim).filter(|v| !v.is_empty()),
+        context.passport_valid_until,
+    ) {
+        (Some(number), Some(valid)) => format!(
+            ", Reisepass Nr.: {number}, gültig bis {}",
+            valid.format("%d.%m.%Y")
+        ),
+        (Some(number), None) => format!(", Reisepass Nr.: {number}"),
+        _ => String::new(),
+    };
+    let clinics = if context.clinics.is_empty() {
+        "den vereinbarten Kliniken".to_string()
+    } else {
+        context
+            .clinics
+            .iter()
+            .map(|clinic| match clinic.address.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+                Some(address) => format!("{} ({address})", clinic.name),
+                None => clinic.name.clone(),
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    admin_block(
+        &mut layout,
+        &format!(
+            "hiermit bestätigen wir, dass {}{} sämtliche Termine für Diagnostik und Behandlung in {} hat.",
+            context.patient.name_with_title(),
+            passport,
+            clinics
+        ),
+        0.0,
+        1.5,
+    );
+
+    let first = context
+        .first_examination
+        .map(|value| value.format("%d.%m.%Y").to_string())
+        .unwrap_or_else(|| "in Kürze".to_string());
+    let weeks = context
+        .examination_weeks
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(|value| format!(" Weitere Untersuchungen sind für die Kalenderwochen {value} geplant."))
+        .unwrap_or_default();
+    admin_block(
+        &mut layout,
+        &format!("Die ersten Untersuchungen finden am {first} statt.{weeks}"),
+        0.0,
+        1.5,
+    );
+    admin_block(
+        &mut layout,
+        "Die Behandlung wurde in Deutschland begonnen und soll nun fortgesetzt werden. In München wird der Patient von unserer Agentur betreut und begleitet. Dolmetscher und Transfer sind organisiert.",
+        0.0,
+        1.5,
+    );
+    admin_block(
+        &mut layout,
+        "Die Kostenfrage wurde mit dem Patienten geklärt. Es fallen keine Kosten für die Bundesrepublik Deutschland an.",
+        0.0,
+        1.5,
+    );
+    if let Some(phones) = context.contact_phones.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        admin_block(
+            &mut layout,
+            &format!("Für Rückfragen stehen wir Ihnen gerne unter {phones} zur Verfügung."),
+            0.0,
+            2.0,
+        );
+    }
+
+    admin_block(&mut layout, "Mit freundlichen Grüßen,", 2.0, 8.0);
+    layout.text_block(
+        &context.agency.name,
+        11.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        0.5,
+    );
+    admin_block(&mut layout, "Geschäftsführer", 0.0, 1.0);
+
+    Ok(finalize_admin_pdf(document, layout))
+}
+
+fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<Vec<u8>, &'static str> {
+    let (document, regular, bold) = new_admin_pdf()?;
+    let footer = format!(
+        "{} · {}",
+        context.auto_name,
+        context.generated_at.format("%d.%m.%Y %H:%M UTC")
+    );
+    let mut layout = TreatmentPlanPdfLayout::new(footer, regular, bold);
+
+    layout.text_block(
+        "Einverständniserklärung zur Datenübermittlung und Schweigepflichtsentbindung",
+        15.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        2.0,
+    );
+    admin_block(&mut layout, "Gültig bis: bis auf Widerruf", 0.0, 2.0);
+
+    let we = if context.sole_guardian { "Ich" } else { "Wir" };
+    let we_lower = if context.sole_guardian { "ich" } else { "wir" };
+    let our = if context.sole_guardian { "meinem" } else { "unserem" };
+    let our_gen = if context.sole_guardian { "meines" } else { "unseres" };
+
+    if context.sole_guardian {
+        admin_block(&mut layout, "Ich (alleinige/r Personensorgeberechtigte/r):", 0.0, 0.5);
+        admin_block(
+            &mut layout,
+            &consent_person_line(context.guardian_name.as_deref(), context.guardian_birth_date),
+            0.0,
+            1.5,
+        );
+    } else {
+        admin_block(&mut layout, "Wir (Erziehungsberechtigte):", 0.0, 0.5);
+        admin_block(
+            &mut layout,
+            &format!(
+                "{} (Mutter)",
+                consent_person_line(context.guardian_name.as_deref(), context.guardian_birth_date)
+            ),
+            0.0,
+            0.5,
+        );
+        admin_block(
+            &mut layout,
+            &format!(
+                "{} (Vater)",
+                consent_person_line(context.guardian2_name.as_deref(), context.guardian2_birth_date)
+            ),
+            0.0,
+            1.5,
+        );
+    }
+    admin_block(
+        &mut layout,
+        &format!(
+            "von {our} Kind: {}",
+            consent_person_line(context.child_name.as_deref(), context.child_birth_date)
+        ),
+        0.0,
+        0.5,
+    );
+    admin_block(
+        &mut layout,
+        &format!(
+            "Adresse: {}",
+            context
+                .child_address
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .unwrap_or("________________________________________________")
+        ),
+        0.0,
+        2.0,
+    );
+
+    admin_block(
+        &mut layout,
+        &format!(
+            "{we} {we_lower} sind damit einverstanden, dass Herr Heorhii Hudiiev, geb. am 12.12.1994, Albert-Schweitzer-Straße 56, 81735 München, und von ihm beauftragte Mitarbeiter personenbezogene und medizinische Daten von {our} Kind (Personalausweis- und Reisepasskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche Dokumentation, Kostenvoranschläge, Rechnungen, Quittungen, Behandlungs- und Leistungsverträge, Arzt- und Krankenhausberichte) einholen, bearbeiten, speichern und/oder übermitteln, insbesondere an behandelnde Ärzte, Krankenhäuser, Labore, Dolmetscher, Übersetzer oder Gutachter, sowie im GMED-CRM-System gespeichert und verarbeitet werden.",
+            we = we, we_lower = we_lower, our = our
+        ),
+        0.0,
+        1.5,
+    );
+    admin_block(
+        &mut layout,
+        &format!(
+            "{we} {we_lower} entbinden alle nach § 203 StGB schweigepflichtigen Personen sowie weitere im Rahmen der Datenverarbeitung tätige Personen von ihrer Schweigepflicht gegenüber Herrn Heorhii Hudiiev und umgekehrt Herrn Heorhii Hudiiev gegenüber den behandelnden Ärzten, Heilberufen, Dolmetschern, Übersetzern, Gutachtern und medizinischen Einrichtungen.",
+            we = we, we_lower = we_lower
+        ),
+        0.0,
+        1.5,
+    );
+    if let Some(extra) = context
+        .extra_release_recipients
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        admin_block(
+            &mut layout,
+            &format!("Zusätzliche Entbindung gegenüber: {extra}"),
+            0.0,
+            1.5,
+        );
+    }
+    admin_block(
+        &mut layout,
+        &format!(
+            "Die Einwilligung ist freiwillig und kann jederzeit ohne Angabe von Gründen schriftlich widerrufen werden; dies hat keine Auswirkungen auf die Rechtmäßigkeit der bisherigen Verarbeitung. Die Aufklärung gemäß DSGVO ist erfolgt. {we} wurde{suffix} über die Rechte auf Auskunft, Berichtigung, Löschung und Einschränkung der Verarbeitung der Daten {our_gen} Kindes aufgeklärt.",
+            we = we,
+            suffix = if context.sole_guardian { "" } else { "n" },
+            our_gen = our_gen
+        ),
+        0.0,
+        1.5,
+    );
+    admin_block(
+        &mut layout,
+        "Die elektronische Unterschrift hat die gleiche rechtliche Gültigkeit wie eine handschriftliche Unterschrift, sofern sie den geltenden rechtlichen Anforderungen entspricht.",
+        0.0,
+        4.0,
+    );
+
+    if context.sole_guardian {
+        admin_block(
+            &mut layout,
+            "Ort, Datum: ____________________   Unterschrift: ____________________________________",
+            4.0,
+            0.5,
+        );
+        admin_block(
+            &mut layout,
+            "(Personensorgeberechtigte/r / ges. Vertreter)",
+            0.0,
+            2.0,
+        );
+    } else {
+        admin_block(
+            &mut layout,
+            "Ort, Datum: ____________________   Unterschrift: __________________________ (Mutter)",
+            4.0,
+            3.0,
+        );
+        admin_block(
+            &mut layout,
+            "Ort, Datum: ____________________   Unterschrift: __________________________ (Vater)",
+            0.0,
+            2.0,
+        );
+    }
+
+    Ok(finalize_admin_pdf(document, layout))
+}
+
+fn consent_person_line(name: Option<&str>, birth: Option<NaiveDate>) -> String {
+    let name = name
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("___________________________________");
+    let birth = birth
+        .map(|value| value.format("%d.%m.%Y").to_string())
+        .unwrap_or_else(|| "________________".to_string());
+    format!("{name}, geb. am {birth}")
+}
+
+fn apply_bank_overrides(agency: &mut AgencyContractSettings, bindings: &DocumentBindingOverrides) {
+    for (slot, value) in [
+        (&mut agency.bank_holder, &bindings.bank_holder),
+        (&mut agency.bank_name, &bindings.bank_name),
+        (&mut agency.bank_swift, &bindings.bank_swift),
+        (&mut agency.bank_iban, &bindings.bank_iban),
+    ] {
+        if let Some(value) = value.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+            *slot = Some(value.to_string());
+        }
+    }
+}
+
+fn payer_block_from_bindings(bindings: &DocumentBindingOverrides) -> DocPartyBlock {
+    DocPartyBlock {
+        name: bindings.payer_name.clone().unwrap_or_default(),
+        title: None,
+        birth_date: bindings.payer_birth_date,
+        street: bindings.payer_street.clone(),
+        zip: bindings.payer_zip.clone(),
+        city: bindings.payer_city.clone(),
+        country: bindings.payer_country.clone(),
+        email: bindings.payer_email.clone(),
+        phone: None,
+    }
+}
+
+fn service_lines_to_items(lines: &[ServiceLineInput]) -> Vec<GeneratedContractLineItem> {
+    lines
+        .iter()
+        .filter(|line| !line.description.trim().is_empty())
+        .map(|line| GeneratedContractLineItem {
+            description: line.description.trim().to_string(),
+            quantity: line.quantity.clone().unwrap_or_default(),
+            unit_price: line.fee.clone().unwrap_or_default(),
+            line_gross: line.line_total.clone().unwrap_or_default(),
+            vat_rate: None,
+            notes: line
+                .note
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(ToOwned::to_owned),
+        })
+        .collect()
+}
+
+struct OrderQuoteSummary {
+    quote_number: Option<String>,
+    total_net: Option<String>,
+    total_vat: Option<String>,
+    total_gross: Option<String>,
+    line_items: Vec<GeneratedContractLineItem>,
+}
+
+async fn load_order_quote_summary(
+    state: &AppState,
+    order_id: Uuid,
+) -> Result<Option<OrderQuoteSummary>, axum::response::Response> {
+    let row = sqlx::query(
+        r#"SELECT quote_number, total_net::TEXT AS total_net,
+                  total_vat::TEXT AS total_vat, total_gross::TEXT AS total_gross,
+                  line_items
+           FROM quotes
+           WHERE order_id = $1
+           ORDER BY created_at DESC
+           LIMIT 1"#,
+    )
+    .bind(order_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, order_id = %order_id, "load order quote summary");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load quote context",
+        )
+    })?;
+
+    Ok(row.map(|row| {
+        let line_items = row
+            .try_get::<Option<Value>, _>("line_items")
+            .ok()
+            .flatten()
+            .map(|value| parse_quote_line_items(&value))
+            .unwrap_or_default();
+        OrderQuoteSummary {
+            quote_number: row.try_get::<Option<String>, _>("quote_number").ok().flatten(),
+            total_net: row.try_get::<Option<String>, _>("total_net").ok().flatten(),
+            total_vat: row.try_get::<Option<String>, _>("total_vat").ok().flatten(),
+            total_gross: row.try_get::<Option<String>, _>("total_gross").ok().flatten(),
+            line_items,
+        }
+    }))
 }
 
 async fn list_documents(

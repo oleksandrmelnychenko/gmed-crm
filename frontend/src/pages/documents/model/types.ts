@@ -242,6 +242,13 @@ export type TemplateCatalogResponse = {
   text_blocks: TemplateTextBlock[];
 };
 
+/**
+ * Manual "binding socket" overrides for generated agency/legal documents.
+ * Keys mirror the backend `bindings` field names (snake_case); the two
+ * `*_text` keys are multiline editors parsed into arrays on submit.
+ */
+export type DocumentBindingForm = Record<string, string>;
+
 export type GenerateFormState = {
   templateId: string;
   patientId: string;
@@ -259,6 +266,7 @@ export type GenerateFormState = {
   ursprung: string;
   notes: string;
   textBlockKeys: string[];
+  bindings: DocumentBindingForm;
 };
 
 export type GenerateDocumentResponse = {
