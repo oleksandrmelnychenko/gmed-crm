@@ -144,6 +144,7 @@ import type {
   DocumentVisibility,
   EditFormState,
   FiltersState,
+  FrameworkContractOption,
   GenerateFormState,
   OrderOption,
   PatientOption,
@@ -922,6 +923,9 @@ function StaffDocumentsPage({
   const [generateAppointments, setGenerateAppointments] = useState<
     AppointmentOption[]
   >([]);
+  const [generateFrameworkContracts, setGenerateFrameworkContracts] = useState<
+    FrameworkContractOption[] | null
+  >(null);
   const [generateBusy, setGenerateBusy] = useState(false);
   const [generateError, setGenerateError] = useState("");
 
@@ -1040,6 +1044,15 @@ function StaffDocumentsPage({
       templates.find((template) => template.id === generateForm.templateId) ??
       null,
     [generateForm.templateId, templates],
+  );
+  const selectedTemplateNeedsFrameworkContract =
+    selectedTemplate?.id === "framework_contract";
+  const selectedFrameworkContract = generateFrameworkContracts?.[0] ?? null;
+  const generateBlockedByMissingFrameworkContract = Boolean(
+    selectedTemplateNeedsFrameworkContract &&
+      generateForm.patientId &&
+      generateFrameworkContracts !== null &&
+      generateFrameworkContracts.length === 0,
   );
   const currentDetailTemplate = useMemo(
     () => templateForDocument(templates, detail),
@@ -1349,15 +1362,20 @@ function StaffDocumentsPage({
     if (!templateOpen || !generateForm.patientId) {
       setGenerateOrders([]);
       setGenerateAppointments([]);
+      setGenerateFrameworkContracts(null);
       return;
     }
     let active = true;
     async function loadGenerateContext() {
-      const { orders: orderRows, appointments: appointmentRows } =
-        await fetchPatientDocumentContext(generateForm.patientId);
+      const {
+        orders: orderRows,
+        appointments: appointmentRows,
+        frameworkContracts,
+      } = await fetchPatientDocumentContext(generateForm.patientId);
       if (!active) return;
       setGenerateOrders(orderRows);
       setGenerateAppointments(appointmentRows);
+      setGenerateFrameworkContracts(frameworkContracts);
     }
     void loadGenerateContext();
     return () => {
@@ -1654,6 +1672,10 @@ function StaffDocumentsPage({
     }
     if (!generateForm.patientId) {
       setGenerateError(t.documents_patient_context_required);
+      return;
+    }
+    if (generateBlockedByMissingFrameworkContract) {
+      setGenerateError(l("documents_scope_4"));
       return;
     }
 
@@ -2554,7 +2576,10 @@ function StaffDocumentsPage({
                   submitLabel={t.documents_generate_document}
                   submittingLabel={t.documents_generating}
                   submitting={generateBusy}
-                  submitDisabled={templates.length === 0}
+                  submitDisabled={
+                    templates.length === 0 ||
+                    generateBlockedByMissingFrameworkContract
+                  }
                   onCancel={() => setTemplateOpen(false)}
                 />
               )}
@@ -2579,6 +2604,42 @@ function StaffDocumentsPage({
                         {t.documents_generate_replace_warning}{" "}
                         {detail.version_number}.
                       </div>
+                    ) : null}
+                    {selectedTemplateNeedsFrameworkContract &&
+                    generateForm.patientId &&
+                    generateFrameworkContracts !== null ? (
+                      <Banner
+                        tone={
+                          generateBlockedByMissingFrameworkContract
+                            ? "warning"
+                            : "success"
+                        }
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <span>
+                            {generateBlockedByMissingFrameworkContract
+                              ? l("documents_scope_4")
+                              : `${t.contracts_framework}: ${
+                                  selectedFrameworkContract?.contract_number ??
+                                  t.common_not_set
+                                }`}
+                          </span>
+                          {generateBlockedByMissingFrameworkContract ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 rounded-lg"
+                              onClick={() => {
+                                setTemplateOpen(false);
+                                staffGo(`/contracts?patient=${generateForm.patientId}`);
+                              }}
+                            >
+                              {l("patients_create_framework_contract")}
+                            </Button>
+                          ) : null}
+                        </div>
+                      </Banner>
                     ) : null}
                     <div className="grid gap-4 md:grid-cols-2">
               <Field label={t.documents_section_template} required>

@@ -6,6 +6,7 @@ import type {
   DocumentItem,
   DocumentShare,
   DocumentTextExtraction,
+  FrameworkContractOption,
   GenerateDocumentResponse,
   OrderOption,
   PatientOption,
@@ -35,6 +36,7 @@ export type DocumentLookups = {
 export type PatientDocumentContext = {
   orders: OrderOption[];
   appointments: AppointmentOption[];
+  frameworkContracts: FrameworkContractOption[] | null;
 };
 
 export type DocumentDetailBundle = {
@@ -193,13 +195,16 @@ export async function fetchDocumentDetailBundle(
 export async function fetchPatientDocumentContext(
   patientId: string,
 ): Promise<PatientDocumentContext> {
-  const [orders, appointments] = await Promise.all([
+  const [orders, appointments, frameworkContracts] = await Promise.all([
     apiFetch<OrderOption[]>(`/orders?patient_id=${patientId}`).catch(() => []),
     apiFetch<AppointmentOption[]>(`/appointments?patient_id=${patientId}`).catch(
       () => [],
     ),
+    apiFetch<FrameworkContractOption[]>(
+      `/patients/${patientId}/framework-contracts`,
+    ).catch(() => null),
   ]);
-  return { orders, appointments };
+  return { orders, appointments, frameworkContracts };
 }
 
 export function uploadDocument(formData: FormData) {

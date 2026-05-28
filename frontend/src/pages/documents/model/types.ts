@@ -157,6 +157,15 @@ export type AppointmentOption = {
   date: string;
   time_start: string | null;
 };
+export type FrameworkContractOption = {
+  id: string;
+  contract_number: string;
+  status: string;
+  signed_at?: string | null;
+  valid_from?: string | null;
+  valid_to?: string | null;
+  created_at: string;
+};
 
 export type FiltersState = {
   search: string;
