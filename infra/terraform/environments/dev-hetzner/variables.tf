@@ -50,8 +50,8 @@ variable "admin_ip_allowlist" {
 
 variable "deploy_app" {
   type        = bool
-  description = "Toggle Phase-1 app deploy in the bootstrap script."
-  default     = true
+  description = "Optional legacy bootstrap app deploy. Keep false for the standard infra-only Terraform flow; use scripts/publish-dev-current.ps1 or scripts/deploy-dev.sh for app releases."
+  default     = false
 }
 
 variable "app_repo_url" {
@@ -72,6 +72,7 @@ variable "age_private_key" {
     Generate with `age-keygen -o dev.key`; paste the AGE-SECRET-KEY-1...
     line. Keep the file outside this repo (1Password is fine).
   EOT
+  default     = ""
 }
 
 # ----------------------------------------------------------------------------

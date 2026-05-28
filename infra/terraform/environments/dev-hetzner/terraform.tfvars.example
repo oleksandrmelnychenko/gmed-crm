@@ -31,24 +31,27 @@ admin_ssh_public_key = "ssh-ed25519 AAAAC3Nz... your-key@host"
 # personal naming if needed — bootstrap creates this user.
 admin_username = "gmed"
 
-# --- Phase 1: application deploy --------------------------------------------
+# --- Optional bootstrap app deploy -------------------------------------------
 
-# When true the bootstrap script clones the repo and runs `docker compose
-# up`. Set to false on the first run if you want to validate Phase 0 in
-# isolation first.
-deploy_app = true
+# Standard flow: Terraform provisions infrastructure only. Application
+# releases are separate (`scripts/publish-dev-current.ps1` from a local
+# workstation, or `scripts/deploy-dev.sh` on a TF-managed host).
+#
+# Leave this false unless you are intentionally creating a disposable DEV
+# host that should deploy the app during first cloud-init boot.
+deploy_app = false
 
 app_repo_url = "https://github.com/oleksandrmelnychenko/gmed-crm.git"
 app_branch   = "main"
 
-# Contents of your DEV age private key (AGE-SECRET-KEY-1...). Generate
-# with `age-keygen -o dev.key` and store the file in 1Password. Paste the
-# single-line key value here; the bootstrap installs it as
-# /etc/gmed/age.key on the server.
+# Only required when deploy_app=true. Contents of your DEV age private key
+# (AGE-SECRET-KEY-1...). Generate with `age-keygen -o dev.key` and store
+# the file in 1Password. Paste the single-line key value here; the
+# bootstrap installs it as /etc/gmed/age.key on the server.
 #
 # NEVER commit terraform.tfvars (already gitignored). NEVER reuse this
 # key for prod.
-age_private_key = "AGE-SECRET-KEY-1REPLACEMEREPLACEMEREPLACEMEREPLACEMEREPLACEMEREP"
+age_private_key = ""
 
 # Tailscale: ensures the monitoring host can scrape DEV exporters and
 # Promtail on DEV can ship logs to Loki via the tailnet.

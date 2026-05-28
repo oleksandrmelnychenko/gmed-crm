@@ -1,69 +1,73 @@
-# Terraform for AWS (Low-Cost Baseline)
+# Terraform Infrastructure
 
-This folder contains a pragmatic Terraform baseline for running this project on AWS with a cost-first setup:
+Terraform in this repo owns infrastructure, not routine application
+releases.
 
-- single EC2 instance (default `t4g.micro`)
-- Docker Compose runtime on the host
-- one public subnet (no NAT Gateway)
-- security group with explicit SSH allowlist
-- budget alarms and basic instance CloudWatch alarms
-- secrets loaded from SSM Parameter Store at boot
+## Current Environments
 
-This is intended for `dev`/early `stage`. For production, extend with private subnets, ALB + ACM, managed DB, and stronger HA.
+- `environments/dev-hetzner` - DEV Hetzner Cloud server, firewall,
+  optional Tailscale, and optional first-boot app bootstrap.
+- `environments/prod-hetzner` - PROD Hetzner Cloud server, firewall,
+  dedicated Postgres Volume, backups enabled, and no app deploy from
+  Terraform.
+- `environments/monitoring-hetzner` - monitoring host infrastructure.
+- `environments/dev` - legacy AWS baseline kept only for historical
+  reference. Do not use it for new GMED deployments.
 
-## Structure
+## Operating Model
 
-- `environments/dev` - ready-to-use environment wiring
-- `modules/network` - VPC, subnet, route table, security group
-- `modules/compute` - EC2, IAM role/profile, bootstrap user-data, optional EIP
-- `modules/ops` - budget and alarms
+Use Terraform for:
 
-## Prerequisites
+- servers, primary IPs, firewalls, volumes;
+- base OS bootstrap, Docker, hardening, Tailscale package install;
+- infrastructure outputs such as public IPs for DNS.
 
-- Terraform `>= 1.6`
-- AWS credentials configured locally (profile or env vars)
-- Existing SSM SecureString parameters for app secrets
+Use deploy scripts / CI for:
 
-## Quick start
+- pulling or uploading application code;
+- building or pulling Docker images;
+- decrypting runtime secrets on the host;
+- running `docker compose up`;
+- smoke testing `/health`.
 
-1. Copy:
-   - `infra/terraform/environments/dev/terraform.tfvars.example`
-   - to `infra/terraform/environments/dev/terraform.tfvars`
-2. Fill:
-   - `allowed_ssh_cidrs`
-   - `allowed_frontend_cidrs` if the frontend app port should differ from `allowed_http_cidrs`
-   - `allowed_backend_cidrs` only if you explicitly need direct backend API access
-   - `budget_email`
-   - `ssm_parameter_names` to match your account paths
-3. Run:
+This separation is intentional. A normal app publish must not require
+`terraform apply`, and a Terraform plan must not be used as the release
+vehicle for code changes.
 
-```bash
-cd infra/terraform/environments/dev
-terraform init
-terraform plan
-terraform apply
+## DEV Publish
+
+For the current DEV host, publish the checked-out commit from a local
+workstation:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\publish-dev-current.ps1
 ```
 
-After apply, Terraform outputs the public URL/IP.
+The script creates a `git archive` of `HEAD`, uploads it to the DEV
+host, runs `scripts/deploy-dev-current.sh` remotely, and checks
+`https://console-dev.gmed-health.com/health`.
 
-## Secret contract (SSM)
+For a Terraform-managed `/opt/gmed/repo` DEV host, SSH to the host and
+run:
 
-Bootstrap script expects these parameter names:
+```bash
+sudo /opt/gmed/repo/scripts/deploy-dev.sh
+```
 
-- `DATABASE_URL`
-- `JWT_SECRET`
-- `MESSAGE_ENCRYPTION_KEYS`
-- `MESSAGE_ENCRYPTION_KEY_ACTIVE`
-- `AUDIT_IP_SALT`
-- `CORS_ORIGIN`
-- `LEAD_INTAKE_TOKEN` if the public website should submit leads into CRM
+## PROD Publish
 
-The instance role is granted read access to these parameters.
+PROD uses digest-pinned GHCR release images built by
+`.github/workflows/release.yml`. Terraform creates the host and volume
+only. Application deployment is:
 
-## Notes
+1. Build/sign images through the release workflow.
+2. Put `GMED_BACKEND_IMAGE` and `GMED_FRONTEND_IMAGE` digest refs into
+   the PROD SOPS bundle.
+3. Re-run:
 
-- The bootstrap process clones/pulls the repo and runs:
-  - `docker compose -f docker-compose.yml -f docker-compose.release.yml up -d --build`
-- Direct backend ingress is disabled by default. Keep the API behind the frontend/proxy unless a temporary allowlist is required.
-- This keeps infra simple and cheap, but image builds happen on EC2.
-- For the next phase, switch to prebuilt images (ECR/GHCR) to reduce deploy time and variability.
+```bash
+ssh gmed@console.gmed-health.com sudo /opt/gmed/repo/scripts/deploy-prod.sh
+```
+
+`deploy-prod.sh` verifies cosign signatures before Compose reconciles
+the stack. It never builds images locally.

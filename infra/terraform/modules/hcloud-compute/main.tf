@@ -21,12 +21,11 @@ terraform {
 #   to chase a moving target.
 #
 # - The bootstrap script (cloud-init `user_data`) is intentionally
-#   thin: it provisions the OS, installs Docker, creates a non-root
-#   admin user, and hardens SSH/fail2ban/sysctl. It does NOT deploy
-#   the application. App deploy is added by a follow-up commit that
-#   introduces sops-based secrets, an edge proxy (Caddy), and image
-#   pulls from a registry. Splitting the work keeps each step
-#   independently verifiable.
+#   thin by default: it provisions the OS, installs Docker, creates a
+#   non-root admin user, and hardens SSH/fail2ban/sysctl. Optional
+#   `deploy_app=true` exists for disposable DEV hosts, but the standard
+#   operating model keeps app releases in scripts/CI, separate from
+#   Terraform.
 #
 # - `lifecycle.ignore_changes = [user_data]` prevents a server from
 #   being recreated when the bootstrap template changes. user_data

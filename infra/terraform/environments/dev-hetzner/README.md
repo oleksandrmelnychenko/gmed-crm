@@ -1,10 +1,14 @@
 # DEV on Hetzner Cloud
 
-Provisions and deploys the DEV environment on Hetzner Cloud (Nuremberg).
+Provisions the DEV infrastructure on Hetzner Cloud (Nuremberg).
+Application releases are a separate step; a normal publish must not
+require `terraform apply`.
 
 - **Host:** `console-dev.gmed-health.com` → single Hetzner server.
 - **Phase 0:** OS hardening, Docker, non-root user, fail2ban, sysctl.
-- **Phase 1:** sops-encrypted secrets, app deploy, Caddy + Let's Encrypt.
+- **Phase 1:** optional first-boot app bootstrap for disposable hosts.
+  Standard DEV releases use `scripts/publish-dev-current.ps1` or
+  `scripts/deploy-dev.sh` instead.
 - **Phase 3e5 (current):** Tailscale + observability sidecars
   (node_exporter, cAdvisor, postgres_exporter, promtail). The
   monitoring host scrapes DEV at `gmed-dev:9091/9100/9080/9187`
@@ -26,6 +30,10 @@ Provisions and deploys the DEV environment on Hetzner Cloud (Nuremberg).
 ## One-time setup
 
 ### 1. Generate the DEV age key
+
+This is required for SOPS-managed DEV secrets. It is only passed through
+Terraform if you deliberately set `deploy_app = true`; the standard
+infra-only flow leaves it out of `terraform.tfvars`.
 
 ```bash
 mkdir -p ~/.config/sops/age
@@ -69,8 +77,8 @@ $EDITOR terraform.tfvars
 
 - `admin_ssh_public_key` — your ed25519 public key.
 - `admin_ip_allowlist` — your home/office IPs (`["1.2.3.4/32"]`).
-- `age_private_key` — paste the single-line `AGE-SECRET-KEY-1...` from
-  `~/.config/sops/age/gmed-dev.key` (sensitive; never commit).
+- `deploy_app` — keep `false` for the standard infra-only flow.
+- `age_private_key` — leave empty unless `deploy_app = true`.
 
 ### 4. Point DNS
 
@@ -105,13 +113,35 @@ terraform apply
 
 Cloud-init logs land on the host at `/var/log/cloud-init-output.log`.
 Tail it (`ssh gmed@<ip> sudo tail -f /var/log/cloud-init-output.log`)
-if `apply` looks done but `curl https://console-dev.gmed-health.com`
-still hangs — the bootstrap may still be installing Docker / building
-images.
+if `apply` looks done but SSH or Docker is not ready yet.
 
-First boot typically takes 5–10 minutes (Docker pull + Rust build of the
-backend image on the host). Subsequent applies that don't change
-`user_data` reuse the booted instance.
+With the standard `deploy_app = false` flow, first boot stops after OS
+hardening, Docker, optional Tailscale, and SOPS tooling. The app is not
+running until the separate publish step.
+
+## Publish Application
+
+For the current DEV host layout (`/home/gmed/gmed-crm`), publish the
+checked-out commit from a workstation:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\publish-dev-current.ps1
+```
+
+The script:
+
+1. Requires a clean local working tree.
+2. Archives `HEAD`.
+3. Uploads it to `/home/gmed/deploy/gmed-crm-current.tgz`.
+4. Runs `/home/gmed/gmed-crm/scripts/deploy-dev-current.sh`.
+5. Checks `https://console-dev.gmed-health.com/health`.
+
+For a Terraform-managed `/opt/gmed/repo` host, deploy from the host:
+
+```bash
+ssh gmed@console-dev.gmed-health.com
+sudo /opt/gmed/repo/scripts/deploy-dev.sh
+```
 
 ## Verify
 
@@ -204,8 +234,8 @@ This destroys and recreates the server (the Primary IPv4 survives).
 | SSH               | admin IP allow-list         | closed; via Tailscale             |
 | Hetzner backups   | off                         | on                                |
 | Postgres location | docker volume on root disk  | dedicated server + Hetzner Volume |
-| Image build       | on host by default; optional GHCR pins | prebuilt GHCR, cosign-verified    |
-| age key delivery  | via TF (`age_private_key`)  | out-of-band SSH post-boot         |
+| Image build       | separate publish; host build by default; optional GHCR pins | prebuilt GHCR, cosign-verified    |
+| age key delivery  | out-of-band by default; optional via TF only with `deploy_app=true` | out-of-band SSH post-boot         |
 | Object Lock       | off                         | on, for audit-log bucket          |
 | Real PII allowed? | never                       | yes                               |
 
