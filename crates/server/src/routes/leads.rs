@@ -1701,6 +1701,26 @@ fn first_phone(phones: &Value) -> (Option<String>, Option<String>) {
     (number, kind)
 }
 
+fn public_intake_labels(source: Option<String>) -> (&'static str, &'static str, &'static str) {
+    match source
+        .as_deref()
+        .map(str::trim)
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("contact") | Some("contact-form") | Some("website_contact") => (
+            "website_contact",
+            "Website Contact Form",
+            "Lead created from website contact form",
+        ),
+        _ => (
+            "visitor_facade",
+            "Website Wizard",
+            "Lead created from visitor facade",
+        ),
+    }
+}
+
 struct ParsedIntake {
     bundle: Value,
     files: Vec<ParsedFile>,
@@ -1820,6 +1840,8 @@ async fn ingest_lead_intake(
     let submitted_at = parsed.bundle.get("submittedAt").and_then(str_opt);
     let flow = parsed.bundle.get("flow").and_then(str_opt);
     let locale = parsed.bundle.get("locale").and_then(str_opt);
+    let (intake_source, lead_source, lifecycle_note) =
+        public_intake_labels(parsed.bundle.get("source").and_then(str_opt));
 
     let user_agent = headers
         .get(axum::http::header::USER_AGENT)
@@ -1864,7 +1886,7 @@ async fn ingest_lead_intake(
             consent_opt_out, consent_privacy_practices,
             raw_payload, remote_ip, user_agent, qualification_status
         ) VALUES (
-            'visitor_facade', $1, $2, $3, 'Website Wizard',
+            $49, $1, $2, $3, $50,
             $4, $5, $6, $7, $8, $9,
             $10, $11, $12, $13, $14,
             $15, $16,
@@ -1936,6 +1958,8 @@ async fn ingest_lead_intake(
     .bind(&parsed.bundle)
     .bind(remote_ip)
     .bind(user_agent)
+    .bind(intake_source)
+    .bind(lead_source)
     .fetch_one(&mut *tx)
     .await;
 
@@ -1990,10 +2014,10 @@ async fn ingest_lead_intake(
             to_stage: "new",
             transition_kind: "created",
             changed_by: None,
-            note: Some("Lead created from visitor facade"),
+            note: Some(lifecycle_note),
             metadata: json!({
-                "source": "Website Wizard",
-                "intake_source": "visitor_facade",
+                "source": lead_source,
+                "intake_source": intake_source,
                 "attachment_count": parsed.files.len(),
             }),
         },
@@ -2008,8 +2032,8 @@ async fn ingest_lead_intake(
         "lead.created",
         lead_id,
         json!({
-            "source": "Website Wizard",
-            "intake_source": "visitor_facade",
+            "source": lead_source,
+            "intake_source": intake_source,
             "attachment_count": parsed.files.len(),
         }),
     )

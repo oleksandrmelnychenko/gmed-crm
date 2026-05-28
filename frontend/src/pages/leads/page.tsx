@@ -953,13 +953,59 @@ function useLeadsPageContent() {
         };
       })()
     : null;
+  const detailConversionGate = useMemo(
+    () =>
+      detail
+        ? computeLeadConversionGate(
+            {
+              qualification_status: detail.qualification_status,
+              conversion_ready: detail.readiness.conversion_ready,
+            },
+            { canConvert: permissions.canConvert },
+          )
+        : null,
+    [
+      detail,
+      permissions.canConvert,
+    ],
+  );
+  const detailConvertDisabledReason =
+    detail && detail.failed_outcome.status !== "none"
+      ? t.lead_workflow_locked
+      : detailConversionGate && !detailConversionGate.canConvert
+        ? detailConversionGate.disabledReason ??
+          t.lead_workflow_complete_required_fields
+        : undefined;
 
   const detailPaneNode: ReactNode = (
     <div className="flex h-full flex-col">
       <div className="shrink-0 border-b border-border px-4 pt-3 pb-2 pr-12">
-        <h2 className="text-base font-medium text-foreground">
-          {detail ? `${detail.first_name} ${detail.last_name}` : t.leads_title}
-        </h2>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <h2 className="min-w-0 text-base font-medium text-foreground">
+            {detail ? `${detail.first_name} ${detail.last_name}` : t.leads_title}
+          </h2>
+          {detail && permissions.canConvert && !leadWorkflow?.leadConverted ? (
+            <Button
+              type="button"
+              size="sm"
+              className="shrink-0"
+              disabled={
+                Boolean(actionBusy) ||
+                !detailConversionGate?.canConvert ||
+                detail.failed_outcome.status !== "none"
+              }
+              title={detailConvertDisabledReason}
+              onClick={() => setPendingConvertLead(detail)}
+            >
+              {actionBusy === `convert:${detail.id}` ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : (
+                <UserPlus className="size-4" />
+              )}
+              {t.lead_convert_action}
+            </Button>
+          ) : null}
+        </div>
         <div className="mt-2 flex flex-wrap gap-1">
           {paneTabs.map((tab) => {
             const isActive = paneTab === tab.key;

@@ -1481,5 +1481,13 @@ test.describe("lead conversion gating", () => {
       /Missing required data|Qualifikation und Konvertierung/i,
     );
     await expect(convertButtons.nth(1)).toBeEnabled();
+
+    await page.getByText("Ready Lead").click();
+    const readyLeadDetail = page.getByRole("dialog").filter({
+      has: page.getByRole("heading", { name: "Ready Lead" }),
+    });
+    await expect(
+      readyLeadDetail.getByRole("button", { name: /Konvertieren|Convert/i }),
+    ).toBeEnabled();
   });
 });

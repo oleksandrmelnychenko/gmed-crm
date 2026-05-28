@@ -113,6 +113,42 @@ async fn json_request(
     (status, value)
 }
 
+async fn public_multipart_request(
+    app: &axum::Router,
+    path: &str,
+    token: &str,
+    bundle: Value,
+) -> (StatusCode, Value) {
+    let boundary = format!("----gmed-test-{}", Uuid::new_v4().simple());
+    let body = format!(
+        "--{boundary}\r\n\
+Content-Disposition: form-data; name=\"bundle\"\r\n\
+Content-Type: application/json\r\n\r\n\
+{}\r\n\
+--{boundary}--\r\n",
+        serde_json::to_string(&bundle).unwrap(),
+    );
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(path)
+        .header("x-intake-token", token)
+        .header(
+            "Content-Type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .unwrap();
+
+    let resp = app.clone().oneshot(req).await.unwrap();
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let value: Value = serde_json::from_slice(&bytes).unwrap_or(json!(null));
+    (status, value)
+}
+
 async fn make_lead_ready_for_qualification(
     app: &axum::Router,
     bearer: &str,
@@ -137,6 +173,73 @@ async fn make_lead_ready_for_qualification(
     .await;
     assert_eq!(status, StatusCode::OK);
     body
+}
+
+#[tokio::test]
+async fn public_lead_intake_stores_contact_form_submissions_as_leads() {
+    let Some(app) = test_app().await else { return };
+    let token = "test-lead-intake-token";
+    // The public intake route reads the shared token from process env.
+    // Integration tests in this crate do not otherwise mutate this key.
+    unsafe {
+        std::env::set_var("LEAD_INTAKE_TOKEN", token);
+    }
+
+    let (status, created) = public_multipart_request(
+        &app,
+        "/api/v1/public/lead-intake",
+        token,
+        json!({
+            "version": 1,
+            "source": "contact",
+            "flow": "contact",
+            "submittedAt": "2026-05-27T12:00:00Z",
+            "patientType": "new",
+            "locale": "de",
+            "summary": {
+                "fullName": "Ada Lovelace",
+                "email": "ada.contact@example.com",
+                "primaryPhone": "+49123456789",
+                "locationDetailed": null,
+                "canTravel": null,
+                "hasMedicalRecords": null,
+                "recordsInAcceptedLanguage": null
+            },
+            "payload": {
+                "firstName": "Ada",
+                "lastName": "Lovelace",
+                "email": "ada.contact@example.com",
+                "emailConsent": true,
+                "phones": [{ "number": "+49123456789", "type": "mobile" }],
+                "message": "I need a call about treatment coordination.",
+                "services": [],
+                "consentAutomatedContact": false,
+                "consentHealthcare": false,
+                "consentOptOut": false,
+                "consentPrivacyPractices": false
+            }
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CREATED);
+    let lead_id = created["lead_id"]
+        .as_str()
+        .expect("public intake returns lead_id");
+
+    let pm = app.auth_header("patient_manager");
+    let (status, detail) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["source"], "Website Contact Form");
+    assert_eq!(detail["intake_source"], "website_contact");
+    assert_eq!(detail["flow"], "contact");
+    assert_eq!(detail["email"], "ada.contact@example.com");
+    assert_eq!(detail["phone"], "+49123456789");
+    assert_eq!(
+        detail["message"],
+        "I need a call about treatment coordination."
+    );
 }
 
 // ── Auth / RBAC tests ───────────────────────────────────────
