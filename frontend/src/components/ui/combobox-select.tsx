@@ -99,27 +99,59 @@ function normalizeValue(value: PrimitiveValue | readonly string[] | null | undef
 function optionsFromChildren(children: React.ReactNode): ComboboxSelectOption[] {
   const options: ComboboxSelectOption[] = []
 
-  React.Children.forEach(children, (child) => {
-    if (!React.isValidElement(child) || child.type !== "option") {
-      return
-    }
+  function collect(nodes: React.ReactNode, groupSearchText = "") {
+    React.Children.forEach(nodes, (child) => {
+      if (!React.isValidElement(child)) {
+        return
+      }
 
-    const props = child.props as React.OptionHTMLAttributes<HTMLOptionElement> & {
-      children?: React.ReactNode
-      "data-search-text"?: string
-      "data-disabled-presentation"?: "group"
-    }
-    const labelText = textFromNode(props.children)
-    const value = props.value == null ? labelText : String(props.value)
+      if (child.type === "optgroup") {
+        const props = child.props as React.OptgroupHTMLAttributes<HTMLOptGroupElement> & {
+          children?: React.ReactNode
+        }
+        const groupLabel = textFromNode(props.label)
 
-    options.push({
-      value,
-      label: props.children ?? value,
-      disabled: props.disabled,
-      disabledPresentation: props["data-disabled-presentation"],
-      searchText: props["data-search-text"] ?? `${value} ${labelText}`,
+        if (groupLabel) {
+          options.push({
+            value: `__combobox_group_${options.length}_${groupLabel}`,
+            label: (
+              <span className="text-[11px] font-semibold uppercase text-muted-foreground">
+                {props.label}
+              </span>
+            ),
+            disabled: true,
+            disabledPresentation: "group",
+            searchText: groupLabel,
+          })
+        }
+
+        collect(props.children, groupLabel)
+        return
+      }
+
+      if (child.type !== "option") {
+        return
+      }
+
+      const props = child.props as React.OptionHTMLAttributes<HTMLOptionElement> & {
+        children?: React.ReactNode
+        "data-search-text"?: string
+        "data-disabled-presentation"?: "group"
+      }
+      const labelText = textFromNode(props.children)
+      const value = props.value == null ? labelText : String(props.value)
+
+      options.push({
+        value,
+        label: props.children ?? value,
+        disabled: props.disabled,
+        disabledPresentation: props["data-disabled-presentation"],
+        searchText: props["data-search-text"] ?? `${value} ${labelText} ${groupSearchText}`,
+      })
     })
-  })
+  }
+
+  collect(children)
 
   return options
 }

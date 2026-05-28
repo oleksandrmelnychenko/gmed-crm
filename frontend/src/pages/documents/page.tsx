@@ -2581,7 +2581,7 @@ function StaffDocumentsPage({
                       </div>
                     ) : null}
                     <div className="grid gap-4 md:grid-cols-2">
-              <Field label={t.documents_category} required>
+              <Field label={t.documents_section_template} required>
                 <NativeComboboxSelect
                   value={generateForm.templateId}
                   onChange={(event) =>
