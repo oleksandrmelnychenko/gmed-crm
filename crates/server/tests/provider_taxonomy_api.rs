@@ -167,10 +167,10 @@ async fn provider_taxonomy_endpoint_returns_seeded_leaves() {
         leaves.iter().all(|leaf| {
             let is_leaf_marker_ok = leaf
                 .get("is_leaf")
-                .map_or(true, |value| value.as_bool() == Some(true));
+                .is_none_or(|value| value.as_bool() == Some(true));
             let level_marker_ok = leaf
                 .get("level")
-                .map_or(true, |value| value.as_str() == Some("type"));
+                .is_none_or(|value| value.as_str() == Some("type"));
             is_leaf_marker_ok && level_marker_ok
         }),
         "leaves collection must contain only assignable taxonomy leaves"

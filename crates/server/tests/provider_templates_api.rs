@@ -183,9 +183,8 @@ async fn patient_manager_can_store_and_update_provider_templates_via_provider_de
             "default_status": "draft",
             "default_visibility": "patient_visible",
             "is_medical": true,
-            "supported_languages": ["de", "en"],
+            "supported_languages": ["de"],
             "body_de": "Hallo {{patient_name}}, bitte erscheinen Sie am {{appointment_date}}.",
-            "body_en": "Hello {{patient_name}}, please arrive on {{appointment_date}}.",
             "notes": "Internal clinic note"
         })),
     )
@@ -224,7 +223,33 @@ async fn patient_manager_can_store_and_update_provider_templates_via_provider_de
             .iter()
             .filter_map(|value| value.as_str())
             .collect::<Vec<_>>(),
-        vec!["de", "en"]
+        vec!["de"]
+    );
+
+    let (invalid_status, invalid_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{provider_id}/templates/{template_id}/update"),
+        &bearer,
+        Some(json!({
+            "label": "Colonoscopy preparation updated",
+            "doctor_id": doctor_id,
+            "art": "prep_instruction",
+            "category": "partner_clinic",
+            "default_auto_name": "Clinic prep updated",
+            "default_status": "active",
+            "default_visibility": "released_external",
+            "is_medical": true,
+            "supported_languages": ["de", "uk"],
+            "body_de": "Hallo {{patient_name}}, neues Datum {{appointment_date}}.",
+            "body_uk": "Вітаємо {{patient_name}}, нова дата {{appointment_date}}."
+        })),
+    )
+    .await;
+    assert_eq!(invalid_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        invalid_body["message"],
+        "Provider document templates currently support German only"
     );
 
     let (update_status, update_body) = json_request(
@@ -243,9 +268,8 @@ async fn patient_manager_can_store_and_update_provider_templates_via_provider_de
             "default_visibility": "released_external",
             "is_medical": true,
             "is_active": false,
-            "supported_languages": ["de", "uk"],
+            "supported_languages": ["de"],
             "body_de": "Hallo {{patient_name}}, neues Datum {{appointment_date}}.",
-            "body_uk": "Вітаємо {{patient_name}}, нова дата {{appointment_date}}.",
             "notes": "Updated note"
         })),
     )
@@ -270,10 +294,8 @@ async fn patient_manager_can_store_and_update_provider_templates_via_provider_de
     assert_eq!(updated["default_status"], "active");
     assert_eq!(updated["default_visibility"], "released_external");
     assert_eq!(updated["is_active"], false);
-    assert_eq!(
-        updated["body_uk"],
-        "Вітаємо {{patient_name}}, нова дата {{appointment_date}}."
-    );
+    assert_eq!(updated["supported_languages"], json!(["de"]));
+    assert_eq!(updated["body_uk"], Value::Null);
 
     let _ = admin_id;
 }
@@ -353,6 +375,31 @@ async fn documents_catalog_includes_provider_templates_and_generation_uses_provi
     assert_eq!(template["provider_name"], format!("Clinic {tag}"));
     assert_eq!(template["doctor_id"], doctor_id.to_string());
 
+    let (unsupported_language_status, unsupported_language_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &bearer,
+        Some(json!({
+            "template_id": public_template_id,
+            "patient_id": patient_id,
+            "order_id": order_id,
+            "appointment_id": appointment_id,
+            "language": "uk",
+            "auto_name": format!("Clinic prep unsupported language {tag}")
+        })),
+    )
+    .await;
+    assert_eq!(
+        unsupported_language_status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "unsupported language body: {unsupported_language_body}"
+    );
+    assert_eq!(
+        unsupported_language_body["message"],
+        "Language is not supported by the selected template"
+    );
+
     let (generate_status, generate_body) = json_request(
         &app,
         "POST",
@@ -381,10 +428,14 @@ async fn documents_catalog_includes_provider_templates_and_generation_uses_provi
     assert!(preview_html.contains("2026-05-10"));
     assert!(preview_html.contains("09:00"));
     assert!(preview_html.contains("ORD-"));
+    assert_eq!(generate_body["language"], "de");
+    assert_eq!(generate_body["generated_template_id"], public_template_id);
+    assert_eq!(generate_body["version_number"], 1);
 
     let document_id = Uuid::parse_str(generate_body["id"].as_str().unwrap()).unwrap();
     let stored = sqlx::query(
-        r#"SELECT klinik, art, category, ursprung, mime_type
+        r#"SELECT klinik, art, category, ursprung, generated_template_id,
+                  mime_type, status, version_root_document_id, replaces_document_id, version_number
            FROM documents
            WHERE id = $1"#,
     )
@@ -415,6 +466,27 @@ async fn documents_catalog_includes_provider_templates_and_generation_uses_provi
         stored.try_get::<String, _>("mime_type").unwrap(),
         "application/pdf"
     );
+    assert_eq!(
+        stored
+            .try_get::<Option<String>, _>("generated_template_id")
+            .unwrap()
+            .as_deref(),
+        Some(public_template_id.as_str())
+    );
+    assert_eq!(stored.try_get::<String, _>("status").unwrap(), "draft");
+    assert_eq!(
+        stored
+            .try_get::<Uuid, _>("version_root_document_id")
+            .unwrap(),
+        document_id
+    );
+    assert_eq!(
+        stored
+            .try_get::<Option<Uuid>, _>("replaces_document_id")
+            .unwrap(),
+        None
+    );
+    assert_eq!(stored.try_get::<i32, _>("version_number").unwrap(), 1);
     assert!(
         stored
             .try_get::<Option<String>, _>("ursprung")
@@ -423,4 +495,129 @@ async fn documents_catalog_includes_provider_templates_and_generation_uses_provi
             .contains("provider_template:"),
         "expected provider template source marker"
     );
+
+    let (second_create_status, second_create_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{provider_id}/templates"),
+        &bearer,
+        Some(json!({
+            "label": "Gastro prep alternate",
+            "description": "Partner clinic handoff alternate",
+            "doctor_id": doctor_id,
+            "art": "prep_instruction",
+            "category": "partner_clinic",
+            "default_auto_name": "Gastro prep alternate",
+            "default_status": "draft",
+            "default_visibility": "patient_visible",
+            "is_medical": true,
+            "supported_languages": ["de"],
+            "body_de": "Hallo {{patient_name}}, dies ist eine alternative Vorlage."
+        })),
+    )
+    .await;
+    assert_eq!(
+        second_create_status,
+        StatusCode::CREATED,
+        "second create body: {second_create_body}"
+    );
+    let second_public_template_id = format!(
+        "provider_template:{}",
+        second_create_body["id"].as_str().unwrap()
+    );
+
+    let (wrong_replace_status, wrong_replace_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &bearer,
+        Some(json!({
+            "template_id": second_public_template_id,
+            "patient_id": patient_id,
+            "order_id": order_id,
+            "appointment_id": appointment_id,
+            "language": "de",
+            "replace_document_id": document_id,
+            "auto_name": format!("Clinic prep wrong replacement {tag}")
+        })),
+    )
+    .await;
+    assert_eq!(
+        wrong_replace_status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "wrong replacement body: {wrong_replace_body}"
+    );
+    assert_eq!(
+        wrong_replace_body["message"],
+        "Replacement document must be the same generated template type"
+    );
+
+    let (replace_status, replace_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &bearer,
+        Some(json!({
+            "template_id": public_template_id,
+            "patient_id": patient_id,
+            "order_id": order_id,
+            "appointment_id": appointment_id,
+            "language": "de",
+            "replace_document_id": document_id,
+            "auto_name": format!("Clinic prep replacement {tag}")
+        })),
+    )
+    .await;
+    assert_eq!(
+        replace_status,
+        StatusCode::OK,
+        "replace body: {replace_body}"
+    );
+    assert_eq!(replace_body["generated_template_id"], public_template_id);
+    assert_eq!(replace_body["version_number"], 2);
+    assert_eq!(
+        replace_body["version_root_document_id"],
+        document_id.to_string()
+    );
+    assert_eq!(
+        replace_body["replaces_document_id"],
+        document_id.to_string()
+    );
+
+    let replacement_id = Uuid::parse_str(replace_body["id"].as_str().unwrap()).unwrap();
+    let old_status: String = sqlx::query_scalar("SELECT status FROM documents WHERE id = $1")
+        .bind(document_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(old_status, "archived");
+    let replacement = sqlx::query(
+        r#"SELECT generated_template_id, version_root_document_id, replaces_document_id, version_number
+           FROM documents
+           WHERE id = $1"#,
+    )
+    .bind(replacement_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        replacement
+            .try_get::<Option<String>, _>("generated_template_id")
+            .unwrap()
+            .as_deref(),
+        Some(public_template_id.as_str())
+    );
+    assert_eq!(
+        replacement
+            .try_get::<Uuid, _>("version_root_document_id")
+            .unwrap(),
+        document_id
+    );
+    assert_eq!(
+        replacement
+            .try_get::<Option<Uuid>, _>("replaces_document_id")
+            .unwrap(),
+        Some(document_id)
+    );
+    assert_eq!(replacement.try_get::<i32, _>("version_number").unwrap(), 2);
 }

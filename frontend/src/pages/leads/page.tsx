@@ -953,22 +953,15 @@ function useLeadsPageContent() {
         };
       })()
     : null;
-  const detailConversionGate = useMemo(
-    () =>
-      detail
-        ? computeLeadConversionGate(
-            {
-              qualification_status: detail.qualification_status,
-              conversion_ready: detail.readiness.conversion_ready,
-            },
-            { canConvert: permissions.canConvert },
-          )
-        : null,
-    [
-      detail,
-      permissions.canConvert,
-    ],
-  );
+  const detailConversionGate = detail
+    ? computeLeadConversionGate(
+        {
+          qualification_status: detail.qualification_status,
+          conversion_ready: detail.readiness.conversion_ready,
+        },
+        { canConvert: permissions.canConvert },
+      )
+    : null;
   const detailConvertDisabledReason =
     detail && detail.failed_outcome.status !== "none"
       ? t.lead_workflow_locked

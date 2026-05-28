@@ -148,6 +148,17 @@ export function templateForDocument(
   detail: DocumentItem | null,
 ) {
   if (!detail) return null;
+  const generatedTemplateId =
+    detail.generated_template_id?.trim() ||
+    (detail.ursprung?.startsWith("template:")
+      ? detail.ursprung.slice("template:".length).trim()
+      : "");
+  if (generatedTemplateId) {
+    const exactTemplate = templates.find(
+      (template) => template.id === generatedTemplateId,
+    );
+    if (exactTemplate) return exactTemplate;
+  }
   return (
     templates.find(
       (template) =>

@@ -263,9 +263,6 @@ struct ProviderDocumentTemplate {
     is_medical: bool,
     supported_languages: Vec<String>,
     body_de: Option<String>,
-    body_en: Option<String>,
-    body_uk: Option<String>,
-    body_ru: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -463,10 +460,18 @@ struct DocPartyBlock {
 
 impl DocPartyBlock {
     fn address_line(&self) -> Option<String> {
-        let street = self.street.as_deref().map(str::trim).filter(|v| !v.is_empty());
+        let street = self
+            .street
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty());
         let city = {
             let zip = self.zip.as_deref().map(str::trim).filter(|v| !v.is_empty());
-            let city = self.city.as_deref().map(str::trim).filter(|v| !v.is_empty());
+            let city = self
+                .city
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty());
             match (zip, city) {
                 (Some(zip), Some(city)) => Some(format!("{zip} {city}")),
                 (Some(zip), None) => Some(zip.to_string()),
@@ -474,11 +479,19 @@ impl DocPartyBlock {
                 (None, None) => None,
             }
         };
-        let country = self.country.as_deref().map(str::trim).filter(|v| !v.is_empty());
-        let parts: Vec<String> = [street.map(ToOwned::to_owned), city, country.map(ToOwned::to_owned)]
-            .into_iter()
-            .flatten()
-            .collect();
+        let country = self
+            .country
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty());
+        let parts: Vec<String> = [
+            street.map(ToOwned::to_owned),
+            city,
+            country.map(ToOwned::to_owned),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
         if parts.is_empty() {
             None
         } else {
@@ -487,7 +500,12 @@ impl DocPartyBlock {
     }
 
     fn name_with_title(&self) -> String {
-        match self.title.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        match self
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
             Some(title) => format!("{title} {}", self.name).trim().to_string(),
             None => self.name.clone(),
         }
@@ -626,6 +644,7 @@ struct NewStoredDocument<'a> {
     klinik: Option<&'a str>,
     ursprung: Option<&'a str>,
     notes: Option<&'a str>,
+    generated_template_id: Option<&'a str>,
     version_root_document_id: Option<Uuid>,
     replaces_document_id: Option<Uuid>,
     version_number: i32,
@@ -654,7 +673,7 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
         mime_type: "application/pdf",
         file_extension: "pdf",
         is_medical: true,
-        languages: &["de", "en", "uk"],
+        languages: &["de"],
         text_block_keys: &[
             "fasting",
             "bring_documents",
@@ -675,7 +694,7 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
         mime_type: "application/pdf",
         file_extension: "pdf",
         is_medical: true,
-        languages: &["de", "en", "uk"],
+        languages: &["de"],
         text_block_keys: &[
             "doctor_changes_only",
             "carry_updated_list",
@@ -694,7 +713,7 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
         mime_type: "application/pdf",
         file_extension: "pdf",
         is_medical: false,
-        languages: &["de", "en", "uk"],
+        languages: &["de"],
         text_block_keys: &[
             "contract_scope_clause",
             "quote_reference_clause",
@@ -714,7 +733,7 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
         mime_type: "application/pdf",
         file_extension: "pdf",
         is_medical: false,
-        languages: &["de", "en", "uk"],
+        languages: &["de"],
         text_block_keys: &[],
     },
     DocumentTemplateDefinition {
@@ -722,14 +741,14 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
         label: "Patient Sticker · Compact 90 x 48 mm",
         description: "Compact patient sticker including agency contact block.",
         art: "patient_sticker",
-        category: "generated",
+        category: "administrative",
         default_auto_name: "Patient sticker",
         default_status: "draft",
         default_visibility: "internal",
         mime_type: "application/pdf",
         file_extension: "pdf",
         is_medical: false,
-        languages: &["de", "en", "uk"],
+        languages: &["de"],
         text_block_keys: &[],
     },
     DocumentTemplateDefinition {
@@ -737,14 +756,14 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
         label: "Patient Sticker · Standard 105 x 74 mm",
         description: "Standard patient sticker including agency contact block.",
         art: "patient_sticker",
-        category: "generated",
+        category: "administrative",
         default_auto_name: "Patient sticker",
         default_status: "draft",
         default_visibility: "internal",
         mime_type: "application/pdf",
         file_extension: "pdf",
         is_medical: false,
-        languages: &["de", "en", "uk"],
+        languages: &["de"],
         text_block_keys: &[],
     },
     DocumentTemplateDefinition {
@@ -752,14 +771,14 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
         label: "Patient Sticker · Sheet 70 x 37 mm",
         description: "Small sheet-style patient sticker including agency contact block.",
         art: "patient_sticker",
-        category: "generated",
+        category: "administrative",
         default_auto_name: "Patient sticker",
         default_status: "draft",
         default_visibility: "internal",
         mime_type: "application/pdf",
         file_extension: "pdf",
         is_medical: false,
-        languages: &["de", "en", "uk"],
+        languages: &["de"],
         text_block_keys: &[],
     },
     DocumentTemplateDefinition {
@@ -774,7 +793,7 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
         mime_type: "application/pdf",
         file_extension: "pdf",
         is_medical: false,
-        languages: &["de", "en", "uk"],
+        languages: &["de"],
         text_block_keys: &[],
     },
     DocumentTemplateDefinition {
@@ -789,13 +808,13 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
         mime_type: "application/pdf",
         file_extension: "pdf",
         is_medical: false,
-        languages: &["de", "en", "uk"],
+        languages: &["de"],
         text_block_keys: &[],
     },
     DocumentTemplateDefinition {
         id: "cost_estimate",
         label: "Cost Estimate (Kostenschätzung)",
-        description: "Non-binding bilingual (DE/RU) estimate of expected costs for medical examinations.",
+        description: "Non-binding German estimate of expected costs for medical examinations.",
         art: "cost_estimate",
         category: "finance",
         default_auto_name: "Kostenschätzung",
@@ -804,7 +823,7 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
         mime_type: "application/pdf",
         file_extension: "pdf",
         is_medical: false,
-        languages: &["de", "ru", "en", "uk"],
+        languages: &["de"],
         text_block_keys: &[],
     },
     DocumentTemplateDefinition {
@@ -819,7 +838,7 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
         mime_type: "application/pdf",
         file_extension: "pdf",
         is_medical: false,
-        languages: &["de", "en", "uk"],
+        languages: &["de"],
         text_block_keys: &[],
     },
     DocumentTemplateDefinition {
@@ -1213,6 +1232,10 @@ struct GeneratedProviderDocumentResult {
     mime_type: &'static str,
     file_size: i64,
     language: String,
+    generated_template_id: String,
+    version_root_document_id: Uuid,
+    replaces_document_id: Option<Uuid>,
+    version_number: i32,
     preview_html: String,
 }
 
@@ -2021,6 +2044,32 @@ fn document_template_by_id(template_id: &str) -> Option<DocumentTemplateDefiniti
         .find(|template| template.id == template_id)
 }
 
+fn generated_template_id_from_source(value: Option<&str>) -> Option<String> {
+    let value = value.map(str::trim).filter(|value| !value.is_empty())?;
+    let value = value.strip_prefix("template:").unwrap_or(value).trim();
+    if value.starts_with(PROVIDER_TEMPLATE_ID_PREFIX) || document_template_by_id(value).is_some() {
+        Some(value.to_string())
+    } else {
+        None
+    }
+}
+
+fn row_generated_template_id(row: &sqlx::postgres::PgRow) -> Option<String> {
+    row.try_get::<Option<String>, _>("generated_template_id")
+        .ok()
+        .flatten()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            generated_template_id_from_source(
+                row.try_get::<Option<String>, _>("ursprung")
+                    .ok()
+                    .flatten()
+                    .as_deref(),
+            )
+        })
+}
+
 fn provider_template_public_id(template_id: Uuid) -> String {
     format!("{PROVIDER_TEMPLATE_ID_PREFIX}{template_id}")
 }
@@ -2076,13 +2125,13 @@ async fn load_active_provider_document_templates(
                   pt.doctor_id, doctor.name AS doctor_name,
                   pt.label, pt.description, pt.art, pt.category,
                   pt.default_auto_name, pt.default_status, pt.default_visibility,
-                  pt.is_medical, pt.supported_languages,
-                  pt.body_de, pt.body_en, pt.body_uk, pt.body_ru,
+                  pt.is_medical, pt.supported_languages, pt.body_de,
                   pt.auto_send_on_confirmed_appointment
            FROM provider_templates pt
            JOIN providers provider ON provider.id = pt.provider_id
            LEFT JOIN provider_doctors doctor ON doctor.id = pt.doctor_id
            WHERE pt.is_active = true
+             AND COALESCE(btrim(pt.body_de), '') <> ''
            ORDER BY provider.name, pt.label"#,
     )
     .fetch_all(&state.db)
@@ -2135,20 +2184,9 @@ fn provider_document_template_from_row(row: sqlx::postgres::PgRow) -> ProviderDo
             .try_get::<String, _>("default_visibility")
             .unwrap_or_else(|_| "patient_visible".to_string()),
         is_medical: row.try_get::<bool, _>("is_medical").unwrap_or(true),
-        supported_languages: row
-            .try_get::<Vec<String>, _>("supported_languages")
-            .unwrap_or_default(),
+        supported_languages: vec!["de".to_string()],
         body_de: row
             .try_get::<Option<String>, _>("body_de")
-            .unwrap_or_default(),
-        body_en: row
-            .try_get::<Option<String>, _>("body_en")
-            .unwrap_or_default(),
-        body_uk: row
-            .try_get::<Option<String>, _>("body_uk")
-            .unwrap_or_default(),
-        body_ru: row
-            .try_get::<Option<String>, _>("body_ru")
             .unwrap_or_default(),
     }
 }
@@ -2163,13 +2201,13 @@ async fn load_provider_document_templates_for_confirmed_appointment(
                   pt.doctor_id, doctor.name AS doctor_name,
                   pt.label, pt.description, pt.art, pt.category,
                   pt.default_auto_name, pt.default_status, pt.default_visibility,
-                  pt.is_medical, pt.supported_languages,
-                  pt.body_de, pt.body_en, pt.body_uk, pt.body_ru,
+                  pt.is_medical, pt.supported_languages, pt.body_de,
                   pt.auto_send_on_confirmed_appointment
            FROM provider_templates pt
            JOIN providers provider ON provider.id = pt.provider_id
            LEFT JOIN provider_doctors doctor ON doctor.id = pt.doctor_id
            WHERE pt.is_active = true
+             AND COALESCE(btrim(pt.body_de), '') <> ''
              AND pt.auto_send_on_confirmed_appointment = true
              AND pt.provider_id = $1
              AND (pt.doctor_id IS NULL OR pt.doctor_id = $2)
@@ -3080,7 +3118,9 @@ fn default_generated_document_name(
         ("cost_estimate", _) => "Kostenschätzung",
         ("appointment_confirmation", "en") => "Appointment confirmation",
         ("appointment_confirmation", _) => "Terminbestätigung",
-        ("consent_data_release_child" | "consent_data_release_single", "en") => "Data release consent",
+        ("consent_data_release_child" | "consent_data_release_single", "en") => {
+            "Data release consent"
+        }
         ("consent_data_release_child" | "consent_data_release_single", _) => {
             "Einverständniserklärung"
         }
@@ -4783,8 +4823,14 @@ fn build_framework_contract_pdf(
     );
     for line in [
         context.patient_address.clone(),
-        context.patient_email.as_deref().map(|v| format!("Email: {v}")),
-        context.patient_phone.as_deref().map(|v| format!("Tel.: {v}")),
+        context
+            .patient_email
+            .as_deref()
+            .map(|v| format!("Email: {v}")),
+        context
+            .patient_phone
+            .as_deref()
+            .map(|v| format!("Tel.: {v}")),
     ]
     .into_iter()
     .flatten()
@@ -5845,10 +5891,8 @@ fn provider_template_body_for_language<'a>(
     language: &str,
 ) -> Option<&'a str> {
     match language {
-        "uk" => template.body_uk.as_deref(),
-        "en" => template.body_en.as_deref(),
-        "ru" => template.body_ru.as_deref(),
-        _ => template.body_de.as_deref(),
+        "de" => template.body_de.as_deref(),
+        _ => None,
     }
 }
 
@@ -6794,8 +6838,20 @@ fn infer_document_sensitivity(
         || searchable.contains("billing")
         || searchable.contains("insurance")
         || searchable.contains("quote")
+        || searchable.contains("contract")
     {
         return DataSensitivity::Financial;
+    }
+
+    if searchable.contains("appointment_confirmation")
+        || searchable.contains("consent")
+        || searchable.contains("data_release")
+        || searchable.contains("identity")
+        || searchable.contains("passport")
+        || searchable.contains("sticker")
+        || searchable.contains("visa")
+    {
+        return DataSensitivity::PatientIdentity;
     }
 
     if searchable.contains("concierge")
@@ -6858,6 +6914,7 @@ fn document_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
     let ursprung = row
         .try_get::<Option<String>, _>("ursprung")
         .unwrap_or_default();
+    let generated_template_id = row_generated_template_id(row);
     let share_status = parse_share_status(&visibility).unwrap_or(ShareStatus::InternalOnly);
     let sensitivity = infer_document_sensitivity(
         row.try_get::<bool, _>("is_medical").unwrap_or(false),
@@ -6908,6 +6965,7 @@ fn document_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
             .unwrap_or(false),
         "klinik": row.try_get::<Option<String>, _>("klinik").unwrap_or_default(),
         "ursprung": ursprung,
+        "generated_template_id": generated_template_id,
         "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
         "uploaded_by": row.try_get::<Uuid, _>("uploaded_by").unwrap_or_else(|_| Uuid::nil()),
         "uploaded_by_name": row.try_get::<Option<String>, _>("uploaded_by_name").unwrap_or_default(),
@@ -7075,6 +7133,7 @@ async fn fetch_document_row(
         r#"SELECT d.id, d.patient_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
+                  d.generated_template_id,
                   d.notes, d.extracted_text, d.text_extraction_status, d.text_extraction_method,
                   d.text_extracted_at, d.text_extracted_by, d.version_root_document_id, d.replaces_document_id,
                   d.version_number, d.uploaded_by, d.created_at, d.updated_at,
@@ -7236,10 +7295,14 @@ async fn load_replacement_document_version(
     patient_id: Uuid,
     order_id: Option<Uuid>,
     appointment_id: Option<Uuid>,
-    template: DocumentTemplateDefinition,
+    expected_template_id: &str,
+    template_art: &str,
+    template_category: &str,
+    allow_legacy_generated_category: bool,
 ) -> Result<ReplacementDocumentVersion, axum::response::Response> {
     let row = match sqlx::query(
         r#"SELECT d.id, d.patient_id, d.order_id, d.appointment_id, d.art, d.category,
+                  d.ursprung, d.generated_template_id,
                   d.status, d.version_root_document_id, d.version_number,
                   EXISTS(
                     SELECT 1 FROM documents dv WHERE dv.replaces_document_id = d.id
@@ -7292,13 +7355,20 @@ async fn load_replacement_document_version(
             "Replacement document must keep the same appointment context",
         ));
     }
-    if row.try_get::<String, _>("art").unwrap_or_default() != template.art
-        || row
-            .try_get::<Option<String>, _>("category")
-            .unwrap_or_default()
-            .as_deref()
-            != Some(template.category)
-    {
+    let generated_template_id = row_generated_template_id(&row);
+    let art = row.try_get::<String, _>("art").unwrap_or_default();
+    let category = row
+        .try_get::<Option<String>, _>("category")
+        .unwrap_or_default();
+    let legacy_template_match = art == template_art
+        && (category.as_deref() == Some(template_category)
+            || (allow_legacy_generated_category && category.as_deref() == Some("generated")));
+    let template_matches = generated_template_id
+        .as_deref()
+        .map(|value| value == expected_template_id)
+        .unwrap_or(legacy_template_match);
+
+    if !template_matches {
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Replacement document must be the same generated template type",
@@ -7728,13 +7798,13 @@ async fn persist_document_file(
         r#"INSERT INTO documents (
                 id, patient_id, order_id, appointment_id, auto_name, original_filename,
                 art, category, status, visibility, is_medical, mime_type, file_size,
-                storage_key, klinik, ursprung, notes, version_root_document_id,
-                replaces_document_id, version_number, uploaded_by
+                storage_key, klinik, ursprung, notes, generated_template_id,
+                version_root_document_id, replaces_document_id, version_number, uploaded_by
            ) VALUES (
                 $1, $2, $3, $4, $5, $6,
                 $7, $8, $9, $10, $11, $12, $13,
                 $14, $15, $16, $17, $18,
-                $19, $20, $21
+                $19, $20, $21, $22
            )"#,
     )
     .bind(document_id)
@@ -7754,6 +7824,7 @@ async fn persist_document_file(
     .bind(input.klinik)
     .bind(input.ursprung)
     .bind(input.notes)
+    .bind(input.generated_template_id)
     .bind(input.version_root_document_id.unwrap_or(document_id))
     .bind(input.replaces_document_id)
     .bind(input.version_number)
@@ -7995,6 +8066,18 @@ async fn generate_provider_document_from_template_internal(
         .try_get::<Option<NaiveDate>, _>("birth_date")
         .unwrap_or_default();
 
+    if let Some(requested_language) = normalize_document_language(body.language.as_deref())
+        && !template
+            .supported_languages
+            .iter()
+            .any(|supported| supported == requested_language)
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Language is not supported by the selected template",
+        ));
+    }
+
     let language = resolve_owned_document_language(
         body.language.as_deref(),
         &patient_languages,
@@ -8006,6 +8089,7 @@ async fn generate_provider_document_from_template_internal(
             "Language is not supported by the selected template",
         ));
     };
+    let generated_template_id = provider_template_public_id(template.id);
 
     let order_number = if let Some(order_uuid) = order_id {
         match sqlx::query_scalar::<_, String>("SELECT order_number FROM orders WHERE id = $1")
@@ -8205,7 +8289,7 @@ async fn generate_provider_document_from_template_internal(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
-        .unwrap_or_else(|| format!("template:{}", provider_template_public_id(template.id)));
+        .unwrap_or_else(|| format!("template:{generated_template_id}"));
     let klinik = body
         .klinik
         .as_deref()
@@ -8213,6 +8297,27 @@ async fn generate_provider_document_from_template_internal(
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| template.provider_name.clone());
+
+    let replacement = if let Some(replace_document_id) = body.replace_document_id {
+        match load_replacement_document_version(
+            state,
+            replace_document_id,
+            patient_uuid,
+            order_id,
+            appointment_id,
+            &generated_template_id,
+            &template.art,
+            &template.category,
+            false,
+        )
+        .await
+        {
+            Ok(value) => Some(value),
+            Err(resp) => return Err(resp),
+        }
+    } else {
+        None
+    };
 
     let persist_input = NewStoredDocument {
         patient_id,
@@ -8233,9 +8338,15 @@ async fn generate_provider_document_from_template_internal(
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty()),
-        version_root_document_id: None,
-        replaces_document_id: None,
-        version_number: 1,
+        generated_template_id: Some(generated_template_id.as_str()),
+        version_root_document_id: replacement
+            .as_ref()
+            .map(|value| value.version_root_document_id),
+        replaces_document_id: replacement.as_ref().map(|value| value.document_id),
+        version_number: replacement
+            .as_ref()
+            .map(|value| value.version_number + 1)
+            .unwrap_or(1),
         uploaded_by: actor_user_id,
     };
 
@@ -8245,28 +8356,72 @@ async fn generate_provider_document_from_template_internal(
             Err(resp) => return Err(resp),
         };
 
+    if let Some(replaced) = replacement.as_ref() {
+        if let Err(e) = sqlx::query(
+            r#"UPDATE documents
+               SET status = 'archived'
+               WHERE id = $1"#,
+        )
+        .bind(replaced.document_id)
+        .execute(&state.db)
+        .await
+        {
+            tracing::error!(error = %e, replaced_document_id = %replaced.document_id, "archive replaced provider template document");
+            return Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to archive replaced document",
+            ));
+        }
+
+        if let Err(e) = sqlx::query(
+            r#"UPDATE document_shares
+               SET revoked_at = now()
+               WHERE document_id = $1
+                 AND channel = 'patient_portal'
+                 AND revoked_at IS NULL"#,
+        )
+        .bind(replaced.document_id)
+        .execute(&state.db)
+        .await
+        {
+            tracing::error!(error = %e, replaced_document_id = %replaced.document_id, "revoke superseded provider template portal releases");
+            return Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to finalize replaced document version",
+            ));
+        }
+    }
+
     state.audit_sender.try_send(audit::domain_event(
         "generate_document_from_template",
         Some(actor_user_id),
         "document",
         Some(document_id),
         json!({
-            "template_id": provider_template_public_id(template.id),
+            "template_id": generated_template_id.as_str(),
             "patient_id": patient_uuid,
             "order_id": order_id,
             "appointment_id": appointment_id,
             "language": language,
-            "version_number": 1,
+            "replace_document_id": replacement.as_ref().map(|value| value.document_id),
+            "version_number": persist_input.version_number,
         }),
     ));
 
     Ok(GeneratedProviderDocumentResult {
         id: document_id,
-        auto_name,
+        auto_name: auto_name.clone(),
         original_filename,
         mime_type: "application/pdf",
         file_size,
         language: context.language,
+        generated_template_id: generated_template_id.clone(),
+        version_root_document_id: replacement
+            .as_ref()
+            .map(|value| value.version_root_document_id)
+            .unwrap_or(document_id),
+        replaces_document_id: replacement.as_ref().map(|value| value.document_id),
+        version_number: persist_input.version_number,
         preview_html,
     })
 }
@@ -8288,9 +8443,10 @@ async fn generate_provider_document_from_template(
             "mime_type": result.mime_type,
             "file_size": result.file_size,
             "language": result.language,
-            "version_number": 1,
-            "version_root_document_id": result.id,
-            "replaces_document_id": Value::Null,
+            "generated_template_id": result.generated_template_id,
+            "version_number": result.version_number,
+            "version_root_document_id": result.version_root_document_id,
+            "replaces_document_id": result.replaces_document_id,
             "preview_html": result.preview_html,
         }))
         .into_response(),
@@ -8478,7 +8634,10 @@ async fn generate_document(
             patient_uuid,
             order_id,
             appointment_id,
-            template,
+            template.id,
+            template.art,
+            template.category,
+            template.id == "framework_contract",
         )
         .await
         {
@@ -8542,30 +8701,42 @@ async fn generate_document(
         name: patient_name.clone(),
         title: patient_title.clone(),
         birth_date,
-        street: bindings
-            .party_street
-            .clone()
-            .or_else(|| patient_row.try_get::<Option<String>, _>("address_street").ok().flatten()),
-        zip: bindings
-            .party_zip
-            .clone()
-            .or_else(|| patient_row.try_get::<Option<String>, _>("address_zip").ok().flatten()),
-        city: bindings
-            .party_city
-            .clone()
-            .or_else(|| patient_row.try_get::<Option<String>, _>("address_city").ok().flatten()),
-        country: bindings
-            .party_country
-            .clone()
-            .or_else(|| patient_row.try_get::<Option<String>, _>("address_country").ok().flatten()),
-        email: bindings
-            .party_email
-            .clone()
-            .or_else(|| patient_row.try_get::<Option<String>, _>("email").ok().flatten()),
-        phone: bindings
-            .party_phone
-            .clone()
-            .or_else(|| patient_row.try_get::<Option<String>, _>("phone_primary").ok().flatten()),
+        street: bindings.party_street.clone().or_else(|| {
+            patient_row
+                .try_get::<Option<String>, _>("address_street")
+                .ok()
+                .flatten()
+        }),
+        zip: bindings.party_zip.clone().or_else(|| {
+            patient_row
+                .try_get::<Option<String>, _>("address_zip")
+                .ok()
+                .flatten()
+        }),
+        city: bindings.party_city.clone().or_else(|| {
+            patient_row
+                .try_get::<Option<String>, _>("address_city")
+                .ok()
+                .flatten()
+        }),
+        country: bindings.party_country.clone().or_else(|| {
+            patient_row
+                .try_get::<Option<String>, _>("address_country")
+                .ok()
+                .flatten()
+        }),
+        email: bindings.party_email.clone().or_else(|| {
+            patient_row
+                .try_get::<Option<String>, _>("email")
+                .ok()
+                .flatten()
+        }),
+        phone: bindings.party_phone.clone().or_else(|| {
+            patient_row
+                .try_get::<Option<String>, _>("phone_primary")
+                .ok()
+                .flatten()
+        }),
     };
 
     let (preview_html, pdf_bytes) = match template.id {
@@ -9195,10 +9366,9 @@ async fn generate_document(
                 generated_at,
             };
             let preview = admin_preview_html(
-                &context
-                    .title_override
-                    .clone()
-                    .unwrap_or_else(|| admin_doc_label(&context.language, "single_order_title").to_string()),
+                &context.title_override.clone().unwrap_or_else(|| {
+                    admin_doc_label(&context.language, "single_order_title").to_string()
+                }),
                 &party_block_lines(&context.party),
             );
             let pdf_bytes = match build_single_order_pdf(&context) {
@@ -9230,7 +9400,8 @@ async fn generate_document(
             } else {
                 None
             };
-            let line_items = if bindings.service_lines.is_empty() {
+            let uses_quote_lines = bindings.service_lines.is_empty();
+            let line_items = if uses_quote_lines {
                 quote
                     .as_ref()
                     .map(|q| q.line_items.clone())
@@ -9282,10 +9453,9 @@ async fn generate_document(
                 generated_at,
             };
             let preview = admin_preview_html(
-                &context
-                    .title_override
-                    .clone()
-                    .unwrap_or_else(|| admin_doc_label(&context.language, "cost_coverage_title").to_string()),
+                &context.title_override.clone().unwrap_or_else(|| {
+                    admin_doc_label(&context.language, "cost_coverage_title").to_string()
+                }),
                 &cost_coverage_summary_lines(&context),
             );
             let pdf_bytes = match build_cost_coverage_pdf(&context) {
@@ -9298,7 +9468,31 @@ async fn generate_document(
             (preview, pdf_bytes)
         }
         "cost_estimate" => {
-            let line_items = service_lines_to_items(&bindings.service_lines);
+            let quote = if let Some(order_uuid) = order_id {
+                match load_order_quote_summary(&state, order_uuid).await {
+                    Ok(value) => value,
+                    Err(resp) => return resp,
+                }
+            } else {
+                None
+            };
+            let uses_quote_lines = bindings.service_lines.is_empty();
+            let line_items = if uses_quote_lines {
+                quote
+                    .as_ref()
+                    .map(|q| q.line_items.clone())
+                    .unwrap_or_default()
+            } else {
+                service_lines_to_items(&bindings.service_lines)
+            };
+            let total_range = if uses_quote_lines {
+                bindings
+                    .estimate_total
+                    .clone()
+                    .or_else(|| quote.as_ref().and_then(|q| q.total_gross.clone()))
+            } else {
+                bindings.estimate_total.clone()
+            };
             let context = GeneratedCostEstimateContext {
                 language: language.to_string(),
                 auto_name: auto_name.clone(),
@@ -9307,12 +9501,12 @@ async fn generate_document(
                 patient_pid: patient_pid.clone(),
                 estimate_date: bindings.sign_date.or(bindings.order_date),
                 line_items,
-                total_range: bindings.estimate_total.clone(),
+                total_range,
                 generated_at,
             };
             let preview = admin_preview_html(
                 admin_doc_label(&context.language, "cost_estimate_title"),
-                &party_block_lines(&context.patient),
+                &cost_estimate_summary_lines(&context),
             );
             let pdf_bytes = match build_cost_estimate_pdf(&context) {
                 Ok(bytes) => bytes,
@@ -9444,6 +9638,7 @@ async fn generate_document(
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty()),
+        generated_template_id: Some(template.id),
         version_root_document_id: replacement
             .as_ref()
             .map(|value| value.version_root_document_id),
@@ -9538,6 +9733,7 @@ async fn generate_document(
         "mime_type": template.mime_type,
         "file_size": file_size,
         "language": language,
+        "generated_template_id": template.id,
         "version_number": persist_input.version_number,
         "version_root_document_id": replacement
             .as_ref()
@@ -9642,10 +9838,20 @@ fn party_block_lines(party: &DocPartyBlock) -> Vec<String> {
     if let Some(address) = party.address_line() {
         lines.push(address);
     }
-    if let Some(email) = party.email.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+    if let Some(email) = party
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
         lines.push(format!("Email: {email}"));
     }
-    if let Some(phone) = party.phone.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+    if let Some(phone) = party
+        .phone
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
         lines.push(format!("Tel.: {phone}"));
     }
     lines
@@ -9653,13 +9859,28 @@ fn party_block_lines(party: &DocPartyBlock) -> Vec<String> {
 
 fn agency_block_lines(agency: &AgencyContractSettings) -> Vec<String> {
     let mut lines = vec![format!("{} – Agentur für Patientenbetreuung", agency.name)];
-    if let Some(address) = agency.address.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+    if let Some(address) = agency
+        .address
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
         lines.push(address.to_string());
     }
-    if let Some(email) = agency.email.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+    if let Some(email) = agency
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
         lines.push(format!("Email: {email}"));
     }
-    if let Some(phone) = agency.phone.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+    if let Some(phone) = agency
+        .phone
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
         lines.push(format!("Tel.: {phone}"));
     }
     lines
@@ -9714,15 +9935,7 @@ fn admin_block(layout: &mut TreatmentPlanPdfLayout, text: &str, before: f32, aft
 }
 
 fn admin_heading(layout: &mut TreatmentPlanPdfLayout, text: &str) {
-    layout.text_block(
-        text,
-        13.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        3.0,
-        2.0,
-    );
+    layout.text_block(text, 13.0, true, 0.0, TreatmentPlanPdfColor::Body, 3.0, 2.0);
 }
 
 fn admin_signature_block(
@@ -9784,7 +9997,15 @@ fn build_single_order_pdf(context: &GeneratedSingleOrderContext) -> Result<Vec<u
             fmt_de_date(context.contract_date)
         )
     });
-    layout.text_block(&title, 18.0, true, 0.0, TreatmentPlanPdfColor::Body, 0.0, 3.0);
+    layout.text_block(
+        &title,
+        18.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        3.0,
+    );
     if !context.order_number.trim().is_empty() {
         layout.text_block(
             &format!("Auftragsnummer: {}", context.order_number),
@@ -9801,12 +10022,22 @@ fn build_single_order_pdf(context: &GeneratedSingleOrderContext) -> Result<Vec<u
     for line in party_block_lines(&context.party) {
         admin_block(&mut layout, &line, 0.0, 0.5);
     }
-    admin_block(&mut layout, "– nachfolgend „Auftraggeber“ genannt –", 0.5, 2.0);
+    admin_block(
+        &mut layout,
+        "– nachfolgend „Auftraggeber“ genannt –",
+        0.5,
+        2.0,
+    );
     admin_block(&mut layout, "und", 0.0, 1.0);
     for line in agency_block_lines(&context.agency) {
         admin_block(&mut layout, &line, 0.0, 0.5);
     }
-    admin_block(&mut layout, "– nachfolgend „Auftragnehmer“ genannt –", 0.5, 4.0);
+    admin_block(
+        &mut layout,
+        "– nachfolgend „Auftragnehmer“ genannt –",
+        0.5,
+        4.0,
+    );
 
     admin_heading(&mut layout, "Präambel");
     admin_block(
@@ -9895,11 +10126,26 @@ fn build_single_order_pdf(context: &GeneratedSingleOrderContext) -> Result<Vec<u
     }
 
     for (heading, body) in [
-        ("§ 3 Fortgeltung", "Im Übrigen gelten die Regelungen des Rahmendienstleistungsvertrages mit allen enthaltenen Bestandteilen unverändert fort."),
-        ("§ 4 Anwendbares Recht", "Auf diesen Vertrag ist ausschließlich das deutsche Recht anzuwenden."),
-        ("§ 5 Erfüllungsort", "Erfüllungsort für sämtliche Leistungen ist München."),
-        ("§ 6 Gerichtsstand", "Ausschließlicher Gerichtsstand für alle aus dem Vertragsverhältnis entstehenden Streitigkeiten ist München, Deutschland."),
-        ("§ 7 Salvatorische Klausel", "Sollten einzelne Bestimmungen dieses Vertrages unwirksam sein oder werden, bleibt die Wirksamkeit der übrigen Bestimmungen unberührt."),
+        (
+            "§ 3 Fortgeltung",
+            "Im Übrigen gelten die Regelungen des Rahmendienstleistungsvertrages mit allen enthaltenen Bestandteilen unverändert fort.",
+        ),
+        (
+            "§ 4 Anwendbares Recht",
+            "Auf diesen Vertrag ist ausschließlich das deutsche Recht anzuwenden.",
+        ),
+        (
+            "§ 5 Erfüllungsort",
+            "Erfüllungsort für sämtliche Leistungen ist München.",
+        ),
+        (
+            "§ 6 Gerichtsstand",
+            "Ausschließlicher Gerichtsstand für alle aus dem Vertragsverhältnis entstehenden Streitigkeiten ist München, Deutschland.",
+        ),
+        (
+            "§ 7 Salvatorische Klausel",
+            "Sollten einzelne Bestimmungen dieses Vertrages unwirksam sein oder werden, bleibt die Wirksamkeit der übrigen Bestimmungen unberührt.",
+        ),
     ] {
         admin_heading(&mut layout, heading);
         admin_block(&mut layout, body, 0.0, 1.0);
@@ -9937,7 +10183,25 @@ fn cost_coverage_summary_lines(context: &GeneratedCostCoverageContext) -> Vec<St
     lines
 }
 
-fn build_cost_coverage_pdf(context: &GeneratedCostCoverageContext) -> Result<Vec<u8>, &'static str> {
+fn cost_estimate_summary_lines(context: &GeneratedCostEstimateContext) -> Vec<String> {
+    let mut lines = party_block_lines(&context.patient);
+    if let Some(item) = context.line_items.first() {
+        lines.push(format!("Erste Leistung: {}", item.description));
+    }
+    if let Some(total) = context
+        .total_range
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        lines.push(format!("Gesamt: {total}"));
+    }
+    lines
+}
+
+fn build_cost_coverage_pdf(
+    context: &GeneratedCostCoverageContext,
+) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
     let footer = format!(
         "{} · {}",
@@ -9975,12 +10239,22 @@ fn build_cost_coverage_pdf(context: &GeneratedCostCoverageContext) -> Result<Vec
     for line in party_block_lines(&context.payer) {
         admin_block(&mut layout, &line, 0.0, 0.5);
     }
-    admin_block(&mut layout, "– nachfolgend „Kostenübernehmer“ genannt –", 0.5, 2.0);
+    admin_block(
+        &mut layout,
+        "– nachfolgend „Kostenübernehmer“ genannt –",
+        0.5,
+        2.0,
+    );
     admin_block(&mut layout, "und", 0.0, 1.0);
     for line in agency_block_lines(&context.agency) {
         admin_block(&mut layout, &line, 0.0, 0.5);
     }
-    admin_block(&mut layout, "– nachfolgend „Auftragnehmer“ genannt –", 0.5, 3.0);
+    admin_block(
+        &mut layout,
+        "– nachfolgend „Auftragnehmer“ genannt –",
+        0.5,
+        3.0,
+    );
 
     admin_heading(&mut layout, "1. Übernahme der Kosten");
     admin_block(
@@ -10004,7 +10278,12 @@ fn build_cost_coverage_pdf(context: &GeneratedCostCoverageContext) -> Result<Vec
             if !item.unit_price.trim().is_empty() {
                 parts.push(format!("Honorar: {}", item.unit_price));
             }
-            if let Some(note) = item.notes.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+            if let Some(note) = item
+                .notes
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+            {
                 parts.push(note.to_string());
             }
             layout.text_block(
@@ -10017,14 +10296,31 @@ fn build_cost_coverage_pdf(context: &GeneratedCostCoverageContext) -> Result<Vec
                 1.0,
             );
         }
-        admin_block(&mut layout, "Alle angegebenen Preise zzgl. 19 % MwSt.", 1.0, 2.0);
+        admin_block(
+            &mut layout,
+            "Alle angegebenen Preise zzgl. 19 % MwSt.",
+            1.0,
+            2.0,
+        );
     }
 
     for (heading, body) in [
-        ("3. Rechtsverbindlichkeit", "Diese Erklärung wird mit ihrer Unterzeichnung rechtsverbindlich. Der Einzelauftrag entfaltet seine Rechtswirkung gegenüber dem Auftragnehmer erst mit Zugang dieser Kostenübernahmeerklärung."),
-        ("4. Anwendbares Recht", "Auf diesen Vertrag ist ausschließlich das deutsche Recht anzuwenden."),
-        ("5. Erfüllungsort", "Erfüllungsort für sämtliche Leistungen ist München."),
-        ("6. Gerichtsstand", "Ausschließlicher Gerichtsstand für alle aus dem Vertragsverhältnis entstehenden Streitigkeiten ist München, Deutschland."),
+        (
+            "3. Rechtsverbindlichkeit",
+            "Diese Erklärung wird mit ihrer Unterzeichnung rechtsverbindlich. Der Einzelauftrag entfaltet seine Rechtswirkung gegenüber dem Auftragnehmer erst mit Zugang dieser Kostenübernahmeerklärung.",
+        ),
+        (
+            "4. Anwendbares Recht",
+            "Auf diesen Vertrag ist ausschließlich das deutsche Recht anzuwenden.",
+        ),
+        (
+            "5. Erfüllungsort",
+            "Erfüllungsort für sämtliche Leistungen ist München.",
+        ),
+        (
+            "6. Gerichtsstand",
+            "Ausschließlicher Gerichtsstand für alle aus dem Vertragsverhältnis entstehenden Streitigkeiten ist München, Deutschland.",
+        ),
     ] {
         admin_heading(&mut layout, heading);
         admin_block(&mut layout, body, 0.0, 1.0);
@@ -10032,8 +10328,18 @@ fn build_cost_coverage_pdf(context: &GeneratedCostCoverageContext) -> Result<Vec
 
     // Anlage: Kostenvoranschlag
     admin_heading(&mut layout, "Anlage: Kostenvoranschlag");
-    if let Some(quote) = context.quote_number.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
-        admin_block(&mut layout, &format!("Kostenvoranschlag Nr.: {quote}"), 0.0, 0.5);
+    if let Some(quote) = context
+        .quote_number
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        admin_block(
+            &mut layout,
+            &format!("Kostenvoranschlag Nr.: {quote}"),
+            0.0,
+            0.5,
+        );
     }
     for (label_key, value) in [
         ("total_net", context.total_net.as_deref()),
@@ -10043,7 +10349,10 @@ fn build_cost_coverage_pdf(context: &GeneratedCostCoverageContext) -> Result<Vec
         if let Some(value) = value.map(str::trim).filter(|v| !v.is_empty()) {
             admin_block(
                 &mut layout,
-                &format!("{}: {value}", translated_label(&context.language, label_key)),
+                &format!(
+                    "{}: {value}",
+                    translated_label(&context.language, label_key)
+                ),
                 0.0,
                 0.5,
             );
@@ -10055,7 +10364,10 @@ fn build_cost_coverage_pdf(context: &GeneratedCostCoverageContext) -> Result<Vec
         ("SWIFT/BIC", context.agency.bank_swift.as_deref()),
         ("IBAN", context.agency.bank_iban.as_deref()),
     ];
-    if bank_lines.iter().any(|(_, v)| v.map(str::trim).is_some_and(|v| !v.is_empty())) {
+    if bank_lines
+        .iter()
+        .any(|(_, v)| v.map(str::trim).is_some_and(|v| !v.is_empty()))
+    {
         admin_block(
             &mut layout,
             "Die angefallenen Kosten sind nach Zugang der Rechnung binnen 14 Tagen auf folgendes Konto fällig:",
@@ -10087,7 +10399,9 @@ fn build_cost_coverage_pdf(context: &GeneratedCostCoverageContext) -> Result<Vec
     Ok(finalize_admin_pdf(document, layout))
 }
 
-fn build_cost_estimate_pdf(context: &GeneratedCostEstimateContext) -> Result<Vec<u8>, &'static str> {
+fn build_cost_estimate_pdf(
+    context: &GeneratedCostEstimateContext,
+) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
     let footer = format!(
         "{} · {}",
@@ -10097,35 +10411,41 @@ fn build_cost_estimate_pdf(context: &GeneratedCostEstimateContext) -> Result<Vec
     let mut layout = TreatmentPlanPdfLayout::new(footer, regular, bold);
 
     let title = context.title_override.clone().unwrap_or_else(|| {
-        "Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen / Ориентировочный расчёт стоимости медицинских услуг".to_string()
+        "Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen"
+            .to_string()
     });
-    layout.text_block(&title, 15.0, true, 0.0, TreatmentPlanPdfColor::Body, 0.0, 4.0);
+    layout.text_block(
+        &title,
+        15.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        4.0,
+    );
 
     admin_block(
         &mut layout,
-        &format!("Datum / Дата: {}", fmt_de_date(context.estimate_date)),
+        &format!("Datum: {}", fmt_de_date(context.estimate_date)),
         0.0,
         0.5,
     );
     admin_block(
         &mut layout,
-        &format!("Patient / Пациент: {}", context.patient.name_with_title()),
+        &format!("Patient: {}", context.patient.name_with_title()),
         0.0,
         0.5,
     );
     if let Some(birth) = context.patient.birth_date {
         admin_block(
             &mut layout,
-            &format!("Geb. am / Дата рождения: {}", birth.format("%d.%m.%Y")),
+            &format!("Geb. am: {}", birth.format("%d.%m.%Y")),
             0.0,
             2.0,
         );
     }
 
-    admin_heading(
-        &mut layout,
-        "Medizinische Leistungen / Медицинские услуги",
-    );
+    admin_heading(&mut layout, "Medizinische Leistungen");
     if context.line_items.is_empty() {
         admin_block(
             &mut layout,
@@ -10136,9 +10456,15 @@ fn build_cost_estimate_pdf(context: &GeneratedCostEstimateContext) -> Result<Vec
     } else {
         for item in &context.line_items {
             admin_block(&mut layout, &item.description, 1.0, 0.5);
-            if !item.line_gross.trim().is_empty() {
+            let price = item.line_gross.trim();
+            let price = if price.is_empty() {
+                item.unit_price.trim()
+            } else {
+                price
+            };
+            if !price.is_empty() {
                 layout.text_block(
-                    &item.line_gross,
+                    price,
                     11.0,
                     true,
                     4.0,
@@ -10149,9 +10475,14 @@ fn build_cost_estimate_pdf(context: &GeneratedCostEstimateContext) -> Result<Vec
             }
         }
     }
-    if let Some(total) = context.total_range.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+    if let Some(total) = context
+        .total_range
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
         layout.text_block(
-            &format!("Gesamt / Общая сумма: {total}"),
+            &format!("Gesamt: {total}"),
             12.0,
             true,
             0.0,
@@ -10183,7 +10514,12 @@ fn build_appointment_confirmation_pdf(
     );
     let mut layout = TreatmentPlanPdfLayout::new(footer, regular, bold);
 
-    if let Some(doc_id) = context.doc_id.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+    if let Some(doc_id) = context
+        .doc_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
         layout.text_block(
             &format!("Doc.-ID: {doc_id}"),
             9.0,
@@ -10248,7 +10584,11 @@ fn build_appointment_confirmation_pdf(
     admin_block(&mut layout, "Sehr geehrte Damen und Herren,", 0.0, 1.5);
 
     let passport = match (
-        context.passport_number.as_deref().map(str::trim).filter(|v| !v.is_empty()),
+        context
+            .passport_number
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty()),
         context.passport_valid_until,
     ) {
         (Some(number), Some(valid)) => format!(
@@ -10264,9 +10604,16 @@ fn build_appointment_confirmation_pdf(
         context
             .clinics
             .iter()
-            .map(|clinic| match clinic.address.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
-                Some(address) => format!("{} ({address})", clinic.name),
-                None => clinic.name.clone(),
+            .map(|clinic| {
+                match clinic
+                    .address
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                {
+                    Some(address) => format!("{} ({address})", clinic.name),
+                    None => clinic.name.clone(),
+                }
             })
             .collect::<Vec<_>>()
             .join(", ")
@@ -10292,7 +10639,9 @@ fn build_appointment_confirmation_pdf(
         .as_deref()
         .map(str::trim)
         .filter(|v| !v.is_empty())
-        .map(|value| format!(" Weitere Untersuchungen sind für die Kalenderwochen {value} geplant."))
+        .map(|value| {
+            format!(" Weitere Untersuchungen sind für die Kalenderwochen {value} geplant.")
+        })
         .unwrap_or_default();
     admin_block(
         &mut layout,
@@ -10312,7 +10661,12 @@ fn build_appointment_confirmation_pdf(
         0.0,
         1.5,
     );
-    if let Some(phones) = context.contact_phones.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+    if let Some(phones) = context
+        .contact_phones
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
         admin_block(
             &mut layout,
             &format!("Für Rückfragen stehen wir Ihnen gerne unter {phones} zur Verfügung."),
@@ -10358,14 +10712,30 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<Vec<u8>, &'sta
 
     let we = if context.sole_guardian { "Ich" } else { "Wir" };
     let we_lower = if context.sole_guardian { "ich" } else { "wir" };
-    let our = if context.sole_guardian { "meinem" } else { "unserem" };
-    let our_gen = if context.sole_guardian { "meines" } else { "unseres" };
+    let our = if context.sole_guardian {
+        "meinem"
+    } else {
+        "unserem"
+    };
+    let our_gen = if context.sole_guardian {
+        "meines"
+    } else {
+        "unseres"
+    };
 
     if context.sole_guardian {
-        admin_block(&mut layout, "Ich (alleinige/r Personensorgeberechtigte/r):", 0.0, 0.5);
         admin_block(
             &mut layout,
-            &consent_person_line(context.guardian_name.as_deref(), context.guardian_birth_date),
+            "Ich (alleinige/r Personensorgeberechtigte/r):",
+            0.0,
+            0.5,
+        );
+        admin_block(
+            &mut layout,
+            &consent_person_line(
+                context.guardian_name.as_deref(),
+                context.guardian_birth_date,
+            ),
             0.0,
             1.5,
         );
@@ -10375,7 +10745,10 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<Vec<u8>, &'sta
             &mut layout,
             &format!(
                 "{} (Mutter)",
-                consent_person_line(context.guardian_name.as_deref(), context.guardian_birth_date)
+                consent_person_line(
+                    context.guardian_name.as_deref(),
+                    context.guardian_birth_date
+                )
             ),
             0.0,
             0.5,
@@ -10384,7 +10757,10 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<Vec<u8>, &'sta
             &mut layout,
             &format!(
                 "{} (Vater)",
-                consent_person_line(context.guardian2_name.as_deref(), context.guardian2_birth_date)
+                consent_person_line(
+                    context.guardian2_name.as_deref(),
+                    context.guardian2_birth_date
+                )
             ),
             0.0,
             1.5,
@@ -10418,7 +10794,9 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<Vec<u8>, &'sta
         &mut layout,
         &format!(
             "{we} {we_lower} sind damit einverstanden, dass Herr Heorhii Hudiiev, geb. am 12.12.1994, Albert-Schweitzer-Straße 56, 81735 München, und von ihm beauftragte Mitarbeiter personenbezogene und medizinische Daten von {our} Kind (Personalausweis- und Reisepasskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche Dokumentation, Kostenvoranschläge, Rechnungen, Quittungen, Behandlungs- und Leistungsverträge, Arzt- und Krankenhausberichte) einholen, bearbeiten, speichern und/oder übermitteln, insbesondere an behandelnde Ärzte, Krankenhäuser, Labore, Dolmetscher, Übersetzer oder Gutachter, sowie im GMED-CRM-System gespeichert und verarbeitet werden.",
-            we = we, we_lower = we_lower, our = our
+            we = we,
+            we_lower = we_lower,
+            our = our
         ),
         0.0,
         1.5,
@@ -10427,7 +10805,8 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<Vec<u8>, &'sta
         &mut layout,
         &format!(
             "{we} {we_lower} entbinden alle nach § 203 StGB schweigepflichtigen Personen sowie weitere im Rahmen der Datenverarbeitung tätige Personen von ihrer Schweigepflicht gegenüber Herrn Heorhii Hudiiev und umgekehrt Herrn Heorhii Hudiiev gegenüber den behandelnden Ärzten, Heilberufen, Dolmetschern, Übersetzern, Gutachtern und medizinischen Einrichtungen.",
-            we = we, we_lower = we_lower
+            we = we,
+            we_lower = we_lower
         ),
         0.0,
         1.5,
@@ -10560,7 +10939,9 @@ fn format_eur(value: f64) -> String {
 }
 
 /// Best-effort net/VAT(19%)/gross totals summed from manual service lines.
-fn compute_line_item_totals(items: &[GeneratedContractLineItem]) -> Option<(String, String, String)> {
+fn compute_line_item_totals(
+    items: &[GeneratedContractLineItem],
+) -> Option<(String, String, String)> {
     let mut net = 0.0_f64;
     for item in items {
         if let Some(amount) =
@@ -10636,10 +11017,16 @@ async fn load_order_quote_summary(
             .map(|value| parse_quote_line_items(&value))
             .unwrap_or_default();
         OrderQuoteSummary {
-            quote_number: row.try_get::<Option<String>, _>("quote_number").ok().flatten(),
+            quote_number: row
+                .try_get::<Option<String>, _>("quote_number")
+                .ok()
+                .flatten(),
             total_net: row.try_get::<Option<String>, _>("total_net").ok().flatten(),
             total_vat: row.try_get::<Option<String>, _>("total_vat").ok().flatten(),
-            total_gross: row.try_get::<Option<String>, _>("total_gross").ok().flatten(),
+            total_gross: row
+                .try_get::<Option<String>, _>("total_gross")
+                .ok()
+                .flatten(),
             line_items,
         }
     }))
@@ -10784,6 +11171,7 @@ async fn list_documents(
         r#"SELECT d.id, d.patient_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
+                  d.generated_template_id,
                   d.notes, d.version_root_document_id, d.replaces_document_id,
                   d.version_number, d.uploaded_by, d.created_at, d.updated_at,
                   d.file_deleted_at, d.file_deleted_by, d.file_delete_reason,
@@ -10816,6 +11204,7 @@ async fn list_documents(
                   OR COALESCE(d.original_filename, '') ILIKE '%' || $1 || '%'
                   OR COALESCE(d.category, '') ILIKE '%' || $1 || '%'
                   OR COALESCE(d.art, '') ILIKE '%' || $1 || '%'
+                  OR COALESCE(d.generated_template_id, '') ILIKE '%' || $1 || '%'
                   OR COALESCE(d.notes, '') ILIKE '%' || $1 || '%')
              AND ($2::uuid IS NULL OR d.patient_id = $2)
              AND ($3::uuid IS NULL OR d.order_id = $3)
@@ -10882,6 +11271,7 @@ async fn list_document_intake_queue(
         r#"SELECT d.id, d.patient_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
+                  d.generated_template_id,
                   d.notes, d.version_root_document_id, d.replaces_document_id,
                   d.version_number, d.uploaded_by, d.created_at, d.updated_at,
                   d.file_deleted_at, d.file_deleted_by, d.file_delete_reason,
@@ -11138,6 +11528,7 @@ async fn list_document_versions(
         r#"SELECT d.id, d.patient_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
+                  d.generated_template_id,
                   d.notes, d.version_root_document_id, d.replaces_document_id,
                   d.version_number, d.uploaded_by, d.created_at, d.updated_at,
                   d.file_deleted_at, d.file_deleted_by, d.file_delete_reason,
@@ -11890,6 +12281,7 @@ async fn create_translated_document_from_request(
         klinik: None,
         ursprung: Some("translation_request"),
         notes: Some(notes.as_str()),
+        generated_template_id: None,
         version_root_document_id: None,
         replaces_document_id: None,
         version_number: 1,
@@ -12304,6 +12696,7 @@ async fn upload_my_document(
         klinik: None,
         ursprung: Some("patient_portal"),
         notes: notes.as_deref(),
+        generated_template_id: None,
         version_root_document_id: None,
         replaces_document_id: None,
         version_number: 1,
@@ -12708,6 +13101,7 @@ async fn upload_document(
         klinik: klinik.as_deref(),
         ursprung: ursprung.as_deref(),
         notes: notes.as_deref(),
+        generated_template_id: None,
         version_root_document_id: None,
         replaces_document_id: None,
         version_number: 1,

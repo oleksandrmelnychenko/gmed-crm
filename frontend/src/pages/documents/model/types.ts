@@ -34,6 +34,7 @@ export type DocumentItem = {
   has_stored_file: boolean;
   klinik: string | null;
   ursprung: string | null;
+  generated_template_id: string | null;
   notes: string | null;
   uploaded_by_name: string | null;
   version_root_document_id: string;
@@ -276,6 +277,7 @@ export type GenerateDocumentResponse = {
   mime_type: string;
   file_size: number;
   language?: string;
+  generated_template_id?: string;
   version_number?: number;
   preview_html?: string;
 };

@@ -321,9 +321,6 @@ struct UpsertProviderTemplateRequest {
     is_medical: Option<bool>,
     supported_languages: Option<Vec<String>>,
     body_de: Option<String>,
-    body_en: Option<String>,
-    body_uk: Option<String>,
-    body_ru: Option<String>,
     notes: Option<String>,
     is_active: Option<bool>,
     auto_send_on_confirmed_appointment: Option<bool>,
@@ -4259,25 +4256,13 @@ fn normalize_provider_template_payload(
     }
 
     let supported_languages = normalize_provider_template_languages(body.supported_languages)?;
-    if supported_languages.is_empty() {
-        return Err("Template must support at least one language");
-    }
 
     let body_de = normalize_optional(body.body_de);
-    let body_en = normalize_optional(body.body_en);
-    let body_uk = normalize_optional(body.body_uk);
-    let body_ru = normalize_optional(body.body_ru);
-    for language in &supported_languages {
-        let has_body = match language.as_str() {
-            "de" => body_de.is_some(),
-            "en" => body_en.is_some(),
-            "uk" => body_uk.is_some(),
-            "ru" => body_ru.is_some(),
-            _ => false,
-        };
-        if !has_body {
-            return Err("Every supported language must have a template body");
-        }
+    let body_en = None;
+    let body_uk = None;
+    let body_ru = None;
+    if body_de.is_none() {
+        return Err("German provider document templates must have a German body");
     }
 
     Ok(ProviderTemplatePayload {
@@ -4359,14 +4344,14 @@ fn normalize_provider_taxonomy_input(
     let primary = primary_taxonomy_node_id.or(taxonomy_node_id);
     let mut values = taxonomy_node_ids.unwrap_or_default();
     if let Some(value) = primary
-        && !values.iter().any(|existing| *existing == value)
+        && !values.contains(&value)
     {
         values.insert(0, value);
     }
 
     let mut normalized = Vec::with_capacity(values.len());
     for value in values {
-        if !normalized.iter().any(|existing| *existing == value) {
+        if !normalized.contains(&value) {
             normalized.push(value);
         }
     }
@@ -4434,11 +4419,17 @@ fn normalize_provider_template_languages(
     let mut normalized = Vec::new();
     for item in value.unwrap_or_default() {
         let Some(language) = normalize_provider_template_language(&item) else {
-            return Err("Template languages must be one of de, en, uk or ru");
+            return Err("Provider document templates currently support German only");
         };
+        if language != "de" {
+            return Err("Provider document templates currently support German only");
+        }
         if !normalized.iter().any(|existing| existing == language) {
             normalized.push(language.to_string());
         }
+    }
+    if normalized.is_empty() {
+        normalized.push("de".to_string());
     }
     Ok(normalized)
 }

@@ -585,17 +585,17 @@ fn normalize_patient_contacts(
     for kind in ["phone", "email"] {
         let mut first_index = None;
         let mut primary_seen = false;
-        for index in 0..normalized.len() {
-            if normalized[index].contact_kind != kind {
+        for (index, contact) in normalized.iter_mut().enumerate() {
+            if contact.contact_kind != kind {
                 continue;
             }
             if first_index.is_none() {
                 first_index = Some(index);
             }
-            if normalized[index].is_primary && !primary_seen {
+            if contact.is_primary && !primary_seen {
                 primary_seen = true;
-            } else if normalized[index].is_primary {
-                normalized[index].is_primary = false;
+            } else if contact.is_primary {
+                contact.is_primary = false;
             }
         }
         if !primary_seen && let Some(index) = first_index {

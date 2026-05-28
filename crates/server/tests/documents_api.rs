@@ -2840,6 +2840,8 @@ async fn ceo_can_generate_admin_document_templates_as_pdf() {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "generate {template_id}: {body:?}");
+        assert_eq!(body["language"], "de", "{template_id}");
+        assert_eq!(body["generated_template_id"], template_id, "{template_id}");
         let document_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
 
         let (status, detail_body) = json_request(
@@ -2853,6 +2855,19 @@ async fn ceo_can_generate_admin_document_templates_as_pdf() {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(detail_body["mime_type"], "application/pdf", "{template_id}");
         assert_eq!(detail_body["category"], expected_category, "{template_id}");
+        assert_eq!(
+            detail_body["generated_template_id"], template_id,
+            "{template_id}"
+        );
+        let expected_sensitivity = if matches!(expected_category, "contract" | "finance") {
+            "Financial"
+        } else {
+            "Patient Identity"
+        };
+        assert_eq!(
+            detail_body["data_sensitivity"], expected_sensitivity,
+            "{template_id}"
+        );
 
         let (status, bytes) = bytes_request(
             &app,
@@ -2865,6 +2880,87 @@ async fn ceo_can_generate_admin_document_templates_as_pdf() {
         assert!(bytes.starts_with(b"%PDF-"), "{template_id} is not a PDF");
         assert!(bytes.len() > 800, "{template_id} PDF too small");
     }
+}
+
+#[tokio::test]
+async fn cost_estimate_uses_order_quote_when_manual_lines_are_omitted() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-cost-estimate-quote");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let contract_id = seed_framework_contract(&pool, patient_id, admin_id, &tag).await;
+    let order_id = seed_order_with_contract(&pool, patient_id, contract_id, admin_id, &tag).await;
+    let _quote_id = seed_quote_for_order(&pool, order_id, admin_id, &tag).await;
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "cost_estimate",
+            "patient_id": patient_id,
+            "order_id": order_id,
+            "language": "de",
+            "bindings": {
+                "order_date": "2026-05-18"
+            }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "generate cost estimate: {body:?}");
+    assert_eq!(body["language"], "de");
+    let preview_html = body["preview_html"].as_str().unwrap();
+    assert!(preview_html.contains("Koordination vor stationärer Aufnahme"));
+    assert!(preview_html.contains("1428"));
+
+    let document_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+    let (status, bytes) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/download"),
+        &admin_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(bytes.starts_with(b"%PDF-"));
+    assert!(bytes.len() > 800);
+}
+
+#[tokio::test]
+async fn cost_estimate_manual_lines_do_not_reuse_quote_total() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-cost-estimate-manual");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let contract_id = seed_framework_contract(&pool, patient_id, admin_id, &tag).await;
+    let order_id = seed_order_with_contract(&pool, patient_id, contract_id, admin_id, &tag).await;
+    let _quote_id = seed_quote_for_order(&pool, order_id, admin_id, &tag).await;
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "cost_estimate",
+            "patient_id": patient_id,
+            "order_id": order_id,
+            "language": "de",
+            "bindings": {
+                "service_lines": [
+                    {"description": "Manuelle Zusatzleistung", "line_total": "99,00 EUR"}
+                ]
+            }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "generate cost estimate: {body:?}");
+    let preview_html = body["preview_html"].as_str().unwrap();
+    assert!(preview_html.contains("Manuelle Zusatzleistung"));
+    assert!(!preview_html.contains("1428"));
 }
 
 #[tokio::test]
@@ -2916,7 +3012,7 @@ async fn ceo_assistant_can_list_document_templates_but_cannot_generate_documents
 }
 
 #[tokio::test]
-async fn document_templates_default_to_patient_language_when_omitted() {
+async fn document_templates_are_german_only_even_when_patient_prefers_another_language() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
         return;
     };
@@ -2948,10 +3044,47 @@ async fn document_templates_default_to_patient_language_when_omitted() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["language"], "uk");
+    assert_eq!(body["language"], "de");
     let preview_html = body["preview_html"].as_str().unwrap();
-    assert!(preview_html.contains("План обстеження та лікування"));
-    assert!(preview_html.contains("залишайтеся натще"));
+    assert!(preview_html.contains("Behandlungsplan"));
+    assert!(preview_html.contains("Bitte nüchtern bleiben"));
+
+    let (status, catalog_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/documents/templates",
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    for template in catalog_body["templates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["template_kind"].as_str().unwrap_or("builtin") == "builtin")
+    {
+        assert_eq!(template["supported_languages"], json!(["de"]));
+    }
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "treatment_plan",
+            "patient_id": patient_id,
+            "appointment_id": appointment_id,
+            "language": "uk"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        body["message"],
+        "Language is not supported by the selected template"
+    );
 }
 
 #[tokio::test]
@@ -3053,6 +3186,93 @@ async fn document_templates_can_replace_previous_generated_version() {
     assert_eq!(versions.len(), 2);
     assert_eq!(versions[0]["id"], second_document_id.to_string());
     assert_eq!(versions[1]["id"], first_document_id.to_string());
+}
+
+#[tokio::test]
+async fn generated_document_replacement_requires_exact_template_id() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-template-exact-version");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+
+    let (status, first_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "consent_data_release_single",
+            "patient_id": patient_id,
+            "language": "de",
+            "bindings": {
+                "child_name": "Max Mustermann",
+                "child_birth_date": "2015-01-01",
+                "guardian_name": "Erika Mustermann"
+            }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let first_document_id = Uuid::parse_str(first_body["id"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        first_body["generated_template_id"],
+        "consent_data_release_single"
+    );
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "consent_data_release_child",
+            "patient_id": patient_id,
+            "language": "de",
+            "replace_document_id": first_document_id,
+            "bindings": {
+                "child_name": "Max Mustermann",
+                "child_birth_date": "2015-01-01",
+                "guardian_name": "Erika Mustermann",
+                "guardian2_name": "Hans Mustermann"
+            }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        body["message"],
+        "Replacement document must be the same generated template type"
+    );
+
+    let (status, second_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "consent_data_release_single",
+            "patient_id": patient_id,
+            "language": "de",
+            "replace_document_id": first_document_id,
+            "bindings": {
+                "child_name": "Max Mustermann",
+                "child_birth_date": "2015-01-01",
+                "guardian_name": "Erika Mustermann"
+            }
+        })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "replace exact template: {second_body:?}"
+    );
+    assert_eq!(second_body["version_number"], 2);
+    assert_eq!(
+        second_body["replaces_document_id"],
+        first_document_id.to_string()
+    );
 }
 
 #[tokio::test]
@@ -3333,8 +3553,10 @@ async fn document_templates_can_generate_patient_sticker_pdf_document() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(detail_body["art"], "patient_sticker");
+    assert_eq!(detail_body["category"], "administrative");
     assert_eq!(detail_body["mime_type"], "application/pdf");
     assert_eq!(detail_body["visibility"], "internal");
+    assert_eq!(detail_body["data_sensitivity"], "Patient Identity");
 
     let (status, bytes) = bytes_request(
         &app,

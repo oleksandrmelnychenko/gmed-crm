@@ -296,7 +296,8 @@ const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
   ],
 };
 
-function parseBindingServiceLines(text: string) {
+function parseBindingServiceLines(text: string, templateId: string) {
+  const isCostEstimate = templateId === "cost_estimate";
   return text
     .split("\n")
     .map((line) => line.trim())
@@ -307,9 +308,9 @@ function parseBindingServiceLines(text: string) {
         .map((part) => part.trim());
       return {
         description: description ?? "",
-        fee: fee || undefined,
+        fee: isCostEstimate ? undefined : fee || undefined,
         quantity: quantity || undefined,
-        line_total: lineTotal || undefined,
+        line_total: (isCostEstimate ? fee : lineTotal) || undefined,
         note: note || undefined,
       };
     })
@@ -329,18 +330,35 @@ function parseBindingClinics(text: string) {
 }
 
 function buildBindingsPayload(
+  templateId: string,
   bindings: Record<string, string>,
 ): Record<string, unknown> | null {
   const out: Record<string, unknown> = {};
+  const fieldKeys = new Set(
+    (DOCUMENT_BINDING_FIELDS[templateId] ?? []).map((field) => field.key),
+  );
   for (const [key, value] of Object.entries(bindings)) {
-    if (key === "service_lines_text" || key === "clinics_text") continue;
+    if (
+      !fieldKeys.has(key) ||
+      key === "service_lines_text" ||
+      key === "clinics_text"
+    ) {
+      continue;
+    }
     const trimmed = (value ?? "").trim();
     if (trimmed) out[key] = trimmed;
   }
-  const serviceLines = parseBindingServiceLines(bindings.service_lines_text ?? "");
-  if (serviceLines.length) out.service_lines = serviceLines;
-  const clinics = parseBindingClinics(bindings.clinics_text ?? "");
-  if (clinics.length) out.clinics = clinics;
+  if (fieldKeys.has("service_lines_text")) {
+    const serviceLines = parseBindingServiceLines(
+      bindings.service_lines_text ?? "",
+      templateId,
+    );
+    if (serviceLines.length) out.service_lines = serviceLines;
+  }
+  if (fieldKeys.has("clinics_text")) {
+    const clinics = parseBindingClinics(bindings.clinics_text ?? "");
+    if (clinics.length) out.clinics = clinics;
+  }
   return Object.keys(out).length ? out : null;
 }
 
@@ -1352,7 +1370,7 @@ function StaffDocumentsPage({
     if (
       detail?.id === generateForm.replaceDocumentId &&
       detail.patient_id === generateForm.patientId &&
-      detail.art === selectedTemplate?.art
+      currentDetailTemplate?.id === selectedTemplate?.id
     ) {
       return;
     }
@@ -1362,12 +1380,12 @@ function StaffDocumentsPage({
         : current,
     );
   }, [
-    detail?.art,
     detail?.id,
     detail?.patient_id,
+    currentDetailTemplate?.id,
     generateForm.patientId,
     generateForm.replaceDocumentId,
-    selectedTemplate?.art,
+    selectedTemplate?.id,
   ]);
 
   useEffect(() => {
@@ -1556,6 +1574,7 @@ function StaffDocumentsPage({
           templateId,
           replaceDocumentId: "",
           textBlockKeys: [],
+          bindings: {},
         };
       }
       const previousTemplate = templates.find(
@@ -1584,12 +1603,13 @@ function StaffDocumentsPage({
           detail &&
           current.replaceDocumentId === detail.id &&
           detail.patient_id === current.patientId &&
-          detail.art === template.art
+          currentDetailTemplate?.id === template.id
             ? current.replaceDocumentId
             : "",
         textBlockKeys: current.textBlockKeys.filter((key) =>
           allowedBlocks.has(key),
         ),
+        bindings: template.id === current.templateId ? current.bindings : {},
       };
     });
   }
@@ -1657,7 +1677,7 @@ function StaffDocumentsPage({
         ursprung: generateForm.ursprung.trim() || null,
         notes: generateForm.notes.trim() || null,
         text_block_keys: generateForm.textBlockKeys,
-        bindings: buildBindingsPayload(generateForm.bindings),
+        bindings: buildBindingsPayload(selectedTemplate.id, generateForm.bindings),
       });
       setTemplateOpen(false);
       setNotice(
