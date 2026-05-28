@@ -278,3 +278,54 @@ async fn non_medical_appointments_reject_non_regular_care_path_kind() {
         "Only medical appointments can use preventive, control or followup care paths"
     );
 }
+
+#[tokio::test]
+async fn appointments_accept_ceo_as_owner() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("appointment-ceo-owner");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let ceo_id = seed_user(&pool, &tag, "ceo").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "owner_user_id": ceo_id,
+            "appointment_type": "medical",
+            "care_path_kind": "regular",
+            "title": format!("CEO-owned visit {tag}"),
+            "date": "2026-08-14",
+            "time_start": "08:30",
+            "time_end": "09:15",
+            "location": "Clinic reception"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let appointment_id = body["id"].as_str().unwrap().to_string();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{appointment_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["owner_user_id"], json!(ceo_id));
+    assert_eq!(body["owner_role"], "ceo");
+}

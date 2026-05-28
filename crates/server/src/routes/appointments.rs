@@ -1152,7 +1152,7 @@ async fn convert_appointment_request(
             Ok(None) => {
                 return err(
                     StatusCode::UNPROCESSABLE_ENTITY,
-                    "owner_user_id must reference an active PM/teamlead/interpreter/concierge",
+                    "owner_user_id must reference an active CEO/PM/teamlead/interpreter/concierge",
                 );
             }
             Err(resp) => return resp,
@@ -2117,7 +2117,7 @@ async fn create_appointment(
             Ok(None) => {
                 return err(
                     StatusCode::UNPROCESSABLE_ENTITY,
-                    "owner_user_id must reference an active PM/teamlead/interpreter/concierge",
+                    "owner_user_id must reference an active CEO/PM/teamlead/interpreter/concierge",
                 );
             }
             Err(resp) => return resp,
@@ -3540,7 +3540,7 @@ async fn update_appointment(
             Ok(None) => {
                 return err(
                     StatusCode::UNPROCESSABLE_ENTITY,
-                    "owner_user_id must reference an active PM/teamlead/interpreter/concierge",
+                    "owner_user_id must reference an active CEO/PM/teamlead/interpreter/concierge",
                 );
             }
             Err(resp) => return resp,
@@ -6520,7 +6520,7 @@ async fn load_active_appointment_owner_role(
         Some(role)
             if matches!(
                 role.as_str(),
-                "patient_manager" | "teamlead_interpreter" | "interpreter" | "concierge"
+                "ceo" | "patient_manager" | "teamlead_interpreter" | "interpreter" | "concierge"
             ) =>
         {
             Ok(Some(role))
