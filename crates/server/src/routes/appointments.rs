@@ -1152,7 +1152,7 @@ async fn convert_appointment_request(
             Ok(None) => {
                 return err(
                     StatusCode::UNPROCESSABLE_ENTITY,
-                    "owner_user_id must reference an active CEO/PM/teamlead/interpreter/concierge",
+                    "owner_user_id must reference an active CEO/PM/teamlead/interpreter/concierge/IT admin",
                 );
             }
             Err(resp) => return resp,
@@ -1986,7 +1986,8 @@ async fn list_staff(
                 'patient_manager',
                 'teamlead_interpreter',
                 'interpreter',
-                'concierge'
+                'concierge',
+                'it_admin'
              )
            ORDER BY role, name"#,
     )
@@ -2117,7 +2118,7 @@ async fn create_appointment(
             Ok(None) => {
                 return err(
                     StatusCode::UNPROCESSABLE_ENTITY,
-                    "owner_user_id must reference an active CEO/PM/teamlead/interpreter/concierge",
+                    "owner_user_id must reference an active CEO/PM/teamlead/interpreter/concierge/IT admin",
                 );
             }
             Err(resp) => return resp,
@@ -3540,7 +3541,7 @@ async fn update_appointment(
             Ok(None) => {
                 return err(
                     StatusCode::UNPROCESSABLE_ENTITY,
-                    "owner_user_id must reference an active CEO/PM/teamlead/interpreter/concierge",
+                    "owner_user_id must reference an active CEO/PM/teamlead/interpreter/concierge/IT admin",
                 );
             }
             Err(resp) => return resp,
@@ -6516,17 +6517,30 @@ async fn load_active_appointment_owner_role(
     state: &AppState,
     user_id: Uuid,
 ) -> Result<Option<String>, axum::response::Response> {
-    match load_active_user_role(state, user_id).await? {
-        Some(role)
-            if matches!(
-                role.as_str(),
-                "ceo" | "patient_manager" | "teamlead_interpreter" | "interpreter" | "concierge"
-            ) =>
-        {
-            Ok(Some(role))
-        }
-        _ => Ok(None),
-    }
+    sqlx::query_scalar::<_, String>(
+        r#"SELECT role
+           FROM users
+           WHERE id = $1
+             AND is_active = true
+             AND role IN (
+                'ceo',
+                'patient_manager',
+                'teamlead_interpreter',
+                'interpreter',
+                'concierge',
+                'it_admin'
+             )"#,
+    )
+    .bind(user_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, user_id = %user_id, "Failed to load appointment owner role");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate owner",
+        )
+    })
 }
 
 #[allow(clippy::result_large_err)]
@@ -6537,6 +6551,16 @@ fn validate_owner_assignment_rules(
 ) -> Result<(), axum::response::Response> {
     match auth.role {
         Role::Ceo | Role::PatientManager => Ok(()),
+        Role::ItAdmin => {
+            if owner_user_id == auth.user_id && owner_role == "it_admin" {
+                Ok(())
+            } else {
+                Err(err(
+                    StatusCode::FORBIDDEN,
+                    "IT admin can only assign appointment ownership to self",
+                ))
+            }
+        }
         Role::TeamleadInterpreter => {
             if owner_user_id == auth.user_id
                 || matches!(owner_role, "interpreter" | "teamlead_interpreter")

@@ -791,6 +791,28 @@ function normalizeAvailabilityEditorIntervals(
   return normalized;
 }
 
+function buildAvailabilityEditorSchedule(value: string) {
+  return parseWeeklyAvailability(value).map((row) => {
+    const intervals = normalizeAvailabilityEditorIntervals(row.intervals);
+    return {
+      ...row,
+      enabled: row.enabled && intervals.length > 0,
+      intervals,
+    };
+  });
+}
+
+function normalizeAvailabilityEditorSchedule(schedule: WeeklyAvailabilitySchedule) {
+  return schedule.map((row) => {
+    const intervals = normalizeAvailabilityEditorIntervals(row.intervals);
+    return {
+      ...row,
+      enabled: row.enabled && intervals.length > 0,
+      intervals,
+    };
+  });
+}
+
 function weeklyAvailabilityIntervalItems(row: WeeklyAvailabilityRow) {
   const seen = new Map<string, number>();
   const items: Array<{
@@ -825,29 +847,13 @@ function WeeklyAvailabilityEditor({
   onChange: (value: string) => void;
 }) {
   const { t, lang } = useLang();
-  const parsedSchedule = useMemo(() => parseWeeklyAvailability(value), [value]);
-  const schedule = useMemo(
-    () =>
-      parsedSchedule.map((row) => ({
-        ...row,
-        enabled: row.enabled && row.intervals.length > 0,
-        intervals: normalizeAvailabilityEditorIntervals(row.intervals),
-      })),
-    [parsedSchedule],
+  const [draftSchedule, setDraftSchedule] = useState<WeeklyAvailabilitySchedule>(() =>
+    buildAvailabilityEditorSchedule(value),
   );
-  const parsedAvailabilityValue = useMemo(
-    () => formatWeeklyAvailabilityValue(parsedSchedule),
-    [parsedSchedule],
-  );
-  const normalizedAvailabilityValue = useMemo(
-    () => formatWeeklyAvailabilityValue(schedule),
-    [schedule],
-  );
+
   useEffect(() => {
-    if (parsedAvailabilityValue !== normalizedAvailabilityValue) {
-      onChange(normalizedAvailabilityValue);
-    }
-  }, [normalizedAvailabilityValue, onChange, parsedAvailabilityValue]);
+    setDraftSchedule(buildAvailabilityEditorSchedule(value));
+  }, [value]);
   const closedLabel = lang === "de" ? "Geschlossen" : "Закрыто";
   const addIntervalLabel = lang === "de" ? "Zeit hinzufügen" : "Добавить время";
   const fromLabel = lang === "de" ? "Von" : "С";
@@ -871,22 +877,37 @@ function WeeklyAvailabilityEditor({
     }
     return `${(hour + 1).toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
   };
-  const nextInterval = (intervals: typeof schedule[number]["intervals"]) => {
+  const nextInterval = (intervals: WeeklyAvailabilityRow["intervals"]) => {
     const previous = intervals.at(-1);
     if (!previous?.end) return defaultInterval;
     const end = addOneHour(previous.end);
     return previous.end < end ? { start: previous.end, end } : defaultInterval;
   };
-  const commit = (nextSchedule: typeof schedule) => {
-    onChange(formatWeeklyAvailabilityValue(nextSchedule));
+  const commit = (nextSchedule: WeeklyAvailabilitySchedule) => {
+    const normalized = normalizeAvailabilityEditorSchedule(nextSchedule);
+    const nextValue = formatWeeklyAvailabilityValue(normalized);
+    setDraftSchedule(normalized);
+    if (nextValue !== value) {
+      onChange(nextValue);
+    }
   };
   const updateDay = (
-    day: typeof schedule[number]["day"],
-    update: (current: typeof schedule[number]) => typeof schedule[number],
+    day: WeeklyAvailabilityRow["day"],
+    update: (current: WeeklyAvailabilityRow) => WeeklyAvailabilityRow,
   ) => {
-    commit(schedule.map((row) => (row.day === day ? update(row) : row)));
+    commit(draftSchedule.map((row) => (row.day === day ? update(row) : row)));
   };
-  const toggleDay = (day: typeof schedule[number]["day"], enabled: boolean) => {
+  const commitCurrentDraft = () => {
+    setDraftSchedule((current) => {
+      const normalized = normalizeAvailabilityEditorSchedule(current);
+      const nextValue = formatWeeklyAvailabilityValue(normalized);
+      if (nextValue !== value) {
+        onChange(nextValue);
+      }
+      return normalized;
+    });
+  };
+  const toggleDay = (day: WeeklyAvailabilityRow["day"], enabled: boolean) => {
     updateDay(day, (row) => ({
       ...row,
       enabled,
@@ -898,26 +919,25 @@ function WeeklyAvailabilityEditor({
     }));
   };
   const updateInterval = (
-    day: typeof schedule[number]["day"],
+    day: WeeklyAvailabilityRow["day"],
     index: number,
     field: "start" | "end",
     nextValue: string,
   ) => {
-    updateDay(day, (row) => {
-      const intervals = normalizeAvailabilityEditorIntervals(
-        row.intervals.map((interval, intervalIndex) =>
-          intervalIndex === index ? { ...interval, [field]: nextValue } : interval,
-        ),
-        { index, field },
-      );
-      return {
-        ...row,
-        enabled: intervals.length > 0,
-        intervals,
-      };
-    });
+    setDraftSchedule((current) =>
+      current.map((row) =>
+        row.day === day
+          ? {
+              ...row,
+              intervals: row.intervals.map((interval, intervalIndex) =>
+                intervalIndex === index ? { ...interval, [field]: nextValue } : interval,
+              ),
+            }
+          : row,
+      ),
+    );
   };
-  const addInterval = (day: typeof schedule[number]["day"]) => {
+  const addInterval = (day: WeeklyAvailabilityRow["day"]) => {
     updateDay(day, (row) => {
       const intervals = normalizeAvailabilityEditorIntervals([
         ...row.intervals,
@@ -930,7 +950,7 @@ function WeeklyAvailabilityEditor({
       };
     });
   };
-  const removeInterval = (day: typeof schedule[number]["day"], index: number) => {
+  const removeInterval = (day: WeeklyAvailabilityRow["day"], index: number) => {
     updateDay(day, (row) => {
       const intervals = row.intervals.filter((_, intervalIndex) => intervalIndex !== index);
       return {
@@ -942,7 +962,7 @@ function WeeklyAvailabilityEditor({
   };
   const applyPreset = (preset: (typeof quickPresets)[number]) => {
     commit(
-      schedule.map((row) => {
+      draftSchedule.map((row) => {
         const applies =
           preset.scope === "all" ||
           row.day === "mon" ||
@@ -964,10 +984,10 @@ function WeeklyAvailabilityEditor({
       }),
     );
   };
-  const copyDayToAll = (sourceRow: typeof schedule[number]) => {
+  const copyDayToAll = (sourceRow: WeeklyAvailabilityRow) => {
     const sourceIntervals = sourceRow.intervals.map((interval) => ({ ...interval }));
     commit(
-      schedule.map((row) => ({
+      draftSchedule.map((row) => ({
         ...row,
         enabled: sourceRow.enabled && sourceIntervals.length > 0,
         intervals: sourceRow.enabled
@@ -994,7 +1014,7 @@ function WeeklyAvailabilityEditor({
           </Button>
         ))}
       </div>
-      {schedule.map((row) => (
+      {draftSchedule.map((row) => (
         <div
           key={row.day}
           className="grid gap-2 rounded-md border border-border/60 bg-background/70 p-2 sm:grid-cols-[6.5rem_minmax(0,1fr)]"
@@ -1047,6 +1067,7 @@ function WeeklyAvailabilityEditor({
                         onChange={(event) =>
                           updateInterval(row.day, intervalIndex, "start", event.target.value)
                         }
+                        onBlur={commitCurrentDraft}
                         className={availabilityTimeInputClassName}
                         disabled={disabled}
                         aria-label={`${weeklyAvailabilityDayLabel(row.day, lang)} ${fromLabel}`}
@@ -1063,6 +1084,7 @@ function WeeklyAvailabilityEditor({
                         onChange={(event) =>
                           updateInterval(row.day, intervalIndex, "end", event.target.value)
                         }
+                        onBlur={commitCurrentDraft}
                         className={availabilityTimeInputClassName}
                         disabled={disabled}
                         aria-label={`${weeklyAvailabilityDayLabel(row.day, lang)} ${toLabel}`}

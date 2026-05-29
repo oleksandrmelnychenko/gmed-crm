@@ -291,6 +291,69 @@ async fn sales_billing_ceo_assistant_and_it_admin_cannot_open_appointments_works
 }
 
 #[tokio::test]
+async fn patient_manager_can_select_it_admin_as_appointment_owner() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("appointment-it-admin-owner");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let it_admin_id = seed_user(&pool, &format!("{tag}-it"), "it_admin").await;
+
+    seed_patient_assignment(&pool, patient_id, patient_manager_id, admin_id).await;
+
+    let pm_bearer = auth_header_for(patient_manager_id, "patient_manager");
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/appointments/meta/staff",
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body.as_array()
+            .unwrap()
+            .iter()
+            .any(|item| { item["id"] == it_admin_id.to_string() && item["role"] == "it_admin" }),
+        "IT admin must be available in appointment owner options"
+    );
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "owner_user_id": it_admin_id,
+            "appointment_type": "internal",
+            "title": "Internal coordination",
+            "date": "2026-06-10",
+            "time_start": "09:00",
+            "time_end": "09:30"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body:?}");
+    let appointment_id = body["id"].as_str().unwrap().to_string();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{appointment_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["owner_user_id"], it_admin_id.to_string());
+    assert_eq!(body["owner_role"], "it_admin");
+}
+
+#[tokio::test]
 async fn approved_request_can_be_converted_and_patient_sees_schedule() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
