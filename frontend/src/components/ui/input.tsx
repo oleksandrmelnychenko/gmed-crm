@@ -79,6 +79,7 @@ function Input({
   onBlur,
   min,
   max,
+  step,
   ...props
 }: React.ComponentProps<"input">) {
   if (type === "date" || type === "datetime-local") {
@@ -221,6 +222,7 @@ function Input({
       onBlur={onBlur}
       min={min}
       max={max}
+      step={type === "time" && step === undefined ? 60 : step}
       {...props}
     />
   )
