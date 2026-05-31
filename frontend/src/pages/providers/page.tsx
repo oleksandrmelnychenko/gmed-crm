@@ -1060,7 +1060,7 @@ function WeeklyAvailabilityEditor({
                       {fromLabel}
                       <Input
                         type="time"
-                        step={900}
+                        step={60}
                         min={previousInterval?.end || undefined}
                         max={availabilityMaxStartForEnd(interval.end)}
                         value={interval.start}
@@ -1077,7 +1077,7 @@ function WeeklyAvailabilityEditor({
                       {toLabel}
                       <Input
                         type="time"
-                        step={900}
+                        step={60}
                         min={availabilityMinEndForStart(interval.start)}
                         max={nextIntervalItem?.start || undefined}
                         value={interval.end}

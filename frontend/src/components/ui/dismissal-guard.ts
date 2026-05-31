@@ -9,7 +9,15 @@ const DIRTY_DISMISS_REASONS = new Set([
 ])
 
 export const CONFIRMED_DISMISS_REASON = "confirmed-dismiss"
-const AUXILIARY_OVERLAY_SELECTOR = "[data-overlay-interaction-root]"
+const AUXILIARY_OVERLAY_SELECTOR = [
+  "[data-overlay-interaction-root]",
+  ".MuiPickerPopper-root",
+  ".MuiPickersLayout-root",
+  ".MuiDateCalendar-root",
+  ".MuiTimeClock-root",
+  ".MuiDigitalClock-root",
+  ".MuiMultiSectionDigitalClock-root",
+].join(", ")
 const OVERLAY_CONTENT_SELECTOR =
   "[data-slot='sheet-content'], [data-slot='dialog-content']"
 
