@@ -814,27 +814,16 @@ function normalizeAvailabilityEditorSchedule(schedule: WeeklyAvailabilitySchedul
 }
 
 function weeklyAvailabilityIntervalItems(row: WeeklyAvailabilityRow) {
-  const seen = new Map<string, number>();
-  const items: Array<{
-    interval: WeeklyAvailabilityRow["intervals"][number];
-    intervalIndex: number;
-    key: string;
-  }> = [];
-  let intervalIndex = 0;
-
-  for (const interval of row.intervals) {
-    const baseKey = `${row.day}-${interval.start}-${interval.end}`;
-    const duplicateCount = seen.get(baseKey) ?? 0;
-    seen.set(baseKey, duplicateCount + 1);
-    items.push({
-      interval,
-      intervalIndex,
-      key: duplicateCount === 0 ? baseKey : `${baseKey}-${duplicateCount + 1}`,
-    });
-    intervalIndex += 1;
-  }
-
-  return items;
+  // Key by position within the day, never by the editable start/end value.
+  // A value-derived key changes on every keystroke, which remounts the focused
+  // <input type="time"> mid-edit: it loses focus and (critically in Safari)
+  // churns the native time control hard enough to hang the WebContent process,
+  // triggering the "reloaded because a problem occurred" page reload.
+  return row.intervals.map((interval, intervalIndex) => ({
+    interval,
+    intervalIndex,
+    key: `${row.day}-${intervalIndex}`,
+  }));
 }
 
 function WeeklyAvailabilityEditor({
@@ -898,14 +887,12 @@ function WeeklyAvailabilityEditor({
     commit(draftSchedule.map((row) => (row.day === day ? update(row) : row)));
   };
   const commitCurrentDraft = () => {
-    setDraftSchedule((current) => {
-      const normalized = normalizeAvailabilityEditorSchedule(current);
-      const nextValue = formatWeeklyAvailabilityValue(normalized);
-      if (nextValue !== value) {
-        onChange(nextValue);
-      }
-      return normalized;
-    });
+    const normalized = normalizeAvailabilityEditorSchedule(draftSchedule);
+    const nextValue = formatWeeklyAvailabilityValue(normalized);
+    setDraftSchedule(normalized);
+    if (nextValue !== value) {
+      onChange(nextValue);
+    }
   };
   const toggleDay = (day: WeeklyAvailabilityRow["day"], enabled: boolean) => {
     updateDay(day, (row) => ({
