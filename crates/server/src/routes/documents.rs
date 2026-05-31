@@ -4750,411 +4750,1247 @@ fn build_framework_contract_html(context: &GeneratedFrameworkContractContext) ->
     )
 }
 
+/// Heading for the numbered paragraphs (§ 1 … § 11) and Anlage sub-sections.
+/// Slightly larger/bolder than body text, mirrors `admin_heading` styling.
+fn fc_paragraph_heading(layout: &mut TreatmentPlanPdfLayout, text: &str) {
+    layout.text_block(text, 13.0, true, 0.0, TreatmentPlanPdfColor::Body, 4.0, 2.0);
+}
+
+/// A regular body paragraph for the contract text.
+fn fc_body(layout: &mut TreatmentPlanPdfLayout, text: &str) {
+    layout.text_block(
+        text,
+        11.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        2.0,
+    );
+}
+
+/// A bold inline sub-label inside § 1 (e.g. "Individuelle Beratung und ...").
+fn fc_subhead(layout: &mut TreatmentPlanPdfLayout, text: &str) {
+    layout.text_block(text, 11.0, true, 4.0, TreatmentPlanPdfColor::Body, 1.5, 0.5);
+}
+
+/// An indented bullet point.
+fn fc_bullet(layout: &mut TreatmentPlanPdfLayout, text: &str) {
+    layout.text_block(
+        &format!("•  {text}"),
+        11.0,
+        false,
+        8.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        1.0,
+    );
+}
+
+/// A check-box style consent line (used in Anlage 1).
+fn fc_checkbox(layout: &mut TreatmentPlanPdfLayout, text: &str) {
+    layout.text_block(
+        &format!("☐  {text}"),
+        11.0,
+        false,
+        4.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        1.5,
+    );
+}
+
+/// A blank handwritten fill-in run of underscores (never a placeholder string).
+fn fc_underscores(len: usize) -> String {
+    "_".repeat(len)
+}
+
+/// Patient designation "Herr Max Mustermann" / "Frau …" / bare name.
+fn fc_patient_salutation_name(context: &GeneratedFrameworkContractContext) -> String {
+    match context
+        .patient_salutation
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        Some(salutation) => format!("{salutation} {}", context.patient_name)
+            .trim()
+            .to_string(),
+        None => context.patient_name.clone(),
+    }
+}
+
+/// The agency responsible person (care_of) or, failing that, the agency name.
+fn fc_agency_person(agency: &AgencyContractSettings) -> String {
+    agency
+        .care_of
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| agency.name.clone())
+}
+
+/// A tightly-spaced body line (no leading gap), used for stacked address/contact rows.
+fn fc_body_tight(layout: &mut TreatmentPlanPdfLayout, text: &str) {
+    layout.text_block(
+        text,
+        11.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        0.5,
+    );
+}
+
+/// "Ich, <name> geb. am <date>, / Adresse: <address> / Telefonnummer: <phone>. Email: <email>"
+/// — the personal-identity preamble shared by Anlage 1 and Anlage 2. Dynamic values are
+/// rendered inline; missing values fall back to underscore fill-ins.
+fn fc_patient_identity_block(
+    layout: &mut TreatmentPlanPdfLayout,
+    context: &GeneratedFrameworkContractContext,
+) {
+    let name = if context.patient_name.trim().is_empty() {
+        fc_underscores(40)
+    } else {
+        context.patient_name.trim().to_string()
+    };
+    let birth = context
+        .birth_date
+        .map(|value| value.format("%d.%m.%Y").to_string())
+        .unwrap_or_else(|| fc_underscores(18));
+    layout.text_block(
+        &format!("Ich, {name} geb. am {birth},"),
+        11.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        1.0,
+    );
+    let address = context
+        .patient_address
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| fc_underscores(60));
+    layout.text_block(
+        &format!("Adresse: {address}"),
+        11.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        1.0,
+    );
+    let phone = context
+        .patient_phone
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| fc_underscores(24));
+    let email = context
+        .patient_email
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| fc_underscores(28));
+    layout.text_block(
+        &format!("Telefonnummer: {phone}.   Email: {email}"),
+        11.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        2.0,
+    );
+}
+
+/// "Ort, Datum: <place>, <date>   Unterschrift: ____ / <patient name>" — the consent
+/// signature footer shared by Anlage 1 and Anlage 2.
+fn fc_consent_signature_line(
+    layout: &mut TreatmentPlanPdfLayout,
+    context: &GeneratedFrameworkContractContext,
+) {
+    let place = context
+        .sign_place
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| fc_underscores(20));
+    let date = context
+        .sign_date
+        .map(|value| value.format("%d.%m.%Y").to_string())
+        .unwrap_or_else(|| fc_underscores(14));
+    layout.text_block(
+        &format!(
+            "Ort, Datum: {place}, {date}                  Unterschrift: {}",
+            fc_underscores(20)
+        ),
+        11.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        4.0,
+        0.5,
+    );
+    let name = if context.patient_name.trim().is_empty() {
+        fc_underscores(20)
+    } else {
+        context.patient_name.trim().to_string()
+    };
+    layout.text_block(
+        &name,
+        11.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        1.0,
+    );
+}
+
 fn build_framework_contract_pdf(
     context: &GeneratedFrameworkContractContext,
 ) -> Result<Vec<u8>, &'static str> {
-    let mut font_warnings: Vec<String> = Vec::new();
-    let regular_font = ParsedFont::from_bytes(TREATMENT_PLAN_ARIAL_TTF, 0, &mut font_warnings)
-        .ok_or("Failed to load PDF font")?;
-    let bold_font = ParsedFont::from_bytes(TREATMENT_PLAN_ARIAL_BOLD_TTF, 0, &mut font_warnings)
-        .ok_or("Failed to load PDF font")?;
+    let (document, regular, bold) = new_admin_pdf()?;
 
-    let mut document = PdfDocument::new(&context.auto_name);
-    let regular_font_id = document.add_font(&regular_font);
-    let bold_font_id = document.add_font(&bold_font);
-    let regular_handle = PdfFontHandle::External(regular_font_id);
-    let bold_handle = PdfFontHandle::External(bold_font_id);
-
-    let title = context.title_override.clone().unwrap_or_else(|| {
-        format!(
-            "{} {}",
-            translated_label(&context.language, "framework_contract_title"),
-            context.patient_name
-        )
-    });
-    let birth_date = context
-        .birth_date
-        .map(|value| value.format("%d.%m.%Y").to_string())
-        .unwrap_or_else(|| "n/a".to_string());
-    let patient_line = match context
-        .patient_title
+    // Footer mirrors the reference letterhead (agency contact), not an internal timestamp.
+    let agency_person = fc_agency_person(&context.agency);
+    let mut footer_parts: Vec<String> = vec!["Agentur für Patientenbetreuung".to_string()];
+    if !agency_person.trim().is_empty() {
+        footer_parts.push(agency_person.clone());
+    }
+    if let Some(address) = context
+        .agency
+        .address
         .as_deref()
         .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|v| !v.is_empty())
     {
-        Some(title_prefix) => format!("{title_prefix} {}", context.patient_name),
-        None => context.patient_name.clone(),
-    };
+        footer_parts.push(address.to_string());
+    }
+    let mut footer = footer_parts.join(" | ");
+    let mut contact_parts: Vec<String> = Vec::new();
+    if let Some(phone) = context
+        .agency
+        .phone
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        contact_parts.push(format!("Tel.: {phone}"));
+    }
+    if let Some(email) = context
+        .agency
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        contact_parts.push(format!("E-mail: {email}"));
+    }
+    if !contact_parts.is_empty() {
+        footer.push_str(" — ");
+        footer.push_str(&contact_parts.join(" | "));
+    }
+    let mut layout = TreatmentPlanPdfLayout::new(footer, regular, bold);
 
-    let footer_text = format!(
-        "{}: {}",
-        translated_label(&context.language, "generated_footer"),
-        context.generated_at.format("%d.%m.%Y %H:%M UTC")
-    );
-    let mut layout = TreatmentPlanPdfLayout::new(footer_text, regular_handle, bold_handle);
+    let effective_date_str = fmt_de_date(context.effective_date);
 
+    // --- Running header (date + Auftraggeber) ---------------------------------
     layout.text_block(
-        translated_label(&context.language, "draft_badge"),
-        10.0,
+        &format!(
+            "Rahmendienstleistungsvertrag vom {} / {} / 8 Seiten",
+            effective_date_str, context.patient_name
+        ),
+        9.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Muted,
+        0.0,
+        3.0,
+    );
+
+    // --- Title ----------------------------------------------------------------
+    layout.text_block(
+        "RAHMENDIENSTLEISTUNGSVERTRAG",
+        20.0,
         true,
         0.0,
-        TreatmentPlanPdfColor::Primary,
+        TreatmentPlanPdfColor::Body,
         0.0,
         4.0,
     );
-    layout.text_block(
-        &title,
-        22.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        6.0,
-    );
-    for line in [
-        format!(
-            "{}: {}",
-            translated_label(&context.language, "created_on"),
-            context.generated_at.format("%d.%m.%Y")
-        ),
-        format!(
-            "{}: {}",
-            translated_label(&context.language, "patient_id"),
-            context.patient_pid
-        ),
-        format!(
-            "{}: {}",
-            translated_label(&context.language, "birth_date"),
-            birth_date
-        ),
-        format!(
-            "{}: {}",
-            translated_label(&context.language, "contract_number"),
-            context.contract_number
-        ),
-        format!(
-            "{}: {}",
-            translated_label(&context.language, "contract_status"),
-            context.contract_status
-        ),
-    ] {
-        layout.text_block(
-            &line,
-            11.0,
-            false,
-            0.0,
-            TreatmentPlanPdfColor::Muted,
-            0.0,
-            1.0,
-        );
-    }
-    if let Some(valid_from) = context.valid_from {
-        layout.text_block(
-            &format!(
-                "{}: {}",
-                translated_label(&context.language, "valid_from"),
-                valid_from.format("%d.%m.%Y")
-            ),
-            11.0,
-            false,
-            0.0,
-            TreatmentPlanPdfColor::Muted,
-            0.0,
-            1.0,
-        );
-    }
-    if let Some(valid_to) = context.valid_to {
-        layout.text_block(
-            &format!(
-                "{}: {}",
-                translated_label(&context.language, "valid_to"),
-                valid_to.format("%d.%m.%Y")
-            ),
-            11.0,
-            false,
-            0.0,
-            TreatmentPlanPdfColor::Muted,
-            0.0,
-            1.0,
-        );
-    }
-    if let Some(signed_at) = context.signed_at {
-        layout.text_block(
-            &format!(
-                "{}: {}",
-                translated_label(&context.language, "signed_at"),
-                signed_at.format("%d.%m.%Y %H:%M UTC")
-            ),
-            11.0,
-            false,
-            0.0,
-            TreatmentPlanPdfColor::Muted,
-            0.0,
-            1.0,
-        );
-    }
-    if let Some(order_number) = context
-        .order_number
-        .as_deref()
-        .filter(|value| !value.is_empty())
-    {
-        layout.text_block(
-            &format!("Order: {order_number}"),
-            11.0,
-            false,
-            0.0,
-            TreatmentPlanPdfColor::Muted,
-            0.0,
-            1.0,
-        );
-    }
-    layout.text_block(
-        &format!("Patient: {patient_line}"),
-        12.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        1.0,
-        1.0,
-    );
-    for line in [
-        context.patient_address.clone(),
-        context
-            .patient_email
-            .as_deref()
-            .map(|v| format!("Email: {v}")),
-        context
-            .patient_phone
-            .as_deref()
-            .map(|v| format!("Tel.: {v}")),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        layout.text_block(
-            &line,
-            11.0,
-            false,
-            0.0,
-            TreatmentPlanPdfColor::Muted,
-            0.0,
-            1.0,
-        );
-    }
-    layout.spacer(5.0);
 
-    if let Some(introduction) = context
-        .introduction
+    // --- Party designation block ---------------------------------------------
+    fc_body(&mut layout, "zwischen");
+    layout.text_block(
+        &fc_patient_salutation_name(context),
+        11.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        0.5,
+    );
+    if let Some(birth) = context.birth_date {
+        fc_body_tight(
+            &mut layout,
+            &format!("geb. am {}", birth.format("%d.%m.%Y")),
+        );
+    }
+    if let Some(address) = context
+        .patient_address
         .as_deref()
         .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|v| !v.is_empty())
     {
+        fc_body_tight(&mut layout, address);
+    }
+    if let Some(email) = context
+        .patient_email
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        fc_body_tight(&mut layout, &format!("Email: {email}"));
+    }
+    if let Some(phone) = context
+        .patient_phone
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        fc_body_tight(&mut layout, &format!("Tel.: {phone}"));
+    }
+    layout.text_block(
+        "– nachfolgend „Auftraggeber“ genannt –",
+        11.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Muted,
+        0.5,
+        2.0,
+    );
+
+    fc_body(&mut layout, "und");
+    layout.text_block(
+        &format!(
+            "{} – Agentur für Patientenbetreuung",
+            agency_person.to_uppercase()
+        ),
+        11.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        0.5,
+    );
+    if let Some(address) = context
+        .agency
+        .address
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        fc_body_tight(&mut layout, address);
+    }
+    if let Some(email) = context
+        .agency
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        fc_body_tight(&mut layout, &format!("Email: {email}"));
+    }
+    layout.text_block(
+        "– nachfolgend „Auftragnehmer“ genannt –",
+        11.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Muted,
+        0.5,
+        0.5,
+    );
+    layout.text_block(
+        "– nachfolgend „Auftraggeber“ und „Auftragnehmer“ gemeinsam „Vertragsparteien“ genannt –",
+        11.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Muted,
+        0.5,
+        3.0,
+    );
+
+    // --- Präambel -------------------------------------------------------------
+    fc_paragraph_heading(&mut layout, "Präambel");
+    fc_body(
+        &mut layout,
+        "Der Auftragnehmer bietet als Vermittler umfassende Service-Dienstleistungen im Bereich der Gesundheitsfürsorge und des Gesundheitstourismus für Patienten aus dem Ausland an, die eine medizinische Behandlung in Deutschland wünschen.",
+    );
+    fc_body(
+        &mut layout,
+        "Die nachfolgenden Bestimmungen regeln die Zusammenarbeit zwischen den Parteien.",
+    );
+    fc_body(
+        &mut layout,
+        "Zur besseren Lesbarkeit dieses Vertrages wird in diesem Vertrag das generische Maskulinum verwendet. Sämtliche Personenbezeichnungen gelten gleichermaßen für alle Geschlechter.",
+    );
+
+    // --- § 1 Vertragsgegenstand ----------------------------------------------
+    fc_paragraph_heading(&mut layout, "§ 1 Vertragsgegenstand");
+    fc_body(
+        &mut layout,
+        "Der Auftraggeber beabsichtigt sich in Deutschland einer medizinischen Untersuchung und Behandlung zu unterziehen.",
+    );
+    fc_body(
+        &mut layout,
+        "Zu diesem Zweck schließen die Vertragsparteien diesen Vertrag. Dieser Vertrag gilt als Rahmendienstleistungsvertrag für alle künftigen Einzelaufträge.",
+    );
+    fc_body(
+        &mut layout,
+        "Die Beratungs- und Leistungspflichten im Rahmen dieses Dienstleistungsvertrags bestehen ausschließlich aufgrund und in den Grenzen der abgeschlossenen Einzelaufträge zu den jeweiligen Einzelsachverhalten. Die Einzelsachverhalte sind vom Auftraggeber, ausdrücklich mitzuteilen und fallweise inhaltlich – soweit erforderlich gemeinsam mit dem Auftragnehmer – zu definieren.",
+    );
+    fc_body(
+        &mut layout,
+        "Für das Zustandekommen eines Einzelauftrags ist die Annahme des Auftrags durch den Auftragnehmer erforderlich. Der Auftragnehmer behält sich vor, einen Einzelauftrag auch ohne Benennung des Grundes abzulehnen.",
+    );
+    fc_body(
+        &mut layout,
+        "Die Erteilung und Annahme eines Einzelauftrags kann schriftlich unter Einbeziehung dieses Rahmendienstleistungsvertrags erfolgen. Eine entsprechende Vorlage ist als Anlage 4 diesem Rahmendienstleistungsvertrag beigefügt.",
+    );
+    fc_body(
+        &mut layout,
+        "Die Vertragsparteien sind darüber einig, dass die Beratungs- und Leistungspflichten von dem Auftragnehmer insbesondere wie folgt eingeschränkt sind:",
+    );
+
+    fc_subhead(
+        &mut layout,
+        "Individuelle Beratung und Informationsvermittlung:",
+    );
+    fc_bullet(
+        &mut layout,
+        "Ausführliche Beratungsgespräche zur Erfassung individueller Bedürfnisse und Wünsche",
+    );
+    fc_bullet(
+        &mut layout,
+        "Bereitstellung fundierter Informationen zu Behandlungsmöglichkeiten, Kliniken und Fachärzten",
+    );
+
+    fc_subhead(&mut layout, "Vermittlung und Koordination:");
+    fc_bullet(
+        &mut layout,
+        "Herstellung von Kontakten zu führenden Kliniken, Laboren und spezialisierten Fachärzten",
+    );
+    fc_bullet(
+        &mut layout,
+        "Terminvereinbarungen und Koordination der Abläufe",
+    );
+    fc_bullet(
+        &mut layout,
+        "administrative Unterstützung bei der Zusammenstellung und Übermittlung medizinischer Unterlagen",
+    );
+    fc_bullet(
+        &mut layout,
+        "Koordination und Gewährleistung einer interdisziplinären Zusammenarbeit zwischen unterschiedlichen medizinischen Dienstleistern",
+    );
+
+    fc_subhead(&mut layout, "Concierge- und Lifestyle-Service");
+    fc_bullet(&mut layout, "Reservierung in ausgewählten Restaurants");
+    fc_bullet(&mut layout, "Organisation kultureller Aktivitäten");
+    fc_bullet(&mut layout, "Stadtführungen und Freizeitangebote");
+    fc_bullet(
+        &mut layout,
+        "Persönliche Betreuung rund um die Uhr, um individuelle Wünsche und Sonderanforderungen zu erfüllen",
+    );
+
+    fc_subhead(
+        &mut layout,
+        "Unterstützung bei der Einrichtung der digitalen Infrastruktur",
+    );
+    fc_bullet(
+        &mut layout,
+        "Unterstützung bei der Einrichtung der digitalen Infrastruktur, z.B. Mikrofon, Kamera, zur Teilnahme an einer Videosprechstunde",
+    );
+    fc_bullet(
+        &mut layout,
+        "Unterstützung beim Einwahlvorgang auf der Plattform der medizinischen Leistungserbringer",
+    );
+
+    fc_subhead(&mut layout, "Übersetzungs- und Dolmetscherdienste");
+    fc_bullet(
+        &mut layout,
+        "Professionelle sprachliche Unterstützung zur Überwindung von Sprachbarrieren",
+    );
+    fc_bullet(
+        &mut layout,
+        "Bereitstellung von Übersetzern und Dolmetschern für den reibungslosen Informationsaustausch zwischen internationalen Patienten und medizinischem Fachpersonal",
+    );
+    fc_bullet(
+        &mut layout,
+        "Übersetzung von Arztbriefen, Befunden und anderen Unterlagen",
+    );
+
+    fc_subhead(&mut layout, "Nachbetreuung und Rehabilitationsmanagement");
+    fc_bullet(
+        &mut layout,
+        "Koordination von Nachsorgeterminen und Rehabilitationsmaßnahmen",
+    );
+    fc_bullet(
+        &mut layout,
+        "Organisation von Follow-up-Beratungen zur nachhaltigen Unterstützung des Genesungsprozesses (auch bei unseren Kooperationspartnern im Heimatland)",
+    );
+
+    fc_subhead(&mut layout, "Kostenkontrolle");
+    fc_bullet(&mut layout, "Überwachung der Abrechnungsrichtigkeit;");
+    fc_bullet(
+        &mut layout,
+        "Kostenübernahmen und Zahlungsabwicklung bei unterschiedlichen medizinischen Anbietern",
+    );
+    fc_bullet(
+        &mut layout,
+        "Kalkulation und Planung von voraussichtlichen Behandlungskosten, Anfrage von Kostenvoranschlägen bei den medizinischen Leistungserbringern",
+    );
+
+    fc_subhead(
+        &mut layout,
+        "Zeit- und kosteneffiziente Organisation der Behandlung",
+    );
+    fc_bullet(
+        &mut layout,
+        "Optimierung der Prozesse, um Wartezeiten zu minimieren und den Untersuchungs- und Behandlungsablauf zeit- und kosteneffizient zu gestalten",
+    );
+    fc_bullet(&mut layout, "Effizientes Ressourcenmanagement");
+
+    fc_subhead(&mut layout, "Logistik und Reiseorganisation");
+    fc_bullet(
+        &mut layout,
+        "Planung und Buchung von Flügen, Unterkünften und Transfers vor Ort",
+    );
+    fc_bullet(
+        &mut layout,
+        "Organisation eines kompletten Reise- und Transferservices für einen reibungslosen Ablauf",
+    );
+
+    layout.spacer(2.0);
+    fc_body(
+        &mut layout,
+        "Die Vertragsparteien können jederzeit die Erbringung weiterer Leistungen vereinbaren. Sofern hierdurch weitere Kosten entstehen, wird der Auftragnehmer dem Auftraggeber einen neuen Kostenvoranschlag übermitteln, der der schriftlichen Annahme durch den Auftraggeber bedarf.",
+    );
+    fc_body(
+        &mut layout,
+        "Vorbehaltlich der Regelungen gemäß § 4 Abs. 4 wird der Auftragnehmer im Falle unvorhergesehener Umstände oder Hindernisse bei der Umsetzung der geplanten Abläufe auch dabei unterstützen, bedarfs- und situationsgerecht umzuplanen.",
+    );
+    fc_body(
+        &mut layout,
+        "Es wird klargestellt, dass es sich bei den Leistungen des Auftragnehmers nicht um medizinische Beratung zum Zwecke der Befunderhebung oder um sonstige medizinische Behandlungsleistungen handelt.",
+    );
+    fc_body(
+        &mut layout,
+        "Die Beratungsleistungen des Auftragnehmers beschränken sich auf die Bedarfsermittlung und die Beratung hinsichtlich der Erreichung der gemäß § 1 Absatz 6 definierten Leistungen damit die medizinische Versorgung in Deutschland für den Auftraggeber bestmöglich in die Wege geleitet werden kann.",
+    );
+    fc_body(
+        &mut layout,
+        "Die Organisation- und Koordination von Terminen erfolgt in Abstimmung mit dem Auftragnehmer entsprechend der jeweiligen Verfügbarkeiten der medizinischen Leistungserbringer und Einrichtungen. Eine Gewähr für die Einhaltung von Wunschterminen kann nicht übernommen werden; auf die Dauer von Wartezeiten hat der Auftragnehmer keinen Einfluss.",
+    );
+
+    // --- § 2 Vergütung --------------------------------------------------------
+    fc_paragraph_heading(&mut layout, "§ 2 Vergütung");
+    fc_body(
+        &mut layout,
+        "Die Vergütung für die erbrachten Leistungen richtet sich nach den tatsächlich angefallenen Kosten nach Maßgabe des in jedem neuen Auftrag (Einzelauftrag) zur Verfügung gestellten Vergütungsvereinbarungs und Kostenvoranschlags.",
+    );
+    let threshold = context
+        .cost_threshold
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(fmt_money_de)
+        .unwrap_or_else(|| fc_underscores(14));
+    fc_body(
+        &mut layout,
+        &format!(
+            "Zusätzliche Kosten, die im Kostenvoranschlag nicht aufgeführt waren, und {threshold} der Gesamtsumme übersteigen, bedürfen der schriftlichen Zustimmung des Auftraggebers. Schriftliche Zustimmung bedeutet, schriftlich gem. §126 BGB und Textform gem. §126 b BGB, sofern in dieser Vereinbarung nichts Abweichendes geregelt ist."
+        ),
+    );
+    fc_body(
+        &mut layout,
+        "Kosten für Leistungen Dritter sind entweder direkt gegenüber den Dritten oder -im Fall der Kostenübernahme durch den Auftragnehmer- in der Höhe der jeweiligen Rechnungsbeträge an den Auftraggeber zu zahlen.",
+    );
+    fc_body(
+        &mut layout,
+        "Nach Beendigung des Auftrags (Einzelauftrags) stellt der Auftragnehmer eine Rechnung über die fällige Vergütung. Der Auftraggeber ist mit der Erstellung der Rechnung in Textform und mit der Versendung der Rechnung auf digitalem Wege einverstanden.",
+    );
+    fc_body(
+        &mut layout,
+        "Die Vergütung und Auslagen sind nach Rechnungszugang binnen 14 Tagen zur Zahlung fällig. Eingehende Geldbeträge werden vorab zur Deckung der jeweils fälligen Vergütung und Auslagen verrechnet.",
+    );
+    fc_body(
+        &mut layout,
+        "Eine Aufrechnung mit Gegenansprüchen ist nur zulässig, wenn diese Ansprüche unstreitig oder rechtskräftig festgestellt sind. Das Recht des Auftraggebers zur Aufrechnung besteht uneingeschränkt, soweit die aufgerechnete Forderung mit der Hauptforderung synallagmatisch verknüpft ist.",
+    );
+    fc_body(
+        &mut layout,
+        "Macht der Auftraggeber von einem Leistungsverweigerungsrecht bzw. Zurückbehaltungsrecht Gebrauch, so ist der Auftragnehmer berechtigt, die Geltendmachung dieses Zurückbehaltungsrechts durch Sicherheitsleistung in Höhe des geforderten Betrags abzuwenden. Die Kosten der Sicherheit sind vom Auftragnehmer zu tragen, wenn die Ausübung des Zurückbehaltungsrechts nicht berechtigt war.",
+    );
+
+    // --- § 3 Vertraulichkeit --------------------------------------------------
+    fc_paragraph_heading(&mut layout, "§ 3 Vertraulichkeit");
+    fc_body(
+        &mut layout,
+        "Die Vertragsparteien verpflichten sich, sämtliche im Rahmen dieses Vertrages bekannt gewordenen vertraulichen Informationen streng vertraulich zu behandeln und nicht ohne ausdrückliche Zustimmung der informationsgebenden Vertragspartei an Dritte weiterzugeben. Mitarbeitende des Auftragnehmers sind keine Dritten im Sinne dieses Vertrags.",
+    );
+    fc_body(
+        &mut layout,
+        "Die Vertragsparteien sind sich einig, dass es im Rahmen der Leistungserbringung erforderlich sein kann, dass der Auftraggeber dem Auftragnehmer personenbezogene und medizinische Daten wie Personalausweiskopien, Reisepasskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation, Kostenvoranschläge, Rechnungen, Quittungen, Behandlungsverträge, Leistungsverträge, Arzt- und Krankenhausberichte zur Verfügung stellt und der Auftragnehmer diese Informationen im Rahmen und zum Zwecke des Vertrages bearbeitet, speichert, und insbesondere an behandelnde Ärzte, Krankenhäuser, Labore und andere medizinische Einrichtungen, Dolmetscher, Übersetzer oder Gutachter übermittelt. Die Vertragsparteien sind sich darüber bewusst, dass die vorgenannten Informationen Rückschlüsse auf Diagnosen, medizinische Untersuchungen, medizinische Zustände abgeschlossene oder noch andauernde Behandlungen zulassen oder solche Informationen enthalten können und daher besonders sensibel sind und der Umgang besonderer Sorgfalt bedarf.",
+    );
+    fc_body(
+        &mut layout,
+        "Der Auftraggeber erklärt gegenüber dem Auftragnehmer sein Einverständnis zur Übermittlung der erforderlichen Informationen an die Ärzte, Krankenhäuser, Labore, medizinische Einrichtungen, Apotheken sowie die beauftragten Dolmetscher, Übersetzer oder Gutachter.",
+    );
+    fc_body(
+        &mut layout,
+        "Der Auftraggeber wird die schweigepflichtigen Personen, insbesondere Ärzte, Angehörige anderer Heilberufe sowie andere Personen, die im Rahmen der Durchführung dieses Vertrags mit der Verarbeitung vertraulicher Informationen betraut sind, gegenüber dem Auftragnehmer von ihrer Schweigepflicht entbinden. Gleichzeitig wird er den Auftragnehmer gegenüber den Leistungserbringern und Einrichtungen von seiner Verschwiegenheitspflicht entbinden.",
+    );
+    fc_body(
+        &mut layout,
+        "Die in den vorherigen Absätzen genannten Erklärungen erfolgen schriftlich in einem separaten Dokument und sind jederzeit widerrufbar.",
+    );
+
+    // --- § 4 Gewährleistung & Haftung -----------------------------------------
+    fc_paragraph_heading(&mut layout, "§ 4 Gewährleistung & Haftung");
+    fc_body(
+        &mut layout,
+        "Der Auftragnehmer übernimmt keine Gewähr für die Qualität, Richtigkeit oder die Wirksamkeit der vermittelten Behandlungs- und Gesundheitsleistungen. Alle Informationen und Empfehlungen, die im Rahmen der Vermittlung gegeben werden, dienen ausschließlich Informationszwecken und stellen keine medizinische Beratung dar.",
+    );
+    fc_body(
+        &mut layout,
+        "Die Haftung des Auftragnehmers für Schäden, die aus oder im Zusammenhang mit den geschuldeten Leistungen entstehen, ist, außer in Fällen der Verletzung des Lebens und der Gesundheit sowie in sonstigen Fällen zwingender gesetzlicher Haftung, auf Vorsatz und grobe Fahrlässigkeit beschränkt. Eine weitergehende Haftung, insbesondere für mittelbare Schäden, Folgeschäden oder entgangenen Gewinn, ist ausgeschlossen.",
+    );
+    fc_body(
+        &mut layout,
+        "Der Auftragnehmer haftet nicht für Handlungen oder Unterlassungen der vermittelten Ärzte, Therapeuten und sonstiger Dritter, die an der medizinischen Behandlung und Betreuung des Auftraggebers beteiligt werden oder sonst im Rahmen der Vertragsdurchführung tätig werden. Der Auftraggeber stellt den Auftragnehmer ferner von allen Ansprüchen Dritter frei, die im Zusammenhang mit den vermittelten Behandlungsleistungen entstehen.",
+    );
+    fc_body(
+        &mut layout,
+        "Der Auftragnehmer haftet nicht für Ausfälle der medizinischen Leistungserbringer und Einrichtungen oder für Hindernisse in der Durchführung der vermittelten Leistungen gemäß § 1 Abs. 6 dieses Vertrags. Dies umfasst insbesondere, aber nicht ausschließlich, Schäden durch Verspätungen, Ausfälle, Änderungen der Reiseroute oder sonstige Unannehmlichkeiten, die durch Reiseveranstalter, Transportunternehmen oder andere Dritte verursacht werden. Der Auftragnehmer haftet nicht für Schäden oder Verluste, die durch Umstände verursacht werden, auf die der Auftragnehmer keinen Einfluss hat. Dazu gehören unter anderem höhere Gewalt, Naturkatastrophen, politische Unruhen, Streiks, Epidemien oder behördliche Maßnahmen.",
+    );
+
+    // --- § 5 Nutzung von Online-Diensten und Telemedien -----------------------
+    fc_paragraph_heading(
+        &mut layout,
+        "§ 5 Nutzung von Online-Diensten und Telemedien",
+    );
+    fc_body(
+        &mut layout,
+        "Zur Durchführung einer störungsfreien Videosprechstunde hat der Auftraggeber sicherzustellen, dass er sich zu diesem Zweck in einem geschlossenen und ruhigen Raum mit guten Lichtverhältnissen befindet sowie über geeignete Technik, insbesondere über einen sicheren und schnellen Internetzugang verfügt. Sind die Bedingungen nicht geeignet, kann der Auftragnehmer oder die behandelnde Person die Videosprechstunde abbrechen. Die Kosten, die hierdurch und bei einem etwaigen erneuten Durchführungsversuch entstehen, hat der Auftraggeber zu tragen.",
+    );
+    fc_body(
+        &mut layout,
+        "Im Falle der Vermittlung von telemedizinischen Diensten wie Videosprechstunden, übernimmt der Auftragnehmer keine Gewähr dafür, dass die Nutzung des vermittelten Dienstes oder Teile davon immer und vollumfänglich von jedem Ort gleichermaßen verfügbar ist. Auf die Qualität der durch den Auftraggeber genutzten Internetverbindung oder dessen technische Ausstattung hat der Auftragnehmer keinen Einfluss. Für Hindernisse, die aus der Risikosphäre des Auftraggebers stammen, steht der Auftragnehmer nicht ein. Der Auftragnehmer wird sich im Bedarfsfalle bemühen, den Auftragnehmer bei der Problemanalyse und -behebung zu unterstützen.",
+    );
+    fc_body(
+        &mut layout,
+        "Die Entscheidung, ob die Behandlung im Rahmen einer Videosprechstunde oder mithilfe sonstiger Telemedien durchgeführt werden kann, obliegt ausschließlich dem medizinischen Leistungserbringer oder der Einrichtung.",
+    );
+    fc_body(
+        &mut layout,
+        "Ton- und Videoaufnahmen durch die an der Videosprechstunde Teilnehmenden dürfen nur mit vorheriger schriftlicher Genehmigung aller teilnehmenden Personen angefertigt werden. Es wird darauf hingewiesen, dass ein Zuwiderhandeln rechtliche Konsequenzen nach sich ziehen kann. Hierfür übernimmt der Auftragnehmer keine Verantwortung.",
+    );
+    fc_body(
+        &mut layout,
+        "Im Übrigen gelten die Nutzungsbedingungen des jeweiligen Plattformbetreibers ergänzend.",
+    );
+
+    // --- § 6 Vertragslaufzeit & Kündigung -------------------------------------
+    fc_paragraph_heading(&mut layout, "§ 6 Vertragslaufzeit & Kündigung");
+    fc_body(
+        &mut layout,
+        &format!(
+            "Der Vertrag tritt zum {} mit Unterzeichnung der Vertragsparteien in Kraft und wird auf unbefristete Dauer geschlossen.",
+            effective_date_str
+        ),
+    );
+    fc_body(
+        &mut layout,
+        "Der Vertrag kann von beiden Seiten jederzeit fristlos gekündigt werden.",
+    );
+    fc_body(
+        &mut layout,
+        "Eine Kündigung bedarf zu ihrer Wirksamkeit der Schriftform i.S.d. § 126 BGB bzw. der elektronischen Form i.S.d. § 126a BGB Die Kündigung in Textform gem. § 126b BGB ist ausgeschlossen.",
+    );
+    fc_body(
+        &mut layout,
+        "Im Falle einer Kündigung erfolgt eine Abrechnung über die tatsächlich angefallenen Leistungen und Nebenkosten/Aufwendungen. Als Abrechnungsgrundlage dient hierbei der dem Vertrag bzw. Einzelauftrag zugrundeliegende Kostenvoranschlag sowie die Rechnungsunterlagen der zum Zwecke des Vertrags bzw. Einzelauftrags eingebundenen Dritten.",
+    );
+
+    // --- § 7 Sprache & anwendbares Recht --------------------------------------
+    fc_paragraph_heading(&mut layout, "§ 7 Sprache & anwendbares Recht");
+    fc_body(
+        &mut layout,
+        "Dieser Vertrag unterliegt ausschließlich deutschem Recht.",
+    );
+    fc_body(
+        &mut layout,
+        "Die deutsche Fassung dieses Vertrags ist die einzig verbindliche Version für die Auslegung und Anwendung dieses Vertrags. Übersetzungen in andere Sprachen dienen lediglich zu Informationszwecken und entfalten keine rechtliche Wirkung. Im Falle von Unstimmigkeiten oder Auslegungsfragen ist ausschließlich die deutsche Version maßgeblich.",
+    );
+
+    // --- § 8 Erfüllungsort ----------------------------------------------------
+    fc_paragraph_heading(&mut layout, "§ 8 Erfüllungsort");
+    fc_body(
+        &mut layout,
+        "Erfüllungsort für sämtliche Leistungen des Auftragsnehmers ist der Sitz des Auftragnehmers, München, sofern der Vertrag nichts Abweichendes vorsieht. Sofern die vereinbarten Leistungen ein Tätigwerden des Auftragnehmers außerhalb seiner Geschäftsräume erfordert, so ist der Erfüllungsort gleichwohl am Sitz des Auftragnehmers.",
+    );
+
+    // --- § 9 Änderungen & Ergänzungen -----------------------------------------
+    fc_paragraph_heading(&mut layout, "§ 9 Änderungen & Ergänzungen");
+    fc_body(
+        &mut layout,
+        "Änderungen und Ergänzungen dieses Vertrags bedürfen der Schriftform. Dies gilt auch für diese Schriftformvereinbarung.",
+    );
+
+    // --- § 10 Salvatorische Klausel -------------------------------------------
+    fc_paragraph_heading(&mut layout, "§ 10 Salvatorische Klausel");
+    fc_body(
+        &mut layout,
+        "Sollten einzelne Bestimmungen dieses Vertrages ganz oder teilweise unwirksam sein oder werden, so wird hierdurch die Wirksamkeit der übrigen Bestimmungen nicht berührt. Anstelle der unwirksamen Bestimmung gilt diejenige wirksame Bestimmung als vereinbart, die dem Sinn und Zweck der unwirksamen Bestimmung am nächsten kommt.",
+    );
+
+    // --- § 11 Bestandteile des Vertrages und Rangfolge ------------------------
+    fc_paragraph_heading(&mut layout, "§ 11 Bestandteile des Vertrages und Rangfolge");
+    fc_body(
+        &mut layout,
+        "Die nachfolgenden Anlagen sind integraler Bestandteil des Vertrags:",
+    );
+    for line in [
+        "Anlage 1:  Einverständnis zur Datenübermittlung",
+        "Anlage 2:  Schweigepflichtentbindung",
+        "Anlage 3:  Informationsblatt zum Datenschutz",
+        "Anlage 4:  Vorlage: Einzelauftrag",
+    ] {
         layout.text_block(
-            translated_label(&context.language, "intro_heading"),
-            13.0,
-            true,
-            0.0,
-            TreatmentPlanPdfColor::Body,
-            2.0,
-            2.0,
-        );
-        layout.text_block(
-            introduction,
+            line,
             11.0,
             false,
-            0.0,
+            8.0,
             TreatmentPlanPdfColor::Body,
             0.0,
-            4.0,
+            1.0,
         );
     }
+    fc_body(
+        &mut layout,
+        "Im Falle von Widersprüchen gelten die Vertragsdokumente in oben genannter Rangfolge.",
+    );
 
-    if context.quote_number.is_some()
-        || !context.line_items.is_empty()
-        || context.quote_total_gross.is_some()
+    // --- Signature blocks (both parties) --------------------------------------
+    layout.spacer(4.0);
+    admin_signature_block(
+        &mut layout,
+        context.sign_place.as_deref(),
+        context.sign_date,
+        &agency_person,
+        "Auftragnehmer",
+    );
+    admin_signature_block(
+        &mut layout,
+        context.sign_place.as_deref(),
+        context.sign_date,
+        &context.patient_name,
+        "Auftraggeber",
+    );
+
+    // ======================================================================
+    // Anlage 1 — Einverständniserklärung zur Datenübermittlung
+    // ======================================================================
+    layout.spacer(6.0);
+    layout.text_block(
+        "Anlage 1",
+        15.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        1.0,
+    );
+    layout.text_block(
+        "Einverständniserklärung zur Datenübermittlung",
+        13.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        3.0,
+    );
+    fc_patient_identity_block(&mut layout, context);
+    fc_body(&mut layout, "bin damit einverstanden, (bitte ankreuzen)");
+    fc_checkbox(
+        &mut layout,
+        "dass Herr Heorhii Hudiiev, geb. am 12.12.1994, Albert-Schweitzer-Straße 56, 81735 München, Deutschland, und von ihm beauftragte Mitarbeitende meine personenbezogenen und medizinischen Daten, Personalausweiskopien, Reisepasskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation, Rezepte, Kostenvoranschläge, Rechnungen, Quittungen, Behandlungsverträge, Leistungsverträge, Arzt- und Krankenhausberichte über meine abgeschlossene oder noch andauernde Behandlung einholt, bearbeitet, speichert und erforderlichenfalls an behandelnde Ärzte, Krankenhäuser, Labore oder andere medizinische Einrichtungen, Dolmetscher, Übersetzer, Gutachter oder Kostenträger übermittelt;",
+    );
+    fc_checkbox(
+        &mut layout,
+        "dass, alle meine behandelnden Ärzte und medizinischen Einrichtungen meine Behandlungsunterlagen und medizinischen Informationen an Herrn Heorhii Hudiiev, geb. am 12.12.1994, Albert-Schweitzer-Straße 56, 81735 München, Deutschland, übermitteln dürfen;",
+    );
+    fc_checkbox(
+        &mut layout,
+        "dass meine notwendigen Personalausweiskopien, Reisepasskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation, Rechnungen und Quittungen, Arzt- und Krankenhausberichte über meine abgeschlossene oder noch andauernde Behandlung im Salesforce-CRM-System (weiter bezeichnet als „GMED-CRM-System“) gespeichert und verarbeitet werden;",
+    );
+    fc_checkbox(
+        &mut layout,
+        "dass meine personenbezogenen und medizinischen Daten, Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation, Rezepte, Kostenvoranschläge, Rechnungen, Quittungen, Behandlungsverträge, Leistungsverträge, Arzt- und Krankenhausberichte und Informationen über meine abgeschlossene oder noch andauernde Behandlung an folgende Personen oder Institutionen übermittelt werden:",
+    );
+    match context
+        .extra_release_recipients
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
     {
-        layout.text_block(
-            translated_label(&context.language, "quote_heading"),
-            14.0,
-            true,
-            0.0,
-            TreatmentPlanPdfColor::Body,
-            2.0,
-            3.0,
-        );
-        for line in [
-            context.quote_number.as_ref().map(|value| {
-                format!(
-                    "{}: {}",
-                    translated_label(&context.language, "quote_number"),
-                    value
-                )
-            }),
-            context.quote_valid_until.map(|value| {
-                format!(
-                    "{}: {}",
-                    translated_label(&context.language, "quote_valid_until"),
-                    value.format("%d.%m.%Y")
-                )
-            }),
-            context.quote_total_net.as_ref().map(|value| {
-                format!(
-                    "{}: {}",
-                    translated_label(&context.language, "total_net"),
-                    value
-                )
-            }),
-            context.quote_total_vat.as_ref().map(|value| {
-                format!(
-                    "{}: {}",
-                    translated_label(&context.language, "total_vat"),
-                    value
-                )
-            }),
-            context.quote_total_gross.as_ref().map(|value| {
-                format!(
-                    "{}: {}",
-                    translated_label(&context.language, "total_gross"),
-                    value
-                )
-            }),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            layout.text_block(
-                &line,
-                10.5,
-                false,
-                4.0,
-                TreatmentPlanPdfColor::Muted,
-                0.0,
-                1.0,
-            );
-        }
-        if let Some(notes) = context
-            .quote_notes
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            layout.text_block(
-                notes,
-                10.5,
-                false,
-                4.0,
-                TreatmentPlanPdfColor::Body,
-                0.0,
-                2.0,
-            );
-        }
-        if context.line_items.is_empty() {
-            layout.text_block(
-                translated_label(&context.language, "no_services"),
-                10.5,
-                false,
-                4.0,
-                TreatmentPlanPdfColor::Muted,
-                0.0,
-                2.0,
-            );
-        } else {
-            layout.text_block(
-                translated_label(&context.language, "services_heading"),
-                12.0,
-                true,
-                0.0,
-                TreatmentPlanPdfColor::Primary,
-                2.0,
-                2.0,
-            );
-            for item in &context.line_items {
+        Some(recipients) => {
+            for line in recipients.lines().filter(|l| !l.trim().is_empty()) {
                 layout.text_block(
-                    &item.description,
+                    line.trim(),
                     11.0,
-                    true,
-                    4.0,
+                    false,
+                    12.0,
                     TreatmentPlanPdfColor::Body,
                     0.0,
                     1.0,
                 );
-                let detail_line = [
-                    Some(format!(
-                        "{}: {}",
-                        translated_label(&context.language, "service_quantity"),
-                        item.quantity
-                    )),
-                    (!item.unit_price.trim().is_empty()).then(|| {
-                        format!(
-                            "{}: {}",
-                            translated_label(&context.language, "service_unit_price"),
-                            item.unit_price
-                        )
-                    }),
-                    (!item.line_gross.trim().is_empty()).then(|| {
-                        format!(
-                            "{}: {}",
-                            translated_label(&context.language, "service_total"),
-                            item.line_gross
-                        )
-                    }),
-                    item.vat_rate.as_ref().map(|value| {
-                        format!(
-                            "{}: {}%",
-                            translated_label(&context.language, "total_vat"),
-                            value
-                        )
-                    }),
-                ]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-                .join(" · ");
-                if !detail_line.is_empty() {
-                    layout.text_block(
-                        &detail_line,
-                        10.0,
-                        false,
-                        10.0,
-                        TreatmentPlanPdfColor::Muted,
-                        0.0,
-                        1.0,
-                    );
-                }
-                if let Some(notes) = item
-                    .notes
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                {
-                    layout.text_block(
-                        notes,
-                        10.0,
-                        false,
-                        10.0,
-                        TreatmentPlanPdfColor::Body,
-                        0.0,
-                        1.0,
-                    );
-                }
             }
         }
+        None => {
+            layout.text_block(
+                &fc_underscores(70),
+                11.0,
+                false,
+                12.0,
+                TreatmentPlanPdfColor::Body,
+                0.0,
+                1.0,
+            );
+        }
+    }
+    layout.spacer(1.5);
+    fc_checkbox(
+        &mut layout,
+        "dass meine personenbezogenen und medizinischen Daten, Personalausweiskopien, Reisepasskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation, Kostenvoranschläge, Rechnungen und Quittungen, Behandlungsverträge, Leistungsverträge, Arzt- und Krankenhausberichte über meine abgeschlossene oder noch andauernde Behandlung per folgende Kommunikationsmedien eingeholt und/oder übermittelt werden:",
+    );
+    for medium in [
+        "☐  E-mail",
+        "☐  Threema-Messenger",
+        "☐  WhatsApp-Messenger",
+        "☐  Telegram-Messenger",
+    ] {
+        layout.text_block(
+            medium,
+            11.0,
+            false,
+            12.0,
+            TreatmentPlanPdfColor::Body,
+            0.0,
+            1.0,
+        );
+    }
+    layout.spacer(1.5);
+    fc_body(
+        &mut layout,
+        "Ich bin mir der möglichen Risiken bei der Übermittlung sensibler Daten per E-mail, WhatsApp-, Telegram- oder Threema-Messenger bewusst.",
+    );
+    fc_body(&mut layout, "Mir ist bekannt,");
+    fc_body(
+        &mut layout,
+        "dass meine personenbezogenen und medizinischen Daten von Salesforce in den Vereinigten Staaten sowie von den verbundenen Unternehmen und Drittparteien in anderen Ländern erhoben, an Salesforce übermittelt und von Salesforce gespeichert werden können. Meine personenbezogenen und medizinischen Daten können daher außerhalb Deutschlands und an Orten verarbeitet werden, die möglicherweise nicht denselben Standard an Datenschutz bieten.",
+    );
+    fc_body(
+        &mut layout,
+        "Die Einwilligung in die Verarbeitung meiner Daten ist freiwillig und kann jederzeit ohne Angaben von Gründen schriftlich widerrufen werden, was keine Auswirkungen auf die Rechtmäßigkeit der bisherigen Verarbeitung hat.",
+    );
+    fc_body(
+        &mut layout,
+        "Die Verarbeitung von personenbezogenen und Gesundheitsdaten bleibt bis zum Zeitpunkt des Widerrufs oder solange gesetzliche Aufbewahrungsfristen bestehen, rechtmäßig.",
+    );
+    fc_body(
+        &mut layout,
+        "Die Aufklärung gemäß EU-Datenschutz-Grundverordnung (DS-GVO) ist erfolgt. Ich wurde darüber aufgeklärt, dass ich gemäß der DS-GVO ein Recht auf Auskunft, Berichtigung, Löschung oder Einschränkung der Verarbeitung meiner personenbezogenen Daten habe. Diese Rechte kann ich ebenfalls jederzeit geltend machen.",
+    );
+    fc_consent_signature_line(&mut layout, context);
+
+    // ======================================================================
+    // Anlage 2 — Schweigepflichtentbindung
+    // ======================================================================
+    layout.spacer(6.0);
+    layout.text_block(
+        "Anlage 2",
+        15.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        1.0,
+    );
+    layout.text_block(
+        "Schweigepflichtentbindung",
+        13.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        3.0,
+    );
+    fc_patient_identity_block(&mut layout, context);
+    fc_body(
+        &mut layout,
+        "bin mir bewusst, dass ärztliche und medizinische Dokumentation, Arztberichte, Rezepte Kostenvoranschläge, Rechnungen und Quittungen Informationen im Sinne von § 203 StGB enthalten können, die insbesondere Rückschlüsse auf meine Diagnosen, medizinischen Untersuchungen, medizinischen Zustände sowie geplante, abgeschlossene oder noch andauernde Behandlungen zulassen oder solche Informationen enthalten können.",
+    );
+    fc_body(
+        &mut layout,
+        "Daher entbinde ich alle meine behandelnden Ärzte und medizinischen Einrichtungen von ihrer Schweigepflicht gegenüber Herrn Heorhii Hudiiev, geb. am 12.12.1994, Albert-Schweitzer-Straße 56, 81735 München, Deutschland und von ihm beauftragte Mitarbeiter.",
+    );
+    fc_body(
+        &mut layout,
+        "Mir ist bekannt, dass ich diese Erklärung über die Entbindung von der Schweigepflicht jederzeit mit Wirkung für die Zukunft widerrufen kann.",
+    );
+    fc_consent_signature_line(&mut layout, context);
+
+    // ======================================================================
+    // Anlage 3 — Informationsblatt zum Datenschutz
+    // ======================================================================
+    layout.spacer(6.0);
+    layout.text_block(
+        "Anlage 3",
+        15.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        1.0,
+    );
+    layout.text_block(
+        "Informationsblatt zum Datenschutz",
+        13.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        3.0,
+    );
+    fc_body(
+        &mut layout,
+        "Im Rahmen der Vermittlung von Gesundheitsdienstleistungen werden personenbezogene Daten sowohl des Auftraggebers als auch durch den vorliegenden Vertrag begünstigte Dritte, durch mich, Heorhii Hudiiev – Agentur für Patientenbetreuung – Agentur für Patientenbetreuung, verarbeitet. Dabei setze ich die Anforderungen der Datenschutzgesetze (insbesondere DS-GVO und BDSG) um. Hierzu ergreifen wir technische und organisatorische Maßnahmen entsprechend den aktuellsten Standards, um Ihre Daten zu schützen. Dieses Informationsblatt beschreibt die Verarbeitung personenbezogener Daten im Rahmen der allgemeinen geschäftlichen Tätigkeit und in der Vermittlungstätigkeit sowie die Rechte der durch die Verarbeitung betroffenen Personen.",
+    );
+    fc_subhead(&mut layout, "Name des Verantwortlichen");
+    fc_body(
+        &mut layout,
+        "Verantwortlich für die Verarbeitung Ihrer Daten ist Heorhii Hudiiev, geb. am 12.12.1994, Albert-Schweitzer-Straße 56, 81735 München, Deutschland",
+    );
+    fc_subhead(&mut layout, "Kontaktdaten des Datenschutzbeauftragten");
+    fc_body(
+        &mut layout,
+        "Postalisch können Sie unseren Datenschutzbeauftragten unter der oben genannten Adresse erreichen („Vertraulich, zu Händen des Datenschutzbeauftragten“).",
+    );
+    fc_body(
+        &mut layout,
+        "Per E-Mail erreichen Sie den Datenschutzbeauftragten unter datenschutz@gmed-health.com.",
+    );
+    fc_subhead(
+        &mut layout,
+        "Kategorien der verarbeiteten personenbezogenen Daten",
+    );
+    fc_body(
+        &mut layout,
+        "„Personenbezogene Daten“ im Sinne dieses Schreibens sind alle Informationen, welche sich, direkt oder indirekt, auf eine Einzelperson beziehen (Art. 4 Nr. 1 DS-GVO).",
+    );
+    fc_body(
+        &mut layout,
+        "Im Rahmen unserer allgemeinen Geschäftstätigkeit und bei den Vermittlungsmaßnahmen verarbeiten wir üblicherweise folgende Daten:",
+    );
+    fc_bullet(
+        &mut layout,
+        "Persönliche Daten: Name, Kontaktdaten (E-Mail, Handynummer, Anschrift, Geburtsdatum)",
+    );
+    fc_bullet(
+        &mut layout,
+        "Gesundheitsdaten und behandlungsspezifische Daten: Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation, Rezepte",
+    );
+    fc_bullet(&mut layout, "Zahlungsdaten: IBAN, BIC");
+    fc_subhead(
+        &mut layout,
+        "Zweckbestimmung und Rechtsgründe der Datenerhebung, -verarbeitung oder -nutzung",
+    );
+    fc_body(
+        &mut layout,
+        "Wir verarbeiten personenbezogene Daten einerseits im Rahmen unserer allgemeinen Geschäftstätigkeit, andererseits im Rahmen der Vermittlungs- und Koordinationstätigkeit, sowie im Kontakt zu den vermittelten Ärzten, Therapeuten und sonstigen Dritten, die an der vermittelten medizinischen Behandlung und Betreuung beteiligt sind.",
+    );
+    fc_subhead(
+        &mut layout,
+        "Erfüllung vertraglicher Pflichten (Art. 6 Abs. 1 S. 1 lit. b DS-GVO)",
+    );
+    fc_body(
+        &mut layout,
+        "Wir verarbeiten personenbezogene Daten zur Durchführung oder Anbahnung von Verträgen, deren Vertragspartei der Betroffene ist. Art und Umfang der Verarbeitung ergeben sich in diesem Falle aus dem jeweiligen Vertrag.",
+    );
+    fc_subhead(
+        &mut layout,
+        "Wahrung berechtigter Interessen (Art. 6 Abs. 1 S. 1 lit. f DS-GVO)",
+    );
+    fc_body(
+        &mut layout,
+        "Wir verarbeiten im Rahmen unseres allgemeinen Geschäftsbetriebes und unserer Vermittlungs- und Koordinationstätigkeit personenbezogene Daten auf Grundlage einer Interessenabwägung, sofern schutzwürdige entgegenstehende Interessen der betroffenen Person nicht überwiegen.",
+    );
+    fc_body(
+        &mut layout,
+        "Die zu Grunde liegenden berechtigten Interessen sind dabei insbesondere die Aufrechterhaltung des Geschäftsbetriebes sowie die Erbringung der vertraglich vereinbarten Leistung gegenüber unseren Auftraggebern, die unsere Leistungen in Anspruch nehmen. Dabei verarbeiten wir die personenbezogenen Daten nur soweit, wie dies für die Erbringung unserer Leistung erforderlich ist.",
+    );
+    fc_subhead(
+        &mut layout,
+        "Übersenden interessanter Informationen und Werbung (Art. 6 Abs. 1 S. 1 lit. f DS-GVO)",
+    );
+    fc_body(
+        &mut layout,
+        "Wir informieren unsere Auftraggeber gerne per E-Mail oder Post über aus unserer Sicht interessante Veranstaltungen, Ereignisse oder Neuigkeiten. Wir möchten Ihre Kontaktdaten auch für diesen Zweck verwenden. Sollte dies von Ihnen nicht gewünscht sein, können sie dieser Verwendung jederzeit widersprechen. Sie können diesen Widerspruch per E-Mail oder Post an Ihren Ansprechpartner senden, oder sich an unseren Datenschutzbeauftragten unter datenschutz@gmed-health.com wenden.",
+    );
+    fc_body(
+        &mut layout,
+        "Selbstverständlich können Sie Ihren Widerspruch zur Zusendung dieser Informationen auch bereits als Anlage an den Rahmenvertrag sowie Einzelauftrag erklären.",
+    );
+    fc_body(
+        &mut layout,
+        "Sofern keine der Rechtsgrundlagen nach a. bis c. vorliegt, holen wir für die Durchführung einer Verarbeitung eine Einwilligung des Betroffenen ein, den wir über die geplante Verarbeitung umfassend informieren.",
+    );
+    fc_subhead(
+        &mut layout,
+        "Empfänger oder Kategorien von Empfängern, denen Ihre Daten mitgeteilt werden können",
+    );
+    fc_subhead(&mut layout, "Technische Dienstleistungen");
+    fc_body(
+        &mut layout,
+        "Für einzelne technische Aufgaben sind wir gezwungen, die Unterstützung von Spezialisten in Anspruch zu nehmen, sodass nicht ausgeschlossen werden kann, dass Ihre Daten im Rahmen von Wartungs- und Reparaturarbeiten, sowie Dienstleistungen zur Sicherstellung der Richtigkeit, Sicherheit und Verfügbarkeit von Daten, auch an Subunternehmer weitergegeben werden. Hierbei sorgen wir stets durch entsprechende vertragliche Regelungen und sorgfältige Auswahl der Dienstleister dafür, dass unsere hohen Sicherheitsstandards auch bei den Dienstleistern umgesetzt sind.",
+    );
+    fc_subhead(&mut layout, "Dauer der Datenspeicherung");
+    fc_body(
+        &mut layout,
+        "Wir speichern personenbezogene Daten so lange, wie wir sie für die Durchführung der jeweiligen Aufgabe benötigen. Soweit die Daten gesetzlichen Aufbewahrungspflichten unterliegen, speichern wir sie für die Dauer der Aufbewahrungsfrist. Darüber hinaus speichern wir personenbezogene Daten auch dann, wenn ein weiteres berechtigtes Interesse nach Art. 6 Abs. 1 S. 1 lit. f DS-GVO vorliegt.",
+    );
+    fc_body(
+        &mut layout,
+        "Soweit personenbezogene Daten mehreren Aufbewahrungsfristen unterliegen, ist die jeweils längste Frist maßgeblich.",
+    );
+    fc_subhead(&mut layout, "Betroffenenrechte");
+    fc_body(
+        &mut layout,
+        "Bei Fragen, Beschwerden und Anregungen zum Datenschutz dürfen Sie sich gerne jederzeit an den Datenschutzbeauftragten wenden. Sie erreichen ihn unter der E-Mail-Adresse datenschutz@gmed-health.com.",
+    );
+    fc_body(
+        &mut layout,
+        "Allen Betroffenen stehen von Gesetzes wegen Auskunftsrechte (z.B. zum Zweck der Verarbeitung, Empfängern der Daten, geltende Speicherfristen) zu. Daneben bestehen Rechte auf Berichtigung unrichtiger Daten, Löschung, Einschränkung der Verarbeitung und Datenübertragbarkeit, sowie Widerspruch (z.B. bei einer Verwendung für Marketingzwecke, oder bei überwiegenden entgegenstehenden Interessen).",
+    );
+    fc_body(
+        &mut layout,
+        "Erteilte Einwilligungen können jederzeit mit Wirkung für die Zukunft widerrufen werden, wobei der Widerruf ebenso einfach zu erklären ist wie die Einwilligung.",
+    );
+    fc_body(
+        &mut layout,
+        "Bevor Sie von Ihrem Beschwerderecht bei einer Datenschutzaufsichtsbehörde Gebrauch machen, möchten wir Sie bitten, zunächst noch einmal auf uns zuzukommen (beispielsweise über (E-Mail-Adresse oder durch Anschreiben an Ihren Ansprechpartner).",
+    );
+
+    // ======================================================================
+    // Anlage 4 — Vorlage Einzelauftrag / Vergütungsvereinbarung
+    // ======================================================================
+    layout.spacer(6.0);
+    layout.text_block(
+        "Anlage 4: Vorlage Einzelauftrag",
+        15.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        2.0,
+    );
+    let order_ordinal = context.order_sequence.max(1);
+    layout.text_block(
+        &format!(
+            "{}. EINZELAUFTRAG ZUM RAHMENDIENSTLEISTUNGSVERTRAG VOM {}",
+            order_ordinal, effective_date_str
+        ),
+        14.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        3.0,
+    );
+
+    fc_body(&mut layout, "zwischen");
+    layout.text_block(
+        &fc_patient_salutation_name(context),
+        11.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        0.5,
+    );
+    if let Some(address) = context
+        .patient_address
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        fc_body_tight(&mut layout, address);
+    }
+    if let Some(email) = context
+        .patient_email
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        fc_body_tight(&mut layout, &format!("Email: {email}"));
+    }
+    layout.text_block(
+        "– nachfolgend „Auftraggeber“ genannt –",
+        11.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Muted,
+        0.5,
+        2.0,
+    );
+    fc_body(&mut layout, "und");
+    layout.text_block(
+        &format!(
+            "{} – Agentur für Patientenbetreuung",
+            agency_person.to_uppercase()
+        ),
+        11.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        0.5,
+    );
+    if let Some(address) = context
+        .agency
+        .address
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        fc_body_tight(&mut layout, address);
+    }
+    layout.text_block(
+        "– nachfolgend „Auftragnehmer“ genannt –",
+        11.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Muted,
+        0.5,
+        3.0,
+    );
+
+    fc_paragraph_heading(&mut layout, "Präambel");
+    fc_body(
+        &mut layout,
+        &format!(
+            "Zwischen dem Auftraggeber und Auftragnehmer wurde am {} ein Rahmendienstleistungsvertrag (im Folgenden „Rahmendienstleistungsvertrag“ genannt) geschlossen.",
+            effective_date_str
+        ),
+    );
+    fc_body(
+        &mut layout,
+        "Die in diesem Rahmendienstleistungsvertrag vereinbarten Beratungs- und Dienstleistungen werden auf Basis von Einzelaufträgen durch den Auftragnehmer erbracht. Vor diesem Hintergrund vereinbaren die Vertragspartner folgenden Einzelauftrag:",
+    );
+
+    fc_paragraph_heading(&mut layout, "Leistungsumfang");
+    fc_body(
+        &mut layout,
+        "Im Zuge der vorliegenden Beauftragung sind durch den Auftragnehmer folgende Leistungen zu erbringen:",
+    );
+    if context.line_items.is_empty() {
+        for _ in 0..3 {
+            layout.text_block(
+                &format!("{};", fc_underscores(40)),
+                11.0,
+                false,
+                8.0,
+                TreatmentPlanPdfColor::Body,
+                0.0,
+                1.0,
+            );
+        }
+    } else {
+        for item in &context.line_items {
+            layout.text_block(
+                &format!("•  {}", item.description),
+                11.0,
+                false,
+                8.0,
+                TreatmentPlanPdfColor::Body,
+                0.0,
+                1.0,
+            );
+        }
     }
 
-    if !context.conditions.is_empty() {
+    fc_paragraph_heading(&mut layout, "Vergütungsvereinbarung");
+    fc_body(
+        &mut layout,
+        "Für diese Auftragserfüllung wird folgende Vergütung vereinbart:",
+    );
+    // Column header for the Leistungen / Honorar / Anmerkung layout.
+    layout.text_block(
+        "Leistungen   |   Honorar   |   Anmerkung",
+        11.0,
+        true,
+        4.0,
+        TreatmentPlanPdfColor::Primary,
+        1.0,
+        1.5,
+    );
+    if context.line_items.is_empty() {
         layout.text_block(
-            translated_label(&context.language, "contract_conditions_heading"),
-            13.0,
-            true,
-            0.0,
-            TreatmentPlanPdfColor::Body,
+            &format!(
+                "{}   |   {}   |   {}",
+                fc_underscores(18),
+                fc_underscores(12),
+                fc_underscores(18)
+            ),
+            11.0,
+            false,
             4.0,
-            2.0,
+            TreatmentPlanPdfColor::Body,
+            0.0,
+            1.0,
         );
-        for (key, value) in &context.conditions {
+    } else {
+        for item in &context.line_items {
+            let honorar = if item.unit_price.trim().is_empty() {
+                fc_underscores(12)
+            } else {
+                fmt_money_de(&item.unit_price)
+            };
+            let anmerkung = item
+                .notes
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(ToOwned::to_owned)
+                .unwrap_or_default();
+            let description = if item.description.trim().is_empty() {
+                fc_underscores(18)
+            } else {
+                item.description.trim().to_string()
+            };
             layout.text_block(
-                &format!("{key}: {value}"),
-                10.5,
+                &format!("{description}   |   {honorar}   |   {anmerkung}"),
+                11.0,
                 false,
                 4.0,
                 TreatmentPlanPdfColor::Body,
@@ -5164,57 +6000,108 @@ fn build_framework_contract_pdf(
         }
     }
 
-    if !context.text_blocks.is_empty()
-        || context
-            .closing_note
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .is_some()
+    layout.spacer(1.5);
+    if let Some(net) = context
+        .quote_total_net
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
     {
         layout.text_block(
-            translated_label(&context.language, "contract_terms_heading"),
-            13.0,
-            true,
-            0.0,
-            TreatmentPlanPdfColor::Body,
+            &format!("Nettowert: {net}"),
+            11.0,
+            false,
             4.0,
-            2.0,
+            TreatmentPlanPdfColor::Body,
+            0.0,
+            1.0,
         );
-        for block in &context.text_blocks {
-            layout.text_block(
-                &format!("- {block}"),
-                10.5,
-                false,
-                4.0,
-                TreatmentPlanPdfColor::Body,
-                0.0,
-                1.0,
-            );
-        }
-        if let Some(closing) = context
-            .closing_note
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            layout.text_block(
-                &format!("- {closing}"),
-                10.5,
-                false,
-                4.0,
-                TreatmentPlanPdfColor::Body,
-                0.0,
-                1.0,
-            );
-        }
+    }
+    if let Some(vat) = context
+        .quote_total_vat
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        layout.text_block(
+            &format!("MWSt.: {vat}"),
+            11.0,
+            false,
+            4.0,
+            TreatmentPlanPdfColor::Body,
+            0.0,
+            1.0,
+        );
+    }
+    if let Some(gross) = context
+        .quote_total_gross
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        layout.text_block(
+            &format!("Gesamtsumme: {gross}"),
+            11.0,
+            true,
+            4.0,
+            TreatmentPlanPdfColor::Body,
+            0.0,
+            1.0,
+        );
     }
 
-    let pages = layout.finish();
-    let mut save_warnings: Vec<PdfWarnMsg> = Vec::new();
-    Ok(document
-        .with_pages(pages)
-        .save(&PdfSaveOptions::default(), &mut save_warnings))
+    fc_paragraph_heading(&mut layout, "Fortgeltung");
+    fc_body(
+        &mut layout,
+        &format!(
+            "Im Übrigen gelten die Regelungen des Rahmendienstleistungsvertrag mit allen enthaltenden Regelungen und Bestandteilen, die Vergütungsvereinbarung vom {}, sowie das Informationsblatt zum Datenschutz, unverändert fort.",
+            effective_date_str
+        ),
+    );
+
+    fc_paragraph_heading(&mut layout, "Anwendbares Recht");
+    fc_body(
+        &mut layout,
+        "Auf diesen Vertrag ist ausschließlich das deutsche Recht anzuwenden.",
+    );
+    fc_paragraph_heading(&mut layout, "Erfüllungsort");
+    fc_body(
+        &mut layout,
+        "Erfüllungsort für sämtliche Leistungen ist München.",
+    );
+    fc_paragraph_heading(&mut layout, "Gerichtstand");
+    fc_body(
+        &mut layout,
+        "Ausschließlicher Gerichtstand für alle, sich aus dem Vertragsverhältnis ergebenden Streitigkeiten, ist München, Deutschland.",
+    );
+    fc_paragraph_heading(&mut layout, "Änderungen und Ergänzungen");
+    fc_body(
+        &mut layout,
+        "Änderungen und Ergänzungen dieses Vertrags bedürfen der Schriftform. Schriftform im Rahmen des Vertrags bedeutet, schriftlich gem. §126 BGB und Textform gem. §126 b BGB, sofern in dieser Vereinbarung nichts Abweichendes geregelt ist.",
+    );
+    fc_paragraph_heading(&mut layout, "Salvatorische Klausel");
+    fc_body(
+        &mut layout,
+        "Sollten einzelne Bestimmungen dieses Vertrages ganz oder teilweise unwirksam sein oder werden, so wird hierdurch die Wirksamkeit der übrigen Bestimmungen nicht berührt. Anstelle der unwirksamen Bestimmung gilt diejenige wirksame Bestimmung als vereinbart, die dem Sinn und Zweck der unwirksamen Bestimmung am nächsten kommt.",
+    );
+
+    layout.spacer(3.0);
+    admin_signature_block(
+        &mut layout,
+        context.sign_place.as_deref(),
+        context.sign_date,
+        &agency_person,
+        "Auftragnehmer",
+    );
+    admin_signature_block(
+        &mut layout,
+        context.sign_place.as_deref(),
+        context.sign_date,
+        &context.patient_name,
+        "Auftraggeber",
+    );
+
+    Ok(finalize_admin_pdf(document, layout))
 }
 
 fn visa_invitation_summary_lines(context: &GeneratedVisaInvitationContext) -> Vec<String> {
@@ -10113,6 +11000,37 @@ fn admin_signature_block(
     );
 }
 
+/// Party block lines for the contract letterhead, using the gendered
+/// salutation on the first line (e.g. "Herr Max Musterman") where the
+/// reference .docx shows one, otherwise the bare name. Mirrors
+/// `party_block_lines` for the remaining lines (birth date, address, contacts).
+fn single_order_party_lines(party: &DocPartyBlock) -> Vec<String> {
+    let mut lines = vec![party.name_with_salutation()];
+    if let Some(birth) = party.birth_date {
+        lines.push(format!("geb. am {}", birth.format("%d.%m.%Y")));
+    }
+    if let Some(address) = party.address_line() {
+        lines.push(address);
+    }
+    if let Some(email) = party
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        lines.push(format!("Email: {email}"));
+    }
+    if let Some(phone) = party
+        .phone
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        lines.push(format!("Tel.: {phone}"));
+    }
+    lines
+}
+
 fn build_single_order_pdf(context: &GeneratedSingleOrderContext) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
     let footer = format!(
@@ -10125,7 +11043,7 @@ fn build_single_order_pdf(context: &GeneratedSingleOrderContext) -> Result<Vec<u
     let title = context.title_override.clone().unwrap_or_else(|| {
         format!(
             "{}. {} VOM {} ZUM RAHMENDIENSTLEISTUNGSVERTRAG VOM {}",
-            1,
+            context.order_sequence,
             admin_doc_label(&context.language, "single_order_title").to_uppercase(),
             fmt_de_date(context.order_date),
             fmt_de_date(context.contract_date)
@@ -10153,7 +11071,7 @@ fn build_single_order_pdf(context: &GeneratedSingleOrderContext) -> Result<Vec<u
     }
 
     admin_block(&mut layout, "zwischen", 0.0, 1.0);
-    for line in party_block_lines(&context.party) {
+    for line in single_order_party_lines(&context.party) {
         admin_block(&mut layout, &line, 0.0, 0.5);
     }
     admin_block(
@@ -10170,6 +11088,12 @@ fn build_single_order_pdf(context: &GeneratedSingleOrderContext) -> Result<Vec<u
         &mut layout,
         "– nachfolgend „Auftragnehmer“ genannt –",
         0.5,
+        0.5,
+    );
+    admin_block(
+        &mut layout,
+        "– nachfolgend „Auftraggeber“ und „Auftragnehmer“ gemeinsam „Vertragsparteien“ genannt –",
+        0.5,
         4.0,
     );
 
@@ -10177,14 +11101,26 @@ fn build_single_order_pdf(context: &GeneratedSingleOrderContext) -> Result<Vec<u
     admin_block(
         &mut layout,
         &format!(
-            "Zwischen dem Auftraggeber und Auftragnehmer wurde am {} ein Rahmendienstleistungsvertrag geschlossen. Die darin vereinbarten Beratungs- und Dienstleistungen werden auf Basis von Einzelaufträgen erbracht. Vor diesem Hintergrund vereinbaren die Vertragspartner folgenden Einzelauftrag:",
+            "Zwischen dem Auftraggeber und Auftragnehmer wurde am {} ein Rahmendienstleistungsvertrag (im Folgenden „Rahmendienstleistungsvertrag“ genannt) geschlossen.",
             fmt_de_date(context.contract_date)
         ),
+        0.0,
+        1.0,
+    );
+    admin_block(
+        &mut layout,
+        "Die in diesem Rahmendienstleistungsvertrag vereinbarten Beratungs- und Dienstleistungen werden auf Basis von Einzelaufträgen durch den Auftragnehmer erbracht. Vor diesem Hintergrund vereinbaren die Vertragspartner folgenden Einzelauftrag:",
         0.0,
         2.0,
     );
 
     admin_heading(&mut layout, "§ 1 Leistungsumfang");
+    admin_block(
+        &mut layout,
+        "Im Zuge der vorliegenden Beauftragung sind durch den Auftragnehmer folgende Leistungen zu erbringen:",
+        0.0,
+        1.0,
+    );
     let specialties = context
         .specialties
         .as_deref()
@@ -10199,19 +11135,37 @@ fn build_single_order_pdf(context: &GeneratedSingleOrderContext) -> Result<Vec<u
         ),
         _ => "im vereinbarten Zeitraum".to_string(),
     };
+    let examination_purpose = context
+        .examination_purpose
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("ausführliche medizinische Untersuchung");
+    let treatment_purpose = context
+        .treatment_purpose
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("eine medizinische Behandlung");
     for item in [
         format!(
-            "Individuelle Beratung und Informationsvermittlung zu einer medizinischen Untersuchung bei Fachärzten für {specialties} {period} in München."
+            "Individuelle Beratung und Informationsvermittlung in Bezug auf eine Möglichkeit, eine medizinische Untersuchung bei den Fachärzten für {specialties} {period} in München durchzuführen."
         ),
         format!(
-            "Herstellung von Kontakten und Terminvereinbarungen {period} bei Fachärzten für {specialties} sowie ggf. bei weiteren Ärzten und medizinischen Dienstleistern."
+            "Herstellung von Kontakten und Terminvereinbarungen {period} bei Fachärzten für {specialties} mit dem Zweck, sich einer {examination_purpose} zu unterziehen und ggf. {treatment_purpose} bei oben genannten Fachärzten. Bei Bedarf, auch bei weiteren Ärzten und medizinischen Dienstleistern."
         ),
-        "Administrative Unterstützung bei der Zusammenstellung und Übermittlung medizinischer Unterlagen zwischen dem Auftraggeber und den behandelnden Ärzten.".to_string(),
-        "Koordination und Gewährleistung einer interdisziplinären Zusammenarbeit zwischen den genannten Fachärzten und medizinischen Institutionen.".to_string(),
-        "Überwachung der Abrechnungsrichtigkeit; bei Bedarf Kostenübernahmen und Zahlungsabwicklung bei den medizinischen Anbietern.".to_string(),
-        "Kalkulation und Planung voraussichtlicher Behandlungskosten und Weiterleitung dieser Informationen an die zahlungspflichtigen Dritten.".to_string(),
-        "Professionelle sprachliche Unterstützung und Bereitstellung von Dolmetschern für den reibungslosen Informationsaustausch.".to_string(),
-        "Bei ausdrücklichem Wunsch: schriftliche Übersetzung ausgewählter Arztbriefe, Befunde und anderer Unterlagen.".to_string(),
+        "Administrative Unterstützung bei der Zusammenstellung und Übermittlung medizinischer Unterlagen zwischen dem Auftraggeber und behandelnden Ärzten, sowie bei Bedarf auch anderen weiterbehandelnden Ärzten und medizinischen Dienstleistern.".to_string(),
+        "Koordination und Gewährleistung einer interdisziplinären Zusammenarbeit zwischen den oben genannten Fachärzten und ggf. bei anderen weiterbehandelnden Ärzten und medizinischen Institutionen.".to_string(),
+        "Überwachung der Abrechnungsrichtigkeit.".to_string(),
+        format!(
+            "Bei Bedarf: Kostenübernahmen und Zahlungsabwicklung bei Fachärzten für {specialties}, bei Bedarf, auch bei weiterbehandelnden Ärzten und anderen medizinischen Anbietern."
+        ),
+        "Kalkulation und Planung von voraussichtlichen Behandlungskosten, Anfrage von Kostenvoranschlägen bei den medizinischen Leistungserbringern und Weiterleitung von diesen Informationen an die zahlungspflichtigen Dritten.".to_string(),
+        "Optimierung der Prozesse, um Wartezeiten zu minimieren und den Untersuchungs- und Behandlungsablauf zeit- und kosteneffizient zu gestalten.".to_string(),
+        "Effizientes Ressourcenmanagement.".to_string(),
+        "Professionelle sprachliche Unterstützung zur Überwindung von Sprachbarrieren zwischen dem Auftraggeber und medizinischen Leistungsanbietern.".to_string(),
+        "Bereitstellung von Dolmetschern für den reibungslosen Informationsaustausch zwischen dem Auftraggeber und medizinischem Fachpersonal.".to_string(),
+        "Bei Bedarf und einem ausdrücklichen Wunsch: schriftliche Übersetzung von vom Auftraggeber ausgewählten Arztbriefen, Befunden und anderen Unterlagen.".to_string(),
         "Koordination von Nachsorgeterminen und Rehabilitationsmaßnahmen.".to_string(),
     ] {
         layout.text_block(
@@ -10227,7 +11181,13 @@ fn build_single_order_pdf(context: &GeneratedSingleOrderContext) -> Result<Vec<u
 
     admin_heading(
         &mut layout,
-        "§ 2 Vergütung und Kostenübernahme durch Dritte",
+        "§ 2 Vergütungsvereinbarung, Kostenübernahme durch Dritte und aufschiebende Bedingung für die Wirksamkeit des Einzelauftrags",
+    );
+    admin_block(
+        &mut layout,
+        "Für diese Auftragserfüllung wird folgendes vereinbart:",
+        0.0,
+        1.0,
     );
     if let Some(payer) = context.payer.as_ref() {
         let payer_birth = payer
@@ -10237,8 +11197,9 @@ fn build_single_order_pdf(context: &GeneratedSingleOrderContext) -> Result<Vec<u
         admin_block(
             &mut layout,
             &format!(
-                "Die im Rahmen dieses Einzelauftrags anfallenden Kosten werden nicht vom Auftraggeber, sondern vollständig von einer dritten Person – {}{} – (nachfolgend „Kostenübernehmer“) übernommen. Der Kostenübernehmer verpflichtet sich, sämtliche aus diesem Einzelauftrag entstehenden Zahlungsverpflichtungen vollständig zu tragen.",
-                payer.name_with_title(),
+                "Die im Rahmen dieses Einzelauftrags gemäß Rahmendienstleistungsvertrag vom {} anfallenden Kosten werden nicht vom Auftraggeber, sondern vollständig von einer dritten Person – {}{} – (nachfolgend „Kostenübernehmer“) übernommen. Der Kostenübernehmer verpflichtet sich, sämtliche Zahlungsverpflichtungen, die aus diesem Einzelauftrag entstehen, vollständig zu tragen.",
+                fmt_de_date(context.contract_date),
+                payer.name_with_salutation(),
                 payer_birth
             ),
             0.0,
@@ -10246,7 +11207,22 @@ fn build_single_order_pdf(context: &GeneratedSingleOrderContext) -> Result<Vec<u
         );
         admin_block(
             &mut layout,
-            "Alle Vertragspflichten des Auftraggebers gemäß § 2 des Rahmendienstleistungsvertrages gehen, soweit sie diesen Einzelauftrag betreffen, mit Unterzeichnung der Kostenübernahmeerklärung durch den Kostenübernehmer auf diesen über.",
+            &format!(
+                "Alle Vertragspflichten des Auftraggebers gemäß § 2 des Rahmendienstleistungsvertrages vom {}, soweit sie diesen Einzelauftrag betreffen, gehen mit Unterzeichnung der Kostenübernahmeerklärung durch den Kostenübernehmer auf diesen über.",
+                fmt_de_date(context.contract_date)
+            ),
+            0.0,
+            1.5,
+        );
+        admin_block(
+            &mut layout,
+            "Dieser Einzelauftrag tritt erst dann in Kraft und entfaltet keine Rechtswirkung, solange dem Auftragnehmer keine schriftliche und rechtsverbindlich unterzeichnete Kostenübernahmeerklärung durch den benannten Kostenübernehmer vorliegt. Erst mit Zugang dieser Erklärung beim Auftragnehmer gilt der Einzelauftrag als wirksam zustande gekommen.",
+            0.0,
+            1.5,
+        );
+        admin_block(
+            &mut layout,
+            "Der Auftraggeber erklärt sich ausdrücklich damit einverstanden, dass der Auftragnehmer dem benannten Kostenübernehmer die für die Durchführung und Abrechnung des Einzelauftrags erforderlichen personenbezogenen Daten des Auftraggebers (insbesondere Name, Anschrift, Kontaktdaten sowie Informationen zur beauftragten Leistung) übermittelt. Die Datenweitergabe erfolgt ausschließlich zweckgebunden im Rahmen dieses Vertragsverhältnisses und auf Grundlage der Einwilligung des Auftraggebers gemäß Art. 6 Abs. 1 lit. a DSGVO.",
             0.0,
             2.0,
         );
@@ -10262,7 +11238,7 @@ fn build_single_order_pdf(context: &GeneratedSingleOrderContext) -> Result<Vec<u
     for (heading, body) in [
         (
             "§ 3 Fortgeltung",
-            "Im Übrigen gelten die Regelungen des Rahmendienstleistungsvertrages mit allen enthaltenen Bestandteilen unverändert fort.",
+            "Im Übrigen gelten die Regelungen des Rahmendienstleistungsvertrag mit allen enthaltenden Regelungen und Bestandteilen unverändert fort.",
         ),
         (
             "§ 4 Anwendbares Recht",
@@ -10273,17 +11249,33 @@ fn build_single_order_pdf(context: &GeneratedSingleOrderContext) -> Result<Vec<u
             "Erfüllungsort für sämtliche Leistungen ist München.",
         ),
         (
-            "§ 6 Gerichtsstand",
-            "Ausschließlicher Gerichtsstand für alle aus dem Vertragsverhältnis entstehenden Streitigkeiten ist München, Deutschland.",
+            "§ 6 Gerichtstand",
+            "Ausschließlicher Gerichtstand für alle, sich aus dem Vertragsverhältnis ergebenden Streitigkeiten, ist München, Deutschland.",
         ),
         (
-            "§ 7 Salvatorische Klausel",
-            "Sollten einzelne Bestimmungen dieses Vertrages unwirksam sein oder werden, bleibt die Wirksamkeit der übrigen Bestimmungen unberührt.",
+            "§ 7 Änderungen und Ergänzungen",
+            "Die Parteien vereinbaren, dass das Schriftformerfordernis für diesen Einzelauftrag als gewahrt gilt, sofern beide Parteien diesen mittels eines anerkannten elektronischen Signaturtools, wie beispielsweise DocuSign, unterzeichnen. Kurzfristige Änderungen oder Ergänzungen des festgelegten Leistungsumfangs dieses Einzelauftrags können hingegen per E-Mail vereinbart werden.",
+        ),
+        (
+            "§ 8 Salvatorische Klausel",
+            "Sollten einzelne Bestimmungen dieses Vertrages ganz oder teilweise unwirksam sein oder werden, so wird hierdurch die Wirksamkeit der übrigen Bestimmungen nicht berührt. Anstelle der unwirksamen Bestimmung gilt diejenige wirksame Bestimmung als vereinbart, die dem Sinn und Zweck der unwirksamen Bestimmung am nächsten kommt.",
         ),
     ] {
         admin_heading(&mut layout, heading);
         admin_block(&mut layout, body, 0.0, 1.0);
     }
+
+    admin_heading(
+        &mut layout,
+        "§ 9 Bestandteile des Einzelauftrages und Rangfolge",
+    );
+    let order_components = context
+        .order_components
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("Keine");
+    admin_block(&mut layout, order_components, 0.0, 2.0);
 
     admin_signature_block(
         &mut layout,
@@ -10294,9 +11286,9 @@ fn build_single_order_pdf(context: &GeneratedSingleOrderContext) -> Result<Vec<u
     );
     admin_signature_block(
         &mut layout,
-        None,
+        context.sign_place.as_deref(),
         context.sign_date,
-        &context.party.name,
+        &context.party.name_with_salutation(),
         "Auftraggeber",
     );
 
@@ -10333,6 +11325,65 @@ fn cost_estimate_summary_lines(context: &GeneratedCostEstimateContext) -> Vec<St
     lines
 }
 
+/// German accusative rendering of the Auftraggeber for the intro sentence
+/// ("zwischen … und dem Auftraggeber – Herrn Max Musterman –"). Declines the
+/// gendered salutation ("Herr" -> "Herrn", "Frau" -> "Frau") and prefixes it to
+/// the plain name. Falls back to the bare name when no salutation is known.
+fn cost_coverage_party_accusative(party: &DocPartyBlock) -> String {
+    match party.clean_salutation() {
+        Some(salutation) => {
+            let declined = match salutation {
+                "Herr" => "Herrn",
+                other => other,
+            };
+            format!("{declined} {}", party.name).trim().to_string()
+        }
+        None => party.name.clone(),
+    }
+}
+
+/// Letterhead/party lines for the Kostenübernehmer using the gendered
+/// salutation form of the name (reference renders "Justus Geldgeber" plainly
+/// when no salutation is present). Mirrors `party_block_lines` otherwise.
+fn cost_coverage_payer_lines(party: &DocPartyBlock) -> Vec<String> {
+    let mut lines = vec![party.name_with_salutation()];
+    if let Some(birth) = party.birth_date {
+        lines.push(format!("geb. am {}", birth.format("%d.%m.%Y")));
+    }
+    if let Some(address) = party.address_line() {
+        lines.push(address);
+    }
+    if let Some(email) = party
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        lines.push(format!("Email: {email}"));
+    }
+    if let Some(phone) = party
+        .phone
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        lines.push(format!("Tel.: {phone}"));
+    }
+    lines
+}
+
+/// Format a raw line-item monetary cell. Numeric values ("999.00"/"999,00") are
+/// normalised to "999,00 EUR" via `fmt_money_de`; operator free-text such as
+/// "100,00 EUR/1 Stunde" is preserved verbatim.
+fn cost_coverage_money_cell(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(fmt_money_de(trimmed))
+    }
+}
+
 fn build_cost_coverage_pdf(
     context: &GeneratedCostCoverageContext,
 ) -> Result<Vec<u8>, &'static str> {
@@ -10343,6 +11394,9 @@ fn build_cost_coverage_pdf(
         context.generated_at.format("%d.%m.%Y %H:%M UTC")
     );
     let mut layout = TreatmentPlanPdfLayout::new(footer, regular, bold);
+
+    // Ordinal used throughout the intro / headings ("1." in the reference).
+    let ordinal = context.order_sequence.max(1);
 
     let title = context
         .title_override
@@ -10360,9 +11414,9 @@ fn build_cost_coverage_pdf(
     admin_block(
         &mut layout,
         &format!(
-            "bezüglich des 1. Einzelauftrags vom {} zwischen dem Auftragnehmer und dem Auftraggeber – {} – im Rahmen des bestehenden Rahmendienstleistungsvertrags vom {}.",
+            "bezüglich des {ordinal}. Einzelauftrags vom {} zwischen dem Auftragnehmer und dem Auftraggeber – {} – im Rahmen des bestehenden Rahmendienstleistungsvertrags vom {}.",
             fmt_de_date(context.order_date),
-            context.patient.name_with_title(),
+            cost_coverage_party_accusative(&context.patient),
             fmt_de_date(context.contract_date)
         ),
         0.0,
@@ -10370,7 +11424,7 @@ fn build_cost_coverage_pdf(
     );
 
     admin_block(&mut layout, "zwischen", 0.0, 1.0);
-    for line in party_block_lines(&context.payer) {
+    for line in cost_coverage_payer_lines(&context.payer) {
         admin_block(&mut layout, &line, 0.0, 0.5);
     }
     admin_block(
@@ -10399,6 +11453,12 @@ fn build_cost_coverage_pdf(
     );
 
     admin_heading(&mut layout, "2. Vergütungsvereinbarung");
+    admin_block(
+        &mut layout,
+        "Für diese Auftragserfüllung wird folgende Vergütung vereinbart:",
+        0.0,
+        1.5,
+    );
     if context.line_items.is_empty() {
         admin_block(
             &mut layout,
@@ -10407,32 +11467,76 @@ fn build_cost_coverage_pdf(
             1.0,
         );
     } else {
+        // Column header row (Leistungen / Honorar* / Anmerkung).
+        layout.text_block(
+            "Leistungen — Honorar* — Anmerkung",
+            10.0,
+            true,
+            0.0,
+            TreatmentPlanPdfColor::Muted,
+            0.0,
+            1.0,
+        );
         for item in &context.line_items {
-            let mut parts = vec![item.description.clone()];
-            if !item.unit_price.trim().is_empty() {
-                parts.push(format!("Honorar: {}", item.unit_price));
+            // Description (Leistungen).
+            layout.text_block(
+                &format!("•  {}", item.description.trim()),
+                11.0,
+                true,
+                4.0,
+                TreatmentPlanPdfColor::Body,
+                0.5,
+                0.3,
+            );
+            // Honorar* — quantity (Aufwand) — Summe.
+            let mut figures: Vec<String> = Vec::new();
+            if let Some(honorar) = cost_coverage_money_cell(&item.unit_price) {
+                figures.push(format!("Honorar: {honorar}"));
             }
+            if let Some(quantity) = item
+                .quantity
+                .trim()
+                .is_empty()
+                .then_some(())
+                .map_or_else(|| Some(item.quantity.trim().to_string()), |_| None)
+            {
+                figures.push(format!("Aufwand: {quantity}"));
+            }
+            if let Some(summe) = cost_coverage_money_cell(&item.line_gross) {
+                figures.push(format!("Summe: {summe}"));
+            }
+            if !figures.is_empty() {
+                layout.text_block(
+                    &figures.join("   ·   "),
+                    11.0,
+                    false,
+                    8.0,
+                    TreatmentPlanPdfColor::Primary,
+                    0.0,
+                    0.3,
+                );
+            }
+            // Anmerkung.
             if let Some(note) = item
                 .notes
                 .as_deref()
                 .map(str::trim)
                 .filter(|v| !v.is_empty())
             {
-                parts.push(note.to_string());
+                layout.text_block(
+                    note,
+                    10.0,
+                    false,
+                    8.0,
+                    TreatmentPlanPdfColor::Muted,
+                    0.0,
+                    0.6,
+                );
             }
-            layout.text_block(
-                &format!("•  {}", parts.join(" — ")),
-                11.0,
-                false,
-                4.0,
-                TreatmentPlanPdfColor::Body,
-                0.0,
-                1.0,
-            );
         }
         admin_block(
             &mut layout,
-            "Alle angegebenen Preise zzgl. 19 % MwSt.",
+            "*Alle angegebenen Preise zzgl. MwSt. 19 %.",
             1.0,
             2.0,
         );
@@ -10460,8 +11564,11 @@ fn build_cost_coverage_pdf(
         admin_block(&mut layout, body, 0.0, 1.0);
     }
 
-    // Anlage: Kostenvoranschlag
-    admin_heading(&mut layout, "Anlage: Kostenvoranschlag");
+    // Anlage: Kostenvoranschlag zum {n}. Einzelauftrag
+    admin_heading(
+        &mut layout,
+        &format!("Anlage: Kostenvoranschlag zum {ordinal}. Einzelauftrag"),
+    );
     if let Some(quote) = context
         .quote_number
         .as_deref()
@@ -10475,27 +11582,63 @@ fn build_cost_coverage_pdf(
             0.5,
         );
     }
-    for (label_key, value) in [
-        ("total_net", context.total_net.as_deref()),
-        ("total_vat", context.total_vat.as_deref()),
-        ("total_gross", context.total_gross.as_deref()),
+    admin_block(
+        &mut layout,
+        &format!("Datum: {}", fmt_de_date(context.order_date)),
+        0.0,
+        0.5,
+    );
+    admin_block(
+        &mut layout,
+        &format!("Auftraggeber: {}", context.patient.name_with_salutation()),
+        0.0,
+        0.5,
+    );
+    if let Some(birth) = context.patient.birth_date {
+        admin_block(
+            &mut layout,
+            &format!(
+                "Geburtsdatum des Auftraggebers: {}",
+                birth.format("%d.%m.%Y")
+            ),
+            0.0,
+            0.5,
+        );
+    }
+    admin_block(
+        &mut layout,
+        &format!(
+            "Kostenträger/Kostenübernehmer: {}",
+            context.payer.name_with_salutation()
+        ),
+        0.0,
+        1.0,
+    );
+
+    // Totals — already German-formatted "2.698,00 EUR" in the context.
+    for (label, value) in [
+        ("Nettowert", context.total_net.as_deref()),
+        ("MWSt. 19%", context.total_vat.as_deref()),
+        ("Gesamtsumme", context.total_gross.as_deref()),
     ] {
         if let Some(value) = value.map(str::trim).filter(|v| !v.is_empty()) {
-            admin_block(
-                &mut layout,
-                &format!(
-                    "{}: {value}",
-                    translated_label(&context.language, label_key)
-                ),
+            let is_gross = label == "Gesamtsumme";
+            layout.text_block(
+                &format!("{label}: {value}"),
+                if is_gross { 12.0 } else { 11.0 },
+                is_gross,
+                0.0,
+                TreatmentPlanPdfColor::Body,
                 0.0,
                 0.5,
             );
         }
     }
+
     let bank_lines: Vec<(&str, Option<&str>)> = vec![
         ("Kontoinhaber", context.agency.bank_holder.as_deref()),
         ("Bank", context.agency.bank_name.as_deref()),
-        ("SWIFT/BIC", context.agency.bank_swift.as_deref()),
+        ("SWIFT-Code", context.agency.bank_swift.as_deref()),
         ("IBAN", context.agency.bank_iban.as_deref()),
     ];
     if bank_lines
@@ -10504,7 +11647,7 @@ fn build_cost_coverage_pdf(
     {
         admin_block(
             &mut layout,
-            "Die angefallenen Kosten sind nach Zugang der Rechnung binnen 14 Tagen auf folgendes Konto fällig:",
+            "Die in der Endabrechnung angegebenen, angefallenen Kosten für von uns erbrachte Leistungen und Auslagen sind nach Zugang der Rechnung binnen 14 Tagen auf das folgende Konto zur Zahlung fällig:",
             1.5,
             1.0,
         );
@@ -10530,20 +11673,93 @@ fn build_cost_coverage_pdf(
         "Kostenübernehmer",
     );
 
+    let _ = &context.order_number;
     Ok(finalize_admin_pdf(document, layout))
+}
+
+/// Format a single service line-item price for the cost estimate.
+///
+/// This is a RANGE estimate: operators enter free-text ranges such as
+/// "100,00 -1000,00 €" which must render verbatim. Only when the value parses
+/// as a single numeric amount (a quote fallback) do we normalise it via
+/// `fmt_money_de`. Empty input yields an underscore fill-in line.
+fn cost_estimate_price_text(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return "____________".to_string();
+    }
+    match parse_eur_amount(trimmed) {
+        Some(amount) => format_eur(amount),
+        None => trimmed.to_string(),
+    }
+}
+
+/// Two-line institutional footer block for the cost estimate, mirroring the
+/// reference .docx footer:
+///   "Agentur für Patientenbetreuung | HEORHII HUDIIEV | <address>"
+///   "Tel.: <phone> | E-mail: <email>"
+/// Built from `context.agency` (name/care_of, address, phone, email). Empty
+/// fields are simply omitted so the block stays clean.
+fn cost_estimate_footer_lines(agency: &AgencyContractSettings) -> Vec<String> {
+    let care_of = agency
+        .care_of
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    let address = agency
+        .address
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    let phone = agency
+        .phone
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    let email = agency
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+
+    let mut contact_parts: Vec<String> = vec![agency.name.trim().to_string()];
+    if let Some(care_of) = care_of {
+        contact_parts.push(care_of.to_uppercase());
+    }
+    if let Some(address) = address {
+        contact_parts.push(address.to_string());
+    }
+
+    let mut lines = vec![contact_parts.join(" | ")];
+
+    let mut contact_line_parts: Vec<String> = Vec::new();
+    if let Some(phone) = phone {
+        contact_line_parts.push(format!("Tel.: {phone}"));
+    }
+    if let Some(email) = email {
+        contact_line_parts.push(format!("E-mail: {email}"));
+    }
+    if !contact_line_parts.is_empty() {
+        lines.push(contact_line_parts.join(" | "));
+    }
+
+    lines
 }
 
 fn build_cost_estimate_pdf(
     context: &GeneratedCostEstimateContext,
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
-    let footer = format!(
-        "{} · {}",
-        context.auto_name,
-        context.generated_at.format("%d.%m.%Y %H:%M UTC")
-    );
-    let mut layout = TreatmentPlanPdfLayout::new(footer, regular, bold);
 
+    // Footer: render the agency institutional contact block (matching the
+    // reference footer) instead of the "{auto_name} · timestamp" metadata.
+    let footer_lines = cost_estimate_footer_lines(&context.agency);
+    // The per-page footer renders a single line (with " · Page N" appended), so
+    // collapse the institutional block into one line for it.
+    let page_footer = footer_lines.join(" · ");
+    let mut layout = TreatmentPlanPdfLayout::new(page_footer, regular, bold);
+
+    // German-only title.
     let title = context.title_override.clone().unwrap_or_else(|| {
         "Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen"
             .to_string()
@@ -10558,15 +11774,18 @@ fn build_cost_estimate_pdf(
         4.0,
     );
 
+    // Datum: estimate_date now falls back to the generated date upstream, so it
+    // is never a blank placeholder here.
     admin_block(
         &mut layout,
         &format!("Datum: {}", fmt_de_date(context.estimate_date)),
         0.0,
         0.5,
     );
+    // Patient line uses the gendered salutation ("Herr Max Musterman").
     admin_block(
         &mut layout,
-        &format!("Patient: {}", context.patient.name_with_title()),
+        &format!("Patient: {}", context.patient.name_with_salutation()),
         0.0,
         0.5,
     );
@@ -10579,7 +11798,26 @@ fn build_cost_estimate_pdf(
         );
     }
 
-    admin_heading(&mut layout, "Medizinische Leistungen");
+    // German-only column headers.
+    layout.text_block(
+        "Medizinische Leistungen",
+        12.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        2.0,
+        0.0,
+    );
+    layout.text_block(
+        "Unverbindliche Kostenschätzung",
+        11.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Muted,
+        0.0,
+        2.0,
+    );
+
     if context.line_items.is_empty() {
         admin_block(
             &mut layout,
@@ -10590,51 +11828,130 @@ fn build_cost_estimate_pdf(
     } else {
         for item in &context.line_items {
             admin_block(&mut layout, &item.description, 1.0, 0.5);
-            let price = item.line_gross.trim();
-            let price = if price.is_empty() {
-                item.unit_price.trim()
-            } else {
-                price
+            // Range estimate: prefer the operator's free-text line total, fall
+            // back to the unit price. Verbatim ranges are preserved; only single
+            // numeric quote-fallback values are normalised via fmt_money_de.
+            let raw_price = {
+                let line_gross = item.line_gross.trim();
+                if line_gross.is_empty() {
+                    item.unit_price.trim()
+                } else {
+                    line_gross
+                }
             };
-            if !price.is_empty() {
-                layout.text_block(
-                    price,
-                    11.0,
-                    true,
-                    4.0,
-                    TreatmentPlanPdfColor::Primary,
-                    0.0,
-                    1.0,
-                );
-            }
+            layout.text_block(
+                &cost_estimate_price_text(raw_price),
+                11.0,
+                true,
+                4.0,
+                TreatmentPlanPdfColor::Primary,
+                0.0,
+                1.0,
+            );
         }
     }
-    if let Some(total) = context
+
+    // German-only total line.
+    admin_block(
+        &mut layout,
+        "Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen \
+         (gesamt):",
+        2.0,
+        0.5,
+    );
+    let total_text = context
         .total_range
         .as_deref()
         .map(str::trim)
         .filter(|v| !v.is_empty())
-    {
+        .map(cost_estimate_price_text)
+        .unwrap_or_else(|| "____________".to_string());
+    layout.text_block(
+        &total_text,
+        12.0,
+        true,
+        4.0,
+        TreatmentPlanPdfColor::Primary,
+        0.0,
+        3.0,
+    );
+
+    // German-only legal notice.
+    admin_block(
+        &mut layout,
+        "Rechtliche Hinweise: Die Kosten für medizinische Diagnostik und/oder Behandlung können von \
+         angegebenen Preisen/Kosten abweichen und dienen ausschließlich Informationszwecken. \
+         Dementsprechend geben wir keine Gewährleistungen oder Zusicherungen hinsichtlich der \
+         Genauigkeit, Vollständigkeit oder Richtigkeit der hierin enthaltenen Informationen oder \
+         Meinungen ab. Wir übernehmen keine Haftung für unmittelbare oder mittelbare Schäden, die \
+         durch die Verteilung und/oder Verwendung dieses Dokuments verursacht und/oder mit der \
+         Verteilung und/oder Verwendung dieses Dokuments im Zusammenhang stehen. Die Aussagen \
+         entsprechen dem Stand zum Zeitpunkt der Erstellung des Dokuments und beruhen auf \
+         Medianpreisen für aufgeführte medizinische Leistungen aufgrund unserer Erfahrung. Sie \
+         können aufgrund künftiger Entwicklungen überholt sein, ohne dass das Dokument geändert \
+         wurde.",
+        2.0,
+        3.0,
+    );
+
+    // Institutional footer block rendered in the document body, matching the
+    // reference .docx footer (two lines, from context.agency).
+    for line in &footer_lines {
         layout.text_block(
-            &format!("Gesamt: {total}"),
-            12.0,
-            true,
+            line,
+            9.0,
+            false,
             0.0,
-            TreatmentPlanPdfColor::Body,
-            2.0,
-            3.0,
+            TreatmentPlanPdfColor::Muted,
+            0.0,
+            0.3,
         );
     }
 
-    admin_block(
-        &mut layout,
-        "Rechtliche Hinweise: Die Kosten für medizinische Diagnostik und/oder Behandlung können von den angegebenen Preisen abweichen und dienen ausschließlich Informationszwecken. Es werden keine Gewährleistungen hinsichtlich Genauigkeit, Vollständigkeit oder Richtigkeit übernommen. Die Angaben entsprechen dem Stand zum Zeitpunkt der Erstellung und können durch künftige Entwicklungen überholt sein.",
-        2.0,
-        2.0,
-    );
     let _ = &context.patient_pid;
 
     Ok(finalize_admin_pdf(document, layout))
+}
+
+/// German dative salutation for the heading address ("Herr" → "Herrn", "Frau" → "Frau").
+/// Falls back to an empty string (so the bare name is used) when no salutation is known.
+fn appointment_dative_salutation(party: &DocPartyBlock) -> &'static str {
+    match party.clean_salutation() {
+        Some(value) if value.eq_ignore_ascii_case("herr") => "Herrn",
+        Some(value) if value.eq_ignore_ascii_case("frau") => "Frau",
+        _ => "",
+    }
+}
+
+/// German nominative salutation for the running body sentence ("Herr"/"Frau").
+/// Falls back to an empty string when no salutation is known.
+fn appointment_nominative_salutation(party: &DocPartyBlock) -> &'static str {
+    match party.clean_salutation() {
+        Some(value) if value.eq_ignore_ascii_case("herr") => "Herr",
+        Some(value) if value.eq_ignore_ascii_case("frau") => "Frau",
+        _ => "",
+    }
+}
+
+/// Comma-joins the agency contact (responsible person + address) for the letterhead
+/// sender line, e.g. "Heorhii Hudiiev, Albert-Schweitzer-Str. 56, 81735 München".
+fn appointment_sender_line(agency: &AgencyContractSettings) -> Option<String> {
+    let care_of = agency
+        .care_of
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    let address = agency
+        .address
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    let parts: Vec<&str> = [care_of, address].into_iter().flatten().collect();
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(", "))
+    }
 }
 
 fn build_appointment_confirmation_pdf(
@@ -10648,28 +11965,73 @@ fn build_appointment_confirmation_pdf(
     );
     let mut layout = TreatmentPlanPdfLayout::new(footer, regular, bold);
 
-    if let Some(doc_id) = context
+    // --- Header meta table (Date / Pages / Doc.-ID / Originator / For / Project) ---
+    let meta_date = if context.sign_date.is_some() {
+        fmt_de_date(context.sign_date)
+    } else {
+        context.generated_at.format("%d.%m.%Y").to_string()
+    };
+    let meta_doc_id = context
         .doc_id
         .as_deref()
         .map(str::trim)
         .filter(|v| !v.is_empty())
-    {
+        .unwrap_or("____________")
+        .to_string();
+    let meta_originator = context
+        .agency
+        .care_of
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or(context.agency.name.as_str())
+        .to_string();
+    let meta_for = {
+        let name = context.patient.name.trim();
+        if name.is_empty() {
+            "____________".to_string()
+        } else {
+            name.to_string()
+        }
+    };
+    for (label, value) in [
+        ("Date:", meta_date.as_str()),
+        ("Pages:", "1"),
+        ("Doc.-ID:", meta_doc_id.as_str()),
+        ("Originator:", meta_originator.as_str()),
+        ("For:", meta_for.as_str()),
+        ("Project:", "TB-V2"),
+    ] {
         layout.text_block(
-            &format!("Doc.-ID: {doc_id}"),
+            &format!("{label} {value}"),
             9.0,
             false,
             0.0,
             TreatmentPlanPdfColor::Muted,
             0.0,
-            2.0,
+            0.6,
         );
     }
+    layout.spacer(2.5);
 
+    // --- Agency letterhead sender line + footer agency block ---
+    if let Some(sender) = appointment_sender_line(&context.agency) {
+        layout.text_block(
+            &sender,
+            9.0,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Muted,
+            0.0,
+            1.0,
+        );
+    }
     for line in agency_block_lines(&context.agency) {
         admin_block(&mut layout, &line, 0.0, 0.3);
     }
     layout.spacer(2.0);
 
+    // --- Recipient ---
     let recipient = context
         .recipient_block
         .as_deref()
@@ -10681,6 +12043,7 @@ fn build_appointment_confirmation_pdf(
     }
     layout.spacer(2.0);
 
+    // --- Place / date line ---
     let sign_place = context
         .sign_place
         .as_deref()
@@ -10694,17 +12057,21 @@ fn build_appointment_confirmation_pdf(
         3.0,
     );
 
-    let birth = context
-        .patient
-        .birth_date
-        .map(|value| format!(", geb. am {}", value.format("%d.%m.%Y")))
-        .unwrap_or_default();
+    // --- Heading: dative salutation + UPPERCASE "LAST, FIRST" ---
     let heading = context.title_override.clone().unwrap_or_else(|| {
-        format!(
-            "Terminbestätigung für {}{}",
-            context.patient.name_with_title(),
-            birth
-        )
+        let birth = context
+            .patient
+            .birth_date
+            .map(|value| format!(", geb. am {}", value.format("%d.%m.%Y")))
+            .unwrap_or_default();
+        let address = context.patient.name_last_comma_first().to_uppercase();
+        let salutation = appointment_dative_salutation(&context.patient);
+        let addressee = if salutation.is_empty() {
+            address
+        } else {
+            format!("{salutation} {address}")
+        };
+        format!("Terminbestätigung für {addressee}{birth}")
     });
     layout.text_block(
         &heading,
@@ -10717,6 +12084,12 @@ fn build_appointment_confirmation_pdf(
     );
     admin_block(&mut layout, "Sehr geehrte Damen und Herren,", 0.0, 1.5);
 
+    // --- Confirmation body sentence ---
+    let body_birth = context
+        .patient
+        .birth_date
+        .map(|value| format!(", geb. am {}", value.format("%d.%m.%Y")))
+        .unwrap_or_default();
     let passport = match (
         context
             .passport_number
@@ -10752,18 +12125,22 @@ fn build_appointment_confirmation_pdf(
             .collect::<Vec<_>>()
             .join(", ")
     };
+    let nominative = appointment_nominative_salutation(&context.patient);
+    let body_addressee = if nominative.is_empty() {
+        context.patient.name_last_comma_first()
+    } else {
+        format!("{nominative} {}", context.patient.name_last_comma_first())
+    };
     admin_block(
         &mut layout,
         &format!(
-            "hiermit bestätigen wir, dass {}{} sämtliche Termine für Diagnostik und Behandlung in {} hat.",
-            context.patient.name_with_title(),
-            passport,
-            clinics
+            "hiermit bestätigen wir, dass {body_addressee}{body_birth}{passport} sämtliche Termine für Diagnostik und Behandlung in {clinics} hat.",
         ),
         0.0,
         1.5,
     );
 
+    // --- Examination scheduling ---
     let first = context
         .first_examination
         .map(|value| value.format("%d.%m.%Y").to_string())
@@ -10795,23 +12172,39 @@ fn build_appointment_confirmation_pdf(
         0.0,
         1.5,
     );
-    if let Some(phones) = context
+
+    // --- Closing "Für Rückfragen" — ALWAYS rendered, fall back to agency phone. ---
+    let phones = context
         .contact_phones
         .as_deref()
         .map(str::trim)
         .filter(|v| !v.is_empty())
-    {
-        admin_block(
-            &mut layout,
-            &format!("Für Rückfragen stehen wir Ihnen gerne unter {phones} zur Verfügung."),
-            0.0,
-            2.0,
-        );
-    }
+        .or_else(|| {
+            context
+                .agency
+                .phone
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+        });
+    let closing = match phones {
+        Some(phones) => {
+            format!("Für Rückfragen stehen wir Ihnen gerne zur Verfügung unter {phones}.")
+        }
+        None => "Für Rückfragen stehen wir Ihnen gerne zur Verfügung.".to_string(),
+    };
+    admin_block(&mut layout, &closing, 0.0, 2.0);
 
     admin_block(&mut layout, "Mit freundlichen Grüßen,", 2.0, 8.0);
+    let signer = context
+        .agency
+        .care_of
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or(context.agency.name.as_str());
     layout.text_block(
-        &context.agency.name,
+        signer,
         11.0,
         true,
         0.0,
@@ -10824,6 +12217,33 @@ fn build_appointment_confirmation_pdf(
     Ok(finalize_admin_pdf(document, layout))
 }
 
+/// Default underscore fill-in for a blank handwritten line.
+fn consent_blank_long() -> &'static str {
+    "________________________________________________________________________________"
+}
+
+/// Renders a small muted caption line (the parenthetical hints in the reference form).
+fn consent_caption(layout: &mut TreatmentPlanPdfLayout, text: &str) {
+    layout.text_block(
+        text,
+        9.0,
+        false,
+        4.0,
+        TreatmentPlanPdfColor::Muted,
+        0.0,
+        1.0,
+    );
+}
+
+/// Returns the trimmed, non-empty value or the long underscore blank for handwritten fill-ins.
+fn consent_value_or_blank(value: Option<&str>) -> String {
+    value
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| consent_blank_long().to_string())
+}
+
 fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
     let footer = format!(
@@ -10833,19 +12253,18 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<Vec<u8>, &'sta
     );
     let mut layout = TreatmentPlanPdfLayout::new(footer, regular, bold);
 
-    layout.text_block(
-        "Einverständniserklärung zur Datenübermittlung und Schweigepflichtsentbindung",
-        15.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        2.0,
-    );
-    admin_block(&mut layout, "Gültig bis: bis auf Widerruf", 0.0, 2.0);
-
+    // Grammar tokens differ between the sole-guardian and the two-guardian (child) variants.
     let we = if context.sole_guardian { "Ich" } else { "Wir" };
     let we_lower = if context.sole_guardian { "ich" } else { "wir" };
+    // Main subject verb: "bin" (sole) vs "sind" (child).
+    let verb = if context.sole_guardian { "bin" } else { "sind" };
+    // Release-clause verb: "entbinde" (sole) vs "entbinden" (child).
+    let release_verb = if context.sole_guardian {
+        "entbinde"
+    } else {
+        "entbinden"
+    };
+    // "Ebenso entbinde ich" vs "Ebenso entbinden wir" – subject ordering also differs.
     let our = if context.sole_guardian {
         "meinem"
     } else {
@@ -10856,7 +12275,21 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<Vec<u8>, &'sta
     } else {
         "unseres"
     };
+    // "Mir ist bekannt" (sole) vs "Uns ist bekannt" (child).
+    let us_dat = if context.sole_guardian { "Mir" } else { "Uns" };
 
+    layout.text_block(
+        "Einverständniserklärung zur Datenübermittlung und Schweigepflichtsentbindung",
+        15.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        2.0,
+    );
+    admin_block(&mut layout, "Gültig bis: bis auf Widerruf", 0.0, 2.5);
+
+    // ---- Guardian identification block ----
     if context.sole_guardian {
         admin_block(
             &mut layout,
@@ -10871,8 +12304,27 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<Vec<u8>, &'sta
                 context.guardian_birth_date,
             ),
             0.0,
-            1.5,
+            0.5,
         );
+        consent_caption(
+            &mut layout,
+            "(Vorname, Name)                        (TT.MM.JJJJ)",
+        );
+        // Guardian address block (sole variant only).
+        admin_block(
+            &mut layout,
+            &format!(
+                "Adresse: {}",
+                consent_value_or_blank(context.guardian_address.as_deref())
+            ),
+            0.0,
+            0.5,
+        );
+        consent_caption(
+            &mut layout,
+            "(Straße und Hausnummer, Adressenzusatz, Ort, PLZ, Land)",
+        );
+        admin_block(&mut layout, "– nachfolgend „Ich“ –", 0.5, 1.5);
     } else {
         admin_block(&mut layout, "Wir (Erziehungsberechtigte):", 0.0, 0.5);
         admin_block(
@@ -10887,6 +12339,7 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<Vec<u8>, &'sta
             0.0,
             0.5,
         );
+        admin_block(&mut layout, "und", 0.0, 0.5);
         admin_block(
             &mut layout,
             &format!(
@@ -10897,9 +12350,17 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<Vec<u8>, &'sta
                 )
             ),
             0.0,
+            0.5,
+        );
+        admin_block(
+            &mut layout,
+            "nachfolgend „Wir“ (Mutter und Vater),",
+            0.5,
             1.5,
         );
     }
+
+    // ---- Child identification + address ----
     admin_block(
         &mut layout,
         &format!(
@@ -10909,61 +12370,49 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<Vec<u8>, &'sta
         0.0,
         0.5,
     );
-    admin_block(
+    consent_caption(
         &mut layout,
-        &format!(
-            "Adresse: {}",
-            context
-                .child_address
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .unwrap_or("________________________________________________")
-        ),
-        0.0,
-        2.0,
-    );
-
-    admin_block(
-        &mut layout,
-        &format!(
-            "{we} {we_lower} sind damit einverstanden, dass Herr Heorhii Hudiiev, geb. am 12.12.1994, Albert-Schweitzer-Straße 56, 81735 München, und von ihm beauftragte Mitarbeiter personenbezogene und medizinische Daten von {our} Kind (Personalausweis- und Reisepasskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche Dokumentation, Kostenvoranschläge, Rechnungen, Quittungen, Behandlungs- und Leistungsverträge, Arzt- und Krankenhausberichte) einholen, bearbeiten, speichern und/oder übermitteln, insbesondere an behandelnde Ärzte, Krankenhäuser, Labore, Dolmetscher, Übersetzer oder Gutachter, sowie im GMED-CRM-System gespeichert und verarbeitet werden.",
-            we = we,
-            we_lower = we_lower,
-            our = our
-        ),
-        0.0,
-        1.5,
+        "(Vorname, Name)                        (TT.MM.JJJJ)",
     );
     admin_block(
         &mut layout,
         &format!(
-            "{we} {we_lower} entbinden alle nach § 203 StGB schweigepflichtigen Personen sowie weitere im Rahmen der Datenverarbeitung tätige Personen von ihrer Schweigepflicht gegenüber Herrn Heorhii Hudiiev und umgekehrt Herrn Heorhii Hudiiev gegenüber den behandelnden Ärzten, Heilberufen, Dolmetschern, Übersetzern, Gutachtern und medizinischen Einrichtungen.",
-            we = we,
-            we_lower = we_lower
+            "Adresse{}: {}",
+            if context.sole_guardian { "" } else { "(n)" },
+            consent_value_or_blank(context.child_address.as_deref())
         ),
         0.0,
-        1.5,
+        0.5,
     );
-    if let Some(extra) = context
-        .extra_release_recipients
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        admin_block(
+    if context.sole_guardian {
+        consent_caption(
             &mut layout,
-            &format!("Zusätzliche Entbindung gegenüber: {extra}"),
-            0.0,
-            1.5,
+            "(Straße und Hausnummer, Adressenzusatz, Ort, PLZ, Land)",
         );
     }
+    layout.spacer(1.5);
+
+    // ---- Main consent paragraph (agency principal kept as static literal per product decision) ----
     admin_block(
         &mut layout,
         &format!(
-            "Die Einwilligung ist freiwillig und kann jederzeit ohne Angabe von Gründen schriftlich widerrufen werden; dies hat keine Auswirkungen auf die Rechtmäßigkeit der bisherigen Verarbeitung. Die Aufklärung gemäß DSGVO ist erfolgt. {we} wurde{suffix} über die Rechte auf Auskunft, Berichtigung, Löschung und Einschränkung der Verarbeitung der Daten {our_gen} Kindes aufgeklärt.",
+            "{verb} damit einverstanden, dass Herr Heorhii Hudiiev, geb. am 12.12.1994 Anschrift: Albert-Schweitzer-Straße 56, 81735 München, Deutschland und von ihm beauftragte Mitarbeiter personenbezogene und medizinische Daten von {our} Kind, Personalausweiskopien, Reisepasskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation, Kostenvoranschläge, Rechnungen, Quittungen, Behandlungsverträge, Leistungsverträge, Arzt- und Krankenhausberichte über eine abgeschlossene oder noch andauernde Behandlung von {our} Kind einholen, bearbeiten, speichern und/oder übermitteln, insbesondere an behandelnde Ärzte, Krankenhäuser, Labore oder andere medizinische Einrichtungen, Dolmetscher, Übersetzer oder Gutachter. {we} {verb} damit einverstanden, dass notwendige Personalausweiskopien, Reisepasskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation, Rechnungen und Quittungen, Arzt- und Krankenhausberichte über eine abgeschlossene oder noch andauernde Behandlung von {our} Kind im Salesforce-CRM-System (weiter bezeichnet als „GMED-CRM-System“) gespeichert und verarbeitet werden. {us_dat} ist bekannt, dass personenbezogenen und medizinischen Daten von {our} Kind von Salesforce in den Vereinigten Staaten sowie von den verbundenen Unternehmen und Drittparteien in anderen Ländern erhoben, an Salesforce übermittelt und von Salesforce gespeichert werden können. Personenbezogenen und medizinischen Daten von {our} Kind können daher außerhalb Deutschlands und an Orten verarbeitet werden, die möglicherweise nicht denselben Standard an Datenschutz bieten.",
+            verb = verb,
             we = we,
-            suffix = if context.sole_guardian { "" } else { "n" },
+            our = our,
+            us_dat = us_dat
+        ),
+        0.0,
+        1.5,
+    );
+
+    // ---- Schweigepflichtsentbindung (release from confidentiality) ----
+    admin_block(
+        &mut layout,
+        &format!(
+            "{we} {release_verb} alle nach § 203 StGB schweigepflichtigen Personen (insbesondere Ärzte, Angehörige anderer Heilberufe) sowie andere Personen, die im Rahmen der Verarbeitung von Daten {our_gen} Kindes tätig sind (Mitarbeiter von Herrn Heorhii Hudiiev, Dolmetscher, Übersetzer, Gutachter, Kostenträger sowie Angehörigen von Krankenhäusern, Privatpraxen und anderen medizinischen Einrichtungen), von ihrer Schweigepflicht gegenüber Herrn Heorhii Hudiiev.",
+            we = we,
+            release_verb = release_verb,
             our_gen = our_gen
         ),
         0.0,
@@ -10971,34 +12420,135 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<Vec<u8>, &'sta
     );
     admin_block(
         &mut layout,
-        "Die elektronische Unterschrift hat die gleiche rechtliche Gültigkeit wie eine handschriftliche Unterschrift, sofern sie den geltenden rechtlichen Anforderungen entspricht.",
+        &format!(
+            "Ebenso {release_verb} {we_lower} Herrn Heorhii Hudiiev und von ihm beauftragte Mitarbeiter von der Schweigepflicht nach § 203 StGB gegenüber allen Ärzten, Angehörigen anderer Heilberufe, Dolmetschern, Übersetzern, Gutachtern, sowie Angehörigen von Krankenhäusern, Privatpraxen und anderen medizinischen Einrichtungen.",
+            release_verb = release_verb,
+            we_lower = we_lower
+        ),
+        0.0,
+        1.5,
+    );
+
+    // ---- Extra-release recipients: ALWAYS rendered (value or underscore blank + caption) ----
+    admin_block(
+        &mut layout,
+        &format!(
+            "Außerdem {release_verb} {we_lower} Herrn Heorhii Hudiiev von seiner Schweigepflicht gegenüber folgenden Personen und/oder Institutionen/Einrichtungen:",
+            release_verb = release_verb,
+            we_lower = we_lower
+        ),
+        0.0,
+        0.5,
+    );
+    admin_block(
+        &mut layout,
+        &consent_value_or_blank(context.extra_release_recipients.as_deref()),
+        0.0,
+        0.5,
+    );
+    consent_caption(
+        &mut layout,
+        "(Vollständige Name der Institution / Name, Vorname und Geburtsdatum der Person; Adresse)",
+    );
+    layout.spacer(1.5);
+
+    // ---- Consent to transmission via Email/WhatsApp/Telegram/Threema (incl. risk acknowledgement) ----
+    admin_block(
+        &mut layout,
+        &format!(
+            "{we} {verb} damit einverstanden, dass personenbezogene und medizinische Daten von {our} Kind, Personalausweiskopien, Reisepasskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation und Information, Kostenvoranschläge, Rechnungen und Quittungen, Behandlungsverträge, Leistungsverträge, Arzt- und Krankenhausberichte über eine abgeschlossene oder noch andauernde Behandlung von {our} Kind per Email, WhatsApp-, Telegram- oder Threema-Messenger eingeholt und/oder übermittelt werden. {we} {verb} {us_refl} der möglichen Risiken bei der Übermittlung sensibler Daten per Email, WhatsApp-, Telegram- oder Threema-Messenger bewusst.",
+            we = we,
+            verb = verb,
+            our = our,
+            us_refl = if context.sole_guardian { "mir" } else { "uns" }
+        ),
+        0.0,
+        1.5,
+    );
+    admin_block(
+        &mut layout,
+        &format!(
+            "{we} {verb} mit der Speicherung und Verarbeitung von Personenbezogenen- und Gesundheitsdaten von {our} Kind im GMED CRM-System einverstanden.",
+            we = we,
+            verb = verb,
+            our = our
+        ),
+        0.0,
+        1.5,
+    );
+
+    // ---- Revocation + retention ----
+    admin_block(
+        &mut layout,
+        "Die Einwilligung ist freiwillig und kann jederzeit ohne Angaben von Gründen schriftlich widerrufen werden, was keine Auswirkungen auf die Rechtmäßigkeit der bisherigen Verarbeitung hat. Die Verarbeitung von Personenbezogenen- und Gesundheitsdaten bleibt bis zum Zeitpunkt des Wiederrufs oder solange gesetzliche Aufbewahrungsfristen bestehen rechtmäßig.",
+        0.0,
+        1.5,
+    );
+
+    // ---- DSGVO information ----
+    admin_block(
+        &mut layout,
+        &format!(
+            "Die Aufklärung gemäß EU-Datenschutz-Grundverordnung (DSGVO) ist erfolgt. {we} {wurden} darüber aufgeklärt, dass {we_lower} gemäß der DSGVO ein Recht auf Auskunft, Berichtigung, Löschung oder Einschränkung der Verarbeitung von personenbezogenen Daten {our_gen} Kindes {haben}. Diese Rechte {koennen} {we_lower}{einzeln} ebenfalls jederzeit geltend machen.",
+            we = we,
+            wurden = if context.sole_guardian {
+                "wurde"
+            } else {
+                "wurden"
+            },
+            we_lower = we_lower,
+            our_gen = our_gen,
+            haben = if context.sole_guardian {
+                "habe"
+            } else {
+                "haben"
+            },
+            koennen = if context.sole_guardian {
+                "kann"
+            } else {
+                "können"
+            },
+            einzeln = if context.sole_guardian {
+                ""
+            } else {
+                " (zusammen oder jeder einzeln)"
+            }
+        ),
+        0.0,
+        1.5,
+    );
+
+    // ---- Electronic signature clause ----
+    admin_block(
+        &mut layout,
+        &format!(
+            "{we} {verb} damit einverstanden, dass diese Einverständniserklärung und Schweigepflichtsentbindung auch durch eine elektronische Unterschrift erteilt werden kann, die die gleiche rechtliche Gültigkeit wie eine handschriftliche Unterschrift hat. Die elektronische Unterschrift erfolgt unter der Voraussetzung, dass sie den geltenden rechtlichen Anforderungen entspricht.",
+            we = we,
+            verb = verb
+        ),
         0.0,
         4.0,
     );
 
+    // ---- Signature block(s) ----
     if context.sole_guardian {
         admin_block(
             &mut layout,
-            "Ort, Datum: ____________________   Unterschrift: ____________________________________",
+            "Ort, Datum: __________________________   Unterschrift: __________________________________________",
             4.0,
             0.5,
         );
-        admin_block(
-            &mut layout,
-            "(Personensorgeberechtigte/r / ges. Vertreter)",
-            0.0,
-            2.0,
-        );
+        consent_caption(&mut layout, "(Personensorgeberechtigte/r / ges. Vertreter)");
     } else {
         admin_block(
             &mut layout,
-            "Ort, Datum: ____________________   Unterschrift: __________________________ (Mutter)",
+            "Ort, Datum: _________________   Unterschrift (Erziehungsberechtigte): ____________________ (Mutter)",
             4.0,
-            3.0,
+            2.0,
         );
         admin_block(
             &mut layout,
-            "Ort, Datum: ____________________   Unterschrift: __________________________ (Vater)",
+            "Ort, Datum: _________________   Unterschrift (Erziehungsberechtigter): ____________________ (Vater)",
             0.0,
             2.0,
         );

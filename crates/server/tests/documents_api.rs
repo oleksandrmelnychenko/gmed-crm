@@ -3295,7 +3295,8 @@ async fn cost_estimate_uses_order_quote_when_manual_lines_are_omitted() {
     assert_eq!(body["language"], "de");
     let preview_html = body["preview_html"].as_str().unwrap();
     assert!(preview_html.contains("Koordination vor stationärer Aufnahme"));
-    assert!(preview_html.contains("1428"));
+    // Quote total is now rendered in German currency format ("1.428,00 EUR").
+    assert!(preview_html.contains("1.428,00"));
 
     let document_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
     let (status, bytes) = bytes_request(
@@ -3919,10 +3920,13 @@ async fn document_templates_can_generate_patient_sticker_pdf_document() {
     assert_eq!(status, StatusCode::OK);
     let document_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
     let preview_html = body["preview_html"].as_str().unwrap();
-    assert!(preview_html.contains("Standard 105 x 74 mm"));
-    assert!(preview_html.contains("AOK Rheinland"));
+    // The sticker now mirrors the reference label: ID line, "Lastname, Firstname",
+    // "geb. am", KT1/KT2 cost-bearer labels and the agency block — the non-reference
+    // format eyebrow, Versicherer (insurance) and Land (country) lines were removed.
+    assert!(preview_html.contains("ID:"));
+    assert!(preview_html.contains("geb. am"));
+    assert!(preview_html.contains("KT1:"));
     assert!(preview_html.contains("Agency Street 1"));
-    assert!(preview_html.contains("UA"));
     assert!(preview_html.contains("PT-"));
 
     let (status, detail_body) = json_request(
