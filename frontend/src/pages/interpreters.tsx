@@ -21,10 +21,12 @@ import { useParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, downloadApiFile } from "@/lib/api";
 import {
   buildInterpreterLanguagesPath,
   buildInterpreterListPath,
+  buildInterpreterProfileDocumentDownloadPath,
+  buildInterpreterProfileDocumentsPath,
   emptyInterpreterLanguage,
   interpreterLanguageRecordToForm,
   interpreterLanguagesToPayload,
@@ -53,6 +55,13 @@ type InterpreterOperations = {
   billing_lines: Record<string, unknown>[];
 };
 
+type UploadedProfileDocument = {
+  id: string;
+  original_filename: string;
+  mime_type: string;
+  file_size: number;
+};
+
 type CredentialForm = {
   credentialType: string;
   title: string;
@@ -60,6 +69,8 @@ type CredentialForm = {
   issuedAt: string;
   expiresAt: string;
   documentUrl: string;
+  documentId: string;
+  documentName: string;
   notes: string;
 };
 
@@ -85,9 +96,13 @@ type InterpreterProfileForm = {
   confidentialityStatus: string;
   confidentialitySignedAt: string;
   confidentialityDocumentUrl: string;
+  confidentialityDocumentId: string;
+  confidentialityDocumentName: string;
   avvStatus: string;
   avvSignedAt: string;
   avvDocumentUrl: string;
+  avvDocumentId: string;
+  avvDocumentName: string;
   gdprTrainingAt: string;
   workPermitValidUntil: string;
   hourlyRate: string;
@@ -168,6 +183,8 @@ function emptyCredential(): CredentialForm {
     issuedAt: "",
     expiresAt: "",
     documentUrl: "",
+    documentId: "",
+    documentName: "",
     notes: "",
   };
 }
@@ -183,9 +200,14 @@ function credentialsToForm(value: unknown): CredentialForm[] {
           issuedAt: text(item.issuedAt),
           expiresAt: text(item.expiresAt),
           documentUrl: text(item.documentUrl),
+          documentId: text(item.documentId),
+          documentName: text(item.documentName),
           notes: text(item.notes),
         }))
-        .filter((item) => item.title || item.issuer || item.documentUrl)
+        .filter(
+          (item) =>
+            item.title || item.issuer || item.documentUrl || item.documentId,
+        )
     : [];
 }
 
@@ -199,6 +221,7 @@ function credentialsToProfile(credentials: CredentialForm[]) {
       issuedAt: credential.issuedAt,
       expiresAt: credential.expiresAt,
       documentUrl: credential.documentUrl.trim(),
+      documentId: credential.documentId,
       notes: credential.notes.trim(),
     }));
 }
@@ -238,10 +261,19 @@ function profileToForm(profile: InterpreterProfile): InterpreterProfileForm {
     confidentialityDocumentUrl:
       text(profile.confidentialityDocumentUrl) ||
       text(compliance.confidentialityDocumentUrl),
+    confidentialityDocumentId:
+      text(profile.confidentialityDocumentId) ||
+      text(compliance.confidentialityDocumentId),
+    confidentialityDocumentName:
+      text(profile.confidentialityDocumentName) ||
+      text(compliance.confidentialityDocumentName),
     avvStatus: text(profile.avvStatus) || text(compliance.avvStatus),
     avvSignedAt: text(profile.avvSignedAt) || text(compliance.avvSignedAt),
     avvDocumentUrl:
       text(profile.avvDocumentUrl) || text(compliance.avvDocumentUrl),
+    avvDocumentId: text(profile.avvDocumentId) || text(compliance.avvDocumentId),
+    avvDocumentName:
+      text(profile.avvDocumentName) || text(compliance.avvDocumentName),
     gdprTrainingAt:
       text(profile.gdprTrainingAt) || text(compliance.gdprTrainingAt),
     workPermitValidUntil: text(profile.workPermitValidUntil),
@@ -286,9 +318,11 @@ function formToProfile(form: InterpreterProfileForm) {
       confidentialityStatus: form.confidentialityStatus,
       confidentialitySignedAt: form.confidentialitySignedAt,
       confidentialityDocumentUrl: form.confidentialityDocumentUrl,
+      confidentialityDocumentId: form.confidentialityDocumentId,
       avvStatus: form.avvStatus,
       avvSignedAt: form.avvSignedAt,
       avvDocumentUrl: form.avvDocumentUrl,
+      avvDocumentId: form.avvDocumentId,
       gdprTrainingAt: form.gdprTrainingAt,
     },
     workPermitValidUntil: form.workPermitValidUntil,
@@ -413,6 +447,7 @@ export function InterpretersPage() {
   const [operationsLoading, setOperationsLoading] = useState(false);
   const [languages, setLanguages] = useState<InterpreterLanguageForm[]>([]);
   const [languagesLoading, setLanguagesLoading] = useState(false);
+  const [uploadingDocumentKey, setUploadingDocumentKey] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [contractFilter, setContractFilter] = useState("");
@@ -548,6 +583,55 @@ export function InterpretersPage() {
     setLanguages((current) =>
       current.filter((_, itemIndex) => itemIndex !== index),
     );
+  }
+
+  async function uploadProfileDocument(
+    documentKind: string,
+    file: File | null | undefined,
+    onUploaded: (document: UploadedProfileDocument) => void,
+    uploadKey: string,
+  ) {
+    if (!selected || !file) return;
+    setUploadingDocumentKey(uploadKey);
+    setError("");
+    setNotice("");
+    try {
+      const formData = new FormData();
+      formData.append("documentKind", documentKind);
+      formData.append("file", file);
+      const document = await apiFetch<UploadedProfileDocument>(
+        buildInterpreterProfileDocumentsPath(selected.id),
+        {
+          method: "POST",
+          body: formData,
+          timeoutMs: 60_000,
+        },
+      );
+      onUploaded(document);
+      setNotice("Document uploaded. Save the profile to keep the link.");
+    } catch (uploadError) {
+      setError(
+        uploadError instanceof Error ? uploadError.message : "Upload failed",
+      );
+    } finally {
+      setUploadingDocumentKey("");
+    }
+  }
+
+  async function downloadProfileDocument(documentId: string, fallbackName: string) {
+    if (!selected || !documentId) return;
+    setError("");
+    try {
+      await downloadApiFile(
+        buildInterpreterProfileDocumentDownloadPath(selected.id, documentId),
+        fallbackName || "interpreter-profile-document",
+        { timeoutMs: 60_000 },
+      );
+    } catch (downloadError) {
+      setError(
+        downloadError instanceof Error ? downloadError.message : "Download failed",
+      );
+    }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -1098,16 +1182,45 @@ export function InterpretersPage() {
                             />
                           </div>
                         </Field>
-                        <Field label="Document URL">
-                          <Input
-                            className={inputClass}
-                            value={credential.documentUrl}
-                            onChange={(event) =>
-                              patchCredential(index, {
-                                documentUrl: event.target.value,
-                              })
-                            }
-                          />
+                        <Field label="Document">
+                          <div className="grid gap-2">
+                            {credential.documentId ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="h-9 justify-start px-2 text-xs"
+                                onClick={() =>
+                                  void downloadProfileDocument(
+                                    credential.documentId,
+                                    credential.documentName || credential.title,
+                                  )
+                                }
+                              >
+                                {credential.documentName || "Download document"}
+                              </Button>
+                            ) : null}
+                            <Input
+                              type="file"
+                              className={inputClass}
+                              disabled={
+                                uploadingDocumentKey === `credential-${index}`
+                              }
+                              onChange={(event) => {
+                                const file = event.currentTarget.files?.[0];
+                                event.currentTarget.value = "";
+                                void uploadProfileDocument(
+                                  "credential",
+                                  file,
+                                  (document) =>
+                                    patchCredential(index, {
+                                      documentId: document.id,
+                                      documentName: document.original_filename,
+                                    }),
+                                  `credential-${index}`,
+                                );
+                              }}
+                            />
+                          </div>
                         </Field>
                         <Field label="Notes">
                           <Input
@@ -1166,16 +1279,48 @@ export function InterpretersPage() {
                       }
                     />
                   </Field>
-                  <Field label="Document URL">
-                    <Input
-                      className={inputClass}
-                      value={form.confidentialityDocumentUrl}
-                      onChange={(event) =>
-                        patchForm({
-                          confidentialityDocumentUrl: event.target.value,
-                        })
-                      }
-                    />
+                  <Field label="Document">
+                    <div className="grid gap-2">
+                      {form.confidentialityDocumentId ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-9 justify-start px-2 text-xs"
+                          onClick={() =>
+                            void downloadProfileDocument(
+                              form.confidentialityDocumentId,
+                              form.confidentialityDocumentName ||
+                                "confidentiality-document",
+                            )
+                          }
+                        >
+                          {form.confidentialityDocumentName ||
+                            "Download document"}
+                        </Button>
+                      ) : null}
+                      <Input
+                        type="file"
+                        className={inputClass}
+                        disabled={
+                          uploadingDocumentKey === "confidentiality-document"
+                        }
+                        onChange={(event) => {
+                          const file = event.currentTarget.files?.[0];
+                          event.currentTarget.value = "";
+                          void uploadProfileDocument(
+                            "confidentiality",
+                            file,
+                            (document) =>
+                              patchForm({
+                                confidentialityDocumentId: document.id,
+                                confidentialityDocumentName:
+                                  document.original_filename,
+                              }),
+                            "confidentiality-document",
+                          );
+                        }}
+                      />
+                    </div>
                   </Field>
                   <Field label="AVV / work contract">
                     <select
@@ -1200,14 +1345,43 @@ export function InterpretersPage() {
                       }
                     />
                   </Field>
-                  <Field label="AVV document URL">
-                    <Input
-                      className={inputClass}
-                      value={form.avvDocumentUrl}
-                      onChange={(event) =>
-                        patchForm({ avvDocumentUrl: event.target.value })
-                      }
-                    />
+                  <Field label="AVV document">
+                    <div className="grid gap-2">
+                      {form.avvDocumentId ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-9 justify-start px-2 text-xs"
+                          onClick={() =>
+                            void downloadProfileDocument(
+                              form.avvDocumentId,
+                              form.avvDocumentName || "avv-document",
+                            )
+                          }
+                        >
+                          {form.avvDocumentName || "Download document"}
+                        </Button>
+                      ) : null}
+                      <Input
+                        type="file"
+                        className={inputClass}
+                        disabled={uploadingDocumentKey === "avv-document"}
+                        onChange={(event) => {
+                          const file = event.currentTarget.files?.[0];
+                          event.currentTarget.value = "";
+                          void uploadProfileDocument(
+                            "avv",
+                            file,
+                            (document) =>
+                              patchForm({
+                                avvDocumentId: document.id,
+                                avvDocumentName: document.original_filename,
+                              }),
+                            "avv-document",
+                          );
+                        }}
+                      />
+                    </div>
                   </Field>
                   <Field label="GDPR training">
                     <Input

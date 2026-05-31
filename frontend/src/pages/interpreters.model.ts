@@ -39,6 +39,17 @@ export function buildInterpreterLanguagesPath(interpreterId: string) {
   return `/interpreters/${interpreterId}/languages`;
 }
 
+export function buildInterpreterProfileDocumentsPath(interpreterId: string) {
+  return `/interpreters/${interpreterId}/profile/documents`;
+}
+
+export function buildInterpreterProfileDocumentDownloadPath(
+  interpreterId: string,
+  documentId: string,
+) {
+  return `/interpreters/${interpreterId}/profile/documents/${documentId}/download`;
+}
+
 export function emptyInterpreterLanguage(): InterpreterLanguageForm {
   return {
     languageCode: "",

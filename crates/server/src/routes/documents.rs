@@ -54,7 +54,7 @@ use windows::{
     Storage::Streams::{DataWriter, InMemoryRandomAccessStream},
 };
 
-const MAX_FILE_SIZE: usize = 25 * 1024 * 1024;
+pub(crate) const MAX_FILE_SIZE: usize = 25 * 1024 * 1024;
 const UPLOAD_DIR: &str = "uploads/documents";
 
 fn normalize_seed_demo_storage_key(storage_key: &str) -> String {
@@ -356,6 +356,7 @@ struct GeneratedContractLineItem {
     notes: Option<String>,
 }
 
+#[allow(dead_code)]
 struct GeneratedFrameworkContractContext {
     patient_pid: String,
     patient_name: String,
@@ -364,11 +365,20 @@ struct GeneratedFrameworkContractContext {
     patient_address: Option<String>,
     patient_email: Option<String>,
     patient_phone: Option<String>,
+    patient_salutation: Option<String>,
     language: String,
     auto_name: String,
     title_override: Option<String>,
     introduction: Option<String>,
     closing_note: Option<String>,
+    // Full-contract reproduction: agency (Auftragnehmer), signature + §2/§6 sockets, Anlagen.
+    agency: AgencyContractSettings,
+    sign_place: Option<String>,
+    sign_date: Option<NaiveDate>,
+    effective_date: Option<NaiveDate>,
+    cost_threshold: Option<String>,
+    order_sequence: i64,
+    extra_release_recipients: Option<String>,
     contract_number: String,
     contract_status: String,
     valid_from: Option<NaiveDate>,
@@ -409,6 +419,7 @@ struct GeneratedVisaInvitationContext {
     generated_at: chrono::DateTime<chrono::Utc>,
 }
 
+#[allow(dead_code)]
 struct GeneratedPatientStickerContext {
     patient_pid: String,
     patient_title: Option<String>,
@@ -418,6 +429,10 @@ struct GeneratedPatientStickerContext {
     birth_date: NaiveDate,
     country_code: Option<String>,
     insurance_provider: Option<String>,
+    // Manual operator-entered cost-bearer codes (KT1/KT2) + branch/cost code (e.g. "FRA").
+    kt1: Option<String>,
+    kt2: Option<String>,
+    cost_code: Option<String>,
     agency: PatientLabelAgencySettings,
     format: PatientLabelFormat,
     auto_name: String,
@@ -448,7 +463,15 @@ struct GeneratedProviderTemplateContext {
 #[derive(Clone, Default)]
 struct DocPartyBlock {
     name: String,
+    /// Academic/honorific title from the patient record (e.g. "Dr."), NOT the salutation.
     title: Option<String>,
+    /// Gendered salutation for legal documents ("Herr"/"Frau"), derived from gender
+    /// or supplied via a binding override. Distinct from `title`.
+    salutation: Option<String>,
+    /// Structured given/family name, used for "LASTNAME, First" ordering. Falls back
+    /// to `name` when absent.
+    first_name: Option<String>,
+    last_name: Option<String>,
     birth_date: Option<NaiveDate>,
     street: Option<String>,
     zip: Option<String>,
@@ -458,6 +481,7 @@ struct DocPartyBlock {
     phone: Option<String>,
 }
 
+#[allow(dead_code)]
 impl DocPartyBlock {
     fn address_line(&self) -> Option<String> {
         let street = self
@@ -510,11 +534,56 @@ impl DocPartyBlock {
             None => self.name.clone(),
         }
     }
+
+    fn clean_salutation(&self) -> Option<&str> {
+        self.salutation
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+    }
+
+    /// "Herr Max Musterman" — gendered salutation prefixed to the plain name.
+    /// Falls back to the bare name when no salutation is known.
+    fn name_with_salutation(&self) -> String {
+        match self.clean_salutation() {
+            Some(salutation) => format!("{salutation} {}", self.name).trim().to_string(),
+            None => self.name.clone(),
+        }
+    }
+
+    /// "Musterman, Max" — surname first, comma, given name. Falls back to the
+    /// combined name (splitting on the last space) when first/last are not set.
+    fn name_last_comma_first(&self) -> String {
+        let first = self
+            .first_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty());
+        let last = self
+            .last_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty());
+        match (last, first) {
+            (Some(last), Some(first)) => format!("{last}, {first}"),
+            (Some(last), None) => last.to_string(),
+            _ => {
+                let trimmed = self.name.trim();
+                match trimmed.rsplit_once(' ') {
+                    Some((first, last)) => format!("{}, {}", last.trim(), first.trim()),
+                    None => trimmed.to_string(),
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone, Default)]
+#[allow(dead_code)]
 struct AgencyContractSettings {
     name: String,
+    /// Responsible person ("Originator" / letterhead contact), e.g. "Heorhii Hudiiev".
+    care_of: Option<String>,
     address: Option<String>,
     phone: Option<String>,
     email: Option<String>,
@@ -524,6 +593,7 @@ struct AgencyContractSettings {
     bank_iban: Option<String>,
 }
 
+#[allow(dead_code)]
 struct GeneratedSingleOrderContext {
     language: String,
     auto_name: String,
@@ -532,9 +602,13 @@ struct GeneratedSingleOrderContext {
     party: DocPartyBlock,
     agency: AgencyContractSettings,
     order_number: String,
+    order_sequence: i64,
     order_date: Option<NaiveDate>,
     contract_date: Option<NaiveDate>,
     specialties: Option<String>,
+    examination_purpose: Option<String>,
+    treatment_purpose: Option<String>,
+    order_components: Option<String>,
     period_from: Option<NaiveDate>,
     period_to: Option<NaiveDate>,
     payer: Option<DocPartyBlock>,
@@ -543,6 +617,7 @@ struct GeneratedSingleOrderContext {
     generated_at: chrono::DateTime<chrono::Utc>,
 }
 
+#[allow(dead_code)]
 struct GeneratedCostCoverageContext {
     language: String,
     auto_name: String,
@@ -551,6 +626,7 @@ struct GeneratedCostCoverageContext {
     payer: DocPartyBlock,
     agency: AgencyContractSettings,
     order_number: String,
+    order_sequence: i64,
     order_date: Option<NaiveDate>,
     contract_date: Option<NaiveDate>,
     quote_number: Option<String>,
@@ -563,6 +639,7 @@ struct GeneratedCostCoverageContext {
     generated_at: chrono::DateTime<chrono::Utc>,
 }
 
+#[allow(dead_code)]
 struct GeneratedCostEstimateContext {
     language: String,
     auto_name: String,
@@ -572,6 +649,7 @@ struct GeneratedCostEstimateContext {
     estimate_date: Option<NaiveDate>,
     line_items: Vec<GeneratedContractLineItem>,
     total_range: Option<String>,
+    agency: AgencyContractSettings,
     generated_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -594,6 +672,7 @@ struct GeneratedAppointmentConfirmationContext {
     generated_at: chrono::DateTime<chrono::Utc>,
 }
 
+#[allow(dead_code)]
 struct GeneratedConsentContext {
     sole_guardian: bool,
     auto_name: String,
@@ -602,6 +681,7 @@ struct GeneratedConsentContext {
     child_address: Option<String>,
     guardian_name: Option<String>,
     guardian_birth_date: Option<NaiveDate>,
+    guardian_address: Option<String>,
     guardian2_name: Option<String>,
     guardian2_birth_date: Option<NaiveDate>,
     extra_release_recipients: Option<String>,
@@ -629,26 +709,26 @@ struct DocumentShareInsert<'a> {
     message: Option<&'a str>,
 }
 
-struct NewStoredDocument<'a> {
-    patient_id: Option<Uuid>,
-    order_id: Option<Uuid>,
-    appointment_id: Option<Uuid>,
-    auto_name: &'a str,
-    original_filename: &'a str,
-    art: &'a str,
-    category: Option<&'a str>,
-    status: &'a str,
-    visibility: &'a str,
-    is_medical: bool,
-    mime_type: &'a str,
-    klinik: Option<&'a str>,
-    ursprung: Option<&'a str>,
-    notes: Option<&'a str>,
-    generated_template_id: Option<&'a str>,
-    version_root_document_id: Option<Uuid>,
-    replaces_document_id: Option<Uuid>,
-    version_number: i32,
-    uploaded_by: Uuid,
+pub(crate) struct NewStoredDocument<'a> {
+    pub(crate) patient_id: Option<Uuid>,
+    pub(crate) order_id: Option<Uuid>,
+    pub(crate) appointment_id: Option<Uuid>,
+    pub(crate) auto_name: &'a str,
+    pub(crate) original_filename: &'a str,
+    pub(crate) art: &'a str,
+    pub(crate) category: Option<&'a str>,
+    pub(crate) status: &'a str,
+    pub(crate) visibility: &'a str,
+    pub(crate) is_medical: bool,
+    pub(crate) mime_type: &'a str,
+    pub(crate) klinik: Option<&'a str>,
+    pub(crate) ursprung: Option<&'a str>,
+    pub(crate) notes: Option<&'a str>,
+    pub(crate) generated_template_id: Option<&'a str>,
+    pub(crate) version_root_document_id: Option<Uuid>,
+    pub(crate) replaces_document_id: Option<Uuid>,
+    pub(crate) version_number: i32,
+    pub(crate) uploaded_by: Uuid,
 }
 
 #[derive(Clone, Copy)]
@@ -1160,6 +1240,7 @@ struct DocumentBindingOverrides {
     party_phone: Option<String>,
     // Third-party payer / Kostenübernehmer
     payer_name: Option<String>,
+    payer_salutation: Option<String>,
     payer_birth_date: Option<NaiveDate>,
     payer_street: Option<String>,
     payer_zip: Option<String>,
@@ -1174,11 +1255,21 @@ struct DocumentBindingOverrides {
     // Contract / order meta
     contract_date: Option<NaiveDate>,
     order_number: Option<String>,
+    /// Ordinal of this single order within the framework contract (the highlighted
+    /// "1." in "1. Einzelauftrag"). Defaults to 1 when omitted.
+    order_sequence: Option<i64>,
     order_date: Option<NaiveDate>,
     quote_number: Option<String>,
     doc_id: Option<String>,
     sign_place: Option<String>,
     sign_date: Option<NaiveDate>,
+    /// §2 framework-contract cost threshold above which written approval is required.
+    cost_threshold: Option<String>,
+    /// Single-order "Bestandteile des Einzelauftrages und Rangfolge" value (default "Keine").
+    order_components: Option<String>,
+    /// Single-order Leistungsumfang scope phrases (examination / treatment type).
+    examination_purpose: Option<String>,
+    treatment_purpose: Option<String>,
     // Scope of services
     specialties: Option<String>,
     period_from: Option<NaiveDate>,
@@ -1194,12 +1285,17 @@ struct DocumentBindingOverrides {
     examination_weeks: Option<String>,
     recipient_block: Option<String>,
     contact_phones: Option<String>,
+    // Patient sticker specifics (manual operator-entered codes: KT1/KT2 cost-bearer, FRA code)
+    kt1: Option<String>,
+    kt2: Option<String>,
+    cost_code: Option<String>,
     // Consent (minor) specifics
     child_name: Option<String>,
     child_birth_date: Option<NaiveDate>,
     child_address: Option<String>,
     guardian_name: Option<String>,
     guardian_birth_date: Option<NaiveDate>,
+    guardian_address: Option<String>,
     guardian2_name: Option<String>,
     guardian2_birth_date: Option<NaiveDate>,
     extra_release_recipients: Option<String>,
@@ -5631,47 +5727,49 @@ fn format_sticker_birth_date(value: NaiveDate) -> String {
     value.format("%d.%m.%Y").to_string()
 }
 
-fn patient_sticker_title_line(context: &GeneratedPatientStickerContext) -> String {
-    [
-        Some(context.patient_salutation.as_str()),
-        context.patient_title.as_deref(),
-        Some(context.patient_first_name.as_str()),
-        Some(context.patient_last_name.as_str()),
-    ]
-    .into_iter()
-    .flatten()
-    .map(str::trim)
-    .filter(|value| !value.is_empty())
-    .collect::<Vec<_>>()
-    .join(" ")
+/// Gendered salutation line (e.g. "Herr"), rendered on its own row above the name
+/// to mirror the reference label. Empty when unknown.
+fn patient_sticker_salutation_line(context: &GeneratedPatientStickerContext) -> String {
+    context.patient_salutation.trim().to_string()
 }
 
-fn patient_sticker_meta_line(context: &GeneratedPatientStickerContext) -> String {
-    [
-        Some(format!(
-            "{} {}",
-            translated_label(&context.language, "sticker_dob"),
-            format_sticker_birth_date(context.birth_date)
-        )),
-        context.country_code.as_ref().map(|value| {
-            format!(
-                "{} {}",
-                translated_label(&context.language, "sticker_country"),
-                value
-            )
-        }),
-        context.insurance_provider.as_ref().map(|value| {
-            format!(
-                "{} {}",
-                translated_label(&context.language, "sticker_insurance"),
-                value
-            )
-        }),
-    ]
-    .into_iter()
-    .flatten()
-    .collect::<Vec<_>>()
-    .join("  ·  ")
+/// Patient name in the reference's "Lastname, Firstname" order (no salutation,
+/// no academic title). Falls back to the patient ID when names are missing.
+fn patient_sticker_title_line(context: &GeneratedPatientStickerContext) -> String {
+    let last = context.patient_last_name.trim();
+    let first = context.patient_first_name.trim();
+    match (last.is_empty(), first.is_empty()) {
+        (false, false) => format!("{last}, {first}"),
+        (false, true) => last.to_string(),
+        (true, false) => first.to_string(),
+        (true, true) => context.patient_pid.clone(),
+    }
+}
+
+/// Reference meta rows: "geb. am <date>", "KT1: <code>", "KT2: <code>" (cost-bearer
+/// codes, labels always shown), and the standalone branch/cost code (e.g. "FRA").
+fn patient_sticker_meta_lines(context: &GeneratedPatientStickerContext) -> Vec<String> {
+    let mut lines = vec![format!(
+        "geb. am {}",
+        format_sticker_birth_date(context.birth_date)
+    )];
+    lines.push(format!(
+        "KT1: {}",
+        context.kt1.as_deref().map(str::trim).unwrap_or_default()
+    ));
+    lines.push(format!(
+        "KT2: {}",
+        context.kt2.as_deref().map(str::trim).unwrap_or_default()
+    ));
+    if let Some(code) = context
+        .cost_code
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        lines.push(code.to_string());
+    }
+    lines
 }
 
 fn patient_sticker_agency_line(context: &GeneratedPatientStickerContext) -> String {
@@ -5714,14 +5812,21 @@ fn build_patient_sticker_html(context: &GeneratedPatientStickerContext) -> Strin
     let format = context.format;
     let label_width = (format.width_mm as f32 - 10.0).max(48.0);
     let label_height = (format.height_mm as f32 - 10.0).max(24.0);
+    let salutation_line = patient_sticker_salutation_line(context);
     let title_line = patient_sticker_title_line(context);
-    let meta_line = patient_sticker_meta_line(context);
+    let meta_html = patient_sticker_meta_lines(context)
+        .iter()
+        .map(|line| format!("<div>{}</div>", escape_html(line)))
+        .collect::<String>();
     let agency_line = patient_sticker_agency_line(context);
-    let footer_line = format!(
-        "{} {}",
-        translated_label(&context.language, "sticker_generated"),
-        context.generated_at.to_rfc3339()
-    );
+    let salutation_html = if salutation_line.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<div class=\"salutation\">{}</div>",
+            escape_html(&salutation_line)
+        )
+    };
 
     format!(
         "<!doctype html><html lang=\"{lang}\"><head><meta charset=\"utf-8\" /><title>{title}</title><style>
@@ -5730,13 +5835,12 @@ fn build_patient_sticker_html(context: &GeneratedPatientStickerContext) -> Strin
         * {{ box-sizing: border-box; }}
         html, body {{ margin: 0; padding: 0; width: 100%; min-height: 100%; background: #f3f4f6; font-family: Arial, sans-serif; color: #0f172a; }}
         body {{ display: grid; place-items: center; padding: 6mm; }}
-        .label {{ width: {label_w}mm; min-height: {label_h}mm; border: 1px solid #cbd5e1; border-radius: 4mm; background: radial-gradient(circle at top right, rgba(15,23,42,0.06), transparent 42%), linear-gradient(180deg, #ffffff 0%, #f8fafc 100%); padding: 4mm; display: grid; gap: 2.2mm; box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08); }}
-        .eyebrow {{ font-size: 8pt; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #475569; }}
+        .label {{ width: {label_w}mm; min-height: {label_h}mm; border: 1px solid #cbd5e1; border-radius: 4mm; background: radial-gradient(circle at top right, rgba(15,23,42,0.06), transparent 42%), linear-gradient(180deg, #ffffff 0%, #f8fafc 100%); padding: 4mm; display: grid; gap: 1.6mm; box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08); }}
         .patient-id {{ font-size: 12pt; font-weight: 700; letter-spacing: 0.04em; }}
+        .salutation {{ font-size: {small_size}; color: #334155; }}
         .name {{ font-size: {name_size}; font-weight: 700; line-height: 1.15; }}
-        .meta, .agency, .footer {{ font-size: {small_size}; line-height: 1.35; color: #334155; }}
-        .footer {{ color: #64748b; }}
-        </style></head><body><article class=\"label\"><div class=\"eyebrow\">{format_label}</div><div class=\"patient-id\">{patient_id}</div><div class=\"name\">{name}</div><div class=\"meta\">{meta}</div><div class=\"agency\">{agency}</div><div class=\"footer\">{footer}</div></article></body></html>",
+        .meta, .agency {{ font-size: {small_size}; line-height: 1.3; color: #334155; }}
+        </style></head><body><article class=\"label\"><div class=\"patient-id\">ID: {patient_id}</div>{salutation}<div class=\"name\">{name}</div><div class=\"meta\">{meta}</div><div class=\"agency\">{agency}</div></article></body></html>",
         lang = escape_html(&context.language),
         title = escape_html(&format!("{} {}", context.patient_pid, translated_label(&context.language, "sticker_title"))),
         page_w = format.width_mm,
@@ -5745,12 +5849,11 @@ fn build_patient_sticker_html(context: &GeneratedPatientStickerContext) -> Strin
         label_h = label_height,
         name_size = if format.height_mm <= 40 { "11.5pt" } else { "14pt" },
         small_size = if format.height_mm <= 40 { "7.5pt" } else { "8.5pt" },
-        format_label = escape_html(format.label),
         patient_id = escape_html(&context.patient_pid),
+        salutation = salutation_html,
         name = escape_html(if title_line.is_empty() { &context.patient_pid } else { &title_line }),
-        meta = escape_html(if meta_line.is_empty() { translated_label(&context.language, "sticker_dob") } else { &meta_line }),
+        meta = meta_html,
         agency = escape_html(if agency_line.is_empty() { &context.agency.name } else { &agency_line }),
-        footer = escape_html(&footer_line),
     )
 }
 
@@ -5774,24 +5877,18 @@ fn build_patient_sticker_pdf(
     let left_margin_mm = 5.0;
     let right_margin_mm = 5.0;
     let top_margin_mm = 5.0;
-    let bottom_margin_mm = 5.0;
+    let _bottom_margin_mm = 5.0;
     let content_width_mm = (width_mm - left_margin_mm - right_margin_mm).max(30.0);
     let mut y_mm = height_mm - top_margin_mm;
     let compact = context.format.height_mm <= 40;
-    let eyebrow_size = if compact { 6.5 } else { 7.5 };
     let id_size = if compact { 10.0 } else { 11.5 };
     let name_size = if compact { 10.5 } else { 13.0 };
     let body_size = if compact { 6.5 } else { 7.8 };
-    let footer_size = if compact { 5.6 } else { 6.4 };
 
+    let salutation_line = patient_sticker_salutation_line(context);
     let title_line = patient_sticker_title_line(context);
-    let meta_line = patient_sticker_meta_line(context);
+    let meta_lines = patient_sticker_meta_lines(context);
     let agency_line = patient_sticker_agency_line(context);
-    let footer_line = format!(
-        "{} {}",
-        translated_label(&context.language, "sticker_generated"),
-        context.generated_at.format("%d.%m.%Y %H:%M")
-    );
 
     let mut ops = Vec::new();
 
@@ -5807,24 +5904,28 @@ fn build_patient_sticker_pdf(
         }
     };
 
+    // ID line ("ID: <pid>")
     push_wrapped(
         &mut ops,
-        context.format.label,
-        &regular_handle,
-        eyebrow_size,
-        TreatmentPlanPdfColor::Muted,
-        &mut y_mm,
-    );
-    y_mm -= 1.0;
-    push_wrapped(
-        &mut ops,
-        &context.patient_pid,
+        &format!("ID: {}", context.patient_pid),
         &bold_handle,
         id_size,
         TreatmentPlanPdfColor::Body,
         &mut y_mm,
     );
-    y_mm -= 1.0;
+    y_mm -= 0.8;
+    // Salutation on its own row (Herr/Frau), when known
+    if !salutation_line.is_empty() {
+        push_wrapped(
+            &mut ops,
+            &salutation_line,
+            &regular_handle,
+            body_size,
+            TreatmentPlanPdfColor::Body,
+            &mut y_mm,
+        );
+    }
+    // Name: "Lastname, Firstname"
     push_wrapped(
         &mut ops,
         if title_line.is_empty() {
@@ -5837,47 +5938,29 @@ fn build_patient_sticker_pdf(
         TreatmentPlanPdfColor::Body,
         &mut y_mm,
     );
-    y_mm -= 1.0;
-    push_wrapped(
-        &mut ops,
-        if meta_line.is_empty() {
-            translated_label(&context.language, "sticker_dob")
-        } else {
-            &meta_line
-        },
-        &regular_handle,
-        body_size,
-        TreatmentPlanPdfColor::Body,
-        &mut y_mm,
-    );
-    y_mm -= 1.0;
-    push_wrapped(
-        &mut ops,
-        if agency_line.is_empty() {
-            &context.agency.name
-        } else {
-            &agency_line
-        },
-        &regular_handle,
-        body_size,
-        TreatmentPlanPdfColor::Body,
-        &mut y_mm,
-    );
-
-    let footer_lines = wrap_text_to_width(&footer_line, footer_size, content_width_mm);
-    let footer_height = footer_lines.len() as f32 * pdf_line_height_mm(footer_size, 1.15);
-    let mut footer_y = (bottom_margin_mm + footer_height).max(bottom_margin_mm + 2.5);
-    for line in footer_lines.into_iter().rev() {
-        append_pdf_text_line(
+    y_mm -= 0.8;
+    // Meta rows: geb. am / KT1 / KT2 / cost code
+    for line in &meta_lines {
+        push_wrapped(
             &mut ops,
-            &line,
-            left_margin_mm,
-            footer_y,
-            footer_size,
+            line,
             &regular_handle,
-            TreatmentPlanPdfColor::Muted,
+            body_size,
+            TreatmentPlanPdfColor::Body,
+            &mut y_mm,
         );
-        footer_y += pdf_line_height_mm(footer_size, 1.15);
+    }
+    y_mm -= 1.0;
+    // Agency contact block
+    if !agency_line.is_empty() {
+        push_wrapped(
+            &mut ops,
+            &agency_line,
+            &regular_handle,
+            body_size,
+            TreatmentPlanPdfColor::Muted,
+            &mut y_mm,
+        );
     }
 
     let mut save_warnings: Vec<PdfWarnMsg> = Vec::new();
@@ -7757,7 +7840,7 @@ async fn provider_matches_medical_document_specialty(
     })
 }
 
-async fn persist_document_file(
+pub(crate) async fn persist_document_file(
     state: &AppState,
     data: &[u8],
     input: &NewStoredDocument<'_>,
@@ -8700,6 +8783,17 @@ async fn generate_document(
     let patient_party = DocPartyBlock {
         name: patient_name.clone(),
         title: patient_title.clone(),
+        salutation: doc_salutation(&patient_gender),
+        first_name: patient_row
+            .try_get::<String, _>("first_name")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty()),
+        last_name: patient_row
+            .try_get::<String, _>("last_name")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty()),
         birth_date,
         street: bindings.party_street.clone().or_else(|| {
             patient_row
@@ -9136,6 +9230,15 @@ async fn generate_document(
                 .map(|value| parse_quote_line_items(&value))
                 .unwrap_or_default();
 
+            let mut agency = match load_agency_contract_settings(&state).await {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
+            apply_bank_overrides(&mut agency, &bindings);
+            let contract_valid_from = contract_row
+                .try_get::<Option<NaiveDate>, _>("valid_from")
+                .unwrap_or_default();
+
             let context = GeneratedFrameworkContractContext {
                 patient_pid: patient_pid.clone(),
                 patient_name: patient_name.clone(),
@@ -9144,11 +9247,19 @@ async fn generate_document(
                 patient_address: patient_party.address_line(),
                 patient_email: patient_party.email.clone(),
                 patient_phone: patient_party.phone.clone(),
+                patient_salutation: patient_party.salutation.clone(),
                 language: language.to_string(),
                 auto_name: auto_name.clone(),
                 title_override,
                 introduction,
                 closing_note,
+                agency,
+                sign_place: bindings.sign_place.clone(),
+                sign_date: bindings.sign_date,
+                effective_date: bindings.contract_date.or(contract_valid_from),
+                cost_threshold: bindings.cost_threshold.clone(),
+                order_sequence: bindings.order_sequence.unwrap_or(1),
+                extra_release_recipients: bindings.extra_release_recipients.clone(),
                 contract_number: contract_row
                     .try_get::<String, _>("contract_number")
                     .unwrap_or_default(),
@@ -9177,15 +9288,20 @@ async fn generate_document(
                 }),
                 quote_total_net: quote_row
                     .as_ref()
-                    .and_then(|row| row.try_get::<Option<String>, _>("total_net").ok().flatten()),
+                    .and_then(|row| row.try_get::<Option<String>, _>("total_net").ok().flatten())
+                    .map(|v| fmt_money_de(&v)),
                 quote_total_vat: quote_row
                     .as_ref()
-                    .and_then(|row| row.try_get::<Option<String>, _>("total_vat").ok().flatten()),
-                quote_total_gross: quote_row.as_ref().and_then(|row| {
-                    row.try_get::<Option<String>, _>("total_gross")
-                        .ok()
-                        .flatten()
-                }),
+                    .and_then(|row| row.try_get::<Option<String>, _>("total_vat").ok().flatten())
+                    .map(|v| fmt_money_de(&v)),
+                quote_total_gross: quote_row
+                    .as_ref()
+                    .and_then(|row| {
+                        row.try_get::<Option<String>, _>("total_gross")
+                            .ok()
+                            .flatten()
+                    })
+                    .map(|v| fmt_money_de(&v)),
                 quote_notes: quote_row
                     .as_ref()
                     .and_then(|row| row.try_get::<Option<String>, _>("notes").ok().flatten()),
@@ -9310,6 +9426,9 @@ async fn generate_document(
                     residence_country.as_deref(),
                 ),
                 insurance_provider,
+                kt1: bindings.kt1.clone(),
+                kt2: bindings.kt2.clone(),
+                cost_code: bindings.cost_code.clone(),
                 agency,
                 format,
                 auto_name: auto_name.clone(),
@@ -9351,9 +9470,13 @@ async fn generate_document(
                 party: patient_party.clone(),
                 agency,
                 order_number: resolved_order_number,
+                order_sequence: bindings.order_sequence.unwrap_or(1),
                 order_date: bindings.order_date,
                 contract_date: bindings.contract_date,
                 specialties: bindings.specialties.clone(),
+                examination_purpose: bindings.examination_purpose.clone(),
+                treatment_purpose: bindings.treatment_purpose.clone(),
+                order_components: bindings.order_components.clone(),
                 period_from: bindings.period_from,
                 period_to: bindings.period_to,
                 payer: if payer.name.trim().is_empty() {
@@ -9429,6 +9552,7 @@ async fn generate_document(
                 payer,
                 agency,
                 order_number: resolved_order_number,
+                order_sequence: bindings.order_sequence.unwrap_or(1),
                 order_date: bindings.order_date,
                 contract_date: bindings.contract_date,
                 quote_number: bindings
@@ -9468,6 +9592,10 @@ async fn generate_document(
             (preview, pdf_bytes)
         }
         "cost_estimate" => {
+            let cost_estimate_agency = match load_agency_contract_settings(&state).await {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
             let quote = if let Some(order_uuid) = order_id {
                 match load_order_quote_summary(&state, order_uuid).await {
                     Ok(value) => value,
@@ -9499,9 +9627,13 @@ async fn generate_document(
                 title_override: title_override.clone(),
                 patient: patient_party.clone(),
                 patient_pid: patient_pid.clone(),
-                estimate_date: bindings.sign_date.or(bindings.order_date),
+                estimate_date: bindings
+                    .sign_date
+                    .or(bindings.order_date)
+                    .or_else(|| Some(generated_at.date_naive())),
                 line_items,
                 total_range,
+                agency: cost_estimate_agency,
                 generated_at,
             };
             let preview = admin_preview_html(
@@ -9573,6 +9705,7 @@ async fn generate_document(
                     .or_else(|| patient_party.address_line()),
                 guardian_name: bindings.guardian_name.clone(),
                 guardian_birth_date: bindings.guardian_birth_date,
+                guardian_address: bindings.guardian_address.clone(),
                 guardian2_name: bindings.guardian2_name.clone(),
                 guardian2_birth_date: bindings.guardian2_birth_date,
                 extra_release_recipients: bindings.extra_release_recipients.clone(),
@@ -9820,6 +9953,7 @@ async fn load_agency_contract_settings(
         .unwrap_or_else(|| "GMED".to_string());
     Ok(AgencyContractSettings {
         name,
+        care_of: values.get("agency_care_of").cloned(),
         address: values.get("agency_address").cloned(),
         phone: values.get("agency_phone").cloned(),
         email: values.get("agency_email").cloned(),
@@ -10901,6 +11035,9 @@ fn payer_block_from_bindings(bindings: &DocumentBindingOverrides) -> DocPartyBlo
     DocPartyBlock {
         name: bindings.payer_name.clone().unwrap_or_default(),
         title: None,
+        salutation: bindings.payer_salutation.clone(),
+        first_name: None,
+        last_name: None,
         birth_date: bindings.payer_birth_date,
         street: bindings.payer_street.clone(),
         zip: bindings.payer_zip.clone(),
@@ -10934,8 +11071,42 @@ fn parse_eur_amount(value: &str) -> Option<f64> {
     normalized.parse::<f64>().ok()
 }
 
+/// Gendered salutation ("Herr"/"Frau") for legal documents. Returns None for
+/// diverse/unknown gender so callers can omit it rather than print a placeholder.
+fn doc_salutation(gender: &str) -> Option<String> {
+    match gender {
+        "male" => Some("Herr".to_string()),
+        "female" => Some("Frau".to_string()),
+        _ => None,
+    }
+}
+
+/// German currency formatting with thousands grouping: 1234.5 -> "1.234,50 EUR".
 fn format_eur(value: f64) -> String {
-    format!("{value:.2}").replace('.', ",") + " EUR"
+    let cents = (value.abs() * 100.0).round() as u64;
+    let euros = cents / 100;
+    let frac = cents % 100;
+    let mut grouped = String::new();
+    let digits = euros.to_string();
+    let len = digits.len();
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (len - i).is_multiple_of(3) {
+            grouped.push('.');
+        }
+        grouped.push(ch);
+    }
+    let sign = if value < 0.0 { "-" } else { "" };
+    format!("{sign}{grouped},{frac:02} EUR")
+}
+
+/// Format a raw monetary string (e.g. a Postgres NUMERIC ::TEXT "2698.00" or a
+/// German "2.698,00") into "2.698,00 EUR". Returns the trimmed input unchanged
+/// when it cannot be parsed (so already-formatted free text is preserved).
+fn fmt_money_de(raw: &str) -> String {
+    match parse_eur_amount(raw) {
+        Some(amount) => format_eur(amount),
+        None => raw.trim().to_string(),
+    }
 }
 
 /// Best-effort net/VAT(19%)/gross totals summed from manual service lines.
@@ -11021,12 +11192,21 @@ async fn load_order_quote_summary(
                 .try_get::<Option<String>, _>("quote_number")
                 .ok()
                 .flatten(),
-            total_net: row.try_get::<Option<String>, _>("total_net").ok().flatten(),
-            total_vat: row.try_get::<Option<String>, _>("total_vat").ok().flatten(),
+            total_net: row
+                .try_get::<Option<String>, _>("total_net")
+                .ok()
+                .flatten()
+                .map(|v| fmt_money_de(&v)),
+            total_vat: row
+                .try_get::<Option<String>, _>("total_vat")
+                .ok()
+                .flatten()
+                .map(|v| fmt_money_de(&v)),
             total_gross: row
                 .try_get::<Option<String>, _>("total_gross")
                 .ok()
-                .flatten(),
+                .flatten()
+                .map(|v| fmt_money_de(&v)),
             line_items,
         }
     }))
@@ -11096,6 +11276,9 @@ fn merge_payer(manual: DocPartyBlock, invoice: Option<DocPartyBlock>) -> DocPart
             manual.name
         },
         title: manual.title,
+        salutation: manual.salutation,
+        first_name: manual.first_name.or(invoice.first_name),
+        last_name: manual.last_name.or(invoice.last_name),
         birth_date: manual.birth_date,
         street: manual.street,
         zip: manual.zip,

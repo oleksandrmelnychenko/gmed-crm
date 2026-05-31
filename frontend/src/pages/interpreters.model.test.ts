@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildInterpreterLanguagesPath,
   buildInterpreterListPath,
+  buildInterpreterProfileDocumentDownloadPath,
+  buildInterpreterProfileDocumentsPath,
   interpreterLanguagesToPayload,
 } from "./interpreters.model";
 
@@ -35,6 +37,17 @@ describe("buildInterpreterLanguagesPath", () => {
     expect(buildInterpreterLanguagesPath("int-123")).toBe(
       "/interpreters/int-123/languages",
     );
+  });
+});
+
+describe("interpreter profile document paths", () => {
+  it("targets upload and download endpoints", () => {
+    expect(buildInterpreterProfileDocumentsPath("int-123")).toBe(
+      "/interpreters/int-123/profile/documents",
+    );
+    expect(
+      buildInterpreterProfileDocumentDownloadPath("int-123", "doc-456"),
+    ).toBe("/interpreters/int-123/profile/documents/doc-456/download");
   });
 });
 

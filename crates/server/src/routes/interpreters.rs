@@ -1,22 +1,28 @@
 use axum::{
     Json, Router,
-    extract::{Extension, Path, Query, State},
+    body::Body,
+    extract::{Extension, Multipart, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::get,
+    routing::{get, post},
 };
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use serde::Deserialize;
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 use sqlx::{Postgres, Row, Transaction};
 use std::{collections::HashSet, str::FromStr};
 use uuid::Uuid;
 
-use crate::access;
 use crate::auth::middleware::AuthUser;
+use crate::file_scan::{FileScanOutcome, scan_upload_bytes};
+use crate::file_sniff::validate_upload_magic_bytes;
+use crate::routes::documents::{
+    MAX_FILE_SIZE, NewStoredDocument, persist_document_file, read_document_storage_bytes,
+};
 use crate::services::interpreter_suggestions::load_appointment_interpreter_suggestions;
 use crate::state::AppState;
+use crate::{access, audit};
 use gmed_domain::role::Role;
 
 pub fn router() -> Router<AppState> {
@@ -29,6 +35,14 @@ pub fn router() -> Router<AppState> {
         .route(
             "/interpreters/{interpreter_id}/profile/operations",
             get(get_interpreter_profile_operations),
+        )
+        .route(
+            "/interpreters/{interpreter_id}/profile/documents",
+            post(upload_interpreter_profile_document),
+        )
+        .route(
+            "/interpreters/{interpreter_id}/profile/documents/{document_id}/download",
+            get(download_interpreter_profile_document),
         )
         .route(
             "/appointments/{appointment_id}/interpreter-suggestions",
@@ -116,7 +130,9 @@ async fn list_interpreter_profiles(
                   d.medical_knowledge, d.training_history, d.work_permit_valid_until AS detail_work_permit_valid_until,
                   d.internal_notes, d.retention_delete_at, d.erasure_request_status,
                   c.confidentiality_status, c.confidentiality_signed_at, c.confidentiality_document_url,
-                  c.avv_status, c.avv_signed_at, c.avv_document_url, c.gdpr_training_at,
+                  c.confidentiality_document_id, confidentiality_doc.original_filename AS confidentiality_document_name,
+                  c.avv_status, c.avv_signed_at, c.avv_document_url, c.avv_document_id,
+                  avv_doc.original_filename AS avv_document_name, c.gdpr_training_at,
                   c.work_permit_valid_until AS compliance_work_permit_valid_until,
                   f.hourly_rate, f.salary_class, f.bank_details, f.tax_number, f.ust_idnr, f.billing_status,
                   a.access_level, a.auto_block_policy,
@@ -144,15 +160,21 @@ async fn list_interpreter_profiles(
                         'issuedAt', cr.issued_at,
                         'expiresAt', cr.expires_at,
                         'documentUrl', cr.document_url,
+                        'documentId', cr.document_id,
+                        'documentName', credential_doc.original_filename,
+                        'documentMimeType', credential_doc.mime_type,
                         'notes', cr.notes
                     ) ORDER BY cr.credential_type, cr.expires_at NULLS LAST, cr.title)
                     FROM interpreter_credentials cr
+                    LEFT JOIN documents credential_doc ON credential_doc.id = cr.document_id
                     WHERE cr.interpreter_id = u.id
                   ), '[]'::jsonb) AS credentials
            FROM users u
            LEFT JOIN interpreter_profiles p ON p.user_id = u.id
            LEFT JOIN interpreter_profile_details d ON d.user_id = u.id
            LEFT JOIN interpreter_compliance_profiles c ON c.user_id = u.id
+           LEFT JOIN documents confidentiality_doc ON confidentiality_doc.id = c.confidentiality_document_id
+           LEFT JOIN documents avv_doc ON avv_doc.id = c.avv_document_id
            LEFT JOIN interpreter_finance_profiles f ON f.user_id = u.id
            LEFT JOIN interpreter_access_profiles a ON a.user_id = u.id
            WHERE u.role IN ('interpreter', 'teamlead_interpreter')
@@ -203,7 +225,9 @@ async fn get_interpreter_profile(
                   d.medical_knowledge, d.training_history, d.work_permit_valid_until AS detail_work_permit_valid_until,
                   d.internal_notes, d.retention_delete_at, d.erasure_request_status,
                   c.confidentiality_status, c.confidentiality_signed_at, c.confidentiality_document_url,
-                  c.avv_status, c.avv_signed_at, c.avv_document_url, c.gdpr_training_at,
+                  c.confidentiality_document_id, confidentiality_doc.original_filename AS confidentiality_document_name,
+                  c.avv_status, c.avv_signed_at, c.avv_document_url, c.avv_document_id,
+                  avv_doc.original_filename AS avv_document_name, c.gdpr_training_at,
                   c.work_permit_valid_until AS compliance_work_permit_valid_until,
                   f.hourly_rate, f.salary_class, f.bank_details, f.tax_number, f.ust_idnr, f.billing_status,
                   a.access_level, a.auto_block_policy,
@@ -231,15 +255,21 @@ async fn get_interpreter_profile(
                         'issuedAt', cr.issued_at,
                         'expiresAt', cr.expires_at,
                         'documentUrl', cr.document_url,
+                        'documentId', cr.document_id,
+                        'documentName', credential_doc.original_filename,
+                        'documentMimeType', credential_doc.mime_type,
                         'notes', cr.notes
                     ) ORDER BY cr.credential_type, cr.expires_at NULLS LAST, cr.title)
                     FROM interpreter_credentials cr
+                    LEFT JOIN documents credential_doc ON credential_doc.id = cr.document_id
                     WHERE cr.interpreter_id = u.id
                   ), '[]'::jsonb) AS credentials
            FROM users u
            LEFT JOIN interpreter_profiles p ON p.user_id = u.id
            LEFT JOIN interpreter_profile_details d ON d.user_id = u.id
            LEFT JOIN interpreter_compliance_profiles c ON c.user_id = u.id
+           LEFT JOIN documents confidentiality_doc ON confidentiality_doc.id = c.confidentiality_document_id
+           LEFT JOIN documents avv_doc ON avv_doc.id = c.avv_document_id
            LEFT JOIN interpreter_finance_profiles f ON f.user_id = u.id
            LEFT JOIN interpreter_access_profiles a ON a.user_id = u.id
            WHERE u.id = $1
@@ -356,6 +386,242 @@ async fn get_interpreter_profile_operations(
             )
         }
     }
+}
+
+async fn upload_interpreter_profile_document(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(interpreter_id): Path<Uuid>,
+    mut multipart: Multipart,
+) -> axum::response::Response {
+    if let Err(resp) = ensure_interpreter_profile_access(&state, &auth, interpreter_id, true).await
+    {
+        return resp;
+    }
+
+    let mut file_data: Option<Vec<u8>> = None;
+    let mut file_name: Option<String> = None;
+    let mut mime_type = String::from("application/octet-stream");
+    let mut document_kind = String::from("other");
+    let mut auto_name: Option<String> = None;
+    let mut notes: Option<String> = None;
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let name = field.name().unwrap_or_default().to_string();
+        match name.as_str() {
+            "file" => {
+                file_name = field.file_name().map(ToOwned::to_owned);
+                if let Some(content_type) = field.content_type() {
+                    mime_type = content_type.to_string();
+                }
+                match field.bytes().await {
+                    Ok(bytes) => {
+                        if bytes.len() > MAX_FILE_SIZE {
+                            return err(StatusCode::PAYLOAD_TOO_LARGE, "File too large (max 25MB)");
+                        }
+                        file_data = Some(bytes.to_vec());
+                    }
+                    Err(error) => {
+                        tracing::error!(error = %error, interpreter_id = %interpreter_id, "read interpreter profile document upload");
+                        return err(StatusCode::BAD_REQUEST, "Failed to read uploaded file");
+                    }
+                }
+            }
+            "document_kind" | "documentKind" => {
+                document_kind = parse_multipart_text(field).await.unwrap_or_default();
+            }
+            "auto_name" | "autoName" => {
+                auto_name = parse_multipart_optional_text(field).await;
+            }
+            "notes" => {
+                notes = parse_multipart_optional_text(field).await;
+            }
+            _ => {}
+        }
+    }
+
+    let Some(document_kind) = normalize_interpreter_profile_document_kind(&document_kind) else {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid document kind");
+    };
+    let data = match file_data {
+        Some(data) if !data.is_empty() => data,
+        _ => return err(StatusCode::BAD_REQUEST, "No file uploaded"),
+    };
+    match validate_upload_magic_bytes(file_name.as_deref(), Some(mime_type.as_str()), &data) {
+        Ok(Some(validated_mime)) => mime_type = validated_mime,
+        Ok(None) => {}
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    }
+    match scan_upload_bytes(file_name.as_deref(), &data).await {
+        Ok(FileScanOutcome::Clean) => {}
+        Ok(FileScanOutcome::Skipped) => {
+            tracing::warn!(filename = ?file_name, "virus scanner unavailable; interpreter profile document scan skipped");
+        }
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
+    }
+
+    let original_filename = file_name.unwrap_or_else(|| "interpreter-profile-document".to_string());
+    let resolved_auto_name = auto_name.unwrap_or_else(|| {
+        format!(
+            "{} - {}",
+            interpreter_profile_document_kind_label(document_kind),
+            original_filename
+        )
+    });
+    let persist_input = NewStoredDocument {
+        patient_id: None,
+        order_id: None,
+        appointment_id: None,
+        auto_name: resolved_auto_name.as_str(),
+        original_filename: original_filename.as_str(),
+        art: "interpreter_profile_document",
+        category: Some(document_kind),
+        status: "active",
+        visibility: "internal",
+        is_medical: false,
+        mime_type: mime_type.as_str(),
+        klinik: None,
+        ursprung: Some("interpreter_profile"),
+        notes: notes.as_deref(),
+        generated_template_id: None,
+        version_root_document_id: None,
+        replaces_document_id: None,
+        version_number: 1,
+        uploaded_by: auth.user_id,
+    };
+    let (document_id, file_size, original_filename, _storage_key) =
+        match persist_document_file(&state, &data, &persist_input).await {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+
+    if let Err(error) = sqlx::query(
+        r#"INSERT INTO interpreter_profile_documents (
+                document_id, interpreter_id, document_kind, uploaded_by
+           ) VALUES ($1, $2, $3, $4)
+           ON CONFLICT (document_id)
+           DO UPDATE SET interpreter_id = EXCLUDED.interpreter_id,
+                         document_kind = EXCLUDED.document_kind,
+                         uploaded_by = EXCLUDED.uploaded_by"#,
+    )
+    .bind(document_id)
+    .bind(interpreter_id)
+    .bind(document_kind)
+    .bind(auth.user_id)
+    .execute(&state.db)
+    .await
+    {
+        tracing::error!(error = %error, interpreter_id = %interpreter_id, document_id = %document_id, "link interpreter profile document");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to link interpreter profile document",
+        );
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "upload_interpreter_profile_document",
+        Some(auth.user_id),
+        "document",
+        Some(document_id),
+        json!({
+            "interpreter_id": interpreter_id,
+            "document_kind": document_kind,
+            "mime_type": mime_type.as_str(),
+            "file_size": file_size,
+        }),
+    ));
+
+    Json(json!({
+        "ok": true,
+        "id": document_id,
+        "document_id": document_id,
+        "documentKind": document_kind,
+        "original_filename": original_filename,
+        "mime_type": mime_type,
+        "file_size": file_size,
+        "download_url": format!("/interpreters/{interpreter_id}/profile/documents/{document_id}/download"),
+    }))
+    .into_response()
+}
+
+async fn download_interpreter_profile_document(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((interpreter_id, document_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if let Err(resp) = ensure_interpreter_profile_access(&state, &auth, interpreter_id, false).await
+    {
+        return resp;
+    }
+
+    let row = match sqlx::query(
+        r#"SELECT d.auto_name, d.original_filename, d.mime_type, d.storage_key,
+                  d.file_deleted_at, ipd.document_kind
+           FROM interpreter_profile_documents ipd
+           JOIN documents d ON d.id = ipd.document_id
+           WHERE ipd.interpreter_id = $1
+             AND ipd.document_id = $2"#,
+    )
+    .bind(interpreter_id)
+    .bind(document_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
+        Err(error) => {
+            tracing::error!(error = %error, interpreter_id = %interpreter_id, document_id = %document_id, "load interpreter profile document");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load interpreter profile document",
+            );
+        }
+    };
+
+    let Some(storage_key) = row
+        .try_get::<Option<String>, _>("storage_key")
+        .unwrap_or_default()
+    else {
+        if row
+            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("file_deleted_at")
+            .unwrap_or_default()
+            .is_some()
+        {
+            return err(StatusCode::GONE, "Document file was deleted");
+        }
+        return err(StatusCode::NOT_FOUND, "Document file is not stored");
+    };
+    let mime_type = row
+        .try_get::<Option<String>, _>("mime_type")
+        .unwrap_or_default()
+        .unwrap_or_else(|| "application/octet-stream".to_string());
+    let auto_name = row
+        .try_get::<String, _>("auto_name")
+        .unwrap_or_else(|_| "document".to_string());
+    let filename = row
+        .try_get::<Option<String>, _>("original_filename")
+        .unwrap_or_default()
+        .unwrap_or_else(|| auto_name.clone());
+    let data = match read_document_storage_bytes(
+        document_id,
+        storage_key.as_str(),
+        Some(mime_type.as_str()),
+        Some(filename.as_str()),
+        Some(auto_name.as_str()),
+    )
+    .await
+    {
+        Ok(data) => data,
+        Err(_) => return err(StatusCode::NOT_FOUND, "Document file not found on disk"),
+    };
+
+    let disposition = format!("attachment; filename=\"{}\"", filename.replace('"', ""));
+    axum::response::Response::builder()
+        .header("content-type", mime_type)
+        .header("content-disposition", disposition)
+        .body(Body::from(data))
+        .unwrap()
+        .into_response()
 }
 
 async fn get_interpreter_suggestions(
@@ -959,7 +1225,9 @@ async fn load_interpreter_profile_payload(
                   d.medical_knowledge, d.training_history, d.work_permit_valid_until AS detail_work_permit_valid_until,
                   d.internal_notes, d.retention_delete_at, d.erasure_request_status,
                   c.confidentiality_status, c.confidentiality_signed_at, c.confidentiality_document_url,
-                  c.avv_status, c.avv_signed_at, c.avv_document_url, c.gdpr_training_at,
+                  c.confidentiality_document_id, confidentiality_doc.original_filename AS confidentiality_document_name,
+                  c.avv_status, c.avv_signed_at, c.avv_document_url, c.avv_document_id,
+                  avv_doc.original_filename AS avv_document_name, c.gdpr_training_at,
                   c.work_permit_valid_until AS compliance_work_permit_valid_until,
                   f.hourly_rate, f.salary_class, f.bank_details, f.tax_number, f.ust_idnr, f.billing_status,
                   a.access_level, a.auto_block_policy,
@@ -987,15 +1255,21 @@ async fn load_interpreter_profile_payload(
                         'issuedAt', cr.issued_at,
                         'expiresAt', cr.expires_at,
                         'documentUrl', cr.document_url,
+                        'documentId', cr.document_id,
+                        'documentName', credential_doc.original_filename,
+                        'documentMimeType', credential_doc.mime_type,
                         'notes', cr.notes
                     ) ORDER BY cr.credential_type, cr.expires_at NULLS LAST, cr.title)
                     FROM interpreter_credentials cr
+                    LEFT JOIN documents credential_doc ON credential_doc.id = cr.document_id
                     WHERE cr.interpreter_id = u.id
                   ), '[]'::jsonb) AS credentials
            FROM users u
            LEFT JOIN interpreter_profiles p ON p.user_id = u.id
            LEFT JOIN interpreter_profile_details d ON d.user_id = u.id
            LEFT JOIN interpreter_compliance_profiles c ON c.user_id = u.id
+           LEFT JOIN documents confidentiality_doc ON confidentiality_doc.id = c.confidentiality_document_id
+           LEFT JOIN documents avv_doc ON avv_doc.id = c.avv_document_id
            LEFT JOIN interpreter_finance_profiles f ON f.user_id = u.id
            LEFT JOIN interpreter_access_profiles a ON a.user_id = u.id
            WHERE u.id = $1
@@ -1074,9 +1348,23 @@ fn build_structured_profile(row: &sqlx::postgres::PgRow) -> Value {
         row,
         "confidentiality_document_url",
     );
+    insert_row_uuid_string(
+        &mut compliance,
+        "confidentialityDocumentId",
+        row,
+        "confidentiality_document_id",
+    );
+    insert_row_string(
+        &mut compliance,
+        "confidentialityDocumentName",
+        row,
+        "confidentiality_document_name",
+    );
     insert_row_string(&mut compliance, "avvStatus", row, "avv_status");
     insert_row_date(&mut compliance, "avvSignedAt", row, "avv_signed_at");
     insert_row_string(&mut compliance, "avvDocumentUrl", row, "avv_document_url");
+    insert_row_uuid_string(&mut compliance, "avvDocumentId", row, "avv_document_id");
+    insert_row_string(&mut compliance, "avvDocumentName", row, "avv_document_name");
     insert_row_date(&mut compliance, "gdprTrainingAt", row, "gdpr_training_at");
     if !compliance.is_empty() {
         profile.insert("compliance".to_string(), Value::Object(compliance));
@@ -1164,6 +1452,17 @@ fn insert_row_date(
         .try_get::<Option<NaiveDate>, _>(column)
         .unwrap_or_default()
     {
+        target.insert(key.to_string(), Value::String(value.to_string()));
+    }
+}
+
+fn insert_row_uuid_string(
+    target: &mut Map<String, Value>,
+    key: &str,
+    row: &sqlx::postgres::PgRow,
+    column: &str,
+) {
+    if let Some(value) = row.try_get::<Option<Uuid>, _>(column).unwrap_or_default() {
         target.insert(key.to_string(), Value::String(value.to_string()));
     }
 }
@@ -1280,6 +1579,7 @@ struct CredentialRecord {
     issued_at: Option<NaiveDate>,
     expires_at: Option<NaiveDate>,
     document_url: Option<String>,
+    document_id: Option<Uuid>,
     notes: Option<String>,
 }
 
@@ -1500,6 +1800,12 @@ fn credentials_from_profile(
                     .get("documentUrl")
                     .or_else(|| object.get("document_url")),
             ),
+            document_id: uuid_from_value(
+                object
+                    .get("documentId")
+                    .or_else(|| object.get("document_id")),
+                "credential documentId",
+            )?,
             notes: string_from_value(object.get("notes")),
         });
     }
@@ -1529,21 +1835,39 @@ async fn save_structured_compliance(
         &["signed", "pending"],
         "Invalid AVV status",
     )?;
+    let confidentiality_document_id = uuid_from_value(
+        value_from_profile_or_nested(
+            profile,
+            "confidentialityDocumentId",
+            "compliance",
+            "confidentialityDocumentId",
+        ),
+        "confidentialityDocumentId",
+    )?;
+    validate_interpreter_profile_document_id(tx, interpreter_id, confidentiality_document_id)
+        .await?;
+    let avv_document_id = uuid_from_value(
+        value_from_profile_or_nested(profile, "avvDocumentId", "compliance", "avvDocumentId"),
+        "avvDocumentId",
+    )?;
+    validate_interpreter_profile_document_id(tx, interpreter_id, avv_document_id).await?;
 
     sqlx::query(
         r#"INSERT INTO interpreter_compliance_profiles (
                 user_id, confidentiality_status, confidentiality_signed_at,
-                confidentiality_document_url, avv_status, avv_signed_at,
-                avv_document_url, gdpr_training_at, work_permit_valid_until,
-                updated_by
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                confidentiality_document_url, confidentiality_document_id,
+                avv_status, avv_signed_at, avv_document_url, avv_document_id,
+                gdpr_training_at, work_permit_valid_until, updated_by
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
            ON CONFLICT (user_id)
            DO UPDATE SET confidentiality_status = EXCLUDED.confidentiality_status,
                          confidentiality_signed_at = EXCLUDED.confidentiality_signed_at,
                          confidentiality_document_url = EXCLUDED.confidentiality_document_url,
+                         confidentiality_document_id = EXCLUDED.confidentiality_document_id,
                          avv_status = EXCLUDED.avv_status,
                          avv_signed_at = EXCLUDED.avv_signed_at,
                          avv_document_url = EXCLUDED.avv_document_url,
+                         avv_document_id = EXCLUDED.avv_document_id,
                          gdpr_training_at = EXCLUDED.gdpr_training_at,
                          work_permit_valid_until = EXCLUDED.work_permit_valid_until,
                          updated_by = EXCLUDED.updated_by,
@@ -1566,6 +1890,7 @@ async fn save_structured_compliance(
         "compliance",
         "confidentialityDocumentUrl",
     ))
+    .bind(confidentiality_document_id)
     .bind(avv_status)
     .bind(date_from_value(
         value_from_profile_or_nested(profile, "avvSignedAt", "compliance", "avvSignedAt"),
@@ -1577,6 +1902,7 @@ async fn save_structured_compliance(
         "compliance",
         "avvDocumentUrl",
     ))
+    .bind(avv_document_id)
     .bind(date_from_value(
         value_from_profile_or_nested(profile, "gdprTrainingAt", "compliance", "gdprTrainingAt"),
         "gdprTrainingAt",
@@ -1758,6 +2084,46 @@ async fn replace_string_values(
 }
 
 #[allow(clippy::result_large_err)]
+async fn validate_interpreter_profile_document_id(
+    tx: &mut Transaction<'_, Postgres>,
+    interpreter_id: Uuid,
+    document_id: Option<Uuid>,
+) -> Result<(), axum::response::Response> {
+    let Some(document_id) = document_id else {
+        return Ok(());
+    };
+
+    let belongs_to_profile = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+                SELECT 1
+                FROM interpreter_profile_documents
+                WHERE interpreter_id = $1
+                  AND document_id = $2
+           )"#,
+    )
+    .bind(interpreter_id)
+    .bind(document_id)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, interpreter_id = %interpreter_id, document_id = %document_id, "validate interpreter profile document");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate interpreter profile document",
+        )
+    })?;
+
+    if belongs_to_profile {
+        Ok(())
+    } else {
+        Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Document is not linked to interpreter profile",
+        ))
+    }
+}
+
+#[allow(clippy::result_large_err)]
 async fn replace_credentials(
     tx: &mut Transaction<'_, Postgres>,
     interpreter_id: Uuid,
@@ -1776,11 +2142,13 @@ async fn replace_credentials(
         })?;
 
     for credential in credentials {
+        validate_interpreter_profile_document_id(tx, interpreter_id, credential.document_id)
+            .await?;
         sqlx::query(
             r#"INSERT INTO interpreter_credentials (
                     interpreter_id, credential_type, title, issuer,
-                    issued_at, expires_at, document_url, notes
-               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#,
+                    issued_at, expires_at, document_url, document_id, notes
+               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#,
         )
         .bind(interpreter_id)
         .bind(&credential.credential_type)
@@ -1789,6 +2157,7 @@ async fn replace_credentials(
         .bind(credential.issued_at)
         .bind(credential.expires_at)
         .bind(&credential.document_url)
+        .bind(credential.document_id)
         .bind(&credential.notes)
         .execute(&mut **tx)
         .await
@@ -1851,6 +2220,22 @@ fn string_from_profile_or_nested(
         nested_key,
         nested_field,
     ))
+}
+
+#[allow(clippy::result_large_err)]
+fn uuid_from_value(
+    value: Option<&Value>,
+    field_name: &str,
+) -> Result<Option<Uuid>, axum::response::Response> {
+    let Some(value) = string_from_value(value) else {
+        return Ok(None);
+    };
+    Uuid::parse_str(&value).map(Some).map_err(|_| {
+        err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &format!("Invalid {field_name}"),
+        )
+    })
 }
 
 fn bool_from_profile_or_nested(
@@ -2010,6 +2395,45 @@ fn normalize_language_code(value: &str) -> Option<String> {
     } else {
         Some(normalized)
     }
+}
+
+fn normalize_interpreter_profile_document_kind(value: &str) -> Option<&'static str> {
+    match value.trim() {
+        "credential" => Some("credential"),
+        "confidentiality" => Some("confidentiality"),
+        "avv" => Some("avv"),
+        "gdpr_training" | "gdprTraining" => Some("gdpr_training"),
+        "work_permit" | "workPermit" => Some("work_permit"),
+        "" | "other" => Some("other"),
+        _ => None,
+    }
+}
+
+fn interpreter_profile_document_kind_label(kind: &str) -> &'static str {
+    match kind {
+        "credential" => "Credential",
+        "confidentiality" => "Confidentiality",
+        "avv" => "AVV",
+        "gdpr_training" => "GDPR training",
+        "work_permit" => "Work permit",
+        _ => "Interpreter profile document",
+    }
+}
+
+async fn parse_multipart_text(field: axum::extract::multipart::Field<'_>) -> Option<String> {
+    field
+        .text()
+        .await
+        .ok()
+        .map(|value| value.trim().to_string())
+}
+
+async fn parse_multipart_optional_text(
+    field: axum::extract::multipart::Field<'_>,
+) -> Option<String> {
+    parse_multipart_text(field)
+        .await
+        .filter(|value| !value.is_empty())
 }
 
 fn normalize_optional_text(value: Option<String>) -> Option<String> {

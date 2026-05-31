@@ -43,6 +43,73 @@ async fn json_request(
     (status, payload)
 }
 
+async fn multipart_upload(
+    app: &axum::Router,
+    path: &str,
+    bearer: &str,
+    text_fields: &[(&str, String)],
+    file_name: &str,
+    mime_type: &str,
+    file_bytes: &[u8],
+) -> (StatusCode, Value) {
+    let boundary = format!("----gmed-boundary-{}", Uuid::new_v4().simple());
+    let mut body = Vec::new();
+
+    for (name, value) in text_fields {
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(
+            format!("Content-Disposition: form-data; name=\"{name}\"\r\n\r\n").as_bytes(),
+        );
+        body.extend_from_slice(value.as_bytes());
+        body.extend_from_slice(b"\r\n");
+    }
+
+    body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+    body.extend_from_slice(
+        format!(
+            "Content-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\nContent-Type: {mime_type}\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(file_bytes);
+    body.extend_from_slice(b"\r\n");
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+
+    let request = Request::builder()
+        .method("POST")
+        .uri(path)
+        .header("Authorization", bearer)
+        .header(
+            "Content-Type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
+        .await
+        .unwrap();
+    let payload = serde_json::from_slice(&bytes).unwrap_or(json!(null));
+    (status, payload)
+}
+
+async fn download_request(app: &axum::Router, path: &str, bearer: &str) -> (StatusCode, Vec<u8>) {
+    let request = Request::builder()
+        .method("GET")
+        .uri(path)
+        .header("Authorization", bearer)
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
+        .await
+        .unwrap()
+        .to_vec();
+    (status, bytes)
+}
+
 fn auth_header_for(user_id: Uuid, role: &str) -> String {
     let token = jwt::issue_access_token(TEST_SECRET, user_id, role, Uuid::new_v4()).unwrap();
     format!("Bearer {token}")
@@ -528,6 +595,180 @@ async fn managers_can_manage_interpreter_languages_and_interpreters_can_read_sel
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(body["message"], "Invalid CEFR level");
+}
+
+#[tokio::test]
+async fn interpreter_profile_documents_upload_link_and_download() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("interpreter-profile-docs");
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
+    let other_interpreter_id = seed_user(&pool, &format!("{tag}-other"), "interpreter").await;
+    let billing_id = seed_user(&pool, &format!("{tag}-billing"), "billing").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
+    let other_bearer = auth_header_for(other_interpreter_id, "interpreter");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+
+    let (status, body) = multipart_upload(
+        &app,
+        &format!("/api/v1/interpreters/{interpreter_id}/profile/documents"),
+        &pm_bearer,
+        &[("documentKind", "confidentiality".to_string())],
+        "confidentiality.pdf",
+        "application/pdf",
+        b"%PDF-interpreter-confidentiality%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    let confidentiality_document_id =
+        Uuid::parse_str(body["id"].as_str().expect("uploaded document id")).unwrap();
+    assert_eq!(body["documentKind"], "confidentiality");
+
+    let (status, body) = multipart_upload(
+        &app,
+        &format!("/api/v1/interpreters/{interpreter_id}/profile/documents"),
+        &pm_bearer,
+        &[("documentKind", "credential".to_string())],
+        "sworn-certificate.pdf",
+        "application/pdf",
+        b"%PDF-interpreter-credential%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    let credential_document_id =
+        Uuid::parse_str(body["id"].as_str().expect("credential document id")).unwrap();
+
+    let (status, body) = multipart_upload(
+        &app,
+        &format!("/api/v1/interpreters/{interpreter_id}/profile/documents"),
+        &interpreter_bearer,
+        &[("documentKind", "credential".to_string())],
+        "self-upload.pdf",
+        "application/pdf",
+        b"%PDF-self-upload%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["message"], "Insufficient permissions");
+
+    let (status, body) = json_request(
+        &app,
+        "PUT",
+        &format!("/api/v1/interpreters/{interpreter_id}/profile"),
+        &pm_bearer,
+        Some(json!({
+            "status": "active",
+            "compliance": {
+                "confidentialityStatus": "signed",
+                "confidentialityDocumentId": confidentiality_document_id
+            },
+            "credentials": [
+                {
+                    "credentialType": "sworn_interpreter",
+                    "title": "Sworn interpreter certificate",
+                    "issuer": "Court",
+                    "documentId": credential_document_id
+                }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(
+        body["profile"]["compliance"]["confidentialityDocumentId"],
+        confidentiality_document_id.to_string()
+    );
+    assert_eq!(
+        body["profile"]["credentials"][0]["documentId"],
+        credential_document_id.to_string()
+    );
+    assert_eq!(
+        body["profile"]["credentials"][0]["documentName"],
+        "sworn-certificate.pdf"
+    );
+
+    let compliance_document: Option<Uuid> = sqlx::query_scalar(
+        "SELECT confidentiality_document_id FROM interpreter_compliance_profiles WHERE user_id = $1",
+    )
+    .bind(interpreter_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(compliance_document, Some(confidentiality_document_id));
+
+    let credential_document: Option<Uuid> = sqlx::query_scalar(
+        "SELECT document_id FROM interpreter_credentials WHERE interpreter_id = $1",
+    )
+    .bind(interpreter_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(credential_document, Some(credential_document_id));
+
+    let (status, bytes) = download_request(
+        &app,
+        &format!(
+            "/api/v1/interpreters/{interpreter_id}/profile/documents/{credential_document_id}/download"
+        ),
+        &pm_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(String::from_utf8_lossy(&bytes).contains("%PDF-interpreter-credential%"));
+
+    let (status, bytes) = download_request(
+        &app,
+        &format!(
+            "/api/v1/interpreters/{interpreter_id}/profile/documents/{credential_document_id}/download"
+        ),
+        &interpreter_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(String::from_utf8_lossy(&bytes).contains("%PDF-interpreter-credential%"));
+
+    let (status, _bytes) = download_request(
+        &app,
+        &format!(
+            "/api/v1/interpreters/{interpreter_id}/profile/documents/{credential_document_id}/download"
+        ),
+        &other_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, _bytes) = download_request(
+        &app,
+        &format!(
+            "/api/v1/interpreters/{interpreter_id}/profile/documents/{credential_document_id}/download"
+        ),
+        &billing_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, body) = json_request(
+        &app,
+        "PUT",
+        &format!("/api/v1/interpreters/{interpreter_id}/profile"),
+        &pm_bearer,
+        Some(json!({
+            "status": "active",
+            "compliance": {
+                "confidentialityDocumentId": Uuid::new_v4()
+            }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        body["message"],
+        "Document is not linked to interpreter profile"
+    );
 }
 
 #[tokio::test]
