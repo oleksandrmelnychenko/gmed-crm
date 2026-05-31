@@ -129,7 +129,21 @@ async fn list_interpreter_profiles(
                     SELECT jsonb_agg(e.label ORDER BY e.sort_order, e.label)
                     FROM interpreter_equipment e
                     WHERE e.interpreter_id = u.id
-                  ), '[]'::jsonb) AS equipment
+                  ), '[]'::jsonb) AS equipment,
+                  COALESCE((
+                    SELECT jsonb_agg(jsonb_build_object(
+                        'id', cr.id,
+                        'credentialType', cr.credential_type,
+                        'title', cr.title,
+                        'issuer', cr.issuer,
+                        'issuedAt', cr.issued_at,
+                        'expiresAt', cr.expires_at,
+                        'documentUrl', cr.document_url,
+                        'notes', cr.notes
+                    ) ORDER BY cr.credential_type, cr.expires_at NULLS LAST, cr.title)
+                    FROM interpreter_credentials cr
+                    WHERE cr.interpreter_id = u.id
+                  ), '[]'::jsonb) AS credentials
            FROM users u
            LEFT JOIN interpreter_profiles p ON p.user_id = u.id
            LEFT JOIN interpreter_profile_details d ON d.user_id = u.id
@@ -202,7 +216,21 @@ async fn get_interpreter_profile(
                     SELECT jsonb_agg(e.label ORDER BY e.sort_order, e.label)
                     FROM interpreter_equipment e
                     WHERE e.interpreter_id = u.id
-                  ), '[]'::jsonb) AS equipment
+                  ), '[]'::jsonb) AS equipment,
+                  COALESCE((
+                    SELECT jsonb_agg(jsonb_build_object(
+                        'id', cr.id,
+                        'credentialType', cr.credential_type,
+                        'title', cr.title,
+                        'issuer', cr.issuer,
+                        'issuedAt', cr.issued_at,
+                        'expiresAt', cr.expires_at,
+                        'documentUrl', cr.document_url,
+                        'notes', cr.notes
+                    ) ORDER BY cr.credential_type, cr.expires_at NULLS LAST, cr.title)
+                    FROM interpreter_credentials cr
+                    WHERE cr.interpreter_id = u.id
+                  ), '[]'::jsonb) AS credentials
            FROM users u
            LEFT JOIN interpreter_profiles p ON p.user_id = u.id
            LEFT JOIN interpreter_profile_details d ON d.user_id = u.id
@@ -939,7 +967,21 @@ async fn load_interpreter_profile_payload(
                     SELECT jsonb_agg(e.label ORDER BY e.sort_order, e.label)
                     FROM interpreter_equipment e
                     WHERE e.interpreter_id = u.id
-                  ), '[]'::jsonb) AS equipment
+                  ), '[]'::jsonb) AS equipment,
+                  COALESCE((
+                    SELECT jsonb_agg(jsonb_build_object(
+                        'id', cr.id,
+                        'credentialType', cr.credential_type,
+                        'title', cr.title,
+                        'issuer', cr.issuer,
+                        'issuedAt', cr.issued_at,
+                        'expiresAt', cr.expires_at,
+                        'documentUrl', cr.document_url,
+                        'notes', cr.notes
+                    ) ORDER BY cr.credential_type, cr.expires_at NULLS LAST, cr.title)
+                    FROM interpreter_credentials cr
+                    WHERE cr.interpreter_id = u.id
+                  ), '[]'::jsonb) AS credentials
            FROM users u
            LEFT JOIN interpreter_profiles p ON p.user_id = u.id
            LEFT JOIN interpreter_profile_details d ON d.user_id = u.id
@@ -1001,6 +1043,7 @@ fn build_structured_profile(row: &sqlx::postgres::PgRow) -> Value {
     insert_row_array(&mut profile, "workCountries", row, "work_countries");
     insert_row_array(&mut profile, "workLocations", row, "work_locations");
     insert_row_array(&mut profile, "equipment", row, "equipment");
+    insert_row_array(&mut profile, "credentials", row, "credentials");
 
     let mut compliance = nested_value_object(profile.remove("compliance"));
     insert_row_string(
@@ -1220,6 +1263,16 @@ fn f64_from_profile_number(profile: &Value, key: &str) -> Option<f64> {
     .filter(|value| value.is_finite() && *value >= 0.0)
 }
 
+struct CredentialRecord {
+    credential_type: String,
+    title: String,
+    issuer: Option<String>,
+    issued_at: Option<NaiveDate>,
+    expires_at: Option<NaiveDate>,
+    document_url: Option<String>,
+    notes: Option<String>,
+}
+
 #[allow(clippy::result_large_err)]
 async fn save_structured_interpreter_profile(
     tx: &mut Transaction<'_, Postgres>,
@@ -1369,7 +1422,79 @@ async fn save_structured_interpreter_profile(
     )
     .await?;
 
+    if let Some(credentials) = credentials_from_profile(profile)? {
+        replace_credentials(tx, interpreter_id, &credentials).await?;
+    }
+
     Ok(())
+}
+
+#[allow(clippy::result_large_err)]
+fn credentials_from_profile(
+    profile: &Value,
+) -> Result<Option<Vec<CredentialRecord>>, axum::response::Response> {
+    let Some(value) = value_from_object(profile, "credentials") else {
+        return Ok(None);
+    };
+    let Some(items) = value.as_array() else {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Credentials must be an array",
+        ));
+    };
+    if items.len() > 50 {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Too many interpreter credentials",
+        ));
+    }
+
+    let mut credentials = Vec::new();
+    for item in items {
+        let Some(object) = item.as_object() else {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid interpreter credential",
+            ));
+        };
+        let credential_type = string_from_value(
+            object
+                .get("credentialType")
+                .or_else(|| object.get("credential_type")),
+        )
+        .unwrap_or_else(|| "certificate".to_string());
+        if !matches!(
+            credential_type.as_str(),
+            "sworn_interpreter" | "medical_translation" | "certificate" | "training"
+        ) {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid interpreter credential type",
+            ));
+        }
+        let Some(title) = string_from_value(object.get("title")) else {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Interpreter credential title is required",
+            ));
+        };
+
+        credentials.push(CredentialRecord {
+            credential_type,
+            title,
+            issuer: string_from_value(object.get("issuer")),
+            issued_at: date_from_value(object.get("issuedAt"), "issuedAt")?,
+            expires_at: date_from_value(object.get("expiresAt"), "expiresAt")?,
+            document_url: string_from_value(
+                object
+                    .get("documentUrl")
+                    .or_else(|| object.get("document_url")),
+            ),
+            notes: string_from_value(object.get("notes")),
+        });
+    }
+
+    Ok(Some(credentials))
 }
 
 #[allow(clippy::result_large_err)]
@@ -1617,6 +1742,53 @@ async fn replace_string_values(
                     "Failed to save interpreter profile",
                 )
             })?;
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::result_large_err)]
+async fn replace_credentials(
+    tx: &mut Transaction<'_, Postgres>,
+    interpreter_id: Uuid,
+    credentials: &[CredentialRecord],
+) -> Result<(), axum::response::Response> {
+    sqlx::query("DELETE FROM interpreter_credentials WHERE interpreter_id = $1")
+        .bind(interpreter_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, interpreter_id = %interpreter_id, "clear interpreter credentials");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to save interpreter profile",
+            )
+        })?;
+
+    for credential in credentials {
+        sqlx::query(
+            r#"INSERT INTO interpreter_credentials (
+                    interpreter_id, credential_type, title, issuer,
+                    issued_at, expires_at, document_url, notes
+               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#,
+        )
+        .bind(interpreter_id)
+        .bind(&credential.credential_type)
+        .bind(&credential.title)
+        .bind(&credential.issuer)
+        .bind(credential.issued_at)
+        .bind(credential.expires_at)
+        .bind(&credential.document_url)
+        .bind(&credential.notes)
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, interpreter_id = %interpreter_id, "insert interpreter credential");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to save interpreter profile",
+            )
+        })?;
     }
 
     Ok(())

@@ -113,6 +113,17 @@ async fn manager_can_save_interpreter_profile_and_interpreter_can_view_self() {
         "phone": "+49 170 000000",
         "workCountries": ["DE"],
         "workLocations": ["Berlin", "Charite"],
+        "credentials": [
+            {
+                "credentialType": "medical_translation",
+                "title": "Medical translation certificate",
+                "issuer": "GMED Academy",
+                "issuedAt": "2026-01-15",
+                "expiresAt": "2027-01-15",
+                "documentUrl": "https://example.com/cert.pdf",
+                "notes": "Annual renewal required"
+            }
+        ],
         "languages": [
             { "language": "de", "level": "C1", "specialization": "medicine" }
         ],
@@ -148,6 +159,11 @@ async fn manager_can_save_interpreter_profile_and_interpreter_can_view_self() {
         body["profile"]["workLocations"],
         json!(["Berlin", "Charite"])
     );
+    assert_eq!(
+        body["profile"]["credentials"][0]["title"],
+        "Medical translation certificate"
+    );
+    assert_eq!(body["profile"]["credentials"][0]["expiresAt"], "2027-01-15");
 
     let (status, body) = json_request(
         &app,
@@ -235,6 +251,39 @@ async fn manager_can_save_interpreter_profile_and_interpreter_can_view_self() {
     .unwrap();
     assert_eq!(equipment_count, 1);
 
+    let credential = sqlx::query(
+        r#"SELECT credential_type, title, issuer, expires_at
+           FROM interpreter_credentials
+           WHERE interpreter_id = $1"#,
+    )
+    .bind(interpreter_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        credential.try_get::<String, _>("credential_type").unwrap(),
+        "medical_translation"
+    );
+    assert_eq!(
+        credential.try_get::<String, _>("title").unwrap(),
+        "Medical translation certificate"
+    );
+    assert_eq!(
+        credential
+            .try_get::<Option<String>, _>("issuer")
+            .unwrap()
+            .as_deref(),
+        Some("GMED Academy")
+    );
+    assert_eq!(
+        credential
+            .try_get::<Option<chrono::NaiveDate>, _>("expires_at")
+            .unwrap()
+            .map(|date| date.to_string())
+            .as_deref(),
+        Some("2027-01-15")
+    );
+
     let (status, body) = json_request(
         &app,
         "GET",
@@ -293,6 +342,22 @@ async fn interpreter_profile_rejects_invalid_structured_values() {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(body["message"], "Invalid interpreter status");
+
+    let (status, body) = json_request(
+        &app,
+        "PUT",
+        &format!("/api/v1/interpreters/{interpreter_id}/profile"),
+        &pm_bearer,
+        Some(json!({
+            "status": "active",
+            "credentials": [
+                { "credentialType": "bogus", "title": "Broken credential" }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["message"], "Invalid interpreter credential type");
 }
 
 #[tokio::test]

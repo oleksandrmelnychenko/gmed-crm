@@ -12,6 +12,8 @@ import {
   Save,
   Search,
   ShieldCheck,
+  Plus,
+  Trash2,
   UsersRound,
   X,
 } from "lucide-react";
@@ -43,6 +45,16 @@ type InterpreterOperations = {
   billing_lines: Record<string, unknown>[];
 };
 
+type CredentialForm = {
+  credentialType: string;
+  title: string;
+  issuer: string;
+  issuedAt: string;
+  expiresAt: string;
+  documentUrl: string;
+  notes: string;
+};
+
 type InterpreterProfileForm = {
   gender: string;
   birthDate: string;
@@ -59,6 +71,7 @@ type InterpreterProfileForm = {
   workLocations: string;
   languageProfile: string;
   certificates: string;
+  credentials: CredentialForm[];
   medicalKnowledge: string;
   trainingHistory: string;
   confidentialityStatus: string;
@@ -139,6 +152,49 @@ function compactDate(value: unknown) {
   return typeof value === "string" && value ? value : "-";
 }
 
+function emptyCredential(): CredentialForm {
+  return {
+    credentialType: "certificate",
+    title: "",
+    issuer: "",
+    issuedAt: "",
+    expiresAt: "",
+    documentUrl: "",
+    notes: "",
+  };
+}
+
+function credentialsToForm(value: unknown): CredentialForm[] {
+  return Array.isArray(value)
+    ? value
+        .map((item) => asProfile(item))
+        .map((item) => ({
+          credentialType: text(item.credentialType) || "certificate",
+          title: text(item.title),
+          issuer: text(item.issuer),
+          issuedAt: text(item.issuedAt),
+          expiresAt: text(item.expiresAt),
+          documentUrl: text(item.documentUrl),
+          notes: text(item.notes),
+        }))
+        .filter((item) => item.title || item.issuer || item.documentUrl)
+    : [];
+}
+
+function credentialsToProfile(credentials: CredentialForm[]) {
+  return credentials
+    .filter((credential) => credential.title.trim())
+    .map((credential) => ({
+      credentialType: credential.credentialType || "certificate",
+      title: credential.title.trim(),
+      issuer: credential.issuer.trim(),
+      issuedAt: credential.issuedAt,
+      expiresAt: credential.expiresAt,
+      documentUrl: credential.documentUrl.trim(),
+      notes: credential.notes.trim(),
+    }));
+}
+
 function profileToForm(profile: InterpreterProfile): InterpreterProfileForm {
   const contact = nested(profile, "contact");
   const compliance = nested(profile, "compliance");
@@ -162,6 +218,7 @@ function profileToForm(profile: InterpreterProfile): InterpreterProfileForm {
     workLocations: listText(profile.workLocations),
     languageProfile: text(profile.languageProfile),
     certificates: text(profile.certificates),
+    credentials: credentialsToForm(profile.credentials),
     medicalKnowledge: text(profile.medicalKnowledge),
     trainingHistory: text(profile.trainingHistory),
     confidentialityStatus:
@@ -214,6 +271,7 @@ function formToProfile(form: InterpreterProfileForm) {
     workLocations: parseList(form.workLocations),
     languageProfile: form.languageProfile,
     certificates: form.certificates,
+    credentials: credentialsToProfile(form.credentials),
     medicalKnowledge: form.medicalKnowledge,
     trainingHistory: form.trainingHistory,
     compliance: {
@@ -418,6 +476,29 @@ export function InterpretersPage() {
 
   function patchForm(patch: Partial<InterpreterProfileForm>) {
     setForm((current) => ({ ...current, ...patch }));
+  }
+
+  function patchCredential(index: number, patch: Partial<CredentialForm>) {
+    setForm((current) => ({
+      ...current,
+      credentials: current.credentials.map((credential, itemIndex) =>
+        itemIndex === index ? { ...credential, ...patch } : credential,
+      ),
+    }));
+  }
+
+  function addCredential() {
+    setForm((current) => ({
+      ...current,
+      credentials: [...current.credentials, emptyCredential()],
+    }));
+  }
+
+  function removeCredential(index: number) {
+    setForm((current) => ({
+      ...current,
+      credentials: current.credentials.filter((_, itemIndex) => itemIndex !== index),
+    }));
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -767,6 +848,135 @@ export function InterpretersPage() {
                       }
                     />
                   </Field>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Structured credentials
+                    </h3>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-8 px-2 text-xs"
+                      onClick={addCredential}
+                    >
+                      <Plus className="size-3.5" />
+                      Add credential
+                    </Button>
+                  </div>
+                  {form.credentials.length > 0 ? (
+                    form.credentials.map((credential, index) => (
+                      <div
+                        key={index}
+                        className="grid gap-3 border-t border-border pt-3 md:grid-cols-4"
+                      >
+                        <Field label="Type">
+                          <select
+                            className={selectClass}
+                            value={credential.credentialType}
+                            onChange={(event) =>
+                              patchCredential(index, {
+                                credentialType: event.target.value,
+                              })
+                            }
+                          >
+                            <option value="certificate">Certificate</option>
+                            <option value="sworn_interpreter">
+                              Sworn interpreter
+                            </option>
+                            <option value="medical_translation">
+                              Medical translation
+                            </option>
+                            <option value="training">Training</option>
+                          </select>
+                        </Field>
+                        <Field label="Title">
+                          <Input
+                            className={inputClass}
+                            value={credential.title}
+                            onChange={(event) =>
+                              patchCredential(index, {
+                                title: event.target.value,
+                              })
+                            }
+                          />
+                        </Field>
+                        <Field label="Issuer">
+                          <Input
+                            className={inputClass}
+                            value={credential.issuer}
+                            onChange={(event) =>
+                              patchCredential(index, {
+                                issuer: event.target.value,
+                              })
+                            }
+                          />
+                        </Field>
+                        <Field label="Valid dates">
+                          <div className="grid grid-cols-2 gap-2">
+                            <Input
+                              type="date"
+                              className={inputClass}
+                              value={credential.issuedAt}
+                              onChange={(event) =>
+                                patchCredential(index, {
+                                  issuedAt: event.target.value,
+                                })
+                              }
+                            />
+                            <Input
+                              type="date"
+                              className={inputClass}
+                              value={credential.expiresAt}
+                              onChange={(event) =>
+                                patchCredential(index, {
+                                  expiresAt: event.target.value,
+                                })
+                              }
+                            />
+                          </div>
+                        </Field>
+                        <Field label="Document URL">
+                          <Input
+                            className={inputClass}
+                            value={credential.documentUrl}
+                            onChange={(event) =>
+                              patchCredential(index, {
+                                documentUrl: event.target.value,
+                              })
+                            }
+                          />
+                        </Field>
+                        <Field label="Notes">
+                          <Input
+                            className={inputClass}
+                            value={credential.notes}
+                            onChange={(event) =>
+                              patchCredential(index, {
+                                notes: event.target.value,
+                              })
+                            }
+                          />
+                        </Field>
+                        <div className="flex items-end">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            className="h-9 px-2 text-xs"
+                            onClick={() => removeCredential(index)}
+                          >
+                            <Trash2 className="size-3.5" />
+                            Remove
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="border-t border-border pt-3 text-xs text-muted-foreground">
+                      No structured credentials yet.
+                    </p>
+                  )}
                 </div>
               </Section>
 
