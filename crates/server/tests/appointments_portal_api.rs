@@ -309,8 +309,14 @@ async fn it_admin_can_open_metadata_and_create_self_owned_appointment() {
     let (status, _) = json_request(&app, "GET", "/api/v1/appointments", &it_bearer, None).await;
     assert_eq!(status, StatusCode::OK);
 
-    let (status, body) =
-        json_request(&app, "GET", "/api/v1/appointments/meta/staff", &it_bearer, None).await;
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/appointments/meta/staff",
+        &it_bearer,
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert!(
         body.as_array()

@@ -1,13 +1,16 @@
 use axum::{
     Json, Router,
-    extract::{Extension, Path, State},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::get,
 };
+use chrono::NaiveDate;
+use rust_decimal::Decimal;
 use serde::Deserialize;
-use serde_json::Value;
-use sqlx::Row;
+use serde_json::{Map, Value};
+use sqlx::{Postgres, Row, Transaction};
+use std::str::FromStr;
 use uuid::Uuid;
 
 use crate::access;
@@ -34,6 +37,13 @@ pub fn router() -> Router<AppState> {
 }
 
 #[derive(Deserialize)]
+struct ListInterpreterProfilesQuery {
+    status: Option<String>,
+    contract_type: Option<String>,
+    search: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct ReplaceInterpreterLanguages {
     languages: Vec<InterpreterLanguageInput>,
 }
@@ -48,6 +58,7 @@ struct InterpreterLanguageInput {
 async fn list_interpreter_profiles(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
+    Query(query): Query<ListInterpreterProfilesQuery>,
 ) -> axum::response::Response {
     if let Err(resp) = auth.require_any_role(&[
         Role::Ceo,
@@ -58,15 +69,78 @@ async fn list_interpreter_profiles(
         return resp;
     }
 
+    let status = match normalize_optional_query_enum(
+        query.status,
+        &[
+            "active",
+            "vacation",
+            "sick",
+            "training",
+            "blocked",
+            "terminated",
+        ],
+        "Invalid interpreter status",
+    ) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let contract_type = match normalize_optional_query_enum(
+        query.contract_type,
+        &["employee", "freelancer", "hourly"],
+        "Invalid contract type",
+    ) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let search_pattern = format!(
+        "%{}%",
+        normalize_optional_text(query.search).unwrap_or_default()
+    );
+
     match sqlx::query(
         r#"SELECT u.id, u.name, u.email, u.role, u.is_active,
-                  COALESCE(p.profile, '{}'::jsonb) AS profile,
-                  p.updated_at AS profile_updated_at
+                  COALESCE(p.profile, '{}'::jsonb) AS raw_profile,
+                  p.updated_at AS profile_updated_at,
+                  d.gender, d.birth_date, COALESCE(d.status, 'active') AS typed_status,
+                  d.contract_type, d.contract_start_date, d.contract_end_date,
+                  d.employment_kind, d.phone, d.email_secure, d.address, d.emergency_contact,
+                  d.medical_knowledge, d.training_history, d.work_permit_valid_until AS detail_work_permit_valid_until,
+                  d.internal_notes, d.retention_delete_at, d.erasure_request_status,
+                  c.confidentiality_status, c.confidentiality_signed_at, c.confidentiality_document_url,
+                  c.avv_status, c.avv_signed_at, c.avv_document_url, c.gdpr_training_at,
+                  c.work_permit_valid_until AS compliance_work_permit_valid_until,
+                  f.hourly_rate, f.salary_class, f.bank_details, f.tax_number, f.ust_idnr, f.billing_status,
+                  a.access_level, a.auto_block_policy,
+                  COALESCE((
+                    SELECT jsonb_agg(w.value ORDER BY w.sort_order, w.value)
+                    FROM interpreter_work_zones w
+                    WHERE w.interpreter_id = u.id AND w.zone_type = 'country'
+                  ), '[]'::jsonb) AS work_countries,
+                  COALESCE((
+                    SELECT jsonb_agg(w.value ORDER BY w.sort_order, w.value)
+                    FROM interpreter_work_zones w
+                    WHERE w.interpreter_id = u.id AND w.zone_type = 'location'
+                  ), '[]'::jsonb) AS work_locations,
+                  COALESCE((
+                    SELECT jsonb_agg(e.label ORDER BY e.sort_order, e.label)
+                    FROM interpreter_equipment e
+                    WHERE e.interpreter_id = u.id
+                  ), '[]'::jsonb) AS equipment
            FROM users u
            LEFT JOIN interpreter_profiles p ON p.user_id = u.id
+           LEFT JOIN interpreter_profile_details d ON d.user_id = u.id
+           LEFT JOIN interpreter_compliance_profiles c ON c.user_id = u.id
+           LEFT JOIN interpreter_finance_profiles f ON f.user_id = u.id
+           LEFT JOIN interpreter_access_profiles a ON a.user_id = u.id
            WHERE u.role IN ('interpreter', 'teamlead_interpreter')
+             AND ($1::text IS NULL OR COALESCE(d.status, 'active') = $1)
+             AND ($2::text IS NULL OR d.contract_type = $2)
+             AND ($3::text = '%%' OR u.name ILIKE $3 OR u.email ILIKE $3)
            ORDER BY u.is_active DESC, u.name"#,
     )
+    .bind(status)
+    .bind(contract_type)
+    .bind(search_pattern)
     .fetch_all(&state.db)
     .await
     {
@@ -98,10 +172,39 @@ async fn get_interpreter_profile(
 
     match sqlx::query(
         r#"SELECT u.id, u.name, u.email, u.role, u.is_active,
-                  COALESCE(p.profile, '{}'::jsonb) AS profile,
-                  p.updated_at AS profile_updated_at
+                  COALESCE(p.profile, '{}'::jsonb) AS raw_profile,
+                  p.updated_at AS profile_updated_at,
+                  d.gender, d.birth_date, COALESCE(d.status, 'active') AS typed_status,
+                  d.contract_type, d.contract_start_date, d.contract_end_date,
+                  d.employment_kind, d.phone, d.email_secure, d.address, d.emergency_contact,
+                  d.medical_knowledge, d.training_history, d.work_permit_valid_until AS detail_work_permit_valid_until,
+                  d.internal_notes, d.retention_delete_at, d.erasure_request_status,
+                  c.confidentiality_status, c.confidentiality_signed_at, c.confidentiality_document_url,
+                  c.avv_status, c.avv_signed_at, c.avv_document_url, c.gdpr_training_at,
+                  c.work_permit_valid_until AS compliance_work_permit_valid_until,
+                  f.hourly_rate, f.salary_class, f.bank_details, f.tax_number, f.ust_idnr, f.billing_status,
+                  a.access_level, a.auto_block_policy,
+                  COALESCE((
+                    SELECT jsonb_agg(w.value ORDER BY w.sort_order, w.value)
+                    FROM interpreter_work_zones w
+                    WHERE w.interpreter_id = u.id AND w.zone_type = 'country'
+                  ), '[]'::jsonb) AS work_countries,
+                  COALESCE((
+                    SELECT jsonb_agg(w.value ORDER BY w.sort_order, w.value)
+                    FROM interpreter_work_zones w
+                    WHERE w.interpreter_id = u.id AND w.zone_type = 'location'
+                  ), '[]'::jsonb) AS work_locations,
+                  COALESCE((
+                    SELECT jsonb_agg(e.label ORDER BY e.sort_order, e.label)
+                    FROM interpreter_equipment e
+                    WHERE e.interpreter_id = u.id
+                  ), '[]'::jsonb) AS equipment
            FROM users u
            LEFT JOIN interpreter_profiles p ON p.user_id = u.id
+           LEFT JOIN interpreter_profile_details d ON d.user_id = u.id
+           LEFT JOIN interpreter_compliance_profiles c ON c.user_id = u.id
+           LEFT JOIN interpreter_finance_profiles f ON f.user_id = u.id
+           LEFT JOIN interpreter_access_profiles a ON a.user_id = u.id
            WHERE u.id = $1
              AND u.role IN ('interpreter', 'teamlead_interpreter')"#,
     )
@@ -137,35 +240,60 @@ async fn update_interpreter_profile(
         Err(resp) => return resp,
     };
 
-    match sqlx::query(
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(error = %error, "begin interpreter profile update");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to save interpreter profile",
+            );
+        }
+    };
+
+    if let Err(error) = sqlx::query(
         r#"INSERT INTO interpreter_profiles (user_id, profile, updated_by)
            VALUES ($1, $2, $3)
            ON CONFLICT (user_id)
            DO UPDATE SET profile = EXCLUDED.profile,
                          updated_by = EXCLUDED.updated_by,
-                         updated_at = now()
-           RETURNING profile, updated_at"#,
+                         updated_at = now()"#,
     )
     .bind(interpreter_id)
-    .bind(profile)
+    .bind(&profile)
     .bind(auth.user_id)
-    .fetch_one(&state.db)
+    .execute(&mut *tx)
     .await
     {
-        Ok(row) => Json(serde_json::json!({
-            "user_id": interpreter_id,
-            "profile": row.try_get::<Value, _>("profile").unwrap_or_else(|_| serde_json::json!({})),
-            "updated_at": row
-                .try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at")
-                .map(|value| value.to_rfc3339())
-                .unwrap_or_default(),
-        }))
-        .into_response(),
+        tracing::error!(error = %error, interpreter_id = %interpreter_id, "update raw interpreter profile");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to save interpreter profile",
+        );
+    }
+
+    if let Err(resp) =
+        save_structured_interpreter_profile(&mut tx, interpreter_id, auth.user_id, &profile).await
+    {
+        return resp;
+    }
+
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, interpreter_id = %interpreter_id, "commit interpreter profile");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to save interpreter profile",
+        );
+    }
+
+    match load_interpreter_profile_payload(&state, interpreter_id).await {
+        Ok(Some(payload)) => Json(payload).into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Interpreter not found"),
         Err(error) => {
-            tracing::error!(error = %error, interpreter_id = %interpreter_id, "update interpreter profile");
+            tracing::error!(error = %error, interpreter_id = %interpreter_id, "load saved interpreter profile");
             err(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to save interpreter profile",
+                "Failed to load interpreter profile",
             )
         }
     }
@@ -438,18 +566,812 @@ async fn ensure_interpreter_profile_access(
 }
 
 fn interpreter_profile_row_json(row: sqlx::postgres::PgRow) -> Value {
+    let profile = build_structured_profile(&row);
+
     serde_json::json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
         "name": row.try_get::<String, _>("name").unwrap_or_default(),
         "email": row.try_get::<String, _>("email").unwrap_or_default(),
         "role": row.try_get::<String, _>("role").unwrap_or_default(),
         "is_active": row.try_get::<bool, _>("is_active").unwrap_or(false),
-        "profile": row.try_get::<Value, _>("profile").unwrap_or_else(|_| serde_json::json!({})),
+        "profile": profile,
         "profile_updated_at": row
             .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("profile_updated_at")
             .unwrap_or_default()
             .map(|value| value.to_rfc3339()),
     })
+}
+
+async fn load_interpreter_profile_payload(
+    state: &AppState,
+    interpreter_id: Uuid,
+) -> Result<Option<Value>, sqlx::Error> {
+    sqlx::query(
+        r#"SELECT u.id, u.name, u.email, u.role, u.is_active,
+                  COALESCE(p.profile, '{}'::jsonb) AS raw_profile,
+                  p.updated_at AS profile_updated_at,
+                  d.gender, d.birth_date, COALESCE(d.status, 'active') AS typed_status,
+                  d.contract_type, d.contract_start_date, d.contract_end_date,
+                  d.employment_kind, d.phone, d.email_secure, d.address, d.emergency_contact,
+                  d.medical_knowledge, d.training_history, d.work_permit_valid_until AS detail_work_permit_valid_until,
+                  d.internal_notes, d.retention_delete_at, d.erasure_request_status,
+                  c.confidentiality_status, c.confidentiality_signed_at, c.confidentiality_document_url,
+                  c.avv_status, c.avv_signed_at, c.avv_document_url, c.gdpr_training_at,
+                  c.work_permit_valid_until AS compliance_work_permit_valid_until,
+                  f.hourly_rate, f.salary_class, f.bank_details, f.tax_number, f.ust_idnr, f.billing_status,
+                  a.access_level, a.auto_block_policy,
+                  COALESCE((
+                    SELECT jsonb_agg(w.value ORDER BY w.sort_order, w.value)
+                    FROM interpreter_work_zones w
+                    WHERE w.interpreter_id = u.id AND w.zone_type = 'country'
+                  ), '[]'::jsonb) AS work_countries,
+                  COALESCE((
+                    SELECT jsonb_agg(w.value ORDER BY w.sort_order, w.value)
+                    FROM interpreter_work_zones w
+                    WHERE w.interpreter_id = u.id AND w.zone_type = 'location'
+                  ), '[]'::jsonb) AS work_locations,
+                  COALESCE((
+                    SELECT jsonb_agg(e.label ORDER BY e.sort_order, e.label)
+                    FROM interpreter_equipment e
+                    WHERE e.interpreter_id = u.id
+                  ), '[]'::jsonb) AS equipment
+           FROM users u
+           LEFT JOIN interpreter_profiles p ON p.user_id = u.id
+           LEFT JOIN interpreter_profile_details d ON d.user_id = u.id
+           LEFT JOIN interpreter_compliance_profiles c ON c.user_id = u.id
+           LEFT JOIN interpreter_finance_profiles f ON f.user_id = u.id
+           LEFT JOIN interpreter_access_profiles a ON a.user_id = u.id
+           WHERE u.id = $1
+             AND u.role IN ('interpreter', 'teamlead_interpreter')"#,
+    )
+    .bind(interpreter_id)
+    .fetch_optional(&state.db)
+    .await
+    .map(|row| row.map(interpreter_profile_row_json))
+}
+
+fn build_structured_profile(row: &sqlx::postgres::PgRow) -> Value {
+    let raw_profile = row
+        .try_get::<Value, _>("raw_profile")
+        .unwrap_or_else(|_| serde_json::json!({}));
+    let mut profile = value_object(raw_profile);
+
+    insert_row_string(&mut profile, "gender", row, "gender");
+    insert_row_date(&mut profile, "birthDate", row, "birth_date");
+    insert_row_string(&mut profile, "status", row, "typed_status");
+    insert_row_string(&mut profile, "contractType", row, "contract_type");
+    insert_row_date(
+        &mut profile,
+        "contractStartDate",
+        row,
+        "contract_start_date",
+    );
+    insert_row_date(&mut profile, "contractEndDate", row, "contract_end_date");
+    insert_row_string(&mut profile, "employmentKind", row, "employment_kind");
+    insert_row_string(&mut profile, "phone", row, "phone");
+    insert_row_bool(&mut profile, "emailSecure", row, "email_secure");
+    insert_row_string(&mut profile, "address", row, "address");
+    insert_row_string(&mut profile, "emergencyContact", row, "emergency_contact");
+    insert_row_string(&mut profile, "medicalKnowledge", row, "medical_knowledge");
+    insert_row_string(&mut profile, "trainingHistory", row, "training_history");
+    insert_row_date(
+        &mut profile,
+        "workPermitValidUntil",
+        row,
+        "detail_work_permit_valid_until",
+    );
+    insert_row_string(&mut profile, "internalNotes", row, "internal_notes");
+    insert_row_date(
+        &mut profile,
+        "retentionDeleteAt",
+        row,
+        "retention_delete_at",
+    );
+    insert_row_string(
+        &mut profile,
+        "erasureRequestStatus",
+        row,
+        "erasure_request_status",
+    );
+    insert_row_array(&mut profile, "workCountries", row, "work_countries");
+    insert_row_array(&mut profile, "workLocations", row, "work_locations");
+    insert_row_array(&mut profile, "equipment", row, "equipment");
+
+    let mut compliance = nested_value_object(profile.remove("compliance"));
+    insert_row_string(
+        &mut compliance,
+        "confidentialityStatus",
+        row,
+        "confidentiality_status",
+    );
+    insert_row_date(
+        &mut compliance,
+        "confidentialitySignedAt",
+        row,
+        "confidentiality_signed_at",
+    );
+    insert_row_string(
+        &mut compliance,
+        "confidentialityDocumentUrl",
+        row,
+        "confidentiality_document_url",
+    );
+    insert_row_string(&mut compliance, "avvStatus", row, "avv_status");
+    insert_row_date(&mut compliance, "avvSignedAt", row, "avv_signed_at");
+    insert_row_string(&mut compliance, "avvDocumentUrl", row, "avv_document_url");
+    insert_row_date(&mut compliance, "gdprTrainingAt", row, "gdpr_training_at");
+    if !compliance.is_empty() {
+        profile.insert("compliance".to_string(), Value::Object(compliance));
+    }
+
+    if let Some(value) = row
+        .try_get::<Option<NaiveDate>, _>("compliance_work_permit_valid_until")
+        .unwrap_or_default()
+    {
+        profile.insert(
+            "workPermitValidUntil".to_string(),
+            Value::String(value.to_string()),
+        );
+    }
+
+    let mut finance = nested_value_object(profile.remove("finance"));
+    insert_row_decimal(&mut finance, "hourlyRate", row, "hourly_rate");
+    insert_row_string(&mut finance, "salaryClass", row, "salary_class");
+    insert_row_string(&mut finance, "bankDetails", row, "bank_details");
+    insert_row_string(&mut finance, "taxNumber", row, "tax_number");
+    insert_row_string(&mut finance, "ustIdnr", row, "ust_idnr");
+    insert_row_string(&mut finance, "billingStatus", row, "billing_status");
+    if !finance.is_empty() {
+        profile.insert("finance".to_string(), Value::Object(finance));
+    }
+
+    let mut access = nested_value_object(profile.remove("access"));
+    insert_row_string(&mut access, "level", row, "access_level");
+    insert_row_string(&mut access, "autoBlockPolicy", row, "auto_block_policy");
+    if !access.is_empty() {
+        profile.insert("access".to_string(), Value::Object(access));
+    }
+
+    Value::Object(profile)
+}
+
+fn value_object(value: Value) -> Map<String, Value> {
+    match value {
+        Value::Object(map) => map,
+        _ => Map::new(),
+    }
+}
+
+fn nested_value_object(value: Option<Value>) -> Map<String, Value> {
+    match value {
+        Some(Value::Object(map)) => map,
+        _ => Map::new(),
+    }
+}
+
+fn insert_row_string(
+    target: &mut Map<String, Value>,
+    key: &str,
+    row: &sqlx::postgres::PgRow,
+    column: &str,
+) {
+    if let Some(value) = row
+        .try_get::<Option<String>, _>(column)
+        .unwrap_or_default()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        target.insert(key.to_string(), Value::String(value));
+    }
+}
+
+fn insert_row_bool(
+    target: &mut Map<String, Value>,
+    key: &str,
+    row: &sqlx::postgres::PgRow,
+    column: &str,
+) {
+    if let Some(value) = row.try_get::<Option<bool>, _>(column).unwrap_or_default() {
+        target.insert(key.to_string(), Value::Bool(value));
+    }
+}
+
+fn insert_row_date(
+    target: &mut Map<String, Value>,
+    key: &str,
+    row: &sqlx::postgres::PgRow,
+    column: &str,
+) {
+    if let Some(value) = row
+        .try_get::<Option<NaiveDate>, _>(column)
+        .unwrap_or_default()
+    {
+        target.insert(key.to_string(), Value::String(value.to_string()));
+    }
+}
+
+fn insert_row_decimal(
+    target: &mut Map<String, Value>,
+    key: &str,
+    row: &sqlx::postgres::PgRow,
+    column: &str,
+) {
+    let Some(value) = row
+        .try_get::<Option<Decimal>, _>(column)
+        .unwrap_or_default()
+    else {
+        return;
+    };
+    let number = value
+        .to_string()
+        .parse::<f64>()
+        .ok()
+        .and_then(serde_json::Number::from_f64);
+    if let Some(number) = number {
+        target.insert(key.to_string(), Value::Number(number));
+    }
+}
+
+fn insert_row_array(
+    target: &mut Map<String, Value>,
+    key: &str,
+    row: &sqlx::postgres::PgRow,
+    column: &str,
+) {
+    let value = row
+        .try_get::<Value, _>(column)
+        .unwrap_or_else(|_| serde_json::json!([]));
+    if matches!(&value, Value::Array(items) if !items.is_empty()) {
+        target.insert(key.to_string(), value);
+    }
+}
+
+#[allow(clippy::result_large_err)]
+async fn save_structured_interpreter_profile(
+    tx: &mut Transaction<'_, Postgres>,
+    interpreter_id: Uuid,
+    updated_by: Uuid,
+    profile: &Value,
+) -> Result<(), axum::response::Response> {
+    let status = enum_from_profile(
+        profile,
+        "status",
+        &[
+            "active",
+            "vacation",
+            "sick",
+            "training",
+            "blocked",
+            "terminated",
+        ],
+        "Invalid interpreter status",
+    )?
+    .unwrap_or_else(|| "active".to_string());
+    let contract_type = enum_from_profile(
+        profile,
+        "contractType",
+        &["employee", "freelancer", "hourly"],
+        "Invalid contract type",
+    )?;
+    let employment_kind = enum_from_profile(
+        profile,
+        "employmentKind",
+        &["internal", "external"],
+        "Invalid employment kind",
+    )?;
+    let email_secure =
+        bool_from_profile_or_nested(profile, "emailSecure", "contact", "emailSecure")
+            .unwrap_or(false);
+    let birth_date = date_from_profile(profile, "birthDate")?;
+    let contract_start_date = date_from_profile(profile, "contractStartDate")?;
+    let contract_end_date = date_from_profile(profile, "contractEndDate")?;
+    let work_permit_valid_until = date_from_profile(profile, "workPermitValidUntil")?;
+    let retention_delete_at = date_from_profile(profile, "retentionDeleteAt")?;
+
+    sqlx::query(
+        r#"INSERT INTO interpreter_profile_details (
+                user_id, gender, birth_date, status, contract_type,
+                contract_start_date, contract_end_date, employment_kind,
+                phone, email_secure, address, emergency_contact,
+                medical_knowledge, training_history, work_permit_valid_until,
+                internal_notes, retention_delete_at, erasure_request_status,
+                updated_by
+           ) VALUES (
+                $1, $2, $3, $4, $5,
+                $6, $7, $8,
+                $9, $10, $11, $12,
+                $13, $14, $15,
+                $16, $17, $18,
+                $19
+           )
+           ON CONFLICT (user_id)
+           DO UPDATE SET gender = EXCLUDED.gender,
+                         birth_date = EXCLUDED.birth_date,
+                         status = EXCLUDED.status,
+                         contract_type = EXCLUDED.contract_type,
+                         contract_start_date = EXCLUDED.contract_start_date,
+                         contract_end_date = EXCLUDED.contract_end_date,
+                         employment_kind = EXCLUDED.employment_kind,
+                         phone = EXCLUDED.phone,
+                         email_secure = EXCLUDED.email_secure,
+                         address = EXCLUDED.address,
+                         emergency_contact = EXCLUDED.emergency_contact,
+                         medical_knowledge = EXCLUDED.medical_knowledge,
+                         training_history = EXCLUDED.training_history,
+                         work_permit_valid_until = EXCLUDED.work_permit_valid_until,
+                         internal_notes = EXCLUDED.internal_notes,
+                         retention_delete_at = EXCLUDED.retention_delete_at,
+                         erasure_request_status = EXCLUDED.erasure_request_status,
+                         updated_by = EXCLUDED.updated_by,
+                         updated_at = now()"#,
+    )
+    .bind(interpreter_id)
+    .bind(string_from_profile(profile, "gender"))
+    .bind(birth_date)
+    .bind(status)
+    .bind(contract_type)
+    .bind(contract_start_date)
+    .bind(contract_end_date)
+    .bind(employment_kind)
+    .bind(string_from_profile_or_nested(profile, "phone", "contact", "phone"))
+    .bind(email_secure)
+    .bind(string_from_profile_or_nested(
+        profile,
+        "address",
+        "contact",
+        "address",
+    ))
+    .bind(string_from_profile_or_nested(
+        profile,
+        "emergencyContact",
+        "contact",
+        "emergencyContact",
+    ))
+    .bind(string_from_profile(profile, "medicalKnowledge"))
+    .bind(string_from_profile(profile, "trainingHistory"))
+    .bind(work_permit_valid_until)
+    .bind(string_from_profile(profile, "internalNotes"))
+    .bind(retention_delete_at)
+    .bind(string_from_profile(profile, "erasureRequestStatus"))
+    .bind(updated_by)
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, interpreter_id = %interpreter_id, "save interpreter profile details");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to save interpreter profile",
+        )
+    })?;
+
+    save_structured_compliance(tx, interpreter_id, updated_by, profile).await?;
+    save_structured_finance(tx, interpreter_id, updated_by, profile).await?;
+    save_structured_access(tx, interpreter_id, updated_by, profile).await?;
+    replace_string_values(
+        tx,
+        "DELETE FROM interpreter_work_zones WHERE interpreter_id = $1",
+        "INSERT INTO interpreter_work_zones (interpreter_id, zone_type, value, sort_order) VALUES ($1, $2, $3, $4)",
+        interpreter_id,
+        Some("country"),
+        &string_list_from_profile(profile, "workCountries"),
+    )
+    .await?;
+    replace_string_values(
+        tx,
+        "DELETE FROM interpreter_work_zones WHERE interpreter_id = $1 AND zone_type = 'location'",
+        "INSERT INTO interpreter_work_zones (interpreter_id, zone_type, value, sort_order) VALUES ($1, $2, $3, $4)",
+        interpreter_id,
+        Some("location"),
+        &string_list_from_profile(profile, "workLocations"),
+    )
+    .await?;
+    replace_string_values(
+        tx,
+        "DELETE FROM interpreter_equipment WHERE interpreter_id = $1",
+        "INSERT INTO interpreter_equipment (interpreter_id, label, sort_order) VALUES ($1, $2, $3)",
+        interpreter_id,
+        None,
+        &string_list_from_profile(profile, "equipment"),
+    )
+    .await?;
+
+    Ok(())
+}
+
+#[allow(clippy::result_large_err)]
+async fn save_structured_compliance(
+    tx: &mut Transaction<'_, Postgres>,
+    interpreter_id: Uuid,
+    updated_by: Uuid,
+    profile: &Value,
+) -> Result<(), axum::response::Response> {
+    let confidentiality_status = enum_from_value(
+        value_from_profile_or_nested(
+            profile,
+            "confidentialityStatus",
+            "compliance",
+            "confidentialityStatus",
+        ),
+        &["signed", "missing"],
+        "Invalid confidentiality status",
+    )?;
+    let avv_status = enum_from_value(
+        value_from_profile_or_nested(profile, "avvStatus", "compliance", "avvStatus"),
+        &["signed", "pending"],
+        "Invalid AVV status",
+    )?;
+
+    sqlx::query(
+        r#"INSERT INTO interpreter_compliance_profiles (
+                user_id, confidentiality_status, confidentiality_signed_at,
+                confidentiality_document_url, avv_status, avv_signed_at,
+                avv_document_url, gdpr_training_at, work_permit_valid_until,
+                updated_by
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           ON CONFLICT (user_id)
+           DO UPDATE SET confidentiality_status = EXCLUDED.confidentiality_status,
+                         confidentiality_signed_at = EXCLUDED.confidentiality_signed_at,
+                         confidentiality_document_url = EXCLUDED.confidentiality_document_url,
+                         avv_status = EXCLUDED.avv_status,
+                         avv_signed_at = EXCLUDED.avv_signed_at,
+                         avv_document_url = EXCLUDED.avv_document_url,
+                         gdpr_training_at = EXCLUDED.gdpr_training_at,
+                         work_permit_valid_until = EXCLUDED.work_permit_valid_until,
+                         updated_by = EXCLUDED.updated_by,
+                         updated_at = now()"#,
+    )
+    .bind(interpreter_id)
+    .bind(confidentiality_status)
+    .bind(date_from_value(
+        value_from_profile_or_nested(
+            profile,
+            "confidentialitySignedAt",
+            "compliance",
+            "confidentialitySignedAt",
+        ),
+        "confidentialitySignedAt",
+    )?)
+    .bind(string_from_profile_or_nested(
+        profile,
+        "confidentialityDocumentUrl",
+        "compliance",
+        "confidentialityDocumentUrl",
+    ))
+    .bind(avv_status)
+    .bind(date_from_value(
+        value_from_profile_or_nested(profile, "avvSignedAt", "compliance", "avvSignedAt"),
+        "avvSignedAt",
+    )?)
+    .bind(string_from_profile_or_nested(
+        profile,
+        "avvDocumentUrl",
+        "compliance",
+        "avvDocumentUrl",
+    ))
+    .bind(date_from_value(
+        value_from_profile_or_nested(profile, "gdprTrainingAt", "compliance", "gdprTrainingAt"),
+        "gdprTrainingAt",
+    )?)
+    .bind(date_from_profile(profile, "workPermitValidUntil")?)
+    .bind(updated_by)
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, interpreter_id = %interpreter_id, "save interpreter compliance");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to save interpreter profile",
+        )
+    })?;
+
+    Ok(())
+}
+
+#[allow(clippy::result_large_err)]
+async fn save_structured_finance(
+    tx: &mut Transaction<'_, Postgres>,
+    interpreter_id: Uuid,
+    updated_by: Uuid,
+    profile: &Value,
+) -> Result<(), axum::response::Response> {
+    let billing_status = enum_from_value(
+        value_from_profile_or_nested(profile, "billingStatus", "finance", "billingStatus"),
+        &["unpaid", "paid", "overdue"],
+        "Invalid billing status",
+    )?;
+
+    sqlx::query(
+        r#"INSERT INTO interpreter_finance_profiles (
+                user_id, hourly_rate, salary_class, bank_details,
+                tax_number, ust_idnr, billing_status, updated_by
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           ON CONFLICT (user_id)
+           DO UPDATE SET hourly_rate = EXCLUDED.hourly_rate,
+                         salary_class = EXCLUDED.salary_class,
+                         bank_details = EXCLUDED.bank_details,
+                         tax_number = EXCLUDED.tax_number,
+                         ust_idnr = EXCLUDED.ust_idnr,
+                         billing_status = EXCLUDED.billing_status,
+                         updated_by = EXCLUDED.updated_by,
+                         updated_at = now()"#,
+    )
+    .bind(interpreter_id)
+    .bind(decimal_from_value(
+        value_from_profile_or_nested(profile, "hourlyRate", "finance", "hourlyRate"),
+        "hourlyRate",
+    )?)
+    .bind(string_from_profile_or_nested(
+        profile,
+        "salaryClass",
+        "finance",
+        "salaryClass",
+    ))
+    .bind(string_from_profile_or_nested(
+        profile,
+        "bankDetails",
+        "finance",
+        "bankDetails",
+    ))
+    .bind(string_from_profile_or_nested(
+        profile,
+        "taxNumber",
+        "finance",
+        "taxNumber",
+    ))
+    .bind(string_from_profile_or_nested(
+        profile,
+        "ustIdnr",
+        "finance",
+        "ustIdnr",
+    ))
+    .bind(billing_status)
+    .bind(updated_by)
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, interpreter_id = %interpreter_id, "save interpreter finance");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to save interpreter profile",
+        )
+    })?;
+
+    Ok(())
+}
+
+#[allow(clippy::result_large_err)]
+async fn save_structured_access(
+    tx: &mut Transaction<'_, Postgres>,
+    interpreter_id: Uuid,
+    updated_by: Uuid,
+    profile: &Value,
+) -> Result<(), axum::response::Response> {
+    let access_level = enum_from_value(
+        value_from_profile_or_nested(profile, "accessLevel", "access", "level"),
+        &["appointment_only", "medical_shared", "full"],
+        "Invalid access level",
+    )?;
+    let auto_block_policy = enum_from_value(
+        value_from_profile_or_nested(profile, "autoBlockPolicy", "access", "autoBlockPolicy"),
+        &["immediate", "after_one_hour"],
+        "Invalid auto-block policy",
+    )?;
+
+    sqlx::query(
+        r#"INSERT INTO interpreter_access_profiles (
+                user_id, access_level, auto_block_policy, updated_by
+           ) VALUES ($1, $2, $3, $4)
+           ON CONFLICT (user_id)
+           DO UPDATE SET access_level = EXCLUDED.access_level,
+                         auto_block_policy = EXCLUDED.auto_block_policy,
+                         updated_by = EXCLUDED.updated_by,
+                         updated_at = now()"#,
+    )
+    .bind(interpreter_id)
+    .bind(access_level)
+    .bind(auto_block_policy)
+    .bind(updated_by)
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, interpreter_id = %interpreter_id, "save interpreter access profile");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to save interpreter profile",
+        )
+    })?;
+
+    Ok(())
+}
+
+#[allow(clippy::result_large_err)]
+async fn replace_string_values(
+    tx: &mut Transaction<'_, Postgres>,
+    delete_sql: &str,
+    insert_sql: &str,
+    interpreter_id: Uuid,
+    discriminator: Option<&str>,
+    values: &[String],
+) -> Result<(), axum::response::Response> {
+    sqlx::query(delete_sql)
+        .bind(interpreter_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, interpreter_id = %interpreter_id, "clear interpreter structured list");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to save interpreter profile",
+            )
+        })?;
+
+    for (index, value) in values.iter().enumerate() {
+        let mut query = sqlx::query(insert_sql).bind(interpreter_id);
+        if let Some(discriminator) = discriminator {
+            query = query.bind(discriminator).bind(value);
+        } else {
+            query = query.bind(value);
+        }
+        query
+            .bind(index as i32)
+            .execute(&mut **tx)
+            .await
+            .map_err(|error| {
+                tracing::error!(error = %error, interpreter_id = %interpreter_id, "insert interpreter structured list item");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to save interpreter profile",
+                )
+            })?;
+    }
+
+    Ok(())
+}
+
+fn value_from_object<'a>(object: &'a Value, key: &str) -> Option<&'a Value> {
+    object.as_object().and_then(|map| map.get(key))
+}
+
+fn value_from_profile_or_nested<'a>(
+    profile: &'a Value,
+    top_key: &str,
+    nested_key: &str,
+    nested_field: &str,
+) -> Option<&'a Value> {
+    profile
+        .as_object()
+        .and_then(|map| map.get(top_key))
+        .or_else(|| {
+            profile
+                .as_object()
+                .and_then(|map| map.get(nested_key))
+                .and_then(|value| value.as_object())
+                .and_then(|map| map.get(nested_field))
+        })
+}
+
+fn string_from_value(value: Option<&Value>) -> Option<String> {
+    match value {
+        Some(Value::String(raw)) => Some(raw.trim().to_string()),
+        Some(Value::Number(number)) => Some(number.to_string()),
+        _ => None,
+    }
+    .filter(|value| !value.is_empty())
+}
+
+fn string_from_profile(profile: &Value, key: &str) -> Option<String> {
+    string_from_value(value_from_object(profile, key))
+}
+
+fn string_from_profile_or_nested(
+    profile: &Value,
+    top_key: &str,
+    nested_key: &str,
+    nested_field: &str,
+) -> Option<String> {
+    string_from_value(value_from_profile_or_nested(
+        profile,
+        top_key,
+        nested_key,
+        nested_field,
+    ))
+}
+
+fn bool_from_profile_or_nested(
+    profile: &Value,
+    top_key: &str,
+    nested_key: &str,
+    nested_field: &str,
+) -> Option<bool> {
+    match value_from_profile_or_nested(profile, top_key, nested_key, nested_field) {
+        Some(Value::Bool(value)) => Some(*value),
+        Some(Value::String(value)) if value.eq_ignore_ascii_case("true") => Some(true),
+        Some(Value::String(value)) if value.eq_ignore_ascii_case("false") => Some(false),
+        _ => None,
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn enum_from_profile(
+    profile: &Value,
+    key: &str,
+    allowed: &[&str],
+    error_message: &str,
+) -> Result<Option<String>, axum::response::Response> {
+    enum_from_value(value_from_object(profile, key), allowed, error_message)
+}
+
+#[allow(clippy::result_large_err)]
+fn enum_from_value(
+    value: Option<&Value>,
+    allowed: &[&str],
+    error_message: &str,
+) -> Result<Option<String>, axum::response::Response> {
+    let Some(value) = string_from_value(value) else {
+        return Ok(None);
+    };
+    if allowed.contains(&value.as_str()) {
+        Ok(Some(value))
+    } else {
+        Err(err(StatusCode::UNPROCESSABLE_ENTITY, error_message))
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn date_from_profile(
+    profile: &Value,
+    key: &str,
+) -> Result<Option<NaiveDate>, axum::response::Response> {
+    date_from_value(value_from_object(profile, key), key)
+}
+
+#[allow(clippy::result_large_err)]
+fn date_from_value(
+    value: Option<&Value>,
+    field_name: &str,
+) -> Result<Option<NaiveDate>, axum::response::Response> {
+    let Some(value) = string_from_value(value) else {
+        return Ok(None);
+    };
+    NaiveDate::parse_from_str(&value, "%Y-%m-%d")
+        .map(Some)
+        .map_err(|_| {
+            err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                &format!("Invalid {field_name} (YYYY-MM-DD)"),
+            )
+        })
+}
+
+#[allow(clippy::result_large_err)]
+fn decimal_from_value(
+    value: Option<&Value>,
+    field_name: &str,
+) -> Result<Option<Decimal>, axum::response::Response> {
+    let Some(value) = string_from_value(value) else {
+        return Ok(None);
+    };
+    Decimal::from_str(&value).map(Some).map_err(|_| {
+        err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &format!("Invalid {field_name}"),
+        )
+    })
+}
+
+fn string_list_from_profile(profile: &Value, key: &str) -> Vec<String> {
+    match value_from_object(profile, key) {
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(|item| string_from_value(Some(item)))
+            .collect(),
+        Some(Value::String(raw)) => raw
+            .split(',')
+            .map(|item| item.trim().to_string())
+            .filter(|item| !item.is_empty())
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 #[allow(clippy::result_large_err)]
@@ -518,6 +1440,22 @@ fn normalize_optional_text(value: Option<String>) -> Option<String> {
     value
         .map(|raw| raw.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+#[allow(clippy::result_large_err)]
+fn normalize_optional_query_enum(
+    value: Option<String>,
+    allowed: &[&str],
+    error_message: &str,
+) -> Result<Option<String>, axum::response::Response> {
+    let Some(value) = normalize_optional_text(value) else {
+        return Ok(None);
+    };
+    if allowed.contains(&value.as_str()) {
+        Ok(Some(value))
+    } else {
+        Err(err(StatusCode::UNPROCESSABLE_ENTITY, error_message))
+    }
 }
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {

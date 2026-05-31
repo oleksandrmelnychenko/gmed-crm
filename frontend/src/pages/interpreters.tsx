@@ -1,17 +1,19 @@
 import {
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useState,
   type FormEvent,
   type ReactNode,
 } from "react";
-import { RefreshCcw, Save, ShieldCheck, UsersRound } from "lucide-react";
+import { RefreshCcw, Save, Search, ShieldCheck, UsersRound, X } from "lucide-react";
 import { useParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiFetch } from "@/lib/api";
+import { buildInterpreterListPath } from "./interpreters.model";
 
 type InterpreterRecord = {
   id: string;
@@ -250,6 +252,12 @@ export function InterpretersPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [contractFilter, setContractFilter] = useState("");
+  const deferredSearch = useDeferredValue(search);
+  const filtersActive =
+    search.trim() !== "" || statusFilter !== "" || contractFilter !== "";
 
   const selected = useMemo(
     () => items.find((item) => item.id === selectedId) ?? items[0] ?? null,
@@ -263,15 +271,29 @@ export function InterpretersPage() {
     setLoading(true);
     setError("");
     try {
-      const data = await apiFetch<InterpreterRecord[]>("/interpreters");
+      const data = await apiFetch<InterpreterRecord[]>(
+        buildInterpreterListPath({
+          search: deferredSearch,
+          status: statusFilter,
+          contractType: contractFilter,
+        }),
+      );
       setItems(data);
-      setSelectedId((current) => interpreterId || current || data[0]?.id || "");
+      setSelectedId((current) => {
+        if (interpreterId && data.some((item) => item.id === interpreterId)) {
+          return interpreterId;
+        }
+        if (data.some((item) => item.id === current)) {
+          return current;
+        }
+        return data[0]?.id || "";
+      });
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Load failed");
     } finally {
       setLoading(false);
     }
-  }, [interpreterId]);
+  }, [contractFilter, deferredSearch, interpreterId, statusFilter]);
 
   useEffect(() => {
     void loadItems();
@@ -354,6 +376,55 @@ export function InterpretersPage() {
             <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
               <UsersRound className="size-4 text-primary" />
               Team
+            </div>
+            <div className="space-y-2 rounded-lg border border-border bg-card p-3">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  className={`${inputClass} w-full pl-8`}
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search"
+                />
+              </div>
+              <select
+                className={selectClass}
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value)}
+              >
+                <option value="">All statuses</option>
+                <option value="active">Active</option>
+                <option value="vacation">Vacation</option>
+                <option value="sick">Sick</option>
+                <option value="training">Training</option>
+                <option value="blocked">Blocked</option>
+                <option value="terminated">Terminated</option>
+              </select>
+              <select
+                className={selectClass}
+                value={contractFilter}
+                onChange={(event) => setContractFilter(event.target.value)}
+              >
+                <option value="">All contract types</option>
+                <option value="employee">Employee</option>
+                <option value="freelancer">Freelancer</option>
+                <option value="hourly">Hourly</option>
+              </select>
+              {filtersActive ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="h-8 w-full justify-start px-2 text-xs"
+                  onClick={() => {
+                    setSearch("");
+                    setStatusFilter("");
+                    setContractFilter("");
+                  }}
+                >
+                  <X className="size-3.5" />
+                  Clear filters
+                </Button>
+              ) : null}
             </div>
             <div className="space-y-2">
               {items.map((item) => (
