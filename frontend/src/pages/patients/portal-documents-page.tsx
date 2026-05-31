@@ -142,7 +142,7 @@ const INITIAL_PATIENT_DOCUMENTS_STATE: PatientDocumentsState = {
   uploadFile: null,
   activeCategory: "all",
   translationDocument: null,
-  translationLanguage: "en",
+  translationLanguage: "de",
   translationNote: "",
   translationBusy: false,
   translationError: "",
@@ -331,7 +331,7 @@ function usePatientDocumentsPageContent() {
   function openTranslationDialog(item: PortalDocumentItem) {
     dispatchDocumentsState({
       translationDocument: item,
-      translationLanguage: "en",
+      translationLanguage: "de",
       translationNote: "",
       translationError: "",
     });
@@ -781,9 +781,6 @@ function usePatientDocumentsPageContent() {
                 className={selectClass}
               >
                 <option value="de">{t.portal_documents_german}</option>
-                <option value="en">{t.portal_documents_english}</option>
-                <option value="uk">{t.portal_documents_ukrainian}</option>
-                <option value="ru">{t.portal_documents_russian}</option>
               </NativeComboboxSelect>
             </Field>
             <Field label={t.portal_documents_note} htmlFor="portal-translation-note">

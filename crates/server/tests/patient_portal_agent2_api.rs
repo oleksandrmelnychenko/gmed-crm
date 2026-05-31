@@ -388,7 +388,22 @@ async fn patient_translation_request_requires_own_visible_document() {
         Some(json!({ "requested_language": "en", "note": "Need English copy" })),
     )
     .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{created}");
+    assert_eq!(
+        created["message"],
+        "Only German translation target language is supported"
+    );
+
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/me/documents/{visible_doc}/translation-requests"),
+        &patient_auth,
+        Some(json!({ "requested_language": "de", "note": "Need German copy" })),
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["requested_language"], "de");
     assert_eq!(created["request_source"], "patient_portal");
 
     for forbidden_doc in [internal_doc, other_doc] {

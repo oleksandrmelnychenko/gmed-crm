@@ -120,6 +120,12 @@ async fn create_my_document_translation_request(
             );
         }
     };
+    if requested_language != "de" {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Only German translation target language is supported",
+        );
+    }
     let note = normalize_optional_text(body.note.as_deref());
 
     let document =

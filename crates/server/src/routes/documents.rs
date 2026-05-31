@@ -14085,6 +14085,30 @@ async fn create_translated_document_from_request(
     Ok(document_id)
 }
 
+/// Build a file-download response without panicking on the request path. Header
+/// construction can in principle fail (invalid header value); surface a 500
+/// instead of unwrapping.
+fn document_attachment_response(
+    mime_type: &str,
+    disposition: String,
+    data: Vec<u8>,
+) -> axum::response::Response {
+    match axum::response::Response::builder()
+        .header("content-type", mime_type)
+        .header("content-disposition", disposition)
+        .body(Body::from(data))
+    {
+        Ok(response) => response.into_response(),
+        Err(error) => {
+            tracing::error!(%error, "build document download response");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to build download response",
+            )
+        }
+    }
+}
+
 async fn download_document(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -14156,12 +14180,7 @@ async fn download_document(
 
     let disposition = format!("attachment; filename=\"{}\"", filename.replace('"', ""));
 
-    axum::response::Response::builder()
-        .header("content-type", mime_type)
-        .header("content-disposition", disposition)
-        .body(Body::from(data))
-        .unwrap()
-        .into_response()
+    document_attachment_response(&mime_type, disposition, data)
 }
 
 async fn list_my_uploaded_documents(
@@ -14315,12 +14334,7 @@ async fn download_my_uploaded_document(
 
     let disposition = format!("attachment; filename=\"{}\"", filename.replace('"', ""));
 
-    axum::response::Response::builder()
-        .header("content-type", mime_type)
-        .header("content-disposition", disposition)
-        .body(Body::from(data))
-        .unwrap()
-        .into_response()
+    document_attachment_response(&mime_type, disposition, data)
 }
 
 async fn upload_my_document(
@@ -15287,7 +15301,7 @@ async fn delete_document_file(
         }
     };
 
-    if let Err(error) = sqlx::query(
+    match sqlx::query(
         r#"UPDATE documents
            SET status = 'archived',
                visibility = 'internal',
@@ -15295,7 +15309,7 @@ async fn delete_document_file(
                file_deleted_at = now(),
                file_deleted_by = $2,
                file_delete_reason = $3
-           WHERE id = $1"#,
+           WHERE id = $1 AND file_deleted_at IS NULL"#,
     )
     .bind(id)
     .bind(auth.user_id)
@@ -15303,14 +15317,26 @@ async fn delete_document_file(
     .execute(&mut *tx)
     .await
     {
-        if let Some(staged) = staged_delete.as_ref() {
-            rollback_staged_document_delete(staged).await;
+        // A concurrent request deleted the file between our pre-check and this
+        // UPDATE; the guarded WHERE matches no rows. Roll back and report the
+        // conflict instead of silently re-archiving the same record.
+        Ok(result) if result.rows_affected() == 0 => {
+            if let Some(staged) = staged_delete.as_ref() {
+                rollback_staged_document_delete(staged).await;
+            }
+            return err(StatusCode::CONFLICT, "Document file was already deleted");
         }
-        tracing::error!(error = %error, document_id = %id, "mark document file deleted");
-        return err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to delete document file",
-        );
+        Ok(_) => {}
+        Err(error) => {
+            if let Some(staged) = staged_delete.as_ref() {
+                rollback_staged_document_delete(staged).await;
+            }
+            tracing::error!(error = %error, document_id = %id, "mark document file deleted");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete document file",
+            );
+        }
     }
 
     if let Err(error) = tx.commit().await {

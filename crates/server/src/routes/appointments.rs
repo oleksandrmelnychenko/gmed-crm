@@ -745,6 +745,17 @@ async fn create_my_appointment_request(
     {
         Ok(id) => id,
         Err(e) => {
+            // The partial unique index (uniq_patient_appointment_requests_open) is the
+            // race-safe backstop for the EXISTS pre-check above: a concurrent request
+            // that slipped through the check trips it here.
+            if e.as_database_error()
+                .is_some_and(|db| db.is_unique_violation())
+            {
+                return err(
+                    StatusCode::CONFLICT,
+                    "An open appointment request of this type already exists",
+                );
+            }
             tracing::error!(error = %e, user_id = %auth.user_id, "create appointment request");
             return err(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -2799,10 +2810,11 @@ async fn insert_appointment_occurrence(
     recurrence_index: i32,
     created_by: Uuid,
     interpreter_response: Option<&str>,
+    care_path_kind: &str,
 ) -> Result<(), axum::response::Response> {
     sqlx::query(
-        "INSERT INTO appointments (id, patient_id, provider_id, doctor_id, owner_user_id, interpreter_id, order_id, appointment_type, title, date, time_start, time_end, location, category, notes, recurrence_series_id, recurrence_frequency, recurrence_interval, recurrence_count, recurrence_until, recurrence_index, created_by, interpreter_response)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)",
+        "INSERT INTO appointments (id, patient_id, provider_id, doctor_id, owner_user_id, interpreter_id, order_id, appointment_type, title, date, time_start, time_end, location, category, notes, recurrence_series_id, recurrence_frequency, recurrence_interval, recurrence_count, recurrence_until, recurrence_index, created_by, interpreter_response, care_path_kind)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)",
     )
     .bind(appointment_id)
     .bind(patient_id)
@@ -2827,6 +2839,7 @@ async fn insert_appointment_occurrence(
     .bind(recurrence_index)
     .bind(created_by)
     .bind(interpreter_response)
+    .bind(care_path_kind)
     .execute(&mut **tx)
     .await
     .map(|_| ())
@@ -3031,7 +3044,8 @@ fn build_monthly_recurrence_date(
     let year = start_date.year() + absolute_month.div_euclid(12);
     let month0 = absolute_month.rem_euclid(12) as u32;
     let month = month0 + 1;
-    let month_start = chrono::NaiveDate::from_ymd_opt(year, month, 1)?;
+    // Validate (year, month): an out-of-range year yields None and propagates a proper error.
+    chrono::NaiveDate::from_ymd_opt(year, month, 1)?;
     let next_month_start = if month == 12 {
         chrono::NaiveDate::from_ymd_opt(year + 1, 1, 1)?
     } else {
@@ -3039,7 +3053,6 @@ fn build_monthly_recurrence_date(
     };
     let last_day = (next_month_start - chrono::Days::new(1)).day();
     chrono::NaiveDate::from_ymd_opt(year, month, start_date.day().min(last_day))
-        .or(Some(month_start))
 }
 
 #[allow(clippy::result_large_err)]
@@ -3971,6 +3984,7 @@ async fn update_appointment(
                 0,
                 auth.user_id,
                 body.interpreter_id.map(|_| "pending"),
+                &care_path_kind,
             )
             .await
             {
@@ -4544,7 +4558,7 @@ async fn assign_interpreter(
     }
 
     let appointment_ctx = match sqlx::query(
-        "SELECT patient_id, title, date, time_start FROM appointments WHERE id = $1",
+        "SELECT patient_id, title, date, time_start, interpreter_id FROM appointments WHERE id = $1",
     )
     .bind(apt_id)
     .fetch_optional(&state.db)
@@ -4557,6 +4571,9 @@ async fn assign_interpreter(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+    let previous_interpreter_id: Option<Uuid> = appointment_ctx
+        .try_get::<Option<Uuid>, _>("interpreter_id")
+        .unwrap_or(None);
 
     let interpreter_role = match load_active_user_role(&state, body.interpreter_id).await {
         Ok(Some(role)) => role,
@@ -4569,11 +4586,17 @@ async fn assign_interpreter(
         Err(resp) => return resp,
     };
 
-    match sqlx::query!(
-        "UPDATE appointments SET interpreter_id = $2, interpreter_response = 'pending' WHERE id = $1",
-        apt_id,
-        body.interpreter_id
+    match sqlx::query(
+        "UPDATE appointments
+            SET interpreter_id = $2,
+                interpreter_response = CASE
+                    WHEN interpreter_id IS DISTINCT FROM $2 THEN 'pending'
+                    ELSE interpreter_response
+                END
+          WHERE id = $1",
     )
+    .bind(apt_id)
+    .bind(body.interpreter_id)
     .execute(&state.db)
     .await
     {
@@ -4625,12 +4648,18 @@ async fn assign_interpreter(
                 Some(auth.user_id),
                 "appointment",
                 Some(apt_id),
-                serde_json::json!({ "interpreter_id": body.interpreter_id }),
+                serde_json::json!({
+                    "interpreter_id": body.interpreter_id,
+                    "previous_interpreter_id": previous_interpreter_id,
+                }),
             ));
             Json(serde_json::json!({"ok": true})).into_response()
         }
         Ok(_) => err(StatusCode::NOT_FOUND, "Not found"),
-        Err(e) => { tracing::error!(error = %e, "assign interpreter"); err(StatusCode::INTERNAL_SERVER_ERROR, "Failed") }
+        Err(e) => {
+            tracing::error!(error = %e, "assign interpreter");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        }
     }
 }
 

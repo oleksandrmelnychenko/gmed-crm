@@ -967,5 +967,8 @@ export const MemoizedCreateAppointmentSheet = memo(
     prev.userId === next.userId &&
     prev.userRole === next.userRole &&
     prev.onDraftChange === next.onDraftChange &&
-    prev.onDraftDiscard === next.onDraftDiscard,
+    prev.onDraftDiscard === next.onDraftDiscard &&
+    prev.title === next.title &&
+    prev.onOpenChange === next.onOpenChange &&
+    prev.onCreated === next.onCreated,
 );

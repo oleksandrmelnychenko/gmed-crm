@@ -289,6 +289,7 @@ const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
     { key: "child_address", label: "Adresse des Kindes", kind: "text" },
     { key: "guardian_name", label: "Sorgeberechtigte/r (Name)", kind: "text" },
     { key: "guardian_birth_date", label: "Sorgeberechtigte/r (geb. am)", kind: "date" },
+    { key: "guardian_address", label: "Adresse der/des Sorgeberechtigten", kind: "text" },
     {
       key: "extra_release_recipients",
       label: "Zusätzliche Entbindung gegenüber",
