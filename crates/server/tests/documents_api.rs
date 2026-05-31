@@ -1076,7 +1076,7 @@ async fn document_text_extraction_can_prefill_translation_request_workspace() {
         &format!("/api/v1/documents/{document_id}/translation-requests"),
         &admin_bearer,
         Some(json!({
-            "requested_language": "en",
+            "requested_language": "de",
             "note": "Translate the uploaded findings."
         })),
     )
@@ -2073,8 +2073,25 @@ async fn document_translation_requests_can_be_created_and_completed() {
         })),
     )
     .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        create_body["message"],
+        "Only German translation target language is supported"
+    );
+
+    let (status, create_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/translation-requests"),
+        &admin_bearer,
+        Some(json!({
+            "requested_language": "de",
+            "note": "Prepare a patient-facing German summary."
+        })),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(create_body["requested_language"], "en");
+    assert_eq!(create_body["requested_language"], "de");
     assert_eq!(create_body["status"], "pending");
     let request_id = create_body["id"].as_str().unwrap().to_string();
 
@@ -2098,7 +2115,7 @@ async fn document_translation_requests_can_be_created_and_completed() {
         &admin_bearer,
         Some(json!({
             "status": "completed",
-            "translated_text": "Patient summary in English."
+            "translated_text": "Patient summary in German."
         })),
     )
     .await;
@@ -2137,7 +2154,7 @@ async fn translation_workspace_can_store_source_and_translated_text() {
         &format!("/api/v1/documents/{document_id}/translation-requests"),
         &admin_bearer,
         Some(json!({
-            "requested_language": "en",
+            "requested_language": "de",
             "note": "Prepare a patient-safe translation."
         })),
     )
@@ -2154,7 +2171,7 @@ async fn translation_workspace_can_store_source_and_translated_text() {
             "status": "completed",
             "source_language": "de",
             "source_text": "Hallo Welt",
-            "translated_text": "Hello world",
+            "translated_text": "Hallo Welt auf Deutsch",
             "note": "Ready for patient delivery."
         })),
     )
@@ -2163,7 +2180,7 @@ async fn translation_workspace_can_store_source_and_translated_text() {
     assert_eq!(update_body["status"], "completed");
     assert_eq!(update_body["source_language"], "de");
     assert_eq!(update_body["source_text"], "Hallo Welt");
-    assert_eq!(update_body["translated_text"], "Hello world");
+    assert_eq!(update_body["translated_text"], "Hallo Welt auf Deutsch");
     assert!(update_body["translated_at"].as_str().is_some());
     assert!(update_body["completed_at"].as_str().is_some());
 
@@ -2176,7 +2193,7 @@ async fn translation_workspace_can_store_source_and_translated_text() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(list_body[0]["translated_text"], "Hello world");
+    assert_eq!(list_body[0]["translated_text"], "Hallo Welt auf Deutsch");
 }
 
 #[tokio::test]
@@ -2211,8 +2228,8 @@ async fn ceo_assistant_can_review_translation_requests_but_cannot_mutate_them() 
         &format!("/api/v1/documents/{document_id}/translation-requests"),
         &admin_bearer,
         Some(json!({
-            "requested_language": "en",
-            "note": "Prepare a patient-facing English summary."
+            "requested_language": "de",
+            "note": "Prepare a patient-facing German summary."
         })),
     )
     .await;

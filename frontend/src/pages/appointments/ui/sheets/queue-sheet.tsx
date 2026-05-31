@@ -1,4 +1,4 @@
-import { memo, useMemo, useState, type FormEvent } from "react";
+import { memo, useEffect, useMemo, useState, type FormEvent } from "react";
 
 import {
   CheckCircle2,
@@ -76,6 +76,8 @@ export type QueueSheetProps = {
   canManageStatus: boolean;
   actionBusy: string;
   requestActionBusy: string;
+  scheduleDraft?: QueueScheduleDraft | null;
+  onScheduleDraftChange?: (draft: QueueScheduleDraft | null) => void;
   onStatusChange: (
     appointmentId: string,
     status: AppointmentStatus,
@@ -106,7 +108,7 @@ type ConvertAppointmentRequestInput = {
   notes: string | null;
 };
 
-type RequestScheduleFormState = {
+export type RequestScheduleFormState = {
   title: string;
   date: string;
   timeStart: string;
@@ -115,6 +117,12 @@ type RequestScheduleFormState = {
   interpreterId: string;
   location: string;
   notes: string;
+};
+
+export type QueueScheduleDraft = {
+  requestId: string;
+  form: RequestScheduleFormState;
+  error: string;
 };
 
 function requestActionKey(
@@ -212,6 +220,8 @@ function useQueueSheetContent({
   canManageStatus,
   actionBusy,
   requestActionBusy,
+  scheduleDraft,
+  onScheduleDraftChange,
   onStatusChange,
   onReviewRequest,
   onConvertRequest,
@@ -220,13 +230,72 @@ function useQueueSheetContent({
   const tr = t as unknown as Record<string, string>;
   const hasAppointmentRequests = appointmentRequests.length > 0;
   const hasAppointments = items.length > 0;
-  const [activeScheduleRequestId, setActiveScheduleRequestId] = useState("");
-  const [scheduleForm, setScheduleForm] = useState<RequestScheduleFormState | null>(null);
-  const [scheduleError, setScheduleError] = useState("");
-  const ownerOptions = useMemo(
-    () => filterAppointmentOwnerOptions(staff, userRole, currentUserId),
-    [currentUserId, staff, userRole],
+  const [activeScheduleRequestId, setActiveScheduleRequestId] = useState(
+    scheduleDraft?.requestId ?? "",
   );
+  const [scheduleForm, setScheduleForm] =
+    useState<RequestScheduleFormState | null>(scheduleDraft?.form ?? null);
+  const [scheduleError, setScheduleError] = useState(scheduleDraft?.error ?? "");
+  const activeScheduleRequestExists = activeScheduleRequestId
+    ? appointmentRequests.some((item) => item.id === activeScheduleRequestId)
+    : true;
+  const isScheduleRequestCurrent =
+    !activeScheduleRequestId ||
+    appointmentRequestsLoading ||
+    Boolean(appointmentRequestsError) ||
+    activeScheduleRequestExists;
+  const visibleScheduleRequestId = isScheduleRequestCurrent
+    ? activeScheduleRequestId
+    : "";
+  const visibleScheduleForm = isScheduleRequestCurrent ? scheduleForm : null;
+  const visibleScheduleError = isScheduleRequestCurrent ? scheduleError : "";
+  const ownerOptions = useMemo(() => {
+    const filtered = filterAppointmentOwnerOptions(staff, userRole, currentUserId);
+    const ownerUserId = visibleScheduleForm?.ownerUserId;
+
+    if (
+      !ownerUserId ||
+      filtered.some((member) => member.id === ownerUserId)
+    ) {
+      return filtered;
+    }
+
+    const currentOwner = staff.find((member) => member.id === ownerUserId);
+    if (currentOwner) {
+      return [currentOwner, ...filtered];
+    }
+
+    if (currentUserId && ownerUserId === currentUserId && userRole) {
+      return [
+        {
+          id: currentUserId,
+          name: appointmentText("patients_current_user"),
+          role: userRole,
+        },
+        ...filtered,
+      ];
+    }
+
+    return filtered;
+  }, [currentUserId, staff, userRole, visibleScheduleForm?.ownerUserId]);
+
+  useEffect(() => {
+    if (visibleScheduleRequestId && visibleScheduleForm) {
+      onScheduleDraftChange?.({
+        requestId: visibleScheduleRequestId,
+        form: visibleScheduleForm,
+        error: visibleScheduleError,
+      });
+      return;
+    }
+
+    onScheduleDraftChange?.(null);
+  }, [
+    onScheduleDraftChange,
+    visibleScheduleError,
+    visibleScheduleForm,
+    visibleScheduleRequestId,
+  ]);
 
   function resetScheduleForm() {
     setActiveScheduleRequestId("");
@@ -235,9 +304,6 @@ function useQueueSheetContent({
   }
 
   function handleOpenChange(nextOpen: boolean) {
-    if (!nextOpen) {
-      resetScheduleForm();
-    }
     onOpenChange(nextOpen);
   }
 
@@ -262,24 +328,29 @@ function useQueueSheetContent({
       return;
     }
     setScheduleError("");
-    await onConvertRequest(item.id, {
-      providerId: item.requested_provider_id,
-      doctorId: item.requested_doctor_id,
-      ownerUserId: scheduleForm.ownerUserId || null,
-      interpreterId: scheduleForm.interpreterId || null,
-      orderId: item.order_id,
-      title: scheduleForm.title,
-      date: scheduleForm.date,
-      timeStart: scheduleForm.timeStart || null,
-      timeEnd: scheduleForm.timeEnd || null,
-      location: scheduleForm.location || null,
-      category: null,
-      notes: scheduleForm.notes || null,
-    });
+    try {
+      await onConvertRequest(item.id, {
+        providerId: item.requested_provider_id,
+        doctorId: item.requested_doctor_id,
+        ownerUserId: scheduleForm.ownerUserId || null,
+        interpreterId: scheduleForm.interpreterId || null,
+        orderId: item.order_id,
+        title: scheduleForm.title,
+        date: scheduleForm.date,
+        timeStart: scheduleForm.timeStart || null,
+        timeEnd: scheduleForm.timeEnd || null,
+        location: scheduleForm.location || null,
+        category: null,
+        notes: scheduleForm.notes || null,
+      });
+      resetScheduleForm();
+    } catch {
+      // The page-level handler owns the visible error banner.
+    }
   }
 
   return (
-      <AppointmentPreviewSheet
+    <AppointmentPreviewSheet
       open={open}
       onOpenChange={handleOpenChange}
       title={t.appointments_title}
@@ -383,7 +454,7 @@ function useQueueSheetContent({
               ) : null}
               {item.status === "approved" ? (
                 <div className="space-y-3">
-                  {activeScheduleRequestId === item.id && scheduleForm ? (
+                  {visibleScheduleRequestId === item.id && visibleScheduleForm ? (
                     <form
                       className="space-y-3 rounded-xl border border-border/60 bg-background/70 p-3"
                       onSubmit={(event) => void handleScheduleSubmit(event, item)}
@@ -394,7 +465,7 @@ function useQueueSheetContent({
                             {appointmentText("appointments_title")}
                           </span>
                           <Input
-                            value={scheduleForm.title}
+                            value={visibleScheduleForm.title}
                             onChange={(event) =>
                               setScheduleForm((current) =>
                                 current
@@ -411,7 +482,7 @@ function useQueueSheetContent({
                           </span>
                           <Input
                             type="date"
-                            value={scheduleForm.date}
+                            value={visibleScheduleForm.date}
                             onChange={(event) =>
                               setScheduleForm((current) =>
                                 current
@@ -429,7 +500,7 @@ function useQueueSheetContent({
                             </span>
                             <Input
                               type="time"
-                              value={scheduleForm.timeStart}
+                              value={visibleScheduleForm.timeStart}
                               onChange={(event) =>
                                 setScheduleForm((current) =>
                                   current
@@ -446,7 +517,7 @@ function useQueueSheetContent({
                             </span>
                             <Input
                               type="time"
-                              value={scheduleForm.timeEnd}
+                              value={visibleScheduleForm.timeEnd}
                               onChange={(event) =>
                                 setScheduleForm((current) =>
                                   current
@@ -463,7 +534,7 @@ function useQueueSheetContent({
                             {t.patients_assign_owner}
                           </span>
                           <NativeComboboxSelect
-                            value={scheduleForm.ownerUserId}
+                            value={visibleScheduleForm.ownerUserId}
                             onChange={(event) =>
                               setScheduleForm((current) =>
                                 current
@@ -486,7 +557,7 @@ function useQueueSheetContent({
                             {tr.role_interpreter ?? appointmentText("appointments_interpreter")}
                           </span>
                           <NativeComboboxSelect
-                            value={scheduleForm.interpreterId}
+                            value={visibleScheduleForm.interpreterId}
                             onChange={(event) =>
                               setScheduleForm((current) =>
                                 current
@@ -509,7 +580,7 @@ function useQueueSheetContent({
                             {appointmentText("appointments_location_2")}
                           </span>
                           <Input
-                            value={scheduleForm.location}
+                            value={visibleScheduleForm.location}
                             onChange={(event) =>
                               setScheduleForm((current) =>
                                 current
@@ -525,7 +596,7 @@ function useQueueSheetContent({
                             {appointmentText("appointments_notes_2")}
                           </span>
                           <textarea
-                            value={scheduleForm.notes}
+                            value={visibleScheduleForm.notes}
                             onChange={(event) =>
                               setScheduleForm((current) =>
                                 current
@@ -543,9 +614,9 @@ function useQueueSheetContent({
                           {appointmentText("appointments_requested_provider")}: {[item.requested_provider_name, item.requested_doctor_name].filter(Boolean).join(" · ")}
                         </p>
                       ) : null}
-                      {scheduleError ? (
+                      {visibleScheduleError ? (
                         <p className="text-xs font-medium text-rose-700">
-                          {scheduleError}
+                          {visibleScheduleError}
                         </p>
                       ) : null}
                       <div className="flex flex-wrap gap-2">

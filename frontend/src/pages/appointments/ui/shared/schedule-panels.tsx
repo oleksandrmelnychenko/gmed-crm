@@ -56,6 +56,20 @@ function conflictMetaLine(item: ScopedConflictItem) {
   return parts.join(" · ");
 }
 
+function localWarningItemLine(
+  warning: LocalScheduleWarning,
+  item: LocalScheduleWarning["items"][number],
+) {
+  const title = item.title.trim();
+  const label = warning.label.trim();
+  const repeatsScope =
+    title.localeCompare(label, undefined, { sensitivity: "accent" }) === 0;
+
+  return [repeatsScope ? "" : title, slotLabel(item)]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 export function ConflictPanel({
   conflicts,
 }: {
@@ -134,7 +148,7 @@ export function ScheduleWarningsPanel({
                 <p className="mt-1 text-xs text-amber-800">
                   {warning.items
                     .slice(0, 2)
-                    .map((item) => `${item.title} · ${slotLabel(item)}`)
+                    .map((item) => localWarningItemLine(warning, item))
                     .join(" | ")}
                   {warning.items.length > 2
                     ? ` | ${appointmentText("appointments_hidden_more_count", {

@@ -1549,6 +1549,10 @@ export function InterpretersPage() {
                     label="Active tasks"
                     value={displayNumber(operations?.summary.active_tasks)}
                   />
+                  <Metric
+                    label="Overdue tasks"
+                    value={displayNumber(operations?.summary.overdue_tasks)}
+                  />
                 </div>
 
                 {operationsLoading ? (

@@ -279,7 +279,7 @@ async fn get_interpreter_profile(
     .fetch_optional(&state.db)
     .await
     {
-        Ok(Some(row)) => Json(interpreter_profile_row_json(row)).into_response(),
+        Ok(Some(row)) => Json(interpreter_profile_row_json_for_auth(row, &auth)).into_response(),
         Ok(None) => err(StatusCode::NOT_FOUND, "Interpreter not found"),
         Err(error) => {
             tracing::error!(error = %error, interpreter_id = %interpreter_id, "get interpreter profile");
@@ -302,9 +302,26 @@ async fn update_interpreter_profile(
         return resp;
     }
 
-    let profile = match normalize_profile_payload(body) {
+    let incoming_profile = match normalize_profile_payload(body) {
         Ok(value) => value,
         Err(resp) => return resp,
+    };
+    let profile = match load_interpreter_profile_payload(&state, interpreter_id).await {
+        Ok(Some(payload)) => merge_profile_payload(
+            payload
+                .get("profile")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({})),
+            incoming_profile,
+        ),
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Interpreter not found"),
+        Err(error) => {
+            tracing::error!(error = %error, interpreter_id = %interpreter_id, "load interpreter profile before update");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load interpreter profile",
+            );
+        }
     };
 
     let mut tx = match state.db.begin().await {
@@ -1209,6 +1226,25 @@ fn interpreter_profile_row_json(row: sqlx::postgres::PgRow) -> Value {
             .unwrap_or_default()
             .map(|value| value.to_rfc3339()),
     })
+}
+
+fn interpreter_profile_row_json_for_auth(row: sqlx::postgres::PgRow, auth: &AuthUser) -> Value {
+    let mut payload = interpreter_profile_row_json(row);
+    if auth.role == Role::Interpreter {
+        redact_interpreter_self_profile(&mut payload);
+    }
+    payload
+}
+
+fn redact_interpreter_self_profile(payload: &mut Value) {
+    let Some(profile) = payload.get_mut("profile").and_then(Value::as_object_mut) else {
+        return;
+    };
+
+    profile.remove("finance");
+    profile.remove("internalNotes");
+    profile.remove("retentionDeleteAt");
+    profile.remove("erasureRequestStatus");
 }
 
 async fn load_interpreter_profile_payload(
@@ -2175,6 +2211,23 @@ async fn replace_credentials(
 
 fn value_from_object<'a>(object: &'a Value, key: &str) -> Option<&'a Value> {
     object.as_object().and_then(|map| map.get(key))
+}
+
+fn merge_profile_payload(existing: Value, incoming: Value) -> Value {
+    match (existing, incoming) {
+        (Value::Object(mut existing), Value::Object(incoming)) => {
+            for (key, next_value) in incoming {
+                let value = if let Some(current_value) = existing.remove(&key) {
+                    merge_profile_payload(current_value, next_value)
+                } else {
+                    next_value
+                };
+                existing.insert(key, value);
+            }
+            Value::Object(existing)
+        }
+        (_, incoming) => incoming,
+    }
 }
 
 fn value_from_profile_or_nested<'a>(

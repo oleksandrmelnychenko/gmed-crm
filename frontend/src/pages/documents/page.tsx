@@ -959,7 +959,7 @@ function StaffDocumentsPage({
   const [textExtractionBusy, setTextExtractionBusy] = useState(false);
   const [textExtractionError, setTextExtractionError] = useState("");
   const [translationForm, setTranslationForm] = useState({
-    requestedLanguage: "en",
+    requestedLanguage: "de",
     note: "",
   });
   const [translationRequestOpen, setTranslationRequestOpen] = useState(false);
@@ -1775,7 +1775,7 @@ function StaffDocumentsPage({
       clearApiCache("/documents/translation-requests");
       clearApiCache("/documents/translation-requests?status=pending,in_progress");
       setVersion((current) => current + 1);
-      setTranslationForm({ requestedLanguage: "en", note: "" });
+      setTranslationForm({ requestedLanguage: "de", note: "" });
       setTranslationRequestOpen(false);
       setNotice(t.documents_translation_created);
     } catch (nextError) {
@@ -3287,8 +3287,6 @@ function StaffDocumentsPage({
                     className={selectClassName}
                   >
                     <option value="de">{formatLanguageLabel("de")}</option>
-                    <option value="en">{formatLanguageLabel("en")}</option>
-                    <option value="uk">{formatLanguageLabel("uk")}</option>
                   </NativeComboboxSelect>
                 </Field>
                 <Field label={t.patients_notes}>

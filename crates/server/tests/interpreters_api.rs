@@ -220,7 +220,10 @@ async fn manager_can_save_interpreter_profile_and_interpreter_can_view_self() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body:?}");
     assert_eq!(body["profile"]["status"], "active");
-    assert_eq!(body["profile"]["finance"]["hourlyRate"], 45);
+    assert_eq!(
+        body["profile"]["finance"]["hourlyRate"].as_f64(),
+        Some(45.0)
+    );
     assert_eq!(body["profile"]["workCountries"], json!(["DE"]));
     assert_eq!(
         body["profile"]["workLocations"],
@@ -361,6 +364,8 @@ async fn manager_can_save_interpreter_profile_and_interpreter_can_view_self() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body:?}");
     assert_eq!(body["profile"]["contractType"], "freelancer");
+    assert!(body["profile"]["finance"].is_null());
+    assert!(body["profile"]["internalNotes"].is_null());
 
     let (status, body) = json_request(
         &app,
@@ -425,6 +430,165 @@ async fn interpreter_profile_rejects_invalid_structured_values() {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(body["message"], "Invalid interpreter credential type");
+}
+
+#[tokio::test]
+async fn it_admin_can_manage_interpreter_profiles() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("interpreter-profile-it-admin");
+    let it_admin_id = seed_user(&pool, &format!("{tag}-it"), "it_admin").await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
+    let it_admin_bearer = auth_header_for(it_admin_id, "it_admin");
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/interpreters?search={tag}-int"),
+        &it_admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert!(
+        body.as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == interpreter_id.to_string())
+    );
+
+    let (status, body) = json_request(
+        &app,
+        "PUT",
+        &format!("/api/v1/interpreters/{interpreter_id}/profile"),
+        &it_admin_bearer,
+        Some(json!({
+            "status": "training",
+            "contractType": "hourly",
+            "employmentKind": "internal",
+            "access": {
+                "level": "appointment_only",
+                "autoBlockPolicy": "immediate"
+            }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(body["profile"]["status"], "training");
+    assert_eq!(body["profile"]["contractType"], "hourly");
+    assert_eq!(body["profile"]["access"]["autoBlockPolicy"], "immediate");
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/interpreters/{interpreter_id}/profile"),
+        &it_admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(body["profile"]["status"], "training");
+}
+
+#[tokio::test]
+async fn partial_interpreter_profile_update_preserves_omitted_structured_fields() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("interpreter-profile-partial");
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, body) = json_request(
+        &app,
+        "PUT",
+        &format!("/api/v1/interpreters/{interpreter_id}/profile"),
+        &pm_bearer,
+        Some(json!({
+            "status": "active",
+            "contractType": "freelancer",
+            "workCountries": ["DE", "AT"],
+            "workLocations": ["Berlin"],
+            "equipment": ["Secure phone"],
+            "credentials": [
+                {
+                    "credentialType": "medical_translation",
+                    "title": "Medical translation certificate",
+                    "issuer": "GMED Academy"
+                }
+            ],
+            "finance": {
+                "hourlyRate": 55,
+                "bankDetails": "DE00 0000 0000 0000 0000 00",
+                "billingStatus": "unpaid"
+            },
+            "access": {
+                "level": "appointment_only",
+                "autoBlockPolicy": "immediate"
+            }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+
+    let (status, body) = json_request(
+        &app,
+        "PUT",
+        &format!("/api/v1/interpreters/{interpreter_id}/profile"),
+        &pm_bearer,
+        Some(json!({
+            "status": "vacation",
+            "finance": {
+                "billingStatus": "paid"
+            }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(body["profile"]["status"], "vacation");
+    assert_eq!(body["profile"]["contractType"], "freelancer");
+    assert_eq!(body["profile"]["workCountries"], json!(["DE", "AT"]));
+    assert_eq!(body["profile"]["workLocations"], json!(["Berlin"]));
+    assert_eq!(body["profile"]["equipment"], json!(["Secure phone"]));
+    assert_eq!(
+        body["profile"]["credentials"][0]["title"],
+        "Medical translation certificate"
+    );
+    assert_eq!(
+        body["profile"]["finance"]["hourlyRate"].as_f64(),
+        Some(55.0)
+    );
+    assert_eq!(
+        body["profile"]["finance"]["bankDetails"],
+        "DE00 0000 0000 0000 0000 00"
+    );
+    assert_eq!(body["profile"]["finance"]["billingStatus"], "paid");
+    assert_eq!(body["profile"]["access"]["autoBlockPolicy"], "immediate");
+
+    let zone_count: i64 = sqlx::query_scalar(
+        r#"SELECT count(*)
+           FROM interpreter_work_zones
+           WHERE interpreter_id = $1
+             AND value IN ('DE', 'AT', 'Berlin')"#,
+    )
+    .bind(interpreter_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(zone_count, 3);
+
+    let credential_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM interpreter_credentials WHERE interpreter_id = $1",
+    )
+    .bind(interpreter_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(credential_count, 1);
 }
 
 #[tokio::test]

@@ -143,6 +143,7 @@ export function AppointmentEditorSheet({
 export function AppointmentPreviewSheet({
   open,
   onOpenChange,
+  dirty,
   title,
   description,
   maxWidthClassName = "sm:max-w-[560px]",
@@ -151,7 +152,11 @@ export function AppointmentPreviewSheet({
   children,
 }: {
   open: boolean;
-  onOpenChange: (open: boolean) => void;
+  onOpenChange: (
+    open: boolean,
+    eventDetails?: AppointmentEditorSheetOpenChangeDetails,
+  ) => void;
+  dirty?: boolean;
   title: ReactNode;
   description?: ReactNode;
   maxWidthClassName?: string;
@@ -160,7 +165,7 @@ export function AppointmentPreviewSheet({
   children: ReactNode;
 }) {
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={onOpenChange} dirty={dirty}>
       <SheetContent
         side="right"
         className={cn("w-full border-l border-border p-0", maxWidthClassName)}

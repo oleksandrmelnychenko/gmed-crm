@@ -2112,7 +2112,8 @@ async fn create_appointment(
             Err(resp) => return resp,
         }
     }
-    if let Some(owner_user_id) = body.owner_user_id {
+    let effective_owner_user_id = resolve_owner_user_id_for_write(&auth, body.owner_user_id);
+    let effective_owner_role = if let Some(owner_user_id) = effective_owner_user_id {
         match load_active_appointment_owner_role(&state, owner_user_id).await {
             Ok(Some(owner_role)) => {
                 if let Err(resp) =
@@ -2120,6 +2121,7 @@ async fn create_appointment(
                 {
                     return resp;
                 }
+                Some(owner_role)
             }
             Ok(None) => {
                 return err(
@@ -2129,7 +2131,9 @@ async fn create_appointment(
             }
             Err(resp) => return resp,
         }
-    }
+    } else {
+        None
+    };
 
     if !is_valid_appointment_type(&body.appointment_type) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid type");
@@ -2198,7 +2202,7 @@ async fn create_appointment(
         patient_id,
         provider_id,
         doctor_id,
-        owner_user_id,
+        owner_user_id: _,
         interpreter_id,
         order_id,
         appointment_type,
@@ -2216,7 +2220,7 @@ async fn create_appointment(
         recurrence_count: _,
         recurrence_until: _,
     } = body;
-    let owner_user_id = resolve_owner_user_id_for_write(&auth, owner_user_id);
+    let owner_user_id = effective_owner_user_id;
     let mut tx = match state.db.begin().await {
         Ok(value) => value,
         Err(e) => {
@@ -2430,6 +2434,8 @@ async fn create_appointment(
         Json(serde_json::json!({
             "id": root_appointment_id,
             "created_at": created_at,
+            "owner_user_id": owner_user_id,
+            "owner_role": effective_owner_role,
             "conflicts": conflicts,
             "series_created_count": created_appointments.len(),
         })),
@@ -4186,6 +4192,7 @@ async fn update_appointment(
 
     Json(serde_json::json!({
         "ok": true,
+        "owner_user_id": owner_user_id,
         "conflicts": conflicts,
         "recurrence_scope": match recurrence_scope {
             AppointmentRecurrenceScope::Single => "single",

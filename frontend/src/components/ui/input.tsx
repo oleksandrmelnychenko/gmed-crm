@@ -96,6 +96,13 @@ function Input({
       controlBorderColor,
       controlBackground,
     } = getPickerControlStyle(className)
+    const htmlInputProps = {
+      ...props,
+      min,
+      max,
+      step,
+      "aria-label": typeof props["aria-label"] === "string" ? props["aria-label"] : undefined,
+    }
     const sharedTextFieldProps = {
       id,
       name,
@@ -160,9 +167,7 @@ function Input({
             },
           },
         },
-        htmlInput: {
-          "aria-label": typeof props["aria-label"] === "string" ? props["aria-label"] : undefined,
-        },
+        htmlInput: htmlInputProps,
       },
     }
 
@@ -182,6 +187,7 @@ function Input({
           minDateTime={typeof min === "string" && min ? parseDateValue(min) ?? undefined : undefined}
           maxDateTime={typeof max === "string" && max ? parseDateValue(max) ?? undefined : undefined}
           disabled={disabled}
+          readOnly={props.readOnly}
           format={DATETIME_LOCAL_FORMAT}
           ampm={false}
           slotProps={{
@@ -204,6 +210,7 @@ function Input({
         minDate={typeof min === "string" && min ? parseDateValue(min) ?? undefined : undefined}
         maxDate={typeof max === "string" && max ? parseDateValue(max) ?? undefined : undefined}
         disabled={disabled}
+        readOnly={props.readOnly}
         format={DATE_FORMAT}
         slotProps={{
           textField: sharedTextFieldProps,

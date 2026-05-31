@@ -298,10 +298,44 @@ function useAppointmentFollowUpVisitSectionContent({
     form.timeStart,
     scheduleWarningLabels,
   ]);
-  const ownerOptions = useMemo(
-    () => filterAppointmentOwnerOptions(staff, currentUserRole, currentUserId),
-    [currentUserId, currentUserRole, staff],
-  );
+  const ownerOptions = useMemo(() => {
+    const filtered = filterAppointmentOwnerOptions(
+      staff,
+      currentUserRole,
+      currentUserId,
+    );
+
+    if (
+      !form.ownerUserId ||
+      filtered.some((member) => member.id === form.ownerUserId)
+    ) {
+      return filtered;
+    }
+
+    const currentOwner = staff.find((member) => member.id === form.ownerUserId);
+    if (currentOwner) {
+      return [currentOwner, ...filtered];
+    }
+
+    if (currentUserId && form.ownerUserId === currentUserId && currentUserRole) {
+      return [
+        {
+          id: currentUserId,
+          name: appointmentText("patients_current_user"),
+          role: currentUserRole,
+        },
+        ...filtered,
+      ];
+    }
+
+    return filtered;
+  }, [
+    appointmentText,
+    currentUserId,
+    currentUserRole,
+    form.ownerUserId,
+    staff,
+  ]);
 
   function applyPreset(preset: (typeof FOLLOW_UP_PRESETS)[number]) {
     const anchor = appointmentAnchorDateTime(detail);

@@ -20,6 +20,7 @@ import {
 
 import { AdminInlineMetric } from "@/components/admin-page-patterns";
 import { Button } from "@/components/ui/button";
+import { CONFIRMED_DISMISS_REASON } from "@/components/ui/dismissal-guard";
 import { Input } from "@/components/ui/input";
 import {
   Banner,
@@ -104,6 +105,7 @@ import {
 } from "@/pages/appointments/model/constants";
 import {
   AppointmentEditorSheet,
+  type AppointmentEditorSheetOpenChangeDetails,
   Field,
 } from "@/pages/appointments/ui/shared/workspace-primitives";
 
@@ -116,6 +118,40 @@ function withEllipsis(value: string | null | undefined) {
   const normalized = String(value ?? "").trim();
   if (!normalized) return "";
   return /[.…]$/u.test(normalized) ? normalized : `${normalized}…`;
+}
+
+function hasChecklistFormChanges(form: ChecklistFormState) {
+  const initial = blankChecklistForm();
+  return form.phase !== initial.phase || form.itemText !== initial.itemText;
+}
+
+function hasReminderFormChanges(form: ReminderFormState) {
+  const initial = blankReminderForm();
+  return (
+    form.userId !== initial.userId ||
+    form.remindAt !== initial.remindAt ||
+    form.title !== initial.title ||
+    form.description !== initial.description
+  );
+}
+
+function hasTaskFormChanges(form: TaskFormState, initial: TaskFormState) {
+  return (
+    form.title !== initial.title ||
+    form.description !== initial.description ||
+    form.assignedTo !== initial.assignedTo ||
+    form.dueDate !== initial.dueDate ||
+    form.priority !== initial.priority
+  );
+}
+
+function isConfirmedDismiss(
+  eventDetails?: AppointmentEditorSheetOpenChangeDetails,
+) {
+  return (
+    (eventDetails as { reason?: string } | undefined)?.reason ===
+    CONFIRMED_DISMISS_REASON
+  );
 }
 
 function WorkflowSectionAccessory({
@@ -1066,6 +1102,12 @@ function AppointmentChecklistSection({
       },
     });
   }, [detail.id]);
+  const checklistFormDirty = hasChecklistFormChanges(form);
+
+  function resetChecklistForm() {
+    setForm(blankChecklistForm());
+    setSubmitBusy(false);
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1111,11 +1153,23 @@ function AppointmentChecklistSection({
     }
   }
 
-  function handleSheetOpenChange(open: boolean) {
+  function discardChecklistForm() {
+    resetChecklistForm();
+    setSheetOpen(false);
+  }
+
+  function handleChecklistSheetOpenChange(
+    open: boolean,
+    eventDetails?: AppointmentEditorSheetOpenChangeDetails,
+  ) {
     setSheetOpen(open);
-    if (!open) {
-      setForm(blankChecklistForm());
-      setSubmitBusy(false);
+    if (
+      !open &&
+      (!checklistFormDirty ||
+        !eventDetails ||
+        isConfirmedDismiss(eventDetails))
+    ) {
+      resetChecklistForm();
     }
   }
 
@@ -1204,7 +1258,8 @@ function AppointmentChecklistSection({
 
     <AppointmentEditorSheet
       open={sheetOpen}
-      onOpenChange={handleSheetOpenChange}
+      onOpenChange={handleChecklistSheetOpenChange}
+      dirty={checklistFormDirty}
       title={appointmentText("appointments_add_checklist_item")}
       maxWidthClassName="sm:max-w-[760px]"
       onSubmit={handleSubmit}
@@ -1215,7 +1270,7 @@ function AppointmentChecklistSection({
             variant="outline"
             size="sm"
             className="h-8 rounded-lg"
-            onClick={() => handleSheetOpenChange(false)}
+            onClick={discardChecklistForm}
           >
             {t.common_cancel}
           </Button>
@@ -1296,6 +1351,7 @@ function AppointmentRemindersSection({
   const [sheetOpen, setSheetOpen] = useState(false);
   const [submitBusy, setSubmitBusy] = useState(false);
   const [completingId, setCompletingId] = useState("");
+  const reminderFormDirty = hasReminderFormChanges(form);
 
   const resetReminderState = () => {
     setForm(blankReminderForm());
@@ -1354,9 +1410,23 @@ function AppointmentRemindersSection({
     }
   }
 
-  function handleSheetOpenChange(open: boolean) {
+  function discardReminderForm() {
+    setForm(blankReminderForm());
+    setSubmitBusy(false);
+    setSheetOpen(false);
+  }
+
+  function handleReminderSheetOpenChange(
+    open: boolean,
+    eventDetails?: AppointmentEditorSheetOpenChangeDetails,
+  ) {
     setSheetOpen(open);
-    if (!open) {
+    if (
+      !open &&
+      (!reminderFormDirty ||
+        !eventDetails ||
+        isConfirmedDismiss(eventDetails))
+    ) {
       setForm(blankReminderForm());
       setSubmitBusy(false);
     }
@@ -1457,7 +1527,8 @@ function AppointmentRemindersSection({
     {canManageReminders ? (
       <AppointmentEditorSheet
         open={sheetOpen}
-        onOpenChange={handleSheetOpenChange}
+        onOpenChange={handleReminderSheetOpenChange}
+        dirty={reminderFormDirty}
         title={t.appointments_add_reminder}
         maxWidthClassName="sm:max-w-[760px]"
         onSubmit={handleSubmit}
@@ -1468,7 +1539,7 @@ function AppointmentRemindersSection({
               variant="outline"
               size="sm"
               className="h-8 rounded-lg"
-              onClick={() => handleSheetOpenChange(false)}
+              onClick={discardReminderForm}
             >
               {t.common_cancel}
             </Button>
@@ -2181,22 +2252,34 @@ function AppointmentTasksSectionContent({
   const [sheetOpen, setSheetOpen] = useState(false);
   const [submitBusy, setSubmitBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState("");
+  const defaultTaskForm = buildDefaultTaskForm();
+  const taskFormDirty = hasTaskFormChanges(form, defaultTaskForm);
 
-  function resetTaskForm() {
-    setForm(
-      blankTaskForm(
-        detail.interpreter_id ??
-          detail.owner_user_id ??
-          assignableStaff[0]?.id ??
-          "",
-        buildTaskDefaultDueDate(detail),
-      ),
+  function buildDefaultTaskForm() {
+    return blankTaskForm(
+      detail.interpreter_id ??
+        detail.owner_user_id ??
+        assignableStaff[0]?.id ??
+        "",
+      buildTaskDefaultDueDate(detail),
     );
   }
 
-  function handleSheetOpenChange(open: boolean) {
+  function resetTaskForm() {
+    setForm(buildDefaultTaskForm());
+  }
+
+  function handleTaskSheetOpenChange(
+    open: boolean,
+    eventDetails?: AppointmentEditorSheetOpenChangeDetails,
+  ) {
     setSheetOpen(open);
-    if (!open) {
+    if (
+      !open &&
+      (!taskFormDirty ||
+        !eventDetails ||
+        isConfirmedDismiss(eventDetails))
+    ) {
       resetTaskForm();
       setSubmitBusy(false);
     }
@@ -2283,9 +2366,10 @@ function AppointmentTasksSectionContent({
         assignableStaff={assignableStaff}
         form={form}
         open={sheetOpen}
+        dirty={taskFormDirty}
         submitBusy={submitBusy}
         setForm={setForm}
-        onOpenChange={handleSheetOpenChange}
+        onOpenChange={handleTaskSheetOpenChange}
         onSubmit={handleTaskSubmit}
       />
     ) : null}
@@ -2388,6 +2472,7 @@ function AppointmentTaskList({
 
 function AppointmentTaskEditorSheet({
   assignableStaff,
+  dirty,
   form,
   open,
   submitBusy,
@@ -2396,11 +2481,15 @@ function AppointmentTaskEditorSheet({
   onSubmit,
 }: {
   assignableStaff: StaffOption[];
+  dirty: boolean;
   form: TaskFormState;
   open: boolean;
   submitBusy: boolean;
   setForm: TaskFormSetter;
-  onOpenChange: (open: boolean) => void;
+  onOpenChange: (
+    open: boolean,
+    eventDetails?: AppointmentEditorSheetOpenChangeDetails,
+  ) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const { t } = useLang();
@@ -2410,6 +2499,7 @@ function AppointmentTaskEditorSheet({
     <AppointmentEditorSheet
       open={open}
       onOpenChange={onOpenChange}
+      dirty={dirty}
       title={t.appointments_workflow_add_task}
       maxWidthClassName="sm:max-w-[760px]"
       onSubmit={onSubmit}

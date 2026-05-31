@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 
+import { hasAppointmentFormChanges } from "@/pages/appointments/model/form-factories";
 import type { AppointmentFormState } from "@/pages/appointments/model/types";
 
 type UseAppointmentOverlayStateOptions = {
@@ -22,6 +23,12 @@ export function useAppointmentOverlayState({
   const [createSeed, setCreateSeed] = useState<AppointmentFormState>(() =>
     createBlankAppointmentForm(),
   );
+  const [createDraft, setCreateDraft] =
+    useState<AppointmentFormState | null>(null);
+
+  const hasPendingCreateDraft = createDraft
+    ? hasAppointmentFormChanges(createDraft, createSeed)
+    : false;
 
   const handleFiltersModalOpenChange = useCallback((open: boolean) => {
     setFiltersModalOpen(open);
@@ -65,20 +72,33 @@ export function useAppointmentOverlayState({
     (open: boolean) => {
       if (open) {
         preloadCreateSheet();
+        setCreateDraft((currentDraft) => currentDraft ?? createSeed);
       }
       setCreateOpen(open);
     },
-    [preloadCreateSheet],
+    [createSeed, preloadCreateSheet],
   );
 
   const openCreateSeedSheet = useCallback(
     (next: AppointmentFormState) => {
-      setCreateSeed(next);
+      if (!hasPendingCreateDraft) {
+        setCreateSeed(next);
+        setCreateDraft(next);
+      }
       preloadCreateSheet();
       setCreateOpen(true);
     },
-    [preloadCreateSheet],
+    [hasPendingCreateDraft, preloadCreateSheet],
   );
+
+  const handleCreateDraftChange = useCallback((draft: AppointmentFormState) => {
+    setCreateDraft(draft);
+  }, []);
+
+  const clearCreateDraft = useCallback(() => {
+    setCreateDraft(null);
+    setCreateSeed(createBlankAppointmentForm());
+  }, [createBlankAppointmentForm]);
 
   return {
     filtersModalOpen,
@@ -86,6 +106,7 @@ export function useAppointmentOverlayState({
     queueModalOpen,
     createOpen,
     createSeed,
+    createDraft,
     handleFiltersModalOpenChange,
     openFiltersModal,
     handleSearchModalOpenChange,
@@ -93,6 +114,8 @@ export function useAppointmentOverlayState({
     handleQueueModalOpenChange,
     openQueueModal,
     handleCreateOpenChange,
+    handleCreateDraftChange,
+    clearCreateDraft,
     openCreateSeedSheet,
   };
 }

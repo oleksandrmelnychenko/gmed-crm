@@ -11,6 +11,7 @@ import {
 import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { CONFIRMED_DISMISS_REASON } from "@/components/ui/dismissal-guard";
 import { Input } from "@/components/ui/input";
 import {
   CountBadge,
@@ -75,6 +76,7 @@ import type {
 import {
   AppointmentClinicalToggleCard,
   AppointmentEditorSheet,
+  type AppointmentEditorSheetOpenChangeDetails,
   Field,
 } from "@/pages/appointments/ui/shared/workspace-primitives";
 
@@ -84,6 +86,48 @@ const clinicalTextareaClassName = appointmentTextareaControlClassName;
 
 function withEllipsis(value: string) {
   return value.endsWith("...") || value.endsWith("…") ? value : `${value}…`;
+}
+
+function hasIncomingDataFormChanges(
+  form: IncomingDataFormState,
+  initial: IncomingDataFormState,
+) {
+  return (
+    form.source !== initial.source ||
+    form.category !== initial.category ||
+    form.assigneeId !== initial.assigneeId ||
+    form.dueAt !== initial.dueAt ||
+    form.notes !== initial.notes ||
+    form.requiresCaseUpdate !== initial.requiresCaseUpdate ||
+    form.requiresPatientFollowUp !== initial.requiresPatientFollowUp ||
+    form.createTask !== initial.createTask ||
+    form.taskPriority !== initial.taskPriority
+  );
+}
+
+function hasFindingsFollowUpFormChanges(
+  form: FindingsFollowUpFormState,
+  initial: FindingsFollowUpFormState,
+) {
+  return (
+    form.artifact !== initial.artifact ||
+    form.assigneeId !== initial.assigneeId ||
+    form.dueAt !== initial.dueAt ||
+    form.notes !== initial.notes ||
+    form.translationRequired !== initial.translationRequired ||
+    form.sendToPatient !== initial.sendToPatient ||
+    form.createTask !== initial.createTask ||
+    form.taskPriority !== initial.taskPriority
+  );
+}
+
+function isConfirmedDismiss(
+  eventDetails?: AppointmentEditorSheetOpenChangeDetails,
+) {
+  return (
+    (eventDetails as { reason?: string } | undefined)?.reason ===
+    CONFIRMED_DISMISS_REASON
+  );
 }
 
 type AppointmentIncomingDataSectionProps = {
@@ -220,6 +264,11 @@ function useAppointmentIncomingDataSectionContent({
   const caseUpdateLabel = appointmentText("appointments_case_update_required");
   const patientFollowUpLabel = appointmentText("appointments_patient_follow_up_required");
   const intakeComposerTitle = appointmentText("appointments_create_intake_follow_up");
+  const defaultIncomingForm = buildDefaultForm();
+  const incomingComposerDirty = hasIncomingDataFormChanges(
+    form,
+    defaultIncomingForm,
+  );
 
   useEffect(() => {
     dispatchIncomingState({
@@ -232,6 +281,31 @@ function useAppointmentIncomingDataSectionContent({
       },
     });
   }, [buildDefaultForm]);
+
+  function resetIncomingComposerForm() {
+    setForm(buildDefaultForm());
+    setSubmitBusy(false);
+  }
+
+  function discardIncomingComposerForm() {
+    resetIncomingComposerForm();
+    setComposerOpen(false);
+  }
+
+  function handleIncomingComposerOpenChange(
+    open: boolean,
+    eventDetails?: AppointmentEditorSheetOpenChangeDetails,
+  ) {
+    setComposerOpen(open);
+    if (
+      !open &&
+      (!incomingComposerDirty ||
+        !eventDetails ||
+        isConfirmedDismiss(eventDetails))
+    ) {
+      resetIncomingComposerForm();
+    }
+  }
 
   async function completeChecklistItem(itemId: string) {
     setActionBusy(`check:${itemId}`);
@@ -562,13 +636,8 @@ function useAppointmentIncomingDataSectionContent({
 
       <AppointmentEditorSheet
         open={composerOpen}
-        onOpenChange={(open) => {
-          setComposerOpen(open);
-          if (!open) {
-            setForm(buildDefaultForm());
-            setSubmitBusy(false);
-          }
-        }}
+        onOpenChange={handleIncomingComposerOpenChange}
+        dirty={incomingComposerDirty}
         title={intakeComposerTitle}
         description={appointmentText("appointments_create_reminders_checklist_items_and_if_needed_a_linked")}
         onSubmit={handleSubmit}
@@ -579,7 +648,7 @@ function useAppointmentIncomingDataSectionContent({
               variant="outline"
               size="sm"
               className="h-8 rounded-lg"
-              onClick={() => setComposerOpen(false)}
+              onClick={discardIncomingComposerForm}
             >
               {t.common_cancel}
             </Button>
@@ -876,6 +945,11 @@ function useAppointmentFindingsSectionContent({
   const translationRequiredLabel = appointmentText("appointments_written_translation_required");
   const sendToPatientLabel = appointmentText("appointments_send_package_to_patient");
   const findingsComposerTitle = appointmentText("appointments_create_findings_follow_up");
+  const defaultFindingsForm = buildDefaultForm();
+  const findingsComposerDirty = hasFindingsFollowUpFormChanges(
+    form,
+    defaultFindingsForm,
+  );
 
   useEffect(() => {
     dispatchFindingsState({
@@ -888,6 +962,31 @@ function useAppointmentFindingsSectionContent({
       },
     });
   }, [buildDefaultForm]);
+
+  function resetFindingsComposerForm() {
+    setForm(buildDefaultForm());
+    setSubmitBusy(false);
+  }
+
+  function discardFindingsComposerForm() {
+    resetFindingsComposerForm();
+    setComposerOpen(false);
+  }
+
+  function handleFindingsComposerOpenChange(
+    open: boolean,
+    eventDetails?: AppointmentEditorSheetOpenChangeDetails,
+  ) {
+    setComposerOpen(open);
+    if (
+      !open &&
+      (!findingsComposerDirty ||
+        !eventDetails ||
+        isConfirmedDismiss(eventDetails))
+    ) {
+      resetFindingsComposerForm();
+    }
+  }
 
   async function completeChecklistItem(itemId: string) {
     setActionBusy(`check:${itemId}`);
@@ -1218,13 +1317,8 @@ function useAppointmentFindingsSectionContent({
 
       <AppointmentEditorSheet
         open={composerOpen}
-        onOpenChange={(open) => {
-          setComposerOpen(open);
-          if (!open) {
-            setForm(buildDefaultForm());
-            setSubmitBusy(false);
-          }
-        }}
+        onOpenChange={handleFindingsComposerOpenChange}
+        dirty={findingsComposerDirty}
         title={findingsComposerTitle}
         description={appointmentText("appointments_control_the_request_translation_and_delivery_of_findings")}
         onSubmit={handleSubmit}
@@ -1235,7 +1329,7 @@ function useAppointmentFindingsSectionContent({
               variant="outline"
               size="sm"
               className="h-8 rounded-lg"
-              onClick={() => setComposerOpen(false)}
+              onClick={discardFindingsComposerForm}
             >
               {t.common_cancel}
             </Button>

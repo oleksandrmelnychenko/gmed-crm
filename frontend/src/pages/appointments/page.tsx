@@ -8,6 +8,7 @@ import {
   useMemo,
   useReducer,
   useRef,
+  useState,
   type SetStateAction,
 } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -99,6 +100,7 @@ import {
   preloadSchedulerQueueSheet,
   preloadSchedulerSearchSheet,
 } from "@/pages/appointments/ui/scheduler/appointments-scheduler-surface";
+import type { QueueScheduleDraft } from "@/pages/appointments/ui/sheets/queue-sheet";
 import { CreateSheetLayer, preloadCreateSheetLayer } from "@/pages/appointments/ui/sheets/create-sheet-layer";
 import {
   LinkedCasesSheetLayer,
@@ -364,6 +366,8 @@ function useStaffAppointmentsPageContent() {
     setPageField("operationalScope", value);
   const setRequestActionBusy = (value: SetStateAction<string>) =>
     setPageField("requestActionBusy", value);
+  const [queueScheduleDraft, setQueueScheduleDraft] =
+    useState<QueueScheduleDraft | null>(null);
   const deferredSearch = useDeferredValue(filters.search);
   const {
     appointmentsNotice,
@@ -397,6 +401,7 @@ function useStaffAppointmentsPageContent() {
     queueModalOpen,
     createOpen,
     createSeed,
+    createDraft,
     handleFiltersModalOpenChange,
     openFiltersModal,
     handleSearchModalOpenChange,
@@ -404,6 +409,8 @@ function useStaffAppointmentsPageContent() {
     handleQueueModalOpenChange,
     openQueueModal,
     handleCreateOpenChange,
+    handleCreateDraftChange,
+    clearCreateDraft,
     openCreateSeedSheet,
   } = useAppointmentOverlayState({
     createBlankAppointmentForm: blankAppointmentForm,
@@ -1277,7 +1284,7 @@ function useStaffAppointmentsPageContent() {
   );
   const shouldRenderFiltersDialog = filtersModalOpen;
   const shouldRenderSearchSheet = searchModalOpen;
-  const shouldRenderQueueSheet = queueModalOpen;
+  const shouldRenderQueueSheet = queueModalOpen || queueScheduleDraft !== null;
   const shouldRenderDetailSheetContent =
     detailOpen || detailLoading || Boolean(detailError) || Boolean(detail);
   const showInlineDetailWorkspace = detailOpen && !isMobile;
@@ -1418,12 +1425,14 @@ function useStaffAppointmentsPageContent() {
         reportAppointmentsNotice(
           appointmentText("appointments_portal_request_scheduled_as_appointment"),
         );
+        setQueueScheduleDraft(null);
         refreshAppointments();
         openDetailSheet(result.appointment_id);
       } catch (error) {
         setAppointmentRequestsError(
           error instanceof Error ? error.message : tr.common_failed_save,
         );
+        throw error;
       } finally {
         setRequestActionBusy((current) => (current === busyKey ? "" : current));
       }
@@ -1733,6 +1742,8 @@ function useStaffAppointmentsPageContent() {
             canManageStatus: permissions.canManageStatus,
             actionBusy,
             requestActionBusy,
+            scheduleDraft: queueScheduleDraft,
+            onScheduleDraftChange: setQueueScheduleDraft,
             onStatusChange: performStatusChange,
             onReviewRequest: handleReviewAppointmentRequest,
             onConvertRequest: handleConvertAppointmentRequest,
@@ -1781,6 +1792,7 @@ function useStaffAppointmentsPageContent() {
         title={tr.appointments_new}
         loadingLabel={appointmentText("appointments_loading_appointment_form")}
         seed={createSeed}
+        draft={createDraft}
         appointments={appointments}
         patients={patients}
         providers={providers}
@@ -1790,7 +1802,10 @@ function useStaffAppointmentsPageContent() {
         userId={user?.id}
         userRole={user?.role}
         onOpenChange={handleCreateOpenChange}
+        onDraftChange={handleCreateDraftChange}
+        onDraftDiscard={clearCreateDraft}
         onCreated={({ id, notice }) => {
+          clearCreateDraft();
           reportAppointmentsNotice(notice);
           refreshAppointments();
           if (id) {

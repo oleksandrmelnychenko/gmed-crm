@@ -3,6 +3,7 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
   type FormEvent,
   type SetStateAction,
 } from "react";
@@ -14,7 +15,10 @@ import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { confirmDirtyDismiss } from "@/components/ui/dismissal-guard";
+import {
+  CONFIRMED_DISMISS_REASON,
+  confirmDirtyDismiss,
+} from "@/components/ui/dismissal-guard";
 import { Input } from "@/components/ui/input";
 import {
   Banner,
@@ -66,6 +70,7 @@ import { filterAppointmentOwnerOptions } from "@/pages/appointments/model/staff-
 import { parsePositiveIntegerInput } from "@/pages/appointments/model/workflow-helpers";
 import {
   AppointmentEditorSheet,
+  type AppointmentEditorSheetOpenChangeDetails,
   Field,
 } from "@/pages/appointments/ui/shared/workspace-primitives";
 import {
@@ -81,6 +86,7 @@ export type CreateAppointmentSheetProps = {
   open: boolean;
   title: string;
   seed: AppointmentFormState;
+  draft?: AppointmentFormState | null;
   appointments: AppointmentListItem[];
   patients: PatientSummary[];
   providers: ProviderSummary[];
@@ -90,6 +96,8 @@ export type CreateAppointmentSheetProps = {
   userId?: string;
   userRole?: string;
   onOpenChange: (open: boolean) => void;
+  onDraftChange?: (draft: AppointmentFormState) => void;
+  onDraftDiscard?: () => void;
   onCreated: (result: { id: string; notice: string }) => void;
 };
 
@@ -100,6 +108,15 @@ type CreateAppointmentSheetState = {
   error: string;
   busy: boolean;
 };
+
+function isConfirmedDismiss(
+  eventDetails?: AppointmentEditorSheetOpenChangeDetails,
+) {
+  return (
+    (eventDetails as { reason?: string } | undefined)?.reason ===
+    CONFIRMED_DISMISS_REASON
+  );
+}
 
 type CreateAppointmentSheetPatch =
   | Partial<CreateAppointmentSheetState>
@@ -119,6 +136,7 @@ function useCreateAppointmentSheetContent({
   open,
   title,
   seed,
+  draft,
   appointments,
   patients,
   providers,
@@ -128,6 +146,8 @@ function useCreateAppointmentSheetContent({
   userId,
   userRole,
   onOpenChange,
+  onDraftChange,
+  onDraftDiscard,
   onCreated,
 }: CreateAppointmentSheetProps) {
   const { t, lang } = useLang();
@@ -139,7 +159,7 @@ function useCreateAppointmentSheetContent({
     createAppointmentSheetReducer,
     undefined,
     () => ({
-      form: seed,
+      form: draft ?? seed,
       doctors: [],
       conflicts: null,
       error: "",
@@ -159,17 +179,40 @@ function useCreateAppointmentSheetContent({
     () => hasAppointmentFormChanges(form, seed),
     [form, seed],
   );
+  const latestDraftRef = useRef<AppointmentFormState | null>(draft ?? null);
+
+  useEffect(() => {
+    latestDraftRef.current = draft ?? null;
+  }, [draft]);
+
+  useEffect(() => {
+    if (open) {
+      onDraftChange?.(form);
+    }
+  }, [form, onDraftChange, open]);
 
   function requestClose() {
     if (confirmDirtyDismiss(isDirty, t.common_overlay_dismiss_blocked)) {
+      onDraftDiscard?.();
       onOpenChange(false);
     }
+  }
+
+  function handleEditorOpenChange(
+    nextOpen: boolean,
+    eventDetails?: AppointmentEditorSheetOpenChangeDetails,
+  ) {
+    if (!nextOpen && isConfirmedDismiss(eventDetails)) {
+      onDraftDiscard?.();
+    }
+
+    onOpenChange(nextOpen);
   }
 
   useEffect(() => {
     if (!open) return;
     dispatchSheetState({
-      form: seed,
+      form: latestDraftRef.current ?? seed,
       doctors: [],
       conflicts: null,
       error: "",
@@ -216,8 +259,35 @@ function useCreateAppointmentSheetContent({
     [form.providerId, providers],
   );
   const ownerOptions = useMemo(
-    () => filterAppointmentOwnerOptions(staff, userRole, userId),
-    [staff, userId, userRole],
+    () => {
+      const filtered = filterAppointmentOwnerOptions(staff, userRole, userId);
+
+      if (
+        !form.ownerUserId ||
+        filtered.some((member) => member.id === form.ownerUserId)
+      ) {
+        return filtered;
+      }
+
+      const currentOwner = staff.find((member) => member.id === form.ownerUserId);
+      if (currentOwner) {
+        return [currentOwner, ...filtered];
+      }
+
+      if (userId && form.ownerUserId === userId && userRole) {
+        return [
+          {
+            id: userId,
+            name: appointmentText("patients_current_user"),
+            role: userRole,
+          },
+          ...filtered,
+        ];
+      }
+
+      return filtered;
+    },
+    [form.ownerUserId, staff, userId, userRole],
   );
   useEffect(() => {
     if (
@@ -409,7 +479,7 @@ function useCreateAppointmentSheetContent({
   return (
     <AppointmentEditorSheet
       open={open}
-      onOpenChange={onOpenChange}
+      onOpenChange={handleEditorOpenChange}
       dirty={isDirty}
       title={title}
       maxWidthClassName="sm:max-w-[760px]"
@@ -887,6 +957,7 @@ export const MemoizedCreateAppointmentSheet = memo(
   (prev, next) =>
     prev.open === next.open &&
     prev.seed === next.seed &&
+    prev.draft === next.draft &&
     prev.appointments === next.appointments &&
     prev.patients === next.patients &&
     prev.providers === next.providers &&
@@ -894,5 +965,7 @@ export const MemoizedCreateAppointmentSheet = memo(
     prev.interpreters === next.interpreters &&
     prev.staff === next.staff &&
     prev.userId === next.userId &&
-    prev.userRole === next.userRole,
+    prev.userRole === next.userRole &&
+    prev.onDraftChange === next.onDraftChange &&
+    prev.onDraftDiscard === next.onDraftDiscard,
 );

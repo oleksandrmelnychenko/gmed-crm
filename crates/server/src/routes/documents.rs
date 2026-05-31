@@ -743,11 +743,11 @@ struct PatientUploadPreset {
 const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
     DocumentTemplateDefinition {
         id: "treatment_plan",
-        label: "Patient Treatment Plan",
-        description: "Print-ready multilingual treatment schedule grouped by day with reusable hint blocks.",
+        label: "Behandlungsplan",
+        description: "Druckfertiger Behandlungsplan nach Tagen mit wiederverwendbaren Hinweisblöcken.",
         art: "treatment_plan",
         category: "generated",
-        default_auto_name: "Treatment plan",
+        default_auto_name: "Behandlungsplan",
         default_status: "draft",
         default_visibility: "patient_visible",
         mime_type: "application/pdf",
@@ -764,11 +764,11 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
     },
     DocumentTemplateDefinition {
         id: "medication_summary",
-        label: "Patient Medication Summary",
-        description: "Consolidated multilingual medication overview across the current patient case scope.",
+        label: "Medikamentenplan",
+        description: "Konsolidierte Medikamentenübersicht für den ausgewählten Patientenkontext.",
         art: "medication_summary",
         category: "generated",
-        default_auto_name: "Medication summary",
+        default_auto_name: "Medikamentenplan",
         default_status: "draft",
         default_visibility: "patient_visible",
         mime_type: "application/pdf",
@@ -783,11 +783,11 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
     },
     DocumentTemplateDefinition {
         id: "framework_contract",
-        label: "Framework Contract",
-        description: "Patient-facing framework contract generated from contract data and reusable clauses.",
+        label: "Rahmendienstleistungsvertrag",
+        description: "Patientenseitiger Rahmendienstleistungsvertrag aus Vertragsdaten und Klauseln.",
         art: "framework_contract",
         category: "contract",
-        default_auto_name: "Framework contract",
+        default_auto_name: "Rahmendienstleistungsvertrag",
         default_status: "draft",
         default_visibility: "patient_visible",
         mime_type: "application/pdf",
@@ -803,11 +803,11 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
     },
     DocumentTemplateDefinition {
         id: "visa_invitation_letter",
-        label: "Visa Invitation Letter",
-        description: "Formal invitation letter for embassy or consulate visa processing based on patient and appointment context.",
+        label: "Visa-Einladungsschreiben",
+        description: "Formelles Einladungsschreiben für Botschaft oder Konsulat aus Patient- und Terminkontext.",
         art: "visa_invitation",
         category: "generated",
-        default_auto_name: "Visa invitation",
+        default_auto_name: "Visa-Einladung",
         default_status: "draft",
         default_visibility: "patient_visible",
         mime_type: "application/pdf",
@@ -818,11 +818,11 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
     },
     DocumentTemplateDefinition {
         id: "patient_sticker_compact",
-        label: "Patient Sticker · Compact 90 x 48 mm",
-        description: "Compact patient sticker including agency contact block.",
+        label: "Patientenetikett · Kompakt 90 x 48 mm",
+        description: "Kompaktes Patientenetikett mit Kontaktblock der Agentur.",
         art: "patient_sticker",
         category: "administrative",
-        default_auto_name: "Patient sticker",
+        default_auto_name: "Patientenetikett",
         default_status: "draft",
         default_visibility: "internal",
         mime_type: "application/pdf",
@@ -833,11 +833,11 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
     },
     DocumentTemplateDefinition {
         id: "patient_sticker_standard",
-        label: "Patient Sticker · Standard 105 x 74 mm",
-        description: "Standard patient sticker including agency contact block.",
+        label: "Patientenetikett · Standard 105 x 74 mm",
+        description: "Standard-Patientenetikett mit Kontaktblock der Agentur.",
         art: "patient_sticker",
         category: "administrative",
-        default_auto_name: "Patient sticker",
+        default_auto_name: "Patientenetikett",
         default_status: "draft",
         default_visibility: "internal",
         mime_type: "application/pdf",
@@ -848,11 +848,11 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
     },
     DocumentTemplateDefinition {
         id: "patient_sticker_sheet",
-        label: "Patient Sticker · Sheet 70 x 37 mm",
-        description: "Small sheet-style patient sticker including agency contact block.",
+        label: "Patientenetikett · Bogen 70 x 37 mm",
+        description: "Kleines Patientenetikett im Bogenformat mit Kontaktblock der Agentur.",
         art: "patient_sticker",
         category: "administrative",
-        default_auto_name: "Patient sticker",
+        default_auto_name: "Patientenetikett",
         default_status: "draft",
         default_visibility: "internal",
         mime_type: "application/pdf",
@@ -863,8 +863,8 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
     },
     DocumentTemplateDefinition {
         id: "single_order",
-        label: "Single Order (Einzelauftrag)",
-        description: "Single order under the framework service agreement with the agreed scope of services and optional third-party cost coverage.",
+        label: "Einzelauftrag",
+        description: "Einzelauftrag zum Rahmendienstleistungsvertrag mit Leistungsumfang und optionaler Kostenübernahme durch Dritte.",
         art: "single_order",
         category: "contract",
         default_auto_name: "Einzelauftrag",
@@ -878,8 +878,8 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
     },
     DocumentTemplateDefinition {
         id: "cost_coverage_declaration",
-        label: "Cost Coverage Declaration (Kostenübernahmeerklärung)",
-        description: "Third-party cost coverage declaration with the fee schedule, quote totals and agency bank details.",
+        label: "Kostenübernahmeerklärung",
+        description: "Kostenübernahmeerklärung durch Dritte mit Vergütung, Kostenvoranschlag und Bankdaten der Agentur.",
         art: "cost_coverage_declaration",
         category: "finance",
         default_auto_name: "Kostenübernahmeerklärung",
@@ -893,8 +893,8 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
     },
     DocumentTemplateDefinition {
         id: "cost_estimate",
-        label: "Cost Estimate (Kostenschätzung)",
-        description: "Non-binding German estimate of expected costs for medical examinations.",
+        label: "Kostenschätzung",
+        description: "Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen.",
         art: "cost_estimate",
         category: "finance",
         default_auto_name: "Kostenschätzung",
@@ -908,8 +908,8 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
     },
     DocumentTemplateDefinition {
         id: "appointment_confirmation",
-        label: "Appointment Confirmation (Terminbestätigung)",
-        description: "Formal appointment confirmation letter (e.g. for the federal police / border control) listing clinics and examination dates.",
+        label: "Terminbestätigung",
+        description: "Formelle Terminbestätigung mit Kliniken, Untersuchungsdaten und Ansprechpartnern.",
         art: "appointment_confirmation",
         category: "clinic_correspondence",
         default_auto_name: "Terminbestätigung",
@@ -923,8 +923,8 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
     },
     DocumentTemplateDefinition {
         id: "consent_data_release_child",
-        label: "Data Release Consent · Child (two guardians)",
-        description: "GDPR data-transfer and confidentiality release for a minor, signed by both guardians.",
+        label: "Einverständniserklärung · Kind (zwei Sorgeberechtigte)",
+        description: "DSGVO-Datenübermittlung und Schweigepflichtsentbindung für ein minderjähriges Kind mit zwei Sorgeberechtigten.",
         art: "consent_data_release",
         category: "consent",
         default_auto_name: "Einverständniserklärung (Kind)",
@@ -938,8 +938,8 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
     },
     DocumentTemplateDefinition {
         id: "consent_data_release_single",
-        label: "Data Release Consent · Sole guardian",
-        description: "GDPR data-transfer and confidentiality release for a minor, signed by the sole custodian.",
+        label: "Einverständniserklärung · Alleiniges Sorgerecht",
+        description: "DSGVO-Datenübermittlung und Schweigepflichtsentbindung für ein minderjähriges Kind mit alleinigem Sorgerecht.",
         art: "consent_data_release",
         category: "consent",
         default_auto_name: "Einverständniserklärung (alleiniges Sorgerecht)",
@@ -2051,8 +2051,11 @@ async fn extract_document_text_from_bytes(
     }
 
     if is_pdf {
-        return match pdf_extract::extract_text_from_mem(bytes) {
-            Ok(text) => match normalize_extracted_text(&text) {
+        let extraction = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            pdf_extract::extract_text_from_mem(bytes)
+        }));
+        return match extraction {
+            Ok(Ok(text)) => match normalize_extracted_text(&text) {
                 Some(extracted_text) => DocumentTextExtractionResult::Completed {
                     method: "pdf_text",
                     extracted_text,
@@ -2062,10 +2065,17 @@ async fn extract_document_text_from_bytes(
                     message: PDF_TEXT_NO_TEXT_MESSAGE,
                 },
             },
-            Err(_) => DocumentTextExtractionResult::Failed {
+            Ok(Err(_)) => DocumentTextExtractionResult::Failed {
                 method: "pdf_text",
                 message: PDF_TEXT_FAILED_MESSAGE,
             },
+            Err(_) => {
+                tracing::warn!("pdf text extraction panicked");
+                DocumentTextExtractionResult::Failed {
+                    method: "pdf_text",
+                    message: PDF_TEXT_FAILED_MESSAGE,
+                }
+            }
         };
     }
 
@@ -13542,6 +13552,12 @@ async fn create_document_translation_request(
             "Unknown translation target language",
         );
     };
+    if requested_language != "de" {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Only German translation target language is supported",
+        );
+    }
     let note = body
         .note
         .as_deref()
