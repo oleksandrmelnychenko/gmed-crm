@@ -10,7 +10,7 @@ use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use sqlx::{Postgres, Row, Transaction};
-use std::str::FromStr;
+use std::{collections::HashSet, str::FromStr};
 use uuid::Uuid;
 
 use crate::access;
@@ -54,9 +54,14 @@ struct ReplaceInterpreterLanguages {
 
 #[derive(Deserialize)]
 struct InterpreterLanguageInput {
+    #[serde(alias = "languageCode")]
     language_code: String,
+    #[serde(alias = "languageLabel")]
     language_label: Option<String>,
     proficiency: Option<String>,
+    #[serde(alias = "cefrLevel", alias = "level")]
+    cefr_level: Option<String>,
+    specialization: Option<String>,
 }
 
 async fn list_interpreter_profiles(
@@ -414,14 +419,14 @@ async fn list_interpreter_languages(
     Extension(auth): Extension<AuthUser>,
     Path(interpreter_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(resp) =
-        auth.require_any_role(&[Role::TeamleadInterpreter, Role::PatientManager, Role::Ceo])
+    if let Err(resp) = ensure_interpreter_profile_access(&state, &auth, interpreter_id, false).await
     {
         return resp;
     }
 
     match sqlx::query(
-        r#"SELECT id, language_code, language_label, proficiency, is_active
+        r#"SELECT id, language_code, language_label, proficiency, cefr_level,
+                  specialization, is_active
            FROM interpreter_languages
            WHERE interpreter_id = $1
            ORDER BY is_active DESC, language_code"#,
@@ -438,6 +443,8 @@ async fn list_interpreter_languages(
                         "language_code": row.try_get::<String, _>("language_code").unwrap_or_default(),
                         "language_label": row.try_get::<Option<String>, _>("language_label").unwrap_or_default(),
                         "proficiency": row.try_get::<String, _>("proficiency").unwrap_or_else(|_| "working".to_string()),
+                        "cefr_level": row.try_get::<Option<String>, _>("cefr_level").unwrap_or_default(),
+                        "specialization": row.try_get::<Option<String>, _>("specialization").unwrap_or_default(),
                         "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
                     })
                 })
@@ -460,7 +467,8 @@ async fn replace_interpreter_languages(
     Path(interpreter_id): Path<Uuid>,
     Json(body): Json<ReplaceInterpreterLanguages>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::TeamleadInterpreter]) {
+    if let Err(resp) = ensure_interpreter_profile_access(&state, &auth, interpreter_id, true).await
+    {
         return resp;
     }
     if body.languages.len() > 20 {
@@ -470,30 +478,45 @@ async fn replace_interpreter_languages(
         );
     }
 
-    let interpreter_exists = match sqlx::query_scalar::<_, bool>(
-        r#"SELECT EXISTS(
-                SELECT 1
-                FROM users
-                WHERE id = $1
-                  AND is_active = true
-                  AND role IN ('interpreter', 'teamlead_interpreter')
-           )"#,
-    )
-    .bind(interpreter_id)
-    .fetch_one(&state.db)
-    .await
-    {
-        Ok(value) => value,
-        Err(error) => {
-            tracing::error!(error = %error, interpreter_id = %interpreter_id, "validate interpreter for languages");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to validate interpreter",
-            );
+    let mut seen_language_codes = HashSet::new();
+    let mut languages = Vec::with_capacity(body.languages.len());
+    for input in body.languages {
+        let Some(language_code) = normalize_language_code(&input.language_code) else {
+            return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid language code");
+        };
+        if !seen_language_codes.insert(language_code.clone()) {
+            return err(StatusCode::UNPROCESSABLE_ENTITY, "Duplicate language code");
         }
-    };
-    if !interpreter_exists {
-        return err(StatusCode::NOT_FOUND, "Interpreter not found");
+        let proficiency = input
+            .proficiency
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("working");
+        if !matches!(
+            proficiency,
+            "native" | "fluent" | "working" | "basic" | "unknown"
+        ) {
+            return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid proficiency");
+        }
+        let cefr_level = match normalize_optional_text(input.cefr_level) {
+            Some(value) => {
+                let normalized = value.to_uppercase();
+                if !matches!(normalized.as_str(), "A1" | "A2" | "B1" | "B2" | "C1" | "C2") {
+                    return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid CEFR level");
+                }
+                Some(normalized)
+            }
+            None => None,
+        };
+
+        languages.push((
+            language_code,
+            normalize_optional_text(input.language_label),
+            proficiency.to_string(),
+            cefr_level,
+            normalize_optional_text(input.specialization),
+        ));
     }
 
     let mut tx = match state.db.begin().await {
@@ -519,32 +542,19 @@ async fn replace_interpreter_languages(
         );
     }
 
-    for input in body.languages {
-        let Some(language_code) = normalize_language_code(&input.language_code) else {
-            return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid language code");
-        };
-        let proficiency = input
-            .proficiency
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or("working");
-        if !matches!(
-            proficiency,
-            "native" | "fluent" | "working" | "basic" | "unknown"
-        ) {
-            return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid proficiency");
-        }
-
+    for (language_code, language_label, proficiency, cefr_level, specialization) in languages {
         if let Err(error) = sqlx::query(
             r#"INSERT INTO interpreter_languages (
-                    interpreter_id, language_code, language_label, proficiency
-               ) VALUES ($1, $2, $3, $4)"#,
+                    interpreter_id, language_code, language_label, proficiency,
+                    cefr_level, specialization
+               ) VALUES ($1, $2, $3, $4, $5, $6)"#,
         )
         .bind(interpreter_id)
         .bind(language_code)
-        .bind(normalize_optional_text(input.language_label))
+        .bind(language_label)
         .bind(proficiency)
+        .bind(cefr_level)
+        .bind(specialization)
         .execute(&mut *tx)
         .await
         {

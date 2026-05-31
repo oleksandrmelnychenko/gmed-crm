@@ -361,6 +361,176 @@ async fn interpreter_profile_rejects_invalid_structured_values() {
 }
 
 #[tokio::test]
+async fn managers_can_manage_interpreter_languages_and_interpreters_can_read_self() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("interpreter-languages");
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
+    let other_interpreter_id = seed_user(&pool, &format!("{tag}-other"), "interpreter").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
+    let other_bearer = auth_header_for(other_interpreter_id, "interpreter");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/interpreters/{interpreter_id}/languages"),
+        &pm_bearer,
+        Some(json!({
+            "languages": [
+                {
+                    "languageCode": "DE",
+                    "languageLabel": "Deutsch",
+                    "proficiency": "fluent",
+                    "cefrLevel": "c1",
+                    "specialization": "medicine"
+                },
+                {
+                    "languageCode": "uk",
+                    "languageLabel": "Ukrainisch",
+                    "proficiency": "native",
+                    "level": "C2",
+                    "specialization": "legal"
+                }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/interpreters/{interpreter_id}/languages"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    let languages = body.as_array().unwrap();
+    assert_eq!(languages.len(), 2);
+    assert!(languages.iter().any(|item| {
+        item["language_code"] == "de"
+            && item["language_label"] == "Deutsch"
+            && item["proficiency"] == "fluent"
+            && item["cefr_level"] == "C1"
+            && item["specialization"] == "medicine"
+    }));
+    assert!(languages.iter().any(|item| {
+        item["language_code"] == "uk"
+            && item["language_label"] == "Ukrainisch"
+            && item["proficiency"] == "native"
+            && item["cefr_level"] == "C2"
+            && item["specialization"] == "legal"
+    }));
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/interpreters/{interpreter_id}/languages"),
+        &interpreter_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(body.as_array().unwrap().len(), 2);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/interpreters/{interpreter_id}/languages"),
+        &other_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["message"], "Insufficient permissions");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/interpreters/{interpreter_id}/languages"),
+        &interpreter_bearer,
+        Some(json!({ "languages": [] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["message"], "Insufficient permissions");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/interpreters/{interpreter_id}/languages"),
+        &pm_bearer,
+        Some(json!({
+            "languages": [
+                { "languageCode": "de", "proficiency": "working" },
+                { "languageCode": "DE", "proficiency": "basic" }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["message"], "Duplicate language code");
+
+    let saved_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM interpreter_languages WHERE interpreter_id = $1")
+            .bind(interpreter_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(saved_count, 2);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/interpreters/{interpreter_id}/languages"),
+        &pm_bearer,
+        Some(json!({
+            "languages": [
+                { "languageCode": "de!", "proficiency": "working" }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["message"], "Invalid language code");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/interpreters/{interpreter_id}/languages"),
+        &pm_bearer,
+        Some(json!({
+            "languages": [
+                { "languageCode": "de", "proficiency": "expert" }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["message"], "Invalid proficiency");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/interpreters/{interpreter_id}/languages"),
+        &pm_bearer,
+        Some(json!({
+            "languages": [
+                { "languageCode": "de", "cefrLevel": "D1" }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["message"], "Invalid CEFR level");
+}
+
+#[tokio::test]
 async fn interpreter_profile_operations_exposes_live_workload() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;

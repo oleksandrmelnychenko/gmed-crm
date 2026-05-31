@@ -22,7 +22,15 @@ import { useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiFetch } from "@/lib/api";
-import { buildInterpreterListPath } from "./interpreters.model";
+import {
+  buildInterpreterLanguagesPath,
+  buildInterpreterListPath,
+  emptyInterpreterLanguage,
+  interpreterLanguageRecordToForm,
+  interpreterLanguagesToPayload,
+  type InterpreterLanguageForm,
+  type InterpreterLanguageRecord,
+} from "./interpreters.model";
 
 type InterpreterRecord = {
   id: string;
@@ -403,6 +411,8 @@ export function InterpretersPage() {
     null,
   );
   const [operationsLoading, setOperationsLoading] = useState(false);
+  const [languages, setLanguages] = useState<InterpreterLanguageForm[]>([]);
+  const [languagesLoading, setLanguagesLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [contractFilter, setContractFilter] = useState("");
@@ -460,6 +470,25 @@ export function InterpretersPage() {
     }
   }, []);
 
+  const loadLanguages = useCallback(async (id: string) => {
+    setLanguagesLoading(true);
+    try {
+      const data = await apiFetch<InterpreterLanguageRecord[]>(
+        buildInterpreterLanguagesPath(id),
+      );
+      setLanguages(
+        data
+          .filter((item) => item.is_active)
+          .map(interpreterLanguageRecordToForm),
+      );
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Load failed");
+      setLanguages([]);
+    } finally {
+      setLanguagesLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     void loadItems();
   }, [loadItems]);
@@ -469,10 +498,12 @@ export function InterpretersPage() {
       setForm(profileToForm(selected.profile));
       setNotice("");
       void loadOperations(selected.id);
+      void loadLanguages(selected.id);
     } else {
       setOperations(null);
+      setLanguages([]);
     }
-  }, [loadOperations, selected]);
+  }, [loadLanguages, loadOperations, selected]);
 
   function patchForm(patch: Partial<InterpreterProfileForm>) {
     setForm((current) => ({ ...current, ...patch }));
@@ -501,6 +532,24 @@ export function InterpretersPage() {
     }));
   }
 
+  function patchLanguage(index: number, patch: Partial<InterpreterLanguageForm>) {
+    setLanguages((current) =>
+      current.map((language, itemIndex) =>
+        itemIndex === index ? { ...language, ...patch } : language,
+      ),
+    );
+  }
+
+  function addLanguage() {
+    setLanguages((current) => [...current, emptyInterpreterLanguage()]);
+  }
+
+  function removeLanguage(index: number) {
+    setLanguages((current) =>
+      current.filter((_, itemIndex) => itemIndex !== index),
+    );
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selected) return;
@@ -520,6 +569,13 @@ export function InterpretersPage() {
           item.id === selected.id ? { ...item, profile: result.profile } : item,
         ),
       );
+      await apiFetch(buildInterpreterLanguagesPath(selected.id), {
+        method: "POST",
+        body: JSON.stringify({
+          languages: interpreterLanguagesToPayload(languages),
+        }),
+      });
+      await loadLanguages(selected.id);
       await loadOperations(selected.id);
       setNotice("Profile saved");
     } catch (saveError) {
@@ -811,16 +867,121 @@ export function InterpretersPage() {
               </Section>
 
               <Section title="C. Qualification and languages">
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Structured languages
+                    </h3>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-8 px-2 text-xs"
+                      onClick={addLanguage}
+                    >
+                      <Plus className="size-3.5" />
+                      Add language
+                    </Button>
+                  </div>
+                  {languagesLoading ? (
+                    <p className="border-t border-border pt-3 text-xs text-muted-foreground">
+                      Loading languages...
+                    </p>
+                  ) : languages.length > 0 ? (
+                    languages.map((language, index) => (
+                      <div
+                        key={index}
+                        className="grid gap-3 border-t border-border pt-3 md:grid-cols-2 xl:grid-cols-[minmax(80px,0.7fr)_minmax(0,1.1fr)_minmax(90px,0.7fr)_minmax(120px,0.9fr)_minmax(0,1.2fr)_auto]"
+                      >
+                        <Field label="Code">
+                          <Input
+                            className={inputClass}
+                            value={language.languageCode}
+                            onChange={(event) =>
+                              patchLanguage(index, {
+                                languageCode: event.target.value,
+                              })
+                            }
+                          />
+                        </Field>
+                        <Field label="Label">
+                          <Input
+                            className={inputClass}
+                            value={language.languageLabel}
+                            onChange={(event) =>
+                              patchLanguage(index, {
+                                languageLabel: event.target.value,
+                              })
+                            }
+                          />
+                        </Field>
+                        <Field label="CEFR">
+                          <select
+                            className={selectClass}
+                            value={language.cefrLevel}
+                            onChange={(event) =>
+                              patchLanguage(index, {
+                                cefrLevel: event.target.value,
+                              })
+                            }
+                          >
+                            <option value="">Not set</option>
+                            <option value="A1">A1</option>
+                            <option value="A2">A2</option>
+                            <option value="B1">B1</option>
+                            <option value="B2">B2</option>
+                            <option value="C1">C1</option>
+                            <option value="C2">C2</option>
+                          </select>
+                        </Field>
+                        <Field label="Proficiency">
+                          <select
+                            className={selectClass}
+                            value={language.proficiency}
+                            onChange={(event) =>
+                              patchLanguage(index, {
+                                proficiency: event.target.value,
+                              })
+                            }
+                          >
+                            <option value="native">Native</option>
+                            <option value="fluent">Fluent</option>
+                            <option value="working">Working</option>
+                            <option value="basic">Basic</option>
+                            <option value="unknown">Unknown</option>
+                          </select>
+                        </Field>
+                        <Field label="Specialization">
+                          <Input
+                            className={inputClass}
+                            value={language.specialization}
+                            onChange={(event) =>
+                              patchLanguage(index, {
+                                specialization: event.target.value,
+                              })
+                            }
+                          />
+                        </Field>
+                        <div className="flex items-end">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            className="h-9 px-2 text-xs"
+                            onClick={() => removeLanguage(index)}
+                          >
+                            <Trash2 className="size-3.5" />
+                            Remove
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="border-t border-border pt-3 text-xs text-muted-foreground">
+                      No structured languages yet.
+                    </p>
+                  )}
+                </div>
+
                 <div className="grid gap-3 md:grid-cols-2">
-                  <Field label="Language profile">
-                    <textarea
-                      className={textareaClass}
-                      value={form.languageProfile}
-                      onChange={(event) =>
-                        patchForm({ languageProfile: event.target.value })
-                      }
-                    />
-                  </Field>
                   <Field label="Certificates">
                     <textarea
                       className={textareaClass}
