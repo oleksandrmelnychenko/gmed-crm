@@ -294,3 +294,160 @@ async fn interpreter_profile_rejects_invalid_structured_values() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(body["message"], "Invalid interpreter status");
 }
+
+#[tokio::test]
+async fn interpreter_profile_operations_exposes_live_workload() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("interpreter-operations");
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, body) = json_request(
+        &app,
+        "PUT",
+        &format!("/api/v1/interpreters/{interpreter_id}/profile"),
+        &pm_bearer,
+        Some(json!({
+            "status": "active",
+            "weeklyCapacityHours": 30
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+
+    let patient_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (
+                patient_id, first_name, last_name, birth_date, gender, created_by
+           ) VALUES ($1, 'Live', 'Workload', CURRENT_DATE - interval '35 years', 'female', $2)
+           RETURNING id"#,
+    )
+    .bind(format!("P-{tag}"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, created_by)
+           VALUES ($1, $2, $3)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let appointment_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO appointments (
+                patient_id, order_id, interpreter_id, appointment_type, title,
+                date, time_start, time_end, status, interpreter_response, created_by
+           ) VALUES (
+                $1, $2, $3, 'medical', 'Live workload test',
+                CURRENT_DATE, '09:00', '10:30', 'confirmed', 'accepted', $4
+           )
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(interpreter_id)
+    .bind(pm_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let report_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO interpreter_reports (
+                appointment_id, interpreter_id, hours, approval_status
+           ) VALUES ($1, $2, 1.50, 'approved')
+           RETURNING id"#,
+    )
+    .bind(appointment_id)
+    .bind(interpreter_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO order_leistungen (
+                order_id, description, quantity, unit_price, status, source_interpreter_report_id
+           ) VALUES ($1, 'Interpreter report sync', 1, 90.00, 'approved', $2)"#,
+    )
+    .bind(order_id)
+    .bind(report_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO tasks (
+                title, assigned_to, assigned_by, patient_id, order_id, appointment_id,
+                due_date, priority, status
+           ) VALUES (
+                'Confirm terminology pack', $1, $2, $3, $4, $5,
+                now() + interval '1 day', 'high', 'open'
+           )"#,
+    )
+    .bind(interpreter_id)
+    .bind(pm_id)
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(appointment_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO patient_feedback_forms (
+                patient_id, appointment_id, interpreter_id, submitted_by,
+                source, overall_score, interpreter_score, nps_score
+           ) VALUES ($1, $2, $3, $4, 'staff_capture', 5, 4, 9)"#,
+    )
+    .bind(patient_id)
+    .bind(appointment_id)
+    .bind(interpreter_id)
+    .bind(pm_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/interpreters/{interpreter_id}/profile/operations"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(body["summary"]["assigned_patients"], 1);
+    assert_eq!(body["summary"]["appointments_next_30_days"], 1);
+    assert_eq!(
+        body["summary"]["capacity_hours_week"].as_f64().unwrap(),
+        30.0
+    );
+    assert_eq!(body["summary"]["booked_hours_week"].as_f64().unwrap(), 1.5);
+    assert_eq!(
+        body["summary"]["average_feedback_score"].as_f64().unwrap(),
+        4.0
+    );
+    assert_eq!(body["summary"]["active_tasks"], 1);
+    assert_eq!(body["summary"]["approved_reports"], 1);
+    assert_eq!(body["summary"]["synced_billing_lines"], 1);
+    assert_eq!(body["patients"][0]["patient_code"], format!("P-{tag}"));
+    assert_eq!(
+        body["upcoming_appointments"][0]["title"],
+        "Live workload test"
+    );
+    assert_eq!(body["active_tasks"][0]["title"], "Confirm terminology pack");
+    assert_eq!(body["recent_reports"][0]["billing_status"], "approved");
+    assert_eq!(
+        body["billing_lines"][0]["description"],
+        "Interpreter report sync"
+    );
+}

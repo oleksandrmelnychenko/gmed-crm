@@ -7,7 +7,14 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
-import { RefreshCcw, Save, Search, ShieldCheck, UsersRound, X } from "lucide-react";
+import {
+  RefreshCcw,
+  Save,
+  Search,
+  ShieldCheck,
+  UsersRound,
+  X,
+} from "lucide-react";
 import { useParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
@@ -26,6 +33,15 @@ type InterpreterRecord = {
 };
 
 type InterpreterProfile = Record<string, unknown>;
+
+type InterpreterOperations = {
+  summary: Record<string, unknown>;
+  patients: Record<string, unknown>[];
+  upcoming_appointments: Record<string, unknown>[];
+  active_tasks: Record<string, unknown>[];
+  recent_reports: Record<string, unknown>[];
+  billing_lines: Record<string, unknown>[];
+};
 
 type InterpreterProfileForm = {
   gender: string;
@@ -59,6 +75,7 @@ type InterpreterProfileForm = {
   taxNumber: string;
   ustIdnr: string;
   billingStatus: string;
+  weeklyCapacityHours: string;
   accessLevel: string;
   autoBlockPolicy: string;
   internalNotes: string;
@@ -105,6 +122,21 @@ function parseList(value: string) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function displayValue(value: unknown, fallback = "-") {
+  if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(2);
+  if (typeof value === "string" && value.trim()) return value;
+  return fallback;
+}
+
+function displayNumber(value: unknown, suffix = "") {
+  const textValue = displayValue(value, "0");
+  return suffix ? `${textValue}${suffix}` : textValue;
+}
+
+function compactDate(value: unknown) {
+  return typeof value === "string" && value ? value : "-";
 }
 
 function profileToForm(profile: InterpreterProfile): InterpreterProfileForm {
@@ -154,6 +186,7 @@ function profileToForm(profile: InterpreterProfile): InterpreterProfileForm {
     taxNumber: text(profile.taxNumber) || text(finance.taxNumber),
     ustIdnr: text(profile.ustIdnr) || text(finance.ustIdnr),
     billingStatus: text(profile.billingStatus) || text(finance.billingStatus),
+    weeklyCapacityHours: text(profile.weeklyCapacityHours),
     accessLevel: text(profile.accessLevel) || text(access.level),
     autoBlockPolicy:
       text(profile.autoBlockPolicy) || text(access.autoBlockPolicy),
@@ -201,6 +234,9 @@ function formToProfile(form: InterpreterProfileForm) {
       ustIdnr: form.ustIdnr,
       billingStatus: form.billingStatus,
     },
+    weeklyCapacityHours: form.weeklyCapacityHours
+      ? Number(form.weeklyCapacityHours)
+      : null,
     access: {
       level: form.accessLevel,
       autoBlockPolicy: form.autoBlockPolicy,
@@ -244,6 +280,59 @@ function Section({
   );
 }
 
+function Metric({
+  label,
+  value,
+}: {
+  label: string;
+  value: ReactNode;
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-background px-3 py-2">
+      <span className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </span>
+      <span className="mt-1 block text-base font-semibold text-foreground">
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function OperationsList({
+  title,
+  items,
+  empty,
+  renderItem,
+}: {
+  title: string;
+  items: Record<string, unknown>[];
+  empty: string;
+  renderItem: (item: Record<string, unknown>) => ReactNode;
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-background p-3">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {title}
+      </h3>
+      <div className="mt-2 space-y-2">
+        {items.length > 0 ? (
+          items.slice(0, 4).map((item, index) => (
+            <div
+              key={text(item.id) || `${title}-${index}`}
+              className="rounded-md bg-muted/35 px-3 py-2 text-xs text-foreground"
+            >
+              {renderItem(item)}
+            </div>
+          ))
+        ) : (
+          <p className="text-xs text-muted-foreground">{empty}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function InterpretersPage() {
   const { interpreterId } = useParams();
   const [items, setItems] = useState<InterpreterRecord[]>([]);
@@ -252,6 +341,10 @@ export function InterpretersPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [operations, setOperations] = useState<InterpreterOperations | null>(
+    null,
+  );
+  const [operationsLoading, setOperationsLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [contractFilter, setContractFilter] = useState("");
@@ -295,6 +388,20 @@ export function InterpretersPage() {
     }
   }, [contractFilter, deferredSearch, interpreterId, statusFilter]);
 
+  const loadOperations = useCallback(async (id: string) => {
+    setOperationsLoading(true);
+    try {
+      const data = await apiFetch<InterpreterOperations>(
+        `/interpreters/${id}/profile/operations`,
+      );
+      setOperations(data);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Load failed");
+    } finally {
+      setOperationsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     void loadItems();
   }, [loadItems]);
@@ -303,8 +410,11 @@ export function InterpretersPage() {
     if (selected) {
       setForm(profileToForm(selected.profile));
       setNotice("");
+      void loadOperations(selected.id);
+    } else {
+      setOperations(null);
     }
-  }, [selected]);
+  }, [loadOperations, selected]);
 
   function patchForm(patch: Partial<InterpreterProfileForm>) {
     setForm((current) => ({ ...current, ...patch }));
@@ -329,6 +439,7 @@ export function InterpretersPage() {
           item.id === selected.id ? { ...item, profile: result.profile } : item,
         ),
       );
+      await loadOperations(selected.id);
       setNotice("Profile saved");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Save failed");
@@ -838,6 +949,159 @@ export function InterpretersPage() {
                     </select>
                   </Field>
                 </div>
+              </Section>
+
+              <Section title="F. Performance and live workload">
+                <div className="grid gap-3 md:grid-cols-4">
+                  <Field label="Weekly capacity hours">
+                    <Input
+                      type="number"
+                      className={inputClass}
+                      value={form.weeklyCapacityHours}
+                      onChange={(event) =>
+                        patchForm({ weeklyCapacityHours: event.target.value })
+                      }
+                    />
+                  </Field>
+                  <Metric
+                    label="Booked this week"
+                    value={displayNumber(
+                      operations?.summary.booked_hours_week,
+                      " h",
+                    )}
+                  />
+                  <Metric
+                    label="Capacity"
+                    value={displayNumber(
+                      operations?.summary.capacity_hours_week,
+                      " h",
+                    )}
+                  />
+                  <Metric
+                    label="Utilization"
+                    value={displayNumber(
+                      operations?.summary.utilization_percent,
+                      "%",
+                    )}
+                  />
+                  <Metric
+                    label="Average score"
+                    value={`${displayNumber(
+                      operations?.summary.average_feedback_score,
+                    )}/5`}
+                  />
+                  <Metric
+                    label="Feedback"
+                    value={displayNumber(operations?.summary.feedback_count)}
+                  />
+                  <Metric
+                    label="Next 30 days"
+                    value={displayNumber(
+                      operations?.summary.appointments_next_30_days,
+                    )}
+                  />
+                  <Metric
+                    label="Active tasks"
+                    value={displayNumber(operations?.summary.active_tasks)}
+                  />
+                </div>
+
+                {operationsLoading ? (
+                  <div className="rounded-lg border border-border bg-background px-4 py-3 text-sm text-muted-foreground">
+                    Loading workload...
+                  </div>
+                ) : operations ? (
+                  <div className="grid gap-3 xl:grid-cols-2">
+                    <OperationsList
+                      title="Assigned patients"
+                      items={operations.patients}
+                      empty="No assigned patients"
+                      renderItem={(item) => (
+                        <div>
+                          <span className="font-medium">
+                            {displayValue(item.patient_code)} ·{" "}
+                            {displayValue(item.patient_name)}
+                          </span>
+                          <span className="mt-1 block text-muted-foreground">
+                            {displayValue(item.appointment_count)} appointments ·
+                            next {compactDate(item.next_appointment_date)}
+                          </span>
+                        </div>
+                      )}
+                    />
+                    <OperationsList
+                      title="Upcoming appointments"
+                      items={operations.upcoming_appointments}
+                      empty="No upcoming appointments"
+                      renderItem={(item) => (
+                        <div>
+                          <span className="font-medium">
+                            {compactDate(item.date)} ·{" "}
+                            {displayValue(item.time_start)}-
+                            {displayValue(item.time_end)}
+                          </span>
+                          <span className="mt-1 block text-muted-foreground">
+                            {displayValue(item.patient_code)} ·{" "}
+                            {displayValue(item.title)}
+                          </span>
+                        </div>
+                      )}
+                    />
+                    <OperationsList
+                      title="Active tasks"
+                      items={operations.active_tasks}
+                      empty="No active tasks"
+                      renderItem={(item) => (
+                        <div>
+                          <span className="font-medium">
+                            {displayValue(item.priority)} ·{" "}
+                            {displayValue(item.title)}
+                          </span>
+                          <span className="mt-1 block text-muted-foreground">
+                            due {compactDate(item.due_date)} ·{" "}
+                            {displayValue(item.order_number)}
+                          </span>
+                        </div>
+                      )}
+                    />
+                    <OperationsList
+                      title="Recent reports"
+                      items={operations.recent_reports}
+                      empty="No reports"
+                      renderItem={(item) => (
+                        <div>
+                          <span className="font-medium">
+                            {displayNumber(item.hours, " h")} ·{" "}
+                            {displayValue(item.approval_status)}
+                          </span>
+                          <span className="mt-1 block text-muted-foreground">
+                            {compactDate(item.appointment_date)} ·{" "}
+                            {displayValue(item.patient_code)} · billing{" "}
+                            {displayValue(item.billing_status)}
+                          </span>
+                        </div>
+                      )}
+                    />
+                    <OperationsList
+                      title="Billing lines"
+                      items={operations.billing_lines}
+                      empty="No synced billing lines"
+                      renderItem={(item) => (
+                        <div>
+                          <span className="font-medium">
+                            {displayValue(item.order_number)} ·{" "}
+                            {displayValue(item.status)}
+                          </span>
+                          <span className="mt-1 block text-muted-foreground">
+                            {displayValue(item.description)} ·{" "}
+                            {displayNumber(item.unit_price)}{" "}
+                            {displayValue(item.currency)}
+                          </span>
+                        </div>
+                      )}
+                    />
+                  </div>
+                ) : null}
               </Section>
 
               <Section title="I. Internal management">

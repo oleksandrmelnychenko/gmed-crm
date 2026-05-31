@@ -27,6 +27,10 @@ pub fn router() -> Router<AppState> {
             get(get_interpreter_profile).put(update_interpreter_profile),
         )
         .route(
+            "/interpreters/{interpreter_id}/profile/operations",
+            get(get_interpreter_profile_operations),
+        )
+        .route(
             "/appointments/{appointment_id}/interpreter-suggestions",
             get(get_interpreter_suggestions),
         )
@@ -299,6 +303,28 @@ async fn update_interpreter_profile(
     }
 }
 
+async fn get_interpreter_profile_operations(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(interpreter_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(resp) = ensure_interpreter_profile_access(&state, &auth, interpreter_id, false).await
+    {
+        return resp;
+    }
+
+    match load_interpreter_operations_payload(&state, interpreter_id).await {
+        Ok(payload) => Json(payload).into_response(),
+        Err(error) => {
+            tracing::error!(error = %error, interpreter_id = %interpreter_id, "load interpreter operations profile");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load interpreter operations",
+            )
+        }
+    }
+}
+
 async fn get_interpreter_suggestions(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -511,6 +537,305 @@ async fn replace_interpreter_languages(
     }
 
     Json(serde_json::json!({"ok": true})).into_response()
+}
+
+async fn load_interpreter_operations_payload(
+    state: &AppState,
+    interpreter_id: Uuid,
+) -> Result<Value, sqlx::Error> {
+    let summary_row = sqlx::query(
+        r#"SELECT
+                (SELECT COUNT(DISTINCT a.patient_id)
+                   FROM appointments a
+                  WHERE a.interpreter_id = $1) AS assigned_patients,
+                (SELECT COUNT(DISTINCT a.patient_id)
+                   FROM appointments a
+                   JOIN patients p ON p.id = a.patient_id
+                  WHERE a.interpreter_id = $1
+                    AND p.is_active = true
+                    AND a.status <> 'cancelled') AS active_patients,
+                (SELECT COUNT(*)
+                   FROM appointments a
+                  WHERE a.interpreter_id = $1
+                    AND a.date >= date_trunc('month', CURRENT_DATE)::date
+                    AND a.date < (date_trunc('month', CURRENT_DATE) + interval '1 month')::date
+                    AND a.status <> 'cancelled') AS appointments_this_month,
+                (SELECT COUNT(*)
+                   FROM appointments a
+                  WHERE a.interpreter_id = $1
+                    AND a.date >= CURRENT_DATE
+                    AND a.date < CURRENT_DATE + interval '30 days'
+                    AND a.status <> 'cancelled') AS appointments_next_30_days,
+                (SELECT COUNT(*)
+                   FROM appointments a
+                  WHERE a.interpreter_id = $1
+                    AND a.status = 'completed') AS completed_appointments,
+                (SELECT ROUND(COALESCE(SUM(
+                    CASE
+                        WHEN a.time_start IS NOT NULL
+                         AND a.time_end IS NOT NULL
+                         AND a.time_end > a.time_start
+                        THEN EXTRACT(EPOCH FROM (a.time_end - a.time_start)) / 3600.0
+                        ELSE 0
+                    END
+                ), 0)::numeric, 2)
+                   FROM appointments a
+                  WHERE a.interpreter_id = $1
+                    AND a.date >= date_trunc('week', CURRENT_DATE)::date
+                    AND a.date < (date_trunc('week', CURRENT_DATE) + interval '7 days')::date
+                    AND a.status <> 'cancelled') AS booked_hours_week,
+                (SELECT ROUND(AVG(f.interpreter_score)::numeric, 2)
+                   FROM patient_feedback_forms f
+                  WHERE f.interpreter_id = $1
+                    AND f.interpreter_score IS NOT NULL) AS average_feedback_score,
+                (SELECT COUNT(*)
+                   FROM patient_feedback_forms f
+                  WHERE f.interpreter_id = $1
+                    AND f.interpreter_score IS NOT NULL) AS feedback_count,
+                (SELECT COUNT(*)
+                   FROM interpreter_reports ir
+                  WHERE ir.interpreter_id = $1
+                    AND ir.approval_status = 'approved') AS approved_reports,
+                (SELECT COUNT(*)
+                   FROM interpreter_reports ir
+                  WHERE ir.interpreter_id = $1
+                    AND ir.approval_status = 'pending') AS pending_reports,
+                (SELECT ROUND(COALESCE(SUM(ir.hours), 0)::numeric, 2)
+                   FROM interpreter_reports ir
+                  WHERE ir.interpreter_id = $1
+                    AND ir.approval_status = 'approved') AS approved_report_hours,
+                (SELECT COUNT(*)
+                   FROM tasks t
+                  WHERE t.assigned_to = $1
+                    AND t.status IN ('open', 'in_progress')) AS active_tasks,
+                (SELECT COUNT(*)
+                   FROM tasks t
+                  WHERE t.assigned_to = $1
+                    AND t.status IN ('open', 'in_progress')
+                    AND t.due_date IS NOT NULL
+                    AND t.due_date < now()) AS overdue_tasks,
+                (SELECT COUNT(*)
+                   FROM order_leistungen ol
+                   JOIN interpreter_reports ir ON ir.id = ol.source_interpreter_report_id
+                  WHERE ir.interpreter_id = $1) AS synced_billing_lines,
+                (SELECT ROUND(COALESCE(SUM(ol.quantity * ol.unit_price), 0)::numeric, 2)
+                   FROM order_leistungen ol
+                   JOIN interpreter_reports ir ON ir.id = ol.source_interpreter_report_id
+                  WHERE ir.interpreter_id = $1) AS synced_billing_net,
+                (SELECT p.profile
+                   FROM interpreter_profiles p
+                  WHERE p.user_id = $1) AS raw_profile"#,
+    )
+    .bind(interpreter_id)
+    .fetch_one(&state.db)
+    .await?;
+
+    let raw_profile = summary_row
+        .try_get::<Option<Value>, _>("raw_profile")
+        .unwrap_or_default();
+    let capacity_hours_week = raw_profile
+        .as_ref()
+        .and_then(|profile| f64_from_profile_number(profile, "weeklyCapacityHours"));
+    let booked_hours_week = summary_row
+        .try_get::<Option<Decimal>, _>("booked_hours_week")
+        .unwrap_or_default()
+        .and_then(decimal_to_f64)
+        .unwrap_or(0.0);
+    let utilization_percent = capacity_hours_week
+        .filter(|capacity| *capacity > 0.0)
+        .map(|capacity| ((booked_hours_week / capacity) * 100.0).round());
+
+    let patient_rows = sqlx::query(
+        r#"SELECT p.id AS patient_id, p.patient_id AS patient_code,
+                  p.first_name, p.last_name,
+                  COUNT(a.id) AS appointment_count,
+                  MAX(a.date) FILTER (WHERE a.date <= CURRENT_DATE) AS last_appointment_date,
+                  MIN(a.date) FILTER (
+                    WHERE a.date >= CURRENT_DATE AND a.status <> 'cancelled'
+                  ) AS next_appointment_date,
+                  COALESCE(BOOL_OR(
+                    a.date >= CURRENT_DATE AND a.status IN ('planned', 'confirmed', 'in_progress')
+                  ), false) AS active_relation,
+                  pref.preference
+           FROM appointments a
+           JOIN patients p ON p.id = a.patient_id
+           LEFT JOIN interpreter_patient_preferences pref
+                  ON pref.patient_id = p.id
+                 AND pref.interpreter_id = $1
+           WHERE a.interpreter_id = $1
+           GROUP BY p.id, pref.preference
+           ORDER BY active_relation DESC,
+                    next_appointment_date ASC NULLS LAST,
+                    last_appointment_date DESC NULLS LAST,
+                    p.last_name, p.first_name
+           LIMIT 12"#,
+    )
+    .bind(interpreter_id)
+    .fetch_all(&state.db)
+    .await?;
+
+    let upcoming_rows = sqlx::query(
+        r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end,
+                  a.status, a.interpreter_response, a.location,
+                  p.id AS patient_id, p.patient_id AS patient_code,
+                  p.first_name, p.last_name,
+                  o.id AS order_id, o.order_number
+           FROM appointments a
+           JOIN patients p ON p.id = a.patient_id
+           LEFT JOIN orders o ON o.id = a.order_id
+           WHERE a.interpreter_id = $1
+             AND a.date >= CURRENT_DATE
+             AND a.status <> 'cancelled'
+           ORDER BY a.date ASC, a.time_start ASC NULLS LAST
+           LIMIT 8"#,
+    )
+    .bind(interpreter_id)
+    .fetch_all(&state.db)
+    .await?;
+
+    let task_rows = sqlx::query(
+        r#"SELECT t.id, t.title, t.status, t.priority, t.due_date,
+                  p.id AS patient_id, p.patient_id AS patient_code,
+                  p.first_name, p.last_name,
+                  o.id AS order_id, o.order_number,
+                  t.appointment_id
+           FROM tasks t
+           LEFT JOIN patients p ON p.id = t.patient_id
+           LEFT JOIN orders o ON o.id = t.order_id
+           WHERE t.assigned_to = $1
+             AND t.status IN ('open', 'in_progress')
+           ORDER BY CASE t.priority
+                        WHEN 'urgent' THEN 0
+                        WHEN 'high' THEN 1
+                        WHEN 'normal' THEN 2
+                        ELSE 3
+                    END,
+                    t.due_date ASC NULLS LAST,
+                    t.created_at DESC
+           LIMIT 8"#,
+    )
+    .bind(interpreter_id)
+    .fetch_all(&state.db)
+    .await?;
+
+    let report_rows = sqlx::query(
+        r#"SELECT ir.id, ir.appointment_id, ir.hours, ir.approval_status,
+                  ir.created_at, a.title AS appointment_title, a.date,
+                  p.id AS patient_id, p.patient_id AS patient_code,
+                  p.first_name, p.last_name,
+                  ol.id AS billing_line_id, ol.status AS billing_status
+           FROM interpreter_reports ir
+           JOIN appointments a ON a.id = ir.appointment_id
+           JOIN patients p ON p.id = a.patient_id
+           LEFT JOIN order_leistungen ol ON ol.source_interpreter_report_id = ir.id
+           WHERE ir.interpreter_id = $1
+           ORDER BY ir.created_at DESC
+           LIMIT 8"#,
+    )
+    .bind(interpreter_id)
+    .fetch_all(&state.db)
+    .await?;
+
+    let billing_rows = sqlx::query(
+        r#"SELECT ol.id, ol.order_id, o.order_number, ol.description,
+                  ol.quantity, ol.unit_price, ol.currency, ol.status,
+                  ir.id AS report_id, ir.hours
+           FROM order_leistungen ol
+           JOIN interpreter_reports ir ON ir.id = ol.source_interpreter_report_id
+           JOIN orders o ON o.id = ol.order_id
+           WHERE ir.interpreter_id = $1
+           ORDER BY ol.created_at DESC
+           LIMIT 8"#,
+    )
+    .bind(interpreter_id)
+    .fetch_all(&state.db)
+    .await?;
+
+    Ok(serde_json::json!({
+        "summary": {
+            "assigned_patients": row_i64(&summary_row, "assigned_patients"),
+            "active_patients": row_i64(&summary_row, "active_patients"),
+            "appointments_this_month": row_i64(&summary_row, "appointments_this_month"),
+            "appointments_next_30_days": row_i64(&summary_row, "appointments_next_30_days"),
+            "completed_appointments": row_i64(&summary_row, "completed_appointments"),
+            "booked_hours_week": booked_hours_week,
+            "capacity_hours_week": capacity_hours_week,
+            "utilization_percent": utilization_percent,
+            "average_feedback_score": optional_decimal_json(&summary_row, "average_feedback_score"),
+            "feedback_count": row_i64(&summary_row, "feedback_count"),
+            "approved_reports": row_i64(&summary_row, "approved_reports"),
+            "pending_reports": row_i64(&summary_row, "pending_reports"),
+            "approved_report_hours": decimal_json_or_zero(&summary_row, "approved_report_hours"),
+            "active_tasks": row_i64(&summary_row, "active_tasks"),
+            "overdue_tasks": row_i64(&summary_row, "overdue_tasks"),
+            "synced_billing_lines": row_i64(&summary_row, "synced_billing_lines"),
+            "synced_billing_net": decimal_json_or_zero(&summary_row, "synced_billing_net"),
+        },
+        "patients": patient_rows.into_iter().map(|row| serde_json::json!({
+            "patient_id": row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
+            "patient_code": row.try_get::<String, _>("patient_code").unwrap_or_default(),
+            "patient_name": person_name_from_row(&row),
+            "appointment_count": row_i64(&row, "appointment_count"),
+            "last_appointment_date": row_date_string(&row, "last_appointment_date"),
+            "next_appointment_date": row_date_string(&row, "next_appointment_date"),
+            "active_relation": row.try_get::<bool, _>("active_relation").unwrap_or(false),
+            "preference": row.try_get::<Option<String>, _>("preference").unwrap_or_default(),
+        })).collect::<Vec<_>>(),
+        "upcoming_appointments": upcoming_rows.into_iter().map(|row| serde_json::json!({
+            "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+            "title": row.try_get::<String, _>("title").unwrap_or_default(),
+            "date": row_date_string(&row, "date"),
+            "time_start": row_time_string(&row, "time_start"),
+            "time_end": row_time_string(&row, "time_end"),
+            "status": row.try_get::<String, _>("status").unwrap_or_default(),
+            "interpreter_response": row.try_get::<Option<String>, _>("interpreter_response").unwrap_or_default(),
+            "location": row.try_get::<Option<String>, _>("location").unwrap_or_default(),
+            "patient_id": row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
+            "patient_code": row.try_get::<String, _>("patient_code").unwrap_or_default(),
+            "patient_name": person_name_from_row(&row),
+            "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
+            "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
+        })).collect::<Vec<_>>(),
+        "active_tasks": task_rows.into_iter().map(|row| serde_json::json!({
+            "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+            "title": row.try_get::<String, _>("title").unwrap_or_default(),
+            "status": row.try_get::<String, _>("status").unwrap_or_default(),
+            "priority": row.try_get::<String, _>("priority").unwrap_or_default(),
+            "due_date": row_datetime_string(&row, "due_date"),
+            "patient_id": row.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default(),
+            "patient_code": row.try_get::<Option<String>, _>("patient_code").unwrap_or_default(),
+            "patient_name": optional_person_name_from_row(&row),
+            "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
+            "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
+            "appointment_id": row.try_get::<Option<Uuid>, _>("appointment_id").unwrap_or_default(),
+        })).collect::<Vec<_>>(),
+        "recent_reports": report_rows.into_iter().map(|row| serde_json::json!({
+            "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+            "appointment_id": row.try_get::<Uuid, _>("appointment_id").unwrap_or_default(),
+            "appointment_title": row.try_get::<String, _>("appointment_title").unwrap_or_default(),
+            "appointment_date": row_date_string(&row, "date"),
+            "hours": optional_decimal_json(&row, "hours"),
+            "approval_status": row.try_get::<String, _>("approval_status").unwrap_or_default(),
+            "created_at": row_datetime_string(&row, "created_at"),
+            "patient_id": row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
+            "patient_code": row.try_get::<String, _>("patient_code").unwrap_or_default(),
+            "patient_name": person_name_from_row(&row),
+            "billing_line_id": row.try_get::<Option<Uuid>, _>("billing_line_id").unwrap_or_default(),
+            "billing_status": row.try_get::<Option<String>, _>("billing_status").unwrap_or_default(),
+        })).collect::<Vec<_>>(),
+        "billing_lines": billing_rows.into_iter().map(|row| serde_json::json!({
+            "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+            "order_id": row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
+            "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
+            "description": row.try_get::<String, _>("description").unwrap_or_default(),
+            "quantity": optional_decimal_json(&row, "quantity"),
+            "unit_price": optional_decimal_json(&row, "unit_price"),
+            "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
+            "status": row.try_get::<String, _>("status").unwrap_or_default(),
+            "report_id": row.try_get::<Uuid, _>("report_id").unwrap_or_default(),
+            "hours": optional_decimal_json(&row, "hours"),
+        })).collect::<Vec<_>>(),
+    }))
 }
 
 async fn ensure_interpreter_profile_access(
@@ -824,6 +1149,75 @@ fn insert_row_array(
     if matches!(&value, Value::Array(items) if !items.is_empty()) {
         target.insert(key.to_string(), value);
     }
+}
+
+fn row_i64(row: &sqlx::postgres::PgRow, column: &str) -> i64 {
+    row.try_get::<i64, _>(column).unwrap_or_default()
+}
+
+fn row_date_string(row: &sqlx::postgres::PgRow, column: &str) -> Option<String> {
+    row.try_get::<Option<NaiveDate>, _>(column)
+        .unwrap_or_default()
+        .map(|value| value.to_string())
+}
+
+fn row_time_string(row: &sqlx::postgres::PgRow, column: &str) -> Option<String> {
+    row.try_get::<Option<chrono::NaiveTime>, _>(column)
+        .unwrap_or_default()
+        .map(|value| value.format("%H:%M").to_string())
+}
+
+fn row_datetime_string(row: &sqlx::postgres::PgRow, column: &str) -> Option<String> {
+    row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>(column)
+        .unwrap_or_default()
+        .map(|value| value.to_rfc3339())
+}
+
+fn person_name_from_row(row: &sqlx::postgres::PgRow) -> String {
+    let first_name = row.try_get::<String, _>("first_name").unwrap_or_default();
+    let last_name = row.try_get::<String, _>("last_name").unwrap_or_default();
+    format!("{first_name} {last_name}").trim().to_string()
+}
+
+fn optional_person_name_from_row(row: &sqlx::postgres::PgRow) -> Option<String> {
+    let first_name = row.try_get::<Option<String>, _>("first_name").ok()??;
+    let last_name = row.try_get::<Option<String>, _>("last_name").ok()??;
+    let name = format!("{first_name} {last_name}").trim().to_string();
+    (!name.is_empty()).then_some(name)
+}
+
+fn optional_decimal_json(row: &sqlx::postgres::PgRow, column: &str) -> Value {
+    row.try_get::<Option<Decimal>, _>(column)
+        .unwrap_or_default()
+        .map(decimal_to_json)
+        .unwrap_or(Value::Null)
+}
+
+fn decimal_json_or_zero(row: &sqlx::postgres::PgRow, column: &str) -> Value {
+    row.try_get::<Option<Decimal>, _>(column)
+        .unwrap_or_default()
+        .map(decimal_to_json)
+        .unwrap_or_else(|| decimal_to_json(Decimal::ZERO))
+}
+
+fn decimal_to_json(value: Decimal) -> Value {
+    decimal_to_f64(value)
+        .and_then(serde_json::Number::from_f64)
+        .map(Value::Number)
+        .unwrap_or_else(|| Value::String(value.to_string()))
+}
+
+fn decimal_to_f64(value: Decimal) -> Option<f64> {
+    value.to_string().parse::<f64>().ok()
+}
+
+fn f64_from_profile_number(profile: &Value, key: &str) -> Option<f64> {
+    match value_from_object(profile, key) {
+        Some(Value::Number(value)) => value.as_f64(),
+        Some(Value::String(value)) => value.trim().parse::<f64>().ok(),
+        _ => None,
+    }
+    .filter(|value| value.is_finite() && *value >= 0.0)
 }
 
 #[allow(clippy::result_large_err)]
