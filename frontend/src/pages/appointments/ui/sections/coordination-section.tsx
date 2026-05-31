@@ -49,6 +49,8 @@ type AppointmentCoordinationSectionProps = {
   staff: StaffOption[];
   interpreters: InterpreterOption[];
   permissions: AppointmentPermissions;
+  currentUserId?: string;
+  currentUserRole?: string;
   handoffStakeholders: HandoffStakeholder[];
   followUpAssigneeId: string;
   setFollowUpAssigneeId: (value: string) => void;
@@ -79,6 +81,8 @@ function AppointmentCoordinationSection({
   staff,
   interpreters,
   permissions,
+  currentUserId,
+  currentUserRole,
   handoffStakeholders,
   followUpAssigneeId,
   setFollowUpAssigneeId,
@@ -125,6 +129,8 @@ function AppointmentCoordinationSection({
           staff={staff}
           interpreters={interpreters}
           defaultReminderUserId={detailDefaultAssigneeId}
+          currentUserId={currentUserId}
+          currentUserRole={currentUserRole}
           onCreated={onFollowUpVisitCreated}
         />
       ) : null}

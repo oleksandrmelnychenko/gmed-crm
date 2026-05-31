@@ -62,6 +62,7 @@ import type {
 import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 import { ProviderSelectWithTaxonomyFilter } from "@/pages/providers/ui/provider-select-with-taxonomy-filter";
 import { hasAppointmentFormChanges } from "@/pages/appointments/model/form-factories";
+import { filterAppointmentOwnerOptions } from "@/pages/appointments/model/staff-roles";
 import { parsePositiveIntegerInput } from "@/pages/appointments/model/workflow-helpers";
 import {
   AppointmentEditorSheet,
@@ -87,6 +88,7 @@ export type CreateAppointmentSheetProps = {
   interpreters: InterpreterOption[];
   staff: StaffOption[];
   userId?: string;
+  userRole?: string;
   onOpenChange: (open: boolean) => void;
   onCreated: (result: { id: string; notice: string }) => void;
 };
@@ -124,6 +126,7 @@ function useCreateAppointmentSheetContent({
   interpreters,
   staff,
   userId,
+  userRole,
   onOpenChange,
   onCreated,
 }: CreateAppointmentSheetProps) {
@@ -211,6 +214,10 @@ function useCreateAppointmentSheetContent({
   const selectedProvider = useMemo(
     () => providers.find((provider) => provider.id === form.providerId) ?? null,
     [form.providerId, providers],
+  );
+  const ownerOptions = useMemo(
+    () => filterAppointmentOwnerOptions(staff, userRole, userId),
+    [staff, userId, userRole],
   );
   useEffect(() => {
     if (
@@ -792,7 +799,7 @@ function useCreateAppointmentSheetContent({
                       className={createSheetSelectClassName}
                     >
                       <option value="">{t.common_not_set}</option>
-                      {staff.map((member) => (
+                      {ownerOptions.map((member) => (
                         <option key={member.id} value={member.id}>
                           {staffLabel(member)}
                         </option>
@@ -886,5 +893,6 @@ export const MemoizedCreateAppointmentSheet = memo(
     prev.taxonomyNodes === next.taxonomyNodes &&
     prev.interpreters === next.interpreters &&
     prev.staff === next.staff &&
-    prev.userId === next.userId,
+    prev.userId === next.userId &&
+    prev.userRole === next.userRole,
 );

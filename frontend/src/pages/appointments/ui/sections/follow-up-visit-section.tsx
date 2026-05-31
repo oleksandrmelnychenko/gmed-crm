@@ -29,7 +29,10 @@ import {
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
 import { formatAppointmentSlotLabel as slotLabel } from "@/pages/appointments/model/runtime-formatters";
 import { buildConflictQuery } from "@/pages/appointments/model/query-builders";
-import { buildFollowUpVisitForm } from "@/pages/appointments/model/form-factories";
+import {
+  buildFollowUpVisitForm,
+  defaultAppointmentOwnerUserId,
+} from "@/pages/appointments/model/form-factories";
 import {
   providerSelectionFitsAppointmentScope,
 } from "@/pages/appointments/model/provider-taxonomy";
@@ -50,6 +53,7 @@ import {
   appointmentAnchorDateTime,
   toRfc3339,
 } from "@/pages/appointments/model/workflow-helpers";
+import { filterAppointmentOwnerOptions } from "@/pages/appointments/model/staff-roles";
 import type {
   AppointmentCarePathKind,
   AppointmentDetail,
@@ -83,6 +87,8 @@ type AppointmentFollowUpVisitSectionProps = {
   staff: StaffOption[];
   interpreters: InterpreterOption[];
   defaultReminderUserId: string;
+  currentUserId?: string;
+  currentUserRole?: string;
   onCreated: (result: { id?: string; notice: string }) => void;
 };
 
@@ -124,6 +130,8 @@ function useAppointmentFollowUpVisitSectionContent({
   staff,
   interpreters,
   defaultReminderUserId,
+  currentUserId,
+  currentUserRole,
   onCreated,
 }: AppointmentFollowUpVisitSectionProps) {
   const { t, lang } = useLang();
@@ -140,11 +148,20 @@ function useAppointmentFollowUpVisitSectionContent({
     }),
     [tr.common_doctor, tr.common_provider, tr.patients_assign_owner],
   );
+  const defaultOwnerUserId =
+    currentUserRole === "it_admin"
+      ? defaultAppointmentOwnerUserId(currentUserId, currentUserRole)
+      : detail.owner_user_id ?? "";
   const [sectionState, dispatchSectionState] = useReducer(
     followUpVisitSectionReducer,
     undefined,
     () => ({
-      form: buildFollowUpVisitForm(detail, defaultReminderUserId, tr.phase_followup),
+      form: buildFollowUpVisitForm(
+        detail,
+        defaultReminderUserId,
+        tr.phase_followup,
+        defaultOwnerUserId,
+      ),
       doctors: [],
       conflicts: null,
       error: "",
@@ -163,13 +180,18 @@ function useAppointmentFollowUpVisitSectionContent({
 
   useEffect(() => {
     dispatchSectionState({
-      form: buildFollowUpVisitForm(detail, defaultReminderUserId, tr.phase_followup),
+      form: buildFollowUpVisitForm(
+        detail,
+        defaultReminderUserId,
+        tr.phase_followup,
+        defaultOwnerUserId,
+      ),
       doctors: [],
       conflicts: null,
       error: "",
       busy: false,
     });
-  }, [defaultReminderUserId, detail, tr.phase_followup]);
+  }, [defaultOwnerUserId, defaultReminderUserId, detail, tr.phase_followup]);
 
   useEffect(() => {
     if (
@@ -276,6 +298,10 @@ function useAppointmentFollowUpVisitSectionContent({
     form.timeStart,
     scheduleWarningLabels,
   ]);
+  const ownerOptions = useMemo(
+    () => filterAppointmentOwnerOptions(staff, currentUserRole, currentUserId),
+    [currentUserId, currentUserRole, staff],
+  );
 
   function applyPreset(preset: (typeof FOLLOW_UP_PRESETS)[number]) {
     const anchor = appointmentAnchorDateTime(detail);
@@ -369,7 +395,12 @@ function useAppointmentFollowUpVisitSectionContent({
         ? `${buildScheduleNotice(result.conflicts, localWarnings)} ${t.appointments_follow_up_visit_created}`
         : tr.common_active;
       dispatchSectionState({
-        form: buildFollowUpVisitForm(detail, form.reminderUserId, tr.phase_followup),
+        form: buildFollowUpVisitForm(
+          detail,
+          form.reminderUserId,
+          tr.phase_followup,
+          defaultOwnerUserId,
+        ),
         busy: false,
       });
       onCreated({ id: result.id, notice });
@@ -528,7 +559,7 @@ function useAppointmentFollowUpVisitSectionContent({
               className={selectClassName}
             >
               <option value="">{t.common_not_set}</option>
-              {staff.map((member) => (
+              {ownerOptions.map((member) => (
                 <option key={member.id} value={member.id}>
                   {member.name} · {roleLabel(member.role)}
                 </option>

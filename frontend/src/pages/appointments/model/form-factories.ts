@@ -52,6 +52,27 @@ export function blankAppointmentForm(): AppointmentFormState {
   };
 }
 
+export function defaultAppointmentOwnerUserId(
+  currentUserId?: string,
+  currentUserRole?: string,
+) {
+  if (!currentUserId || currentUserRole === "interpreter") {
+    return "";
+  }
+
+  return currentUserId;
+}
+
+export function blankAppointmentFormForCurrentUser(
+  currentUserId?: string,
+  currentUserRole?: string,
+): AppointmentFormState {
+  return {
+    ...blankAppointmentForm(),
+    ownerUserId: defaultAppointmentOwnerUserId(currentUserId, currentUserRole),
+  };
+}
+
 const APPOINTMENT_FORM_DIRTY_FIELDS: Array<keyof AppointmentFormState> = [
   "patientId",
   "providerId",
@@ -123,6 +144,7 @@ export function buildFollowUpVisitForm(
   detail: AppointmentDetail,
   defaultReminderUserId = "",
   followUpLabel = "Follow-up",
+  defaultOwnerUserId = detail.owner_user_id ?? "",
 ): FollowUpVisitFormState {
   const start = detail.time_start
     ? shiftLocalDateTime(`${detail.date}T${detail.time_start.slice(0, 5)}`, {
@@ -141,7 +163,7 @@ export function buildFollowUpVisitForm(
     providerId: detail.provider_id ?? "",
     providerTaxonomyNodeId: "",
     doctorId: detail.doctor_id ?? "",
-    ownerUserId: detail.owner_user_id ?? "",
+    ownerUserId: defaultOwnerUserId,
     interpreterId: detail.interpreter_id ?? "",
     appointmentType: detail.type,
     carePathKind: "followup",

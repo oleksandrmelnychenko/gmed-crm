@@ -1,4 +1,4 @@
-import { memo, useState, type FormEvent } from "react";
+import { memo, useMemo, useState, type FormEvent } from "react";
 
 import {
   CheckCircle2,
@@ -21,8 +21,10 @@ import {
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
+  defaultAppointmentOwnerUserId,
   statusActionKey,
 } from "@/pages/appointments/model/form-factories";
+import { filterAppointmentOwnerOptions } from "@/pages/appointments/model/staff-roles";
 import {
   operationalScopeReason,
 } from "@/pages/appointments/model/operational-scopes";
@@ -129,6 +131,7 @@ function requestConvertActionKey(requestId: string) {
 function buildScheduleForm(
   item: AppointmentRequestItem,
   currentUserId?: string,
+  currentUserRole?: string,
 ): RequestScheduleFormState {
   const patientLabel =
     item.patient_name || item.patient_pid || appointmentText("appointments_patient");
@@ -137,7 +140,7 @@ function buildScheduleForm(
     date: item.preferred_date_from || item.preferred_date_to || currentDateInput(),
     timeStart: "",
     timeEnd: "",
-    ownerUserId: currentUserId ?? "",
+    ownerUserId: defaultAppointmentOwnerUserId(currentUserId, currentUserRole),
     interpreterId: "",
     location: item.location ?? "",
     notes: [item.reason, item.notes].filter(Boolean).join("\n\n"),
@@ -220,6 +223,10 @@ function useQueueSheetContent({
   const [activeScheduleRequestId, setActiveScheduleRequestId] = useState("");
   const [scheduleForm, setScheduleForm] = useState<RequestScheduleFormState | null>(null);
   const [scheduleError, setScheduleError] = useState("");
+  const ownerOptions = useMemo(
+    () => filterAppointmentOwnerOptions(staff, userRole, currentUserId),
+    [currentUserId, staff, userRole],
+  );
 
   function resetScheduleForm() {
     setActiveScheduleRequestId("");
@@ -236,7 +243,7 @@ function useQueueSheetContent({
 
   function openScheduleForm(item: AppointmentRequestItem) {
     setActiveScheduleRequestId(item.id);
-    setScheduleForm(buildScheduleForm(item, currentUserId));
+    setScheduleForm(buildScheduleForm(item, currentUserId, userRole));
     setScheduleError("");
   }
 
@@ -467,7 +474,7 @@ function useQueueSheetContent({
                             className={selectClass}
                           >
                             <option value="">{t.common_not_set}</option>
-                            {staff.map((member) => (
+                            {ownerOptions.map((member) => (
                               <option key={member.id} value={member.id}>
                                 {staffLabel(member)}
                               </option>

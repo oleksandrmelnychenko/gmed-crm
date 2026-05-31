@@ -992,6 +992,7 @@ async fn list_patients(
         Role::TeamleadInterpreter,
         Role::Interpreter,
         Role::Concierge,
+        Role::ItAdmin,
     ])?;
 
     let active_only = query.active_only.unwrap_or(true);

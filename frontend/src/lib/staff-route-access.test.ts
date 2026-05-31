@@ -23,6 +23,8 @@ const SAMPLE_PATHS = [
   "/documents/00000000-0000-0000-0000-000000000001",
   "/appointments",
   "/appointments/00000000-0000-0000-0000-000000000002",
+  "/interpreters",
+  "/interpreters/00000000-0000-0000-0000-000000000007",
   "/orders",
   "/orders?order=x",
   "/orders/00000000-0000-0000-0000-000000000006",
@@ -96,9 +98,11 @@ describe("canAccessStaffRoute", () => {
     expect(canAccessStaffRoute("patient_manager", "/cases")).toBe(true);
   });
 
-  it("keeps it_admin inside admin-only shell and out of patient-bearing workspaces", () => {
+  it("allows it_admin into operational scheduling while keeping finance and reports closed", () => {
     expect(canAccessStaffRoute("it_admin", "/admin/settings")).toBe(true);
-    expect(canAccessStaffRoute("it_admin", "/patients")).toBe(false);
+    expect(canAccessStaffRoute("it_admin", "/appointments")).toBe(true);
+    expect(canAccessStaffRoute("it_admin", "/patients")).toBe(true);
+    expect(canAccessStaffRoute("it_admin", "/providers")).toBe(true);
     expect(canAccessStaffRoute("it_admin", "/cases")).toBe(false);
     expect(canAccessStaffRoute("it_admin", "/reports")).toBe(false);
     expect(canAccessStaffRoute("it_admin", "/documents")).toBe(false);
@@ -110,6 +114,16 @@ describe("canAccessStaffRoute", () => {
     expect(canAccessStaffRoute("billing", "/appointments")).toBe(false);
     expect(canAccessStaffRoute("ceo_assistant", "/appointments")).toBe(false);
     expect(canAccessStaffRoute("patient_manager", "/appointments")).toBe(true);
+    expect(canAccessStaffRoute("it_admin", "/appointments")).toBe(true);
+  });
+
+  it("allows interpreter profile management for operational leadership", () => {
+    expect(canAccessStaffRoute("ceo", "/interpreters")).toBe(true);
+    expect(canAccessStaffRoute("patient_manager", "/interpreters")).toBe(true);
+    expect(canAccessStaffRoute("teamlead_interpreter", "/interpreters")).toBe(true);
+    expect(canAccessStaffRoute("it_admin", "/interpreters")).toBe(true);
+    expect(canAccessStaffRoute("interpreter", "/interpreters")).toBe(false);
+    expect(canAccessStaffRoute("billing", "/interpreters")).toBe(false);
   });
 
   it("allows ceo and it_admin on generic /admin tooling routes", () => {
@@ -151,23 +165,26 @@ describe("canAccessStaffRoute", () => {
   });
 
   it("matches dynamic patient and provider paths against tightened role lists", () => {
-    // /patients now excludes sales and it_admin per backend list_patients
+    // /patients now excludes sales while admitting it_admin for scheduling support.
     expect(
       canAccessStaffRoute("sales", "/patients/00000000-0000-0000-0000-000000000001"),
     ).toBe(false);
     expect(
       canAccessStaffRoute("it_admin", "/patients/00000000-0000-0000-0000-000000000001"),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       canAccessStaffRoute("interpreter", "/patients/00000000-0000-0000-0000-000000000001"),
     ).toBe(true);
-    // /providers now allows ceo, patient_manager, concierge, billing, sales
+    // /providers now allows ceo, patient_manager, concierge, billing, sales, it_admin.
     expect(
       canAccessStaffRoute("billing", "/providers/00000000-0000-0000-0000-000000000002"),
     ).toBe(true);
     expect(
       canAccessStaffRoute("interpreter", "/providers/00000000-0000-0000-0000-000000000002"),
     ).toBe(false);
+    expect(
+      canAccessStaffRoute("it_admin", "/providers/00000000-0000-0000-0000-000000000002"),
+    ).toBe(true);
   });
 
   it("blocks non-lead roles from /leads (ceo passes via full-access policy)", () => {
@@ -253,6 +270,8 @@ describe("staffHrefIfAllowed", () => {
 describe("listStaffNavItems", () => {
   it("derives admin navigation from the same route rules as the guard", () => {
     expect(listStaffNavItems("it_admin").map((item) => item.to)).toContain("/admin/settings");
+    expect(listStaffNavItems("it_admin").map((item) => item.to)).toContain("/appointments");
+    expect(listStaffNavItems("it_admin").map((item) => item.to)).toContain("/interpreters");
     expect(listStaffNavItems("it_admin").map((item) => item.to)).not.toContain("/admin/compliance");
 
     expect(listStaffNavItems("patient_manager").map((item) => item.to)).toContain("/admin/compliance");

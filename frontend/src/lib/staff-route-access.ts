@@ -74,6 +74,14 @@ const ROLES_APPOINTMENTS = [
   "teamlead_interpreter",
   "interpreter",
   "concierge",
+  "it_admin",
+] as const satisfies readonly StaffRole[];
+
+const ROLES_INTERPRETERS = [
+  "ceo",
+  "patient_manager",
+  "teamlead_interpreter",
+  "it_admin",
 ] as const satisfies readonly StaffRole[];
 
 // CEO has full access by policy — `AuthUser::require_any_role` in
@@ -131,6 +139,7 @@ const ROLES_PATIENTS = [
   "teamlead_interpreter",
   "interpreter",
   "concierge",
+  "it_admin",
 ] as const satisfies readonly StaffRole[];
 
 /** `crates/server/src/routes/providers.rs:132` (`list_providers`) */
@@ -140,6 +149,7 @@ const ROLES_PROVIDERS = [
   "concierge",
   "billing",
   "sales",
+  "it_admin",
 ] as const satisfies readonly StaffRole[];
 
 /** `crates/server/src/routes/concierge_services.rs:564` (`list_concierge_services`) */
@@ -262,6 +272,13 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     path: "/appointments",
     roles: ROLES_APPOINTMENTS,
     nav: { section: "medicine", labelKey: "appointments_title" },
+  },
+  {
+    id: "interpreters",
+    match: "prefix",
+    path: "/interpreters",
+    roles: ROLES_INTERPRETERS,
+    nav: { section: "medicine", labelKey: "nav_interpreters" },
   },
   {
     id: "documents",

@@ -103,6 +103,7 @@ type AppointmentDesktopDetailWorkspaceContentProps = {
   interpreters: InterpreterOption[];
   permissions: AppointmentPermissions;
   currentUserId?: string;
+  currentUserRole?: string;
   detailDefaultAssigneeId: string;
   doctorFollowUpAssignees: StaffOption[];
   handoffStakeholders: HandoffStakeholder[];
@@ -175,6 +176,7 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
   interpreters,
   permissions,
   currentUserId,
+  currentUserRole,
   detailDefaultAssigneeId,
   doctorFollowUpAssignees,
   handoffStakeholders,
@@ -315,6 +317,8 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
             staff={staff}
             interpreters={interpreters}
             permissions={permissions}
+            currentUserId={currentUserId}
+            currentUserRole={currentUserRole}
             showSummary={false}
             open={overviewEditOpen}
             onOpenChange={handleOverviewEditOpenChange}
@@ -359,6 +363,8 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
               staff={staff}
               interpreters={interpreters}
               permissions={permissions}
+              currentUserId={currentUserId}
+              currentUserRole={currentUserRole}
               handoffStakeholders={handoffStakeholders}
               followUpAssigneeId={followUpAssigneeId}
               setFollowUpAssigneeId={setFollowUpAssigneeId}
@@ -460,6 +466,8 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
                       staff={staff}
                       interpreters={interpreters}
                       permissions={permissions}
+                      currentUserId={currentUserId}
+                      currentUserRole={currentUserRole}
                       onSaved={onEditSaved}
                     />
                   ) : null

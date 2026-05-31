@@ -71,6 +71,7 @@ export type AppointmentMobileDetailSheetContentProps = {
   interpreters: InterpreterOption[];
   permissions: AppointmentPermissions;
   currentUserId?: string;
+  currentUserRole?: string;
   detailDefaultAssigneeId: string;
   doctorFollowUpAssignees: StaffOption[];
   handoffStakeholders: HandoffStakeholder[];
@@ -139,6 +140,7 @@ function useAppointmentMobileDetailSheetContentContent({
   interpreters,
   permissions,
   currentUserId,
+  currentUserRole,
   detailDefaultAssigneeId,
   doctorFollowUpAssignees,
   handoffStakeholders,
@@ -235,6 +237,8 @@ function useAppointmentMobileDetailSheetContentContent({
                   staff={staff}
                   interpreters={interpreters}
                   permissions={permissions}
+                  currentUserId={currentUserId}
+                  currentUserRole={currentUserRole}
                   showSummary={false}
                   open={overviewEditOpen}
                   onOpenChange={handleOverviewEditOpenChange}
@@ -275,6 +279,8 @@ function useAppointmentMobileDetailSheetContentContent({
                   staff={staff}
                   interpreters={interpreters}
                   defaultReminderUserId={detailDefaultAssigneeId}
+                  currentUserId={currentUserId}
+                  currentUserRole={currentUserRole}
                   onCreated={onFollowUpVisitCreated}
                 />
               ) : null}

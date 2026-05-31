@@ -1404,6 +1404,7 @@ async fn list_appointments(
         Role::TeamleadInterpreter,
         Role::Interpreter,
         Role::Concierge,
+        Role::ItAdmin,
     ]) {
         return e;
     }
@@ -1581,6 +1582,7 @@ async fn list_attention_items(
         Role::TeamleadInterpreter,
         Role::Interpreter,
         Role::Concierge,
+        Role::ItAdmin,
     ]) {
         return e;
     }
@@ -1932,6 +1934,7 @@ async fn list_interpreters(
         Role::TeamleadInterpreter,
         Role::Interpreter,
         Role::Concierge,
+        Role::ItAdmin,
     ])?;
 
     match sqlx::query(
@@ -1975,6 +1978,7 @@ async fn list_staff(
         Role::TeamleadInterpreter,
         Role::Interpreter,
         Role::Concierge,
+        Role::ItAdmin,
     ])?;
 
     match sqlx::query(
@@ -2026,12 +2030,13 @@ async fn get_conflicts(
         Role::TeamleadInterpreter,
         Role::Interpreter,
         Role::Concierge,
+        Role::ItAdmin,
     ]) {
         return e;
     }
 
     if let Err(resp) = ensure_patient_access(&state, &auth, query.patient_id).await
-        && auth.role != Role::Ceo
+        && !matches!(auth.role, Role::Ceo | Role::ItAdmin)
     {
         return resp;
     }
@@ -2082,6 +2087,7 @@ async fn create_appointment(
         Role::PatientManager,
         Role::TeamleadInterpreter,
         Role::Concierge,
+        Role::ItAdmin,
     ]) {
         return e;
     }
@@ -3206,6 +3212,7 @@ async fn get_appointment(
         Role::TeamleadInterpreter,
         Role::Interpreter,
         Role::Concierge,
+        Role::ItAdmin,
     ]) {
         return e;
     }
@@ -3333,6 +3340,7 @@ async fn update_appointment(
         Role::PatientManager,
         Role::TeamleadInterpreter,
         Role::Concierge,
+        Role::ItAdmin,
     ]) {
         return e;
     }
@@ -3529,7 +3537,9 @@ async fn update_appointment(
     }
 
     let owner_user_id = resolve_owner_user_id_for_write(&auth, body.owner_user_id);
-    if let Some(owner_user_id) = owner_user_id {
+    if let Some(owner_user_id) = owner_user_id
+        && Some(owner_user_id) != current_owner_user_id
+    {
         match load_active_appointment_owner_role(&state, owner_user_id).await {
             Ok(Some(owner_role)) => {
                 if let Err(resp) =
@@ -6589,7 +6599,7 @@ fn validate_owner_assignment_rules(
 
 fn resolve_owner_user_id_for_write(auth: &AuthUser, owner_user_id: Option<Uuid>) -> Option<Uuid> {
     owner_user_id.or(match auth.role {
-        Role::TeamleadInterpreter | Role::Concierge => Some(auth.user_id),
+        Role::TeamleadInterpreter | Role::Concierge | Role::ItAdmin => Some(auth.user_id),
         _ => None,
     })
 }
@@ -7095,7 +7105,7 @@ async fn ensure_patient_access(
     auth: &AuthUser,
     patient_id: Uuid,
 ) -> Result<(), axum::response::Response> {
-    if auth.role == Role::Ceo {
+    if matches!(auth.role, Role::Ceo | Role::ItAdmin) {
         return Ok(());
     }
 

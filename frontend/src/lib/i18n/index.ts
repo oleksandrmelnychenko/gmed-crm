@@ -44,6 +44,7 @@ export interface Translations
   nav_feedback: string;
   nav_reports: string;
   nav_learning: string;
+  nav_interpreters: string;
 
   login_title: string;
   login_email: string;

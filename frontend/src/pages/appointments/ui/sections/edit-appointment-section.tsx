@@ -52,6 +52,7 @@ import {
   buildScheduleNotice,
 } from "@/pages/appointments/model/schedule-warnings";
 import { parsePositiveIntegerInput } from "@/pages/appointments/model/workflow-helpers";
+import { filterAppointmentOwnerOptions } from "@/pages/appointments/model/staff-roles";
 import {
   recurrenceFrequencyLabel,
 } from "@/pages/appointments/model/recurrence";
@@ -99,6 +100,8 @@ type EditAppointmentSectionProps = {
     AppointmentPermissions,
     "canEditSchedule" | "canManageStatus" | "canManageChecklist"
   >;
+  currentUserId?: string;
+  currentUserRole?: string;
   showSummary?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -238,6 +241,8 @@ function useEditAppointmentSectionContentContent({
   staff,
   interpreters,
   permissions,
+  currentUserId,
+  currentUserRole,
   showSummary = true,
   open,
   onOpenChange,
@@ -401,6 +406,22 @@ function useEditAppointmentSectionContentContent({
       scheduleWarningLabels,
     ],
   );
+  const ownerOptions = useMemo(() => {
+    const filtered = filterAppointmentOwnerOptions(
+      staff,
+      currentUserRole,
+      currentUserId,
+    );
+    if (
+      !form.ownerUserId ||
+      filtered.some((member) => member.id === form.ownerUserId)
+    ) {
+      return filtered;
+    }
+
+    const currentOwner = staff.find((member) => member.id === form.ownerUserId);
+    return currentOwner ? [currentOwner, ...filtered] : filtered;
+  }, [currentUserId, currentUserRole, form.ownerUserId, staff]);
   const conflictQuery = useMemo(() => {
     if (!detail.patient_id || !form.date) return "";
     return buildConflictQuery(
@@ -1049,7 +1070,7 @@ function useEditAppointmentSectionContentContent({
               className={selectClassName}
             >
               <option value="">{t.common_not_set}</option>
-              {staff.map((member) => (
+              {ownerOptions.map((member) => (
                 <option key={member.id} value={member.id}>
                   {member.name} · {roleLabel(member.role)}
                 </option>

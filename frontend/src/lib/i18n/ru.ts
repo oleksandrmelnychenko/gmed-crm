@@ -36,6 +36,7 @@ export const ru = {
   nav_feedback: "Отзывы",
   nav_reports: "Отчеты",
   nav_learning: "SOP и обучение",
+  nav_interpreters: "Переводчики",
 
   login_title: "Вход в систему",
   login_email: "Электронная почта",

@@ -36,6 +36,7 @@ export const de = {
   nav_feedback: "Feedback",
   nav_reports: "Berichte",
   nav_learning: "SOP & Lernen",
+  nav_interpreters: "Dolmetscher",
 
   login_title: "Anmeldung",
   login_email: "E-Mail",

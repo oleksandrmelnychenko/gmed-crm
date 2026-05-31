@@ -6,6 +6,7 @@ use axum::{
     routing::get,
 };
 use serde::Deserialize;
+use serde_json::Value;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -17,6 +18,11 @@ use gmed_domain::role::Role;
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route("/interpreters", get(list_interpreter_profiles))
+        .route(
+            "/interpreters/{interpreter_id}/profile",
+            get(get_interpreter_profile).put(update_interpreter_profile),
+        )
         .route(
             "/appointments/{appointment_id}/interpreter-suggestions",
             get(get_interpreter_suggestions),
@@ -37,6 +43,132 @@ struct InterpreterLanguageInput {
     language_code: String,
     language_label: Option<String>,
     proficiency: Option<String>,
+}
+
+async fn list_interpreter_profiles(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::TeamleadInterpreter,
+        Role::ItAdmin,
+    ]) {
+        return resp;
+    }
+
+    match sqlx::query(
+        r#"SELECT u.id, u.name, u.email, u.role, u.is_active,
+                  COALESCE(p.profile, '{}'::jsonb) AS profile,
+                  p.updated_at AS profile_updated_at
+           FROM users u
+           LEFT JOIN interpreter_profiles p ON p.user_id = u.id
+           WHERE u.role IN ('interpreter', 'teamlead_interpreter')
+           ORDER BY u.is_active DESC, u.name"#,
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => Json(
+            rows.into_iter()
+                .map(interpreter_profile_row_json)
+                .collect::<Vec<_>>(),
+        )
+        .into_response(),
+        Err(error) => {
+            tracing::error!(error = %error, "list interpreter profiles");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load interpreter profiles",
+            )
+        }
+    }
+}
+
+async fn get_interpreter_profile(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(interpreter_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(resp) = ensure_interpreter_profile_access(&state, &auth, interpreter_id, false).await
+    {
+        return resp;
+    }
+
+    match sqlx::query(
+        r#"SELECT u.id, u.name, u.email, u.role, u.is_active,
+                  COALESCE(p.profile, '{}'::jsonb) AS profile,
+                  p.updated_at AS profile_updated_at
+           FROM users u
+           LEFT JOIN interpreter_profiles p ON p.user_id = u.id
+           WHERE u.id = $1
+             AND u.role IN ('interpreter', 'teamlead_interpreter')"#,
+    )
+    .bind(interpreter_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => Json(interpreter_profile_row_json(row)).into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Interpreter not found"),
+        Err(error) => {
+            tracing::error!(error = %error, interpreter_id = %interpreter_id, "get interpreter profile");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load interpreter profile",
+            )
+        }
+    }
+}
+
+async fn update_interpreter_profile(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(interpreter_id): Path<Uuid>,
+    Json(body): Json<Value>,
+) -> axum::response::Response {
+    if let Err(resp) = ensure_interpreter_profile_access(&state, &auth, interpreter_id, true).await
+    {
+        return resp;
+    }
+
+    let profile = match normalize_profile_payload(body) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+
+    match sqlx::query(
+        r#"INSERT INTO interpreter_profiles (user_id, profile, updated_by)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (user_id)
+           DO UPDATE SET profile = EXCLUDED.profile,
+                         updated_by = EXCLUDED.updated_by,
+                         updated_at = now()
+           RETURNING profile, updated_at"#,
+    )
+    .bind(interpreter_id)
+    .bind(profile)
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => Json(serde_json::json!({
+            "user_id": interpreter_id,
+            "profile": row.try_get::<Value, _>("profile").unwrap_or_else(|_| serde_json::json!({})),
+            "updated_at": row
+                .try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at")
+                .map(|value| value.to_rfc3339())
+                .unwrap_or_default(),
+        }))
+        .into_response(),
+        Err(error) => {
+            tracing::error!(error = %error, interpreter_id = %interpreter_id, "update interpreter profile");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to save interpreter profile",
+            )
+        }
+    }
 }
 
 async fn get_interpreter_suggestions(
@@ -251,6 +383,96 @@ async fn replace_interpreter_languages(
     }
 
     Json(serde_json::json!({"ok": true})).into_response()
+}
+
+async fn ensure_interpreter_profile_access(
+    state: &AppState,
+    auth: &AuthUser,
+    interpreter_id: Uuid,
+    write: bool,
+) -> Result<(), axum::response::Response> {
+    let allowed = if write {
+        matches!(
+            auth.role,
+            Role::Ceo | Role::PatientManager | Role::TeamleadInterpreter | Role::ItAdmin
+        )
+    } else {
+        matches!(
+            auth.role,
+            Role::Ceo
+                | Role::PatientManager
+                | Role::TeamleadInterpreter
+                | Role::ItAdmin
+                | Role::Interpreter
+        ) && (auth.role != Role::Interpreter || auth.user_id == interpreter_id)
+    };
+
+    if !allowed {
+        return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
+    }
+
+    let exists = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+                SELECT 1
+                FROM users
+                WHERE id = $1
+                  AND role IN ('interpreter', 'teamlead_interpreter')
+           )"#,
+    )
+    .bind(interpreter_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, interpreter_id = %interpreter_id, "validate interpreter profile access");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate interpreter",
+        )
+    })?;
+
+    if exists {
+        Ok(())
+    } else {
+        Err(err(StatusCode::NOT_FOUND, "Interpreter not found"))
+    }
+}
+
+fn interpreter_profile_row_json(row: sqlx::postgres::PgRow) -> Value {
+    serde_json::json!({
+        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+        "name": row.try_get::<String, _>("name").unwrap_or_default(),
+        "email": row.try_get::<String, _>("email").unwrap_or_default(),
+        "role": row.try_get::<String, _>("role").unwrap_or_default(),
+        "is_active": row.try_get::<bool, _>("is_active").unwrap_or(false),
+        "profile": row.try_get::<Value, _>("profile").unwrap_or_else(|_| serde_json::json!({})),
+        "profile_updated_at": row
+            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("profile_updated_at")
+            .unwrap_or_default()
+            .map(|value| value.to_rfc3339()),
+    })
+}
+
+#[allow(clippy::result_large_err)]
+fn normalize_profile_payload(body: Value) -> Result<Value, axum::response::Response> {
+    let profile = body.get("profile").cloned().unwrap_or(body);
+    if !profile.is_object() {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Profile payload must be a JSON object",
+        ));
+    }
+
+    if serde_json::to_vec(&profile)
+        .map(|bytes| bytes.len() > 65_536)
+        .unwrap_or(true)
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Profile payload is too large",
+        ));
+    }
+
+    Ok(profile)
 }
 
 async fn ensure_patient_scope(

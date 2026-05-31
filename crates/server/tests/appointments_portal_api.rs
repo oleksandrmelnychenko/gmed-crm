@@ -275,12 +275,12 @@ async fn patient_can_create_appointment_request_and_pm_can_review_queue() {
 }
 
 #[tokio::test]
-async fn sales_billing_ceo_assistant_and_it_admin_cannot_open_appointments_workspace() {
+async fn sales_billing_and_ceo_assistant_cannot_open_appointments_workspace() {
     let Some((app, pool, _admin_id)) = test_context().await else {
         return;
     };
 
-    for role in ["sales", "billing", "ceo_assistant", "it_admin"] {
+    for role in ["sales", "billing", "ceo_assistant"] {
         let user_id = seed_user(&pool, &unique_tag(&format!("appointments-{role}")), role).await;
         let bearer = auth_header_for(user_id, role);
 
@@ -288,6 +288,125 @@ async fn sales_billing_ceo_assistant_and_it_admin_cannot_open_appointments_works
         assert_eq!(status, StatusCode::FORBIDDEN, "role {role} must be denied");
         assert_eq!(body["message"], "Insufficient permissions");
     }
+}
+
+#[tokio::test]
+async fn it_admin_can_open_metadata_and_create_self_owned_appointment() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("appointment-it-admin-self");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let it_admin_id = seed_user(&pool, &format!("{tag}-it"), "it_admin").await;
+    let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, patient_manager_id, admin_id).await;
+
+    let it_bearer = auth_header_for(it_admin_id, "it_admin");
+    let pm_bearer = auth_header_for(patient_manager_id, "patient_manager");
+
+    let (status, _) = json_request(&app, "GET", "/api/v1/appointments", &it_bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) =
+        json_request(&app, "GET", "/api/v1/appointments/meta/staff", &it_bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body.as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == it_admin_id.to_string() && item["role"] == "it_admin"),
+        "IT admin must see self in staff metadata"
+    );
+
+    let (status, _) = json_request(&app, "GET", "/api/v1/patients", &it_bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = json_request(&app, "GET", "/api/v1/providers", &it_bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) =
+        json_request(&app, "GET", "/api/v1/providers/taxonomy", &it_bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &it_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "owner_user_id": it_admin_id,
+            "appointment_type": "internal",
+            "title": "Admin maintenance slot",
+            "date": "2026-06-12",
+            "time_start": "10:00",
+            "time_end": "10:30"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body:?}");
+    assert_eq!(body["owner_user_id"], it_admin_id.to_string());
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &it_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "owner_user_id": patient_manager_id,
+            "appointment_type": "internal",
+            "title": "Invalid admin owner",
+            "date": "2026-06-12",
+            "time_start": "11:00",
+            "time_end": "11:30"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(
+        body["message"],
+        "IT admin can only assign appointment ownership to self"
+    );
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "provider_id": provider_id,
+            "owner_user_id": patient_manager_id,
+            "appointment_type": "medical",
+            "title": "PM-owned consultation",
+            "date": "2026-06-13",
+            "time_start": "10:00",
+            "time_end": "10:30"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body:?}");
+    let appointment_id = body["id"].as_str().unwrap().to_string();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/update"),
+        &it_bearer,
+        Some(json!({
+            "provider_id": provider_id,
+            "owner_user_id": patient_manager_id,
+            "appointment_type": "medical",
+            "title": "PM-owned consultation moved",
+            "date": "2026-06-13",
+            "time_start": "10:30",
+            "time_end": "11:00"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(body["owner_user_id"], patient_manager_id.to_string());
 }
 
 #[tokio::test]

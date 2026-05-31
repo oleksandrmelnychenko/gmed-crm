@@ -48,10 +48,12 @@ import {
 const ACTIVE_APPOINTMENT_STATUSES = new Set(["planned", "confirmed", "in_progress"]);
 import {
   blankAppointmentForm,
+  blankAppointmentFormForCurrentUser,
 } from "@/pages/appointments/model/form-factories";
 import {
   buildAppointmentsQuery,
 } from "@/pages/appointments/model/query-builders";
+import { isAppointmentTaskAssignableRole } from "@/pages/appointments/model/staff-roles";
 import { toCalendarEvent } from "@/pages/appointments/model/calendar-events";
 import { useAppointmentDetail } from "@/pages/appointments/data/use-appointment-detail";
 import { useAppointmentLinkedPatientAssignment } from "@/pages/appointments/data/use-appointment-linked-patient-assignment";
@@ -157,12 +159,6 @@ const DEFAULT_FILTERS: FiltersState = {
   dateFrom: "",
   dateTo: "",
 };
-const TASK_ASSIGNABLE_ROLES = new Set([
-  "patient_manager",
-  "teamlead_interpreter",
-  "interpreter",
-  "concierge",
-]);
 const EMPTY_DETAIL_DERIVED_STATE = {
   handoffStakeholders: [] as HandoffStakeholder[],
   openChecklistCount: 0,
@@ -619,7 +615,7 @@ function useStaffAppointmentsPageContent() {
                 : "all";
   const taskAssignableStaff = useMemo(
     () =>
-      staff.filter((member) => TASK_ASSIGNABLE_ROLES.has(member.role)),
+      staff.filter((member) => isAppointmentTaskAssignableRole(member.role)),
     [staff],
   );
   const billingStaff = useMemo(
@@ -1186,7 +1182,7 @@ function useStaffAppointmentsPageContent() {
     setFilters,
     openDetailWorkspace: openDetailWorkspaceFromRoute,
     onOpenCreateFromPatient: (patientId) => {
-      const next = blankAppointmentForm();
+      const next = blankAppointmentFormForCurrentUser(user?.id, user?.role);
       next.patientId = patientId;
       openCreateSeedSheet(next);
     },
@@ -1561,6 +1557,7 @@ function useStaffAppointmentsPageContent() {
             interpreters={interpreters}
             permissions={permissions}
             currentUserId={user?.id}
+            currentUserRole={user?.role}
             detailDefaultAssigneeId={detailDefaultAssigneeId}
             doctorFollowUpAssignees={doctorFollowUpAssignees}
             handoffStakeholders={handoffStakeholders}
@@ -1791,6 +1788,7 @@ function useStaffAppointmentsPageContent() {
         interpreters={interpreters}
         staff={staff}
         userId={user?.id}
+        userRole={user?.role}
         onOpenChange={handleCreateOpenChange}
         onCreated={({ id, notice }) => {
           reportAppointmentsNotice(notice);
@@ -1906,6 +1904,7 @@ function useStaffAppointmentsPageContent() {
           interpreters={interpreters}
           permissions={permissions}
           currentUserId={user?.id}
+          currentUserRole={user?.role}
           detailDefaultAssigneeId={detailDefaultAssigneeId}
           doctorFollowUpAssignees={doctorFollowUpAssignees}
           handoffStakeholders={handoffStakeholders}

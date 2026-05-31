@@ -43,6 +43,13 @@ function emitDateChange(
   onChange(event)
 }
 
+export function normalizeInputStep(
+  type: React.ComponentProps<"input">["type"],
+  step: React.ComponentProps<"input">["step"],
+) {
+  return type === "time" && step === undefined ? 60 : step
+}
+
 function getPickerControlStyle(className: string | undefined) {
   const isTall = hasClassToken(className, "h-10")
   const isShellHeight = hasClassToken(className, "h-9")
@@ -222,7 +229,7 @@ function Input({
       onBlur={onBlur}
       min={min}
       max={max}
-      step={type === "time" && step === undefined ? 60 : step}
+      step={normalizeInputStep(type, step)}
       {...props}
     />
   )

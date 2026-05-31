@@ -2,10 +2,12 @@ import * as React from "react"
 
 const DIRTY_DISMISS_REASONS = new Set([
   "outside-press",
+  "trigger-press",
   "escape-key",
   "focus-out",
   "close-watcher",
   "close-press",
+  "imperative-action",
 ])
 
 export const CONFIRMED_DISMISS_REASON = "confirmed-dismiss"

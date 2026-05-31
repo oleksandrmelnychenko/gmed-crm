@@ -337,6 +337,7 @@ async fn list_providers(
         Role::Concierge,
         Role::Billing,
         Role::Sales,
+        Role::ItAdmin,
     ]) {
         return e;
     }
@@ -834,6 +835,7 @@ async fn list_specializations(
         Role::Billing,
         Role::Sales,
         Role::Patient,
+        Role::ItAdmin,
     ]) {
         return e;
     }
@@ -856,6 +858,7 @@ async fn list_provider_taxonomy(
         Role::Billing,
         Role::Sales,
         Role::Patient,
+        Role::ItAdmin,
     ]) {
         return e;
     }

@@ -130,6 +130,30 @@ export function appointmentPermissions(
         canViewCommunications: true,
         canManageCommunications: true,
       };
+    case "it_admin":
+      return {
+        canViewPage: true,
+        canCreate: true,
+        canEditSchedule: true,
+        canManageStatus: false,
+        canAssignInterpreter: false,
+        canManageChecklist: false,
+        canViewReminders: false,
+        canManageReminders: false,
+        canRespondToAssignment: false,
+        canSubmitReport: false,
+        canViewReport: false,
+        canApproveReport: false,
+        canRejectReport: false,
+        canViewNotes: true,
+        canViewTasks: false,
+        canCreateTasks: false,
+        canViewConciergeServices: false,
+        canManageConciergeServices: false,
+        canManageConciergeBilling: false,
+        canViewCommunications: false,
+        canManageCommunications: false,
+      };
     default:
       return {
         canViewPage: false,

@@ -10,7 +10,7 @@ import type FullCalendar from "@fullcalendar/react";
 import type { DateClickArg } from "@fullcalendar/interaction";
 import type { DatesSetArg } from "@fullcalendar/core";
 
-import { blankAppointmentForm } from "@/pages/appointments/model/form-factories";
+import { blankAppointmentFormForCurrentUser } from "@/pages/appointments/model/form-factories";
 import { toDateInput, toTimeInput } from "@/pages/appointments/model/date-time";
 import type {
   AppointmentFormState,
@@ -240,7 +240,10 @@ export function useAppointmentSchedulerControls({
   const openCreateSheetFromDate = useCallback(
     (info?: DateClickArg) => {
       if (!canCreate) return;
-      const next = blankAppointmentForm();
+      const next = blankAppointmentFormForCurrentUser(
+        currentUserId,
+        currentUserRole,
+      );
       if (info) {
         next.date = toDateInput(info.date);
         if (!info.allDay) {
@@ -252,7 +255,7 @@ export function useAppointmentSchedulerControls({
       }
       onOpenCreateSeed(next);
     },
-    [canCreate, onOpenCreateSeed],
+    [canCreate, currentUserId, currentUserRole, onOpenCreateSeed],
   );
 
   useEffect(() => {
@@ -261,7 +264,9 @@ export function useAppointmentSchedulerControls({
     };
     const handleCreateRequest = () => {
       if (!canCreate) return;
-      onOpenCreateSeed(blankAppointmentForm());
+      onOpenCreateSeed(
+        blankAppointmentFormForCurrentUser(currentUserId, currentUserRole),
+      );
     };
 
     window.addEventListener(
@@ -283,7 +288,13 @@ export function useAppointmentSchedulerControls({
         handleCreateRequest as EventListener,
       );
     };
-  }, [canCreate, onOpenCreateSeed, onRefreshAppointments]);
+  }, [
+    canCreate,
+    currentUserId,
+    currentUserRole,
+    onOpenCreateSeed,
+    onRefreshAppointments,
+  ]);
 
   return {
     handleDatesSet,
