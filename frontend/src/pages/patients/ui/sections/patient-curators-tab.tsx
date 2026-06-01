@@ -8,11 +8,11 @@ import { TabsContent } from "@/components/ui/tabs";
 import {
   CountBadge,
   EmptyCell,
-  Section as FormSection,
 } from "@/components/ui-shell";
 import { cn } from "@/lib/utils";
 
 import type { PatientAssignment, StaffOption } from "../../model/list-model";
+import { FormSection } from "../shared/patient-form-primitives";
 
 type Localize = (key: string) => string;
 

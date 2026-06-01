@@ -4,13 +4,13 @@ import { TabsContent } from "@/components/ui/tabs";
 import {
   CountBadge,
   EmptyCell,
-  Section as FormSection,
   TabLoader,
   tokens,
 } from "@/components/ui-shell";
 import { cn } from "@/lib/utils";
 
 import type { ContractItem } from "../../model/detail-tab-types";
+import { FormSection } from "../shared/patient-form-primitives";
 import { WorkspaceSectionIntro } from "../shared/workspace-primitives";
 
 type LocalizeFn = (key: string) => string;

@@ -20,7 +20,6 @@ import {
   CountBadge,
   EmptyCell,
   Field,
-  Section as FormSection,
   TabLoader,
   inputClass as formInputClassName,
 } from "@/components/ui-shell";
@@ -32,6 +31,7 @@ import type {
   WorkflowChecklistResponse,
 } from "../../model/detail-tab-types";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
+import { FormSection } from "../shared/patient-form-primitives";
 import { WorkspaceSectionIntro } from "../shared/workspace-primitives";
 
 type LocalizeFn = (key: string) => string;

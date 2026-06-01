@@ -5,11 +5,11 @@ import { Button } from "@/components/ui/button";
 import { TabsContent } from "@/components/ui/tabs";
 import {
   EmptyCell,
-  Section as FormSection,
   TabLoader,
 } from "@/components/ui-shell";
 
 import type { RelationItem } from "../../model/detail-tab-types";
+import { FormSection } from "../shared/patient-form-primitives";
 
 type Localize = (key: string) => string;
 

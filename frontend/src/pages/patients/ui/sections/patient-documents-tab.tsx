@@ -7,7 +7,6 @@ import { TabsContent } from "@/components/ui/tabs";
 import {
   CountBadge,
   EmptyCell,
-  Section as FormSection,
   TabLoader,
   inputClass as formInputClassName,
   tokens,
@@ -20,6 +19,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import type { DocumentAlerts, DocumentItem } from "../../model/detail-tab-types";
+import { FormSection } from "../shared/patient-form-primitives";
 import { WorkspaceSectionIntro } from "../shared/workspace-primitives";
 
 type LocalizeFn = (key: string) => string;

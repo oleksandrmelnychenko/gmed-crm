@@ -9,7 +9,6 @@ import { TabsContent } from "@/components/ui/tabs";
 import {
   CountBadge,
   EmptyCell,
-  Section as FormSection,
   TabLoader,
   inputClass as formInputClassName,
 } from "@/components/ui-shell";
@@ -26,6 +25,7 @@ import {
   type PatientTimelineItem,
   type PatientTimelineRangeFilter,
 } from "../../model/detail-model";
+import { FormSection } from "../shared/patient-form-primitives";
 import { WorkspaceSectionIntro } from "../shared/workspace-primitives";
 
 type LocalizeFn = (key: string) => string;

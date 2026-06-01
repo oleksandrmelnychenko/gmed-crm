@@ -3,12 +3,12 @@ import { TabsContent } from "@/components/ui/tabs";
 import {
   CountBadge,
   EmptyCell,
-  Section as FormSection,
   TabLoader,
 } from "@/components/ui-shell";
 import { cn } from "@/lib/utils";
 
 import type { CaseItem } from "../../model/detail-tab-types";
+import { FormSection } from "../shared/patient-form-primitives";
 
 type PatientCasesDictionary = {
   cases_title: string;

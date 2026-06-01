@@ -32,7 +32,6 @@ import {
   CountBadge,
   EmptyCell,
   Field,
-  Section as FormSection,
   TabLoader,
   inputClass,
   selectClass,
@@ -54,6 +53,7 @@ import type {
   OrderItem,
 } from "../../model/detail-tab-types";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
+import { FormSection } from "../shared/patient-form-primitives";
 import { WorkspaceSectionIntro } from "../shared/workspace-primitives";
 import {
   patientInvoiceLedgerCategoryLabel,

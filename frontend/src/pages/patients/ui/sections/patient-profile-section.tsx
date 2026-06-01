@@ -17,7 +17,6 @@ import { Button } from "@/components/ui/button";
 import {
   CountBadge,
   EmptyCell,
-  Section as FormSection,
 } from "@/components/ui-shell";
 import type { Translations } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -31,7 +30,7 @@ import type {
   PatientVitalMeasurement,
 } from "../../model/detail-resource-types";
 import { LegalStatusPill } from "../shared/legal-status-pill";
-import { humanizeFunctionalLabel } from "../shared/patient-form-primitives";
+import { FormSection, humanizeFunctionalLabel } from "../shared/patient-form-primitives";
 
 const loadPatientLegalPreviewSheets = () => import("../sheets/patient-legal-preview-sheets");
 const loadPatientLegalStatusSheet = () => import("../sheets/patient-legal-status-sheet");
