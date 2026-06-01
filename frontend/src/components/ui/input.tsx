@@ -2,6 +2,7 @@ import * as React from "react"
 import { Input as InputPrimitive } from "@base-ui/react/input"
 import { DatePicker } from "@mui/x-date-pickers/DatePicker"
 import { DateTimePicker } from "@mui/x-date-pickers/DateTimePicker"
+import { TimePicker } from "@mui/x-date-pickers/TimePicker"
 import dayjs from "dayjs"
 
 import { cn } from "@/lib/utils"
@@ -9,6 +10,7 @@ import { cn } from "@/lib/utils"
 const DATE_FORMAT = "YYYY-MM-DD"
 const DATETIME_LOCAL_FORMAT = "YYYY-MM-DD HH:mm"
 const DATETIME_LOCAL_VALUE_FORMAT = "YYYY-MM-DDTHH:mm"
+const TIME_FORMAT = "HH:mm"
 
 function hasClassToken(className: string | undefined, token: string) {
   if (!className) {
@@ -23,6 +25,18 @@ function parseDateValue(value: string | number | readonly string[] | undefined) 
   }
   const parsed = dayjs(value)
   return parsed.isValid() ? parsed : null
+}
+
+function parseTimeValue(value: string | number | readonly string[] | undefined) {
+  if (typeof value !== "string" || value.length === 0) {
+    return null
+  }
+  const match = value.match(/^(\d{1,2}):(\d{1,2})$/)
+  if (!match) return null
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null
+  return dayjs().hour(hour).minute(minute).second(0).millisecond(0)
 }
 
 function emitDateChange(
@@ -48,6 +62,17 @@ export function normalizeInputStep(
   step: React.ComponentProps<"input">["step"],
 ) {
   return type === "time" && step === undefined ? 60 : step
+}
+
+export function timePickerMinutesStep(step: React.ComponentProps<"input">["step"]) {
+  if (step === undefined || step === "any") {
+    return 1
+  }
+  const seconds = typeof step === "number" ? step : Number(step)
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return 1
+  }
+  return Math.max(1, Math.round(seconds / 60))
 }
 
 function getPickerControlStyle(className: string | undefined) {
@@ -89,7 +114,7 @@ function Input({
   step,
   ...props
 }: React.ComponentProps<"input">) {
-  if (type === "date" || type === "datetime-local") {
+  if (type === "date" || type === "datetime-local" || type === "time") {
     const {
       controlHeight,
       controlRadius,
@@ -190,6 +215,32 @@ function Input({
           readOnly={props.readOnly}
           format={DATETIME_LOCAL_FORMAT}
           ampm={false}
+          slotProps={{
+            textField: sharedTextFieldProps,
+          }}
+        />
+      )
+    }
+
+    if (type === "time") {
+      return (
+        <TimePicker
+          value={parseTimeValue(value)}
+          onChange={(nextDate, context) => {
+            if (context.validationError) {
+              return
+            }
+            const formatted = nextDate && nextDate.isValid() ? nextDate.format(TIME_FORMAT) : ""
+            emitDateChange(onChange, formatted, id, name)
+          }}
+          minTime={typeof min === "string" && min ? parseTimeValue(min) ?? undefined : undefined}
+          maxTime={typeof max === "string" && max ? parseTimeValue(max) ?? undefined : undefined}
+          disabled={disabled}
+          readOnly={props.readOnly}
+          format={TIME_FORMAT}
+          ampm={false}
+          minutesStep={timePickerMinutesStep(step)}
+          views={["hours", "minutes"]}
           slotProps={{
             textField: sharedTextFieldProps,
           }}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeInputStep } from "./input";
+import { normalizeInputStep, timePickerMinutesStep } from "./input";
 
 describe("Input", () => {
   it("uses one-minute steps for time inputs by default", () => {
@@ -10,5 +10,12 @@ describe("Input", () => {
   it("preserves explicit time steps and unrelated input types", () => {
     expect(normalizeInputStep("time", 900)).toBe(900);
     expect(normalizeInputStep("number", undefined)).toBeUndefined();
+  });
+
+  it("maps native time step seconds to picker minute steps", () => {
+    expect(timePickerMinutesStep(undefined)).toBe(1);
+    expect(timePickerMinutesStep(60)).toBe(1);
+    expect(timePickerMinutesStep(900)).toBe(15);
+    expect(timePickerMinutesStep("1800")).toBe(30);
   });
 });

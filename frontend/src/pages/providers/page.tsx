@@ -98,7 +98,6 @@ import {
   doctorListDisplayName,
   doctorRelationshipTypeLabel,
   doctorRoleLabel,
-  formatAvailabilityTimeDraft,
   formatWeeklyAvailabilityDisplay,
   formatWeeklyAvailabilityValue,
   humanizeCode,
@@ -185,7 +184,7 @@ const formSelectClassName = cn(
 );
 const availabilityTimeInputClassName = cn(
   shellInputClassName,
-  "h-9 min-w-0 px-2 text-sm tabular-nums"
+  "h-9 min-w-0 px-2 text-sm tabular-nums [color-scheme:light] [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70"
 );
 const providerDetailSectionClassName =
   "border-border/70 bg-card px-5 py-4 sm:px-6 sm:py-5";
@@ -932,21 +931,10 @@ function WeeklyAvailabilityEditor({
                     <label className="flex min-w-0 flex-col gap-0.5 text-[10px] font-medium uppercase leading-tight text-muted-foreground">
                       {fromLabel}
                       <Input
-                        type="text"
-                        inputMode="numeric"
-                        pattern="[0-9:]*"
-                        maxLength={5}
-                        placeholder="HH:MM"
-                        autoComplete="off"
-                        spellCheck={false}
+                        type="time"
                         value={interval.start}
                         onChange={(event) =>
-                          updateInterval(
-                            row.day,
-                            intervalIndex,
-                            "start",
-                            formatAvailabilityTimeDraft(event.target.value),
-                          )
+                          updateInterval(row.day, intervalIndex, "start", event.target.value)
                         }
                         onBlur={commitCurrentDraft}
                         className={availabilityTimeInputClassName}
@@ -957,21 +945,10 @@ function WeeklyAvailabilityEditor({
                     <label className="flex min-w-0 flex-col gap-0.5 text-[10px] font-medium uppercase leading-tight text-muted-foreground">
                       {toLabel}
                       <Input
-                        type="text"
-                        inputMode="numeric"
-                        pattern="[0-9:]*"
-                        maxLength={5}
-                        placeholder="HH:MM"
-                        autoComplete="off"
-                        spellCheck={false}
+                        type="time"
                         value={interval.end}
                         onChange={(event) =>
-                          updateInterval(
-                            row.day,
-                            intervalIndex,
-                            "end",
-                            formatAvailabilityTimeDraft(event.target.value),
-                          )
+                          updateInterval(row.day, intervalIndex, "end", event.target.value)
                         }
                         onBlur={commitCurrentDraft}
                         className={availabilityTimeInputClassName}

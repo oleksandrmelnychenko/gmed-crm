@@ -9,7 +9,6 @@ import {
   blankServiceForm,
   buildProvidersQuery,
   doctorListDisplayName,
-  formatAvailabilityTimeDraft,
   formatDoctorTitleValue,
   formatWeeklyAvailabilityDisplay,
   formatWeeklyAvailabilityValue,
@@ -263,6 +262,16 @@ describe("weekly availability helpers", () => {
     expect(formatWeeklyAvailabilityDisplay("Mo 18:00-00:00", "de")).toBe("Mo 18:00-00:00");
   });
 
+  it("pads incomplete minute input instead of falling back to a one-minute interval", () => {
+    expect(normalizeAvailabilityEditorIntervals([{ start: "9:0", end: "22:0" }])).toEqual([
+      { start: "09:00", end: "22:00" },
+    ]);
+    expect(normalizeAvailabilityEditorIntervals([{ start: "09:00", end: "22:0" }])).toEqual([
+      { start: "09:00", end: "22:00" },
+    ]);
+    expect(formatWeeklyAvailabilityDisplay("Mo 9:0-22:0", "de")).toBe("Mo 09:00-22:00");
+  });
+
   it("supports full-day availability expressed as 00:00-00:00", () => {
     expect(normalizeAvailabilityEditorIntervals([{ start: "00:00", end: "00:00" }])).toEqual([
       { start: "00:00", end: "00:00" },
@@ -271,11 +280,4 @@ describe("weekly availability helpers", () => {
     expect(availabilityMinEndForStart("23:59")).toBe("00:00");
   });
 
-  it("formats typed availability drafts without relying on native time inputs", () => {
-    expect(formatAvailabilityTimeDraft("0900")).toBe("09:00");
-    expect(formatAvailabilityTimeDraft("900")).toBe("09:00");
-    expect(formatAvailabilityTimeDraft("1830")).toBe("18:30");
-    expect(formatAvailabilityTimeDraft("9:00")).toBe("9:00");
-    expect(formatAvailabilityTimeDraft("00:00")).toBe("00:00");
-  });
 });

@@ -371,7 +371,7 @@ function weeklyDayRange(
 }
 
 function normalizeAvailabilityTime(value: string) {
-  const match = value.trim().match(/^(\d{1,2}):(\d{2})$/);
+  const match = value.trim().match(/^(\d{1,2}):(\d{1,2})$/);
   if (!match) return "";
   const hour = Number(match[1]);
   const minute = Number(match[2]);
@@ -385,7 +385,7 @@ export function availabilityTimeToMinutes(
   options: { midnightAsEndOfDay?: boolean } = {},
 ) {
   if (!value) return null;
-  const match = value.match(/^(\d{1,2}):(\d{2})$/);
+  const match = value.match(/^(\d{1,2}):(\d{1,2})$/);
   if (!match) return null;
   const hour = Number(match[1]);
   const minute = Number(match[2]);
@@ -403,23 +403,6 @@ export function availabilityMinutesToTime(value: number) {
   const hour = Math.floor(minutes / 60);
   const minute = minutes % 60;
   return `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
-}
-
-export function formatAvailabilityTimeDraft(value: string) {
-  const trimmed = value.trim();
-  if (trimmed.includes(":")) {
-    const [hourPart = "", minutePart = ""] = trimmed.split(":");
-    const hour = hourPart.replace(/\D/g, "").slice(0, 2);
-    const minute = minutePart.replace(/\D/g, "").slice(0, 2);
-    return `${hour}:${minute}`;
-  }
-
-  const digits = trimmed.replace(/\D/g, "").slice(0, 4);
-  if (digits.length <= 2) return digits;
-  if (digits.length === 3 && Number(digits.slice(0, 2)) > 23) {
-    return `${digits.slice(0, 1).padStart(2, "0")}:${digits.slice(1)}`;
-  }
-  return `${digits.slice(0, 2)}:${digits.slice(2)}`;
 }
 
 function availabilityClampMinutes(value: number, min: number, max: number) {
@@ -502,7 +485,7 @@ function normalizeAvailabilityIntervals(
 
 function parseAvailabilityIntervals(value: string) {
   const intervals: WeeklyAvailabilityInterval[] = [];
-  const matcher = /(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})/g;
+  const matcher = /(\d{1,2}:\d{1,2})\s*[-–]\s*(\d{1,2}:\d{1,2})/g;
   let match = matcher.exec(value);
   while (match) {
     intervals.push({
