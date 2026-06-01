@@ -57,6 +57,20 @@ fn unique_tag(prefix: &str) -> String {
     format!("{prefix}-{}", Uuid::new_v4().simple())
 }
 
+fn query_encode(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                encoded.push(byte as char)
+            }
+            b' ' => encoded.push('+'),
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
+}
+
 fn provider_payload(tag: &str, taxonomy_node_id: &str, internal_rating: i32) -> Value {
     json!({
         "name": format!("Taxonomy Clinic {tag}"),
@@ -447,6 +461,63 @@ async fn providers_universal_search_matches_taxonomy_attributes_and_ancestor_lab
         exact_provider_id,
         "universal search must match German ancestor taxonomy labels",
     );
+}
+
+#[tokio::test]
+async fn providers_universal_search_matches_german_food_terms_by_prefix_and_full_phrase() {
+    let Some((app, _pool, _admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("provider-german-food-search");
+    let restaurant_leaf_id = taxonomy_leaf_id(&app, &bearer, RESTAURANT_LEAF_CODE).await;
+    let cases = [
+        ("Frühstück", "Früh", "meal"),
+        ("Bayerische Küche", "Bayer", "cuisine"),
+        ("Steak House", "Steak", "cuisine"),
+        ("Fine dining", "Fine", "cuisine"),
+        ("Asiatische Küche", "Asiat", "cuisine"),
+    ];
+
+    for (full_term, prefix, attribute_key) in cases {
+        let provider_id = create_provider_with_payload(
+            &app,
+            &bearer,
+            json!({
+                "name": format!("Food Search {full_term} {tag}"),
+                "provider_type": "non_medical",
+                "address_city": "Munich",
+                "address_country": "Germany",
+                "taxonomy_node_id": restaurant_leaf_id.clone(),
+                "taxonomy_attributes": {
+                    attribute_key: full_term
+                },
+                "internal_rating": 4
+            }),
+        )
+        .await;
+
+        for query in [prefix, full_term] {
+            let (status, body) = json_request(
+                &app,
+                "GET",
+                &format!(
+                    "/api/v1/providers?provider_type=non_medical&search={}",
+                    query_encode(query)
+                ),
+                &bearer,
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            let items = body.as_array().expect("providers array");
+            assert_provider_present(
+                items,
+                provider_id,
+                &format!("universal search must match `{full_term}` when searching `{query}`"),
+            );
+        }
+    }
 }
 
 #[tokio::test]
