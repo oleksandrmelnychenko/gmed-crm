@@ -39,6 +39,7 @@ import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { DocumentsGrid } from "@/components/documents-grid";
 import { localizeDocumentCode } from "@/lib/required-document-labels";
+import { localizeTextBlock } from "@/pages/documents/model/text-block-labels";
 import {
   AdminSheetScaffold,
   SheetFormFooter,
@@ -811,7 +812,7 @@ function StaffDocumentsPage({
   routeMode = "documents",
 }: StaffDocumentsPageProps) {
   const { user } = useAuth();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const { staffGo } = useStaffNavigate();
   const l = (key: string) => t.uiText[key] ?? key;
   const [searchParams] = useSearchParams();
@@ -2904,11 +2905,12 @@ function StaffDocumentsPage({
                     const checked = generateForm.textBlockKeys.includes(
                       block.key,
                     );
+                    const blockText = localizeTextBlock(block.key, lang, block);
                     return (
                       <label
                         htmlFor={`template-block-${block.key}`}
                         key={block.key}
-                        aria-label={block.label}
+                        aria-label={blockText.label}
                         className="flex gap-3 rounded-lg border border-border/60 bg-card px-4 py-3 text-sm text-foreground"
                       >
                         <input
@@ -2929,10 +2931,10 @@ function StaffDocumentsPage({
                         />
                         <span>
                           <span className="block font-medium text-foreground">
-                            {block.label}
+                            {blockText.label}
                           </span>
                           <span className="mt-1 block text-xs text-muted-foreground">
-                            {block.description}
+                            {blockText.description}
                           </span>
                         </span>
                       </label>

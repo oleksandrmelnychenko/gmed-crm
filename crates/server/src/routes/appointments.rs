@@ -653,6 +653,7 @@ async fn create_my_appointment_request(
             &state,
             body.requested_provider_id,
             body.requested_doctor_id,
+            &body.appointment_type,
         )
         .await
     {
@@ -1133,7 +1134,8 @@ async fn convert_appointment_request(
         );
     }
     if let Err(resp) =
-        validate_provider_doctor_context(&state, body.provider_id, body.doctor_id).await
+        validate_provider_doctor_context(&state, body.provider_id, body.doctor_id, &request_type)
+            .await
     {
         return resp;
     }
@@ -2106,11 +2108,6 @@ async fn create_appointment(
         Ok(()) => {}
         Err(resp) => return resp,
     }
-    if let Err(resp) =
-        validate_provider_doctor_context(&state, body.provider_id, body.doctor_id).await
-    {
-        return resp;
-    }
     if let Some(interpreter_id) = body.interpreter_id {
         match load_active_interpreter_role(&state, interpreter_id).await {
             Ok(Some(_)) => {}
@@ -2171,6 +2168,19 @@ async fn create_appointment(
             StatusCode::FORBIDDEN,
             "Concierge can only create non-medical or internal appointments",
         );
+    }
+
+    // Provider/doctor validation runs after authorization and type/care-path checks
+    // so a 403 (role) or a type/care-path 422 is surfaced before provider-type details.
+    if let Err(resp) = validate_provider_doctor_context(
+        &state,
+        body.provider_id,
+        body.doctor_id,
+        &body.appointment_type,
+    )
+    .await
+    {
+        return resp;
     }
 
     let date = match chrono::NaiveDate::parse_from_str(&body.date, "%Y-%m-%d") {
@@ -3530,8 +3540,13 @@ async fn update_appointment(
         return err(StatusCode::UNPROCESSABLE_ENTITY, "title is required");
     }
 
-    if let Err(resp) =
-        validate_provider_doctor_context(&state, body.provider_id, body.doctor_id).await
+    if let Err(resp) = validate_provider_doctor_context(
+        &state,
+        body.provider_id,
+        body.doctor_id,
+        &appointment_type,
+    )
+    .await
     {
         return resp;
     }
@@ -7086,50 +7101,72 @@ async fn validate_provider_doctor_context(
     state: &AppState,
     provider_id: Option<Uuid>,
     doctor_id: Option<Uuid>,
+    appointment_type: &str,
 ) -> Result<(), axum::response::Response> {
-    match (provider_id, doctor_id) {
-        (None, Some(_)) => Err(err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "doctor_id requires provider_id",
-        )),
-        (Some(provider_id), Some(doctor_id)) => {
-            let row = sqlx::query("SELECT id FROM provider_doctors WHERE provider_id = $1 AND id = $2")
+    let Some(provider_id) = provider_id else {
+        // A doctor cannot be set without a provider.
+        return if doctor_id.is_some() {
+            Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "doctor_id requires provider_id",
+            ))
+        } else {
+            Ok(())
+        };
+    };
+
+    // Provider must exist, and for medical/non_medical appointments its type must
+    // match the appointment type (the frontend filters providers by type; this is
+    // the server-side backstop against a mismatched or stale provider_id).
+    let provider_row = sqlx::query("SELECT provider_type FROM providers WHERE id = $1")
+        .bind(provider_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, provider_id = %provider_id, "Failed to validate provider");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate provider",
+            )
+        })?;
+    let Some(provider_row) = provider_row else {
+        return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Provider not found"));
+    };
+    if matches!(appointment_type, "medical" | "non_medical") {
+        let provider_type = provider_row
+            .try_get::<String, _>("provider_type")
+            .unwrap_or_default();
+        if provider_type != appointment_type {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Provider type does not match appointment type",
+            ));
+        }
+    }
+
+    if let Some(doctor_id) = doctor_id {
+        let row =
+            sqlx::query("SELECT id FROM provider_doctors WHERE provider_id = $1 AND id = $2")
                 .bind(provider_id)
                 .bind(doctor_id)
                 .fetch_optional(&state.db)
                 .await
                 .map_err(|e| {
                     tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, "Failed to validate provider doctor");
-                    err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate provider doctor")
+                    err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to validate provider doctor",
+                    )
                 })?;
-
-            if row.is_some() {
-                Ok(())
-            } else {
-                Err(err(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "Doctor does not belong to provider",
-                ))
-            }
+        if row.is_none() {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Doctor does not belong to provider",
+            ));
         }
-        (Some(provider_id), None) => {
-            let row = sqlx::query("SELECT id FROM providers WHERE id = $1")
-                .bind(provider_id)
-                .fetch_optional(&state.db)
-                .await
-                .map_err(|e| {
-                    tracing::error!(error = %e, provider_id = %provider_id, "Failed to validate provider");
-                    err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate provider")
-                })?;
-
-            if row.is_some() {
-                Ok(())
-            } else {
-                Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Provider not found"))
-            }
-        }
-        (None, None) => Ok(()),
     }
+
+    Ok(())
 }
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {

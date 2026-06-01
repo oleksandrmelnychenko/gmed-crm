@@ -630,6 +630,7 @@ function providerMatchesTaxonomy(
   return new Set([
     provider.taxonomy_node_id ?? "",
     provider.taxonomy_node?.id ?? "",
+    ...(provider.taxonomy_filter_ids ?? []),
     ...(provider.taxonomy_node_ids ?? []),
     ...(provider.taxonomy_path ?? []).map((node) => node.id),
   ].filter(Boolean)).has(selected);

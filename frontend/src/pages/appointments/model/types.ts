@@ -262,6 +262,7 @@ export type ProviderSummary = {
     name_ru: string | null;
   }>;
   taxonomy_node_ids?: string[];
+  taxonomy_filter_ids?: string[];
 };
 
 export type DoctorOption = {

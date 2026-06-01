@@ -248,7 +248,9 @@ async fn non_medical_appointments_reject_non_regular_care_path_kind() {
 
     let tag = unique_tag("appointment-care-path-invalid");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let provider_id = seed_provider(&pool, &tag).await;
+    // Use a non_medical provider so the request reaches the care-path validation
+    // (a medical provider would now be rejected first by the provider-type check).
+    let provider_id = seed_provider_typed(&pool, &tag, "non_medical").await;
     let pm_id = seed_user(&pool, &tag, "patient_manager").await;
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
     let pm_bearer = auth_header_for(pm_id, "patient_manager");
@@ -328,4 +330,186 @@ async fn appointments_accept_ceo_as_owner() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["owner_user_id"], json!(ceo_id));
     assert_eq!(body["owner_role"], "ceo");
+}
+
+async fn seed_provider_typed(pool: &PgPool, tag: &str, provider_type: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO providers (name, provider_type, address_city, fachbereich, address_country)
+           VALUES ($1, $2, $3, 'General', 'Germany')
+           RETURNING id"#,
+    )
+    .bind(format!("Provider {tag}"))
+    .bind(provider_type)
+    .bind(format!("City {tag}"))
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn create_appointment_rejects_provider_type_mismatch() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("appt-provider-type");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let bearer = auth_header_for(admin_id, "ceo");
+
+    // A non_medical provider on a "medical" appointment must be rejected server-side
+    // (the frontend filters by type; this is the backstop against a stale provider_id).
+    let non_medical_provider = seed_provider_typed(&pool, &tag, "non_medical").await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "provider_id": non_medical_provider,
+            "owner_user_id": admin_id,
+            "appointment_type": "medical",
+            "care_path_kind": "regular",
+            "title": format!("Mismatch {tag}"),
+            "date": "2026-08-12",
+            "time_start": "08:30",
+            "time_end": "09:15"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(
+        body["message"], "Provider type does not match appointment type",
+        "{body}"
+    );
+
+    // A matching medical provider is accepted.
+    let medical_provider = seed_provider_typed(&pool, &format!("{tag}-med"), "medical").await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "provider_id": medical_provider,
+            "owner_user_id": admin_id,
+            "appointment_type": "medical",
+            "care_path_kind": "regular",
+            "title": format!("Match {tag}"),
+            "date": "2026-08-13",
+            "time_start": "08:30",
+            "time_end": "09:15"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    // The reverse mismatch (medical provider on a non_medical appointment) is also rejected.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "provider_id": medical_provider,
+            "owner_user_id": admin_id,
+            "appointment_type": "non_medical",
+            "title": format!("Reverse mismatch {tag}"),
+            "date": "2026-08-14",
+            "time_start": "08:30",
+            "time_end": "09:15"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(
+        body["message"], "Provider type does not match appointment type",
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn create_appointment_validates_doctor_provider_relationship() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("appt-doctor-provider");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_a = seed_provider(&pool, &tag).await;
+    let provider_b = seed_provider(&pool, &format!("{tag}-b")).await;
+    let doctor_a = seed_doctor(&pool, provider_a, &tag).await;
+    let bearer = auth_header_for(admin_id, "ceo");
+
+    // A doctor without a provider is rejected. Uses a non_medical appointment so the
+    // medical-requires-provider rule does not fire first — isolating the doctor rule.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "doctor_id": doctor_a,
+            "owner_user_id": admin_id,
+            "appointment_type": "non_medical",
+            "title": format!("Doctor without provider {tag}"),
+            "date": "2026-08-15",
+            "time_start": "08:30",
+            "time_end": "09:15"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["message"], "doctor_id requires provider_id", "{body}");
+
+    // A doctor that belongs to a different provider is rejected.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "provider_id": provider_b,
+            "doctor_id": doctor_a,
+            "owner_user_id": admin_id,
+            "appointment_type": "medical",
+            "care_path_kind": "regular",
+            "title": format!("Doctor wrong provider {tag}"),
+            "date": "2026-08-16",
+            "time_start": "08:30",
+            "time_end": "09:15"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(
+        body["message"], "Doctor does not belong to provider",
+        "{body}"
+    );
+
+    // A doctor with its correct provider is accepted.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "provider_id": provider_a,
+            "doctor_id": doctor_a,
+            "owner_user_id": admin_id,
+            "appointment_type": "medical",
+            "care_path_kind": "regular",
+            "title": format!("Doctor right provider {tag}"),
+            "date": "2026-08-17",
+            "time_start": "08:30",
+            "time_end": "09:15"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
 }

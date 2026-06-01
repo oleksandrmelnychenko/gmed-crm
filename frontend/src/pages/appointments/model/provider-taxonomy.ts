@@ -30,6 +30,8 @@ type ProviderTaxonomyCarrier = {
   taxonomy_node?: ProviderTaxonomyPathItem | null;
   taxonomy_path?: ProviderTaxonomyPathItem[];
   taxonomy_node_ids?: string[];
+  /** Assigned nodes + all their ancestors; used for parent-category filtering. */
+  taxonomy_filter_ids?: string[];
 };
 
 function taxonomyNodeLabel(
@@ -118,6 +120,7 @@ function providerKindMatchesAppointmentType(
 
 function providerTaxonomyIds(provider: ProviderTaxonomyCarrier) {
   return new Set([
+    ...(provider.taxonomy_filter_ids ?? []),
     ...(provider.taxonomy_node_ids ?? []),
     ...(provider.taxonomy_path ?? []).map((node) => node.id),
     provider.taxonomy_node?.id ?? "",

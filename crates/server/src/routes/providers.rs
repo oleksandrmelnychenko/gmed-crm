@@ -801,6 +801,7 @@ async fn list_providers(
             "taxonomy_node": taxonomy.get("taxonomy_node").cloned().unwrap_or(Value::Null),
             "taxonomy_path": taxonomy.get("taxonomy_path").cloned().unwrap_or_else(|| json!([])),
             "taxonomy_node_ids": taxonomy.get("taxonomy_node_ids").cloned().unwrap_or_else(|| json!([])),
+            "taxonomy_filter_ids": taxonomy.get("taxonomy_filter_ids").cloned().unwrap_or_else(|| json!([])),
             "taxonomy_attributes": row.try_get::<Value, _>("taxonomy_attributes").unwrap_or_else(|_| json!({})),
             "specializations": specializations,
             "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
@@ -1532,6 +1533,7 @@ async fn get_provider(
         "taxonomy_node": taxonomy.get("taxonomy_node").cloned().unwrap_or(Value::Null),
         "taxonomy_path": taxonomy.get("taxonomy_path").cloned().unwrap_or_else(|| json!([])),
         "taxonomy_node_ids": taxonomy.get("taxonomy_node_ids").cloned().unwrap_or_else(|| json!([])),
+        "taxonomy_filter_ids": taxonomy.get("taxonomy_filter_ids").cloned().unwrap_or_else(|| json!([])),
         "taxonomy_attributes": provider.try_get::<Value, _>("taxonomy_attributes").unwrap_or_else(|_| json!({})),
         "kooperationsvertrag": provider.try_get::<Option<Value>, _>("kooperationsvertrag").unwrap_or_default(),
         "internal_rating": internal_rating_json(provider.try_get::<Option<f64>, _>("internal_rating").unwrap_or_default()),
@@ -5050,11 +5052,45 @@ async fn load_provider_taxonomy_json(
         .filter_map(|row| row.try_get::<Uuid, _>("id").ok())
         .collect::<Vec<_>>();
 
+    // Filtering set = every directly-assigned node PLUS all of its ancestors, for
+    // ALL assignments (not just the primary). The frontend taxonomy filter matches
+    // a selected parent/category against this set, so providers reachable only via a
+    // non-primary assignment's ancestor are no longer dropped. Kept separate from
+    // `taxonomy_node_ids` (the directly-assigned set used for create/update round-trips).
+    let taxonomy_filter_ids = sqlx::query_scalar::<_, Uuid>(
+        r#"WITH RECURSIVE assigned AS (
+                SELECT taxonomy_node_id AS id
+                FROM provider_taxonomy_assignments
+                WHERE provider_id = $1
+            ),
+            chain AS (
+                SELECT node.id, node.parent_id
+                FROM provider_taxonomy_nodes node
+                JOIN assigned a ON a.id = node.id
+                UNION
+                SELECT parent.id, parent.parent_id
+                FROM provider_taxonomy_nodes parent
+                JOIN chain c ON c.parent_id = parent.id
+            )
+            SELECT DISTINCT id FROM chain"#,
+    )
+    .bind(provider_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, provider_id = %provider_id, "Failed to load provider taxonomy filter ids");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load provider taxonomy",
+        )
+    })?;
+
     Ok(json!({
         "taxonomy_node_id": primary_id,
         "taxonomy_node": primary_node,
         "taxonomy_path": taxonomy_path,
         "taxonomy_node_ids": taxonomy_node_ids,
+        "taxonomy_filter_ids": taxonomy_filter_ids,
         "taxonomy_nodes": nodes,
     }))
 }

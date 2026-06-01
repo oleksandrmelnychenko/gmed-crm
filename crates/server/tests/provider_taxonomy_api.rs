@@ -458,3 +458,95 @@ async fn provider_services_support_taxonomy_on_create_update_get_and_list() {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
 }
+
+#[tokio::test]
+async fn provider_taxonomy_filter_ids_include_ancestors_of_all_assignments() {
+    let Some((app, pool, _admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("filter-ids");
+    let clinic_leaf = taxonomy_leaf_id(&app, &bearer, CLINIC_LEAF_CODE).await;
+    let pharmacy_leaf = taxonomy_leaf_id(&app, &bearer, PHARMACY_LEAF_CODE).await;
+
+    // Provider assigned to two leaves under DIFFERENT parents; clinic is primary,
+    // pharmacy is a non-primary assignment.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/providers",
+        &bearer,
+        Some(json!({
+            "name": format!("Multi-assignment provider {tag}"),
+            "provider_type": "medical",
+            "address_city": "Berlin",
+            "address_country": "Germany",
+            "fachbereich": "General",
+            "taxonomy_node_ids": [clinic_leaf, pharmacy_leaf],
+            "primary_taxonomy_node_id": clinic_leaf,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let provider_id = body["id"].as_str().unwrap().to_string();
+
+    // Parent (category) of the NON-primary pharmacy leaf. Before the fix, taxonomy
+    // ancestors were emitted for the PRIMARY assignment only, so this id was missing
+    // and filtering by the pharmacy category dropped the provider from the list.
+    let pharmacy_parent: Uuid =
+        sqlx::query_scalar("SELECT parent_id FROM provider_taxonomy_nodes WHERE id = $1")
+            .bind(Uuid::parse_str(&pharmacy_leaf).unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{provider_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+
+    let filter_ids: Vec<String> = detail["taxonomy_filter_ids"]
+        .as_array()
+        .expect("taxonomy_filter_ids array")
+        .iter()
+        .filter_map(|value| value.as_str().map(str::to_string))
+        .collect();
+
+    assert!(
+        filter_ids.contains(&clinic_leaf),
+        "directly-assigned clinic leaf must be in taxonomy_filter_ids: {filter_ids:?}"
+    );
+    assert!(
+        filter_ids.contains(&pharmacy_leaf),
+        "directly-assigned pharmacy leaf must be in taxonomy_filter_ids: {filter_ids:?}"
+    );
+    assert!(
+        filter_ids.contains(&pharmacy_parent.to_string()),
+        "ancestor {pharmacy_parent} of the NON-primary pharmacy assignment must be in taxonomy_filter_ids: {filter_ids:?}"
+    );
+
+    // Invariant: the directly-assigned set (used for create/update round-trips) must
+    // stay exactly the two leaves — ancestors live only in taxonomy_filter_ids, so the
+    // provider edit form cannot accidentally persist ancestor categories as assignments.
+    let assigned_ids: Vec<String> = detail["taxonomy_node_ids"]
+        .as_array()
+        .expect("taxonomy_node_ids array")
+        .iter()
+        .filter_map(|value| value.as_str().map(str::to_string))
+        .collect();
+    assert_eq!(
+        assigned_ids.len(),
+        2,
+        "taxonomy_node_ids must contain only the two assigned leaves: {assigned_ids:?}"
+    );
+    assert!(assigned_ids.contains(&clinic_leaf) && assigned_ids.contains(&pharmacy_leaf));
+    assert!(
+        !assigned_ids.contains(&pharmacy_parent.to_string()),
+        "ancestors must NOT leak into taxonomy_node_ids: {assigned_ids:?}"
+    );
+}

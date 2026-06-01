@@ -175,3 +175,106 @@ describe("appointment provider taxonomy filters", () => {
     expect(providerTaxonomyCanCommitSelection(firstLevel[0], "any")).toBe(true);
   });
 });
+
+// Mirrors the REAL backend response shape (unlike the `provider()` helper above,
+// which idealizes taxonomy_node_ids to contain every ancestor): taxonomy_node_ids
+// holds ONLY directly-assigned leaf nodes, taxonomy_path holds ancestors of the
+// PRIMARY node only, and taxonomy_filter_ids holds every assigned node plus ALL of
+// their ancestors. This is the field that makes parent-category filtering correct
+// for non-primary assignments — without it, providers vanished from the dropdown.
+function backendProvider(
+  id: string,
+  providerType: string,
+  opts: {
+    primaryPath: ProviderSummary["taxonomy_path"];
+    assignedLeafIds: string[];
+    filterIds: string[];
+  },
+): ProviderSummary {
+  const primary = opts.primaryPath?.at(-1) ?? null;
+  return {
+    id,
+    name: id,
+    provider_type: providerType,
+    address_city: null,
+    fachbereich: null,
+    taxonomy_node_id: primary?.id ?? null,
+    taxonomy_node_code: primary?.code ?? null,
+    taxonomy_node_name_de: primary?.name_de ?? null,
+    taxonomy_node_name_ru: primary?.name_ru ?? null,
+    taxonomy_path: opts.primaryPath,
+    taxonomy_node_ids: opts.assignedLeafIds,
+    taxonomy_filter_ids: opts.filterIds,
+  };
+}
+
+describe("provider filtering with realistic backend taxonomy shape (BUG-1 regression)", () => {
+  // Assigned to two leaves under different parents: primary reha-leaf (under
+  // reha-group) and secondary ortho-leaf (under ortho-group).
+  const multiAssignmentProvider = backendProvider("multi", "medical", {
+    primaryPath: [
+      { id: "medical", code: "medical_providers", name_de: "Medizinisch", name_ru: "Medical" },
+      { id: "reha-group", code: "medical_reha_care", name_de: "Reha", name_ru: "Rehab" },
+      {
+        id: "reha-leaf",
+        code: "medical_reha_clinics",
+        name_de: "Reha Kliniken",
+        name_ru: "Rehab clinics",
+      },
+    ],
+    assignedLeafIds: ["reha-leaf", "ortho-leaf"],
+    filterIds: ["reha-leaf", "ortho-leaf", "reha-group", "ortho-group", "medical"],
+  });
+
+  it("matches a provider when filtering by a NON-primary assignment's parent category", () => {
+    // ortho-group is reachable only through taxonomy_filter_ids — the exact case
+    // that returned an empty provider list before the fix.
+    expect(
+      providerSelectionFitsAppointmentScope(
+        [multiAssignmentProvider],
+        "multi",
+        "medical",
+        "ortho-group",
+      ),
+    ).toBe(true);
+    expect(
+      filterProvidersForAppointmentScope(
+        [multiAssignmentProvider],
+        "medical",
+        "ortho-group",
+      ).map((p) => p.id),
+    ).toEqual(["multi"]);
+  });
+
+  it("still matches by the primary assignment's category", () => {
+    expect(
+      providerSelectionFitsAppointmentScope(
+        [multiAssignmentProvider],
+        "multi",
+        "medical",
+        "reha-group",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not match an unrelated category", () => {
+    expect(
+      providerSelectionFitsAppointmentScope(
+        [multiAssignmentProvider],
+        "multi",
+        "medical",
+        "pharmacy-group",
+      ),
+    ).toBe(false);
+  });
+
+  it("without taxonomy_filter_ids (legacy backend) the non-primary parent does not match — documents the original bug", () => {
+    const legacy: ProviderSummary = {
+      ...multiAssignmentProvider,
+      taxonomy_filter_ids: undefined,
+    };
+    expect(
+      providerSelectionFitsAppointmentScope([legacy], "multi", "medical", "ortho-group"),
+    ).toBe(false);
+  });
+});

@@ -12,6 +12,8 @@ type ProviderTaxonomyCarrier = {
   address_city?: string | null;
   taxonomy_node_id?: string | null;
   taxonomy_node_ids?: string[];
+  /** Assigned nodes + all their ancestors; used for parent-category filtering. */
+  taxonomy_filter_ids?: string[];
   taxonomy_node?: { id?: string | null } | null;
   taxonomy_path?: Array<{ id?: string | null }>;
 };
@@ -47,6 +49,7 @@ function providerMatchesTaxonomy(provider: ProviderTaxonomyCarrier, taxonomyNode
   return new Set([
     provider.taxonomy_node_id ?? "",
     provider.taxonomy_node?.id ?? "",
+    ...(provider.taxonomy_filter_ids ?? []),
     ...(provider.taxonomy_node_ids ?? []),
     ...(provider.taxonomy_path ?? []).map((node) => node.id ?? ""),
   ].filter(Boolean)).has(selected);
