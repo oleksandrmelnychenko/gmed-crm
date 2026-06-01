@@ -8,6 +8,7 @@ import {
   blankProviderForm,
   buildProvidersQuery,
   doctorListDisplayName,
+  formatAvailabilityTimeDraft,
   formatDoctorTitleValue,
   formatWeeklyAvailabilityDisplay,
   formatWeeklyAvailabilityValue,
@@ -244,5 +245,13 @@ describe("weekly availability helpers", () => {
     ]);
     expect(availabilityMaxStartForEnd("00:00")).toBe("23:59");
     expect(availabilityMinEndForStart("23:59")).toBe("00:00");
+  });
+
+  it("formats typed availability drafts without relying on native time inputs", () => {
+    expect(formatAvailabilityTimeDraft("0900")).toBe("09:00");
+    expect(formatAvailabilityTimeDraft("900")).toBe("09:00");
+    expect(formatAvailabilityTimeDraft("1830")).toBe("18:30");
+    expect(formatAvailabilityTimeDraft("9:00")).toBe("9:00");
+    expect(formatAvailabilityTimeDraft("00:00")).toBe("00:00");
   });
 });

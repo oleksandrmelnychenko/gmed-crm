@@ -405,6 +405,23 @@ export function availabilityMinutesToTime(value: number) {
   return `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
 }
 
+export function formatAvailabilityTimeDraft(value: string) {
+  const trimmed = value.trim();
+  if (trimmed.includes(":")) {
+    const [hourPart = "", minutePart = ""] = trimmed.split(":");
+    const hour = hourPart.replace(/\D/g, "").slice(0, 2);
+    const minute = minutePart.replace(/\D/g, "").slice(0, 2);
+    return `${hour}:${minute}`;
+  }
+
+  const digits = trimmed.replace(/\D/g, "").slice(0, 4);
+  if (digits.length <= 2) return digits;
+  if (digits.length === 3 && Number(digits.slice(0, 2)) > 23) {
+    return `${digits.slice(0, 1).padStart(2, "0")}:${digits.slice(1)}`;
+  }
+  return `${digits.slice(0, 2)}:${digits.slice(2)}`;
+}
+
 function availabilityClampMinutes(value: number, min: number, max: number) {
   if (max < min) return min;
   return Math.min(Math.max(value, min), max);

@@ -87,7 +87,6 @@ import { fetchProviderPeople, fetchProviderPeoplePatients } from "./data/provide
 import {
   DEFAULT_FILTERS,
   DOCTOR_TITLE_OPTIONS,
-  availabilityMaxStartForEnd,
   blankDoctorForm,
   blankProviderForm,
   blankServiceForm,
@@ -99,6 +98,7 @@ import {
   doctorListDisplayName,
   doctorRelationshipTypeLabel,
   doctorRoleLabel,
+  formatAvailabilityTimeDraft,
   formatWeeklyAvailabilityDisplay,
   formatWeeklyAvailabilityValue,
   humanizeCode,
@@ -183,7 +183,7 @@ const formSelectClassName = cn(
 );
 const availabilityTimeInputClassName = cn(
   shellInputClassName,
-  "h-9 min-w-0 px-2 text-sm tabular-nums [color-scheme:light] [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70"
+  "h-9 min-w-0 px-2 text-sm tabular-nums"
 );
 const providerDetailSectionClassName =
   "border-border/70 bg-card px-5 py-4 sm:px-6 sm:py-5";
@@ -734,9 +734,7 @@ function normalizeAvailabilityEditorSchedule(schedule: WeeklyAvailabilitySchedul
 function weeklyAvailabilityIntervalItems(row: WeeklyAvailabilityRow) {
   // Key by position within the day, never by the editable start/end value.
   // A value-derived key changes on every keystroke, which remounts the focused
-  // <input type="time"> mid-edit: it loses focus and (critically in Safari)
-  // churns the native time control hard enough to hang the WebContent process,
-  // triggering the "reloaded because a problem occurred" page reload.
+  // input mid-edit and can still upset Safari's editing state.
   return row.intervals.map((interval, intervalIndex) => ({
     interval,
     intervalIndex,
@@ -954,7 +952,6 @@ function WeeklyAvailabilityEditor({
           {row.enabled ? (
             <div className="flex min-w-0 flex-wrap items-end gap-2">
               {weeklyAvailabilityIntervalItems(row).map(({ interval, intervalIndex, key }) => {
-                const previousInterval = row.intervals[intervalIndex - 1];
                 return (
                   <div
                     key={key}
@@ -963,12 +960,21 @@ function WeeklyAvailabilityEditor({
                     <label className="flex min-w-0 flex-col gap-0.5 text-[10px] font-medium uppercase leading-tight text-muted-foreground">
                       {fromLabel}
                       <Input
-                        type="time"
-                        min={previousInterval?.end || undefined}
-                        max={availabilityMaxStartForEnd(interval.end)}
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9:]*"
+                        maxLength={5}
+                        placeholder="HH:MM"
+                        autoComplete="off"
+                        spellCheck={false}
                         value={interval.start}
                         onChange={(event) =>
-                          updateInterval(row.day, intervalIndex, "start", event.target.value)
+                          updateInterval(
+                            row.day,
+                            intervalIndex,
+                            "start",
+                            formatAvailabilityTimeDraft(event.target.value),
+                          )
                         }
                         onBlur={commitCurrentDraft}
                         className={availabilityTimeInputClassName}
@@ -979,10 +985,21 @@ function WeeklyAvailabilityEditor({
                     <label className="flex min-w-0 flex-col gap-0.5 text-[10px] font-medium uppercase leading-tight text-muted-foreground">
                       {toLabel}
                       <Input
-                        type="time"
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9:]*"
+                        maxLength={5}
+                        placeholder="HH:MM"
+                        autoComplete="off"
+                        spellCheck={false}
                         value={interval.end}
                         onChange={(event) =>
-                          updateInterval(row.day, intervalIndex, "end", event.target.value)
+                          updateInterval(
+                            row.day,
+                            intervalIndex,
+                            "end",
+                            formatAvailabilityTimeDraft(event.target.value),
+                          )
                         }
                         onBlur={commitCurrentDraft}
                         className={availabilityTimeInputClassName}
