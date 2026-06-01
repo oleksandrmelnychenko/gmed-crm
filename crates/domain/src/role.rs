@@ -27,7 +27,7 @@ impl Role {
             Role::Concierge => false,
             Role::Billing => false,
             Role::Sales => false,
-            Role::ItAdmin => false,
+            Role::ItAdmin => true,
             Role::Patient => false,
         }
     }
@@ -42,7 +42,7 @@ impl Role {
             Role::Concierge => false,
             Role::Billing => false,
             Role::Sales => false,
-            Role::ItAdmin => false,
+            Role::ItAdmin => true,
             Role::Patient => false,
         }
     }
@@ -57,7 +57,7 @@ impl Role {
             Role::Concierge => false,
             Role::Billing => true,
             Role::Sales => false,
-            Role::ItAdmin => false,
+            Role::ItAdmin => true,
             Role::Patient => false,
         }
     }
@@ -72,7 +72,7 @@ impl Role {
             Role::Concierge => false,
             Role::Billing => false,
             Role::Sales => false,
-            Role::ItAdmin => false,
+            Role::ItAdmin => true,
             Role::Patient => false,
         }
     }
@@ -104,12 +104,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_ceo_has_full_access() {
+    fn ceo_and_it_admin_have_full_access() {
         assert!(Role::Ceo.has_full_access());
+        assert!(Role::ItAdmin.has_full_access());
         assert!(!Role::CeoAssistant.has_full_access());
         assert!(!Role::PatientManager.has_full_access());
         assert!(!Role::Sales.has_full_access());
-        assert!(!Role::ItAdmin.has_full_access());
         assert!(!Role::Patient.has_full_access());
     }
 
@@ -121,11 +121,11 @@ mod tests {
         assert!(Role::PatientManager.can_see_medical_data());
         assert!(Role::TeamleadInterpreter.can_see_medical_data());
         assert!(Role::Interpreter.can_see_medical_data());
-        // Non-clinical roles cannot
+        // Non-clinical roles cannot, except IT admin as a full-access admin role.
         assert!(!Role::Concierge.can_see_medical_data());
         assert!(!Role::Billing.can_see_medical_data());
         assert!(!Role::Sales.can_see_medical_data());
-        assert!(!Role::ItAdmin.can_see_medical_data());
+        assert!(Role::ItAdmin.can_see_medical_data());
         assert!(!Role::Patient.can_see_medical_data());
     }
 
@@ -134,14 +134,16 @@ mod tests {
         assert!(Role::Ceo.can_see_financial_data());
         assert!(Role::Billing.can_see_financial_data());
         assert!(Role::PatientManager.can_see_financial_data());
+        assert!(Role::ItAdmin.can_see_financial_data());
         assert!(!Role::Sales.can_see_financial_data());
         assert!(!Role::Interpreter.can_see_financial_data());
         assert!(!Role::Patient.can_see_financial_data());
     }
 
     #[test]
-    fn patient_assignment_only_ceo() {
+    fn full_admins_can_assign_patients() {
         assert!(Role::Ceo.can_assign_patients());
+        assert!(Role::ItAdmin.can_assign_patients());
         assert!(!Role::PatientManager.can_assign_patients());
         assert!(!Role::Sales.can_assign_patients());
     }
@@ -214,15 +216,16 @@ mod tests {
             let full = role.has_full_access();
             let assign = role.can_assign_patients();
 
-            assert_eq!(full, role == Role::Ceo);
-            assert_eq!(assign, role == Role::Ceo);
+            assert_eq!(full, matches!(role, Role::Ceo | Role::ItAdmin));
+            assert_eq!(assign, matches!(role, Role::Ceo | Role::ItAdmin));
 
             match role {
-                Role::Concierge | Role::Billing | Role::Sales | Role::ItAdmin => {
+                Role::Concierge | Role::Billing | Role::Sales => {
                     assert!(!medical, "{role:?} must not see medical per matrix");
                 }
                 Role::Patient => assert!(!medical),
                 Role::Ceo
+                | Role::ItAdmin
                 | Role::CeoAssistant
                 | Role::PatientManager
                 | Role::TeamleadInterpreter
@@ -230,7 +233,11 @@ mod tests {
             }
 
             match role {
-                Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing => {
+                Role::Ceo
+                | Role::ItAdmin
+                | Role::CeoAssistant
+                | Role::PatientManager
+                | Role::Billing => {
                     assert!(financial, "{role:?} expects financial visibility");
                 }
                 _ => assert!(

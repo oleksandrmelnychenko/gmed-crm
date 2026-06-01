@@ -42,8 +42,8 @@ pub fn check_access(ctx: &AccessContext) -> AccessDecision {
         share_status,
     } = ctx;
 
-    if *role == Role::Ceo {
-        return AccessDecision::allow("CEO has full access");
+    if matches!(role, Role::Ceo | Role::ItAdmin) {
+        return AccessDecision::allow("Admin role has full access");
     }
 
     let requires_assignment = match role {
@@ -122,14 +122,7 @@ pub fn check_access(ctx: &AccessContext) -> AccessDecision {
             DataSensitivity::Service => false,
         },
 
-        Role::ItAdmin => match data_sensitivity {
-            DataSensitivity::General => true,
-            DataSensitivity::PatientIdentity => false,
-            DataSensitivity::Medical => false,
-            DataSensitivity::Financial => false,
-            DataSensitivity::Internal => false,
-            DataSensitivity::Service => false,
-        },
+        Role::ItAdmin => true,
 
         Role::Patient => true,
     };
@@ -205,7 +198,7 @@ pub fn check_access(ctx: &AccessContext) -> AccessDecision {
         Role::Concierge => AccessDecision::allow("Access granted by role and sensitivity"),
         Role::Billing => AccessDecision::allow("Access granted by role and sensitivity"),
         Role::Sales => AccessDecision::allow("Access granted by role and sensitivity"),
-        Role::ItAdmin => AccessDecision::allow("Access granted by role and sensitivity"),
+        Role::ItAdmin => AccessDecision::allow("IT admin has full access"),
     }
 }
 
@@ -270,6 +263,12 @@ mod tests {
     #[test]
     fn ceo_has_full_access() {
         let c = ctx(Role::Ceo, false, DataSensitivity::Medical, None);
+        assert!(check_access(&c).allowed);
+    }
+
+    #[test]
+    fn it_admin_has_full_access() {
+        let c = ctx(Role::ItAdmin, false, DataSensitivity::Medical, None);
         assert!(check_access(&c).allowed);
     }
 
@@ -616,14 +615,13 @@ mod tests {
     }
 
     #[test]
-    fn rbac_matrix_it_admin_only_general() {
+    fn rbac_matrix_it_admin_full_access() {
         for assigned in [false, true] {
             for sens in ALL_SENSITIVITIES {
                 for share in ALL_SHARES {
                     let got = check_access(&ctx(Role::ItAdmin, assigned, sens, share)).allowed;
-                    let exp = sens == DataSensitivity::General;
-                    assert_eq!(
-                        got, exp,
+                    assert!(
+                        got,
                         "it_admin assigned={assigned} sens={sens:?} share={share:?}"
                     );
                 }

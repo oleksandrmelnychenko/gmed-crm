@@ -291,7 +291,7 @@ async fn sales_billing_and_ceo_assistant_cannot_open_appointments_workspace() {
 }
 
 #[tokio::test]
-async fn it_admin_can_open_metadata_and_create_self_owned_appointment() {
+async fn it_admin_can_open_metadata_and_create_any_staff_owned_appointment() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
     };
@@ -362,18 +362,15 @@ async fn it_admin_can_open_metadata_and_create_self_owned_appointment() {
             "patient_id": patient_id,
             "owner_user_id": patient_manager_id,
             "appointment_type": "internal",
-            "title": "Invalid admin owner",
+            "title": "Admin delegated owner",
             "date": "2026-06-12",
             "time_start": "11:00",
             "time_end": "11:30"
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_eq!(
-        body["message"],
-        "IT admin can only assign appointment ownership to self"
-    );
+    assert_eq!(status, StatusCode::CREATED, "{body:?}");
+    assert_eq!(body["owner_user_id"], patient_manager_id.to_string());
 
     let (status, body) = json_request(
         &app,

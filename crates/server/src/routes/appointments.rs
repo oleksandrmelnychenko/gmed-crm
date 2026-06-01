@@ -6611,17 +6611,7 @@ fn validate_owner_assignment_rules(
     owner_role: &str,
 ) -> Result<(), axum::response::Response> {
     match auth.role {
-        Role::Ceo | Role::PatientManager => Ok(()),
-        Role::ItAdmin => {
-            if owner_user_id == auth.user_id && owner_role == "it_admin" {
-                Ok(())
-            } else {
-                Err(err(
-                    StatusCode::FORBIDDEN,
-                    "IT admin can only assign appointment ownership to self",
-                ))
-            }
-        }
+        Role::Ceo | Role::PatientManager | Role::ItAdmin => Ok(()),
         Role::TeamleadInterpreter => {
             if owner_user_id == auth.user_id
                 || matches!(owner_role, "interpreter" | "teamlead_interpreter")

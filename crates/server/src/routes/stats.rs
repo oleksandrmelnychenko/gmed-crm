@@ -442,41 +442,52 @@ async fn reports_workspace(
         Role::PatientManager,
         Role::Billing,
         Role::Sales,
+        Role::ItAdmin,
     ]) {
         return resp;
     }
 
     let role = auth.role;
-    let include_clinics = matches!(
-        role,
-        Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
-    );
-    let include_countries = matches!(
-        role,
-        Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Sales
-    );
-    let include_service_types = matches!(
-        role,
-        Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing | Role::Sales
-    );
-    let include_medical_providers = matches!(
-        role,
-        Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing | Role::Sales
-    );
-    let include_provider_costs = matches!(
-        role,
-        Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
-    );
-    let include_billing_kpis = matches!(role, Role::Ceo | Role::CeoAssistant | Role::Billing);
-    let include_doctors = matches!(
-        role,
-        Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
-    );
-    let include_non_medical_providers = matches!(
-        role,
-        Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing | Role::Sales
-    );
-    let include_sales_kpis = matches!(role, Role::Ceo | Role::CeoAssistant | Role::Sales);
+    let full_access = role.has_full_access();
+    let include_clinics = full_access
+        || matches!(
+            role,
+            Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
+        );
+    let include_countries = full_access
+        || matches!(
+            role,
+            Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Sales
+        );
+    let include_service_types = full_access
+        || matches!(
+            role,
+            Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing | Role::Sales
+        );
+    let include_medical_providers = full_access
+        || matches!(
+            role,
+            Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing | Role::Sales
+        );
+    let include_provider_costs = full_access
+        || matches!(
+            role,
+            Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
+        );
+    let include_billing_kpis =
+        full_access || matches!(role, Role::Ceo | Role::CeoAssistant | Role::Billing);
+    let include_doctors = full_access
+        || matches!(
+            role,
+            Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
+        );
+    let include_non_medical_providers = full_access
+        || matches!(
+            role,
+            Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing | Role::Sales
+        );
+    let include_sales_kpis =
+        full_access || matches!(role, Role::Ceo | Role::CeoAssistant | Role::Sales);
     let can_see_financial = role.can_see_financial_data();
     let taxonomy_filter = ReportTaxonomyFilter::new(query.taxonomy_node_id, query.taxonomy_code);
 
@@ -675,6 +686,7 @@ async fn reports_export(
         Role::PatientManager,
         Role::Billing,
         Role::Sales,
+        Role::ItAdmin,
     ]) {
         return resp;
     }
@@ -686,15 +698,17 @@ async fn reports_export(
         .trim()
         .to_lowercase();
     let role = auth.role;
+    let full_access = role.has_full_access();
     let can_see_financial = role.can_see_financial_data();
     let taxonomy_filter = ReportTaxonomyFilter::new(query.taxonomy_node_id, query.taxonomy_code);
 
     let (filename, csv_result) = match section.as_str() {
         "clinics"
-            if matches!(
-                role,
-                Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
-            ) =>
+            if full_access
+                || matches!(
+                    role,
+                    Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
+                ) =>
         {
             (
                 "clinic-report.csv",
@@ -704,10 +718,11 @@ async fn reports_export(
             )
         }
         "countries"
-            if matches!(
-                role,
-                Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Sales
-            ) =>
+            if full_access
+                || matches!(
+                    role,
+                    Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Sales
+                ) =>
         {
             (
                 "country-report.csv",
@@ -717,10 +732,15 @@ async fn reports_export(
             )
         }
         "service_types"
-            if matches!(
-                role,
-                Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing | Role::Sales
-            ) =>
+            if full_access
+                || matches!(
+                    role,
+                    Role::Ceo
+                        | Role::CeoAssistant
+                        | Role::PatientManager
+                        | Role::Billing
+                        | Role::Sales
+                ) =>
         {
             (
                 "service-type-report.csv",
@@ -730,10 +750,15 @@ async fn reports_export(
             )
         }
         "medical_providers"
-            if matches!(
-                role,
-                Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing | Role::Sales
-            ) =>
+            if full_access
+                || matches!(
+                    role,
+                    Role::Ceo
+                        | Role::CeoAssistant
+                        | Role::PatientManager
+                        | Role::Billing
+                        | Role::Sales
+                ) =>
         {
             (
                 "medical-provider-report.csv",
@@ -743,10 +768,11 @@ async fn reports_export(
             )
         }
         "provider_costs"
-            if matches!(
-                role,
-                Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
-            ) =>
+            if full_access
+                || matches!(
+                    role,
+                    Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
+                ) =>
         {
             (
                 "provider-cost-report.csv",
@@ -756,10 +782,11 @@ async fn reports_export(
             )
         }
         "doctors"
-            if matches!(
-                role,
-                Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
-            ) =>
+            if full_access
+                || matches!(
+                    role,
+                    Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
+                ) =>
         {
             (
                 "doctor-report.csv",
@@ -774,10 +801,15 @@ async fn reports_export(
             )
         }
         "non_medical_providers"
-            if matches!(
-                role,
-                Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing | Role::Sales
-            ) =>
+            if full_access
+                || matches!(
+                    role,
+                    Role::Ceo
+                        | Role::CeoAssistant
+                        | Role::PatientManager
+                        | Role::Billing
+                        | Role::Sales
+                ) =>
         {
             (
                 "non-medical-provider-report.csv",

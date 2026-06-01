@@ -1129,6 +1129,7 @@ async fn get_patient(
         Role::TeamleadInterpreter,
         Role::Interpreter,
         Role::Concierge,
+        Role::ItAdmin,
     ])?;
 
     match sqlx::query(
@@ -5831,7 +5832,7 @@ async fn has_patient_access(
     auth: &AuthUser,
     patient_id: Uuid,
 ) -> Result<bool, axum::response::Response> {
-    if auth.role == Role::Ceo {
+    if auth.role.has_full_access() {
         return Ok(true);
     }
 
@@ -5851,7 +5852,7 @@ async fn load_patient_field_policies(
     state: &AppState,
     auth: &AuthUser,
 ) -> Result<HashMap<String, FieldPolicy>, axum::response::Response> {
-    if matches!(auth.role, Role::Ceo | Role::PatientManager) {
+    if auth.role.has_full_access() || auth.role == Role::PatientManager {
         return Ok(HashMap::new());
     }
 
@@ -6047,7 +6048,7 @@ fn build_patient_detail_json(
             Value::String(patient.updated_at.to_rfc3339()),
         );
 
-        if matches!(auth.role, Role::Ceo | Role::PatientManager) {
+        if auth.role.has_full_access() || auth.role == Role::PatientManager {
             insert_optional_string(map, "address_street", patient.address_street);
             insert_optional_string(map, "address_city", patient.address_city);
             insert_optional_string(map, "address_zip", patient.address_zip);
@@ -6111,7 +6112,7 @@ fn insert_name_fields(
     first_name: String,
     last_name: String,
 ) {
-    match field_access(policies, "name", auth.role == Role::Ceo) {
+    match field_access(policies, "name", auth.role.has_full_access()) {
         Some(FieldAccess::Visible) => {
             insert_optional_string(data, "title", title);
             data.insert("first_name".to_string(), Value::String(first_name));
@@ -6138,7 +6139,7 @@ fn insert_birth_date(
     policies: &HashMap<String, FieldPolicy>,
     birth_date: chrono::NaiveDate,
 ) {
-    match field_access(policies, "birth_date", auth.role == Role::Ceo) {
+    match field_access(policies, "birth_date", auth.role.has_full_access()) {
         Some(FieldAccess::Visible) => {
             data.insert(
                 "birth_date".to_string(),
@@ -6160,7 +6161,7 @@ fn insert_phone_fields(
     phone_primary: Option<String>,
     phone_secondary: Option<String>,
 ) {
-    match field_access(policies, "phone", auth.role == Role::Ceo) {
+    match field_access(policies, "phone", auth.role.has_full_access()) {
         Some(FieldAccess::Visible) => {
             insert_optional_string(data, "phone_primary", phone_primary);
             insert_optional_string(data, "phone_secondary", phone_secondary);
@@ -6189,7 +6190,7 @@ fn insert_email_field(
     policies: &HashMap<String, FieldPolicy>,
     email: Option<String>,
 ) {
-    match field_access(policies, "email", auth.role == Role::Ceo) {
+    match field_access(policies, "email", auth.role.has_full_access()) {
         Some(FieldAccess::Visible) => insert_optional_string(data, "email", email),
         Some(FieldAccess::Masked) => {
             if let Some(value) = email {
@@ -6216,7 +6217,7 @@ fn insert_patient_contacts_field(
         } else {
             "phone"
         };
-        let Some(access) = field_access(policies, field_name, auth.role == Role::Ceo) else {
+        let Some(access) = field_access(policies, field_name, auth.role.has_full_access()) else {
             continue;
         };
         let value = match access {
@@ -6249,7 +6250,7 @@ fn insert_nationality_fields(
     nationality: Option<String>,
     residence_country: Option<String>,
 ) {
-    match field_access(policies, "nationality", auth.role == Role::Ceo) {
+    match field_access(policies, "nationality", auth.role.has_full_access()) {
         Some(FieldAccess::Visible) | Some(FieldAccess::Masked) => {
             insert_optional_string(data, "nationality", nationality);
             insert_optional_string(data, "residence_country", residence_country);
@@ -6264,7 +6265,7 @@ fn insert_languages_field(
     policies: &HashMap<String, FieldPolicy>,
     languages: Vec<String>,
 ) {
-    match field_access(policies, "languages", auth.role == Role::Ceo) {
+    match field_access(policies, "languages", auth.role.has_full_access()) {
         Some(FieldAccess::Visible) | Some(FieldAccess::Masked) => {
             data.insert(
                 "languages".to_string(),
@@ -6281,7 +6282,7 @@ fn insert_functional_labels_field(
     policies: &HashMap<String, FieldPolicy>,
     functional_labels: Vec<String>,
 ) {
-    match field_access(policies, "functional_labels", auth.role == Role::Ceo) {
+    match field_access(policies, "functional_labels", auth.role.has_full_access()) {
         Some(FieldAccess::Visible) | Some(FieldAccess::Masked) => {
             data.insert(
                 "functional_labels".to_string(),
@@ -6300,7 +6301,7 @@ fn insert_insurance_fields(
     insurance_number: Option<String>,
     insurance_type: Option<String>,
 ) {
-    match field_access(policies, "insurance", auth.role == Role::Ceo) {
+    match field_access(policies, "insurance", auth.role.has_full_access()) {
         Some(FieldAccess::Visible) => {
             insert_optional_string(data, "insurance_provider", insurance_provider);
             insert_optional_string(data, "insurance_number", insurance_number);
@@ -6337,7 +6338,7 @@ fn insert_clinical_warnings_field(
     policies: &HashMap<String, FieldPolicy>,
     clinical_warnings: Option<String>,
 ) {
-    match field_access(policies, "vitals", auth.role == Role::Ceo) {
+    match field_access(policies, "vitals", auth.role.has_full_access()) {
         Some(FieldAccess::Visible) => {
             insert_optional_string(data, "clinical_warnings", clinical_warnings)
         }

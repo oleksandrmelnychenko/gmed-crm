@@ -8482,7 +8482,8 @@ fn can_review_document_intake_row(
     }
 
     match auth.role {
-        Role::Ceo | Role::PatientManager => true,
+        role if role.has_full_access() => true,
+        Role::PatientManager => true,
         Role::TeamleadInterpreter => {
             let uploaded_by_role = row
                 .try_get::<Option<String>, _>("uploaded_by_role")
@@ -8881,8 +8882,12 @@ async fn list_document_templates(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::CeoAssistant, Role::PatientManager])
-    {
+    if let Err(resp) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::CeoAssistant,
+        Role::PatientManager,
+        Role::ItAdmin,
+    ]) {
         return resp;
     }
 
@@ -12862,6 +12867,7 @@ async fn list_documents(
         Role::Interpreter,
         Role::Concierge,
         Role::Billing,
+        Role::ItAdmin,
     ]) {
         return resp;
     }
@@ -12999,9 +13005,12 @@ async fn list_document_intake_queue(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(resp) =
-        auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::TeamleadInterpreter])
-    {
+    if let Err(resp) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::TeamleadInterpreter,
+        Role::ItAdmin,
+    ]) {
         return resp;
     }
 
@@ -13097,6 +13106,7 @@ async fn get_document(
         Role::Interpreter,
         Role::Concierge,
         Role::Billing,
+        Role::ItAdmin,
     ]) {
         return resp;
     }
@@ -13131,6 +13141,7 @@ async fn get_document_text_extraction(
         Role::Interpreter,
         Role::Concierge,
         Role::Billing,
+        Role::ItAdmin,
     ]) {
         return resp;
     }
@@ -13245,6 +13256,7 @@ async fn list_document_versions(
         Role::Interpreter,
         Role::Concierge,
         Role::Billing,
+        Role::ItAdmin,
     ]) {
         return resp;
     }
@@ -13339,6 +13351,7 @@ async fn list_document_translation_request_queue(
         Role::Interpreter,
         Role::Concierge,
         Role::Billing,
+        Role::ItAdmin,
     ]) {
         return resp;
     }
@@ -13447,6 +13460,7 @@ async fn list_document_translation_requests(
         Role::Interpreter,
         Role::Concierge,
         Role::Billing,
+        Role::ItAdmin,
     ]) {
         return resp;
     }
@@ -14122,6 +14136,7 @@ async fn download_document(
         Role::Interpreter,
         Role::Concierge,
         Role::Billing,
+        Role::ItAdmin,
     ]) {
         return resp;
     }
@@ -16436,6 +16451,7 @@ async fn list_document_staff(
         Role::Interpreter,
         Role::Concierge,
         Role::Billing,
+        Role::ItAdmin,
     ]) {
         return resp;
     }
@@ -16444,7 +16460,7 @@ async fn list_document_staff(
         r#"SELECT id, name, role
            FROM users
            WHERE is_active = true
-             AND role IN ('ceo', 'patient_manager', 'teamlead_interpreter', 'interpreter', 'concierge', 'billing')
+             AND role IN ('ceo', 'patient_manager', 'teamlead_interpreter', 'interpreter', 'concierge', 'billing', 'it_admin')
            ORDER BY role, name"#,
     )
     .fetch_all(&state.db)
@@ -16482,6 +16498,7 @@ async fn list_document_categories(
         Role::Interpreter,
         Role::Concierge,
         Role::Billing,
+        Role::ItAdmin,
     ]) {
         return resp;
     }

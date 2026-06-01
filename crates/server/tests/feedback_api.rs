@@ -291,14 +291,14 @@ async fn patient_can_submit_feedback_and_pm_gets_summary() {
 }
 
 #[tokio::test]
-async fn billing_sales_interpreter_and_it_admin_cannot_open_feedback_workspace() {
+async fn billing_sales_and_interpreter_cannot_open_feedback_workspace() {
     let Some(ctx) = test_context().await else {
         return;
     };
     let app = ctx.router();
     let pool = ctx.pool();
 
-    for role in ["billing", "sales", "interpreter", "it_admin"] {
+    for role in ["billing", "sales", "interpreter"] {
         let user_id = seed_user(pool, &unique_tag(&format!("feedback-{role}")), role).await;
         let bearer = auth_header_for(user_id, role);
 
@@ -311,6 +311,23 @@ async fn billing_sales_interpreter_and_it_admin_cannot_open_feedback_workspace()
         assert_eq!(status, StatusCode::FORBIDDEN, "role {role} must be denied");
         assert_eq!(body["message"], "Insufficient permissions");
     }
+}
+
+#[tokio::test]
+async fn it_admin_can_open_feedback_workspace() {
+    let Some(ctx) = test_context().await else {
+        return;
+    };
+    let app = ctx.router();
+    let pool = ctx.pool();
+    let user_id = seed_user(pool, &unique_tag("feedback-it-admin-full"), "it_admin").await;
+    let bearer = auth_header_for(user_id, "it_admin");
+
+    let (status, _) = json_request(&app, "GET", "/api/v1/feedback", &bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = json_request(&app, "GET", "/api/v1/feedback/summary", &bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
 }
 
 #[tokio::test]

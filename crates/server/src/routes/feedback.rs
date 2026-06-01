@@ -224,6 +224,7 @@ async fn list_feedback(
         Role::PatientManager,
         Role::TeamleadInterpreter,
         Role::Concierge,
+        Role::ItAdmin,
     ]) {
         return resp;
     }
@@ -247,7 +248,7 @@ async fn create_staff_feedback(
     Extension(auth): Extension<AuthUser>,
     Json(body): Json<CreateFeedbackRequest>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::ItAdmin]) {
         return resp;
     }
 
@@ -261,7 +262,7 @@ async fn create_staff_feedback(
         }
     };
 
-    if auth.role != Role::Ceo {
+    if !auth.role.has_full_access() {
         let assigned = match has_active_patient_assignment(&state.db, patient_id, auth.user_id)
             .await
         {
@@ -296,6 +297,7 @@ async fn get_feedback_summary(
         Role::PatientManager,
         Role::TeamleadInterpreter,
         Role::Concierge,
+        Role::ItAdmin,
     ]) {
         return resp;
     }
@@ -599,6 +601,7 @@ async fn review_feedback(
         Role::PatientManager,
         Role::TeamleadInterpreter,
         Role::Concierge,
+        Role::ItAdmin,
     ]) {
         return resp;
     }
@@ -1096,6 +1099,7 @@ async fn load_feedback_rows(
         Role::PatientManager => "patient_manager",
         Role::TeamleadInterpreter => "teamlead_interpreter",
         Role::Concierge => "concierge",
+        Role::ItAdmin => "it_admin",
         _ => {
             return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
         }
@@ -1196,7 +1200,8 @@ async fn load_feedback_rows(
 
 fn role_can_see_feedback_row(auth: &AuthUser, row: &sqlx::postgres::PgRow) -> bool {
     match auth.role {
-        Role::Ceo | Role::CeoAssistant | Role::PatientManager => true,
+        role if role.has_full_access() => true,
+        Role::CeoAssistant | Role::PatientManager => true,
         Role::TeamleadInterpreter => row
             .try_get::<Option<i32>, _>("interpreter_score")
             .unwrap_or_default()
@@ -1217,7 +1222,8 @@ async fn ensure_feedback_access(
     concierge_score: Option<i32>,
 ) -> Result<(), axum::response::Response> {
     match auth.role {
-        Role::Ceo | Role::CeoAssistant => Ok(()),
+        role if role.has_full_access() => Ok(()),
+        Role::CeoAssistant => Ok(()),
         Role::PatientManager | Role::TeamleadInterpreter | Role::Concierge => {
             let assigned = has_active_patient_assignment(&state.db, patient_id, auth.user_id)
                 .await

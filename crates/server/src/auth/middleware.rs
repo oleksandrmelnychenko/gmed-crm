@@ -23,10 +23,10 @@ pub struct AuthUser {
 }
 
 impl AuthUser {
-    /// CEO always passes — by design (CEO = full access).
+    /// Full-access admin roles always pass by design.
     #[allow(clippy::result_large_err)]
     pub fn require_any_role(&self, allowed: &[Role]) -> Result<(), Response> {
-        if self.role == Role::Ceo {
+        if self.role.has_full_access() {
             return Ok(());
         }
         let mut found = false;
@@ -39,7 +39,7 @@ impl AuthUser {
         if found { Ok(()) } else { Err(forbidden()) }
     }
 
-    /// Strict check — CEO does NOT auto-pass.
+    /// Strict check — full-access roles do NOT auto-pass.
     #[allow(clippy::result_large_err)]
     pub fn require_exact_role(&self, allowed: &[Role]) -> Result<(), Response> {
         let mut found = false;
@@ -179,8 +179,14 @@ mod tests {
     }
 
     #[test]
-    fn ceo_passes_any_role_check() {
+    fn full_access_roles_pass_any_role_check() {
         let u = user(Role::Ceo);
+        assert!(u.require_any_role(&[Role::Sales]).is_ok());
+        assert!(u.require_any_role(&[Role::PatientManager]).is_ok());
+        assert!(u.require_any_role(&[Role::Billing]).is_ok());
+        assert!(u.require_any_role(&[]).is_ok());
+
+        let u = user(Role::ItAdmin);
         assert!(u.require_any_role(&[Role::Sales]).is_ok());
         assert!(u.require_any_role(&[Role::PatientManager]).is_ok());
         assert!(u.require_any_role(&[Role::Billing]).is_ok());
@@ -188,10 +194,14 @@ mod tests {
     }
 
     #[test]
-    fn ceo_does_not_auto_pass_exact_role() {
+    fn full_access_roles_do_not_auto_pass_exact_role() {
         let u = user(Role::Ceo);
         assert!(u.require_exact_role(&[Role::Sales]).is_err());
         assert!(u.require_exact_role(&[Role::Ceo]).is_ok());
+
+        let u = user(Role::ItAdmin);
+        assert!(u.require_exact_role(&[Role::Sales]).is_err());
+        assert!(u.require_exact_role(&[Role::ItAdmin]).is_ok());
     }
 
     #[test]

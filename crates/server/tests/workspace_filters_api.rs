@@ -4402,12 +4402,12 @@ async fn sales_cannot_open_patient_registry() {
 }
 
 #[tokio::test]
-async fn it_admin_cannot_open_patient_registry_case_or_reports_workspace() {
+async fn it_admin_can_open_patient_registry_case_and_reports_workspace() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
     };
 
-    let tag = unique_tag("it-admin-rbac-block");
+    let tag = unique_tag("it-admin-rbac-full");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let case_id = seed_case(
         &pool,
@@ -4421,10 +4421,17 @@ async fn it_admin_cannot_open_patient_registry_case_or_reports_workspace() {
     let it_admin_id = seed_user(&pool, &tag, "it_admin").await;
     let it_admin_bearer = auth_header_for(it_admin_id, "it_admin");
 
-    let (status, _) = json_request(&app, "GET", "/api/v1/patients", &it_admin_bearer, None).await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, body) =
+        json_request(&app, "GET", "/api/v1/patients", &it_admin_bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body.as_array().is_some_and(|patients| patients
+            .iter()
+            .any(|patient| patient["id"] == json!(patient_id.to_string()))),
+        "IT admin should see the seeded patient in the registry: {body}"
+    );
 
-    let (status, _) = json_request(
+    let (status, body) = json_request(
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}"),
@@ -4432,9 +4439,10 @@ async fn it_admin_cannot_open_patient_registry_case_or_reports_workspace() {
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["id"], json!(patient_id.to_string()));
 
-    let (status, _) = json_request(
+    let (status, body) = json_request(
         &app,
         "GET",
         &format!("/api/v1/cases/{case_id}"),
@@ -4442,9 +4450,10 @@ async fn it_admin_cannot_open_patient_registry_case_or_reports_workspace() {
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["id"], json!(case_id.to_string()));
 
-    let (status, _) = json_request(
+    let (status, body) = json_request(
         &app,
         "GET",
         "/api/v1/stats/reports/workspace",
@@ -4452,7 +4461,15 @@ async fn it_admin_cannot_open_patient_registry_case_or_reports_workspace() {
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body["allowed_sections"]
+            .as_array()
+            .is_some_and(|sections| sections
+                .iter()
+                .any(|section| section.as_str() == Some("provider_costs"))),
+        "IT admin should receive full reports workspace sections: {body}"
+    );
 }
 
 #[tokio::test]
