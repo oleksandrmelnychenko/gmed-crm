@@ -183,6 +183,18 @@ function resolveStateAction<T>(value: SetStateAction<T>, current: T) {
     : value;
 }
 
+function formatEditAppointmentError(
+  error: unknown,
+  translations: { uiText: Record<string, string> },
+  fallback: string,
+) {
+  const message = error instanceof Error ? error.message : "";
+  if (message.includes("recurrence rule updates require following or series scope")) {
+    return translations.uiText.appointments_recurring_scope_required ?? message;
+  }
+  return message || fallback;
+}
+
 const selectClassName = appointmentSelectControlClassName;
 const inputClassName = appointmentSlateInputClassName;
 
@@ -534,15 +546,16 @@ function useEditAppointmentSectionContentContent({
         time_start: form.timeStart || null,
         time_end: form.timeEnd || null,
         location: form.location.trim() || null,
-        recurrence_frequency: applyRecurrenceRule ? form.repeatFrequency : null,
-        recurrence_interval: applyRecurrenceRule ? repeatInterval : null,
-        recurrence_count: applyRecurrenceRule ? repeatCount : null,
-        recurrence_until:
-          applyRecurrenceRule && form.repeatUntil ? form.repeatUntil : null,
         recurrence_scope: detail.recurrence_frequency
           ? recurrenceScope
           : "single",
       };
+      if (applyRecurrenceRule) {
+        updatePayload.recurrence_frequency = form.repeatFrequency;
+        updatePayload.recurrence_interval = repeatInterval;
+        updatePayload.recurrence_count = repeatCount;
+        updatePayload.recurrence_until = form.repeatUntil || null;
+      }
       if (canEditAppointmentType) {
         updatePayload.appointment_type = form.appointmentType;
       }
@@ -568,9 +581,11 @@ function useEditAppointmentSectionContentContent({
       onSaved(buildScheduleNotice(result.conflicts, localWarnings));
     } catch (submitError) {
       setError(
-        submitError instanceof Error
-          ? submitError.message
-          : appointmentText("appointments_failed_to_save_schedule"),
+        formatEditAppointmentError(
+          submitError,
+          t,
+          appointmentText("appointments_failed_to_save_schedule"),
+        ),
       );
     } finally {
       setBusy(false);
@@ -1000,7 +1015,7 @@ function useEditAppointmentSectionContentContent({
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
         {editSheetSectionTitle(appointmentText("appointments_provider_and_doctor"))}
         <div className="grid gap-4 md:grid-cols-3">
-          <Field compact label={t.common_provider} className="md:col-span-2">
+          <div className="md:col-span-2">
             <ProviderSelectWithTaxonomyFilter
               value={form.providerId}
               providers={providers}
@@ -1014,6 +1029,8 @@ function useEditAppointmentSectionContentContent({
               providerPlaceholder={t.common_not_set}
               taxonomyPlaceholder={t.appointments_provider_category}
               taxonomyAllLabel={t.providers_all}
+              taxonomyLabel={t.appointments_provider_category}
+              providerSelectLabel={t.common_provider}
               taxonomySelectClassName={selectClassName}
               providerSelectClassName={selectClassName}
               providerLabel={(provider) => provider.name}
@@ -1032,7 +1049,7 @@ function useEditAppointmentSectionContentContent({
               }
               disabled={form.appointmentType === "internal"}
             />
-          </Field>
+          </div>
           <Field compact label={t.common_doctor}>
             <NativeComboboxSelect
               value={form.doctorId}

@@ -1939,6 +1939,9 @@ export const extractedUiDe = {
   "providers_price_from": "Preis von",
   "providers_price_to": "Preis bis",
   "providers_price_note": "Preisnotiz",
+  "patients_score_value_exceeds_scale_max": "Der Wert darf nicht größer als das Skalenmaximum sein.",
+  "appointments_recurring_scope_required": "Für Änderungen an einer Terminserie wählen Sie bitte „Dieser und folgende“ oder „Ganze Serie“.",
+  "contracts_session_expired_retry": "Die Sitzung ist abgelaufen. Bitte melden Sie sich erneut an und speichern Sie danach noch einmal.",
   "common_edit_label": "{label} bearbeiten",
 } as const satisfies Record<string, string>;
 
@@ -3879,5 +3882,8 @@ export const extractedUiRu = {
   "providers_price_from": "Цена от",
   "providers_price_to": "Цена до",
   "providers_price_note": "Примечание к цене",
+  "patients_score_value_exceeds_scale_max": "Значение не может быть больше максимума шкалы.",
+  "appointments_recurring_scope_required": "Для изменения серии выберите «Этот и следующие» или «Вся серия».",
+  "contracts_session_expired_retry": "Сессия истекла. Войдите снова и повторите сохранение.",
   "common_edit_label": "Изменить {label}",
 } as const satisfies Record<string, string>;

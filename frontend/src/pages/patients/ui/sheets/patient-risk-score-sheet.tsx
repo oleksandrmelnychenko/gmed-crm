@@ -66,6 +66,18 @@ function parseNumber(value: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function riskScoreErrorMessage(
+  error: unknown,
+  l: (key: string) => string,
+  fallback: string,
+) {
+  const message = error instanceof Error ? error.message : "";
+  if (message.includes("score_value cannot exceed scale_max")) {
+    return l("patients_score_value_exceeds_scale_max");
+  }
+  return message || fallback;
+}
+
 type FormState = {
   computedAt: string;
   scoreType: ScoreType;
@@ -123,6 +135,10 @@ export function PatientRiskScoreSheet({
       return;
     }
     const scaleMax = parseNumber(form.scaleMax);
+    if (scaleMax != null && scoreValue > scaleMax) {
+      toast.error(l("patients_score_value_exceeds_scale_max"));
+      return;
+    }
 
     let inputs: Record<string, unknown> | undefined;
     if (form.inputsJson.trim()) {
@@ -156,7 +172,7 @@ export function PatientRiskScoreSheet({
       onOpenChange(false);
       onSaved();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t.common_failed_create);
+      toast.error(riskScoreErrorMessage(error, l, t.common_failed_create));
     } finally {
       setBusy(false);
     }

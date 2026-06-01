@@ -1118,9 +1118,9 @@ pub fn router() -> Router<AppState> {
 #[derive(Deserialize)]
 struct DocumentListQuery {
     search: Option<String>,
-    patient_id: Option<Uuid>,
-    order_id: Option<Uuid>,
-    appointment_id: Option<Uuid>,
+    patient_id: Option<String>,
+    order_id: Option<String>,
+    appointment_id: Option<String>,
     status: Option<String>,
     visibility: Option<String>,
     art: Option<String>,
@@ -1129,6 +1129,41 @@ struct DocumentListQuery {
     date_to: Option<String>,
     klinik: Option<String>,
     ursprung: Option<String>,
+}
+
+fn normalized_query_value(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn parse_required_uuid_query_filter(
+    value: Option<&str>,
+    field: &str,
+) -> Result<Option<Uuid>, axum::response::Response> {
+    let Some(value) = normalized_query_value(value) else {
+        return Ok(None);
+    };
+    Uuid::parse_str(&value).map(Some).map_err(|_| {
+        let message = match field {
+            "patient_id" => "Invalid patient_id filter",
+            "order_id" => "Invalid order_id filter",
+            "appointment_id" => "Invalid appointment_id filter",
+            _ => "Invalid document filter",
+        };
+        err(StatusCode::BAD_REQUEST, message)
+    })
+}
+
+fn parse_uuid_or_text_query_filter(value: Option<&str>) -> (Option<Uuid>, Option<String>) {
+    let Some(value) = normalized_query_value(value) else {
+        return (None, None);
+    };
+    match Uuid::parse_str(&value) {
+        Ok(uuid) => (Some(uuid), None),
+        Err(_) => (None, Some(value)),
+    }
 }
 
 #[derive(Deserialize, Default)]
@@ -12881,6 +12916,14 @@ async fn list_documents(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty());
+    let patient_id =
+        match parse_required_uuid_query_filter(query.patient_id.as_deref(), "patient_id") {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+    let (order_id, order_lookup) = parse_uuid_or_text_query_filter(query.order_id.as_deref());
+    let (appointment_id, appointment_lookup) =
+        parse_uuid_or_text_query_filter(query.appointment_id.as_deref());
     let date_from = match query
         .date_from
         .as_deref()
@@ -12954,7 +12997,11 @@ async fn list_documents(
                   OR COALESCE(d.category, '') ILIKE '%' || $1 || '%'
                   OR COALESCE(d.art, '') ILIKE '%' || $1 || '%'
                   OR COALESCE(d.generated_template_id, '') ILIKE '%' || $1 || '%'
-                  OR COALESCE(d.notes, '') ILIKE '%' || $1 || '%')
+                  OR COALESCE(d.notes, '') ILIKE '%' || $1 || '%'
+                  OR COALESCE(p.patient_id, '') ILIKE '%' || $1 || '%'
+                  OR trim(concat_ws(' ', p.first_name, p.last_name)) ILIKE '%' || $1 || '%'
+                  OR COALESCE(o.order_number, '') ILIKE '%' || $1 || '%'
+                  OR COALESCE(a.title, '') ILIKE '%' || $1 || '%')
              AND ($2::uuid IS NULL OR d.patient_id = $2)
              AND ($3::uuid IS NULL OR d.order_id = $3)
              AND ($4::uuid IS NULL OR d.appointment_id = $4)
@@ -12966,13 +13013,15 @@ async fn list_documents(
              AND ($10::date IS NULL OR d.created_at::date <= $10)
              AND ($11::text IS NULL OR COALESCE(d.klinik, '') ILIKE '%' || $11 || '%')
              AND ($12::text IS NULL OR COALESCE(d.ursprung, '') ILIKE '%' || $12 || '%')
+             AND ($14::text IS NULL OR COALESCE(o.order_number, '') ILIKE '%' || $14 || '%')
+             AND ($15::text IS NULL OR COALESCE(a.title, '') ILIKE '%' || $15 || '%')
            ORDER BY d.created_at DESC
            LIMIT 300"#,
     )
     .bind(search)
-    .bind(query.patient_id)
-    .bind(query.order_id)
-    .bind(query.appointment_id)
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(appointment_id)
     .bind(query.status.as_deref())
     .bind(query.visibility.as_deref())
     .bind(query.art.as_deref())
@@ -12982,6 +13031,8 @@ async fn list_documents(
     .bind(klinik)
     .bind(ursprung)
     .bind(auth.user_id)
+    .bind(order_lookup)
+    .bind(appointment_lookup)
     .fetch_all(&state.db)
     .await
     {

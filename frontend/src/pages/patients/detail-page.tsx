@@ -1252,7 +1252,10 @@ function usePatientDetailPageContent() {
   const canViewOperationalSurface = canViewPatientOperationalSurface(user?.role);
   const canViewDocuments = canViewPatientDocumentsSurface(user?.role);
   const canOpenDocumentsWorkspace = canOpenPatientDocumentsWorkspace(user?.role);
-  const canManageDocuments = user?.role === "ceo" || user?.role === "patient_manager";
+  const canManageDocuments =
+    user?.role === "ceo" ||
+    user?.role === "patient_manager" ||
+    user?.role === "it_admin";
   const canViewContracts = canViewPatientContractsSurface(user?.role);
   const canManageContracts =
     user?.role === "ceo" || user?.role === "patient_manager" || user?.role === "billing";

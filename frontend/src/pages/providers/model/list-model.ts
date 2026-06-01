@@ -483,6 +483,57 @@ function normalizeAvailabilityIntervals(
   });
 }
 
+function formatWeeklyAvailabilityRows(
+  days: readonly WeeklyAvailabilityDay[],
+  dayLabel: (day: WeeklyAvailabilityDayCode) => string,
+) {
+  const groups: Array<{
+    startDay: WeeklyAvailabilityDayCode;
+    endDay: WeeklyAvailabilityDayCode;
+    intervalsKey: string;
+    hours: string;
+  }> = [];
+
+  for (const day of WEEKLY_AVAILABILITY_DAYS) {
+    const row = days.find((item) => item.day === day);
+    const intervals = row?.enabled ? normalizeAvailabilityIntervals(row.intervals) : [];
+    if (intervals.length === 0) {
+      continue;
+    }
+
+    const hours = intervals.map((interval) => `${interval.start}-${interval.end}`).join(", ");
+    const intervalsKey = hours;
+    const previous = groups.at(-1);
+    const previousEndIndex = previous ? WEEKLY_DAY_INDEX.get(previous.endDay) : undefined;
+    const currentIndex = WEEKLY_DAY_INDEX.get(day);
+    if (
+      previous?.intervalsKey === intervalsKey &&
+      previousEndIndex !== undefined &&
+      currentIndex === previousEndIndex + 1
+    ) {
+      previous.endDay = day;
+      continue;
+    }
+
+    groups.push({
+      startDay: day,
+      endDay: day,
+      intervalsKey,
+      hours,
+    });
+  }
+
+  return groups
+    .map((group) => {
+      const daysLabel =
+        group.startDay === group.endDay
+          ? dayLabel(group.startDay)
+          : `${dayLabel(group.startDay)}-${dayLabel(group.endDay)}`;
+      return `${daysLabel} ${group.hours}`;
+    })
+    .join("; ");
+}
+
 function parseAvailabilityIntervals(value: string) {
   const intervals: WeeklyAvailabilityInterval[] = [];
   const matcher = /(\d{1,2}:\d{1,2})\s*[-–]\s*(\d{1,2}:\d{1,2})/g;
@@ -556,14 +607,7 @@ export function parseWeeklyAvailability(value: string | null | undefined) {
 }
 
 export function formatWeeklyAvailabilityValue(days: readonly WeeklyAvailabilityDay[]) {
-  return WEEKLY_AVAILABILITY_DAYS.flatMap((day) => {
-    const row = days.find((item) => item.day === day);
-    if (!row?.enabled) return [];
-    const intervals = normalizeAvailabilityIntervals(row.intervals);
-    if (intervals.length === 0) return [];
-    const hours = intervals.map((interval) => `${interval.start}-${interval.end}`).join(", ");
-    return [`${WEEKLY_DAY_CANONICAL_LABELS[day]} ${hours}`];
-  }).join("; ");
+  return formatWeeklyAvailabilityRows(days, (day) => WEEKLY_DAY_CANONICAL_LABELS[day]);
 }
 
 export function formatWeeklyAvailabilityDisplay(
@@ -572,17 +616,11 @@ export function formatWeeklyAvailabilityDisplay(
 ) {
   const source = (value ?? "").trim();
   if (!source) return "";
-  const formatted = formatWeeklyAvailabilityValue(parseWeeklyAvailability(source));
-  if (!formatted) return source;
-  return parseWeeklyAvailability(formatted)
-    .flatMap((row) => {
-      if (!row.enabled) return [];
-      const intervals = normalizeAvailabilityIntervals(row.intervals);
-      if (intervals.length === 0) return [];
-      const hours = intervals.map((interval) => `${interval.start}-${interval.end}`).join(", ");
-      return [`${weeklyAvailabilityDayLabel(row.day, lang)} ${hours}`];
-    })
-    .join("; ");
+  const formatted = formatWeeklyAvailabilityRows(
+    parseWeeklyAvailability(source),
+    (day) => weeklyAvailabilityDayLabel(day, lang),
+  );
+  return formatted || source;
 }
 
 const COMPACT_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-GB", {

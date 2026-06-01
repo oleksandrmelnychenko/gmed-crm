@@ -20,7 +20,7 @@ export const VISIBILITY_OPTIONS: DocumentVisibility[] = [
 ];
 
 export function canManageDocuments(role?: string) {
-  return role === "ceo" || role === "patient_manager";
+  return role === "ceo" || role === "patient_manager" || role === "it_admin";
 }
 
 export function canUploadDocuments(role?: string) {
@@ -29,11 +29,12 @@ export function canUploadDocuments(role?: string) {
     "patient_manager",
     "teamlead_interpreter",
     "interpreter",
+    "it_admin",
   ].includes(role ?? "");
 }
 
 export function canManageDocumentIntake(role?: string) {
-  return ["ceo", "patient_manager", "teamlead_interpreter"].includes(
+  return ["ceo", "patient_manager", "teamlead_interpreter", "it_admin"].includes(
     role ?? "",
   );
 }
@@ -47,6 +48,7 @@ export function canViewDocuments(role?: string) {
     "interpreter",
     "concierge",
     "billing",
+    "it_admin",
   ].includes(role ?? "");
 }
 
@@ -57,6 +59,7 @@ export function canRequestTranslations(role?: string) {
     "teamlead_interpreter",
     "interpreter",
     "concierge",
+    "it_admin",
   ].includes(role ?? "");
 }
 
@@ -66,11 +69,12 @@ export function canUpdateTranslations(role?: string) {
     "patient_manager",
     "teamlead_interpreter",
     "concierge",
+    "it_admin",
   ].includes(role ?? "");
 }
 
 export function canViewDocumentShares(role?: string) {
-  return ["ceo", "ceo_assistant", "patient_manager"].includes(role ?? "");
+  return ["ceo", "ceo_assistant", "patient_manager", "it_admin"].includes(role ?? "");
 }
 
 export function buildDocumentsPath(filters: FiltersState) {

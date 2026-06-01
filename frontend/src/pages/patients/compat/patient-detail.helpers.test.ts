@@ -256,6 +256,14 @@ describe("patient surface access helpers", () => {
     expect(canViewPatientInvoicesSurface("ceo_assistant")).toBe(true);
   });
 
+  it("lets IT admin open every patient operational surface", () => {
+    expect(canViewPatientOperationalSurface("it_admin")).toBe(true);
+    expect(canViewPatientDocumentsSurface("it_admin")).toBe(true);
+    expect(canOpenPatientDocumentsWorkspace("it_admin")).toBe(true);
+    expect(canViewPatientContractsSurface("it_admin")).toBe(true);
+    expect(canViewPatientInvoicesSurface("it_admin")).toBe(true);
+  });
+
   it("keeps sales outside patient-bound commercial and document surfaces", () => {
     expect(canViewPatientOperationalSurface("sales")).toBe(false);
     expect(canViewPatientDocumentsSurface("sales")).toBe(false);

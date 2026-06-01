@@ -1702,7 +1702,7 @@ function useContractsPageContent() {
       });
       setContractsReloadToken((current) => current + 1);
     } catch (error) {
-      setContractStatusError(error instanceof Error ? error.message : t.common_error);
+      setContractStatusError(contractActionErrorMessage(error, t));
     } finally {
       setContractStatusBusy(false);
     }
@@ -3058,6 +3058,20 @@ function titleWithDot(title: ReactNode) {
       <span>{title}</span>
     </span>
   );
+}
+
+function contractActionErrorMessage(
+  error: unknown,
+  translations: { common_error: string; uiText: Record<string, string> },
+) {
+  const message = error instanceof Error ? error.message : "";
+  if (message.includes("Invalid or expired token")) {
+    return (
+      translations.uiText.contracts_session_expired_retry ??
+      translations.common_error
+    );
+  }
+  return message || translations.common_error;
 }
 
 function Field({

@@ -4116,7 +4116,8 @@ pub(crate) async fn load_patient_recheck_readiness(
     let compliance_ready = compliance_completed && dsgvo_signed;
 
     let document_alerts = load_patient_document_alerts_summary(state, patient_uuid).await?;
-    let document_pack_ready = document_alerts.document_pack_complete;
+    let document_pack_ready =
+        document_alerts.document_pack_complete || document_alerts.stored_document_pack_complete;
 
     let contract_rows = sqlx::query(
         r#"SELECT id,

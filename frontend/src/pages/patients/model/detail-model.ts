@@ -126,6 +126,7 @@ const PATIENT_OPERATIONAL_SURFACE_ROLES = new Set([
   "teamlead_interpreter",
   "interpreter",
   "concierge",
+  "it_admin",
 ]);
 
 const PATIENT_DOCUMENT_WORKSPACE_ROLES = new Set([
@@ -136,6 +137,7 @@ const PATIENT_DOCUMENT_WORKSPACE_ROLES = new Set([
   "teamlead_interpreter",
   "interpreter",
   "concierge",
+  "it_admin",
 ]);
 
 const PATIENT_CONTRACT_SURFACE_ROLES = new Set([
@@ -143,6 +145,7 @@ const PATIENT_CONTRACT_SURFACE_ROLES = new Set([
   "ceo_assistant",
   "patient_manager",
   "billing",
+  "it_admin",
 ]);
 
 const PATIENT_INVOICE_SURFACE_ROLES = PATIENT_CONTRACT_SURFACE_ROLES;

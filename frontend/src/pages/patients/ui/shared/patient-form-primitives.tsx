@@ -1,3 +1,5 @@
+import { type ComponentProps } from "react";
+
 import {
   formatUnknownValue,
   getLang,
@@ -8,7 +10,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   Field,
-  Section as FormSection,
+  Section as ShellSection,
   inputClass,
   textareaClass,
 } from "@/components/ui-shell";
@@ -17,7 +19,11 @@ import { LanguageMultiSelect } from "@/components/ui/language-multi-select";
 
 // Re-export shell primitives so existing screens keep working.
 // New code should import from "@/components/ui-shell" directly.
-export { Field, FormSection };
+export { Field };
+
+export function FormSection(props: ComponentProps<typeof ShellSection>) {
+  return <ShellSection showMarker={false} {...props} />;
+}
 
 export const formInputClassName = inputClass;
 export const textareaClassName = textareaClass;

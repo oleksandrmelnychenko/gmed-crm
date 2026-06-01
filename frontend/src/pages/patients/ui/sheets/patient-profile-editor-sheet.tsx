@@ -8,6 +8,7 @@ import { Mail, Phone, Trash2 } from "lucide-react";
 
 import {
   CountrySelect,
+  FormSection,
   FunctionalLabelChips,
   LanguageChips,
   NationalitySelect,
@@ -19,7 +20,6 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import {
   Field as FormField,
-  Section as FormSection,
   checkboxClass,
   inputClass as formInputClassName,
   textareaClass as formTextareaClassName,

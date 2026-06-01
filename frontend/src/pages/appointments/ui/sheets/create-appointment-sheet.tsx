@@ -751,7 +751,7 @@ function useCreateAppointmentSheetContent({
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
                 {sectionTitle(appointmentText("appointments_provider_and_doctor"))}
                 <div className="grid gap-4 md:grid-cols-3">
-                  <Field compact label={t.common_provider} className="md:col-span-2">
+                  <div className="md:col-span-2">
                     <ProviderSelectWithTaxonomyFilter
                       value={form.providerId}
                       providers={providers}
@@ -765,6 +765,8 @@ function useCreateAppointmentSheetContent({
                       providerPlaceholder={t.common_not_set}
                       taxonomyPlaceholder={t.appointments_provider_category}
                       taxonomyAllLabel={t.providers_all}
+                      taxonomyLabel={t.appointments_provider_category}
+                      providerSelectLabel={t.common_provider}
                       taxonomySelectClassName={createSheetSelectClassName}
                       providerSelectClassName={createSheetSelectClassName}
                       providerLabel={(provider) => providerLabel(provider)}
@@ -791,7 +793,7 @@ function useCreateAppointmentSheetContent({
                       }}
                       disabled={form.appointmentType === "internal"}
                     />
-                  </Field>
+                  </div>
                   <Field compact label={t.common_doctor}>
                     <NativeComboboxSelect
                       value={form.doctorId}

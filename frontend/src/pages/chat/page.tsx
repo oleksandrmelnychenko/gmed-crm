@@ -747,73 +747,66 @@ function useChatPageContent() {
 
     // File upload
     if (pendingFile) {
+      if (!activePeerMessageKey) {
+        setSecureStatus(t.chat_secure_setup_pending);
+        return;
+      }
       setSending(true);
       const formData = new FormData();
       const caption = input.trim();
       try {
-        if (activePeerMessageKey) {
-          const senderKey = await ensureServerMessageKey();
-          const encryptedAttachment = await encryptAttachmentForPeer(
-            new Uint8Array(await pendingFile.arrayBuffer()),
+        const senderKey = await ensureServerMessageKey();
+        const encryptedAttachment = await encryptAttachmentForPeer(
+          new Uint8Array(await pendingFile.arrayBuffer()),
+          senderKey,
+          activePeerMessageKey,
+        );
+        formData.append(
+          "file",
+          new Blob([encryptedAttachment.ciphertext], {
+            type: "application/octet-stream",
+          }),
+          pendingFile.name,
+        );
+        formData.append("attachment_plaintext_size", String(pendingFile.size));
+        formData.append(
+          "attachment_e2e_algorithm",
+          encryptedAttachment.attachment_e2e_algorithm,
+        );
+        formData.append(
+          "attachment_e2e_nonce",
+          encryptedAttachment.attachment_e2e_nonce,
+        );
+        formData.append(
+          "attachment_e2e_salt",
+          encryptedAttachment.attachment_e2e_salt,
+        );
+        formData.append(
+          "sender_key_fingerprint",
+          encryptedAttachment.sender_key_fingerprint,
+        );
+        formData.append(
+          "recipient_key_fingerprint",
+          encryptedAttachment.recipient_key_fingerprint,
+        );
+        if (caption) {
+          const payload = await encryptMessageForPeer(
+            caption,
             senderKey,
             activePeerMessageKey,
           );
-          formData.append(
-            "file",
-            new Blob([encryptedAttachment.ciphertext], {
-              type: "application/octet-stream",
-            }),
-            pendingFile.name,
-          );
-          formData.append("attachment_plaintext_size", String(pendingFile.size));
-          formData.append(
-            "attachment_e2e_algorithm",
-            encryptedAttachment.attachment_e2e_algorithm,
-          );
-          formData.append(
-            "attachment_e2e_nonce",
-            encryptedAttachment.attachment_e2e_nonce,
-          );
-          formData.append(
-            "attachment_e2e_salt",
-            encryptedAttachment.attachment_e2e_salt,
-          );
-          formData.append(
-            "sender_key_fingerprint",
-            encryptedAttachment.sender_key_fingerprint,
-          );
-          formData.append(
-            "recipient_key_fingerprint",
-            encryptedAttachment.recipient_key_fingerprint,
-          );
-          if (caption) {
-            const payload = await encryptMessageForPeer(
-              caption,
-              senderKey,
-              activePeerMessageKey,
-            );
-            formData.append("e2e_algorithm", payload.e2e_algorithm);
-            formData.append("e2e_ciphertext", payload.e2e_ciphertext);
-            formData.append("e2e_nonce", payload.e2e_nonce);
-            formData.append("e2e_salt", payload.e2e_salt);
-          }
-        } else {
-          formData.append("file", pendingFile);
-          if (caption) formData.append("message", caption);
+          formData.append("e2e_algorithm", payload.e2e_algorithm);
+          formData.append("e2e_ciphertext", payload.e2e_ciphertext);
+          formData.append("e2e_nonce", payload.e2e_nonce);
+          formData.append("e2e_salt", payload.e2e_salt);
         }
 
         await uploadPeerAttachment(activePeer, formData);
         await loadMessagesForPeer(activePeer);
         void loadConversations();
-        if (activePeerMessageKey) {
-          setSecureStatus(null);
-        }
+        setSecureStatus(null);
       } catch {
-        setSecureStatus(
-          activePeerMessageKey
-            ? t.chat_secure_attachment_send_failed
-            : t.chat_attachment_send_failed,
-        );
+        setSecureStatus(t.chat_secure_attachment_send_failed);
       } finally {
         setInput("");
         setPendingFile(null);
@@ -1143,6 +1136,11 @@ function useChatPageContent() {
                 type="file"
                 className="hidden"
                 onChange={(e) => {
+                  if (!activePeerMessageKey) {
+                    setSecureStatus(t.chat_secure_setup_pending);
+                    e.target.value = "";
+                    return;
+                  }
                   const file = e.target.files?.[0];
                   if (file) setPendingFile(file);
                   e.target.value = "";
@@ -1151,7 +1149,13 @@ function useChatPageContent() {
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="flex items-center justify-center size-9 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+                disabled={sending || !activePeerMessageKey}
+                title={
+                  activePeerMessageKey
+                    ? t.chat_secure_attachment_label
+                    : t.chat_secure_setup_pending
+                }
+                className="flex items-center justify-center size-9 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Paperclip className="size-[18px]" />
               </button>

@@ -979,6 +979,7 @@ function StaffDocumentsPage({
   const [deleteReason, setDeleteReason] = useState("");
 
   const [shares, setShares] = useState<DocumentShare[]>([]);
+  const activeDocumentDetailId = routeDocumentId ?? selectedId;
   const [shareForm, setShareForm] = useState<ShareFormState>({
     targetType: "user",
     userId: "",
@@ -1241,7 +1242,7 @@ function StaffDocumentsPage({
   }, [documents]);
 
   useEffect(() => {
-    if (!canView || !selectedId) {
+    if (!canView || !activeDocumentDetailId) {
       setDetail(null);
       setDetailVersions([]);
       setTranslationRequests([]);
@@ -1264,7 +1265,7 @@ function StaffDocumentsPage({
           versions: versionResponse,
           translationRequests: translationResponse,
           textExtraction: extractionResponse,
-        } = await fetchDocumentDetailBundle(selectedId, canViewShares);
+        } = await fetchDocumentDetailBundle(activeDocumentDetailId, canViewShares);
         if (!active) return;
         setDetail(documentResponse);
         setDetailVersions(versionResponse);
@@ -1294,7 +1295,7 @@ function StaffDocumentsPage({
     return () => {
       active = false;
     };
-  }, [canViewShares, canView, documentsFailedLoadDocumentText, selectedId]);
+  }, [activeDocumentDetailId, canViewShares, canView, documentsFailedLoadDocumentText]);
 
   useEffect(() => {
     if (!uploadOpen || !uploadForm.patientId) {
@@ -5241,6 +5242,10 @@ function StaffDocumentsPage({
                   </SectionCard>
                 ) : null}
               </div>
+              ) : activeDocumentDetailId ? (
+                <div className="pt-5">
+                  <Banner tone="warning">{documentsFailedLoadDocumentText}</Banner>
+                </div>
               ) : null}
             </DocumentDetailState>
         );

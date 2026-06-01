@@ -6348,6 +6348,7 @@ function useOrdersPageContent() {
                       <div className="space-y-1">
                         <div>
                           {createRecheck.requires_recheck &&
+                          !createRecheck.document_pack_ready &&
                           createRecheck.document_alerts.missing_count > 0
                             ? l("orders_recheck_missing_required_documents_count", {
                                 count:

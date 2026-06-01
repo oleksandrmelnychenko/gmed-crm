@@ -411,6 +411,7 @@ type PatientRecheckDocumentAlerts = {
   missing_documents: Array<{ key: string; label: string }>;
   missing_count: number;
   out_of_sync: boolean;
+  stored_document_pack_complete?: boolean;
 };
 
 type PatientRecheckContract = {

@@ -1103,6 +1103,7 @@ function PatientFeedbackWorkspace() {
 function useStaffFeedbackWorkspaceContent() {
   const { user } = useAuth();
   const { t } = useLang();
+  const feedbackSelectPatientError = t.feedback_select_patient_error;
   const canViewWorkspace = canViewStaffFeedback(user?.role);
   const canCapture = roleCanCaptureFeedback(user?.role);
 
@@ -1158,14 +1159,21 @@ function useStaffFeedbackWorkspaceContent() {
   );
   const setSelectedPatientId = useMemo<Dispatch<SetStateAction<string>>>(
     () => (nextValue) => {
-      dispatchStaffState((current) => ({
-        selectedPatientId:
+      dispatchStaffState((current) => {
+        const selectedPatientId =
           typeof nextValue === "function"
             ? nextValue(current.selectedPatientId)
-            : nextValue,
-      }));
+            : nextValue;
+        return {
+          selectedPatientId,
+          error:
+            selectedPatientId && current.error === feedbackSelectPatientError
+              ? ""
+              : current.error,
+        };
+      });
     },
-    [],
+    [feedbackSelectPatientError],
   );
   const setCaptureOpen = useMemo<Dispatch<SetStateAction<boolean>>>(
     () => (nextValue) => {
@@ -1657,6 +1665,9 @@ function useStaffFeedbackWorkspaceContent() {
     );
   }
 
+  const capturePatientError =
+    captureOpen && error === feedbackSelectPatientError ? error : "";
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -1675,7 +1686,7 @@ function useStaffFeedbackWorkspaceContent() {
       />
 
       {notice ? <Banner tone="success">{notice}</Banner> : null}
-      {error ? <Banner tone="error">{error}</Banner> : null}
+      {error && !capturePatientError ? <Banner tone="error">{error}</Banner> : null}
 
       <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
         <AdminInlineMetric
@@ -1842,7 +1853,12 @@ function useStaffFeedbackWorkspaceContent() {
                             event.target.value === "__empty__" || !event.target.value ? "" : event.target.value,
                           )
                         }
-                        className={selectClassName}
+                        aria-invalid={Boolean(capturePatientError)}
+                        className={cn(
+                          selectClassName,
+                          capturePatientError &&
+                            "border-rose-300 focus:border-rose-400 focus:ring-rose-200",
+                        )}
                       >
                         <option value="__empty__">
                           {t.feedback_select_patient}
@@ -1853,6 +1869,11 @@ function useStaffFeedbackWorkspaceContent() {
                           </option>
                         ))}
                       </NativeComboboxSelect>
+                      {capturePatientError ? (
+                        <p className="text-xs text-rose-600">
+                          {capturePatientError}
+                        </p>
+                      ) : null}
                     </Field>
 
                     <Field label={t.feedback_visit}>

@@ -247,6 +247,23 @@ describe("weekly availability helpers", () => {
     );
   });
 
+  it("compacts consecutive days with identical opening hours", () => {
+    const value = formatWeeklyAvailabilityValue([
+      { day: "mon", enabled: true, intervals: [{ start: "08:00", end: "20:00" }] },
+      { day: "tue", enabled: true, intervals: [{ start: "08:00", end: "22:00" }] },
+      { day: "wed", enabled: true, intervals: [{ start: "08:00", end: "22:00" }] },
+      { day: "thu", enabled: true, intervals: [{ start: "08:00", end: "22:00" }] },
+      { day: "fri", enabled: true, intervals: [{ start: "08:00", end: "22:00" }] },
+      { day: "sat", enabled: true, intervals: [{ start: "08:00", end: "22:00" }] },
+      { day: "sun", enabled: false, intervals: [] },
+    ]);
+
+    expect(value).toBe("Mon 08:00-20:00; Tue-Sat 08:00-22:00");
+    expect(formatWeeklyAvailabilityDisplay(value, "ru")).toBe(
+      "Пн 08:00-20:00; Вт-Сб 08:00-22:00",
+    );
+  });
+
   it("keeps midnight as an end-of-day closing time", () => {
     const schedule = parseWeeklyAvailability("Mo 18:00-00:00");
 

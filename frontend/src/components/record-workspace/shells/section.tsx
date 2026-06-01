@@ -9,11 +9,13 @@ export function Section({
   accessory,
   children,
   className,
+  showMarker = true,
 }: {
   title: ReactNode;
   accessory?: ReactNode;
   children: ReactNode;
   className?: string;
+  showMarker?: boolean;
 }) {
   return (
     <section
@@ -25,7 +27,9 @@ export function Section({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          {showMarker ? (
+            <div aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          ) : null}
           <h3 className={cn(tokens.text.sectionTitle, "truncate")}>{title}</h3>
         </div>
         {accessory ? <div className="min-w-0 max-w-full">{accessory}</div> : null}

@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { tokens } from "@/components/ui-shell";
 import { cn } from "@/lib/utils";
 import { ProviderTaxonomyCascadeSelect } from "@/pages/providers/ui/provider-taxonomy-cascade-select";
 import type { ProviderTaxonomyNode, ProviderType } from "@/pages/providers/model/types";
@@ -35,6 +36,8 @@ type ProviderSelectWithTaxonomyFilterProps<TProvider extends ProviderTaxonomyCar
   taxonomyContainerClassName?: string;
   taxonomySelectClassName?: string;
   providerSelectClassName?: string;
+  taxonomyLabel?: ReactNode;
+  providerSelectLabel?: ReactNode;
   providerLabel?: (provider: TProvider) => ReactNode;
   providerSearchText?: (provider: TProvider) => string;
   "aria-label"?: string;
@@ -84,6 +87,8 @@ export function ProviderSelectWithTaxonomyFilter<TProvider extends ProviderTaxon
   taxonomyContainerClassName,
   taxonomySelectClassName,
   providerSelectClassName,
+  taxonomyLabel,
+  providerSelectLabel,
   providerLabel = defaultProviderLabel,
   providerSearchText,
   "aria-label": ariaLabel,
@@ -123,38 +128,59 @@ export function ProviderSelectWithTaxonomyFilter<TProvider extends ProviderTaxon
     }
   };
 
+  const taxonomyControl = (
+    <ProviderTaxonomyCascadeSelect
+      value={selectedTaxonomyValue}
+      nodes={taxonomyNodes}
+      providerType={providerType}
+      mode={taxonomyMode}
+      placeholder={taxonomyPlaceholder}
+      allLabel={taxonomyAllLabel ?? taxonomyPlaceholder}
+      disabled={disabled || taxonomyDisabled || taxonomyNodes.length === 0}
+      containerClassName={taxonomyContainerClassName}
+      selectClassName={taxonomySelectClassName}
+      onChange={handleTaxonomyChange}
+    />
+  );
+  const providerControl = (
+    <NativeComboboxSelect
+      value={selectedProviderStillVisible ? value : ""}
+      onChange={(event) => onChange(event.target.value)}
+      disabled={disabled || providerDisabled}
+      className={providerSelectClassName}
+      aria-label={ariaLabel ?? providerPlaceholder}
+    >
+      <option value="">{providerPlaceholder}</option>
+      {filteredProviders.map((provider) => (
+        <option
+          key={provider.id}
+          value={provider.id}
+          data-search-text={providerSearchText?.(provider)}
+        >
+          {providerLabel(provider)}
+        </option>
+      ))}
+    </NativeComboboxSelect>
+  );
+
   return (
     <div className={cn("grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]", containerClassName)}>
-      <ProviderTaxonomyCascadeSelect
-        value={selectedTaxonomyValue}
-        nodes={taxonomyNodes}
-        providerType={providerType}
-        mode={taxonomyMode}
-        placeholder={taxonomyPlaceholder}
-        allLabel={taxonomyAllLabel ?? taxonomyPlaceholder}
-        disabled={disabled || taxonomyDisabled || taxonomyNodes.length === 0}
-        containerClassName={taxonomyContainerClassName}
-        selectClassName={taxonomySelectClassName}
-        onChange={handleTaxonomyChange}
-      />
-      <NativeComboboxSelect
-        value={selectedProviderStillVisible ? value : ""}
-        onChange={(event) => onChange(event.target.value)}
-        disabled={disabled || providerDisabled}
-        className={providerSelectClassName}
-        aria-label={ariaLabel ?? providerPlaceholder}
-      >
-        <option value="">{providerPlaceholder}</option>
-        {filteredProviders.map((provider) => (
-          <option
-            key={provider.id}
-            value={provider.id}
-            data-search-text={providerSearchText?.(provider)}
-          >
-            {providerLabel(provider)}
-          </option>
-        ))}
-      </NativeComboboxSelect>
+      {taxonomyLabel ? (
+        <div className="space-y-1.5">
+          <label className={cn(tokens.text.label, "block")}>{taxonomyLabel}</label>
+          {taxonomyControl}
+        </div>
+      ) : (
+        taxonomyControl
+      )}
+      {providerSelectLabel ? (
+        <div className="space-y-1.5">
+          <label className={cn(tokens.text.label, "block")}>{providerSelectLabel}</label>
+          {providerControl}
+        </div>
+      ) : (
+        providerControl
+      )}
     </div>
   );
 }
