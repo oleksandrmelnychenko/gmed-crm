@@ -343,7 +343,8 @@ async fn list_providers(
     }
 
     let active_only = query.active_only.unwrap_or(true);
-    let search_pattern = format!("%{}%", query.search.unwrap_or_default());
+    let search_term = normalize_optional(query.search);
+    let search_pattern = format!("%{}%", search_term.clone().unwrap_or_default());
     let provider_type = normalize_optional(query.provider_type);
     let city_pattern = format!("%{}%", query.city.unwrap_or_default());
     let country_pattern = format!("%{}%", query.country.unwrap_or_default());
@@ -463,7 +464,31 @@ async fn list_providers(
                 OR COALESCE(p.tax_id, '') ILIKE $3
                 OR COALESCE(p.address_city, '') ILIKE $3
                 OR COALESCE(p.fachbereich, '') ILIKE $3
+                OR COALESCE(p.address_country, '') ILIKE $3
+                OR COALESCE(p.phone, '') ILIKE $3
+                OR COALESCE(p.email, '') ILIKE $3
+                OR COALESCE(p.opening_hours, '') ILIKE $3
+                OR COALESCE(p.notes, '') ILIKE $3
+                OR COALESCE(parent.name, '') ILIKE $3
                 OR p.taxonomy_attributes::text ILIKE $3
+                OR EXISTS (
+                    SELECT 1
+                    FROM jsonb_each_text(p.taxonomy_attributes) AS attr(key, value)
+                    WHERE attr.key ILIKE $3
+                       OR attr.value ILIKE $3
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM provider_contacts pc
+                    WHERE pc.provider_id = p.id
+                      AND (
+                        pc.value ILIKE $3
+                        OR COALESCE(pc.label, '') ILIKE $3
+                        OR COALESCE(pc.department, '') ILIKE $3
+                        OR COALESCE(pc.contact_type, '') ILIKE $3
+                        OR COALESCE(pc.notes, '') ILIKE $3
+                      )
+                )
                 OR EXISTS (
                     SELECT 1
                     FROM provider_specializations ps
@@ -477,15 +502,23 @@ async fn list_providers(
                       )
                 )
                 OR EXISTS (
+                    WITH RECURSIVE assigned_taxonomy AS (
+                        SELECT ptn.id, ptn.parent_id, ptn.code, ptn.name_de, ptn.name_ru
+                        FROM provider_taxonomy_assignments pta
+                        JOIN provider_taxonomy_nodes ptn ON ptn.id = pta.taxonomy_node_id
+                        WHERE pta.provider_id = p.id
+
+                        UNION ALL
+
+                        SELECT parent.id, parent.parent_id, parent.code, parent.name_de, parent.name_ru
+                        FROM provider_taxonomy_nodes parent
+                        JOIN assigned_taxonomy child ON child.parent_id = parent.id
+                    )
                     SELECT 1
-                    FROM provider_taxonomy_assignments pta
-                    JOIN provider_taxonomy_nodes ptn ON ptn.id = pta.taxonomy_node_id
-                    WHERE pta.provider_id = p.id
-                      AND (
-                        ptn.code ILIKE $3
-                        OR ptn.name_de ILIKE $3
-                        OR COALESCE(ptn.name_ru, '') ILIKE $3
-                      )
+                    FROM assigned_taxonomy
+                    WHERE code ILIKE $3
+                       OR COALESCE(name_de, '') ILIKE $3
+                       OR COALESCE(name_ru, '') ILIKE $3
                 )
                  OR EXISTS (
                      SELECT 1
@@ -497,6 +530,51 @@ async fn list_providers(
                          OR COALESCE(d.first_name, '') ILIKE $3
                          OR COALESCE(d.last_name, '') ILIKE $3
                          OR COALESCE(d.fachbereich, '') ILIKE $3
+                         OR COALESCE(d.title, '') ILIKE $3
+                         OR COALESCE(d.role_code, '') ILIKE $3
+                         OR COALESCE(d.role_label, '') ILIKE $3
+                         OR COALESCE(d.subrole, '') ILIKE $3
+                         OR COALESCE(d.license_number, '') ILIKE $3
+                         OR COALESCE(d.licensing_country, '') ILIKE $3
+                         OR COALESCE(d.phone, '') ILIKE $3
+                         OR COALESCE(d.email, '') ILIKE $3
+                         OR COALESCE(d.notes, '') ILIKE $3
+                       )
+                 )
+                 OR EXISTS (
+                     SELECT 1
+                     FROM provider_staff staff
+                     WHERE staff.provider_id = p.id
+                       AND (
+                         staff.display_name ILIKE $3
+                         OR COALESCE(staff.first_name, '') ILIKE $3
+                         OR COALESCE(staff.last_name, '') ILIKE $3
+                         OR COALESCE(staff.role, '') ILIKE $3
+                         OR COALESCE(staff.department, '') ILIKE $3
+                         OR COALESCE(staff.status, '') ILIKE $3
+                         OR COALESCE(staff.notes, '') ILIKE $3
+                       )
+                 )
+                 OR EXISTS (
+                     SELECT 1
+                     FROM service_catalog s
+                     LEFT JOIN provider_taxonomy_nodes stn ON stn.id = s.taxonomy_node_id
+                     WHERE s.provider_id = p.id
+                       AND (
+                         s.service_name ILIKE $3
+                         OR COALESCE(s.description, '') ILIKE $3
+                         OR COALESCE(s.price_note, '') ILIKE $3
+                         OR COALESCE(s.currency, '') ILIKE $3
+                         OR s.taxonomy_attributes::text ILIKE $3
+                         OR EXISTS (
+                             SELECT 1
+                             FROM jsonb_each_text(s.taxonomy_attributes) AS attr(key, value)
+                             WHERE attr.key ILIKE $3
+                                OR attr.value ILIKE $3
+                         )
+                         OR COALESCE(stn.code, '') ILIKE $3
+                         OR COALESCE(stn.name_de, '') ILIKE $3
+                         OR COALESCE(stn.name_ru, '') ILIKE $3
                        )
                  )
                  OR EXISTS (
@@ -697,7 +775,60 @@ async fn list_providers(
                       AND cs.patient_id = $18
                  )
               )
-            ORDER BY p.name
+            ORDER BY
+              CASE
+                WHEN $19::text IS NULL THEN 100
+                WHEN lower(p.name) = lower($19) THEN 0
+                WHEN lower(COALESCE(p.legal_name, '')) = lower($19) THEN 1
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM jsonb_each_text(p.taxonomy_attributes) AS attr(key, value)
+                    WHERE lower(attr.value) = lower($19)
+                       OR lower(attr.key) = lower($19)
+                ) THEN 2
+                WHEN EXISTS (
+                    WITH RECURSIVE assigned_taxonomy AS (
+                        SELECT ptn.id, ptn.parent_id, ptn.code, ptn.name_de, ptn.name_ru
+                        FROM provider_taxonomy_assignments pta
+                        JOIN provider_taxonomy_nodes ptn ON ptn.id = pta.taxonomy_node_id
+                        WHERE pta.provider_id = p.id
+
+                        UNION ALL
+
+                        SELECT parent.id, parent.parent_id, parent.code, parent.name_de, parent.name_ru
+                        FROM provider_taxonomy_nodes parent
+                        JOIN assigned_taxonomy child ON child.parent_id = parent.id
+                    )
+                    SELECT 1
+                    FROM assigned_taxonomy
+                    WHERE lower(code) = lower($19)
+                       OR lower(COALESCE(name_de, '')) = lower($19)
+                       OR lower(COALESCE(name_ru, '')) = lower($19)
+                ) THEN 3
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM service_catalog s
+                    LEFT JOIN provider_taxonomy_nodes stn ON stn.id = s.taxonomy_node_id
+                    WHERE s.provider_id = p.id
+                      AND (
+                        lower(s.service_name) = lower($19)
+                        OR lower(COALESCE(stn.code, '')) = lower($19)
+                        OR lower(COALESCE(stn.name_de, '')) = lower($19)
+                        OR lower(COALESCE(stn.name_ru, '')) = lower($19)
+                        OR EXISTS (
+                            SELECT 1
+                            FROM jsonb_each_text(s.taxonomy_attributes) AS attr(key, value)
+                            WHERE lower(attr.value) = lower($19)
+                               OR lower(attr.key) = lower($19)
+                        )
+                      )
+                ) THEN 4
+                WHEN lower(p.name) LIKE lower($19 || '%')
+                  OR lower(COALESCE(p.legal_name, '')) LIKE lower($19 || '%') THEN 5
+                WHEN p.name ILIKE $3 THEN 6
+                ELSE 20
+              END,
+              p.name
             LIMIT 200"#,
     )
     .bind(active_only)
@@ -718,6 +849,7 @@ async fn list_providers(
     .bind(taxonomy_attribute_key)
     .bind(taxonomy_attribute_value)
     .bind(linked_patient_id)
+    .bind(search_term)
     .fetch_all(&state.db)
     .await
     {

@@ -13,6 +13,7 @@ const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
 const CLINIC_LEAF_CODE: &str = "medical_clinics_practices_specialized_centers";
 const PHARMACY_LEAF_CODE: &str = "medical_pharmacies";
 const CHAUFFEUR_LEAF_CODE: &str = "nonmedical_chauffeur";
+const RESTAURANT_LEAF_CODE: &str = "nonmedical_restaurants";
 
 async fn test_context() -> Option<(axum::Router, PgPool, Uuid, String)> {
     let ctx = support::suite_context(TEST_SECRET).await?;
@@ -103,6 +104,13 @@ async fn create_provider(
         Some(provider_payload(tag, taxonomy_node_id, internal_rating)),
     )
     .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    body["id"].as_str().unwrap().parse().unwrap()
+}
+
+async fn create_provider_with_payload(app: &axum::Router, bearer: &str, payload: Value) -> Uuid {
+    let (status, body) =
+        json_request(app, "POST", "/api/v1/providers", bearer, Some(payload)).await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     body["id"].as_str().unwrap().parse().unwrap()
 }
@@ -349,6 +357,95 @@ async fn providers_list_filters_by_taxonomy_internal_rating_and_linked_patient()
         items,
         pharmacy_id,
         "taxonomy attribute filter must exclude other provider attributes",
+    );
+}
+
+#[tokio::test]
+async fn providers_universal_search_matches_taxonomy_attributes_and_ancestor_labels_first() {
+    let Some((app, _pool, _admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("provider-universal-search");
+    let restaurant_leaf_id = taxonomy_leaf_id(&app, &bearer, RESTAURANT_LEAF_CODE).await;
+
+    let exact_provider_id = create_provider_with_payload(
+        &app,
+        &bearer,
+        json!({
+            "name": format!("Zulu Exact Cuisine {tag}"),
+            "provider_type": "non_medical",
+            "address_city": "Munich",
+            "address_country": "Germany",
+            "taxonomy_node_id": restaurant_leaf_id.clone(),
+            "taxonomy_attributes": {
+                "cuisine": "az"
+            },
+            "internal_rating": 4
+        }),
+    )
+    .await;
+
+    let broad_provider_id = create_provider_with_payload(
+        &app,
+        &bearer,
+        json!({
+            "name": format!("Alpha Broad Cuisine {tag}"),
+            "provider_type": "non_medical",
+            "address_city": "Munich",
+            "address_country": "Germany",
+            "taxonomy_node_id": restaurant_leaf_id.clone(),
+            "taxonomy_attributes": {
+                "cuisine": "azerbaijani fusion"
+            },
+            "internal_rating": 4
+        }),
+    )
+    .await;
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/providers?provider_type=non_medical&search=az",
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let items = body.as_array().expect("providers array");
+    assert_provider_present(
+        items,
+        exact_provider_id,
+        "universal search must match an exact provider taxonomy attribute value",
+    );
+    assert_provider_present(
+        items,
+        broad_provider_id,
+        "universal search must also match fuzzy provider taxonomy attribute values",
+    );
+    assert_eq!(
+        items
+            .first()
+            .and_then(|item| item["id"].as_str())
+            .map(ToOwned::to_owned),
+        Some(exact_provider_id.to_string()),
+        "exact taxonomy-attribute value matches should be ranked before fuzzy matches",
+    );
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/providers?provider_type=non_medical&search=Gastronomie",
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let items = body.as_array().expect("providers array");
+    assert_provider_present(
+        items,
+        exact_provider_id,
+        "universal search must match German ancestor taxonomy labels",
     );
 }
 

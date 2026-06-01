@@ -27,6 +27,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  SlidersHorizontal,
   Stethoscope,
   Trash2,
   X,
@@ -197,6 +198,19 @@ const contactAddButtonClassName =
 const textareaClassName = shellTextareaClass;
 const DEFAULT_PROVIDER_SORT: SortStack = [{ field: "provider", dir: "asc" }];
 const LEGACY_PROVIDER_TABLE_QUERY_KEYS = ["filters", "sort", "density", "hide"] as const;
+
+function countAdvancedProviderFilters(filters: ProviderFilters, forceNonMedical: boolean) {
+  let count = 0;
+  if (!forceNonMedical && filters.providerType) count += 1;
+  if (filters.activeOnly !== DEFAULT_FILTERS.activeOnly) count += 1;
+  if (filters.hasContract !== DEFAULT_FILTERS.hasContract) count += 1;
+  if (filters.internalRatingGte.trim()) count += 1;
+  if (filters.specializations.trim()) count += 1;
+  if (filters.taxonomyNodeId.trim()) count += 1;
+  if (filters.taxonomyAttributeKey.trim() || filters.taxonomyAttributeValue.trim()) count += 1;
+  return count;
+}
+
 const PROVIDER_REALTIME_EVENTS = [
   "provider.created",
   "provider.updated",
@@ -1409,6 +1423,9 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       internalRatingGte: internalRatingGte ?? base.internalRatingGte,
     };
   });
+  const [providerFiltersOpen, setProviderFiltersOpen] = useState(
+    () => countAdvancedProviderFilters(filters, permissions.forceNonMedical) > 0,
+  );
   const setFilters: typeof setFiltersState = useCallback(
     (value) => {
       setFiltersState((prev) => {
@@ -1684,16 +1701,20 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
   }, [detail, parentProviderOptions]);
 
   const { columns, metrics, sortedAndFilteredProviders } = useProvidersListTableModel({
-    deferredSearch,
+    deferredSearch: "",
     lang,
     providers,
-    sortStack,
+    sortStack: deferredSearch.trim() ? [] : sortStack,
     tr,
   });
   const selectedFilterTaxonomyNode = taxonomyNodes.find(
     (node) => node.id === filters.taxonomyNodeId,
   );
   const filterAttributeKeys = taxonomyAttributeKeys(selectedFilterTaxonomyNode);
+  const advancedProviderFilterCount = useMemo(
+    () => countAdvancedProviderFilters(filters, permissions.forceNonMedical),
+    [filters, permissions.forceNonMedical],
+  );
 
   function setSearch(value: string) {
     setFilters((current) => ({ ...current, search: value }));
@@ -3006,7 +3027,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           <>
         <div className="relative z-30 flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
-            <div className="relative min-w-[240px] flex-1 sm:max-w-sm">
+            <div className="relative min-w-[260px] flex-1">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={filters.search}
@@ -3022,145 +3043,22 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               />
             </div>
 
-            <NativeComboboxSelect
-              value={filters.providerType}
-              onChange={(event) => {
-                const nextType = event.target.value;
-                setFilters((current) => ({
-                  ...current,
-                  providerType: nextType,
-                  specializations: nextType === "non_medical" ? "" : current.specializations,
-                  taxonomyNodeId: "",
-                  taxonomyAttributeKey: "",
-                  taxonomyAttributeValue: "",
-                }));
-                syncQuery({
-                  provider_type: nextType || null,
-                  specializations: nextType === "non_medical" ? null : filters.specializations || null,
-                  taxonomy: null,
-                  attr_key: null,
-                  attr_value: null,
-                });
-              }}
-              disabled={permissions.forceNonMedical}
-              className={cn(selectClassName, "h-8 w-[170px] bg-card text-[13px]")}
+            <Button
+              type="button"
+              variant={providerFiltersOpen ? "default" : "outline"}
+              size="sm"
+              className="h-8 gap-1.5 rounded-lg px-2.5"
+              aria-expanded={providerFiltersOpen}
+              onClick={() => setProviderFiltersOpen((current) => !current)}
             >
-              <option value="">{t.providers_all}</option>
-              <option value="medical">{t.providers_type_medical}</option>
-              <option value="non_medical">{t.providers_type_non_medical}</option>
-            </NativeComboboxSelect>
-
-            <div className="min-w-[240px] max-w-2xl flex-1 sm:flex-none">
-              <ProviderTaxonomyCascadeSelect
-                value={filters.taxonomyNodeId}
-                nodes={taxonomyNodes}
-                providerType={
-                  permissions.forceNonMedical
-                    ? "non_medical"
-                    : filters.providerType === "medical" || filters.providerType === "non_medical"
-                      ? filters.providerType
-                      : ""
-                }
-                mode="any"
-                placeholder={t.providers_category}
-                allLabel={t.providers_all}
-                containerClassName="w-full"
-                selectClassName={cn(selectClassName, "h-8 min-w-[180px] flex-1 bg-card text-[13px]")}
-                onChange={(nextValue) => {
-                  setFilters((current) => ({
-                    ...current,
-                    taxonomyNodeId: nextValue,
-                    taxonomyAttributeKey: "",
-                    taxonomyAttributeValue: "",
-                  }));
-                  syncQuery({
-                    taxonomy: nextValue || null,
-                    attr_key: null,
-                    attr_value: null,
-                  });
-                }}
-              />
-            </div>
-
-            {filterAttributeKeys.length > 0 ? (
-              <>
-                <NativeComboboxSelect
-                  value={filters.taxonomyAttributeKey}
-                  onChange={(event) => {
-                    const nextKey = event.target.value;
-                    setFilters((current) => ({
-                      ...current,
-                      taxonomyAttributeKey: nextKey,
-                      taxonomyAttributeValue: nextKey ? current.taxonomyAttributeValue : "",
-                    }));
-                    syncQuery({
-                      attr_key: nextKey || null,
-                      attr_value: nextKey ? filters.taxonomyAttributeValue || null : null,
-                    });
-                  }}
-                  className={cn(selectClassName, "h-8 w-[168px] bg-card text-[13px]")}
-                >
-                  <option value="">{t.table_filter}</option>
-                  {filterAttributeKeys.map((key) => (
-                    <option key={key} value={key}>
-                      {taxonomyAttributeLabel(key, lang)}
-                    </option>
-                  ))}
-                </NativeComboboxSelect>
-                <Input
-                  value={filters.taxonomyAttributeValue}
-                  onChange={(event) =>
-                    setServerFilter("taxonomyAttributeValue", event.target.value, "attr_value")
-                  }
-                  disabled={!filters.taxonomyAttributeKey}
-                  placeholder={t.common_value}
-                  className="h-8 w-[160px] rounded-lg bg-card text-[13px]"
-                />
-              </>
-            ) : null}
-
-            <NativeComboboxSelect
-              value={filters.activeOnly}
-              onChange={(event) => setServerFilter("activeOnly", event.target.value, "active")}
-              className={cn(selectClassName, "h-8 w-[140px] bg-card text-[13px]")}
-            >
-              <option value="">{t.providers_all}</option>
-              <option value="true">{t.common_active}</option>
-              <option value="false">{t.common_inactive}</option>
-            </NativeComboboxSelect>
-
-            <NativeComboboxSelect
-              value={filters.hasContract}
-              onChange={(event) => setServerFilter("hasContract", event.target.value, "contract")}
-              className={cn(selectClassName, "h-8 w-[160px] bg-card text-[13px]")}
-            >
-              <option value="">{t.providers_contract}</option>
-              <option value="true">{t.providers_contract_with}</option>
-              <option value="false">{t.providers_contract_without}</option>
-            </NativeComboboxSelect>
-
-            <NativeComboboxSelect
-              value={filters.internalRatingGte}
-              onChange={(event) => setServerFilter("internalRatingGte", event.target.value, "internal_rating")}
-              className={cn(selectClassName, "h-8 w-[148px] bg-card text-[13px]")}
-            >
-              <option value="">{t.providers_internal_rating}</option>
-              <option value="5">5+</option>
-              <option value="4">4+</option>
-              <option value="3">3+</option>
-              <option value="2">2+</option>
-            </NativeComboboxSelect>
-
-            <div className="min-w-[220px] max-w-sm flex-1 sm:flex-none">
-              <SpecializationMultiSelect
-                value={filters.specializations}
-                items={specializations}
-                placeholder={t.providers_fachbereich}
-                compact
-                disabled={permissions.forceNonMedical || filters.providerType === "non_medical"}
-                onChange={(nextValue) => setServerFilter("specializations", nextValue, "specializations")}
-              />
-            </div>
+              <SlidersHorizontal className="size-3.5" />
+              <span>{t.table_filter}</span>
+              {advancedProviderFilterCount > 0 ? (
+                <span className="rounded-full bg-background/80 px-1.5 text-[11px] tabular-nums text-foreground">
+                  {advancedProviderFilterCount}
+                </span>
+              ) : null}
+            </Button>
 
             <div className="ml-auto flex items-center gap-1">
               <Button
@@ -3192,6 +3090,150 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               </Button>
             </div>
           </div>
+
+          {providerFiltersOpen ? (
+            <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border/70 bg-card/70 p-2">
+              <NativeComboboxSelect
+                value={filters.providerType}
+                onChange={(event) => {
+                  const nextType = event.target.value;
+                  setFilters((current) => ({
+                    ...current,
+                    providerType: nextType,
+                    specializations: nextType === "non_medical" ? "" : current.specializations,
+                    taxonomyNodeId: "",
+                    taxonomyAttributeKey: "",
+                    taxonomyAttributeValue: "",
+                  }));
+                  syncQuery({
+                    provider_type: nextType || null,
+                    specializations: nextType === "non_medical" ? null : filters.specializations || null,
+                    taxonomy: null,
+                    attr_key: null,
+                    attr_value: null,
+                  });
+                }}
+                disabled={permissions.forceNonMedical}
+                className={cn(selectClassName, "h-8 w-[170px] bg-card text-[13px]")}
+              >
+                <option value="">{t.providers_all}</option>
+                <option value="medical">{t.providers_type_medical}</option>
+                <option value="non_medical">{t.providers_type_non_medical}</option>
+              </NativeComboboxSelect>
+
+              <div className="min-w-[240px] max-w-2xl flex-1 sm:flex-none">
+                <ProviderTaxonomyCascadeSelect
+                  value={filters.taxonomyNodeId}
+                  nodes={taxonomyNodes}
+                  providerType={
+                    permissions.forceNonMedical
+                      ? "non_medical"
+                      : filters.providerType === "medical" || filters.providerType === "non_medical"
+                        ? filters.providerType
+                        : ""
+                  }
+                  mode="any"
+                  placeholder={t.providers_category}
+                  allLabel={t.providers_all}
+                  containerClassName="w-full"
+                  selectClassName={cn(selectClassName, "h-8 min-w-[180px] flex-1 bg-card text-[13px]")}
+                  onChange={(nextValue) => {
+                    setFilters((current) => ({
+                      ...current,
+                      taxonomyNodeId: nextValue,
+                      taxonomyAttributeKey: "",
+                      taxonomyAttributeValue: "",
+                    }));
+                    syncQuery({
+                      taxonomy: nextValue || null,
+                      attr_key: null,
+                      attr_value: null,
+                    });
+                  }}
+                />
+              </div>
+
+              {filterAttributeKeys.length > 0 ? (
+                <>
+                  <NativeComboboxSelect
+                    value={filters.taxonomyAttributeKey}
+                    onChange={(event) => {
+                      const nextKey = event.target.value;
+                      setFilters((current) => ({
+                        ...current,
+                        taxonomyAttributeKey: nextKey,
+                        taxonomyAttributeValue: nextKey ? current.taxonomyAttributeValue : "",
+                      }));
+                      syncQuery({
+                        attr_key: nextKey || null,
+                        attr_value: nextKey ? filters.taxonomyAttributeValue || null : null,
+                      });
+                    }}
+                    className={cn(selectClassName, "h-8 w-[168px] bg-card text-[13px]")}
+                  >
+                    <option value="">{t.table_filter}</option>
+                    {filterAttributeKeys.map((key) => (
+                      <option key={key} value={key}>
+                        {taxonomyAttributeLabel(key, lang)}
+                      </option>
+                    ))}
+                  </NativeComboboxSelect>
+                  <Input
+                    value={filters.taxonomyAttributeValue}
+                    onChange={(event) =>
+                      setServerFilter("taxonomyAttributeValue", event.target.value, "attr_value")
+                    }
+                    disabled={!filters.taxonomyAttributeKey}
+                    placeholder={t.common_value}
+                    className="h-8 w-[160px] rounded-lg bg-card text-[13px]"
+                  />
+                </>
+              ) : null}
+
+              <NativeComboboxSelect
+                value={filters.activeOnly}
+                onChange={(event) => setServerFilter("activeOnly", event.target.value, "active")}
+                className={cn(selectClassName, "h-8 w-[140px] bg-card text-[13px]")}
+              >
+                <option value="">{t.providers_all}</option>
+                <option value="true">{t.common_active}</option>
+                <option value="false">{t.common_inactive}</option>
+              </NativeComboboxSelect>
+
+              <NativeComboboxSelect
+                value={filters.hasContract}
+                onChange={(event) => setServerFilter("hasContract", event.target.value, "contract")}
+                className={cn(selectClassName, "h-8 w-[160px] bg-card text-[13px]")}
+              >
+                <option value="">{t.providers_contract}</option>
+                <option value="true">{t.providers_contract_with}</option>
+                <option value="false">{t.providers_contract_without}</option>
+              </NativeComboboxSelect>
+
+              <NativeComboboxSelect
+                value={filters.internalRatingGte}
+                onChange={(event) => setServerFilter("internalRatingGte", event.target.value, "internal_rating")}
+                className={cn(selectClassName, "h-8 w-[148px] bg-card text-[13px]")}
+              >
+                <option value="">{t.providers_internal_rating}</option>
+                <option value="5">5+</option>
+                <option value="4">4+</option>
+                <option value="3">3+</option>
+                <option value="2">2+</option>
+              </NativeComboboxSelect>
+
+              <div className="min-w-[220px] max-w-sm flex-1 sm:flex-none">
+                <SpecializationMultiSelect
+                  value={filters.specializations}
+                  items={specializations}
+                  placeholder={t.providers_fachbereich}
+                  compact
+                  disabled={permissions.forceNonMedical || filters.providerType === "non_medical"}
+                  onChange={(nextValue) => setServerFilter("specializations", nextValue, "specializations")}
+                />
+              </div>
+            </div>
+          ) : null}
         </div>
 
         {/* Error banner */}
