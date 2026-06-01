@@ -34,6 +34,11 @@ function setTokenStorage(accessToken: string | null = null, refreshToken: string
   });
 }
 
+function jwtWithExp(exp: number) {
+  const payload = Buffer.from(JSON.stringify({ exp }), "utf8").toString("base64url");
+  return `header.${payload}.signature`;
+}
+
 async function loadApiModule(apiOrigin = "") {
   vi.resetModules();
   vi.stubEnv("VITE_API_BASE_URL", apiOrigin);
@@ -146,6 +151,72 @@ describe("API request deduplication and cache", () => {
     expect(first.version).toBe(1);
     expect(cached.version).toBe(1);
     expect(afterMutation.version).toBe(2);
+  });
+});
+
+describe("API auth session refresh", () => {
+  it("reads the access-token expiry from the JWT payload", async () => {
+    setWindowOrigin("http://app.local:4173");
+    const exp = Math.floor(Date.now() / 1000) + 600;
+    setTokenStorage(jwtWithExp(exp), "refresh-a");
+
+    const { getAccessTokenExpiresAtMs } = await loadApiModule();
+
+    expect(getAccessTokenExpiresAtMs()).toBe(exp * 1000);
+  });
+
+  it("deduplicates concurrent refresh calls and stores rotated tokens", async () => {
+    setWindowOrigin("http://app.local:4173");
+    setTokenStorage("stale-access", "refresh-a");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ access_token: "access-b", refresh_token: "refresh-b" }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { refreshAuthSession } = await loadApiModule();
+    const [left, right] = await Promise.all([
+      refreshAuthSession(),
+      refreshAuthSession(),
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(left).toBe("access-b");
+    expect(right).toBe("access-b");
+    expect(localStorage.setItem).toHaveBeenCalledWith("gmed_access_token", "access-b");
+    expect(localStorage.setItem).toHaveBeenCalledWith("gmed_refresh_token", "refresh-b");
+  });
+
+  it("refreshes an expiring access token before sending a protected request", async () => {
+    setWindowOrigin("http://app.local:4173");
+    setTokenStorage(jwtWithExp(Math.floor(Date.now() / 1000) + 10), "refresh-a");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ access_token: "access-b", refresh_token: "refresh-b" }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { apiFetch } = await loadApiModule();
+    await expect(
+      apiFetch<{ ok: boolean }>("/framework-contracts/contract-1/status", {
+        method: "POST",
+        body: JSON.stringify({ status: "signed" }),
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/v1/auth/refresh");
+    const retriedInit = fetchMock.mock.calls[1]?.[1] as RequestInit | undefined;
+    expect(new Headers(retriedInit?.headers).get("Authorization")).toBe(
+      "Bearer access-b",
+    );
   });
 });
 

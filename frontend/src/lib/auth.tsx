@@ -5,6 +5,8 @@ import {
   buildApiUrl,
   clearApiCache,
   fetchWithApiTimeout,
+  getAccessTokenExpiresAtMs,
+  refreshAuthSession,
 } from "@/lib/api";
 import { uiText } from "@/lib/i18n";
 import { clearSecurePersistedState } from "@/lib/secure-persist";
@@ -67,6 +69,10 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 const ACCESS_TOKEN_KEY = "gmed_access_token";
 const REFRESH_TOKEN_KEY = "gmed_refresh_token";
+const SESSION_REFRESH_LEEWAY_MS = 2 * 60_000;
+const SESSION_REFRESH_RETRY_MS = 60_000;
+const SESSION_REFRESH_FALLBACK_MS = 10 * 60_000;
+const SESSION_REFRESH_ON_FOCUS_WINDOW_MS = 5 * 60_000;
 
 export function useAuth() {
   const ctx = use(AuthContext);
@@ -78,10 +84,6 @@ export function useAuth() {
 
 function getAccessToken() {
   return localStorage.getItem(ACCESS_TOKEN_KEY);
-}
-
-function getRefreshToken() {
-  return localStorage.getItem(REFRESH_TOKEN_KEY);
 }
 
 function saveTokens(tokens: AuthTokens) {
@@ -145,22 +147,6 @@ async function fetchMe(accessToken: string) {
   return fetchJson<User>("/me", { method: "GET" }, accessToken);
 }
 
-async function refreshSession() {
-  const refreshToken = getRefreshToken();
-
-  if (!refreshToken) {
-    return null;
-  }
-
-  const tokens = await fetchJson<AuthTokens>("/auth/refresh", {
-    method: "POST",
-    body: JSON.stringify({ refresh_token: refreshToken }),
-  });
-
-  saveTokens(tokens);
-  return tokens.access_token;
-}
-
 function createAuthState(): AuthState {
   return {
     user: null,
@@ -202,7 +188,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         nextUser = await fetchMe(accessToken);
       } catch {
         try {
-          const refreshedAccessToken = await refreshSession();
+          const refreshedAccessToken = await refreshAuthSession();
           if (!refreshedAccessToken) {
             throw new Error("Missing refresh token");
           }
@@ -236,6 +222,102 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, handleSessionExpired);
     };
   }, []);
+
+  useEffect(() => {
+    if (!user || typeof window === "undefined") return;
+
+    let cancelled = false;
+    let refreshing = false;
+    let refreshTimer: number | null = null;
+
+    const clearRefreshTimer = () => {
+      if (refreshTimer !== null) {
+        window.clearTimeout(refreshTimer);
+        refreshTimer = null;
+      }
+    };
+
+    const scheduleRefreshRetry = () => {
+      clearRefreshTimer();
+      if (!cancelled) {
+        refreshTimer = window.setTimeout(refreshAndReschedule, SESSION_REFRESH_RETRY_MS);
+      }
+    };
+
+    const scheduleNextRefresh = () => {
+      clearRefreshTimer();
+      if (cancelled) return;
+
+      const expiresAtMs = getAccessTokenExpiresAtMs();
+      if (!expiresAtMs) {
+        refreshTimer = window.setTimeout(refreshAndReschedule, SESSION_REFRESH_FALLBACK_MS);
+        return;
+      }
+
+      const delayMs = expiresAtMs - Date.now() - SESSION_REFRESH_LEEWAY_MS;
+      if (delayMs <= 0) {
+        void refreshAndReschedule();
+        return;
+      }
+
+      refreshTimer = window.setTimeout(refreshAndReschedule, delayMs);
+    };
+
+    const refreshIfExpiringSoon = () => {
+      if (cancelled) return;
+      const expiresAtMs = getAccessTokenExpiresAtMs();
+      if (!expiresAtMs || expiresAtMs - Date.now() <= SESSION_REFRESH_ON_FOCUS_WINDOW_MS) {
+        void refreshAndReschedule();
+      }
+    };
+
+    async function refreshAndReschedule() {
+      if (refreshing || cancelled) return;
+      refreshing = true;
+      const nextAccessToken = await refreshAuthSession();
+      refreshing = false;
+
+      if (cancelled) return;
+      if (nextAccessToken) {
+        scheduleNextRefresh();
+      } else {
+        scheduleRefreshRetry();
+      }
+    }
+
+    const canListenForVisibility =
+      typeof document !== "undefined" &&
+      typeof document.addEventListener === "function";
+
+    const handleVisibilityChange = () => {
+      if (!canListenForVisibility || document.visibilityState === "visible") {
+        refreshIfExpiringSoon();
+      }
+    };
+
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.key === ACCESS_TOKEN_KEY || event.key === REFRESH_TOKEN_KEY) {
+        scheduleNextRefresh();
+      }
+    };
+
+    scheduleNextRefresh();
+    window.addEventListener("focus", refreshIfExpiringSoon);
+    window.addEventListener("storage", handleStorageChange);
+    if (canListenForVisibility) {
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+    }
+
+    return () => {
+      cancelled = true;
+      clearRefreshTimer();
+      window.removeEventListener("focus", refreshIfExpiringSoon);
+      window.removeEventListener("storage", handleStorageChange);
+      if (canListenForVisibility) {
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+      }
+    };
+  }, [user]);
 
   const login = async (email: string, password: string) => {
     const result = await fetchJson<AuthTokens | PendingLoginResponse>("/auth/login", {

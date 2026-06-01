@@ -5,6 +5,7 @@ const CLIENT_API_ORIGIN =
 const API_PREFIX = "/api/v1";
 const ACCESS_TOKEN_KEY = "gmed_access_token";
 const REFRESH_TOKEN_KEY = "gmed_refresh_token";
+const AUTH_REFRESH_LOCK_NAME = "gmed-auth-refresh";
 export const AUTH_SESSION_EXPIRED_EVENT = "gmed:auth-session-expired";
 export const DEFAULT_API_TIMEOUT_MS = 20_000;
 
@@ -31,6 +32,14 @@ type ApiRequestErrorOptions = {
   cause?: unknown;
 };
 
+type BrowserLockManager = {
+  request<T>(
+    name: string,
+    options: { mode?: "exclusive" | "shared" },
+    callback: () => T | Promise<T>,
+  ): Promise<T>;
+};
+
 export class ApiRequestError extends Error {
   status?: number;
   code?: string;
@@ -53,6 +62,42 @@ export function getAccessToken() {
 
 function getRefreshToken() {
   return localStorage.getItem(REFRESH_TOKEN_KEY);
+}
+
+function getBrowserLockManager() {
+  if (typeof navigator === "undefined") return null;
+  return (navigator as Navigator & { locks?: BrowserLockManager }).locks ?? null;
+}
+
+function parseJwtPayload(token: string): Record<string, unknown> | null {
+  const [, payload] = token.split(".");
+  if (!payload || typeof globalThis.atob !== "function") return null;
+
+  try {
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(
+      normalized.length + ((4 - (normalized.length % 4)) % 4),
+      "=",
+    );
+    const binary = globalThis.atob(padded);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    const json = new TextDecoder().decode(bytes);
+    const parsed = JSON.parse(json) as unknown;
+    return parsed && typeof parsed === "object"
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function getAccessTokenExpiresAtMs(token = getAccessToken()) {
+  if (!token) return null;
+  const exp = parseJwtPayload(token)?.exp;
+  if (typeof exp !== "number" || !Number.isFinite(exp) || exp <= 0) {
+    return null;
+  }
+  return exp * 1000;
 }
 
 function dispatchAuthSessionExpired() {
@@ -78,15 +123,26 @@ let refreshInFlight: Promise<string | null> | null = null;
 async function tryRefreshAccessToken(timeoutMs = DEFAULT_API_TIMEOUT_MS): Promise<string | null> {
   if (refreshInFlight) return refreshInFlight;
 
-  const refreshToken = getRefreshToken();
-  if (!refreshToken) {
+  const initialRefreshToken = getRefreshToken();
+  if (!initialRefreshToken) {
     clearAuthTokens();
     jsonCache.clear();
     return null;
   }
 
-  refreshInFlight = (async () => {
+  const refreshWithCurrentToken = async () => {
     try {
+      const refreshToken = getRefreshToken();
+      if (!refreshToken) {
+        clearAuthTokens();
+        jsonCache.clear();
+        return null;
+      }
+
+      if (refreshToken !== initialRefreshToken) {
+        return getAccessToken();
+      }
+
       const res = await fetchWithApiTimeout(buildApiUrl("/auth/refresh"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -109,12 +165,27 @@ async function tryRefreshAccessToken(timeoutMs = DEFAULT_API_TIMEOUT_MS): Promis
       return tokens.access_token;
     } catch {
       return null;
-    } finally {
-      refreshInFlight = null;
     }
-  })();
+  };
+
+  const lockManager = getBrowserLockManager();
+  refreshInFlight = (lockManager
+    ? lockManager.request(AUTH_REFRESH_LOCK_NAME, { mode: "exclusive" }, refreshWithCurrentToken)
+    : refreshWithCurrentToken()
+  ).finally(() => {
+    refreshInFlight = null;
+  });
 
   return refreshInFlight;
+}
+
+export function refreshAuthSession(timeoutMs = DEFAULT_API_TIMEOUT_MS) {
+  return tryRefreshAccessToken(timeoutMs);
+}
+
+function shouldRefreshAccessTokenBeforeRequest(leewayMs: number) {
+  const expiresAtMs = getAccessTokenExpiresAtMs();
+  return expiresAtMs !== null && expiresAtMs - Date.now() <= leewayMs;
 }
 
 function isAuthEndpoint(path: string) {
@@ -429,9 +500,17 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
   const headers = buildApiHeaders(requestInit);
   const url = buildApiUrl(path);
   const method = requestMethod(requestInit);
+  const canRetryAuth = headers.has("Authorization") && !isAuthEndpoint(path);
+
+  if (canRetryAuth && shouldRefreshAccessTokenBeforeRequest(30_000)) {
+    const newAccessToken = await tryRefreshAccessToken(timeoutMs);
+    if (newAccessToken) {
+      headers.set("Authorization", `Bearer ${newAccessToken}`);
+    }
+  }
+
   const canCacheGet = isCacheableJsonGet(requestInit);
   const cacheKey = canCacheGet ? jsonRequestCacheKey(url, headers) : "";
-  const canRetryAuth = headers.has("Authorization") && !isAuthEndpoint(path);
 
   if (canCacheGet && !forceFresh) {
     const cached = readFreshJsonCache(cacheKey);
@@ -500,6 +579,14 @@ export async function apiFetchFile(path: string, init: ApiFileFetchInit = {}) {
   const headers = buildApiHeaders(requestInit);
   const url = buildApiUrl(path);
   const canRetryAuth = headers.has("Authorization") && !isAuthEndpoint(path);
+
+  if (canRetryAuth && shouldRefreshAccessTokenBeforeRequest(30_000)) {
+    const newAccessToken = await tryRefreshAccessToken(timeoutMs);
+    if (newAccessToken) {
+      headers.set("Authorization", `Bearer ${newAccessToken}`);
+    }
+  }
+
   let res = await fetchWithRateLimitRetry(url, { ...requestInit, headers }, timeoutMs);
 
   if (res.status === 401 && canRetryAuth) {
