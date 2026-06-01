@@ -88,7 +88,6 @@ import {
   DEFAULT_FILTERS,
   DOCTOR_TITLE_OPTIONS,
   availabilityMaxStartForEnd,
-  availabilityMinEndForStart,
   blankDoctorForm,
   blankProviderForm,
   blankServiceForm,
@@ -956,7 +955,6 @@ function WeeklyAvailabilityEditor({
             <div className="flex min-w-0 flex-wrap items-end gap-2">
               {weeklyAvailabilityIntervalItems(row).map(({ interval, intervalIndex, key }) => {
                 const previousInterval = row.intervals[intervalIndex - 1];
-                const nextIntervalItem = row.intervals[intervalIndex + 1];
                 return (
                   <div
                     key={key}
@@ -982,8 +980,6 @@ function WeeklyAvailabilityEditor({
                       {toLabel}
                       <Input
                         type="time"
-                        min={availabilityMinEndForStart(interval.start)}
-                        max={nextIntervalItem?.start || "00:00"}
                         value={interval.end}
                         onChange={(event) =>
                           updateInterval(row.day, intervalIndex, "end", event.target.value)

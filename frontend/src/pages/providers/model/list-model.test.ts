@@ -232,6 +232,9 @@ describe("weekly availability helpers", () => {
     expect(normalizeAvailabilityEditorIntervals([{ start: "18:00", end: "00:00" }])).toEqual([
       { start: "18:00", end: "00:00" },
     ]);
+    expect(normalizeAvailabilityEditorIntervals([{ start: "09:00", end: "00:00" }])).toEqual([
+      { start: "09:00", end: "00:00" },
+    ]);
     expect(formatWeeklyAvailabilityDisplay("Mo 18:00-00:00", "de")).toBe("Mo 18:00-00:00");
   });
 
