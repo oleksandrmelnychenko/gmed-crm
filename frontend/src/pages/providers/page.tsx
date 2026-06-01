@@ -87,6 +87,8 @@ import { fetchProviderPeople, fetchProviderPeoplePatients } from "./data/provide
 import {
   DEFAULT_FILTERS,
   DOCTOR_TITLE_OPTIONS,
+  availabilityMaxStartForEnd,
+  availabilityMinEndForStart,
   blankDoctorForm,
   blankProviderForm,
   blankServiceForm,
@@ -103,6 +105,7 @@ import {
   humanizeCode,
   joinDoctorTitleValue,
   makeContactFormId,
+  normalizeAvailabilityEditorIntervals,
   normalizeDoctorTitleKey,
   parseWeeklyAvailability,
   patientLabel,
@@ -183,8 +186,6 @@ const availabilityTimeInputClassName = cn(
   shellInputClassName,
   "h-9 min-w-0 px-2 text-sm tabular-nums [color-scheme:light] [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70"
 );
-const AVAILABILITY_MIN_INTERVAL_MINUTES = 1;
-const AVAILABILITY_DAY_END_MINUTES = 23 * 60 + 59;
 const providerDetailSectionClassName =
   "border-border/70 bg-card px-5 py-4 sm:px-6 sm:py-5";
 const providerDetailPanelClassName = cn(
@@ -709,88 +710,6 @@ function DoctorTitleMultiSelect({
 type WeeklyAvailabilitySchedule = ReturnType<typeof parseWeeklyAvailability>;
 type WeeklyAvailabilityRow = WeeklyAvailabilitySchedule[number];
 
-function availabilityTimeToMinutes(value: string | null | undefined) {
-  if (!value) return null;
-  const match = value.match(/^(\d{1,2}):(\d{2})$/);
-  if (!match) return null;
-  const hour = Number(match[1]);
-  const minute = Number(match[2]);
-  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return null;
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
-  return hour * 60 + minute;
-}
-
-function availabilityMinutesToTime(value: number) {
-  const minutes = Math.min(Math.max(Math.round(value), 0), AVAILABILITY_DAY_END_MINUTES);
-  const hour = Math.floor(minutes / 60);
-  const minute = minutes % 60;
-  return `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
-}
-
-function availabilityClampMinutes(value: number, min: number, max: number) {
-  if (max < min) return min;
-  return Math.min(Math.max(value, min), max);
-}
-
-function availabilityMaxStartForEnd(end: string) {
-  const endMinutes = availabilityTimeToMinutes(end);
-  if (endMinutes == null) return undefined;
-  return availabilityMinutesToTime(endMinutes - AVAILABILITY_MIN_INTERVAL_MINUTES);
-}
-
-function availabilityMinEndForStart(start: string) {
-  const startMinutes = availabilityTimeToMinutes(start);
-  if (startMinutes == null) return undefined;
-  return availabilityMinutesToTime(startMinutes + AVAILABILITY_MIN_INTERVAL_MINUTES);
-}
-
-function normalizeAvailabilityEditorIntervals(
-  intervals: readonly WeeklyAvailabilityRow["intervals"][number][],
-  edit?: { index: number; field: "start" | "end" },
-) {
-  const normalized: WeeklyAvailabilityRow["intervals"] = [];
-  let previousEndMinutes = 0;
-
-  intervals.forEach((interval, index) => {
-    if (previousEndMinutes >= AVAILABILITY_DAY_END_MINUTES) return;
-
-    let startMinutes = availabilityTimeToMinutes(interval.start);
-    let endMinutes = availabilityTimeToMinutes(interval.end);
-    if (startMinutes == null && endMinutes == null) return;
-
-    startMinutes ??= previousEndMinutes;
-    endMinutes ??= startMinutes + AVAILABILITY_MIN_INTERVAL_MINUTES;
-
-    if (edit?.index === index && edit.field === "end" && endMinutes <= startMinutes) {
-      startMinutes = endMinutes - AVAILABILITY_MIN_INTERVAL_MINUTES;
-    }
-
-    const latestStartMinutes = AVAILABILITY_DAY_END_MINUTES - AVAILABILITY_MIN_INTERVAL_MINUTES;
-    startMinutes = availabilityClampMinutes(
-      startMinutes,
-      previousEndMinutes,
-      latestStartMinutes,
-    );
-
-    if (endMinutes <= startMinutes) {
-      endMinutes = startMinutes + AVAILABILITY_MIN_INTERVAL_MINUTES;
-    }
-    endMinutes = availabilityClampMinutes(
-      endMinutes,
-      startMinutes + AVAILABILITY_MIN_INTERVAL_MINUTES,
-      AVAILABILITY_DAY_END_MINUTES,
-    );
-
-    normalized.push({
-      start: availabilityMinutesToTime(startMinutes),
-      end: availabilityMinutesToTime(endMinutes),
-    });
-    previousEndMinutes = endMinutes;
-  });
-
-  return normalized;
-}
-
 function buildAvailabilityEditorSchedule(value: string) {
   return parseWeeklyAvailability(value).map((row) => {
     const intervals = normalizeAvailabilityEditorIntervals(row.intervals);
@@ -854,7 +773,7 @@ function WeeklyAvailabilityEditor({
     { label: `${weekdayRangeLabel} 08-16`, scope: "weekdays", start: "08:00", end: "16:00" },
     { label: `${weekdayRangeLabel} 09-18`, scope: "weekdays", start: "09:00", end: "18:00" },
     { label: `${everyDayLabel} 09-18`, scope: "all", start: "09:00", end: "18:00" },
-    { label: "24/7", scope: "all", start: "00:00", end: "23:59" },
+    { label: "24/7", scope: "all", start: "00:00", end: "00:00" },
   ] as const;
   const defaultInterval = { start: "09:00", end: "17:00" };
   const addOneHour = (time: string) => {
@@ -1064,7 +983,7 @@ function WeeklyAvailabilityEditor({
                       <Input
                         type="time"
                         min={availabilityMinEndForStart(interval.start)}
-                        max={nextIntervalItem?.start || undefined}
+                        max={nextIntervalItem?.start || "00:00"}
                         value={interval.end}
                         onChange={(event) =>
                           updateInterval(row.day, intervalIndex, "end", event.target.value)

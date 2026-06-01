@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_FILTERS,
+  availabilityMaxStartForEnd,
+  availabilityMinEndForStart,
   blankDoctorForm,
   blankProviderForm,
   buildProvidersQuery,
@@ -9,6 +11,7 @@ import {
   formatDoctorTitleValue,
   formatWeeklyAvailabilityDisplay,
   formatWeeklyAvailabilityValue,
+  normalizeAvailabilityEditorIntervals,
   parseWeeklyAvailability,
   splitDoctorTitleValue,
   toDoctorPayload,
@@ -218,5 +221,25 @@ describe("weekly availability helpers", () => {
     expect(formatWeeklyAvailabilityDisplay(value, "ru")).toBe(
       "Пн 08:00-12:00, 13:00-17:00; Вт 09:00-16:00",
     );
+  });
+
+  it("keeps midnight as an end-of-day closing time", () => {
+    const schedule = parseWeeklyAvailability("Mo 18:00-00:00");
+
+    expect(schedule.find((day) => day.day === "mon")?.intervals).toEqual([
+      { start: "18:00", end: "00:00" },
+    ]);
+    expect(normalizeAvailabilityEditorIntervals([{ start: "18:00", end: "00:00" }])).toEqual([
+      { start: "18:00", end: "00:00" },
+    ]);
+    expect(formatWeeklyAvailabilityDisplay("Mo 18:00-00:00", "de")).toBe("Mo 18:00-00:00");
+  });
+
+  it("supports full-day availability expressed as 00:00-00:00", () => {
+    expect(normalizeAvailabilityEditorIntervals([{ start: "00:00", end: "00:00" }])).toEqual([
+      { start: "00:00", end: "00:00" },
+    ]);
+    expect(availabilityMaxStartForEnd("00:00")).toBe("23:59");
+    expect(availabilityMinEndForStart("23:59")).toBe("00:00");
   });
 });

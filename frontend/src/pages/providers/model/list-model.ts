@@ -239,6 +239,9 @@ export type WeeklyAvailabilityDay = {
   intervals: WeeklyAvailabilityInterval[];
 };
 
+export const AVAILABILITY_MIN_INTERVAL_MINUTES = 1;
+export const AVAILABILITY_DAY_END_MINUTES = 24 * 60;
+
 const WEEKLY_AVAILABILITY_DAYS: readonly WeeklyAvailabilityDayCode[] = [
   "mon",
   "tue",
@@ -375,6 +378,95 @@ function normalizeAvailabilityTime(value: string) {
   if (!Number.isInteger(hour) || !Number.isInteger(minute)) return "";
   if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return "";
   return `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
+}
+
+export function availabilityTimeToMinutes(
+  value: string | null | undefined,
+  options: { midnightAsEndOfDay?: boolean } = {},
+) {
+  if (!value) return null;
+  const match = value.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return null;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  if (options.midnightAsEndOfDay && hour === 0 && minute === 0) {
+    return AVAILABILITY_DAY_END_MINUTES;
+  }
+  return hour * 60 + minute;
+}
+
+export function availabilityMinutesToTime(value: number) {
+  const clamped = Math.min(Math.max(Math.round(value), 0), AVAILABILITY_DAY_END_MINUTES);
+  const minutes = clamped === AVAILABILITY_DAY_END_MINUTES ? 0 : clamped;
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  return `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
+}
+
+function availabilityClampMinutes(value: number, min: number, max: number) {
+  if (max < min) return min;
+  return Math.min(Math.max(value, min), max);
+}
+
+export function availabilityMaxStartForEnd(end: string) {
+  const endMinutes = availabilityTimeToMinutes(end, { midnightAsEndOfDay: true });
+  if (endMinutes == null) return undefined;
+  return availabilityMinutesToTime(endMinutes - AVAILABILITY_MIN_INTERVAL_MINUTES);
+}
+
+export function availabilityMinEndForStart(start: string) {
+  const startMinutes = availabilityTimeToMinutes(start);
+  if (startMinutes == null) return undefined;
+  return availabilityMinutesToTime(startMinutes + AVAILABILITY_MIN_INTERVAL_MINUTES);
+}
+
+export function normalizeAvailabilityEditorIntervals(
+  intervals: readonly WeeklyAvailabilityInterval[],
+  edit?: { index: number; field: "start" | "end" },
+) {
+  const normalized: WeeklyAvailabilityInterval[] = [];
+  let previousEndMinutes = 0;
+
+  intervals.forEach((interval, index) => {
+    if (previousEndMinutes >= AVAILABILITY_DAY_END_MINUTES) return;
+
+    let startMinutes = availabilityTimeToMinutes(interval.start);
+    let endMinutes = availabilityTimeToMinutes(interval.end, { midnightAsEndOfDay: true });
+    if (startMinutes == null && endMinutes == null) return;
+
+    startMinutes ??= previousEndMinutes;
+    endMinutes ??= startMinutes + AVAILABILITY_MIN_INTERVAL_MINUTES;
+
+    if (edit?.index === index && edit.field === "end" && endMinutes <= startMinutes) {
+      startMinutes = endMinutes - AVAILABILITY_MIN_INTERVAL_MINUTES;
+    }
+
+    const latestStartMinutes = AVAILABILITY_DAY_END_MINUTES - AVAILABILITY_MIN_INTERVAL_MINUTES;
+    startMinutes = availabilityClampMinutes(
+      startMinutes,
+      previousEndMinutes,
+      latestStartMinutes,
+    );
+
+    if (endMinutes <= startMinutes) {
+      endMinutes = startMinutes + AVAILABILITY_MIN_INTERVAL_MINUTES;
+    }
+    endMinutes = availabilityClampMinutes(
+      endMinutes,
+      startMinutes + AVAILABILITY_MIN_INTERVAL_MINUTES,
+      AVAILABILITY_DAY_END_MINUTES,
+    );
+
+    normalized.push({
+      start: availabilityMinutesToTime(startMinutes),
+      end: availabilityMinutesToTime(endMinutes),
+    });
+    previousEndMinutes = endMinutes;
+  });
+
+  return normalized;
 }
 
 function normalizeAvailabilityIntervals(
