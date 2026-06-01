@@ -6,7 +6,6 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import {
   Field as FormField,
-  Section as FormSection,
   inputClass,
   selectClass,
   textareaClass,
@@ -15,6 +14,7 @@ import { toast } from "@/components/ui/toast";
 import { apiFetch } from "@/lib/api";
 import { formatUnknownValue, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { FormSection } from "../shared/patient-form-primitives";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 const SCORE_TYPE_OPTIONS = [

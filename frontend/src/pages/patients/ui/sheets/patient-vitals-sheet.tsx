@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Field as FormField,
-  Section as FormSection,
   inputClass,
   textareaClass,
 } from "@/components/ui-shell";
@@ -14,6 +13,7 @@ import { toast } from "@/components/ui/toast";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { FormSection } from "../shared/patient-form-primitives";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 type FormState = {

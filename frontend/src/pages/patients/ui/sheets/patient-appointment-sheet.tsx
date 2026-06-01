@@ -7,7 +7,6 @@ import { Input } from "@/components/ui/input";
 import {
   checkboxClass,
   Field as FormField,
-  Section as FormSection,
   inputClass,
   selectClass,
   textareaClass,
@@ -25,6 +24,7 @@ import { useProviderTaxonomyNodes } from "@/pages/providers/data/use-provider-ta
 import { doctorSpecialtyLabel, type SpecializationLabelLang } from "@/pages/providers/model/specialization-labels";
 import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 import { ProviderSelectWithTaxonomyFilter } from "@/pages/providers/ui/provider-select-with-taxonomy-filter";
+import { FormSection } from "../shared/patient-form-primitives";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 type AppointmentKind = "medical" | "non_medical" | "internal";

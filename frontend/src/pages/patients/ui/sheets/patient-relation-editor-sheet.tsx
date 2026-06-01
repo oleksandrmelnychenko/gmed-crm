@@ -14,7 +14,6 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import {
   Field as FormField,
-  Section as FormSection,
   checkboxClass,
   inputClass,
   selectClass,
@@ -34,6 +33,7 @@ import {
   relationToForm,
   type RelationFormState,
 } from "../../model/sheet-forms";
+import { FormSection } from "../shared/patient-form-primitives";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 const RELATION_TYPE_OPTIONS = [

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeInputStep, timePickerMinutesStep } from "./input";
+import { normalizeInputStep, pickerFieldReadOnly, timePickerMinutesStep } from "./input";
 
 describe("Input", () => {
   it("uses one-minute steps for time inputs by default", () => {
@@ -17,5 +17,11 @@ describe("Input", () => {
     expect(timePickerMinutesStep(60)).toBe(1);
     expect(timePickerMinutesStep(900)).toBe(15);
     expect(timePickerMinutesStep("1800")).toBe(30);
+  });
+
+  it("keeps time fields picker-only instead of keyboard-editable", () => {
+    expect(pickerFieldReadOnly("time", undefined)).toBe(true);
+    expect(pickerFieldReadOnly("time", false)).toBe(true);
+    expect(pickerFieldReadOnly("date", false)).toBe(false);
   });
 });

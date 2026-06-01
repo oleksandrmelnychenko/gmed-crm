@@ -6,7 +6,6 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { toast } from "@/components/ui/toast";
 import {
   Field as FormField,
-  Section as FormSection,
   selectClass,
   textareaClass,
 } from "@/components/ui-shell";
@@ -19,6 +18,7 @@ import {
   serializePatientLegalStatus,
   type PatientLegalStatus,
 } from "../../model/legal-status";
+import { FormSection } from "../shared/patient-form-primitives";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 const legalNotesTextareaClassName = cn(textareaClass, "min-h-[80px]");

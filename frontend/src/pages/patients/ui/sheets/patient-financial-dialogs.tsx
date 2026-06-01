@@ -8,12 +8,12 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
   Field as FormField,
-  Section as FormSection,
   inputClass,
   selectClass,
 } from "@/components/ui-shell";
 
 import type { DunningEvent } from "../../model/detail-tab-types";
+import { FormSection } from "../shared/patient-form-primitives";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 type LocalizeFn = (key: string) => string;

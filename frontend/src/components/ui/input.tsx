@@ -75,6 +75,13 @@ export function timePickerMinutesStep(step: React.ComponentProps<"input">["step"
   return Math.max(1, Math.round(seconds / 60))
 }
 
+export function pickerFieldReadOnly(
+  type: React.ComponentProps<"input">["type"],
+  readOnly: React.ComponentProps<"input">["readOnly"],
+) {
+  return type === "time" ? true : readOnly
+}
+
 function getPickerControlStyle(className: string | undefined) {
   const isTall = hasClassToken(className, "h-10")
   const isShellHeight = hasClassToken(className, "h-9")
@@ -242,6 +249,9 @@ function Input({
           minutesStep={timePickerMinutesStep(step)}
           views={["hours", "minutes"]}
           slotProps={{
+            field: {
+              readOnly: pickerFieldReadOnly(type, props.readOnly),
+            },
             textField: sharedTextFieldProps,
           }}
         />

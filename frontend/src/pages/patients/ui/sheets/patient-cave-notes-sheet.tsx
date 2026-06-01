@@ -5,12 +5,12 @@ import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
 import {
   Field as FormField,
-  Section as FormSection,
   textareaClass,
 } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { FormSection } from "../shared/patient-form-primitives";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 const caveTextareaClassName = cn(
