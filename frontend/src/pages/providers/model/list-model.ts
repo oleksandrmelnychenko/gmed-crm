@@ -1099,13 +1099,53 @@ function stringifyJsonRecord(value: Record<string, unknown> | null | undefined) 
   }
 }
 
+export function parseTaxonomyAttributes(value: string) {
+  try {
+    const parsed = JSON.parse(value || "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    return {};
+  }
+  return {};
+}
+
+export function taxonomyAttributeValue(value: string, key: string) {
+  const raw = parseTaxonomyAttributes(value)[key];
+  if (raw === null || raw === undefined) return "";
+  if (typeof raw === "string") return raw;
+  return String(raw);
+}
+
+export function updateTaxonomyAttributeValue(value: string, key: string, nextValue: string) {
+  const next = parseTaxonomyAttributes(value);
+  if (nextValue.trim()) {
+    next[key] = nextValue;
+  } else {
+    delete next[key];
+  }
+  return JSON.stringify(next, null, 2);
+}
+
 function parseJsonRecord(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return {};
   const parsed = JSON.parse(trimmed);
-  return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-    ? (parsed as Record<string, unknown>)
-    : {};
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+
+  const record: Record<string, unknown> = {};
+  for (const [key, rawValue] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof rawValue === "string") {
+      const trimmedValue = rawValue.trim();
+      if (trimmedValue) {
+        record[key] = trimmedValue;
+      }
+    } else if (rawValue !== null && rawValue !== undefined) {
+      record[key] = rawValue;
+    }
+  }
+  return record;
 }
 
 function parseOptionalNumber(value: string) {

@@ -118,10 +118,12 @@ import {
   servicePriceLabel,
   staffToForm,
   splitDoctorTitleValue,
+  taxonomyAttributeValue,
   toDoctorPayload,
   toProviderPayload,
   toServicePayload,
   toStaffPayload,
+  updateTaxonomyAttributeValue,
   weeklyAvailabilityDayLabel,
 } from "./model/list-model";
 import {
@@ -590,36 +592,6 @@ function taxonomyAttributeKeys(node: ProviderTaxonomyNode | null | undefined) {
 
 function taxonomyAttributeLabel(key: string, lang: "de" | "ru") {
   return TAXONOMY_ATTRIBUTE_LABELS[key]?.[lang] ?? humanizeCode(key);
-}
-
-function parseTaxonomyAttributes(value: string) {
-  try {
-    const parsed = JSON.parse(value || "{}");
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
-  } catch {
-    return {};
-  }
-  return {};
-}
-
-function taxonomyAttributeValue(value: string, key: string) {
-  const raw = parseTaxonomyAttributes(value)[key];
-  if (raw === null || raw === undefined) return "";
-  if (typeof raw === "string") return raw;
-  return String(raw);
-}
-
-function updateTaxonomyAttributeValue(value: string, key: string, nextValue: string) {
-  const next = parseTaxonomyAttributes(value);
-  const trimmed = nextValue.trim();
-  if (trimmed) {
-    next[key] = trimmed;
-  } else {
-    delete next[key];
-  }
-  return JSON.stringify(next, null, 2);
 }
 
 function serviceTaxonomyLabel(

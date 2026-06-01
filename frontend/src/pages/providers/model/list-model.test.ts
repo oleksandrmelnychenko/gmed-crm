@@ -6,6 +6,7 @@ import {
   availabilityMinEndForStart,
   blankDoctorForm,
   blankProviderForm,
+  blankServiceForm,
   buildProvidersQuery,
   doctorListDisplayName,
   formatAvailabilityTimeDraft,
@@ -15,8 +16,11 @@ import {
   normalizeAvailabilityEditorIntervals,
   parseWeeklyAvailability,
   splitDoctorTitleValue,
+  taxonomyAttributeValue,
   toDoctorPayload,
   toProviderPayload,
+  toServicePayload,
+  updateTaxonomyAttributeValue,
 } from "./list-model";
 import type { ProviderFilters } from "./types";
 
@@ -188,6 +192,26 @@ describe("doctor title helpers", () => {
 
     expect(doctorListDisplayName(doctor, "de")).toBe("Herr Prof. Dr. JOHN REMBO");
     expect(doctorListDisplayName(doctor, "ru")).toBe("Prof. Dr. JOHN REMBO");
+  });
+});
+
+describe("taxonomy attribute drafts", () => {
+  it("keeps trailing spaces while editing taxonomy attributes", () => {
+    const draft = updateTaxonomyAttributeValue("{}", "cuisine", "Asian ");
+
+    expect(taxonomyAttributeValue(draft, "cuisine")).toBe("Asian ");
+    expect(updateTaxonomyAttributeValue(draft, "cuisine", "   ")).toBe("{}");
+  });
+
+  it("trims taxonomy attribute strings only when building payloads", () => {
+    const form = {
+      ...blankServiceForm(),
+      serviceName: "Dinner",
+      price: "12",
+      taxonomyAttributes: updateTaxonomyAttributeValue("{}", "cuisine", "Asian Fusion "),
+    };
+
+    expect(toServicePayload(form).taxonomy_attributes).toEqual({ cuisine: "Asian Fusion" });
   });
 });
 
