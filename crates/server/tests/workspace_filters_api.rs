@@ -6328,6 +6328,16 @@ async fn assign_interpreter_creates_patient_assignment_and_reminder() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/assign-interpreter"),
+        &bearer,
+        Some(json!({ "interpreter_id": interpreter_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
     let assignment_exists: bool = sqlx::query_scalar(
         r#"SELECT EXISTS(
             SELECT 1
@@ -7798,6 +7808,29 @@ async fn concierge_service_update_and_completion_flow_sets_ready_for_billing() {
     assert_eq!(body["booking_reference"], "VIP-REF-42");
     assert_eq!(body["vendor_name"], "Elite Drives");
     assert_eq!(body["actual_cost"], "189.50");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/concierge-services/{service_id}/update"),
+        &concierge_bearer,
+        Some(json!({
+            "booking_reference": null,
+            "vendor_name": null,
+            "starts_at": null,
+            "ends_at": null,
+            "actual_cost": null,
+            "service_notes": null
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["booking_reference"].is_null());
+    assert!(body["vendor_name"].is_null());
+    assert!(body["starts_at"].is_null());
+    assert!(body["ends_at"].is_null());
+    assert!(body["actual_cost"].is_null());
+    assert!(body["service_notes"].is_null());
 
     let (status, body) = json_request(
         &app,

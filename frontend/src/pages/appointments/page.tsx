@@ -391,6 +391,7 @@ function useStaffAppointmentsPageContent() {
     staff,
     metadataLoading,
     metadataError,
+    providersError,
   } = useAppointmentsMetadata({
     failedLoadMessage: tr.common_failed_load,
   });
@@ -1561,6 +1562,7 @@ function useStaffAppointmentsPageContent() {
             timelineEvents={timelineEvents}
             appointments={appointments}
             providers={providers}
+            providersError={providersError}
             taxonomyNodes={taxonomyNodes}
             staff={staff}
             interpreters={interpreters}
@@ -1796,6 +1798,7 @@ function useStaffAppointmentsPageContent() {
         appointments={appointments}
         patients={patients}
         providers={providers}
+        providersError={providersError}
         providersLoading={metadataLoading && providers.length === 0}
         taxonomyNodes={taxonomyNodes}
         interpreters={interpreters}
@@ -1915,6 +1918,7 @@ function useStaffAppointmentsPageContent() {
           timelineEvents={timelineEvents}
           appointments={appointments}
           providers={providers}
+          providersError={providersError}
           taxonomyNodes={taxonomyNodes}
           staff={staff}
           interpreters={interpreters}

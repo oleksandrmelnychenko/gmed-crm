@@ -66,6 +66,7 @@ export type AppointmentMobileDetailSheetContentProps = {
   timelineEvents: AppointmentTimelineEvent[];
   appointments: AppointmentListItem[];
   providers: ProviderSummary[];
+  providersError?: string;
   taxonomyNodes: ProviderTaxonomyNode[];
   staff: StaffOption[];
   interpreters: InterpreterOption[];
@@ -135,6 +136,7 @@ function useAppointmentMobileDetailSheetContentContent({
   timelineEvents,
   appointments,
   providers,
+  providersError,
   taxonomyNodes,
   staff,
   interpreters,
@@ -233,6 +235,7 @@ function useAppointmentMobileDetailSheetContentContent({
                   detail={detail}
                   appointments={appointments}
                   providers={providers}
+                  providersError={providersError}
                   taxonomyNodes={taxonomyNodes}
                   staff={staff}
                   interpreters={interpreters}

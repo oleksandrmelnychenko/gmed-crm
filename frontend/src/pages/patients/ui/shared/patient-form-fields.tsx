@@ -241,7 +241,7 @@ export function PatientFormFields({
         }
       >
         <div className="grid gap-3 md:grid-cols-3">
-          <Field label={t.patients_emergency_name}>
+          <Field label={t.patients_emergency_name} required={isMinor}>
             <Input
               value={form.emergencyContactName}
               onChange={(event) => onChange("emergencyContactName", event.target.value)}
@@ -250,7 +250,7 @@ export function PatientFormFields({
               required={isMinor}
             />
           </Field>
-          <Field label={t.patients_emergency_phone}>
+          <Field label={t.patients_emergency_phone} required={isMinor}>
             <Input
               value={form.emergencyContactPhone}
               onChange={(event) => onChange("emergencyContactPhone", event.target.value)}
@@ -259,7 +259,7 @@ export function PatientFormFields({
               required={isMinor}
             />
           </Field>
-          <Field label={t.patients_emergency_relation}>
+          <Field label={t.patients_emergency_relation} required={isMinor}>
             {isMinor ? (
               <NativeComboboxSelect
                 value={
@@ -334,7 +334,7 @@ function PatientPersonalDataSection({
             disabled={readOnly}
           />
         </Field>
-        <Field label={t.patients_first_name}>
+        <Field label={t.patients_first_name} required>
           <Input
             value={form.firstName}
             onChange={(event) => onChange("firstName", event.target.value)}
@@ -343,7 +343,7 @@ function PatientPersonalDataSection({
             required
           />
         </Field>
-        <Field label={t.patients_last_name}>
+        <Field label={t.patients_last_name} required>
           <Input
             value={form.lastName}
             onChange={(event) => onChange("lastName", event.target.value)}
@@ -356,7 +356,7 @@ function PatientPersonalDataSection({
 
       {includeBirthAndGender ? (
         <div className="grid gap-3 md:grid-cols-2">
-          <Field label={t.patients_birth_date}>
+          <Field label={t.patients_birth_date} required>
             <Input
               type="date"
               value={form.birthDate}

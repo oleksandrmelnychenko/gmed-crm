@@ -98,6 +98,7 @@ type AppointmentDesktopDetailWorkspaceContentProps = {
   timelineEvents: AppointmentTimelineEvent[];
   appointments: AppointmentListItem[];
   providers: ProviderSummary[];
+  providersError?: string;
   taxonomyNodes: ProviderTaxonomyNode[];
   staff: StaffOption[];
   interpreters: InterpreterOption[];
@@ -171,6 +172,7 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
   timelineEvents,
   appointments,
   providers,
+  providersError,
   taxonomyNodes,
   staff,
   interpreters,
@@ -313,6 +315,7 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
             detail={detail}
             appointments={appointments}
             providers={providers}
+            providersError={providersError}
             taxonomyNodes={taxonomyNodes}
             staff={staff}
             interpreters={interpreters}

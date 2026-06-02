@@ -78,7 +78,36 @@ struct CreateConciergeServiceRequest {
     billing_notes: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Default)]
+enum NullablePatchValue {
+    #[default]
+    Missing,
+    Null,
+    Value(serde_json::Value),
+}
+
+impl NullablePatchValue {
+    fn is_present(&self) -> bool {
+        !matches!(self, Self::Missing)
+    }
+}
+
+impl<'de> Deserialize<'de> for NullablePatchValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if value.is_null() {
+            Ok(Self::Null)
+        } else {
+            Ok(Self::Value(value))
+        }
+    }
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default)]
 struct UpdateConciergeServiceRequest {
     provider_id: Option<Uuid>,
     provider_service_id: Option<Uuid>,
@@ -88,18 +117,18 @@ struct UpdateConciergeServiceRequest {
     title: Option<String>,
     status: Option<String>,
     billing_status: Option<String>,
-    booking_reference: Option<String>,
-    vendor_name: Option<String>,
-    vendor_contact: Option<String>,
-    starts_at: Option<String>,
-    ends_at: Option<String>,
-    cost_estimate: Option<f64>,
-    actual_cost: Option<f64>,
+    booking_reference: NullablePatchValue,
+    vendor_name: NullablePatchValue,
+    vendor_contact: NullablePatchValue,
+    starts_at: NullablePatchValue,
+    ends_at: NullablePatchValue,
+    cost_estimate: NullablePatchValue,
+    actual_cost: NullablePatchValue,
     quantity: Option<f64>,
     unit_price: Option<f64>,
     currency: Option<String>,
-    service_notes: Option<String>,
-    billing_notes: Option<String>,
+    service_notes: NullablePatchValue,
+    billing_notes: NullablePatchValue,
 }
 
 #[derive(Deserialize)]
@@ -427,7 +456,7 @@ async fn create_my_concierge_service(
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
 
-    if let (Some(starts_at), Some(ends_at)) = (starts_at, ends_at)
+    if let (Some(starts_at), Some(ends_at)) = (starts_at.as_ref(), ends_at.as_ref())
         && ends_at <= starts_at
     {
         return err(
@@ -1256,26 +1285,76 @@ async fn update_concierge_service(
         }
     }
 
-    let starts_at = match parse_optional_datetime(body.starts_at.as_deref()) {
+    let booking_reference = match parse_optional_text_patch(
+        &body.booking_reference,
+        existing
+            .try_get::<Option<String>, _>("booking_reference")
+            .unwrap_or_default(),
+        "booking_reference",
+    ) {
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
-    let ends_at = match parse_optional_datetime(body.ends_at.as_deref()) {
+    let vendor_name = match parse_optional_text_patch(
+        &body.vendor_name,
+        existing
+            .try_get::<Option<String>, _>("vendor_name")
+            .unwrap_or_default(),
+        "vendor_name",
+    ) {
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
-    let effective_starts_at = starts_at.or_else(|| {
+    let vendor_contact = match parse_optional_text_patch(
+        &body.vendor_contact,
+        existing
+            .try_get::<Option<String>, _>("vendor_contact")
+            .unwrap_or_default(),
+        "vendor_contact",
+    ) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let starts_at = match parse_optional_datetime_patch(
+        &body.starts_at,
         existing
             .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("starts_at")
-            .unwrap_or_default()
-    });
-    let effective_ends_at = ends_at.or_else(|| {
+            .unwrap_or_default(),
+    ) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let ends_at = match parse_optional_datetime_patch(
+        &body.ends_at,
         existing
             .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("ends_at")
-            .unwrap_or_default()
-    });
+            .unwrap_or_default(),
+    ) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let service_notes = match parse_optional_text_patch(
+        &body.service_notes,
+        existing
+            .try_get::<Option<String>, _>("service_notes")
+            .unwrap_or_default(),
+        "service_notes",
+    ) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let billing_notes = match parse_optional_text_patch(
+        &body.billing_notes,
+        existing
+            .try_get::<Option<String>, _>("billing_notes")
+            .unwrap_or_default(),
+        "billing_notes",
+    ) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
 
-    if let (Some(starts_at), Some(ends_at)) = (effective_starts_at, effective_ends_at)
+    if let (Some(starts_at), Some(ends_at)) = (starts_at, ends_at)
         && ends_at <= starts_at
     {
         return err(
@@ -1323,6 +1402,32 @@ async fn update_concierge_service(
         .ok()
         .flatten()
         .and_then(|value| value.to_string().parse::<f64>().ok());
+    let existing_cost_estimate = existing
+        .try_get::<Option<rust_decimal::Decimal>, _>("cost_estimate")
+        .ok()
+        .flatten()
+        .and_then(|value| value.to_string().parse::<f64>().ok());
+    let existing_actual_cost = existing
+        .try_get::<Option<rust_decimal::Decimal>, _>("actual_cost")
+        .ok()
+        .flatten()
+        .and_then(|value| value.to_string().parse::<f64>().ok());
+    let requested_cost_estimate = match parse_optional_non_negative_patch(
+        &body.cost_estimate,
+        existing_cost_estimate,
+        "cost_estimate",
+    ) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let actual_cost = match parse_optional_non_negative_patch(
+        &body.actual_cost,
+        existing_actual_cost,
+        "actual_cost",
+    ) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
     let cost_estimate = match unit_price.or(existing_unit_price) {
         Some(value)
             if body.provider_service_id.is_some()
@@ -1331,7 +1436,7 @@ async fn update_concierge_service(
         {
             Some(round_money(quantity.unwrap_or(existing_quantity) * value))
         }
-        _ => body.cost_estimate,
+        _ => requested_cost_estimate,
     };
     let currency = body.currency.or_else(|| {
         provider_service_pricing
@@ -1359,16 +1464,16 @@ async fn update_concierge_service(
                title = COALESCE($5, title),
                status = COALESCE($6, status),
                billing_status = COALESCE($7, billing_status),
-               booking_reference = COALESCE($8, booking_reference),
-               vendor_name = COALESCE($9, vendor_name),
-               vendor_contact = COALESCE($10, vendor_contact),
-               starts_at = COALESCE($11, starts_at),
-               ends_at = COALESCE($12, ends_at),
-               cost_estimate = COALESCE($13, cost_estimate),
-               actual_cost = COALESCE($14, actual_cost),
+               booking_reference = $8,
+               vendor_name = $9,
+               vendor_contact = $10,
+               starts_at = $11,
+               ends_at = $12,
+               cost_estimate = $13,
+               actual_cost = $14,
                currency = COALESCE($15, currency),
-               service_notes = COALESCE($16, service_notes),
-               billing_notes = COALESCE($17, billing_notes),
+               service_notes = $16,
+               billing_notes = $17,
                completed_at = COALESCE($18, completed_at),
                billed_at = COALESCE($19, billed_at),
                taxonomy_node_id = COALESCE($20, taxonomy_node_id),
@@ -1384,16 +1489,16 @@ async fn update_concierge_service(
     .bind(body.title.map(|value| value.trim().to_string()))
     .bind(body.status)
     .bind(body.billing_status)
-    .bind(body.booking_reference)
-    .bind(body.vendor_name)
-    .bind(body.vendor_contact)
+    .bind(booking_reference)
+    .bind(vendor_name)
+    .bind(vendor_contact)
     .bind(starts_at)
     .bind(ends_at)
     .bind(cost_estimate)
-    .bind(body.actual_cost)
+    .bind(actual_cost)
     .bind(currency.map(|value| value.to_uppercase()))
-    .bind(body.service_notes)
-    .bind(body.billing_notes)
+    .bind(service_notes)
+    .bind(billing_notes)
     .bind(completed_at)
     .bind(billed_at)
     .bind(body.taxonomy_node_id)
@@ -1765,11 +1870,11 @@ fn validate_update_fields_for_role(
             || body.service_kind.is_some()
             || body.taxonomy_node_id.is_some()
             || body.title.is_some()
-            || body.cost_estimate.is_some()
+            || body.cost_estimate.is_present()
             || body.quantity.is_some()
             || body.unit_price.is_some()
             || body.billing_status.is_some()
-            || body.billing_notes.is_some()
+            || body.billing_notes.is_present()
             || body.currency.is_some()
         {
             return Err(err(
@@ -1788,15 +1893,15 @@ fn validate_update_fields_for_role(
             || body.taxonomy_node_id.is_some()
             || body.title.is_some()
             || body.status.is_some()
-            || body.booking_reference.is_some()
-            || body.vendor_name.is_some()
-            || body.vendor_contact.is_some()
-            || body.starts_at.is_some()
-            || body.ends_at.is_some()
-            || body.cost_estimate.is_some()
+            || body.booking_reference.is_present()
+            || body.vendor_name.is_present()
+            || body.vendor_contact.is_present()
+            || body.starts_at.is_present()
+            || body.ends_at.is_present()
+            || body.cost_estimate.is_present()
             || body.quantity.is_some()
             || body.unit_price.is_some()
-            || body.service_notes.is_some()
+            || body.service_notes.is_present()
             || body.currency.is_some()
         {
             return Err(err(
@@ -1862,6 +1967,42 @@ fn parse_optional_datetime(
     }
 }
 
+fn parse_optional_text_patch(
+    value: &NullablePatchValue,
+    existing: Option<String>,
+    field: &'static str,
+) -> Result<Option<String>, &'static str> {
+    match value {
+        NullablePatchValue::Missing => Ok(existing),
+        NullablePatchValue::Null => Ok(None),
+        NullablePatchValue::Value(serde_json::Value::String(value)) => {
+            Ok(normalize_optional_text(Some(value)))
+        }
+        NullablePatchValue::Value(_) => match field {
+            "booking_reference" => Err("booking_reference must be text or null"),
+            "vendor_name" => Err("vendor_name must be text or null"),
+            "vendor_contact" => Err("vendor_contact must be text or null"),
+            "service_notes" => Err("service_notes must be text or null"),
+            "billing_notes" => Err("billing_notes must be text or null"),
+            _ => Err("field must be text or null"),
+        },
+    }
+}
+
+fn parse_optional_datetime_patch(
+    value: &NullablePatchValue,
+    existing: Option<chrono::DateTime<chrono::Utc>>,
+) -> Result<Option<chrono::DateTime<chrono::Utc>>, &'static str> {
+    match value {
+        NullablePatchValue::Missing => Ok(existing),
+        NullablePatchValue::Null => Ok(None),
+        NullablePatchValue::Value(serde_json::Value::String(value)) => {
+            parse_optional_datetime(Some(value))
+        }
+        NullablePatchValue::Value(_) => Err("datetime field must be RFC3339 text or null"),
+    }
+}
+
 fn normalize_positive_number(
     value: Option<f64>,
     default_value: f64,
@@ -1894,6 +2035,22 @@ fn normalize_optional_non_negative(
         };
     }
     Ok(Some(value))
+}
+
+fn parse_optional_non_negative_patch(
+    value: &NullablePatchValue,
+    existing: Option<f64>,
+    field: &'static str,
+) -> Result<Option<f64>, &'static str> {
+    match value {
+        NullablePatchValue::Missing => Ok(existing),
+        NullablePatchValue::Null => Ok(None),
+        NullablePatchValue::Value(serde_json::Value::Number(value)) => match value.as_f64() {
+            Some(value) => normalize_optional_non_negative(Some(value), field),
+            None => Err("value must be numeric or null"),
+        },
+        NullablePatchValue::Value(_) => Err("value must be numeric or null"),
+    }
 }
 
 fn round_money(value: f64) -> f64 {

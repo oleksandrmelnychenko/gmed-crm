@@ -27,6 +27,7 @@ export function useAppointmentsMetadata({
     staff: [] as StaffOption[],
     metadataLoading: true,
     metadataError: "",
+    providersError: "",
   });
 
   useEffect(() => {
@@ -37,44 +38,66 @@ export function useAppointmentsMetadata({
         ...current,
         metadataLoading: true,
         metadataError: "",
+        providersError: "",
       }));
 
       const metadataRequest = Promise.all([
-          apiFetch<PatientSummary[]>("/patients", {
-            cacheTtlMs: APPOINTMENT_METADATA_CACHE_TTL_MS,
-          }).catch(() => []),
-          apiFetch<ProviderSummary[]>("/providers", {
-            cacheTtlMs: APPOINTMENT_METADATA_CACHE_TTL_MS,
-          }).catch(() => []),
-          fetchProviderTaxonomy().then((taxonomy) => taxonomy.nodes).catch(() => []),
-          apiFetch<InterpreterOption[]>("/appointments/meta/interpreters", {
-            cacheTtlMs: APPOINTMENT_METADATA_CACHE_TTL_MS,
-          }).catch(() => []),
-          apiFetch<StaffOption[]>("/appointments/meta/staff", {
-            cacheTtlMs: APPOINTMENT_METADATA_CACHE_TTL_MS,
-          }).catch(() => []),
-        ]);
+        apiFetch<PatientSummary[]>("/patients", {
+          cacheTtlMs: APPOINTMENT_METADATA_CACHE_TTL_MS,
+        })
+          .then((rows) => ({ rows, error: "" }))
+          .catch(() => ({
+            rows: [] as PatientSummary[],
+            error: failedLoadMessage,
+          })),
+        apiFetch<ProviderSummary[]>("/providers", {
+          cacheTtlMs: APPOINTMENT_METADATA_CACHE_TTL_MS,
+        })
+          .then((rows) => ({ rows, error: "" }))
+          .catch(() => ({
+            rows: [] as ProviderSummary[],
+            error: failedLoadMessage,
+          })),
+        fetchProviderTaxonomy().then((taxonomy) => taxonomy.nodes).catch(() => []),
+        apiFetch<InterpreterOption[]>("/appointments/meta/interpreters", {
+          cacheTtlMs: APPOINTMENT_METADATA_CACHE_TTL_MS,
+        })
+          .then((rows) => ({ rows, error: "" }))
+          .catch(() => ({
+            rows: [] as InterpreterOption[],
+            error: failedLoadMessage,
+          })),
+        apiFetch<StaffOption[]>("/appointments/meta/staff", {
+          cacheTtlMs: APPOINTMENT_METADATA_CACHE_TTL_MS,
+        })
+          .then((rows) => ({ rows, error: "" }))
+          .catch(() => ({
+            rows: [] as StaffOption[],
+            error: failedLoadMessage,
+          })),
+      ]);
 
       if (!active) return;
       void metadataRequest.then(
-        ([patientRows, providerRows, taxonomyRows, interpreterRows, staffRows]) => {
+        ([patientResult, providerResult, taxonomyRows, interpreterResult, staffResult]) => {
           if (!active) return;
 
           const metadataError =
-            patientRows.length === 0 &&
-            interpreterRows.length === 0 &&
-            staffRows.length === 0
+            patientResult.error &&
+            interpreterResult.error &&
+            staffResult.error
               ? failedLoadMessage
               : "";
 
           setMetadataState({
-            patients: patientRows,
-            providers: providerRows,
+            patients: patientResult.rows,
+            providers: providerResult.rows,
             taxonomyNodes: taxonomyRows,
-            interpreters: interpreterRows,
-            staff: staffRows,
+            interpreters: interpreterResult.rows,
+            staff: staffResult.rows,
             metadataLoading: false,
             metadataError,
+            providersError: providerResult.error,
           });
         },
       );
@@ -93,5 +116,6 @@ export function useAppointmentsMetadata({
     staff: metadataState.staff,
     metadataLoading: metadataState.metadataLoading,
     metadataError: metadataState.metadataError,
+    providersError: metadataState.providersError,
   };
 }

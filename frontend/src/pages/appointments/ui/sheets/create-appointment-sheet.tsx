@@ -90,6 +90,7 @@ export type CreateAppointmentSheetProps = {
   appointments: AppointmentListItem[];
   patients: PatientSummary[];
   providers: ProviderSummary[];
+  providersError?: string;
   providersLoading?: boolean;
   taxonomyNodes: ProviderTaxonomyNode[];
   interpreters: InterpreterOption[];
@@ -148,6 +149,7 @@ function useCreateAppointmentSheetContent({
   appointments,
   patients,
   providers,
+  providersError = "",
   providersLoading = false,
   taxonomyNodes,
   interpreters,
@@ -780,6 +782,9 @@ function useCreateAppointmentSheetContent({
         </section>
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
                 {sectionTitle(appointmentText("appointments_provider_and_doctor"))}
+                {providersError ? (
+                  <Banner tone="error">{providersError}</Banner>
+                ) : null}
                 <div className="grid gap-4 md:grid-cols-3">
                   <div className="md:col-span-2">
                     <ProviderSelectWithTaxonomyFilter
@@ -996,6 +1001,7 @@ export const MemoizedCreateAppointmentSheet = memo(
     prev.appointments === next.appointments &&
     prev.patients === next.patients &&
     prev.providers === next.providers &&
+    prev.providersError === next.providersError &&
     prev.providersLoading === next.providersLoading &&
     prev.taxonomyNodes === next.taxonomyNodes &&
     prev.interpreters === next.interpreters &&

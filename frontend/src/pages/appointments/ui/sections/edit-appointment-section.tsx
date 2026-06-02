@@ -19,6 +19,7 @@ import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm
 import { isInternalOverlayInteractionEvent } from "@/components/ui/dismissal-guard";
 import {
   Banner,
+  textareaClass,
   tokens,
 } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
@@ -94,6 +95,7 @@ type EditAppointmentSectionProps = {
   detail: AppointmentDetail;
   appointments: AppointmentListItem[];
   providers: ProviderSummary[];
+  providersError?: string;
   taxonomyNodes: ProviderTaxonomyNode[];
   staff: StaffOption[];
   interpreters: InterpreterOption[];
@@ -259,6 +261,7 @@ function useEditAppointmentSectionContentContent({
   detail,
   appointments,
   providers,
+  providersError = "",
   taxonomyNodes,
   staff,
   interpreters,
@@ -1057,6 +1060,9 @@ function useEditAppointmentSectionContentContent({
         </section>
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
         {editSheetSectionTitle(appointmentText("appointments_provider_and_doctor"))}
+        {providersError ? (
+          <Banner tone="error">{providersError}</Banner>
+        ) : null}
         <div className="grid gap-4 md:grid-cols-3">
           <div className="md:col-span-2">
             <ProviderSelectWithTaxonomyFilter
@@ -1157,16 +1163,43 @@ function useEditAppointmentSectionContentContent({
             </NativeComboboxSelect>
           </Field>
         </div>
-        <Field compact label={t.appointments_location}>
-          <Input
-            value={form.location}
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field compact label={t.appointments_location}>
+            <Input
+              value={form.location}
+              onChange={(event) =>
+                setFormFromUser((current) => ({
+                  ...current,
+                  location: event.target.value,
+                }))
+              }
+              className={inputClassName}
+            />
+          </Field>
+          <Field compact label={tr.documents_category}>
+            <Input
+              value={form.category}
+              onChange={(event) =>
+                setFormFromUser((current) => ({
+                  ...current,
+                  category: event.target.value,
+                }))
+              }
+              className={inputClassName}
+            />
+          </Field>
+        </div>
+        <Field compact label={t.patients_notes}>
+          <textarea
+            value={form.notes}
             onChange={(event) =>
               setFormFromUser((current) => ({
                 ...current,
-                location: event.target.value,
+                notes: event.target.value,
               }))
             }
-            className={inputClassName}
+            className={textareaClass}
+            rows={3}
           />
         </Field>
         </section>
