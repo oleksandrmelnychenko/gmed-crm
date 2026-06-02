@@ -5805,18 +5805,22 @@ async fn insert_patient_assignment_notification(
 }
 
 fn can_manage_assignment(role: Role) -> bool {
-    matches!(
-        role,
-        Role::Ceo | Role::PatientManager | Role::TeamleadInterpreter
-    )
+    if role.has_full_access() {
+        return true;
+    }
+
+    matches!(role, Role::PatientManager | Role::TeamleadInterpreter)
 }
 
 fn assignment_allowed(assigner_role: Role, target_role: &str) -> bool {
-    match assigner_role {
-        Role::Ceo => matches!(
+    if assigner_role.has_full_access() {
+        return matches!(
             target_role,
             "patient_manager" | "teamlead_interpreter" | "interpreter" | "concierge"
-        ),
+        );
+    }
+
+    match assigner_role {
         Role::PatientManager => {
             matches!(
                 target_role,

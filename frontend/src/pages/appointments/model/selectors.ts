@@ -135,24 +135,24 @@ export function appointmentPermissions(
         canViewPage: true,
         canCreate: true,
         canEditSchedule: true,
-        canManageStatus: false,
-        canAssignInterpreter: false,
-        canManageChecklist: false,
-        canViewReminders: false,
-        canManageReminders: false,
+        canManageStatus: true,
+        canAssignInterpreter: true,
+        canManageChecklist: true,
+        canViewReminders: true,
+        canManageReminders: true,
         canRespondToAssignment: false,
-        canSubmitReport: false,
-        canViewReport: false,
-        canApproveReport: false,
-        canRejectReport: false,
+        canSubmitReport: true,
+        canViewReport: true,
+        canApproveReport: true,
+        canRejectReport: true,
         canViewNotes: true,
-        canViewTasks: false,
-        canCreateTasks: false,
-        canViewConciergeServices: false,
-        canManageConciergeServices: false,
-        canManageConciergeBilling: false,
-        canViewCommunications: false,
-        canManageCommunications: false,
+        canViewTasks: true,
+        canCreateTasks: true,
+        canViewConciergeServices: true,
+        canManageConciergeServices: true,
+        canManageConciergeBilling: true,
+        canViewCommunications: true,
+        canManageCommunications: true,
       };
     default:
       return {
@@ -185,18 +185,21 @@ export function linkedPatientPermissions(
   role?: string,
 ): LinkedPatientPermissions {
   return {
-    canCreateEdit: role === "ceo" || role === "patient_manager",
+    canCreateEdit:
+      role === "ceo" || role === "patient_manager" || role === "it_admin",
     canViewAssignments: [
       "ceo",
       "patient_manager",
       "teamlead_interpreter",
       "interpreter",
       "concierge",
+      "it_admin",
     ].includes(role ?? ""),
     canManageAssignments:
       role === "ceo" ||
       role === "patient_manager" ||
-      role === "teamlead_interpreter",
+      role === "teamlead_interpreter" ||
+      role === "it_admin",
   };
 }
 

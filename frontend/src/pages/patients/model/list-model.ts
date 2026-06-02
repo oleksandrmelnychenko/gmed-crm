@@ -397,6 +397,7 @@ export function buildPatientsPath(filters: PatientFilters) {
 export function canAssignTarget(managerRole: string | undefined, targetRole: string) {
   switch (managerRole) {
     case "ceo":
+    case "it_admin":
       return ["patient_manager", "teamlead_interpreter", "interpreter", "concierge"].includes(
         targetRole
       );

@@ -434,7 +434,14 @@ function invoiceTypeLabel(value: string) {
 
 function canAssignTarget(managerRole: string | undefined, targetRole: string) {
   switch (managerRole) {
-    case "ceo": return ["patient_manager", "teamlead_interpreter", "interpreter", "concierge"].includes(targetRole);
+    case "ceo":
+    case "it_admin":
+      return [
+        "patient_manager",
+        "teamlead_interpreter",
+        "interpreter",
+        "concierge",
+      ].includes(targetRole);
     case "patient_manager": return ["teamlead_interpreter", "interpreter", "concierge"].includes(targetRole);
     case "teamlead_interpreter": return targetRole === "interpreter";
     default: return false;
@@ -1258,21 +1265,38 @@ function usePatientDetailPageContent() {
     user?.role === "it_admin";
   const canViewContracts = canViewPatientContractsSurface(user?.role);
   const canManageContracts =
-    user?.role === "ceo" || user?.role === "patient_manager" || user?.role === "billing";
+    user?.role === "ceo" ||
+    user?.role === "patient_manager" ||
+    user?.role === "billing" ||
+    user?.role === "it_admin";
   const canViewInvoices = canViewPatientInvoicesSurface(user?.role);
-  const canManageInvoices = user?.role === "ceo" || user?.role === "billing";
-  const canEditPatientProfile = user?.role === "ceo" || user?.role === "patient_manager";
+  const canManageInvoices =
+    user?.role === "ceo" || user?.role === "billing" || user?.role === "it_admin";
+  const canEditPatientProfile =
+    user?.role === "ceo" ||
+    user?.role === "patient_manager" ||
+    user?.role === "it_admin";
   const canManagePatientVitals = canEditPatientProfile;
   const canManagePatientCardEntries = canEditPatientProfile;
   const canManagePatientMedicalOrders = canEditPatientProfile;
   const canManagePatientRiskScores = canEditPatientProfile;
-  const canExportPatientCompliance = user?.role === "ceo" || user?.role === "patient_manager";
-  const canOpenComplianceWorkspace = user?.role === "ceo" || user?.role === "patient_manager";
-  const canPrintPatientLabel = user?.role === "ceo" || user?.role === "patient_manager";
+  const canExportPatientCompliance =
+    user?.role === "ceo" ||
+    user?.role === "patient_manager" ||
+    user?.role === "it_admin";
+  const canOpenComplianceWorkspace =
+    user?.role === "ceo" ||
+    user?.role === "patient_manager" ||
+    user?.role === "it_admin";
+  const canPrintPatientLabel =
+    user?.role === "ceo" ||
+    user?.role === "patient_manager" ||
+    user?.role === "it_admin";
   const canManageWorkflowChecklist =
     user?.role === "ceo" ||
     user?.role === "patient_manager" ||
-    user?.role === "concierge";
+    user?.role === "concierge" ||
+    user?.role === "it_admin";
   const deferredTimelineSearch = useDeferredValue(timelineSearch);
   const {
     assignments,

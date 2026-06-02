@@ -90,6 +90,7 @@ export type CreateAppointmentSheetProps = {
   appointments: AppointmentListItem[];
   patients: PatientSummary[];
   providers: ProviderSummary[];
+  providersLoading?: boolean;
   taxonomyNodes: ProviderTaxonomyNode[];
   interpreters: InterpreterOption[];
   staff: StaffOption[];
@@ -140,6 +141,7 @@ function useCreateAppointmentSheetContent({
   appointments,
   patients,
   providers,
+  providersLoading = false,
   taxonomyNodes,
   interpreters,
   staff,
@@ -762,13 +764,16 @@ function useCreateAppointmentSheetContent({
                           : ""
                       }
                       taxonomyValue={form.providerTaxonomyNodeId}
-                      providerPlaceholder={t.common_not_set}
+                      providerPlaceholder={
+                        providersLoading ? t.common_loading : t.common_not_set
+                      }
                       taxonomyPlaceholder={t.appointments_provider_category}
                       taxonomyAllLabel={t.providers_all}
                       taxonomyLabel={t.appointments_provider_category}
                       providerSelectLabel={t.common_provider}
                       taxonomySelectClassName={createSheetSelectClassName}
                       providerSelectClassName={createSheetSelectClassName}
+                      providerDisabled={providersLoading && providers.length === 0}
                       providerLabel={(provider) => providerLabel(provider)}
                       onTaxonomyChange={(providerTaxonomyNodeId) => {
                         setForm((current) => ({

@@ -241,6 +241,7 @@ function PatientAppointmentScheduleSection({
   doctors,
   form,
   providerOptions,
+  providersLoading,
   providers,
   selectedProvider,
   setForm,
@@ -253,6 +254,7 @@ function PatientAppointmentScheduleSection({
   form: FormState;
   lang: SpecializationLabelLang;
   providerOptions: ProviderSummary[];
+  providersLoading: boolean;
   providers: ProviderSummary[];
   selectedProvider: ProviderSummary | null;
   setForm: PatientAppointmentFormSetter;
@@ -310,10 +312,13 @@ function PatientAppointmentScheduleSection({
                 ? form.appointmentType
                 : ""
             }
-            providerPlaceholder={t.common_not_set}
+            providerPlaceholder={
+              providersLoading ? t.common_loading : t.common_not_set
+            }
             taxonomyPlaceholder={t.providers_category}
             taxonomyAllLabel={t.providers_all}
             disabled={form.appointmentType === "internal"}
+            providerDisabled={providersLoading && providerOptions.length === 0}
             containerClassName="grid-cols-1 sm:grid-cols-2"
             taxonomySelectClassName={cn("w-full", selectClass)}
             providerSelectClassName={cn("w-full", selectClass)}
@@ -458,6 +463,7 @@ function PatientAppointmentSheetContent({
   const [form, setForm] = useState<FormState>(blankForm);
   const [busy, setBusy] = useState(false);
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
+  const [providersLoading, setProvidersLoading] = useState(false);
   const taxonomyNodes = useProviderTaxonomyNodes();
   const [doctorOptionsState, setDoctorOptionsState] = useState<{
     providerId: string;
@@ -483,12 +489,19 @@ function PatientAppointmentSheetContent({
     if (!open) return;
 
     let active = true;
-    void apiFetch<ProviderSummary[]>("/providers", { cacheTtlMs: 60_000 })
+    setProvidersLoading(true);
+    void apiFetch<ProviderSummary[]>("/providers", {
+      cacheTtlMs: 60_000,
+      forceFresh: true,
+    })
       .then((rows) => {
         if (active) setProviders(rows);
       })
       .catch(() => {
         if (active) setProviders([]);
+      })
+      .finally(() => {
+        if (active) setProvidersLoading(false);
       });
 
     return () => {
@@ -608,6 +621,7 @@ function PatientAppointmentSheetContent({
         doctors={doctors}
         form={form}
         providerOptions={providerOptions}
+        providersLoading={providersLoading}
         providers={providers}
         selectedProvider={selectedProvider}
         setForm={setForm}

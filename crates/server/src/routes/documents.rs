@@ -7960,6 +7960,7 @@ fn document_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "patient_id": row.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default(),
         "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
         "appointment_id": row.try_get::<Option<Uuid>, _>("appointment_id").unwrap_or_default(),
+        "provider_context_ids": row.try_get::<Vec<Uuid>, _>("provider_context_ids").unwrap_or_default(),
         "patient_pid": row.try_get::<Option<String>, _>("patient_pid").unwrap_or_default(),
         "patient_name": row.try_get::<Option<String>, _>("patient_name").unwrap_or_default(),
         "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
@@ -8173,7 +8174,8 @@ async fn fetch_document_row(
                     WHERE ds.document_id = d.id
                       AND ds.shared_with_user_id = $2
                       AND ds.revoked_at IS NULL
-                  ) AS shared_to_current
+                  ) AS shared_to_current,
+                  provider_context.provider_context_ids
            FROM documents d
            LEFT JOIN patients p ON p.id = d.patient_id
            LEFT JOIN orders o ON o.id = d.order_id
@@ -8181,6 +8183,32 @@ async fn fetch_document_row(
            LEFT JOIN users u ON u.id = d.uploaded_by
            LEFT JOIN users extractor ON extractor.id = d.text_extracted_by
            LEFT JOIN users deleter ON deleter.id = d.file_deleted_by
+           LEFT JOIN LATERAL (
+                SELECT COALESCE(
+                    array_agg(DISTINCT provider_id) FILTER (WHERE provider_id IS NOT NULL),
+                    ARRAY[]::uuid[]
+                ) AS provider_context_ids
+                FROM (
+                    SELECT appointment.provider_id
+                    FROM appointments appointment
+                    WHERE d.appointment_id IS NOT NULL
+                      AND appointment.id = d.appointment_id
+
+                    UNION
+
+                    SELECT leistung.provider_id
+                    FROM order_leistungen leistung
+                    WHERE d.order_id IS NOT NULL
+                      AND leistung.order_id = d.order_id
+
+                    UNION
+
+                    SELECT order_appointment.provider_id
+                    FROM appointments order_appointment
+                    WHERE d.order_id IS NOT NULL
+                      AND order_appointment.order_id = d.order_id
+                ) provider_context_source
+           ) provider_context ON TRUE
            WHERE d.id = $1"#,
     )
     .bind(document_id)
@@ -12984,13 +13012,40 @@ async fn list_documents(
                     WHERE ds.document_id = d.id
                       AND ds.shared_with_user_id = $13
                       AND ds.revoked_at IS NULL
-                  ) AS shared_to_current
+                  ) AS shared_to_current,
+                  provider_context.provider_context_ids
            FROM documents d
            LEFT JOIN patients p ON p.id = d.patient_id
            LEFT JOIN orders o ON o.id = d.order_id
            LEFT JOIN appointments a ON a.id = d.appointment_id
            LEFT JOIN users u ON u.id = d.uploaded_by
            LEFT JOIN users deleter ON deleter.id = d.file_deleted_by
+           LEFT JOIN LATERAL (
+                SELECT COALESCE(
+                    array_agg(DISTINCT provider_id) FILTER (WHERE provider_id IS NOT NULL),
+                    ARRAY[]::uuid[]
+                ) AS provider_context_ids
+                FROM (
+                    SELECT appointment.provider_id
+                    FROM appointments appointment
+                    WHERE d.appointment_id IS NOT NULL
+                      AND appointment.id = d.appointment_id
+
+                    UNION
+
+                    SELECT leistung.provider_id
+                    FROM order_leistungen leistung
+                    WHERE d.order_id IS NOT NULL
+                      AND leistung.order_id = d.order_id
+
+                    UNION
+
+                    SELECT order_appointment.provider_id
+                    FROM appointments order_appointment
+                    WHERE d.order_id IS NOT NULL
+                      AND order_appointment.order_id = d.order_id
+                ) provider_context_source
+           ) provider_context ON TRUE
            WHERE ($1::text IS NULL
                   OR d.auto_name ILIKE '%' || $1 || '%'
                   OR COALESCE(d.original_filename, '') ILIKE '%' || $1 || '%'

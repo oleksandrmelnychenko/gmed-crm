@@ -17,6 +17,7 @@ import {
 import { createPortal, flushSync } from "react-dom";
 import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import {
+  ArrowUpRight,
   CalendarClock,
   ChevronDown,
   Download,
@@ -507,6 +508,64 @@ function shareChannelOptions(values: readonly string[]) {
     value,
     label: formatShareChannelLabel(value),
   }));
+}
+
+function documentRequiresProviderContext(document?: DocumentItem | null) {
+  return Boolean(document?.order_id || document?.appointment_id);
+}
+
+function shareProviderContextIds(documents: DocumentItem[]) {
+  const constrainedDocuments = documents.filter(documentRequiresProviderContext);
+  if (constrainedDocuments.length === 0) return null;
+
+  const [firstDocument, ...remainingDocuments] = constrainedDocuments;
+  let intersection = new Set(firstDocument.provider_context_ids ?? []);
+  for (const document of remainingDocuments) {
+    const ids = new Set(document.provider_context_ids ?? []);
+    intersection = new Set([...intersection].filter((id) => ids.has(id)));
+  }
+  return intersection;
+}
+
+function singleContextId(documents: DocumentItem[], key: "order_id" | "appointment_id") {
+  const ids = new Set(
+    documents
+      .map((document) => document[key])
+      .filter((id): id is string => Boolean(id)),
+  );
+  return ids.size === 1 ? [...ids][0] : "";
+}
+
+function formatCreateShareError(
+  error: unknown,
+  translations: ReturnType<typeof runtimeTranslations>,
+) {
+  if (!(error instanceof Error)) return translations.documents_failed_create_share;
+  if (error.message.includes("Provider shares require a cover message")) {
+    return translations.documents_share_message_required;
+  }
+  if (error.message.includes("Provider is not involved")) {
+    return `${translations.documents_share_provider_not_in_context} ${translations.documents_share_provider_linking_steps}`;
+  }
+  if (
+    error.message.includes("official registered channel") ||
+    error.message.includes("does not have this channel registered")
+  ) {
+    return `${translations.documents_share_provider_channel_unavailable} ${translations.documents_share_provider_channel_fix}`;
+  }
+  if (error.message.includes("Medical documents can only be shared")) {
+    return translations.documents_share_provider_medical_required;
+  }
+  if (error.message.includes("specialty does not match")) {
+    return translations.documents_share_provider_specialty_mismatch;
+  }
+  if (
+    error.message.includes("Cannot share internal-only documents") ||
+    error.message.includes("Document not released for external sharing")
+  ) {
+    return translations.documents_share_external_release_required;
+  }
+  return error.message;
 }
 
 function formatDocumentSourceLabel(
@@ -1040,6 +1099,55 @@ function StaffDocumentsPage({
       providers.find((provider) => provider.id === shareForm.providerId) ?? null,
     [providers, shareForm.providerId],
   );
+  const shareTargetDocuments = useMemo(() => {
+    const targetIds =
+      selectedDocumentIds.length > 1
+        ? selectedDocumentIds
+        : detail
+          ? [detail.id]
+          : [];
+    if (targetIds.length === 0) return [];
+
+    const documentById = new Map<string, DocumentItem>();
+    for (const document of documents) documentById.set(document.id, document);
+    for (const document of intakeQueue) documentById.set(document.id, document);
+    if (detail) documentById.set(detail.id, detail);
+
+    return targetIds
+      .map((id) => documentById.get(id))
+      .filter((document): document is DocumentItem => Boolean(document));
+  }, [detail, documents, intakeQueue, selectedDocumentIds]);
+  const shareProviderContextIdSet = useMemo(
+    () => shareProviderContextIds(shareTargetDocuments),
+    [shareTargetDocuments],
+  );
+  const shareContextOrderId = useMemo(
+    () => singleContextId(shareTargetDocuments, "order_id"),
+    [shareTargetDocuments],
+  );
+  const shareContextAppointmentId = useMemo(
+    () => singleContextId(shareTargetDocuments, "appointment_id"),
+    [shareTargetDocuments],
+  );
+  const shareTargetsRequireMedicalProvider = useMemo(
+    () => shareTargetDocuments.some((document) => document.is_medical),
+    [shareTargetDocuments],
+  );
+  const shareProviderOptions = useMemo(
+    () =>
+      providers.filter((provider) => {
+        if (
+          shareTargetsRequireMedicalProvider &&
+          provider.provider_type !== "medical"
+        ) {
+          return false;
+        }
+        return shareProviderContextIdSet
+          ? shareProviderContextIdSet.has(provider.id)
+          : true;
+      }),
+    [providers, shareProviderContextIdSet, shareTargetsRequireMedicalProvider],
+  );
   const internalShareChannelOptions = useMemo(
     () => shareChannelOptions(INTERNAL_SHARE_CHANNEL_VALUES),
     [lang],
@@ -1048,6 +1156,21 @@ function StaffDocumentsPage({
     () => shareChannelOptions(providerShareChannelValues(selectedShareProvider)),
     [lang, selectedShareProvider],
   );
+
+  useEffect(() => {
+    if (
+      shareForm.targetType !== "provider" ||
+      !shareForm.providerId ||
+      shareProviderOptions.some((provider) => provider.id === shareForm.providerId)
+    ) {
+      return;
+    }
+    setShareForm((current) => ({
+      ...current,
+      providerId: "",
+      channel: DEFAULT_PROVIDER_SHARE_CHANNEL,
+    }));
+  }, [shareForm.providerId, shareForm.targetType, shareProviderOptions]);
 
   useDebouncedRealtimeSubscription(STAFF_DOCUMENT_REALTIME_EVENTS, (_event, events) => {
     if (!canView) return;
@@ -2055,6 +2178,18 @@ function StaffDocumentsPage({
       setShareError(t.documents_choose_provider_target);
       return;
     }
+    if (
+      shareForm.targetType === "provider" &&
+      shareProviderContextIdSet &&
+      !shareProviderContextIdSet.has(shareForm.providerId)
+    ) {
+      setShareError(
+        shareProviderOptions.length === 0
+          ? t.documents_share_provider_context_empty
+          : `${t.documents_share_provider_not_in_context} ${t.documents_share_provider_linking_steps}`,
+      );
+      return;
+    }
     if (shareForm.targetType === "provider" && !shareForm.message.trim()) {
       setShareError(t.documents_share_message_required);
       return;
@@ -2063,7 +2198,9 @@ function StaffDocumentsPage({
       shareForm.targetType === "provider" &&
       !providerShareChannelOptions.some((option) => option.value === shareForm.channel)
     ) {
-      setShareError(t.documents_share_provider_channel_unavailable);
+      setShareError(
+        `${t.documents_share_provider_channel_unavailable} ${t.documents_share_provider_channel_fix}`,
+      );
       return;
     }
     setShareBusy(true);
@@ -2110,11 +2247,7 @@ function StaffDocumentsPage({
       );
       refresh();
     } catch (nextError) {
-      setShareError(
-        nextError instanceof Error
-          ? nextError.message
-          : t.documents_failed_create_share,
-      );
+      setShareError(formatCreateShareError(nextError, t));
     } finally {
       setShareBusy(false);
     }
@@ -3436,7 +3569,9 @@ function StaffDocumentsPage({
                             targetType: "provider",
                             userId: "",
                             channel: providerShareChannelValues(
-                              providers.find((provider) => provider.id === current.providerId),
+                              shareProviderOptions.find(
+                                (provider) => provider.id === current.providerId,
+                              ),
                             ).includes(current.channel)
                               ? current.channel
                               : DEFAULT_PROVIDER_SHARE_CHANNEL,
@@ -3471,11 +3606,15 @@ function StaffDocumentsPage({
                         <Field label={t.common_provider} required>
                           <ProviderSelectWithTaxonomyFilter
                             value={shareForm.providerId}
-                            providers={providers}
+                            providers={shareProviderOptions}
                             taxonomyNodes={taxonomyNodes}
                             providerPlaceholder={t.documents_select_provider}
                             taxonomyPlaceholder={t.providers_category}
                             taxonomyAllLabel={t.providers_all}
+                            providerDisabled={
+                              Boolean(shareProviderContextIdSet) &&
+                              shareProviderOptions.length === 0
+                            }
                             containerClassName="grid-cols-1 sm:grid-cols-2"
                             taxonomySelectClassName={selectClassName}
                             providerSelectClassName={selectClassName}
@@ -3496,6 +3635,54 @@ function StaffDocumentsPage({
                               })
                             }
                           />
+                          {shareProviderContextIdSet ? (
+                            <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                              <p>
+                                {shareProviderOptions.length === 0
+                                  ? t.documents_share_provider_context_empty
+                                  : t.documents_share_provider_context_hint}
+                              </p>
+                              <p>{t.documents_share_provider_linking_steps}</p>
+                              {shareContextOrderId || shareContextAppointmentId ? (
+                                <div className="flex flex-wrap gap-2 pt-1">
+                                  {shareContextOrderId ? (
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-8 gap-1.5 rounded-lg"
+                                      onClick={() => {
+                                        setShareCreateOpen(false);
+                                        staffGo(
+                                          `/orders/${shareContextOrderId}?section=services`,
+                                        );
+                                      }}
+                                    >
+                                      <ArrowUpRight className="size-3.5" />
+                                      {t.documents_share_open_order_services}
+                                    </Button>
+                                  ) : null}
+                                  {shareContextAppointmentId ? (
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-8 gap-1.5 rounded-lg"
+                                      onClick={() => {
+                                        setShareCreateOpen(false);
+                                        staffGo(
+                                          `/appointments?appointment=${shareContextAppointmentId}&detailTab=overview`,
+                                        );
+                                      }}
+                                    >
+                                      <ArrowUpRight className="size-3.5" />
+                                      {t.documents_share_open_appointment}
+                                    </Button>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : null}
                         </Field>
                       )}
                       <Field label={t.documents_share_channel} required>

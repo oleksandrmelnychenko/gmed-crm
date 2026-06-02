@@ -1754,7 +1754,7 @@ fn validate_update_fields_for_role(
     auth: &AuthUser,
     body: &UpdateConciergeServiceRequest,
 ) -> Result<(), axum::response::Response> {
-    if matches!(auth.role, Role::Ceo | Role::PatientManager) {
+    if auth.role.has_full_access() || auth.role == Role::PatientManager {
         return Ok(());
     }
 
@@ -1828,7 +1828,7 @@ async fn can_access_service(
     patient_id: Uuid,
     assigned_concierge_id: Option<Uuid>,
 ) -> Result<bool, axum::response::Response> {
-    if matches!(auth.role, Role::Ceo | Role::Billing) {
+    if auth.role.has_full_access() || auth.role == Role::Billing {
         return Ok(true);
     }
 

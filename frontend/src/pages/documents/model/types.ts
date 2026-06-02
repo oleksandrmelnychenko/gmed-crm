@@ -18,6 +18,7 @@ export type DocumentItem = {
   patient_id: string | null;
   order_id: string | null;
   appointment_id: string | null;
+  provider_context_ids?: string[];
   patient_pid: string | null;
   patient_name: string | null;
   order_number: string | null;

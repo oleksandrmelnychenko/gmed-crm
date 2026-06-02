@@ -1190,6 +1190,24 @@ export const de = {
   documents_share_channel: "Versandkanal",
   documents_share_provider_channel_unavailable:
     "Wähle einen Kanal, der bei diesem Provider registriert ist.",
+  documents_share_provider_context_hint:
+    "Wähle einen Provider, der mit dem Auftrag oder Termin dieses Dokuments verknüpft ist.",
+  documents_share_provider_context_empty:
+    "Für dieses Dokument ist kein passender Provider im Auftrag oder Termin hinterlegt. Verknüpfe zuerst den korrekten Provider mit Auftrag oder Termin.",
+  documents_share_provider_not_in_context:
+    "Dieser Provider ist nicht mit dem Auftrag oder Termin des ausgewählten Dokuments verknüpft.",
+  documents_share_provider_linking_steps:
+    "So verknüpfst du ihn: Öffne den Auftrag des Patienten und füge eine Leistungszeile mit diesem Provider hinzu oder aktualisiere sie. Wenn das Dokument zu einem Termin gehört, öffne den Termin und wähle diesen Provider im Provider-Feld aus.",
+  documents_share_provider_medical_required:
+    "Medizinische Dokumente dürfen nur an medizinische Provider gesendet werden.",
+  documents_share_provider_specialty_mismatch:
+    "Die Spezialisierung des ausgewählten Providers passt nicht zum medizinischen Kontext des Dokuments. Wähle einen Provider mit passender Spezialisierung oder aktualisiere Spezialisierung bzw. Terminkontext.",
+  documents_share_external_release_required:
+    "Vor einer Provider-Freigabe muss das Dokument extern freigegeben sein. Setze das Dokument zuerst auf externe Freigabe.",
+  documents_share_provider_channel_fix:
+    "Um diesen Kanal zu verwenden, hinterlege den passenden offiziellen Kontakt im Provider-Profil oder wähle einen bereits registrierten Kanal.",
+  documents_share_open_order_services: "Auftragsleistungen öffnen",
+  documents_share_open_appointment: "Termin öffnen",
   documents_size: "Größe",
   documents_generate_title: "Dokument aus Vorlage erstellen",
   documents_generate_description:

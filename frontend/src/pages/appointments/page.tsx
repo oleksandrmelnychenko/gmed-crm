@@ -1796,6 +1796,7 @@ function useStaffAppointmentsPageContent() {
         appointments={appointments}
         patients={patients}
         providers={providers}
+        providersLoading={metadataLoading && providers.length === 0}
         taxonomyNodes={taxonomyNodes}
         interpreters={interpreters}
         staff={staff}

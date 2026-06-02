@@ -168,9 +168,12 @@ struct UpdateAppointment {
     time_start: Option<String>,
     time_end: Option<String>,
     location: Option<String>,
+    category: Option<String>,
+    notes: Option<String>,
     recurrence_frequency: Option<String>,
     recurrence_interval: Option<i32>,
-    recurrence_count: Option<i32>,
+    #[serde(default, deserialize_with = "deserialize_explicit_nullable_i32")]
+    recurrence_count: Option<Option<i32>>,
     #[serde(default, deserialize_with = "deserialize_explicit_nullable_string")]
     recurrence_until: Option<Option<String>>,
     recurrence_scope: Option<String>,
@@ -183,6 +186,15 @@ where
     D: Deserializer<'de>,
 {
     Ok(Some(Option::<String>::deserialize(deserializer)?))
+}
+
+fn deserialize_explicit_nullable_i32<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<i32>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Some(Option::<i32>::deserialize(deserializer)?))
 }
 
 struct AppointmentRecurrence {
@@ -3485,10 +3497,12 @@ async fn update_appointment(
     if !is_valid_appointment_type(&appointment_type) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid appointment_type");
     }
-    if appointment_type != current_type && !matches!(auth.role, Role::Ceo | Role::PatientManager) {
+    if appointment_type != current_type
+        && !(auth.role.has_full_access() || auth.role == Role::PatientManager)
+    {
         return err(
             StatusCode::FORBIDDEN,
-            "Only CEO or patient manager can change appointment type",
+            "Only CEO, IT admin or patient manager can change appointment type",
         );
     }
 
@@ -3500,14 +3514,12 @@ async fn update_appointment(
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid checklist_phase");
     }
     if checklist_phase != current_checklist_phase
-        && !matches!(
-            auth.role,
-            Role::Ceo | Role::PatientManager | Role::Concierge
-        )
+        && !(auth.role.has_full_access()
+            || matches!(auth.role, Role::PatientManager | Role::Concierge))
     {
         return err(
             StatusCode::FORBIDDEN,
-            "Only CEO, patient manager or concierge can change checklist phase",
+            "Only CEO, IT admin, patient manager or concierge can change checklist phase",
         );
     }
 
@@ -3632,6 +3644,8 @@ async fn update_appointment(
         return resp;
     }
     let location = normalize_optional_text(body.location);
+    let category = normalize_optional_text(body.category);
+    let notes = normalize_optional_text(body.notes);
     let shift_days = date.signed_duration_since(current_date).num_days();
     let mut effective_series_id = current_recurrence_series_id;
     let split_performed = if recurrence_scope == AppointmentRecurrenceScope::Following {
@@ -3762,11 +3776,7 @@ async fn update_appointment(
                     .as_deref()
                     .or(current_recurrence_frequency.as_deref()),
                 body.recurrence_interval.or(current_recurrence_interval),
-                if body.recurrence_count.is_some() {
-                    body.recurrence_count
-                } else {
-                    current_recurrence_count
-                },
+                body.recurrence_count.unwrap_or(current_recurrence_count),
                 resolved_recurrence_until.as_deref(),
                 recurrence_anchor_date,
             ) {
@@ -3798,14 +3808,16 @@ async fn update_appointment(
         .as_ref()
         .map(|value| value.interval)
         .or(current_recurrence_interval);
-    let resolved_recurrence_count = recurrence_rule
-        .as_ref()
-        .and_then(|value| value.count)
-        .or(current_recurrence_count);
-    let resolved_recurrence_until_date = recurrence_rule
-        .as_ref()
-        .and_then(|value| value.until)
-        .or(current_recurrence_until);
+    let resolved_recurrence_count = if let Some(ref recurrence) = recurrence_rule {
+        recurrence.count
+    } else {
+        current_recurrence_count
+    };
+    let resolved_recurrence_until_date = if let Some(ref recurrence) = recurrence_rule {
+        recurrence.until
+    } else {
+        current_recurrence_until
+    };
 
     let keep_count = if recurrence_dates.is_empty() {
         targets.len()
@@ -3894,7 +3906,9 @@ async fn update_appointment(
                    recurrence_count = $15,
                    recurrence_until = $16,
                    appointment_type = $17,
-                   checklist_phase = $18
+                   checklist_phase = $18,
+                   category = $19,
+                   notes = $20
                WHERE id = $1"#,
         )
         .bind(target.id)
@@ -3915,6 +3929,8 @@ async fn update_appointment(
         .bind(resolved_recurrence_until_date)
         .bind(&appointment_type)
         .bind(&checklist_phase)
+        .bind(&category)
+        .bind(&notes)
         .execute(&mut *tx)
         .await
         {
@@ -3989,8 +4005,8 @@ async fn update_appointment(
                 time_start,
                 time_end,
                 location.as_deref(),
-                current_category.as_deref(),
-                current_notes.as_deref(),
+                category.as_deref(),
+                notes.as_deref(),
                 Some(recurrence_series_id),
                 resolved_recurrence_frequency,
                 resolved_recurrence_interval,
@@ -4176,6 +4192,8 @@ async fn update_appointment(
             "previous_time_start": current_time_start,
             "previous_time_end": current_time_end,
             "previous_location": current_location,
+            "previous_category": current_category,
+            "previous_notes": current_notes,
             "previous_title": current_title,
             "previous_appointment_type": current_type,
             "previous_care_path_kind": current_care_path_kind,
@@ -4188,6 +4206,8 @@ async fn update_appointment(
             "time_start": time_start,
             "time_end": time_end,
             "location": location,
+            "category": category,
+            "notes": notes,
             "title": title,
             "appointment_type": appointment_type,
             "care_path_kind": care_path_kind,
@@ -4989,7 +5009,7 @@ async fn complete_reminder(
     )
     .bind(reminder_id)
     .bind(apt_id)
-    .bind(matches!(auth.role, Role::Ceo | Role::PatientManager))
+    .bind(auth.role.has_full_access() || auth.role == Role::PatientManager)
     .bind(auth.user_id)
     .execute(&state.db)
     .await;
@@ -5998,7 +6018,7 @@ async fn ensure_checklist_access(
     auth: &AuthUser,
     appointment_id: Uuid,
 ) -> Result<(), axum::response::Response> {
-    if matches!(auth.role, Role::Ceo | Role::PatientManager) {
+    if auth.role.has_full_access() || auth.role == Role::PatientManager {
         return Ok(());
     }
 
@@ -7067,6 +7087,52 @@ async fn create_reminder_record(
     title: String,
     description: Option<String>,
 ) -> Result<Uuid, axum::response::Response> {
+    if let Some(existing_id) = sqlx::query(
+        r#"WITH open_duplicates AS (
+               SELECT id,
+                      row_number() OVER (ORDER BY created_at DESC, id DESC) AS duplicate_rank
+               FROM reminders
+               WHERE appointment_id = $1
+                 AND user_id = $2
+                 AND title = $4
+                 AND is_completed = false
+           ),
+           updated AS (
+               UPDATE reminders r
+               SET remind_at = $3,
+                   description = $5
+               FROM open_duplicates d
+               WHERE r.id = d.id
+                 AND d.duplicate_rank = 1
+               RETURNING r.id
+           ),
+           closed_duplicates AS (
+               UPDATE reminders r
+               SET is_completed = true,
+                   completed_at = now()
+               FROM open_duplicates d
+               WHERE r.id = d.id
+                 AND d.duplicate_rank > 1
+               RETURNING r.id
+           )
+           SELECT id FROM updated LIMIT 1"#,
+    )
+    .bind(appointment_id)
+    .bind(user_id)
+    .bind(remind_at)
+    .bind(&title)
+    .bind(&description)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, appointment_id = %appointment_id, user_id = %user_id, "Failed to reuse reminder");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create reminder")
+    })?
+    .and_then(|row| row.try_get("id").ok())
+    {
+        return Ok(existing_id);
+    }
+
     sqlx::query(
         "INSERT INTO reminders (appointment_id, user_id, remind_at, title, description)
          VALUES ($1, $2, $3, $4, $5)

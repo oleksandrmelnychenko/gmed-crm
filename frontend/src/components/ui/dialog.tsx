@@ -125,10 +125,14 @@ function Dialog({
         resetInternalDirty()
       }
 
+      if (!open && eventDetails.reason === "focus-out") {
+        eventDetails.cancel()
+        return
+      }
+
       if (
         !open &&
-        (eventDetails.reason === "outside-press" ||
-          eventDetails.reason === "focus-out") &&
+        eventDetails.reason === "outside-press" &&
         isInternalOverlayInteractionEvent(eventDetails.event)
       ) {
         eventDetails.cancel()

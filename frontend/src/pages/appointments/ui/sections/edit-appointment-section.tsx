@@ -546,6 +546,8 @@ function useEditAppointmentSectionContentContent({
         time_start: form.timeStart || null,
         time_end: form.timeEnd || null,
         location: form.location.trim() || null,
+        category: form.category.trim() || null,
+        notes: form.notes.trim() || null,
         recurrence_scope: detail.recurrence_frequency
           ? recurrenceScope
           : "single",

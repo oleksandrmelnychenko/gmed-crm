@@ -1143,6 +1143,16 @@ export interface Translations
   documents_source: string;
   documents_share_channel: string;
   documents_share_provider_channel_unavailable: string;
+  documents_share_provider_context_hint: string;
+  documents_share_provider_context_empty: string;
+  documents_share_provider_not_in_context: string;
+  documents_share_provider_linking_steps: string;
+  documents_share_provider_medical_required: string;
+  documents_share_provider_specialty_mismatch: string;
+  documents_share_external_release_required: string;
+  documents_share_provider_channel_fix: string;
+  documents_share_open_order_services: string;
+  documents_share_open_appointment: string;
   documents_size: string;
   documents_generate_title: string;
   documents_generate_description: string;
