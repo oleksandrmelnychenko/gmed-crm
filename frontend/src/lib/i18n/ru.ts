@@ -1196,6 +1196,21 @@ export const ru = {
     "Этот провайдер не привязан к заказу или приёму выбранного документа.",
   documents_share_provider_linking_steps:
     "Как привязать: откройте заказ пациента и добавьте/обновите строку услуги (Leistung) с этим провайдером. Если документ относится к приёму, откройте приём и выберите этого провайдера в поле провайдера.",
+  documents_share_provider_repair_title: "Нет провайдера, которого можно выбрать",
+  documents_share_provider_repair_available_title:
+    "Доступны только провайдеры из заказа или приёма",
+  documents_share_provider_repair_description:
+    "Публикацию можно отправить только провайдеру, который уже участвует в этом заказе или приёме.",
+  documents_share_provider_repair_available_description:
+    "Список ниже уже отфильтрован: выберите провайдера, который связан с этим документом.",
+  documents_share_provider_repair_order_step:
+    "Для заказа: откройте «Услуги / Leistungen», добавьте или обновите строку услуги и выберите нужного провайдера.",
+  documents_share_provider_repair_appointment_step:
+    "Для приёма: откройте приём и выберите нужного провайдера в поле провайдера.",
+  documents_share_provider_repair_after_step:
+    "После сохранения вернитесь в документы и создайте публикацию ещё раз.",
+  documents_share_provider_no_single_context:
+    "Выбрано несколько документов из разных заказов или приёмов. Откройте нужный документ отдельно либо сначала привяжите провайдера во всех соответствующих контекстах.",
   documents_share_provider_medical_required:
     "Медицинский документ можно отправить только медицинскому провайдеру.",
   documents_share_provider_specialty_mismatch:

@@ -20,6 +20,7 @@ import {
   ArrowUpRight,
   CalendarClock,
   ChevronDown,
+  CircleAlert,
   Download,
   FileText,
   FolderPlus,
@@ -1129,6 +1130,21 @@ function StaffDocumentsPage({
     () => singleContextId(shareTargetDocuments, "appointment_id"),
     [shareTargetDocuments],
   );
+  const shareContextOrderLabel = useMemo(() => {
+    if (!shareContextOrderId) return "";
+    return (
+      shareTargetDocuments.find((document) => document.order_id === shareContextOrderId)
+        ?.order_number || shareContextOrderId
+    );
+  }, [shareContextOrderId, shareTargetDocuments]);
+  const shareContextAppointmentLabel = useMemo(() => {
+    if (!shareContextAppointmentId) return "";
+    return (
+      shareTargetDocuments.find(
+        (document) => document.appointment_id === shareContextAppointmentId,
+      )?.appointment_title || shareContextAppointmentId
+    );
+  }, [shareContextAppointmentId, shareTargetDocuments]);
   const shareTargetsRequireMedicalProvider = useMemo(
     () => shareTargetDocuments.some((document) => document.is_medical),
     [shareTargetDocuments],
@@ -3636,52 +3652,24 @@ function StaffDocumentsPage({
                             }
                           />
                           {shareProviderContextIdSet ? (
-                            <div className="mt-2 space-y-1 text-xs text-muted-foreground">
-                              <p>
-                                {shareProviderOptions.length === 0
-                                  ? t.documents_share_provider_context_empty
-                                  : t.documents_share_provider_context_hint}
-                              </p>
-                              <p>{t.documents_share_provider_linking_steps}</p>
-                              {shareContextOrderId || shareContextAppointmentId ? (
-                                <div className="flex flex-wrap gap-2 pt-1">
-                                  {shareContextOrderId ? (
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-8 gap-1.5 rounded-lg"
-                                      onClick={() => {
-                                        setShareCreateOpen(false);
-                                        staffGo(
-                                          `/orders/${shareContextOrderId}?section=services`,
-                                        );
-                                      }}
-                                    >
-                                      <ArrowUpRight className="size-3.5" />
-                                      {t.documents_share_open_order_services}
-                                    </Button>
-                                  ) : null}
-                                  {shareContextAppointmentId ? (
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-8 gap-1.5 rounded-lg"
-                                      onClick={() => {
-                                        setShareCreateOpen(false);
-                                        staffGo(
-                                          `/appointments?appointment=${shareContextAppointmentId}&detailTab=overview`,
-                                        );
-                                      }}
-                                    >
-                                      <ArrowUpRight className="size-3.5" />
-                                      {t.documents_share_open_appointment}
-                                    </Button>
-                                  ) : null}
-                                </div>
-                              ) : null}
-                            </div>
+                            <ShareProviderContextPanel
+                              hasEligibleProviders={shareProviderOptions.length > 0}
+                              orderId={shareContextOrderId}
+                              orderLabel={shareContextOrderLabel}
+                              appointmentId={shareContextAppointmentId}
+                              appointmentLabel={shareContextAppointmentLabel}
+                              translations={t}
+                              onOpenOrderServices={() => {
+                                setShareCreateOpen(false);
+                                staffGo(`/orders/${shareContextOrderId}?section=services`);
+                              }}
+                              onOpenAppointment={() => {
+                                setShareCreateOpen(false);
+                                staffGo(
+                                  `/appointments?appointment=${shareContextAppointmentId}&detailTab=overview`,
+                                );
+                              }}
+                            />
                           ) : null}
                         </Field>
                       )}
@@ -6098,6 +6086,126 @@ function documentSectionToneIcon(tone: DocumentSectionTone) {
     default:
       return "border-border/60 bg-background text-muted-foreground";
   }
+}
+
+function ShareProviderContextPanel({
+  hasEligibleProviders,
+  orderId,
+  orderLabel,
+  appointmentId,
+  appointmentLabel,
+  translations,
+  onOpenOrderServices,
+  onOpenAppointment,
+}: {
+  hasEligibleProviders: boolean;
+  orderId: string;
+  orderLabel: string;
+  appointmentId: string;
+  appointmentLabel: string;
+  translations: ReturnType<typeof runtimeTranslations>;
+  onOpenOrderServices: () => void;
+  onOpenAppointment: () => void;
+}) {
+  const hasDirectNavigation = Boolean(orderId || appointmentId);
+
+  return (
+    <div
+      className={cn(
+        "mt-3 rounded-lg border p-3 text-xs",
+        hasEligibleProviders
+          ? "border-sky-200 bg-sky-50/80 text-sky-900"
+          : "border-amber-200 bg-amber-50/80 text-amber-950",
+      )}
+    >
+      <div className="flex items-start gap-2">
+        <CircleAlert
+          className={cn(
+            "mt-0.5 size-4 shrink-0",
+            hasEligibleProviders ? "text-sky-600" : "text-amber-600",
+          )}
+        />
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="space-y-1">
+            <p className="font-semibold">
+              {hasEligibleProviders
+                ? translations.documents_share_provider_repair_available_title
+                : translations.documents_share_provider_repair_title}
+            </p>
+            <p className={hasEligibleProviders ? "text-sky-800" : "text-amber-900"}>
+              {hasEligibleProviders
+                ? translations.documents_share_provider_repair_available_description
+                : translations.documents_share_provider_repair_description}
+            </p>
+          </div>
+
+          {orderLabel || appointmentLabel ? (
+            <div className="flex flex-wrap gap-1.5">
+              {orderLabel ? (
+                <Badge
+                  variant="outline"
+                  className="max-w-full rounded-full border-current/25 bg-white/70 text-[11px] font-medium text-current"
+                >
+                  <span className="truncate">
+                    {translations.orders_title}: {orderLabel}
+                  </span>
+                </Badge>
+              ) : null}
+              {appointmentLabel ? (
+                <Badge
+                  variant="outline"
+                  className="max-w-full rounded-full border-current/25 bg-white/70 text-[11px] font-medium text-current"
+                >
+                  <span className="truncate">
+                    {translations.appointments_title}: {appointmentLabel}
+                  </span>
+                </Badge>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="space-y-1.5">
+            <p>{translations.documents_share_provider_repair_order_step}</p>
+            <p>{translations.documents_share_provider_repair_appointment_step}</p>
+            <p>{translations.documents_share_provider_repair_after_step}</p>
+          </div>
+
+          {hasDirectNavigation ? (
+            <div className="flex flex-wrap gap-2 pt-1">
+              {orderId ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 rounded-lg border-current/25 bg-white/80 text-current hover:bg-white"
+                  onClick={onOpenOrderServices}
+                >
+                  <ArrowUpRight className="size-3.5" />
+                  {translations.documents_share_open_order_services}
+                </Button>
+              ) : null}
+              {appointmentId ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 rounded-lg border-current/25 bg-white/80 text-current hover:bg-white"
+                  onClick={onOpenAppointment}
+                >
+                  <ArrowUpRight className="size-3.5" />
+                  {translations.documents_share_open_appointment}
+                </Button>
+              ) : null}
+            </div>
+          ) : (
+            <p className={hasEligibleProviders ? "text-sky-800" : "text-amber-900"}>
+              {translations.documents_share_provider_no_single_context}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function DocumentSheetSection({

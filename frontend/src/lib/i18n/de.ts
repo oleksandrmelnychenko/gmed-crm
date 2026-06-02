@@ -1198,6 +1198,21 @@ export const de = {
     "Dieser Provider ist nicht mit dem Auftrag oder Termin des ausgewählten Dokuments verknüpft.",
   documents_share_provider_linking_steps:
     "So verknüpfst du ihn: Öffne den Auftrag des Patienten und füge eine Leistungszeile mit diesem Provider hinzu oder aktualisiere sie. Wenn das Dokument zu einem Termin gehört, öffne den Termin und wähle diesen Provider im Provider-Feld aus.",
+  documents_share_provider_repair_title: "Kein auswählbarer Provider vorhanden",
+  documents_share_provider_repair_available_title:
+    "Nur Provider aus Auftrag oder Termin sind verfügbar",
+  documents_share_provider_repair_description:
+    "Die Freigabe kann nur an einen Provider gesendet werden, der bereits an diesem Auftrag oder Termin beteiligt ist.",
+  documents_share_provider_repair_available_description:
+    "Die Liste ist bereits gefiltert: Wähle einen Provider, der mit diesem Dokument verknüpft ist.",
+  documents_share_provider_repair_order_step:
+    "Für den Auftrag: Öffne „Leistungen“, füge eine Leistungszeile hinzu oder aktualisiere sie und wähle dort den Provider.",
+  documents_share_provider_repair_appointment_step:
+    "Für den Termin: Öffne den Termin und wähle den Provider im Provider-Feld.",
+  documents_share_provider_repair_after_step:
+    "Nach dem Speichern zurück zu den Dokumenten wechseln und die Veröffentlichung erneut erstellen.",
+  documents_share_provider_no_single_context:
+    "Es sind Dokumente aus mehreren Aufträgen oder Terminen ausgewählt. Öffne das gewünschte Dokument einzeln oder verknüpfe den Provider zuerst in allen passenden Kontexten.",
   documents_share_provider_medical_required:
     "Medizinische Dokumente dürfen nur an medizinische Provider gesendet werden.",
   documents_share_provider_specialty_mismatch:

@@ -1147,6 +1147,14 @@ export interface Translations
   documents_share_provider_context_empty: string;
   documents_share_provider_not_in_context: string;
   documents_share_provider_linking_steps: string;
+  documents_share_provider_repair_title: string;
+  documents_share_provider_repair_available_title: string;
+  documents_share_provider_repair_description: string;
+  documents_share_provider_repair_available_description: string;
+  documents_share_provider_repair_order_step: string;
+  documents_share_provider_repair_appointment_step: string;
+  documents_share_provider_repair_after_step: string;
+  documents_share_provider_no_single_context: string;
   documents_share_provider_medical_required: string;
   documents_share_provider_specialty_mismatch: string;
   documents_share_external_release_required: string;
