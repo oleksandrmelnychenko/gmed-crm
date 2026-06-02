@@ -1266,11 +1266,15 @@ export const de = {
   documents_patient_portal: "Patientenportal",
   documents_portal_eligible: "Portal-fähig",
   documents_not_portal_eligible: "Nicht portal-fähig",
+  documents_active_patient_portal_user: "Aktiver Portalnutzer verknüpft",
+  documents_no_active_patient_portal_user: "Kein aktiver Portalnutzer verknüpft",
   documents_active_portal_releases: "aktive Portalfreigaben",
   documents_portal_access_hint:
     "Portalzugriff gilt nur für patientenverknüpfte Portalnutzer und bleibt nur sichtbar, solange eine aktive Freigabe existiert.",
   documents_link_patient_before_portal:
     "Dokument zuerst mit einem Patienten verknüpfen, bevor es ins Portal freigegeben wird.",
+  documents_link_active_patient_portal_user:
+    "Für diesen Patienten ist kein aktiver Portalnutzer verknüpft.",
   documents_patient_portal_user: "Portalnutzer des Patienten",
   documents_confirmed: "Bestätigt",
   documents_waiting_confirmation: "Wartet auf Bestätigung",

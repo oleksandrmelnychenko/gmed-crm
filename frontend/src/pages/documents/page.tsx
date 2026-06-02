@@ -1278,6 +1278,15 @@ function StaffDocumentsPage({
     () => activePortalShares.filter((share) => share.confirmed).length,
     [activePortalShares],
   );
+  const hasActivePatientPortalUser = Boolean(
+    detail?.has_active_patient_portal_user,
+  );
+  const canReleaseSelectedDocumentToPortal = Boolean(
+    detail?.patient_id && hasActivePatientPortalUser,
+  );
+  const portalBlockedByMissingActiveUser = Boolean(
+    detail?.patient_id && !hasActivePatientPortalUser,
+  );
 
   useEffect(() => {
     setSelectedId(
@@ -2289,6 +2298,14 @@ function StaffDocumentsPage({
 
   async function handleReleaseToPortal() {
     if (!detail) return;
+    if (!detail.patient_id) {
+      setShareError(t.documents_link_patient_before_portal);
+      return;
+    }
+    if (!detail.has_active_patient_portal_user) {
+      setShareError(t.documents_link_active_patient_portal_user);
+      return;
+    }
     setPortalBusy(true);
     setShareError("");
     try {
@@ -5179,14 +5196,18 @@ function StaffDocumentsPage({
                       <span
                         className={cn(
                           "inline-flex items-center rounded-full bg-white px-2.5 py-1 text-[11px] font-medium shadow-sm",
-                          detail.visibility === "patient_visible"
+                          hasActivePatientPortalUser
                             ? "text-emerald-700"
-                            : "text-muted-foreground",
+                            : detail.patient_id
+                              ? "text-amber-700"
+                              : "text-muted-foreground",
                         )}
                       >
-                        {detail.visibility === "patient_visible"
-                          ? t.documents_portal_eligible
-                          : t.documents_not_portal_eligible}
+                        {hasActivePatientPortalUser
+                          ? t.documents_active_patient_portal_user
+                          : detail.patient_id
+                            ? t.documents_no_active_patient_portal_user
+                            : t.documents_not_portal_eligible}
                       </span>
                       <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
                         <span className="font-semibold tabular-nums text-foreground">
@@ -5206,7 +5227,9 @@ function StaffDocumentsPage({
                             type="button"
                             size="sm"
                             className="h-8 rounded-lg"
-                            disabled={portalBusy || !detail.patient_id}
+                            disabled={
+                              portalBusy || !canReleaseSelectedDocumentToPortal
+                            }
                             onClick={() => void handleReleaseToPortal()}
                           >
                             {portalBusy ? (
@@ -5234,11 +5257,18 @@ function StaffDocumentsPage({
                     </div>
                   }
                 >
-                  {!detail.patient_id || !canManage ? (
+                  {!detail.patient_id ||
+                  portalBlockedByMissingActiveUser ||
+                  !canManage ? (
                     <div className="rounded-lg bg-amber-50/70 px-4 py-3 text-sm text-amber-900/80">
                       {!detail.patient_id ? (
                         <p className="font-medium text-amber-700">
                           {t.documents_link_patient_before_portal}
+                        </p>
+                      ) : null}
+                      {portalBlockedByMissingActiveUser ? (
+                        <p className="font-medium text-amber-700">
+                          {t.documents_link_active_patient_portal_user}
                         </p>
                       ) : null}
                       {!canManage ? (

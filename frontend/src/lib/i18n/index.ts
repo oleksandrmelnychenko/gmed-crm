@@ -1197,9 +1197,12 @@ export interface Translations
   documents_patient_portal: string;
   documents_portal_eligible: string;
   documents_not_portal_eligible: string;
+  documents_active_patient_portal_user: string;
+  documents_no_active_patient_portal_user: string;
   documents_active_portal_releases: string;
   documents_portal_access_hint: string;
   documents_link_patient_before_portal: string;
+  documents_link_active_patient_portal_user: string;
   documents_patient_portal_user: string;
   documents_confirmed: string;
   documents_waiting_confirmation: string;

@@ -2802,6 +2802,16 @@ async fn appointments_report_endpoint_returns_latest_report_state() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/assign-interpreter"),
+        &bearer,
+        Some(json!({ "interpreter_id": interpreter_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
     let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
     let (status, body) = json_request(
         &app,
@@ -6345,12 +6355,16 @@ async fn assign_interpreter_creates_patient_assignment_and_reminder() {
     .await;
     assert_eq!(status, StatusCode::OK);
     let items = body.as_array().unwrap();
-    assert!(items.iter().any(|item| {
-        item["title"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("New assignment")
-    }));
+    let assignment_reminders = items
+        .iter()
+        .filter(|item| {
+            item["title"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("New assignment")
+        })
+        .count();
+    assert_eq!(assignment_reminders, 1);
 }
 
 #[tokio::test]
@@ -7784,6 +7798,22 @@ async fn concierge_service_update_and_completion_flow_sets_ready_for_billing() {
     assert_eq!(body["booking_reference"], "VIP-REF-42");
     assert_eq!(body["vendor_name"], "Elite Drives");
     assert_eq!(body["actual_cost"], "189.50");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/concierge-services/{service_id}/update"),
+        &concierge_bearer,
+        Some(json!({
+            "title": "Concierge should not rename operational service"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(
+        body["message"],
+        "Concierge can only update operational service fields"
+    );
 
     sqlx::query(
         r#"UPDATE appointment_checklists

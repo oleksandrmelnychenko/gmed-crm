@@ -292,6 +292,9 @@ function useCreateAppointmentSheetContent({
     [form.ownerUserId, staff, userId, userRole],
   );
   useEffect(() => {
+    if (providersLoading && providers.length === 0) {
+      return;
+    }
     if (
       providerSelectionFitsAppointmentScope(
         providers,
@@ -313,6 +316,7 @@ function useCreateAppointmentSheetContent({
     form.providerId,
     form.providerTaxonomyNodeId,
     providers,
+    providersLoading,
   ]);
   const conflictQuery = useMemo(() => {
     if (!open || !form.patientId || !form.date) return "";
@@ -980,6 +984,7 @@ export const MemoizedCreateAppointmentSheet = memo(
     prev.appointments === next.appointments &&
     prev.patients === next.patients &&
     prev.providers === next.providers &&
+    prev.providersLoading === next.providersLoading &&
     prev.taxonomyNodes === next.taxonomyNodes &&
     prev.interpreters === next.interpreters &&
     prev.staff === next.staff &&

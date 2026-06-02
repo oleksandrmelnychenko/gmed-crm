@@ -486,6 +486,7 @@ function normalizeAvailabilityIntervals(
 function formatWeeklyAvailabilityRows(
   days: readonly WeeklyAvailabilityDay[],
   dayLabel: (day: WeeklyAvailabilityDayCode) => string,
+  options: { displayMidnightEndAs24?: boolean } = {},
 ) {
   const groups: Array<{
     startDay: WeeklyAvailabilityDayCode;
@@ -501,7 +502,15 @@ function formatWeeklyAvailabilityRows(
       continue;
     }
 
-    const hours = intervals.map((interval) => `${interval.start}-${interval.end}`).join(", ");
+    const hours = intervals
+      .map((interval) => {
+        const displayEnd =
+          options.displayMidnightEndAs24 && interval.end === "00:00"
+            ? "24:00"
+            : interval.end;
+        return `${interval.start}-${displayEnd}`;
+      })
+      .join(", ");
     const intervalsKey = hours;
     const previous = groups.at(-1);
     const previousEndIndex = previous ? WEEKLY_DAY_INDEX.get(previous.endDay) : undefined;
@@ -619,6 +628,7 @@ export function formatWeeklyAvailabilityDisplay(
   const formatted = formatWeeklyAvailabilityRows(
     parseWeeklyAvailability(source),
     (day) => weeklyAvailabilityDayLabel(day, lang),
+    { displayMidnightEndAs24: true },
   );
   return formatted || source;
 }

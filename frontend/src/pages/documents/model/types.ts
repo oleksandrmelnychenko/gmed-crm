@@ -16,6 +16,7 @@ type DocumentClassificationSuggestion = {
 export type DocumentItem = {
   id: string;
   patient_id: string | null;
+  has_active_patient_portal_user: boolean;
   order_id: string | null;
   appointment_id: string | null;
   provider_context_ids?: string[];

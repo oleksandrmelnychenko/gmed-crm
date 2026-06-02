@@ -90,10 +90,14 @@ describe("evaluatePredicate — is / is_not / equals", () => {
   it("is boolean", () => {
     expect(evaluatePredicate(rows[0], pred("active", "is", true), ctx)).toBe(true);
     expect(evaluatePredicate(rows[2], pred("active", "is", true), ctx)).toBe(false);
+    expect(evaluatePredicate(rows[2], pred("active", "is", false), ctx)).toBe(true);
   });
   it("equals on number", () => {
     expect(evaluatePredicate(rows[0], pred("age", "equals", "34"), ctx)).toBe(true);
     expect(evaluatePredicate(rows[0], pred("age", "equals", "35"), ctx)).toBe(false);
+  });
+  it("equals with an empty string is a no-op for default number filters", () => {
+    expect(applyFilters(rows, [pred("age", "equals", "")], ctx)).toEqual(rows);
   });
 });
 

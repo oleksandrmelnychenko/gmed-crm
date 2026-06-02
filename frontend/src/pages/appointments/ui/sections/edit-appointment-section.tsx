@@ -16,6 +16,7 @@ import { LoaderCircle, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
+import { isInternalOverlayInteractionEvent } from "@/components/ui/dismissal-guard";
 import {
   Banner,
   tokens,
@@ -701,10 +702,7 @@ function useEditAppointmentSectionContentContent({
         return;
       }
 
-      if (
-        target instanceof Element &&
-        target.closest("[data-overlay-interaction-root]")
-      ) {
+      if (isInternalOverlayInteractionEvent(event)) {
         return;
       }
 

@@ -1265,11 +1265,15 @@ export const ru = {
   documents_patient_portal: "Портал пациента",
   documents_portal_eligible: "Доступен для портала",
   documents_not_portal_eligible: "Недоступен для портала",
+  documents_active_patient_portal_user: "Активный пользователь портала привязан",
+  documents_no_active_patient_portal_user: "Нет активного пользователя портала",
   documents_active_portal_releases: "активных портальных релизов",
   documents_portal_access_hint:
     "Доступ в портал предоставляется только пользователям портала, связанным с пациентом, и остаётся видимым только пока существует активный релиз.",
   documents_link_patient_before_portal:
     "Сначала привяжите документ к пациенту, прежде чем выпускать его в портал.",
+  documents_link_active_patient_portal_user:
+    "К этому пациенту не привязан активный пользователь портала.",
   documents_patient_portal_user: "Пользователь портала пациента",
   documents_confirmed: "Подтверждено",
   documents_waiting_confirmation: "Ожидает подтверждения",

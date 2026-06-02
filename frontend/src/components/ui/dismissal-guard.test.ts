@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   confirmDirtyDismiss,
@@ -9,6 +9,10 @@ import {
 } from "./dismissal-guard"
 
 describe("dismissal guard", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   it("asks for confirmation only when a dirty surface is being dismissed", () => {
     expect(shouldConfirmDirtyDismiss(false, "outside-press", true)).toBe(true)
     expect(shouldConfirmDirtyDismiss(false, "escape-key", true)).toBe(true)
@@ -38,6 +42,19 @@ describe("dismissal guard", () => {
 
   it("treats missing overlay interaction events as external", () => {
     expect(isInternalOverlayInteractionEvent(undefined)).toBe(false)
+  })
+
+  it("treats MUI picker poppers as internal overlay interactions", () => {
+    class FakeElement {
+      closest(selector: string) {
+        return selector.includes(".MuiPickerPopper-root") ? this : null
+      }
+    }
+    vi.stubGlobal("Element", FakeElement)
+
+    const event = { target: new FakeElement() } as unknown as Event
+
+    expect(isInternalOverlayInteractionEvent(event)).toBe(true)
   })
 
   it("uses controlled dirty as the source of truth when provided", () => {

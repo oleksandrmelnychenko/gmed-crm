@@ -7958,6 +7958,7 @@ fn document_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
     json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
         "patient_id": row.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default(),
+        "has_active_patient_portal_user": row.try_get::<bool, _>("has_active_patient_portal_user").unwrap_or(false),
         "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
         "appointment_id": row.try_get::<Option<Uuid>, _>("appointment_id").unwrap_or_default(),
         "provider_context_ids": row.try_get::<Vec<Uuid>, _>("provider_context_ids").unwrap_or_default(),
@@ -8175,6 +8176,15 @@ async fn fetch_document_row(
                       AND ds.shared_with_user_id = $2
                       AND ds.revoked_at IS NULL
                   ) AS shared_to_current,
+                  EXISTS(
+                    SELECT 1
+                    FROM patient_assignments pa
+                    JOIN users portal_user ON portal_user.id = pa.user_id
+                    WHERE pa.patient_id = d.patient_id
+                      AND pa.revoked_at IS NULL
+                      AND portal_user.is_active = true
+                      AND portal_user.role = 'patient'
+                  ) AS has_active_patient_portal_user,
                   provider_context.provider_context_ids
            FROM documents d
            LEFT JOIN patients p ON p.id = d.patient_id
@@ -13013,6 +13023,15 @@ async fn list_documents(
                       AND ds.shared_with_user_id = $13
                       AND ds.revoked_at IS NULL
                   ) AS shared_to_current,
+                  EXISTS(
+                    SELECT 1
+                    FROM patient_assignments pa
+                    JOIN users portal_user ON portal_user.id = pa.user_id
+                    WHERE pa.patient_id = d.patient_id
+                      AND pa.revoked_at IS NULL
+                      AND portal_user.is_active = true
+                      AND portal_user.role = 'patient'
+                  ) AS has_active_patient_portal_user,
                   provider_context.provider_context_ids
            FROM documents d
            LEFT JOIN patients p ON p.id = d.patient_id
@@ -13151,7 +13170,16 @@ async fn list_document_intake_queue(
                     WHERE ds.document_id = d.id
                       AND ds.shared_with_user_id = $1
                       AND ds.revoked_at IS NULL
-                  ) AS shared_to_current
+                  ) AS shared_to_current,
+                  EXISTS(
+                    SELECT 1
+                    FROM patient_assignments pa
+                    JOIN users portal_user ON portal_user.id = pa.user_id
+                    WHERE pa.patient_id = d.patient_id
+                      AND pa.revoked_at IS NULL
+                      AND portal_user.is_active = true
+                      AND portal_user.role = 'patient'
+                  ) AS has_active_patient_portal_user
            FROM documents d
            LEFT JOIN patients p ON p.id = d.patient_id
            LEFT JOIN orders o ON o.id = d.order_id
@@ -13410,7 +13438,16 @@ async fn list_document_versions(
                     WHERE ds.document_id = d.id
                       AND ds.shared_with_user_id = $2
                       AND ds.revoked_at IS NULL
-                  ) AS shared_to_current
+                  ) AS shared_to_current,
+                  EXISTS(
+                    SELECT 1
+                    FROM patient_assignments pa
+                    JOIN users portal_user ON portal_user.id = pa.user_id
+                    WHERE pa.patient_id = d.patient_id
+                      AND pa.revoked_at IS NULL
+                      AND portal_user.is_active = true
+                      AND portal_user.role = 'patient'
+                  ) AS has_active_patient_portal_user
            FROM documents d
            LEFT JOIN patients p ON p.id = d.patient_id
            LEFT JOIN orders o ON o.id = d.order_id

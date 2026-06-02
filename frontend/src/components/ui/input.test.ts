@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
+import dayjs from "dayjs";
 
-import { normalizeInputStep, pickerFieldReadOnly, timePickerMinutesStep } from "./input";
+import {
+  formatPickerValue,
+  getTimePickerReferenceDate,
+  normalizeInputStep,
+  pickerFieldReadOnly,
+  timePickerMinutesStep,
+} from "./input";
 
 describe("Input", () => {
   it("uses one-minute steps for time inputs by default", () => {
@@ -17,11 +24,27 @@ describe("Input", () => {
     expect(timePickerMinutesStep(60)).toBe(1);
     expect(timePickerMinutesStep(900)).toBe(15);
     expect(timePickerMinutesStep("1800")).toBe(30);
+    expect(timePickerMinutesStep("any")).toBe(1);
   });
 
   it("keeps time fields picker-only instead of keyboard-editable", () => {
     expect(pickerFieldReadOnly("time", undefined)).toBe(true);
     expect(pickerFieldReadOnly("time", false)).toBe(true);
     expect(pickerFieldReadOnly("date", false)).toBe(false);
+  });
+
+  it("formats picker values without leaking invalid dates", () => {
+    expect(formatPickerValue(dayjs().hour(9).minute(5), "HH:mm")).toBe("09:05");
+    expect(formatPickerValue(dayjs("not-a-date"), "HH:mm")).toBe("");
+    expect(formatPickerValue(null, "HH:mm")).toBe("");
+  });
+
+  it("starts empty time picker selections at exact hours", () => {
+    const referenceDate = getTimePickerReferenceDate();
+
+    expect(referenceDate.hour()).toBe(0);
+    expect(referenceDate.minute()).toBe(0);
+    expect(referenceDate.second()).toBe(0);
+    expect(referenceDate.millisecond()).toBe(0);
   });
 });

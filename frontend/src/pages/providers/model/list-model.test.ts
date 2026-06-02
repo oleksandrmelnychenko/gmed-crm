@@ -264,7 +264,7 @@ describe("weekly availability helpers", () => {
     );
   });
 
-  it("keeps midnight as an end-of-day closing time", () => {
+  it("keeps midnight as an end-of-day closing time and displays it as 24:00", () => {
     const schedule = parseWeeklyAvailability("Mo 18:00-00:00");
 
     expect(schedule.find((day) => day.day === "mon")?.intervals).toEqual([
@@ -276,7 +276,8 @@ describe("weekly availability helpers", () => {
     expect(normalizeAvailabilityEditorIntervals([{ start: "09:00", end: "00:00" }])).toEqual([
       { start: "09:00", end: "00:00" },
     ]);
-    expect(formatWeeklyAvailabilityDisplay("Mo 18:00-00:00", "de")).toBe("Mo 18:00-00:00");
+    expect(formatWeeklyAvailabilityValue(schedule)).toBe("Mon 18:00-00:00");
+    expect(formatWeeklyAvailabilityDisplay("Mo 18:00-00:00", "de")).toBe("Mo 18:00-24:00");
   });
 
   it("pads incomplete minute input instead of falling back to a one-minute interval", () => {
@@ -295,6 +296,7 @@ describe("weekly availability helpers", () => {
     ]);
     expect(availabilityMaxStartForEnd("00:00")).toBe("23:59");
     expect(availabilityMinEndForStart("23:59")).toBe("00:00");
+    expect(formatWeeklyAvailabilityDisplay("Mo 00:00-00:00", "de")).toBe("Mo 00:00-24:00");
   });
 
 });

@@ -3,7 +3,7 @@ import { Input as InputPrimitive } from "@base-ui/react/input"
 import { DatePicker } from "@mui/x-date-pickers/DatePicker"
 import { DateTimePicker } from "@mui/x-date-pickers/DateTimePicker"
 import { TimePicker } from "@mui/x-date-pickers/TimePicker"
-import dayjs from "dayjs"
+import dayjs, { type Dayjs } from "dayjs"
 
 import { cn } from "@/lib/utils"
 
@@ -37,6 +37,14 @@ function parseTimeValue(value: string | number | readonly string[] | undefined) 
   const minute = Number(match[2])
   if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null
   return dayjs().hour(hour).minute(minute).second(0).millisecond(0)
+}
+
+export function formatPickerValue(nextDate: Dayjs | null, format: string) {
+  return nextDate && nextDate.isValid() ? nextDate.format(format) : ""
+}
+
+export function getTimePickerReferenceDate() {
+  return dayjs().hour(0).minute(0).second(0).millisecond(0)
 }
 
 function emitDateChange(
@@ -121,6 +129,24 @@ function Input({
   step,
   ...props
 }: React.ComponentProps<"input">) {
+  const pickerCurrentValue = typeof value === "string" ? value : null
+  const lastEmittedPickerValueRef = React.useRef<string | null>(pickerCurrentValue)
+  const timePickerReferenceDate = React.useMemo(() => getTimePickerReferenceDate(), [])
+
+  React.useEffect(() => {
+    if (type === "date" || type === "datetime-local" || type === "time") {
+      lastEmittedPickerValueRef.current = typeof value === "string" ? value : null
+    }
+  }, [type, value])
+
+  const commitPickerValue = React.useCallback((nextValue: string) => {
+    if (lastEmittedPickerValueRef.current === nextValue) {
+      return
+    }
+    lastEmittedPickerValueRef.current = nextValue
+    emitDateChange(onChange, nextValue, id, name)
+  }, [id, name, onChange])
+
   if (type === "date" || type === "datetime-local" || type === "time") {
     const {
       controlHeight,
@@ -215,10 +241,7 @@ function Input({
             if (context.validationError) {
               return
             }
-            const formatted = nextDate && nextDate.isValid()
-              ? nextDate.format(DATETIME_LOCAL_VALUE_FORMAT)
-              : ""
-            emitDateChange(onChange, formatted, id, name)
+            commitPickerValue(formatPickerValue(nextDate, DATETIME_LOCAL_VALUE_FORMAT))
           }}
           minDateTime={typeof min === "string" && min ? parseDateValue(min) ?? undefined : undefined}
           maxDateTime={typeof max === "string" && max ? parseDateValue(max) ?? undefined : undefined}
@@ -241,15 +264,23 @@ function Input({
             if (context.validationError) {
               return
             }
-            const formatted = nextDate && nextDate.isValid() ? nextDate.format(TIME_FORMAT) : ""
-            emitDateChange(onChange, formatted, id, name)
+            commitPickerValue(formatPickerValue(nextDate, TIME_FORMAT))
+          }}
+          onAccept={(nextDate, context) => {
+            if (context.validationError) {
+              return
+            }
+            commitPickerValue(formatPickerValue(nextDate, TIME_FORMAT))
           }}
           minTime={typeof min === "string" && min ? parseTimeValue(min) ?? undefined : undefined}
           maxTime={typeof max === "string" && max ? parseTimeValue(max) ?? undefined : undefined}
           disabled={disabled}
           readOnly={props.readOnly}
+          referenceDate={timePickerReferenceDate}
           format={TIME_FORMAT}
           ampm={false}
+          closeOnSelect
+          keepOpenDuringFieldFocus
           minutesStep={timePickerMinutesStep(step)}
           views={["hours", "minutes"]}
           slotProps={{
@@ -269,8 +300,7 @@ function Input({
           if (context.validationError) {
             return
           }
-          const formatted = nextDate && nextDate.isValid() ? nextDate.format(DATE_FORMAT) : ""
-          emitDateChange(onChange, formatted, id, name)
+          commitPickerValue(formatPickerValue(nextDate, DATE_FORMAT))
         }}
         minDate={typeof min === "string" && min ? parseDateValue(min) ?? undefined : undefined}
         maxDate={typeof max === "string" && max ? parseDateValue(max) ?? undefined : undefined}

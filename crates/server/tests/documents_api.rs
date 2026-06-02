@@ -4323,6 +4323,92 @@ async fn confirmed_appointment_auto_sends_only_flagged_provider_template_once_to
 }
 
 #[tokio::test]
+async fn document_json_reports_no_active_patient_portal_user_and_release_conflicts() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("doc-portal-no-user");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+    let document_id = seed_document(
+        &pool,
+        admin_id,
+        patient_id,
+        appointment_id,
+        "released_internal",
+        true,
+        "arztbrief",
+        &tag,
+    )
+    .await;
+    let document_id = document_id.to_string();
+
+    let (status, list_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents?patient_id={patient_id}"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let list_item = list_body
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"].as_str() == Some(document_id.as_str()))
+        .unwrap();
+    assert_eq!(list_item["has_active_patient_portal_user"], false);
+
+    let (status, detail_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail_body["has_active_patient_portal_user"], false);
+
+    let (status, release_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/portal-release"),
+        &admin_bearer,
+        Some(json!({
+            "channel": "patient_portal",
+            "requires_confirmation": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        release_body["message"],
+        "No active patient portal user is linked to this patient"
+    );
+
+    let (status, refreshed_detail_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(refreshed_detail_body["visibility"], "released_internal");
+    assert_eq!(
+        refreshed_detail_body["has_active_patient_portal_user"],
+        false
+    );
+}
+
+#[tokio::test]
 async fn document_can_be_released_to_patient_portal_and_confirmed_from_me_workspace() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
         return;
@@ -4359,6 +4445,34 @@ async fn document_can_be_released_to_patient_portal_and_confirmed_from_me_worksp
     .await;
     assert_eq!(status, StatusCode::OK);
     let document_id = upload_body["id"].as_str().unwrap().to_string();
+
+    let (status, staff_list_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents?patient_id={patient_id}"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let staff_list_item = staff_list_body
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"].as_str() == Some(document_id.as_str()))
+        .unwrap();
+    assert_eq!(staff_list_item["has_active_patient_portal_user"], true);
+
+    let (status, detail_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail_body["has_active_patient_portal_user"], true);
 
     let (status, release_body) = json_request(
         &app,
