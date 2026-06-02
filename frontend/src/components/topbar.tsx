@@ -2,8 +2,6 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   Bell,
-  CornerUpLeft,
-  CornerUpRight,
   Globe,
   PanelLeft,
   X,
@@ -147,7 +145,6 @@ export function Topbar() {
   const { user } = useAuth();
   const location = useLocation();
   const { lang, setLang, t } = useLang();
-  const navigate = useNavigate();
   const { toggle: toggleNav } = useNavState();
   const realtimeConnection = useRealtimeConnectionStatus();
   const [unread, setUnread] = useState(0);
@@ -222,13 +219,6 @@ export function Topbar() {
         <div className="flex items-center gap-1">
           <TopbarIconButton onClick={toggleNav} title={t.ui_toggle_sidebar}>
             <PanelLeft className="size-[17px]" />
-          </TopbarIconButton>
-          <div className="h-4 w-px bg-border mx-1" />
-          <TopbarIconButton onClick={() => navigate(-1)} title={t.nav_back}>
-            <CornerUpLeft className="size-[17px]" />
-          </TopbarIconButton>
-          <TopbarIconButton onClick={() => navigate(1)} title={t.nav_forward}>
-            <CornerUpRight className="size-[17px]" />
           </TopbarIconButton>
           <div className="h-4 w-px bg-border mx-1" />
           <span className="px-2 text-[13px] font-semibold tracking-tight text-foreground">

@@ -144,7 +144,11 @@ export type PatientOption = {
 export type ProviderOption = {
   id: string;
   name: string;
+  address_street?: string | null;
   address_city: string | null;
+  address_country?: string | null;
+  phone?: string | null;
+  email?: string | null;
   provider_type?: string | null;
   taxonomy_node_id?: string | null;
   taxonomy_node_ids?: string[];

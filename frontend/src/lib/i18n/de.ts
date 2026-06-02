@@ -1187,6 +1187,9 @@ export const de = {
   documents_date_from: "Datum von",
   documents_date_to: "Datum bis",
   documents_source: "Quelle",
+  documents_share_channel: "Versandkanal",
+  documents_share_provider_channel_unavailable:
+    "Wähle einen Kanal, der bei diesem Provider registriert ist.",
   documents_size: "Größe",
   documents_generate_title: "Dokument aus Vorlage erstellen",
   documents_generate_description:

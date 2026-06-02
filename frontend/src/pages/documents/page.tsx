@@ -466,6 +466,49 @@ function formatShareChannelLabel(channel?: string | null) {
   }
 }
 
+const INTERNAL_SHARE_CHANNEL_VALUES = [
+  "email",
+  "phone",
+  "portal",
+  "fax",
+  "whatsapp",
+  "other",
+] as const;
+
+const DEFAULT_PROVIDER_SHARE_CHANNEL = "portal";
+
+function hasShareChannelValue(value?: string | null) {
+  return Boolean(value?.trim());
+}
+
+function providerHasPostalShareChannel(provider?: ProviderOption | null) {
+  return (
+    hasShareChannelValue(provider?.address_street) &&
+    hasShareChannelValue(provider?.address_city) &&
+    hasShareChannelValue(provider?.address_country)
+  );
+}
+
+function providerShareChannelValues(provider?: ProviderOption | null) {
+  if (!provider) {
+    return ["email", "phone", DEFAULT_PROVIDER_SHARE_CHANNEL, "postal_mail"];
+  }
+
+  const values: string[] = [];
+  if (hasShareChannelValue(provider.email)) values.push("email");
+  if (hasShareChannelValue(provider.phone)) values.push("phone");
+  values.push(DEFAULT_PROVIDER_SHARE_CHANNEL);
+  if (providerHasPostalShareChannel(provider)) values.push("postal_mail");
+  return values;
+}
+
+function shareChannelOptions(values: readonly string[]) {
+  return values.map((value) => ({
+    value,
+    label: formatShareChannelLabel(value),
+  }));
+}
+
 function formatDocumentSourceLabel(
   source?: string | null,
   tr: ReturnType<typeof runtimeTranslations> = runtimeTranslations(),
@@ -992,6 +1035,19 @@ function StaffDocumentsPage({
   const [shareError, setShareError] = useState("");
   const [shareCreateOpen, setShareCreateOpen] = useState(false);
   const [portalBusy, setPortalBusy] = useState(false);
+  const selectedShareProvider = useMemo(
+    () =>
+      providers.find((provider) => provider.id === shareForm.providerId) ?? null,
+    [providers, shareForm.providerId],
+  );
+  const internalShareChannelOptions = useMemo(
+    () => shareChannelOptions(INTERNAL_SHARE_CHANNEL_VALUES),
+    [lang],
+  );
+  const providerShareChannelOptions = useMemo(
+    () => shareChannelOptions(providerShareChannelValues(selectedShareProvider)),
+    [lang, selectedShareProvider],
+  );
 
   useDebouncedRealtimeSubscription(STAFF_DOCUMENT_REALTIME_EVENTS, (_event, events) => {
     if (!canView) return;
@@ -2001,6 +2057,13 @@ function StaffDocumentsPage({
     }
     if (shareForm.targetType === "provider" && !shareForm.message.trim()) {
       setShareError(t.documents_share_message_required);
+      return;
+    }
+    if (
+      shareForm.targetType === "provider" &&
+      !providerShareChannelOptions.some((option) => option.value === shareForm.channel)
+    ) {
+      setShareError(t.documents_share_provider_channel_unavailable);
       return;
     }
     setShareBusy(true);
@@ -3372,6 +3435,11 @@ function StaffDocumentsPage({
                             ...current,
                             targetType: "provider",
                             userId: "",
+                            channel: providerShareChannelValues(
+                              providers.find((provider) => provider.id === current.providerId),
+                            ).includes(current.channel)
+                              ? current.channel
+                              : DEFAULT_PROVIDER_SHARE_CHANNEL,
                           }))
                         }
                       >
@@ -3415,16 +3483,23 @@ function StaffDocumentsPage({
                               `${item.name} - ${item.address_city || t.documents_no_city}`
                             }
                             onChange={(providerId) =>
-                              setShareForm((current) => ({
-                                ...current,
-                                providerId,
-                              }))
+                              setShareForm((current) => {
+                                const provider = providers.find((item) => item.id === providerId);
+                                const channels = providerShareChannelValues(provider);
+                                return {
+                                  ...current,
+                                  providerId,
+                                  channel: channels.includes(current.channel)
+                                    ? current.channel
+                                    : channels[0] ?? DEFAULT_PROVIDER_SHARE_CHANNEL,
+                                };
+                              })
                             }
                           />
                         </Field>
                       )}
-                      <Field label={t.documents_source}>
-                        <Input
+                      <Field label={t.documents_share_channel} required>
+                        <NativeComboboxSelect
                           value={shareForm.channel}
                           onChange={(event) =>
                             setShareForm((current) => ({
@@ -3432,8 +3507,17 @@ function StaffDocumentsPage({
                               channel: event.target.value,
                             }))
                           }
-                          className={shellInputClassName}
-                        />
+                          className={selectClassName}
+                        >
+                          {(shareForm.targetType === "provider"
+                            ? providerShareChannelOptions
+                            : internalShareChannelOptions
+                          ).map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </NativeComboboxSelect>
                       </Field>
                     </div>
                   </div>

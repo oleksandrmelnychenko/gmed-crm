@@ -1141,6 +1141,8 @@ export interface Translations
   documents_date_from: string;
   documents_date_to: string;
   documents_source: string;
+  documents_share_channel: string;
+  documents_share_provider_channel_unavailable: string;
   documents_size: string;
   documents_generate_title: string;
   documents_generate_description: string;

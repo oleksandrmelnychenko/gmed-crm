@@ -1185,6 +1185,9 @@ export const ru = {
   documents_date_from: "Дата с",
   documents_date_to: "Дата по",
   documents_source: "Источник",
+  documents_share_channel: "Канал отправки",
+  documents_share_provider_channel_unavailable:
+    "Выберите канал, который зарегистрирован у этого провайдера.",
   documents_size: "Размер",
   documents_generate_title: "Сгенерировать документ из шаблона",
   documents_generate_description:

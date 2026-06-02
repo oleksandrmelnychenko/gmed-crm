@@ -386,7 +386,7 @@ async fn list_providers(
 
     let rows = match sqlx::query(
         r#"SELECT p.id, p.name, p.provider_type, p.legal_name, p.tax_id,
-                  p.address_city, p.address_country, p.fachbereich,
+                  p.address_street, p.address_city, p.address_country, p.fachbereich,
                   p.phone, p.email, p.opening_hours, p.is_active, p.created_at,
                   p.parent_provider_id, parent.name AS parent_provider_name,
                   p.organization_level,
@@ -920,6 +920,7 @@ async fn list_providers(
             "provider_type": provider_type,
             "legal_name": row.try_get::<Option<String>, _>("legal_name").unwrap_or_default(),
             "tax_id": row.try_get::<Option<String>, _>("tax_id").unwrap_or_default(),
+            "address_street": row.try_get::<Option<String>, _>("address_street").unwrap_or_default(),
             "address_city": row.try_get::<Option<String>, _>("address_city").unwrap_or_default(),
             "address_country": row.try_get::<Option<String>, _>("address_country").unwrap_or_default(),
             "fachbereich": row.try_get::<Option<String>, _>("fachbereich").unwrap_or_default(),
