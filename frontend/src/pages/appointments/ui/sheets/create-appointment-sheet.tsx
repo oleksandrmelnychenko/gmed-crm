@@ -389,6 +389,20 @@ function useCreateAppointmentSheetContent({
         });
         return;
       }
+      if (!form.title.trim()) {
+        dispatchSheetState({
+          error: `${t.appointments_title_col}: ${t.cf_required}`,
+          busy: false,
+        });
+        return;
+      }
+      if (!form.date) {
+        dispatchSheetState({
+          error: `${t.appointments_date}: ${t.cf_required}`,
+          busy: false,
+        });
+        return;
+      }
       if (
         form.appointmentType === "medical" &&
         !form.providerId &&
@@ -598,7 +612,6 @@ function useCreateAppointmentSheetContent({
                         title: event.target.value,
                       }))
                     }
-                    required
                     className={createSheetInputClassName}
                   />
                 </Field>
@@ -613,7 +626,6 @@ function useCreateAppointmentSheetContent({
                           date: event.target.value,
                         }))
                       }
-                      required
                       className={createSheetInputClassName}
                     />
                   </Field>

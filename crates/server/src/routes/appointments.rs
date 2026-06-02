@@ -7136,6 +7136,8 @@ async fn create_reminder_record(
     sqlx::query(
         "INSERT INTO reminders (appointment_id, user_id, remind_at, title, description)
          VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (appointment_id, user_id, title) WHERE is_completed = false
+         DO UPDATE SET remind_at = EXCLUDED.remind_at, description = EXCLUDED.description
          RETURNING id",
     )
     .bind(appointment_id)

@@ -196,6 +196,10 @@ function Input({
             "& .MuiPickersInputBase-sectionsContainer, & .MuiPickersSectionList-sectionContent, & .MuiPickersInputBase-sectionContent": {
               fontSize: "0.8125rem",
               lineHeight: 1.4,
+              // MUI section fields navigate by highlighting the active section, not a
+              // text caret; the blinking caret in the empty leading section shows as a
+              // stray "cursor before the field" (notably in Edge). Suppress it.
+              caretColor: "transparent",
             },
           },
         },

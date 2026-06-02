@@ -72,6 +72,10 @@ export function evaluatePredicate<T>(
 
     case "is":
     case "equals": {
+      // An empty text operand is a no-op (match all), like "contains". Without this
+      // the default "equals" filter on number fields wipes the table the instant it is
+      // added. Guard only the empty string so boolean "is" comparisons still work.
+      if (operand === "") return true;
       if (isEmpty(fieldValue)) return false;
       if (operand == null) return false;
       if (typeof operand === "boolean") return Boolean(fieldValue) === operand;
