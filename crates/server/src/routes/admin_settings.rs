@@ -5,7 +5,9 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::Deserialize;
+use sqlx::Row;
 use uuid::Uuid;
 
 use crate::audit;
@@ -226,6 +228,53 @@ struct ActivityQuery {
     user_id: Option<Uuid>,
     action: Option<String>,
     limit: Option<i64>,
+    offset: Option<i64>,
+    date_from: Option<String>,
+    date_to: Option<String>,
+}
+
+fn parse_activity_date_start(
+    value: Option<String>,
+    field_name: &'static str,
+) -> Result<Option<DateTime<Utc>>, &'static str> {
+    let Some(raw) = value else {
+        return Ok(None);
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+
+    let date = NaiveDate::parse_from_str(trimmed, "%Y-%m-%d").map_err(|_| match field_name {
+        "date_from" => "Invalid date_from (YYYY-MM-DD)",
+        _ => "Invalid date_to (YYYY-MM-DD)",
+    })?;
+    let Some(naive) = date.and_hms_opt(0, 0, 0) else {
+        return Err("Invalid activity date");
+    };
+    Ok(Some(DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc)))
+}
+
+fn parse_activity_date_to_exclusive(
+    value: Option<String>,
+) -> Result<Option<DateTime<Utc>>, &'static str> {
+    let Some(raw) = value else {
+        return Ok(None);
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+
+    let date = NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
+        .map_err(|_| "Invalid date_to (YYYY-MM-DD)")?;
+    let Some(next_day) = date.succ_opt() else {
+        return Err("Invalid date_to (YYYY-MM-DD)");
+    };
+    let Some(naive) = next_day.and_hms_opt(0, 0, 0) else {
+        return Err("Invalid activity date");
+    };
+    Ok(Some(DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc)))
 }
 
 async fn list_activity(
@@ -237,21 +286,77 @@ async fn list_activity(
         return e;
     }
 
-    let limit = q.limit.unwrap_or(200).min(500);
+    let ActivityQuery {
+        user_id,
+        action,
+        limit,
+        offset,
+        date_from,
+        date_to,
+    } = q;
+    let action = action
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let limit = limit.unwrap_or(50).clamp(1, 500);
+    let offset = offset.unwrap_or(0).max(0);
+    let date_from = match parse_activity_date_start(date_from, "date_from") {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let date_to_exclusive = match parse_activity_date_to_exclusive(date_to) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    if let (Some(from), Some(to_exclusive)) = (date_from.as_ref(), date_to_exclusive.as_ref()) {
+        if to_exclusive <= from {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "date_to must be on or after date_from",
+            );
+        }
+    }
 
-    // Use a single query shape — filter in WHERE with COALESCE-style optionals
-    match sqlx::query!(
-        r#"SELECT al.id, al.user_id, u.name AS "user_name!", u.email AS "user_email!",
+    let total = match sqlx::query(
+        r#"SELECT COUNT(*) AS count
+           FROM audit_log al
+           JOIN users u ON u.id = al.user_id
+           WHERE ($1::UUID IS NULL OR al.user_id = $1)
+             AND ($2::TEXT IS NULL OR al.action = $2)
+             AND ($3::TIMESTAMPTZ IS NULL OR al.created_at >= $3)
+             AND ($4::TIMESTAMPTZ IS NULL OR al.created_at < $4)"#,
+    )
+    .bind(user_id)
+    .bind(action)
+    .bind(date_from)
+    .bind(date_to_exclusive)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => row.try_get::<i64, _>("count").unwrap_or_default(),
+        Err(e) => {
+            tracing::error!(error = %e, "count activity");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    match sqlx::query(
+        r#"SELECT al.id, al.user_id, u.name AS user_name, u.email AS user_email,
                   al.action, al.entity_type, al.entity_id, al.context, al.created_at
            FROM audit_log al
            JOIN users u ON u.id = al.user_id
            WHERE ($1::UUID IS NULL OR al.user_id = $1)
              AND ($2::TEXT IS NULL OR al.action = $2)
-           ORDER BY al.created_at DESC LIMIT $3"#,
-        q.user_id,
-        q.action,
-        limit
+             AND ($3::TIMESTAMPTZ IS NULL OR al.created_at >= $3)
+             AND ($4::TIMESTAMPTZ IS NULL OR al.created_at < $4)
+           ORDER BY al.created_at DESC LIMIT $5 OFFSET $6"#,
     )
+    .bind(user_id)
+    .bind(action)
+    .bind(date_from)
+    .bind(date_to_exclusive)
+    .bind(limit)
+    .bind(offset)
     .fetch_all(&state.db)
     .await
     {
@@ -260,19 +365,27 @@ async fn list_activity(
                 .into_iter()
                 .map(|r| {
                     serde_json::json!({
-                        "id": r.id,
-                        "user_id": r.user_id,
-                        "user_name": r.user_name,
-                        "user_email": r.user_email,
-                        "action": r.action,
-                        "entity_type": r.entity_type,
-                        "entity_id": r.entity_id,
-                        "context": r.context,
-                        "created_at": r.created_at,
+                        "id": r.try_get::<i64, _>("id").unwrap_or_default().to_string(),
+                        "user_id": r.try_get::<Uuid, _>("user_id").unwrap_or_default(),
+                        "user_name": r.try_get::<String, _>("user_name").unwrap_or_default(),
+                        "user_email": r.try_get::<String, _>("user_email").unwrap_or_default(),
+                        "action": r.try_get::<String, _>("action").unwrap_or_default(),
+                        "entity_type": r.try_get::<Option<String>, _>("entity_type").unwrap_or_default(),
+                        "entity_id": r.try_get::<Option<Uuid>, _>("entity_id").unwrap_or_default(),
+                        "context": r.try_get::<Option<serde_json::Value>, _>("context").unwrap_or_default(),
+                        "created_at": r.try_get::<DateTime<Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
                     })
                 })
                 .collect();
-            Json(data).into_response()
+            let count = data.len() as i64;
+            Json(serde_json::json!({
+                "items": data,
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "has_more": offset + count < total,
+            }))
+            .into_response()
         }
         Err(e) => {
             tracing::error!(error = %e, "list activity");

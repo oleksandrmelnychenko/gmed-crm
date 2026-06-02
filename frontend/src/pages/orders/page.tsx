@@ -5874,7 +5874,7 @@ function useOrdersPageContent() {
                       className={inputClassName}
                     />
                   </Field>
-                  <Field label={t.common_provider} className="md:col-span-2">
+                  <div className="md:col-span-2">
                     <ProviderSelectWithTaxonomyFilter
                       value={externalInvoiceForm.providerId}
                       providers={providers}
@@ -5882,6 +5882,8 @@ function useOrdersPageContent() {
                       providerPlaceholder={t.common_not_set}
                       taxonomyPlaceholder={t.providers_category}
                       taxonomyAllLabel={t.providers_all}
+                      taxonomyLabel={t.providers_category}
+                      providerSelectLabel={t.common_provider}
                       containerClassName="grid-cols-1 sm:grid-cols-2"
                       taxonomySelectClassName={selectClassName}
                       providerSelectClassName={selectClassName}
@@ -5893,7 +5895,7 @@ function useOrdersPageContent() {
                         }))
                       }
                     />
-                  </Field>
+                  </div>
                   <Field label={t.orders_external_invoice_date}>
                     <Input
                       type="date"

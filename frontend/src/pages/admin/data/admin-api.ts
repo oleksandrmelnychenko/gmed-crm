@@ -157,10 +157,33 @@ export function testAdminNotificationChannel(id: string) {
   return postJson(`/admin/notifications/${id}/test`);
 }
 
-export function fetchAdminActivity<TActivity>(action: string) {
-  const query = new URLSearchParams({ limit: "300" });
-  if (action) query.set("action", action);
-  return apiFetch<TActivity[]>(`/admin/activity?${query.toString()}`, {
+export type AdminActivityQuery = {
+  action?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export type AdminActivityResponse<TActivity> = {
+  items: TActivity[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+};
+
+export function fetchAdminActivity<TActivity>(
+  input: AdminActivityQuery = {},
+) {
+  const query = new URLSearchParams({
+    limit: String(input.limit ?? 50),
+    offset: String(input.offset ?? 0),
+  });
+  if (input.action) query.set("action", input.action);
+  if (input.dateFrom) query.set("date_from", input.dateFrom);
+  if (input.dateTo) query.set("date_to", input.dateTo);
+  return apiFetch<AdminActivityResponse<TActivity>>(`/admin/activity?${query.toString()}`, {
     cacheTtlMs: ADMIN_FAST_CACHE_TTL_MS,
   });
 }

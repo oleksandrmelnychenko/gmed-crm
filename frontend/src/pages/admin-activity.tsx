@@ -55,6 +55,8 @@ import {
 } from "@/components/ui-shell";
 
 interface ActivityRow {
+  id: string;
+  user_id: string;
   user_name: string;
   user_email: string;
   action: string;
@@ -540,10 +542,16 @@ function AdminActivityDetailSheet({
 type AdminActivityToolbarSectionProps = {
   actionOptions: string[];
   anyFilterActive: boolean;
+  dateFrom: string;
+  dateTo: string;
   filterAction: string;
+  pageSize: number;
   search: string;
   t: Translations;
+  onDateFromChange: (value: string) => void;
+  onDateToChange: (value: string) => void;
   onFilterActionChange: (value: string) => void;
+  onPageSizeChange: (value: number) => void;
   onReset: () => void;
   onSearchChange: (value: string) => void;
 };
@@ -551,10 +559,16 @@ type AdminActivityToolbarSectionProps = {
 function AdminActivityToolbarSection({
   actionOptions,
   anyFilterActive,
+  dateFrom,
+  dateTo,
   filterAction,
+  pageSize,
   search,
   t,
+  onDateFromChange,
+  onDateToChange,
   onFilterActionChange,
+  onPageSizeChange,
   onReset,
   onSearchChange,
 }: AdminActivityToolbarSectionProps) {
@@ -590,6 +604,47 @@ function AdminActivityToolbarSection({
         ))}
       </NativeComboboxSelect>
 
+      <div className="grid gap-1">
+        <span className={cn(tokens.text.label, "text-[11px]")}>
+          {t.documents_date_from}
+        </span>
+        <Input
+          type="date"
+          value={dateFrom}
+          onChange={(event) => onDateFromChange(event.target.value)}
+          className="h-8 w-[150px] rounded-lg bg-card text-[13px]"
+        />
+      </div>
+
+      <div className="grid gap-1">
+        <span className={cn(tokens.text.label, "text-[11px]")}>
+          {t.documents_date_to}
+        </span>
+        <Input
+          type="date"
+          value={dateTo}
+          onChange={(event) => onDateToChange(event.target.value)}
+          className="h-8 w-[150px] rounded-lg bg-card text-[13px]"
+        />
+      </div>
+
+      <div className="grid gap-1">
+        <span className={cn(tokens.text.label, "text-[11px]")}>
+          {t.pagination_per_page}
+        </span>
+        <NativeComboboxSelect
+          value={String(pageSize)}
+          onChange={(event) => onPageSizeChange(Number(event.target.value))}
+          className="h-8 w-[110px] rounded-lg bg-card text-[13px]"
+        >
+          {[25, 50, 100, 200].map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
+        </NativeComboboxSelect>
+      </div>
+
       {anyFilterActive ? (
         <Button
           type="button"
@@ -612,11 +667,24 @@ interface AdminActivityPageState {
   error: string;
   search: string;
   filterAction: string;
+  dateFrom: string;
+  dateTo: string;
+  pageSize: number;
+  offset: number;
+  total: number;
+  hasMore: boolean;
   detailOpen: boolean;
   selectedIndex: number | null;
 }
 
 type AdminActivityPagePatch = Partial<AdminActivityPageState>;
+type AdminActivityLoadParams = {
+  action: string;
+  dateFrom: string;
+  dateTo: string;
+  limit: number;
+  offset: number;
+};
 
 const INITIAL_ADMIN_ACTIVITY_PAGE_STATE: AdminActivityPageState = {
   activities: [],
@@ -624,6 +692,12 @@ const INITIAL_ADMIN_ACTIVITY_PAGE_STATE: AdminActivityPageState = {
   error: "",
   search: "",
   filterAction: "",
+  dateFrom: "",
+  dateTo: "",
+  pageSize: 50,
+  offset: 0,
+  total: 0,
+  hasMore: false,
   detailOpen: false,
   selectedIndex: null,
 };
@@ -647,12 +721,18 @@ export function AdminActivityPage() {
   );
   const {
     activities,
+    dateFrom,
+    dateTo,
     detailOpen,
     error,
     filterAction,
+    hasMore,
     loading,
+    offset,
+    pageSize,
     search,
     selectedIndex,
+    total,
   } = activityState;
   const deferredSearch = useDeferredValue(search);
   const setSearch = useCallback(
@@ -660,7 +740,43 @@ export function AdminActivityPage() {
     [],
   );
   const setFilterAction = useCallback(
-    (value: string) => dispatchActivityState({ filterAction: value }),
+    (value: string) =>
+      dispatchActivityState({
+        detailOpen: false,
+        filterAction: value,
+        offset: 0,
+        selectedIndex: null,
+      }),
+    [],
+  );
+  const setDateFrom = useCallback(
+    (value: string) =>
+      dispatchActivityState({
+        dateFrom: value,
+        detailOpen: false,
+        offset: 0,
+        selectedIndex: null,
+      }),
+    [],
+  );
+  const setDateTo = useCallback(
+    (value: string) =>
+      dispatchActivityState({
+        dateTo: value,
+        detailOpen: false,
+        offset: 0,
+        selectedIndex: null,
+      }),
+    [],
+  );
+  const setPageSize = useCallback(
+    (value: number) =>
+      dispatchActivityState({
+        detailOpen: false,
+        offset: 0,
+        pageSize: Number.isFinite(value) ? value : 50,
+        selectedIndex: null,
+      }),
     [],
   );
   const setDetailOpen = useCallback(
@@ -668,37 +784,67 @@ export function AdminActivityPage() {
     [],
   );
 
-  const loadData = useCallback(async (action: string) => {
+  const loadData = useCallback(async (params: AdminActivityLoadParams) => {
     dispatchActivityState({ loading: true, error: "" });
     try {
-      const data = await fetchAdminActivity<ActivityRow>(action);
+      const data = await fetchAdminActivity<ActivityRow>({
+        action: params.action,
+        dateFrom: params.dateFrom,
+        dateTo: params.dateTo,
+        limit: params.limit,
+        offset: params.offset,
+      });
       startTransition(() =>
         dispatchActivityState({
-          activities: data,
+          activities: data.items,
           error: "",
+          hasMore: data.has_more,
           loading: false,
+          offset: data.offset,
+          pageSize: data.limit,
+          selectedIndex: null,
+          total: data.total,
         }),
       );
     } catch (loadError) {
       dispatchActivityState({
         activities: [],
         error: loadError instanceof Error ? loadError.message : t.common_error,
+        hasMore: false,
         loading: false,
+        selectedIndex: null,
+        total: 0,
       });
     }
   }, [t.common_error]);
 
   useEffect(() => {
-    void loadData(filterAction);
-  }, [filterAction, loadData]);
+    void loadData({
+      action: filterAction,
+      dateFrom,
+      dateTo,
+      limit: pageSize,
+      offset,
+    });
+  }, [dateFrom, dateTo, filterAction, loadData, offset, pageSize]);
 
   useDebouncedRealtimeSubscription(ADMIN_ACTIVITY_REALTIME_EVENTS, () => {
     clearApiCache("/admin/activity");
-    void loadData(filterAction);
+    void loadData({
+      action: filterAction,
+      dateFrom,
+      dateTo,
+      limit: pageSize,
+      offset,
+    });
   }, 300);
 
   const actionOptions = useMemo(() => {
-    const values = new Set(activities.map((item) => item.action));
+    const values = new Set<string>([
+      ...Object.keys(EXACT_ACTION_LABEL_KEYS),
+      ...ADMIN_ACTIVITY_REALTIME_EVENTS,
+      ...activities.map((item) => item.action),
+    ]);
     return Array.from(values).sort();
   }, [activities]);
 
@@ -755,9 +901,7 @@ export function AdminActivityPage() {
 
   const selectedActivity =
     selectedIndex !== null ? filtered[selectedIndex] ?? null : null;
-  const selectedActivityId = selectedActivity
-    ? `${selectedActivity.user_email}-${selectedActivity.created_at}-${selectedActivity.action}`
-    : null;
+  const selectedActivityId = selectedActivity?.id ?? null;
 
   const columns = useMemo<ColumnDef<ActivityRow>[]>(() => [
     {
@@ -833,7 +977,13 @@ export function AdminActivityPage() {
     t,
   ]);
 
-  const anyFilterActive = search.trim() !== "" || filterAction !== "";
+  const anyFilterActive =
+    search.trim() !== "" || filterAction !== "" || dateFrom !== "" || dateTo !== "";
+  const pageNumber = Math.floor(offset / pageSize) + 1;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const pageStart = total === 0 ? 0 : offset + 1;
+  const pageEnd = Math.min(offset + activities.length, total);
+  const countLabel = search.trim() ? `${filtered.length}/${total}` : total;
 
   return (
     <>
@@ -852,7 +1002,15 @@ export function AdminActivityPage() {
                 variant="outline"
                 className="h-9 rounded-lg gap-1.5 bg-card px-3.5"
                 disabled={loading}
-                onClick={() => void loadData(filterAction)}
+                onClick={() =>
+                  void loadData({
+                    action: filterAction,
+                    dateFrom,
+                    dateTo,
+                    limit: pageSize,
+                    offset,
+                  })
+                }
               >
                 <RefreshCcw className="size-3.5" />
                 {t.common_refresh}
@@ -864,11 +1022,27 @@ export function AdminActivityPage() {
         <AdminActivityToolbarSection
           actionOptions={actionOptions}
           anyFilterActive={anyFilterActive}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
           filterAction={filterAction}
+          pageSize={pageSize}
           search={search}
           t={t}
+          onDateFromChange={setDateFrom}
+          onDateToChange={setDateTo}
           onFilterActionChange={setFilterAction}
-          onReset={() => dispatchActivityState({ search: "", filterAction: "" })}
+          onPageSizeChange={setPageSize}
+          onReset={() =>
+            dispatchActivityState({
+              dateFrom: "",
+              dateTo: "",
+              detailOpen: false,
+              filterAction: "",
+              offset: 0,
+              search: "",
+              selectedIndex: null,
+            })
+          }
           onSearchChange={setSearch}
         />
 
@@ -881,7 +1055,7 @@ export function AdminActivityPage() {
           <AdminTableCard
             title={t.activity_title}
             description={t.activity_subtitle}
-            count={filtered.length}
+            count={countLabel}
           >
             {filtered.length === 0 ? (
               <div className="p-4">
@@ -894,7 +1068,7 @@ export function AdminActivityPage() {
                 defaultDensity="comfortable"
                 defaultSort={[{ field: "created_at", dir: "desc" }]}
                 dictionary={t as unknown as Record<string, string>}
-                rowId={(activity) => `${activity.user_email}-${activity.created_at}-${activity.action}`}
+                rowId={(activity) => activity.id}
                 activeRowId={selectedActivityId}
                 onRowClick={(activity) => {
                   dispatchActivityState({
@@ -905,6 +1079,48 @@ export function AdminActivityPage() {
                 tableClassName="min-h-[360px]"
               />
             )}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 text-xs text-muted-foreground">
+              <span>
+                {pageStart}-{pageEnd} / {total}
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 rounded-lg"
+                  disabled={loading || offset <= 0}
+                  onClick={() =>
+                    dispatchActivityState({
+                      detailOpen: false,
+                      offset: Math.max(0, offset - pageSize),
+                      selectedIndex: null,
+                    })
+                  }
+                >
+                  {t.pagination_previous}
+                </Button>
+                <span className="min-w-16 text-center">
+                  {pageNumber} / {totalPages}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 rounded-lg"
+                  disabled={loading || !hasMore}
+                  onClick={() =>
+                    dispatchActivityState({
+                      detailOpen: false,
+                      offset: offset + pageSize,
+                      selectedIndex: null,
+                    })
+                  }
+                >
+                  {t.pagination_next}
+                </Button>
+              </div>
+            </div>
           </AdminTableCard>
         ) : null}
       </div>

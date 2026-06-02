@@ -377,7 +377,11 @@ async fn activity_list_ok_for_it_admin() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(body.is_array());
+    assert!(body["items"].is_array());
+    assert_eq!(body["limit"], 50);
+    assert_eq!(body["offset"], 0);
+    assert!(body["total"].is_number());
+    assert!(body["has_more"].is_boolean());
 }
 
 #[tokio::test]
@@ -386,13 +390,30 @@ async fn activity_filter_by_action() {
     let (status, body) = json_request(
         &app,
         "GET",
-        "/api/v1/admin/activity?action=login",
+        "/api/v1/admin/activity?action=login&limit=25&offset=0&date_from=2026-01-01&date_to=2026-12-31",
         &auth_header("it_admin"),
         None,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(body.is_array());
+    assert!(body["items"].is_array());
+    assert_eq!(body["limit"], 25);
+    assert_eq!(body["offset"], 0);
+    assert!(body["total"].is_number());
+}
+
+#[tokio::test]
+async fn activity_rejects_invalid_date_range() {
+    let Some(app) = test_app().await else { return };
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        "/api/v1/admin/activity?date_from=2026-12-31&date_to=2026-01-01",
+        &auth_header("it_admin"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
 #[tokio::test]
