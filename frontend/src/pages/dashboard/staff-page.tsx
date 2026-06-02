@@ -104,7 +104,7 @@ export function StaffDashboardPageNew() {
 
       <Suspense fallback={<DashboardSectionLoading />}>
         <StaffDashboardOperationsSection
-          onOpenProvider={(id) => staffGo(`/providers?provider=${id}`)}
+          onOpenProvider={(id) => staffGo(`/providers/${id}?return_to=/`)}
           operations={operations}
           sectionsLoading={sectionsLoading}
           tr={tr}

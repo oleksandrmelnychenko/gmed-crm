@@ -5333,7 +5333,7 @@ function useOrdersPageContent() {
                                 className="max-w-full truncate text-right font-semibold text-sky-700 hover:text-sky-800"
                                 onClick={() =>
                                   window.open(
-                                    `/providers?provider=${leistung.provider_id}`,
+                                    `/providers/${leistung.provider_id}?return_to=/orders`,
                                     "_blank",
                                     "noopener,noreferrer",
                                   )
@@ -5629,7 +5629,7 @@ function useOrdersPageContent() {
                                 className="max-w-full truncate font-semibold text-sky-700 hover:text-sky-800"
                                 onClick={() =>
                                   window.open(
-                                    `/providers?provider=${invoice.provider_id}`,
+                                    `/providers/${invoice.provider_id}?return_to=/orders`,
                                     "_blank",
                                     "noopener,noreferrer",
                                   )

@@ -104,6 +104,7 @@ export type CreateAppointmentSheetProps = {
 
 type CreateAppointmentSheetState = {
   form: AppointmentFormState;
+  baseline: AppointmentFormState;
   doctors: DoctorOption[];
   conflicts: ConflictSummary | null;
   error: string;
@@ -131,6 +132,12 @@ function createAppointmentSheetReducer(
     ...state,
     ...(typeof patch === "function" ? patch(state) : patch),
   };
+}
+
+function resolveStateAction<T>(value: SetStateAction<T>, current: T) {
+  return typeof value === "function"
+    ? (value as (currentValue: T) => T)(current)
+    : value;
 }
 
 function useCreateAppointmentSheetContent({
@@ -162,26 +169,27 @@ function useCreateAppointmentSheetContent({
     undefined,
     () => ({
       form: draft ?? seed,
+      baseline: draft ?? seed,
       doctors: [],
       conflicts: null,
       error: "",
       busy: false,
     }),
   );
-  const { form, doctors, conflicts, error, busy } = sheetState;
+  const { form, baseline, doctors, conflicts, error, busy } = sheetState;
+  const latestDraftRef = useRef<AppointmentFormState | null>(draft ?? null);
+  const wasOpenRef = useRef(false);
   const setForm = (nextValue: SetStateAction<AppointmentFormState>) => {
     dispatchSheetState((current) => ({
-      form:
-        typeof nextValue === "function"
-          ? nextValue(current.form)
-          : nextValue,
+      form: resolveStateAction(nextValue, current.form),
+      conflicts: current.conflicts ? null : current.conflicts,
+      error: current.error ? "" : current.error,
     }));
   };
   const isDirty = useMemo(
-    () => hasAppointmentFormChanges(form, seed),
-    [form, seed],
+    () => hasAppointmentFormChanges(form, baseline),
+    [baseline, form],
   );
-  const latestDraftRef = useRef<AppointmentFormState | null>(draft ?? null);
 
   useEffect(() => {
     latestDraftRef.current = draft ?? null;
@@ -212,14 +220,18 @@ function useCreateAppointmentSheetContent({
   }
 
   useEffect(() => {
-    if (!open) return;
-    dispatchSheetState({
-      form: latestDraftRef.current ?? seed,
-      doctors: [],
-      conflicts: null,
-      error: "",
-      busy: false,
-    });
+    if (open && !wasOpenRef.current) {
+      const nextForm = latestDraftRef.current ?? seed;
+      dispatchSheetState({
+        form: nextForm,
+        baseline: nextForm,
+        doctors: [],
+        conflicts: null,
+        error: "",
+        busy: false,
+      });
+    }
+    wasOpenRef.current = open;
   }, [open, seed]);
 
   const scheduleWarningLabels = useMemo(

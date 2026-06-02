@@ -241,6 +241,15 @@ function withEllipsis(value: string | null | undefined) {
   return /[.…]$/u.test(normalized) ? normalized : `${normalized}…`;
 }
 
+function defaultProviderTaxonomyNodeId(provider: ProviderSummary | null | undefined) {
+  return (
+    provider?.taxonomy_node_id?.trim() ||
+    provider?.taxonomy_node_ids?.find((value) => value.trim()) ||
+    provider?.taxonomy_path?.at(-1)?.id?.trim() ||
+    ""
+  );
+}
+
 function EditAppointmentSection(props: EditAppointmentSectionProps) {
   const resetKey = useMemo(() => JSON.stringify(props.detail), [props.detail]);
   return <EditAppointmentSectionContent key={resetKey} {...props} />;
@@ -318,9 +327,6 @@ function useEditAppointmentSectionContentContent({
   }, [createOpenSnapshot, sheetOpen]);
   const setForm = (value: SetStateAction<AppointmentFormState>) =>
     dispatchEditState(createEditAppointmentFieldAction("form", value));
-  const setRecurrenceScope = (
-    value: SetStateAction<AppointmentRecurringActionScope>,
-  ) => dispatchEditState(createEditAppointmentFieldAction("recurrenceScope", value));
   const updateDirtyRef = (
     nextForm: AppointmentFormState,
     nextRecurrenceScope: AppointmentRecurringActionScope,
@@ -332,23 +338,39 @@ function useEditAppointmentSectionContentContent({
         nextRecurrenceScope !== openSnapshot.recurrenceScope);
   };
   const setFormFromUser = (value: SetStateAction<AppointmentFormState>) => {
-    setForm((current) => {
-      const next = resolveStateAction(value, current);
+    dispatchEditState({
+      type: "update",
+      updater: (state) => {
+        const next = resolveStateAction(value, state.form);
 
-      updateDirtyRef(next, recurrenceScope);
+        updateDirtyRef(next, state.recurrenceScope);
 
-      return next;
+        return {
+          ...state,
+          form: next,
+          conflicts: state.conflicts ? null : state.conflicts,
+          error: state.error ? "" : state.error,
+        };
+      },
     });
   };
   const setRecurrenceScopeFromUser = (
     value: SetStateAction<AppointmentRecurringActionScope>,
   ) => {
-    setRecurrenceScope((current) => {
-      const next = resolveStateAction(value, current);
+    dispatchEditState({
+      type: "update",
+      updater: (state) => {
+        const next = resolveStateAction(value, state.recurrenceScope);
 
-      updateDirtyRef(form, next);
+        updateDirtyRef(state.form, next);
 
-      return next;
+        return {
+          ...state,
+          recurrenceScope: next,
+          conflicts: state.conflicts ? null : state.conflicts,
+          error: state.error ? "" : state.error,
+        };
+      },
     });
   };
   const setDoctors = (value: SetStateAction<DoctorOption[]>) =>
@@ -360,6 +382,9 @@ function useEditAppointmentSectionContentContent({
   const setBusy = (value: SetStateAction<boolean>) =>
     dispatchEditState(createEditAppointmentFieldAction("busy", value));
   useEffect(() => {
+    if (!providers.length) {
+      return;
+    }
     if (
       providerSelectionFitsAppointmentScope(
         providers,
@@ -382,6 +407,24 @@ function useEditAppointmentSectionContentContent({
     form.providerTaxonomyNodeId,
     providers,
   ]);
+
+  useEffect(() => {
+    if (!providers.length || !form.providerId || form.providerTaxonomyNodeId) {
+      return;
+    }
+
+    const selectedProvider = providers.find((provider) => provider.id === form.providerId);
+    const taxonomyNodeId = defaultProviderTaxonomyNodeId(selectedProvider);
+    if (!taxonomyNodeId) {
+      return;
+    }
+
+    setForm((current) =>
+      current.providerTaxonomyNodeId || current.providerId !== form.providerId
+        ? current
+        : { ...current, providerTaxonomyNodeId: taxonomyNodeId },
+    );
+  }, [form.providerId, form.providerTaxonomyNodeId, providers]);
 
   const scheduleWarningLabels = useMemo(
     () => ({

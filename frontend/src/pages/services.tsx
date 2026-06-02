@@ -959,13 +959,14 @@ function useStaffServicesPageContent() {
   const [editProviderServicesError, setEditProviderServicesError] = useState("");
 
   const isConciergeUser = user?.role === "concierge";
+  const isFullAccessUser = user?.role === "ceo" || user?.role === "it_admin";
   const canCreateService =
-    user?.role === "ceo" ||
+    isFullAccessUser ||
     user?.role === "patient_manager" ||
     isConciergeUser;
   const canEditService = canCreateService;
   const canEditProtectedServiceFields =
-    user?.role === "ceo" || user?.role === "patient_manager";
+    isFullAccessUser || user?.role === "patient_manager";
 
   useDebouncedRealtimeSubscription(STAFF_SERVICES_REALTIME_EVENTS, () => {
     clearApiCache("/concierge-services");

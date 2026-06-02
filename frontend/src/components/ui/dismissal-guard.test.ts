@@ -57,6 +57,22 @@ describe("dismissal guard", () => {
     expect(isInternalOverlayInteractionEvent(event)).toBe(true)
   })
 
+  it("treats MUI mobile picker dialogs as internal overlay interactions", () => {
+    class FakeElement {
+      closest(selector: string) {
+        return selector.includes(".MuiDialog-root") ||
+          selector.includes(".MuiPickersModalDialog-root")
+          ? this
+          : null
+      }
+    }
+    vi.stubGlobal("Element", FakeElement)
+
+    const event = { target: new FakeElement() } as unknown as Event
+
+    expect(isInternalOverlayInteractionEvent(event)).toBe(true)
+  })
+
   it("uses controlled dirty as the source of truth when provided", () => {
     expect(isOverlayDirty(false, true)).toBe(false)
     expect(isOverlayDirty(false, false)).toBe(false)

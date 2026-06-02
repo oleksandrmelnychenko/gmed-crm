@@ -76,7 +76,6 @@ export function blankAppointmentFormForCurrentUser(
 const APPOINTMENT_FORM_DIRTY_FIELDS: Array<keyof AppointmentFormState> = [
   "patientId",
   "providerId",
-  "providerTaxonomyNodeId",
   "doctorId",
   "ownerUserId",
   "interpreterId",

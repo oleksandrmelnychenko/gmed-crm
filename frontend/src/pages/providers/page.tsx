@@ -296,11 +296,24 @@ function stripLegacyProviderTableQuery(params: URLSearchParams) {
   return params;
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({
+  label,
+  required,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  children: ReactNode;
+}) {
   return (
     <label className="flex flex-col gap-1.5">
       <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
         {label}
+        {required ? (
+          <span aria-hidden className="ml-1 text-destructive">
+            *
+          </span>
+        ) : null}
       </span>
       {children}
     </label>
@@ -1323,6 +1336,11 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
   const detailPageMode = Boolean(detailRouteId);
   const { staffGo } = useStaffNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const providerDetailReturnTo = searchParams.get("return_to") ?? "";
+  const providerDetailBackPath =
+    providerDetailReturnTo.startsWith("/") && !providerDetailReturnTo.startsWith("//")
+      ? providerDetailReturnTo
+      : "/providers";
   const permissions = useMemo(() => providerPermissions(user?.role), [user?.role]);
   const relationshipTargetDoctorsRequestRef = useRef(0);
   const [catalogMode, setCatalogModeState] = useState<ProviderCatalogMode>(() =>
@@ -2184,7 +2202,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       setSelectedId("");
       setDetail(null);
       if (detailPageMode) {
-        staffGo("/providers");
+        staffGo(providerDetailBackPath);
       } else {
         refreshList();
       }
@@ -2675,7 +2693,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     type="button"
                     variant="outline"
                     className="h-9 rounded-lg"
-                    onClick={() => staffGo("/providers")}
+                    onClick={() => staffGo(providerDetailBackPath)}
                   >
                     {l("providers_back_to_list")}
                   </Button>
@@ -4319,7 +4337,7 @@ function ProviderDoctorRelationshipFormSheet({
               {error ? <Banner tone="error">{error}</Banner> : null}
               <Section title={l("providers_doctor_relationships")}>
                 <div className="grid gap-4 md:grid-cols-2">
-                  <Field label={l("providers_relationship_source")}>
+                  <Field label={l("providers_relationship_source")} required>
                     <NativeComboboxSelect
                       value={form.sourceDoctorId}
                       onChange={(event) => onChange({ sourceDoctorId: event.target.value })}
@@ -4353,7 +4371,7 @@ function ProviderDoctorRelationshipFormSheet({
                       onChange={onTargetProviderChange}
                     />
                   </FieldGroup>
-                  <Field label={l("providers_relationship_target_doctor")}>
+                  <Field label={l("providers_relationship_target_doctor")} required>
                     <div className="space-y-1.5">
                       <NativeComboboxSelect
                         value={form.targetDoctorId}
@@ -4727,7 +4745,7 @@ function SpecializationManagerSheet({
                 }
               >
                 <div className="grid gap-4 md:grid-cols-2">
-                  <Field label={l("providers_specialization_name_ru")}>
+                  <Field label={l("providers_specialization_name_ru")} required={!draft.nameDe.trim()}>
                     <Input
                       value={draft.nameRu}
                       onChange={(event) =>
@@ -4737,7 +4755,7 @@ function SpecializationManagerSheet({
                       required={!draft.nameDe.trim()}
                     />
                   </Field>
-                  <Field label={l("providers_specialization_name_de")}>
+                  <Field label={l("providers_specialization_name_de")} required={!draft.nameRu.trim()}>
                     <Input
                       value={draft.nameDe}
                       onChange={(event) =>
@@ -5007,7 +5025,7 @@ function StaffRoleManagerSheet({
                 }
               >
                 <div className="grid gap-4 md:grid-cols-2">
-                  <Field label={l("providers_staff_role_name_ru")}>
+                  <Field label={l("providers_staff_role_name_ru")} required>
                     <Input
                       value={draft.nameRu}
                       onChange={(event) =>
@@ -6694,7 +6712,7 @@ function ProviderProfileFields({
   return (
     <>
       <div className="grid gap-4 md:grid-cols-2">
-        <Field label={l("patients_display_name")}>
+        <Field label={l("patients_display_name")} required>
           <Input
             value={form.name}
             onChange={(event) => onChange("name", event.target.value)}
@@ -7639,7 +7657,7 @@ function StaffFormFields({
               className={shellInputClassName}
             />
           </Field>
-          <Field label={l("providers_staff_role")}>
+          <Field label={l("providers_staff_role")} required>
             <NativeComboboxSelect
               value={form.role}
               onChange={(event) => onChange("role", event.target.value)}
@@ -7745,7 +7763,7 @@ function ServiceFormFields({
     <div className="space-y-3">
       <Section title={l("providers_service")}>
         <div className="grid gap-4 md:grid-cols-2">
-          <Field label={t.providers_service_name}>
+          <Field label={t.providers_service_name} required>
             <Input
               value={form.serviceName}
               onChange={(event) => onChange("serviceName", event.target.value)}
@@ -7815,7 +7833,7 @@ function ServiceFormFields({
             </NativeComboboxSelect>
           </Field>
           {priceType === "fixed" ? (
-            <Field label={t.providers_service_price}>
+            <Field label={t.providers_service_price} required>
               <Input
                 type="number"
                 min="0"
@@ -7833,7 +7851,7 @@ function ServiceFormFields({
           ) : null}
           {priceType === "range" ? (
             <>
-              <Field label={l("providers_price_from")}>
+              <Field label={l("providers_price_from")} required>
                 <Input
                   type="number"
                   min="0"
@@ -7844,7 +7862,7 @@ function ServiceFormFields({
                   required
                 />
               </Field>
-              <Field label={l("providers_price_to")}>
+              <Field label={l("providers_price_to")} required>
                 <Input
                   type="number"
                   min="0"

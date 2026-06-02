@@ -1754,6 +1754,7 @@ async fn update_patient(
     };
 
     let contacts_patch = body.contacts;
+    let contacts_patch_supplied = contacts_patch.is_some();
     if let Some(contacts) = contacts_patch.as_ref() {
         for contact in contacts {
             if let Err(message) = validate_patient_contact_payload(contact) {
@@ -1761,6 +1762,9 @@ async fn update_patient(
             }
         }
     }
+    let emergency_contact_supplied = body.emergency_contact_name.is_some()
+        || body.emergency_contact_phone.is_some()
+        || body.emergency_contact_relation.is_some();
 
     let first = match body.first_name.as_deref() {
         Some(value) => {
@@ -2001,7 +2005,8 @@ async fn update_patient(
         Ok(value) => value,
         Err(response) => return response,
     };
-    if is_minor_birth_date(birth_date, chrono::Utc::now().date_naive())
+    if (birth_date_supplied || emergency_contact_supplied || contacts_patch_supplied)
+        && is_minor_birth_date(birth_date, chrono::Utc::now().date_naive())
         && !has_guardian_or_parent_contact(
             emergency_contact_relation.as_deref(),
             emergency_contact_name.as_deref(),

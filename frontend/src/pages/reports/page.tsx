@@ -2057,7 +2057,7 @@ function useReportsPageContent() {
                         >
                           {selectedClinicId === row.provider_id ? text.clearDrillDown : text.drillIntoDoctors}
                         </Button>
-                        <StaffLink to={`/providers?provider=${row.provider_id}`}>
+                        <StaffLink to={`/providers/${row.provider_id}?return_to=/reports`}>
                           <Button variant="outline" size="sm">{text.openProvider}</Button>
                         </StaffLink>
                       </div>
@@ -2119,7 +2119,7 @@ function useReportsPageContent() {
                     columns={medicalProviderColumns}
                     rowId={(row) => row.provider_id}
                     rowActions={(row) => (
-                      <StaffLink to={`/providers?provider=${row.provider_id}`}>
+                      <StaffLink to={`/providers/${row.provider_id}?return_to=/reports`}>
                         <Button variant="outline" size="sm">{text.openProvider}</Button>
                       </StaffLink>
                     )}
@@ -2163,7 +2163,7 @@ function useReportsPageContent() {
                     }
                     onRowClick={(row) => setDetail({ kind: "provider_cost", row })}
                     rowActions={(row) => (
-                      <StaffLink to={`/providers?provider=${row.provider_id}`}>
+                      <StaffLink to={`/providers/${row.provider_id}?return_to=/reports`}>
                         <Button variant="outline" size="sm">{text.openProvider}</Button>
                       </StaffLink>
                     )}
@@ -2196,7 +2196,7 @@ function useReportsPageContent() {
                     columns={nonMedicalProviderColumns}
                     rowId={(row) => row.provider_id}
                     rowActions={(row) => (
-                      <StaffLink to={`/providers?provider=${row.provider_id}`}>
+                      <StaffLink to={`/providers/${row.provider_id}?return_to=/reports`}>
                         <Button variant="outline" size="sm">{text.openProvider}</Button>
                       </StaffLink>
                     )}
@@ -2264,7 +2264,7 @@ function useReportsPageContent() {
                     activeRowId={detail?.kind === "doctor" ? detail.row.doctor_id : null}
                     onRowClick={(row) => setDetail({ kind: "doctor", row })}
                     rowActions={(row) => (
-                      <StaffLink to={`/providers?provider=${row.provider_id}`}>
+                      <StaffLink to={`/providers/${row.provider_id}?return_to=/reports`}>
                         <Button variant="outline" size="sm">{text.openProvider}</Button>
                       </StaffLink>
                     )}
@@ -2355,7 +2355,7 @@ function useReportsPageContent() {
                         >
                           {selectedClinicId === detail.row.provider_id ? text.clearDrillDown : text.drillIntoDoctors}
                         </Button>
-                        <StaffLink to={`/providers?provider=${detail.row.provider_id}`}>
+                        <StaffLink to={`/providers/${detail.row.provider_id}?return_to=/reports`}>
                           <Button variant="outline">{text.openProvider}</Button>
                         </StaffLink>
                       </div>
@@ -2396,7 +2396,7 @@ function useReportsPageContent() {
                           </div>
                         </div>
                       </AdminTableCard>
-                      <StaffLink to={`/providers?provider=${detail.row.provider_id}`}>
+                      <StaffLink to={`/providers/${detail.row.provider_id}?return_to=/reports`}>
                         <Button variant="outline">{text.openProvider}</Button>
                       </StaffLink>
                     </>
@@ -2451,7 +2451,7 @@ function useReportsPageContent() {
                           </div>
                         </AdminTableCard>
                       ) : null}
-                      <StaffLink to={`/providers?provider=${detail.row.provider_id}`}>
+                      <StaffLink to={`/providers/${detail.row.provider_id}?return_to=/reports`}>
                         <Button variant="outline">{text.openProvider}</Button>
                       </StaffLink>
                     </>

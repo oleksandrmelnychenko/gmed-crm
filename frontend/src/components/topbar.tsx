@@ -128,7 +128,7 @@ function notificationHref(item: Notification) {
   if (item.entity_type === "message_peer") return `/chat?peer=${item.entity_id}`;
   if (item.entity_type === "lead") return `/leads?lead=${item.entity_id}`;
   if (item.entity_type === "patient") return `/patients?patient=${item.entity_id}`;
-  if (item.entity_type === "provider") return `/providers?provider=${item.entity_id}`;
+  if (item.entity_type === "provider") return `/providers/${item.entity_id}`;
   if (item.entity_type === "order") return `/orders?order=${item.entity_id}`;
   if (item.entity_type === "appointment") return `/appointments?appointment=${item.entity_id}`;
   if (item.entity_type === "appointment_request") return "/appointments";

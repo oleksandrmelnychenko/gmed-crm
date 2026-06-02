@@ -14,11 +14,15 @@ export const CONFIRMED_DISMISS_REASON = "confirmed-dismiss"
 const AUXILIARY_OVERLAY_SELECTOR = [
   "[data-overlay-interaction-root]",
   ".MuiPickerPopper-root",
+  ".MuiPickersPopper-root",
+  ".MuiPickersModalDialog-root",
   ".MuiPickersLayout-root",
   ".MuiDateCalendar-root",
   ".MuiTimeClock-root",
   ".MuiDigitalClock-root",
   ".MuiMultiSectionDigitalClock-root",
+  ".MuiDialog-root",
+  ".MuiModal-root",
 ].join(", ")
 const OVERLAY_CONTENT_SELECTOR =
   "[data-slot='sheet-content'], [data-slot='dialog-content']"

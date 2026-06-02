@@ -1,5 +1,11 @@
-import { Suspense, lazy } from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import {
+  Component,
+  Suspense,
+  lazy,
+  type ErrorInfo,
+  type ReactNode,
+} from "react";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import { AuthProvider } from "@/lib/auth";
@@ -221,6 +227,101 @@ function NotFoundPage() {
   );
 }
 
+class RouteErrorBoundary extends Component<
+  { children: ReactNode },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("Route render failed", error, info);
+  }
+
+  render() {
+    if (!this.state.hasError) {
+      return this.props.children;
+    }
+
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-6">
+        <div className="max-w-md rounded-xl border border-border bg-card p-6 text-center shadow-sm">
+          <h1 className="text-lg font-semibold text-foreground">
+            Seite konnte nicht geladen werden
+          </h1>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            Bitte laden Sie die Seite neu. Die eingegebenen Daten bleiben auf dem Server unverändert.
+          </p>
+          <button
+            type="button"
+            className="mt-4 inline-flex h-9 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground"
+            onClick={() => window.location.reload()}
+          >
+            Neu laden
+          </button>
+        </div>
+      </div>
+    );
+  }
+}
+
+function AppRoutes() {
+  const location = useLocation();
+
+  return (
+    <RouteErrorBoundary key={`${location.pathname}${location.search}`}>
+      <Suspense fallback={<div className="min-h-screen bg-background" />}>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route element={<AppLayout />}>
+            <Route index element={<DashboardPage />} />
+            <Route path="chat" element={<ChatPage />} />
+            <Route path="reports" element={<ReportsPage />} />
+            <Route path="sops" element={<SopsPage />} />
+            <Route path="leads" element={<LeadsPage />} />
+            <Route path="patients" element={<PatientsPage />} />
+            <Route path="patients/:id" element={<PatientDetailPage />} />
+            <Route path="recommendations" element={<PatientRecommendationsPage />} />
+            <Route path="providers" element={<ProvidersPage />} />
+            <Route path="providers/:id" element={<ProviderDetailPage />} />
+            <Route path="orders" element={<OrdersPage />} />
+            <Route path="orders/:orderId" element={<OrdersPage />} />
+            <Route path="contracts" element={<ContractsPage />} />
+            <Route path="invoices" element={<InvoicesPage />} />
+            <Route path="finance-catalog" element={<FinanceCatalogPage />} />
+            <Route path="documents" element={<DocumentsPage />} />
+            <Route path="documents/intake" element={<DocumentsPage />} />
+            <Route path="documents/translation-requests" element={<DocumentsPage />} />
+            <Route path="documents/:documentId" element={<DocumentsPage />} />
+            <Route path="services" element={<ServicesPage />} />
+            <Route path="feedback" element={<FeedbackPage />} />
+            <Route path="privacy" element={<PrivacyPage />} />
+            <Route path="cases" element={<CasesPage />} />
+            <Route path="cases/:caseId" element={<CaseWorkspacePage />} />
+            <Route path="appointments" element={<AppointmentsPage />} />
+            <Route path="interpreters" element={<InterpretersPage />} />
+            <Route path="interpreters/:interpreterId" element={<InterpretersPage />} />
+            <Route path="admin/users" element={<AdminUsersPage />} />
+            <Route path="admin/access" element={<AdminAccessPage />} />
+            <Route path="admin/settings" element={<AdminSettingsPage />} />
+            <Route path="admin/activity" element={<AdminActivityPage />} />
+            <Route path="admin/security" element={<AdminSecurityPage />} />
+            <Route path="admin/health" element={<AdminHealthPage />} />
+            <Route path="admin/compliance" element={<AdminCompliancePage />} />
+            <Route path="admin/notifications" element={<AdminNotificationsPage />} />
+            <Route path="admin/custom-fields" element={<AdminCustomFieldsPage />} />
+            <Route path="admin/announcements" element={<AdminAnnouncementsPage />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Route>
+        </Routes>
+      </Suspense>
+    </RouteErrorBoundary>
+  );
+}
+
 export default function App() {
   return (
     <LocalizationProvider dateAdapter={AdapterDayjs}>
@@ -228,51 +329,7 @@ export default function App() {
         <AuthProvider>
           <RealtimeProvider>
             <TooltipProvider>
-              <Suspense fallback={<div className="min-h-screen bg-background" />}>
-                <Routes>
-                  <Route path="/login" element={<LoginPage />} />
-                  <Route element={<AppLayout />}>
-                    <Route index element={<DashboardPage />} />
-                    <Route path="chat" element={<ChatPage />} />
-                    <Route path="reports" element={<ReportsPage />} />
-                    <Route path="sops" element={<SopsPage />} />
-                    <Route path="leads" element={<LeadsPage />} />
-                    <Route path="patients" element={<PatientsPage />} />
-                    <Route path="patients/:id" element={<PatientDetailPage />} />
-                    <Route path="recommendations" element={<PatientRecommendationsPage />} />
-                    <Route path="providers" element={<ProvidersPage />} />
-                    <Route path="providers/:id" element={<ProviderDetailPage />} />
-                    <Route path="orders" element={<OrdersPage />} />
-                    <Route path="orders/:orderId" element={<OrdersPage />} />
-                    <Route path="contracts" element={<ContractsPage />} />
-                    <Route path="invoices" element={<InvoicesPage />} />
-                    <Route path="finance-catalog" element={<FinanceCatalogPage />} />
-                    <Route path="documents" element={<DocumentsPage />} />
-                    <Route path="documents/intake" element={<DocumentsPage />} />
-                    <Route path="documents/translation-requests" element={<DocumentsPage />} />
-                    <Route path="documents/:documentId" element={<DocumentsPage />} />
-                    <Route path="services" element={<ServicesPage />} />
-                    <Route path="feedback" element={<FeedbackPage />} />
-                    <Route path="privacy" element={<PrivacyPage />} />
-                    <Route path="cases" element={<CasesPage />} />
-                    <Route path="cases/:caseId" element={<CaseWorkspacePage />} />
-                    <Route path="appointments" element={<AppointmentsPage />} />
-                    <Route path="interpreters" element={<InterpretersPage />} />
-                    <Route path="interpreters/:interpreterId" element={<InterpretersPage />} />
-                    <Route path="admin/users" element={<AdminUsersPage />} />
-                    <Route path="admin/access" element={<AdminAccessPage />} />
-                    <Route path="admin/settings" element={<AdminSettingsPage />} />
-                    <Route path="admin/activity" element={<AdminActivityPage />} />
-                    <Route path="admin/security" element={<AdminSecurityPage />} />
-                    <Route path="admin/health" element={<AdminHealthPage />} />
-                    <Route path="admin/compliance" element={<AdminCompliancePage />} />
-                    <Route path="admin/notifications" element={<AdminNotificationsPage />} />
-                    <Route path="admin/custom-fields" element={<AdminCustomFieldsPage />} />
-                    <Route path="admin/announcements" element={<AdminAnnouncementsPage />} />
-                    <Route path="*" element={<NotFoundPage />} />
-                  </Route>
-                </Routes>
-              </Suspense>
+              <AppRoutes />
             </TooltipProvider>
           </RealtimeProvider>
         </AuthProvider>

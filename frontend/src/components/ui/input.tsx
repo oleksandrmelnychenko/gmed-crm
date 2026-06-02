@@ -131,11 +131,13 @@ function Input({
 }: React.ComponentProps<"input">) {
   const pickerCurrentValue = typeof value === "string" ? value : null
   const lastEmittedPickerValueRef = React.useRef<string | null>(pickerCurrentValue)
+  const pendingTimePickerValueRef = React.useRef<string | null>(pickerCurrentValue)
   const timePickerReferenceDate = React.useMemo(() => getTimePickerReferenceDate(), [])
 
   React.useEffect(() => {
     if (type === "date" || type === "datetime-local" || type === "time") {
       lastEmittedPickerValueRef.current = typeof value === "string" ? value : null
+      pendingTimePickerValueRef.current = typeof value === "string" ? value : null
     }
   }, [type, value])
 
@@ -159,6 +161,7 @@ function Input({
       min,
       max,
       step,
+      readOnly: type === "time" ? true : props.readOnly,
       "aria-label": typeof props["aria-label"] === "string" ? props["aria-label"] : undefined,
     }
     const sharedTextFieldProps = {
@@ -264,7 +267,7 @@ function Input({
             if (context.validationError) {
               return
             }
-            commitPickerValue(formatPickerValue(nextDate, TIME_FORMAT))
+            pendingTimePickerValueRef.current = formatPickerValue(nextDate, TIME_FORMAT)
           }}
           onAccept={(nextDate, context) => {
             if (context.validationError) {

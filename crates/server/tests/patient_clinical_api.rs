@@ -82,6 +82,25 @@ async fn seed_patient(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
     .unwrap()
 }
 
+async fn seed_minor_patient_without_guardian(
+    pool: &PgPool,
+    created_by: Uuid,
+    tag: &str,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by, languages)
+           VALUES ($1, $2, $3, '2020-01-01', 'female', $4, ARRAY['de']::text[])
+           RETURNING id"#,
+    )
+    .bind(format!("PT-MINOR-{tag}"))
+    .bind(format!("Minor {tag}"))
+    .bind(format!("Patient {tag}"))
+    .bind(created_by)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
 async fn seed_patient_assignment(
     pool: &PgPool,
     patient_id: Uuid,
@@ -98,6 +117,45 @@ async fn seed_patient_assignment(
     .execute(pool)
     .await
     .unwrap();
+}
+
+#[tokio::test]
+async fn patient_notes_update_does_not_require_unrelated_minor_guardian_fix() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("minor-notes-update");
+    let patient_id = seed_minor_patient_without_guardian(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/update"),
+        &pm_bearer,
+        Some(json!({
+            "notes": "Metadata note can be edited without changing guardian fields",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        detail["notes"],
+        "Metadata note can be edited without changing guardian fields",
+    );
 }
 
 #[tokio::test]
