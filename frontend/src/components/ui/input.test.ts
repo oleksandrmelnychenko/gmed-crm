@@ -5,6 +5,7 @@ import {
   formatPickerValue,
   getTimePickerReferenceDate,
   normalizeInputStep,
+  parseTimeValue,
   pickerFieldReadOnly,
   timePickerMinutesStep,
 } from "./input";
@@ -46,5 +47,11 @@ describe("Input", () => {
     expect(referenceDate.minute()).toBe(0);
     expect(referenceDate.second()).toBe(0);
     expect(referenceDate.millisecond()).toBe(0);
+  });
+
+  it("parses time values on the stable picker reference day", () => {
+    const parsed = parseTimeValue("22:20");
+
+    expect(parsed?.format("YYYY-MM-DD HH:mm")).toBe("2000-01-01 22:20");
   });
 });

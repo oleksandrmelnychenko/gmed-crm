@@ -11,6 +11,7 @@ const DATE_FORMAT = "YYYY-MM-DD"
 const DATETIME_LOCAL_FORMAT = "YYYY-MM-DD HH:mm"
 const DATETIME_LOCAL_VALUE_FORMAT = "YYYY-MM-DDTHH:mm"
 const TIME_FORMAT = "HH:mm"
+const TIME_PICKER_REFERENCE_DATE = "2000-01-01T00:00:00"
 
 function hasClassToken(className: string | undefined, token: string) {
   if (!className) {
@@ -27,7 +28,7 @@ function parseDateValue(value: string | number | readonly string[] | undefined) 
   return parsed.isValid() ? parsed : null
 }
 
-function parseTimeValue(value: string | number | readonly string[] | undefined) {
+export function parseTimeValue(value: string | number | readonly string[] | undefined) {
   if (typeof value !== "string" || value.length === 0) {
     return null
   }
@@ -36,7 +37,7 @@ function parseTimeValue(value: string | number | readonly string[] | undefined) 
   const hour = Number(match[1])
   const minute = Number(match[2])
   if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null
-  return dayjs().hour(hour).minute(minute).second(0).millisecond(0)
+  return getTimePickerReferenceDate().hour(hour).minute(minute)
 }
 
 export function formatPickerValue(nextDate: Dayjs | null, format: string) {
@@ -44,7 +45,7 @@ export function formatPickerValue(nextDate: Dayjs | null, format: string) {
 }
 
 export function getTimePickerReferenceDate() {
-  return dayjs().hour(0).minute(0).second(0).millisecond(0)
+  return dayjs(TIME_PICKER_REFERENCE_DATE)
 }
 
 function emitDateChange(
@@ -131,13 +132,11 @@ function Input({
 }: React.ComponentProps<"input">) {
   const pickerCurrentValue = typeof value === "string" ? value : null
   const lastEmittedPickerValueRef = React.useRef<string | null>(pickerCurrentValue)
-  const pendingTimePickerValueRef = React.useRef<string | null>(pickerCurrentValue)
   const timePickerReferenceDate = React.useMemo(() => getTimePickerReferenceDate(), [])
 
   React.useEffect(() => {
     if (type === "date" || type === "datetime-local" || type === "time") {
       lastEmittedPickerValueRef.current = typeof value === "string" ? value : null
-      pendingTimePickerValueRef.current = typeof value === "string" ? value : null
     }
   }, [type, value])
 
@@ -267,7 +266,7 @@ function Input({
             if (context.validationError) {
               return
             }
-            pendingTimePickerValueRef.current = formatPickerValue(nextDate, TIME_FORMAT)
+            commitPickerValue(formatPickerValue(nextDate, TIME_FORMAT))
           }}
           onAccept={(nextDate, context) => {
             if (context.validationError) {
