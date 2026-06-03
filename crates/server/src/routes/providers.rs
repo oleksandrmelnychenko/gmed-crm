@@ -469,32 +469,22 @@ async fn list_providers(
                 OR EXISTS (
                     SELECT 1
                     FROM jsonb_each_text(p.taxonomy_attributes) AS attr(key, value)
-                    WHERE attr.key ILIKE $3
-                       OR attr.value ILIKE $3
+                    WHERE de_normalize(concat_ws(' ', attr.key, attr.value)) LIKE de_normalize($3)
                 )
                 OR EXISTS (
                     SELECT 1
                     FROM provider_contacts pc
                     WHERE pc.provider_id = p.id
-                      AND (
-                        pc.value ILIKE $3
-                        OR COALESCE(pc.label, '') ILIKE $3
-                        OR COALESCE(pc.department, '') ILIKE $3
-                        OR COALESCE(pc.contact_type, '') ILIKE $3
-                        OR COALESCE(pc.notes, '') ILIKE $3
-                      )
+                      AND de_normalize(concat_ws(' ',
+                            pc.value, pc.label, pc.department, pc.contact_type, pc.notes
+                          )) LIKE de_normalize($3)
                 )
                 OR EXISTS (
                     SELECT 1
                     FROM provider_specializations ps
                     JOIN medical_specializations ms ON ms.id = ps.specialization_id
                     WHERE ps.provider_id = p.id
-                      AND (
-                        ms.name_en ILIKE $3
-                        OR COALESCE(ms.name_de, '') ILIKE $3
-                        OR COALESCE(ms.name_ru, '') ILIKE $3
-                        OR ms.code ILIKE $3
-                      )
+                      AND de_normalize(concat_ws(' ', ms.name_en, ms.name_de, ms.name_ru, ms.code)) LIKE de_normalize($3)
                 )
                 OR EXISTS (
                     WITH RECURSIVE assigned_taxonomy AS (
@@ -511,44 +501,26 @@ async fn list_providers(
                     )
                     SELECT 1
                     FROM assigned_taxonomy
-                    WHERE code ILIKE $3
-                       OR COALESCE(name_de, '') ILIKE $3
-                       OR COALESCE(name_ru, '') ILIKE $3
+                    WHERE de_normalize(concat_ws(' ', code, name_de, name_ru)) LIKE de_normalize($3)
                 )
                  OR EXISTS (
                      SELECT 1
                      FROM provider_doctors d
                      WHERE d.provider_id = p.id
-                       AND (
-                         d.name ILIKE $3
-                         OR COALESCE(d.display_name, '') ILIKE $3
-                         OR COALESCE(d.first_name, '') ILIKE $3
-                         OR COALESCE(d.last_name, '') ILIKE $3
-                         OR COALESCE(d.fachbereich, '') ILIKE $3
-                         OR COALESCE(d.title, '') ILIKE $3
-                         OR COALESCE(d.role_code, '') ILIKE $3
-                         OR COALESCE(d.role_label, '') ILIKE $3
-                         OR COALESCE(d.subrole, '') ILIKE $3
-                         OR COALESCE(d.license_number, '') ILIKE $3
-                         OR COALESCE(d.licensing_country, '') ILIKE $3
-                         OR COALESCE(d.phone, '') ILIKE $3
-                         OR COALESCE(d.email, '') ILIKE $3
-                         OR COALESCE(d.notes, '') ILIKE $3
-                       )
+                       AND de_normalize(concat_ws(' ',
+                             d.name, d.display_name, d.first_name, d.last_name,
+                             d.fachbereich, d.title, d.role_code, d.role_label, d.subrole,
+                             d.license_number, d.licensing_country, d.phone, d.email, d.notes
+                           )) LIKE de_normalize($3)
                  )
                  OR EXISTS (
                      SELECT 1
                      FROM provider_staff staff
                      WHERE staff.provider_id = p.id
-                       AND (
-                         staff.display_name ILIKE $3
-                         OR COALESCE(staff.first_name, '') ILIKE $3
-                         OR COALESCE(staff.last_name, '') ILIKE $3
-                         OR COALESCE(staff.role, '') ILIKE $3
-                         OR COALESCE(staff.department, '') ILIKE $3
-                         OR COALESCE(staff.status, '') ILIKE $3
-                         OR COALESCE(staff.notes, '') ILIKE $3
-                       )
+                       AND de_normalize(concat_ws(' ',
+                             staff.display_name, staff.first_name, staff.last_name,
+                             staff.role, staff.department, staff.status, staff.notes
+                           )) LIKE de_normalize($3)
                  )
                  OR EXISTS (
                      SELECT 1
@@ -556,32 +528,25 @@ async fn list_providers(
                      LEFT JOIN provider_taxonomy_nodes stn ON stn.id = s.taxonomy_node_id
                      WHERE s.provider_id = p.id
                        AND (
-                         s.service_name ILIKE $3
-                         OR COALESCE(s.description, '') ILIKE $3
-                         OR COALESCE(s.price_note, '') ILIKE $3
-                         OR COALESCE(s.currency, '') ILIKE $3
-                         OR s.taxonomy_attributes::text ILIKE $3
+                         de_normalize(concat_ws(' ',
+                           s.service_name, s.description, s.price_note, s.currency,
+                           s.taxonomy_attributes::text,
+                           stn.code, stn.name_de, stn.name_ru
+                         )) LIKE de_normalize($3)
                          OR EXISTS (
                              SELECT 1
                              FROM jsonb_each_text(s.taxonomy_attributes) AS attr(key, value)
-                             WHERE attr.key ILIKE $3
-                                OR attr.value ILIKE $3
+                             WHERE de_normalize(concat_ws(' ', attr.key, attr.value)) LIKE de_normalize($3)
                          )
-                         OR COALESCE(stn.code, '') ILIKE $3
-                         OR COALESCE(stn.name_de, '') ILIKE $3
-                         OR COALESCE(stn.name_ru, '') ILIKE $3
                        )
                  )
                  OR EXISTS (
                      SELECT 1
                      FROM concierge_services cs
                      WHERE cs.provider_id = p.id
-                       AND (
-                         cs.title ILIKE $3
-                         OR cs.service_kind ILIKE $3
-                         OR COALESCE(cs.vendor_name, '') ILIKE $3
-                         OR COALESCE(cs.vendor_contact, '') ILIKE $3
-                       )
+                       AND de_normalize(concat_ws(' ',
+                             cs.title, cs.service_kind, cs.vendor_name, cs.vendor_contact
+                           )) LIKE de_normalize($3)
                  )
              )
              AND ($4::text = '%%' OR COALESCE(p.address_city, '') ILIKE $4)

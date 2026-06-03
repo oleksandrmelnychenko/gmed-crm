@@ -101,6 +101,9 @@ pub async fn search_drug_products(
              AND (
                     p.normalized_brand_name LIKE $1
                  OR lower(COALESCE(p.atc_code, '')) LIKE $1
+                 OR lower(COALESCE(p.manufacturer, '')) LIKE $1
+                 OR lower(COALESCE(p.strength, '')) LIKE $1
+                 OR lower(COALESCE(p.form, '')) LIKE $1
                  OR EXISTS (
                         SELECT 1
                         FROM drug_product_substances ps2

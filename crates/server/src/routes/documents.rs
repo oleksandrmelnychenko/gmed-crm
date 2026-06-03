@@ -13011,16 +13011,13 @@ async fn list_documents(
                 ) provider_context_source
            ) provider_context ON TRUE
            WHERE ($1::text IS NULL
-                  OR d.auto_name ILIKE '%' || $1 || '%'
-                  OR COALESCE(d.original_filename, '') ILIKE '%' || $1 || '%'
-                  OR COALESCE(d.category, '') ILIKE '%' || $1 || '%'
-                  OR COALESCE(d.art, '') ILIKE '%' || $1 || '%'
-                  OR COALESCE(d.generated_template_id, '') ILIKE '%' || $1 || '%'
-                  OR COALESCE(d.notes, '') ILIKE '%' || $1 || '%'
-                  OR COALESCE(p.patient_id, '') ILIKE '%' || $1 || '%'
-                  OR trim(concat_ws(' ', p.first_name, p.last_name)) ILIKE '%' || $1 || '%'
-                  OR COALESCE(o.order_number, '') ILIKE '%' || $1 || '%'
-                  OR COALESCE(a.title, '') ILIKE '%' || $1 || '%')
+                  OR de_normalize(concat_ws(' ',
+                       d.auto_name, d.original_filename, d.category, d.art,
+                       d.generated_template_id, d.notes, d.klinik, d.mime_type,
+                       p.patient_id, p.first_name, p.last_name,
+                       o.order_number, a.title,
+                       u.name, deleter.name
+                     )) LIKE '%' || de_normalize($1) || '%')
              AND ($2::uuid IS NULL OR d.patient_id = $2)
              AND ($3::uuid IS NULL OR d.order_id = $3)
              AND ($4::uuid IS NULL OR d.appointment_id = $4)

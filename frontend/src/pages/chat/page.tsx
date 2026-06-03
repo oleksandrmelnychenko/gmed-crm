@@ -39,6 +39,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { deNormalize } from "@/components/data-table/search";
 import {
   downloadMessageAttachmentBytes,
   fetchAllowedPeers,
@@ -843,20 +844,24 @@ function useChatPageContent() {
     }
   };
 
-  // Filtered conversations
-  const filteredConvos = search
-    ? conversations.filter((c) => c.name.toLowerCase().includes(search.toLowerCase()))
+  // Filtered conversations (German-aware fold)
+  const normalizedConvoSearch = deNormalize(search);
+  const filteredConvos = normalizedConvoSearch
+    ? conversations.filter((c) => deNormalize(c.name).includes(normalizedConvoSearch))
     : conversations;
 
-  // Filtered users for new chat
-  const normalizedUserSearch = userSearch.toLowerCase();
+  // Filtered users for new chat. Matches name, email, the role enum AND its localized
+  // label (so typing "Dolmetscher" finds an interpreter), all German-folded.
+  const normalizedUserSearch = deNormalize(userSearch);
   const filteredUsers = allUsers.filter(
     (u) =>
       u.is_active &&
       u.id !== myId &&
       (!normalizedUserSearch ||
-        u.name.toLowerCase().includes(normalizedUserSearch) ||
-        u.email.toLowerCase().includes(normalizedUserSearch)),
+        deNormalize(u.name).includes(normalizedUserSearch) ||
+        deNormalize(u.email).includes(normalizedUserSearch) ||
+        deNormalize(u.role).includes(normalizedUserSearch) ||
+        deNormalize(roleDisplay(u.role, t)).includes(normalizedUserSearch)),
   );
 
   const displayMsgs = [...messages].reverse();
