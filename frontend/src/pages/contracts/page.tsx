@@ -1,10 +1,10 @@
 import {
   startTransition,
   useCallback,
-  useDeferredValue,
   useEffect,
   useMemo,
   useReducer,
+  useState,
   type FormEvent,
   type ReactNode,
   type SetStateAction,
@@ -128,6 +128,7 @@ const CONTRACT_REALTIME_EVENTS = [
   "quote.created",
   "quote.status_changed",
 ] as const;
+const CONTRACT_SEARCH_DEBOUNCE_MS = 220;
 
 const CONTRACT_STATUS_LABEL_KEYS = {
   draft: "revenue_contract_status_draft",
@@ -149,6 +150,17 @@ const QUOTE_VERSION_REASON_LABEL_KEYS = {
   initial_snapshot: "revenue_quotes_version_snapshot",
   status_update: "revenue_quotes_version_status_update",
 } satisfies Partial<Record<string, TranslationKey>>;
+
+function useDebouncedValue<T>(value: T, delayMs: number) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timeoutId = globalThis.setTimeout(() => setDebouncedValue(value), delayMs);
+    return () => globalThis.clearTimeout(timeoutId);
+  }, [delayMs, value]);
+
+  return debouncedValue;
+}
 
 function contractMetricCard(
   label: ReactNode,
@@ -729,9 +741,18 @@ function useContractsPageContent() {
   const setQuoteStatusError = (nextValue: SetStateAction<string | null>) =>
     setContractsUiField("quoteStatusError", nextValue);
 
-  const deferredContractSearch = useDeferredValue(contractFilters.search);
-  const deferredQuoteSearch = useDeferredValue(quoteFilters.search);
-  const deferredAgencyServiceSearch = useDeferredValue(agencyServiceFilters.search);
+  const debouncedContractSearch = useDebouncedValue(
+    contractFilters.search,
+    CONTRACT_SEARCH_DEBOUNCE_MS,
+  );
+  const debouncedQuoteSearch = useDebouncedValue(
+    quoteFilters.search,
+    CONTRACT_SEARCH_DEBOUNCE_MS,
+  );
+  const debouncedAgencyServiceSearch = useDebouncedValue(
+    agencyServiceFilters.search,
+    CONTRACT_SEARCH_DEBOUNCE_MS,
+  );
 
   useDebouncedRealtimeSubscription(CONTRACT_REALTIME_EVENTS, (_event, events) => {
     if (!permissions.canViewPage) return;
@@ -772,25 +793,25 @@ function useContractsPageContent() {
     () => ({
       patientId: contractFilters.patientId,
       status: contractFilters.status,
-      search: deferredContractSearch,
+      search: debouncedContractSearch,
     }),
-    [contractFilters.patientId, contractFilters.status, deferredContractSearch],
+    [contractFilters.patientId, contractFilters.status, debouncedContractSearch],
   );
   const quoteQuery = useMemo(
     () => ({
       patientId: quoteFilters.patientId,
       orderId: quoteFilters.orderId,
       status: quoteFilters.status,
-      search: deferredQuoteSearch,
+      search: debouncedQuoteSearch,
     }),
-    [quoteFilters.patientId, quoteFilters.orderId, quoteFilters.status, deferredQuoteSearch],
+    [quoteFilters.patientId, quoteFilters.orderId, quoteFilters.status, debouncedQuoteSearch],
   );
   const agencyServiceQuery = useMemo(
     () => ({
       activeOnly: agencyServiceFilters.activeOnly,
-      search: deferredAgencyServiceSearch,
+      search: debouncedAgencyServiceSearch,
     }),
-    [agencyServiceFilters.activeOnly, deferredAgencyServiceSearch],
+    [agencyServiceFilters.activeOnly, debouncedAgencyServiceSearch],
   );
 
   const syncQuery = (patch: Record<string, string | null | undefined>) => {
@@ -1865,6 +1886,8 @@ function useContractsPageContent() {
               <div className="relative min-w-[260px] flex-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
+                  type="search"
+                  aria-label={text.agencyServiceSearchPlaceholder}
                   value={agencyServiceFilters.search}
                   onChange={(event) =>
                     setAgencyServiceFilters((current) => ({
@@ -1952,6 +1975,8 @@ function useContractsPageContent() {
                   <div className="relative min-w-[260px] flex-1">
                     <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
+                      type="search"
+                      aria-label={`${text.contractsTab} ${t.common_search}`}
                       value={contractFilters.search}
                       onChange={(event) =>
                         setContractFilters((current) => ({ ...current, search: event.target.value }))
@@ -2065,6 +2090,8 @@ function useContractsPageContent() {
                   <div className="relative min-w-[240px] flex-1">
                     <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
+                      type="search"
+                      aria-label={`${text.quotesTab} ${t.common_search}`}
                       value={quoteFilters.search}
                       onChange={(event) =>
                         setQuoteFilters((current) => ({ ...current, search: event.target.value }))
