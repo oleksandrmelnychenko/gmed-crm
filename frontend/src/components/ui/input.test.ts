@@ -54,4 +54,14 @@ describe("Input", () => {
 
     expect(parsed?.format("YYYY-MM-DD HH:mm")).toBe("2000-01-01 22:20");
   });
+
+  it("accepts evening picker values without clipping them to the current day", () => {
+    expect(parseTimeValue("18:20")?.format("YYYY-MM-DD HH:mm")).toBe(
+      "2000-01-01 18:20",
+    );
+    expect(parseTimeValue("23:59")?.format("YYYY-MM-DD HH:mm")).toBe(
+      "2000-01-01 23:59",
+    );
+    expect(parseTimeValue("24:00")).toBeNull();
+  });
 });

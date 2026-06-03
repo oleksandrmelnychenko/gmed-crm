@@ -39,7 +39,6 @@ import {
   appointmentTypeLabel,
   carePathKindLabel,
   doctorLabel,
-  normalizeCarePathKindForAppointmentType,
   patientName,
   providerLabel,
   recurrenceFrequencyLabel,
@@ -66,8 +65,11 @@ import type {
 import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 import { ProviderSelectWithTaxonomyFilter } from "@/pages/providers/ui/provider-select-with-taxonomy-filter";
 import { hasAppointmentFormChanges } from "@/pages/appointments/model/form-factories";
+import {
+  buildCreateAppointmentPayload,
+  validateCreateAppointmentForm,
+} from "@/pages/appointments/model/create-payload";
 import { filterAppointmentOwnerOptions } from "@/pages/appointments/model/staff-roles";
-import { parsePositiveIntegerInput } from "@/pages/appointments/model/workflow-helpers";
 import {
   AppointmentEditorSheet,
   type AppointmentEditorSheetOpenChangeDetails,
@@ -400,55 +402,17 @@ function useCreateAppointmentSheetContent({
       error: "",
     });
     try {
-      if (!form.patientId) {
-        dispatchSheetState({
-          error: `${t.orders_patient}: ${t.cf_required}`,
-          busy: false,
-        });
+      const validation = validateCreateAppointmentForm(form, {
+        patientRequired: `${t.orders_patient}: ${t.cf_required}`,
+        titleRequired: `${t.appointments_title_col}: ${t.cf_required}`,
+        dateRequired: `${t.appointments_date}: ${t.cf_required}`,
+        medicalProviderRequired: appointmentText("appointments_medical_provider_required"),
+        repeatIntervalError: t.appointments_repeat_interval_error,
+        repeatRequireEndError: t.appointments_repeat_require_end_error,
+      });
+      if (validation.error) {
+        dispatchSheetState({ error: validation.error, busy: false });
         return;
-      }
-      if (!form.title.trim()) {
-        dispatchSheetState({
-          error: `${t.appointments_title_col}: ${t.cf_required}`,
-          busy: false,
-        });
-        return;
-      }
-      if (!form.date) {
-        dispatchSheetState({
-          error: `${t.appointments_date}: ${t.cf_required}`,
-          busy: false,
-        });
-        return;
-      }
-      if (
-        form.appointmentType === "medical" &&
-        !form.providerId &&
-        !form.skipMedicalProviderBinding
-      ) {
-        dispatchSheetState({
-          error: appointmentText("appointments_medical_provider_required"),
-          busy: false,
-        });
-        return;
-      }
-      const repeatInterval = parsePositiveIntegerInput(form.repeatInterval);
-      const repeatCount = parsePositiveIntegerInput(form.repeatCount);
-      if (form.repeatEnabled) {
-        if (!repeatInterval) {
-          dispatchSheetState({
-            error: t.appointments_repeat_interval_error,
-            busy: false,
-          });
-          return;
-        }
-        if (!repeatCount && !form.repeatUntil) {
-          dispatchSheetState({
-            error: t.appointments_repeat_require_end_error,
-            busy: false,
-          });
-          return;
-        }
       }
       const result = await apiFetch<{
         id: string;
@@ -456,36 +420,13 @@ function useCreateAppointmentSheetContent({
         series_created_count?: number;
       }>("/appointments", {
         method: "POST",
-        body: JSON.stringify({
-          patient_id: form.patientId,
-          provider_id: form.providerId || null,
-          doctor_id: form.doctorId || null,
-          owner_user_id: form.ownerUserId || null,
-          interpreter_id: form.interpreterId || null,
-          appointment_type: form.appointmentType,
-          skip_medical_provider_binding:
-            form.appointmentType === "medical" &&
-            !form.providerId &&
-            form.skipMedicalProviderBinding,
-          care_path_kind: normalizeCarePathKindForAppointmentType(
-            form.appointmentType,
-            form.carePathKind,
+        body: JSON.stringify(
+          buildCreateAppointmentPayload(
+            form,
+            validation.repeatInterval,
+            validation.repeatCount,
           ),
-          title: form.title.trim(),
-          date: form.date,
-          time_start: form.timeStart || null,
-          time_end: form.timeEnd || null,
-          location: form.location.trim() || null,
-          category: form.category.trim() || null,
-          notes: form.notes.trim() || null,
-          recurrence_frequency: form.repeatEnabled
-            ? form.repeatFrequency
-            : null,
-          recurrence_interval: form.repeatEnabled ? repeatInterval : null,
-          recurrence_count: form.repeatEnabled ? repeatCount : null,
-          recurrence_until:
-            form.repeatEnabled && form.repeatUntil ? form.repeatUntil : null,
-        }),
+        ),
       });
       const notice = buildScheduleNotice(result.conflicts, localWarnings);
       onOpenChange(false);
