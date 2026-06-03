@@ -103,6 +103,14 @@ describe("German umlaut / eszett folding", () => {
   });
 });
 
+describe("phone format tolerance", () => {
+  it("matches a stored phone regardless of spacing/punctuation", () => {
+    // row 1 phone is "+49 170 123 4567" -> digits 491701234567
+    expect(applySearch(rows, "1701234567", ctx).map((r) => r.id)).toEqual(["1"]);
+    expect(applySearch(rows, "+49-170-123", ctx).map((r) => r.id)).toEqual(["1"]);
+  });
+});
+
 describe("applySearch", () => {
   it("empty query returns all", () => {
     expect(applySearch(rows, "", ctx)).toHaveLength(rows.length);

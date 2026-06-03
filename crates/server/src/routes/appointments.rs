@@ -1511,6 +1511,8 @@ async fn list_appointments(
                        p.insurance_number, p.insurance_provider,
                        pr.name, d.name, u.name, owner.name
                      )) LIKE de_normalize($1)
+                  OR (length(regexp_replace($1, '\D', '', 'g')) >= 3
+                      AND phone_digits(concat_ws(' ', p.phone_primary, p.phone_secondary)) LIKE '%' || regexp_replace($1, '\D', '', 'g') || '%')
            )
              AND ($2::text IS NULL OR a.appointment_type = $2)
              AND ($3::text IS NULL OR a.care_path_kind = $3)
@@ -1727,7 +1729,9 @@ async fn list_attention_items(
                        p.email, p.phone_primary, p.phone_secondary,
                        p.insurance_number, p.insurance_provider,
                        pr.name, d.name, u.name, owner.name
-                     )) LIKE de_normalize($1))
+                     )) LIKE de_normalize($1)
+                  OR (length(regexp_replace($1, '\D', '', 'g')) >= 3
+                      AND phone_digits(concat_ws(' ', p.phone_primary, p.phone_secondary)) LIKE '%' || regexp_replace($1, '\D', '', 'g') || '%'))
              AND ($2::text IS NULL OR a.appointment_type = $2)
              AND ($3::text IS NULL OR a.care_path_kind = $3)
              AND ($4::text IS NULL OR a.status = $4)

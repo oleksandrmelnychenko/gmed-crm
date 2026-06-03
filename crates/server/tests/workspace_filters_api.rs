@@ -947,9 +947,10 @@ async fn patients_list_search_matches_contact_full_name_and_insurance() {
         patient_search_matches(&app, &bearer, &format!("PT-{tag}"), patient_id).await,
         "patient_id should still be searchable"
     );
-    // Negative control: an unrelated token must not match.
+    // Negative control: an unrelated token must not match. Uses no digits so the
+    // phone digit-matching can't coincidentally match the tag's uuid digits.
     assert!(
-        !patient_search_matches(&app, &bearer, &format!("zzz-none-{tag}"), patient_id).await,
+        !patient_search_matches(&app, &bearer, "zzznomatchforthispatient", patient_id).await,
         "non-matching token must not return the patient"
     );
 
@@ -976,6 +977,18 @@ async fn patients_list_search_matches_contact_full_name_and_insurance() {
     assert!(
         patient_search_matches(&app, &bearer, &format!("PT-{de_tag}"), de_patient).await,
         "patient_id still matches alongside German-folded name search"
+    );
+
+    // Phone format tolerance: a formatted number is found by its bare digits.
+    sqlx::query("UPDATE patients SET phone_primary = $2 WHERE id = $1")
+        .bind(patient_id)
+        .bind("+49 170 1234567")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        patient_search_matches(&app, &bearer, "1701234567", patient_id).await,
+        "phone search must ignore spacing/punctuation (digit-normalized)"
     );
 }
 

@@ -1016,7 +1016,9 @@ async fn list_patients(
                        p.insurance_provider, p.insurance_number,
                        p.nationality, p.residence_country,
                        array_to_string(p.languages, ' ')
-                     )) LIKE de_normalize($2))
+                     )) LIKE de_normalize($2)
+                  OR (length(regexp_replace($2, '\D', '', 'g')) >= 3
+                      AND phone_digits(concat_ws(' ', p.phone_primary, p.phone_secondary)) LIKE '%' || regexp_replace($2, '\D', '', 'g') || '%'))
              AND (
                 $3::uuid IS NULL
                 OR EXISTS (

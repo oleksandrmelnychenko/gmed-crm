@@ -779,7 +779,9 @@ async fn list_framework_contracts(
                          p.first_name, p.last_name, p.patient_id,
                          p.email, p.phone_primary, p.phone_secondary,
                          p.insurance_number, p.insurance_provider
-                       )) LIKE de_normalize($1))
+                       )) LIKE de_normalize($1)
+                    OR (length(regexp_replace($1, '\D', '', 'g')) >= 3
+                        AND phone_digits(concat_ws(' ', p.phone_primary, p.phone_secondary)) LIKE '%' || regexp_replace($1, '\D', '', 'g') || '%'))
              AND ($2::uuid IS NULL OR fc.patient_id = $2)
              AND ($3::text IS NULL OR fc.status = $3)
            ORDER BY fc.created_at DESC

@@ -3335,7 +3335,9 @@ async fn list_invoices(
                         p.patient_id, p.first_name, p.last_name,
                         p.email, p.phone_primary, p.phone_secondary,
                         i.payer_contact_name, i.payer_contact_email, i.payer_contact_phone
-                      )) LIKE de_normalize($1))
+                      )) LIKE de_normalize($1)
+                   OR (length(regexp_replace($1, '\D', '', 'g')) >= 3
+                       AND phone_digits(concat_ws(' ', p.phone_primary, p.phone_secondary)) LIKE '%' || regexp_replace($1, '\D', '', 'g') || '%'))
              AND ($2::uuid IS NULL OR i.patient_id = $2)
              AND ($3::uuid IS NULL OR i.order_id = $3)
              AND ($4::uuid IS NULL OR i.quote_id = $4)

@@ -146,6 +146,8 @@ async fn list_leads(
                      notes, message, primary_concern_text,
                      additional_concerns, selected_program
                    )) LIKE de_normalize($3)
+                OR (length(regexp_replace($3, '\D', '', 'g')) >= 3
+                    AND phone_digits(concat_ws(' ', phone, whatsapp_number)) LIKE '%' || regexp_replace($3, '\D', '', 'g') || '%')
              )
              AND ($4::text = '%%' OR COALESCE(source, '') ILIKE $4)
              AND ($5::text = '%%' OR COALESCE(country, '') ILIKE $5)

@@ -29,8 +29,17 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function digitsOnly(value: string): string {
+  return value.replace(/\D/g, "");
+}
+
 function blobContainsToken(blob: string, token: string) {
-  return new RegExp(escapeRegExp(deNormalize(token))).test(blob);
+  if (new RegExp(escapeRegExp(deNormalize(token))).test(blob)) return true;
+  // Phone format tolerance: compare digit-only forms so spacing/dashes/"+" differences
+  // don't break a phone search (mirrors the SQL phone_digits()). Requires >=3 digits to
+  // avoid trivial matches. (Does not canonicalize country-code vs. national prefix.)
+  const tokenDigits = digitsOnly(token);
+  return tokenDigits.length >= 3 && digitsOnly(blob).includes(tokenDigits);
 }
 
 function valueToSearchString(value: unknown): string {

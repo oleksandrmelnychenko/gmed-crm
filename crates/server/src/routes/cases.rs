@@ -354,6 +354,8 @@ async fn list_cases(
                        p.email, p.phone_primary, p.phone_secondary,
                        p.insurance_number
                      )) LIKE de_normalize($1)
+                  OR (length(regexp_replace($1, '\D', '', 'g')) >= 3
+                      AND phone_digits(concat_ws(' ', p.phone_primary, p.phone_secondary)) LIKE '%' || regexp_replace($1, '\D', '', 'g') || '%')
            )
              AND ($2::text IS NULL OR c.status = $2)
              AND ($3::uuid IS NULL OR c.patient_id = $3)
