@@ -171,7 +171,7 @@ test.describe("staff live workflows", () => {
       {
         headers: pmApi.headers,
         data: {
-          requested_language: "en",
+          requested_language: "de",
           note: "Read-only translation history note for executive review.",
         },
       },
@@ -272,7 +272,7 @@ test.describe("staff live workflows", () => {
       {
         headers: pmApi.headers,
         data: {
-          requested_language: "en",
+          requested_language: "de",
           note: "Interpreter shell should stay request-only for translation handling.",
         },
       },
@@ -377,7 +377,7 @@ test.describe("staff live workflows", () => {
       {
         headers: pmApi.headers,
         data: {
-          requested_language: "en",
+          requested_language: "de",
           note: "Concierge can process translation workflow but must not access provider-share or portal controls.",
         },
       },
@@ -620,7 +620,7 @@ test.describe("staff live workflows", () => {
     await shareForm.getByRole("button", { name: /^Provider$/i }).click();
     await chooseComboboxOption(
       page,
-      shareForm.getByRole("combobox", { name: /Provider/i }),
+      shareForm.getByRole("combobox", { name: /Provider auswählen/i }),
       /Charite Universitaetsmedizin Berlin/i,
     );
     await shareForm
@@ -697,7 +697,7 @@ test.describe("staff live workflows", () => {
     await chooseComboboxOption(
       page,
       requestDialog.getByRole("combobox").first(),
-      /Englisch|English/i,
+      /Deutsch|German/i,
     );
     await requestDialog
       .getByPlaceholder(/Umfang, Frist oder Lieferhinweise|scope, due date/i)

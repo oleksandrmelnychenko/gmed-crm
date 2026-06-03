@@ -283,10 +283,9 @@ test.describe("appointments recurring live workflows", () => {
     });
     await expect(scheduleScopeSelect).toBeVisible();
 
-    const editForm = editor.locator("form").first();
+    const editForm = editor;
 
-    const titleInput = editForm.getByLabel(/^Titel$/i).first();
-    await titleInput.fill(renamedTitle);
+    await fillInputFieldByLabel(editForm, /^Titel/i, renamedTitle);
 
     await chooseWholeSeries(page, scheduleScopeSelect);
 
@@ -341,7 +340,7 @@ test.describe("appointments recurring live workflows", () => {
     });
     await expect(scheduleScopeSelect).toBeVisible();
 
-    const editForm = editor.locator("form").first();
+    const editForm = editor;
 
     await chooseWholeSeries(page, scheduleScopeSelect);
     await chooseComboboxOption(

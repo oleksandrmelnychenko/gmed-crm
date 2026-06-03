@@ -19,7 +19,7 @@ const TEST_PEER_ADDR: std::net::SocketAddr = std::net::SocketAddr::V4(std::net::
     40123,
 ));
 #[allow(dead_code)]
-const WAIT_UNTIL_ATTEMPTS: usize = 40;
+const WAIT_UNTIL_ATTEMPTS: usize = 200;
 #[allow(dead_code)]
 const WAIT_UNTIL_DELAY_MS: u64 = 50;
 

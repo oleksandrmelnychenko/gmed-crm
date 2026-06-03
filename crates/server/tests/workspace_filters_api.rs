@@ -5246,7 +5246,7 @@ async fn appointment_update_preserves_category_and_persists_recurrence_rule_edit
     assert_eq!(detail["recurrence_frequency"], "weekly");
     assert_eq!(detail["recurrence_interval"], 2);
     assert_eq!(detail["recurrence_count"], 4);
-    assert_eq!(detail["recurrence_until"], Value::Null);
+    assert_eq!(detail["recurrence_until"], "2026-06-15");
     assert_eq!(detail["recurrence_series_size"], 4);
 
     let rows = sqlx::query(
@@ -10453,7 +10453,7 @@ async fn non_medical_provider_rejects_provider_specializations() {
 }
 
 #[tokio::test]
-async fn create_provider_is_forbidden_for_non_pm_roles() {
+async fn create_provider_is_forbidden_for_operational_non_admin_roles() {
     let Some((app, pool, _admin_id, _)) = test_context().await else {
         return;
     };
@@ -10470,7 +10470,6 @@ async fn create_provider_is_forbidden_for_non_pm_roles() {
         "concierge",
         "interpreter",
         "teamlead_interpreter",
-        "it_admin",
     ] {
         let user_id = seed_user(&pool, &format!("{tag}-{role}"), role).await;
         let bearer = auth_header_for(user_id, role);
@@ -10488,6 +10487,22 @@ async fn create_provider_is_forbidden_for_non_pm_roles() {
             "expected {role} to be forbidden from POST /providers"
         );
     }
+
+    let it_admin_id = seed_user(&pool, &format!("{tag}-it-admin"), "it_admin").await;
+    let it_admin_bearer = auth_header_for(it_admin_id, "it_admin");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/providers",
+        &it_admin_bearer,
+        Some(json!({
+            "name": format!("Clinic It Admin {tag}"),
+            "provider_type": "medical",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert!(body["id"].as_str().is_some());
 }
 
 #[tokio::test]

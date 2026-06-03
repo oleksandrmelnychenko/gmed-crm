@@ -16,6 +16,14 @@ function futureLocalDateTime(daysFromNow: number) {
   return shifted.toISOString().slice(0, 16);
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function optionalRequiredLabel(label: string) {
+  return new RegExp(`^${escapeRegExp(label)}\\*?$`, "i");
+}
+
 async function openPatientDetailTab(
   page: Page,
   patientId: string,
@@ -494,14 +502,62 @@ test.describe("patient profile live workflows", () => {
       scenario.credentials.password,
     );
 
-    await page.goto(`/orders?patient=${scenario.patient.id}&create=1`);
-    const createDialog = page.getByRole("dialog");
+    const api = await authenticateApiClient(
+      request,
+      scenario.credentials.pm.email,
+      scenario.credentials.password,
+    );
+    const apiRecheckResponse = await request.get(
+      `${api.backendUrl}/api/v1/patients/${scenario.patient.id}/recheck`,
+      { headers: api.headers },
+    );
+    expect(apiRecheckResponse.ok()).toBe(true);
+    const apiRecheck = (await apiRecheckResponse.json()) as {
+      requires_recheck: boolean;
+      can_create_order: boolean;
+      blocking_reasons: string[];
+      document_alerts: { missing_count: number };
+    };
+    expect(apiRecheck.requires_recheck).toBe(true);
+    expect(apiRecheck.can_create_order).toBe(false);
+    expect(apiRecheck.blocking_reasons.length).toBeGreaterThan(0);
+
+    await page.goto(`/orders?patient=${scenario.patient.id}`);
+    await expect(
+      page.getByRole("heading", { level: 1, name: /Aufträge|Orders/i }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: /Neuen Auftrag|New order/i })
+      .first()
+      .click();
+    const createDialog = page
+      .getByRole("dialog")
+      .filter({
+        has: page.getByRole("heading", {
+          name: /Auftrag anlegen|Создать заказ/i,
+        }),
+      })
+      .last();
     await expect(
       createDialog.getByRole("heading", { name: /Auftrag anlegen|Создать заказ/i }),
     ).toBeVisible();
+    const uiRecheckResponse = page.waitForResponse(
+      (response) =>
+        response
+          .url()
+          .includes(`/api/v1/patients/${scenario.patient.id}/recheck`) &&
+        response.request().method() === "GET" &&
+        response.ok(),
+    );
+    await chooseComboboxOption(
+      page,
+      createDialog.getByRole("combobox").first(),
+      new RegExp(escapeRegExp(scenario.patient.patient_id), "i"),
+    );
+    await uiRecheckResponse;
     await expect(
       createDialog.getByText(
-        /Re-Check fur Bestandskunden|Повторная проверка для существующего клиента/i,
+        /Re-Check f.r Bestandskunden|Повторная проверка для существующего клиента/i,
       ),
     ).toBeVisible();
     await expect(createDialog.getByText(/Blockiert|Заблокирован/i)).toBeVisible();
@@ -549,7 +605,7 @@ test.describe("patient profile live workflows", () => {
 
     const fillField = async (label: string, value: string) => {
       const field = sheet
-        .getByText(label, { exact: true })
+        .getByText(optionalRequiredLabel(label))
         .locator("..")
         .getByRole("textbox")
         .first();
@@ -557,7 +613,7 @@ test.describe("patient profile live workflows", () => {
       await field.fill(value);
     };
     const chooseField = async (label: string, option: RegExp) => {
-      const field = sheet.getByText(label, { exact: true }).locator("..");
+      const field = sheet.getByText(optionalRequiredLabel(label)).locator("..");
       await chooseComboboxOption(page, field.getByRole("combobox"), option);
     };
     const chooseLanguage = async (option: RegExp) => {

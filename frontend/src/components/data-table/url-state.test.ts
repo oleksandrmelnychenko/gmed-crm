@@ -95,8 +95,15 @@ describe("parseFilters — invalid inputs", () => {
   it("missing field is dropped", () => {
     expect(parseFilters(":is:private")).toEqual([]);
   });
-  it("scalar operator without value is dropped", () => {
-    expect(parseFilters("name:contains")).toEqual([]);
+  it("scalar operator without value is kept as an editable no-op", () => {
+    expect(parseFilters("name:contains")).toEqual([
+      {
+        id: "name:contains:0",
+        field: "name",
+        operator: "contains",
+        value: "",
+      },
+    ]);
   });
   it("empty input returns []", () => {
     expect(parseFilters("")).toEqual([]);

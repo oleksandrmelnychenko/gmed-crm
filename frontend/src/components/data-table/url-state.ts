@@ -31,16 +31,6 @@ const VALID_OPERATORS: readonly FilterOperator[] = [
   "equals",
 ];
 
-const SCALAR_OPERATORS: ReadonlySet<FilterOperator> = new Set([
-  "contains",
-  "does_not_contain",
-  "is",
-  "is_not",
-  "before",
-  "after",
-  "equals",
-]);
-
 const ARRAY_OPERATORS: ReadonlySet<FilterOperator> = new Set([
   "is_any_of",
   "is_none_of",
@@ -140,7 +130,6 @@ function parseFilterPredicate(input: string, index: number): FilterPredicate | n
   const valueRaw = secondSep === -1 ? "" : rest.slice(secondSep + 1);
   if (!VALID_OPERATORS.includes(operatorRaw as FilterOperator)) return null;
   const operator = operatorRaw as FilterOperator;
-  if (SCALAR_OPERATORS.has(operator) && valueRaw === "") return null;
   return {
     id: `${field}:${operator}:${index}`,
     field,

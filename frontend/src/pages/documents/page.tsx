@@ -207,6 +207,8 @@ function formatLanguageLabel(language?: string | null) {
   }
 }
 
+const TRANSLATION_LANGUAGE_OPTIONS = ["de"] as const;
+
 type BindingFieldKind = "text" | "date" | "textarea";
 type BindingFieldDef = { key: string; label: string; kind: BindingFieldKind };
 
@@ -3565,7 +3567,11 @@ function StaffDocumentsPage({
                     }
                     className={selectClassName}
                   >
-                    <option value="de">{formatLanguageLabel("de")}</option>
+                    {TRANSLATION_LANGUAGE_OPTIONS.map((language) => (
+                      <option key={language} value={language}>
+                        {formatLanguageLabel(language)}
+                      </option>
+                    ))}
                   </NativeComboboxSelect>
                 </Field>
                 <Field label={t.patients_notes}>

@@ -1,6 +1,6 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { ChevronDown, Plus, Search, X } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +37,23 @@ function resolveOptions<T>(
   if (!column.filterOptions) return [];
   if (typeof column.filterOptions === "function") return column.filterOptions(rows);
   return column.filterOptions.slice();
+}
+
+function hasEmptyEditableValue(predicate: FilterPredicate): boolean {
+  if (!operatorTakesValue(predicate.operator)) return false;
+  const { value } = predicate;
+  if (value == null) return true;
+  if (typeof value === "string") return value.trim() === "";
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === "object") {
+    if ("from" in value || "to" in value) {
+      return !value.from && !value.to;
+    }
+    if ("days" in value) {
+      return !Number.isFinite(value.days) || value.days <= 0;
+    }
+  }
+  return false;
 }
 
 function valueSummary(
@@ -160,6 +177,22 @@ export function FilterBuilder<T>({
   useOutsideClose(pickerRef, () => setPickerOpen(false), { enabled: pickerOpen });
 
   const [editing, setEditing] = useState<string | null>(null);
+  const dismissedAutoEditIds = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const filterIds = new Set(filters.map((filter) => filter.id));
+    for (const id of dismissedAutoEditIds.current) {
+      if (!filterIds.has(id)) dismissedAutoEditIds.current.delete(id);
+    }
+
+    if (editing && filterIds.has(editing)) return;
+    const emptyFilter = filters.find(
+      (filter) =>
+        hasEmptyEditableValue(filter) &&
+        !dismissedAutoEditIds.current.has(filter.id),
+    );
+    if (emptyFilter) setEditing(emptyFilter.id);
+  }, [editing, filters]);
 
   const handleAdd = (column: ColumnDef<T>) => {
     const type: FilterFieldType = column.filterType ?? "text";
@@ -173,6 +206,7 @@ export function FilterBuilder<T>({
     onChange([...filters, newPredicate]);
     setPickerOpen(false);
     setPickerQuery("");
+    dismissedAutoEditIds.current.delete(newPredicate.id);
     setEditing(newPredicate.id);
   };
 
@@ -182,6 +216,7 @@ export function FilterBuilder<T>({
 
   const handleRemove = (id: string) => {
     onChange(filters.filter((f) => f.id !== id));
+    dismissedAutoEditIds.current.delete(id);
     if (editing === id) setEditing(null);
   };
 
@@ -211,10 +246,21 @@ export function FilterBuilder<T>({
             rows={rows}
             predicate={predicate}
             isEditing={editing === predicate.id}
-            onToggleEdit={() => setEditing(editing === predicate.id ? null : predicate.id)}
+            onToggleEdit={() => {
+              if (editing === predicate.id) {
+                dismissedAutoEditIds.current.add(predicate.id);
+                setEditing(null);
+                return;
+              }
+              dismissedAutoEditIds.current.delete(predicate.id);
+              setEditing(predicate.id);
+            }}
             onUpdate={(patch) => handleUpdate(predicate.id, patch)}
             onRemove={() => handleRemove(predicate.id)}
-            onClose={() => setEditing(null)}
+            onClose={() => {
+              dismissedAutoEditIds.current.add(predicate.id);
+              setEditing(null);
+            }}
             translations={resolvedTranslations}
           />
         );

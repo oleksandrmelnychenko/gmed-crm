@@ -82,6 +82,7 @@ export function evaluatePredicate<T>(
       return String(fieldValue) === String(operand);
     }
     case "is_not": {
+      if (operand === "") return true;
       if (operand == null) return true;
       if (typeof operand === "boolean") return Boolean(fieldValue) !== operand;
       return String(fieldValue) !== String(operand);
@@ -120,26 +121,29 @@ export function evaluatePredicate<T>(
     }
 
     case "before": {
-      const fieldMs = parseDate(fieldValue);
       const operandMs = parseDate(operand as string);
+      if (operandMs == null) return true;
+      const fieldMs = parseDate(fieldValue);
       if (fieldMs == null || operandMs == null) return false;
       return fieldMs < operandMs;
     }
     case "after": {
-      const fieldMs = parseDate(fieldValue);
       const operandMs = parseDate(operand as string);
+      if (operandMs == null) return true;
+      const fieldMs = parseDate(fieldValue);
       if (fieldMs == null || operandMs == null) return false;
       return fieldMs > operandMs;
     }
     case "between": {
-      const fieldMs = parseDate(fieldValue);
-      if (fieldMs == null) return false;
       const range = (operand ?? {}) as { from?: string; to?: string };
       const fromMs = range.from ? parseDate(range.from) : null;
       const toMs = range.to ? parseDate(range.to) : null;
+      if (fromMs == null && toMs == null) return true;
+      const fieldMs = parseDate(fieldValue);
+      if (fieldMs == null) return false;
       if (fromMs != null && fieldMs < fromMs) return false;
       if (toMs != null && fieldMs > toMs) return false;
-      return fromMs != null || toMs != null;
+      return true;
     }
     case "last_n_days": {
       const fieldMs = parseDate(fieldValue);

@@ -596,7 +596,9 @@ test.describe("patients data-table", () => {
     await expect(page.getByText("PT-0001")).toBeVisible();
 
     await page.getByRole("button", { name: /Filter|Фильтр/i }).click();
-    await page.getByRole("menuitem", { name: /Created|Создан|Erstellt/i }).click();
+    const filterPicker = page.locator("[data-table-filter-picker]");
+    await expect(filterPicker).toBeVisible();
+    await filterPicker.getByRole("menuitem", { name: /Created|Создан|Erstellt/i }).click();
 
     const editor = page.locator("[data-table-filter-editor]");
     await expect(editor).toBeVisible();

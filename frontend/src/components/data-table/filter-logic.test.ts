@@ -159,8 +159,10 @@ describe("evaluatePredicate — date operators", () => {
     expect(evaluatePredicate(rows[0], pred("birth", "between", { from: "1980-01-01" }), ctx)).toBe(true);
     expect(evaluatePredicate(rows[1], pred("birth", "between", { from: "1980-01-01" }), ctx)).toBe(false);
   });
-  it("between with no bounds = no-op (false — no valid range)", () => {
-    expect(evaluatePredicate(rows[0], pred("birth", "between", {}), ctx)).toBe(false);
+  it("date filters with empty operands are no-ops", () => {
+    expect(evaluatePredicate(rows[0], pred("birth", "before", ""), ctx)).toBe(true);
+    expect(evaluatePredicate(rows[0], pred("birth", "after", ""), ctx)).toBe(true);
+    expect(evaluatePredicate(rows[0], pred("birth", "between", {}), ctx)).toBe(true);
   });
   it("last_n_days", () => {
     expect(evaluatePredicate(rows[3], pred("created", "last_n_days", { days: 7 }), ctx)).toBe(true);

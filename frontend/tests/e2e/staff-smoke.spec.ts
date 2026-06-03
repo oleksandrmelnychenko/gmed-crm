@@ -99,7 +99,7 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
         default_status: "active",
         default_visibility: "patient_visible",
         is_medical: true,
-        supported_languages: ["de", "uk", "ru"],
+        supported_languages: ["de"],
         text_block_keys: ["intro", "next_steps"],
       },
     ],
@@ -296,6 +296,8 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
     patient_id: patientId,
     order_id: null,
     appointment_id: "00000000-0000-0000-0000-000000000401",
+    provider_context_ids: ["00000000-0000-0000-0000-000000000201"],
+    has_active_patient_portal_user: true,
     patient_pid: "PT-001",
     patient_name: "Anna Muster",
     order_number: null,
@@ -947,7 +949,7 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
         document_id: path
           .replace("/documents/", "")
           .replace("/translation-requests", ""),
-        requested_language: payload.requested_language ?? "en",
+        requested_language: payload.requested_language ?? "de",
         status: "pending",
         note: payload.note ?? null,
         requested_at: `2026-04-1${nextTranslationRequestIndex}T09:00:00Z`,
@@ -1194,7 +1196,7 @@ test.describe("staff smoke flows", () => {
 
     await chooseComboboxOption(
       page,
-      dialog.getByRole("combobox", { name: /Kategorie/i }),
+      dialog.getByRole("combobox", { name: /Vorlage/i }),
       /Treatment plan|Behandlungsplan/i,
     );
     await chooseComboboxOption(
@@ -1241,7 +1243,7 @@ test.describe("staff smoke flows", () => {
     await providerToggle.click();
     await chooseComboboxOption(
       page,
-      shareForm.getByRole("combobox").first(),
+      shareForm.getByRole("combobox", { name: /Provider auswählen/i }),
       /Clinic Cologne/i,
     );
     await shareForm
@@ -1313,7 +1315,7 @@ test.describe("staff smoke flows", () => {
       hasText: /bersetzung anfordern|Request translation/i,
     });
     await expect(translationSheet).toBeVisible();
-    await chooseComboboxOption(page, translationSheet.getByRole("combobox").first(), /English|Englisch/i);
+    await chooseComboboxOption(page, translationSheet.getByRole("combobox").first(), /Deutsch|German/i);
     await translationSheet
       .getByPlaceholder(/Umfang, Frist oder Lieferhinweise/i)
       .first()

@@ -532,7 +532,18 @@ async function installAdminPatternMocks(page: Page) {
       return json(route, { ok: true });
     }
 
-    if (path === "/admin/activity") return json(route, activityRows);
+    if (path === "/admin/activity") {
+      const limit = Number(url.searchParams.get("limit") ?? activityRows.length);
+      const offset = Number(url.searchParams.get("offset") ?? 0);
+      const items = activityRows.slice(offset, offset + limit);
+      return json(route, {
+        items,
+        total: activityRows.length,
+        limit,
+        offset,
+        has_more: offset + items.length < activityRows.length,
+      });
+    }
 
     if (path === "/admin/compliance/consents") return json(route, complianceDashboard);
     if (path === "/admin/compliance/consents/expired") return json(route, expiredConsents);

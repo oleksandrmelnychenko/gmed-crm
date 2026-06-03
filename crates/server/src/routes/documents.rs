@@ -9028,13 +9028,6 @@ async fn generate_provider_document_from_template_internal(
     body: &GenerateDocumentRequest,
     template: ProviderDocumentTemplate,
 ) -> Result<GeneratedProviderDocumentResult, axum::response::Response> {
-    if body.replace_document_id.is_some() {
-        return Err(err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Provider templates do not support replacement versioning yet",
-        ));
-    }
-
     let status = body
         .status
         .as_deref()

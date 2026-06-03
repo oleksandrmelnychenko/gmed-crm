@@ -416,7 +416,13 @@ test.describe("provider registry live workflows", () => {
     await chooseFieldOption(page, relationshipForm, /Zielarzt/i, new RegExp(`Release ${targetDoctorLastName}`));
     await chooseFieldOption(page, relationshipForm, /Beziehungstyp/i, /Ueberweisung|referral/i);
     await relationshipForm.getByRole("button", { name: /Beziehung hinzufuegen/i }).click();
-    await expect(page.getByText(`Release ${targetDoctorLastName}`).first()).toBeVisible();
+    await expect(
+      page
+        .locator("main")
+        .getByRole("group")
+        .filter({ hasText: `Dr. med. Release ${targetDoctorLastName}` })
+        .first(),
+    ).toBeVisible();
 
     await page.getByRole("button", { name: /Rollen verwalten/i }).click();
     const roleForm = page.locator("form#provider-staff-role-form");
@@ -463,7 +469,13 @@ test.describe("provider registry live workflows", () => {
     const servicePriceType = serviceForm.getByRole("combobox", { name: /Preistyp/i }).first();
     await expect(servicePriceType).toBeEnabled();
     await chooseComboboxOption(page, servicePriceType, /Festpreis/i);
-    await serviceForm.getByLabel(/^Preis$/i).fill("120");
+    const servicePriceInput = serviceForm
+      .locator("label")
+      .filter({ hasText: /^Preis/i })
+      .getByRole("spinbutton", { name: /Preis/i })
+      .first();
+    await expect(servicePriceInput).toBeVisible();
+    await servicePriceInput.fill("120");
     await serviceForm.getByLabel(/Preisnotiz/i).fill("Release smoke fixed");
     await serviceForm.getByRole("button", { name: /Neue Leistung/i }).click();
     await expect(serviceForm).toBeHidden();
