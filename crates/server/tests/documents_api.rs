@@ -2923,6 +2923,15 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
     };
     let tag = unique_tag("all-doc-templates");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    // Patient stickers render "ID: <patient_id>" as a single line; the default ~40-char
+    // test id wraps to "ID:\n<id>" and only breaks the PDF text assertion (not generation).
+    // Use a realistically short MRN so the label and value stay on one line.
+    sqlx::query("UPDATE patients SET patient_id = $2 WHERE id = $1")
+        .bind(patient_id)
+        .bind(format!("PT-{}", &tag[tag.len().saturating_sub(6)..]))
+        .execute(&pool)
+        .await
+        .unwrap();
     configure_patient_label_profile(&pool, patient_id).await;
 
     let provider_id = seed_provider(&pool, &tag).await;
@@ -3944,6 +3953,16 @@ async fn document_templates_can_generate_patient_sticker_pdf_document() {
     };
     let tag = unique_tag("doc-sticker");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    // Stickers render the patient id on a single line; the default ~40-char test id wraps
+    // in the PDF, so the id/tag is not contiguous when extracted. Use a short, realistic
+    // MRN and assert on it instead of the full tag.
+    let short_pid = format!("PT-{}", &tag[tag.len().saturating_sub(6)..]);
+    sqlx::query("UPDATE patients SET patient_id = $2 WHERE id = $1")
+        .bind(patient_id)
+        .bind(&short_pid)
+        .execute(&pool)
+        .await
+        .unwrap();
     configure_patient_label_profile(&pool, patient_id).await;
 
     let (status, catalog_body) = json_request(
@@ -4015,7 +4034,7 @@ async fn document_templates_can_generate_patient_sticker_pdf_document() {
     let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
     assert!(pdf_text.contains("ID:"));
     assert!(pdf_text.contains("PT-"));
-    assert!(pdf_text.contains(&tag));
+    assert!(pdf_text.contains(&short_pid));
     assert!(pdf_text.contains("Agency Street 1"));
 }
 
