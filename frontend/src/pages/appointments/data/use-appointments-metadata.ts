@@ -16,6 +16,45 @@ type UseAppointmentsMetadataOptions = {
 
 const APPOINTMENT_METADATA_CACHE_TTL_MS = 60_000;
 
+export type AppointmentsMetadataLoadResult<T> = {
+  rows: T[];
+  error: string;
+};
+
+export function buildAppointmentsMetadataState({
+  failedLoadMessage,
+  patientResult,
+  providerResult,
+  taxonomyRows,
+  interpreterResult,
+  staffResult,
+}: {
+  failedLoadMessage: string;
+  patientResult: AppointmentsMetadataLoadResult<PatientSummary>;
+  providerResult: AppointmentsMetadataLoadResult<ProviderSummary>;
+  taxonomyRows: ProviderTaxonomyNode[];
+  interpreterResult: AppointmentsMetadataLoadResult<InterpreterOption>;
+  staffResult: AppointmentsMetadataLoadResult<StaffOption>;
+}) {
+  const metadataError =
+    patientResult.error &&
+    interpreterResult.error &&
+    staffResult.error
+      ? failedLoadMessage
+      : "";
+
+  return {
+    patients: patientResult.rows,
+    providers: providerResult.rows,
+    taxonomyNodes: taxonomyRows,
+    interpreters: interpreterResult.rows,
+    staff: staffResult.rows,
+    metadataLoading: false,
+    metadataError,
+    providersError: providerResult.error,
+  };
+}
+
 export function useAppointmentsMetadata({
   failedLoadMessage,
 }: UseAppointmentsMetadataOptions) {
@@ -82,23 +121,16 @@ export function useAppointmentsMetadata({
         ([patientResult, providerResult, taxonomyRows, interpreterResult, staffResult]) => {
           if (!active) return;
 
-          const metadataError =
-            patientResult.error &&
-            interpreterResult.error &&
-            staffResult.error
-              ? failedLoadMessage
-              : "";
-
-          setMetadataState({
-            patients: patientResult.rows,
-            providers: providerResult.rows,
-            taxonomyNodes: taxonomyRows,
-            interpreters: interpreterResult.rows,
-            staff: staffResult.rows,
-            metadataLoading: false,
-            metadataError,
-            providersError: providerResult.error,
-          });
+          setMetadataState(
+            buildAppointmentsMetadataState({
+              failedLoadMessage,
+              patientResult,
+              providerResult,
+              taxonomyRows,
+              interpreterResult,
+              staffResult,
+            }),
+          );
         },
       );
     })();

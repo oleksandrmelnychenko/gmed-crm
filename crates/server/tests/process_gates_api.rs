@@ -894,6 +894,35 @@ async fn existing_customer_recheck_reports_missing_data_and_debt_hold() {
 }
 
 #[tokio::test]
+async fn new_patient_recheck_does_not_require_existing_customer_history() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("patient-recheck-new");
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let patient_id = create_patient(&app, &pm_bearer, &tag).await;
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/recheck"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["requires_recheck"], false);
+    assert_eq!(body["can_create_order"], true);
+    assert_eq!(body["blocking_reasons"].as_array().unwrap().len(), 0);
+    assert_eq!(body["checks"].as_array().unwrap().len(), 0);
+    assert_eq!(body["document_alerts"]["missing_count"], 0);
+    assert_eq!(body["document_alerts"]["document_pack_complete"], true);
+}
+
+#[tokio::test]
 async fn create_order_is_blocked_until_existing_customer_recheck_passes() {
     let Some((app, pool, _admin_id)) = test_context().await else {
         return;

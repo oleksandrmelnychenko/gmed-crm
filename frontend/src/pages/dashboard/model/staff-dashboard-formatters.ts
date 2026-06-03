@@ -36,6 +36,10 @@ export function greetingFor(name: string, tr: Record<string, string>) {
   return name ? `${prefix}, ${name.split(/\s+/)[0]}` : prefix;
 }
 
+export function dashboardProviderHref(providerId: string) {
+  return `/providers/${encodeURIComponent(providerId)}?return_to=/`;
+}
+
 export function numberOrDash(value: number | null | undefined) {
   return value == null ? "-" : value.toLocaleString();
 }

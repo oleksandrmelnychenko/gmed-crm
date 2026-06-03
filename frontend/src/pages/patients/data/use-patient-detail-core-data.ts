@@ -61,6 +61,12 @@ const EMPTY_PATIENT_DETAIL_CORE_DATA_STATE: PatientDetailCoreDataState = {
   settledKey: "",
 };
 
+export function patientDetailResourceItems<T>(
+  resource: { items?: T[] | null } | null | undefined,
+) {
+  return Array.isArray(resource?.items) ? resource.items : [];
+}
+
 function patientDetailCoreDataReducer(
   state: PatientDetailCoreDataState,
   action: PatientDetailCoreDataAction,
@@ -161,10 +167,10 @@ export function usePatientDetailCoreData({
             detail: nextDetail,
             assignments: nextAssignments,
             staff: nextStaff,
-            vitalsHistory: vitals.items ?? [],
-            cardEntries: entries.items ?? [],
-            medicalOrders: nextMedicalOrders.items ?? [],
-            riskScores: nextRiskScores.items ?? [],
+            vitalsHistory: patientDetailResourceItems(vitals),
+            cardEntries: patientDetailResourceItems(entries),
+            medicalOrders: patientDetailResourceItems(nextMedicalOrders),
+            riskScores: patientDetailResourceItems(nextRiskScores),
           });
         });
       })

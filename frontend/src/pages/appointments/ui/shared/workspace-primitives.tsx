@@ -225,15 +225,24 @@ export function Field({
   label,
   children,
   className,
+  required = false,
 }: {
   label: string;
   children: ReactNode;
   compact?: boolean;
   className?: string;
+  required?: boolean;
 }) {
   return (
     <label className={cn("flex flex-col gap-1.5", className)}>
-      <span className={tokens.text.label}>{label}</span>
+      <span className={tokens.text.label}>
+        {label}
+        {required ? (
+          <span aria-hidden="true" className="ml-1 text-[var(--brand)]">
+            *
+          </span>
+        ) : null}
+      </span>
       {children}
     </label>
   );

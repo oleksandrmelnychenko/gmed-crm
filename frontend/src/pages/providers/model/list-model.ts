@@ -469,6 +469,45 @@ export function normalizeAvailabilityEditorIntervals(
   return normalized;
 }
 
+export function normalizeWeeklyAvailabilitySchedule(
+  schedule: readonly WeeklyAvailabilityDay[],
+  edit?: { day: WeeklyAvailabilityDayCode; index: number; field: "start" | "end" },
+) {
+  return schedule.map((row) => {
+    const intervals = normalizeAvailabilityEditorIntervals(
+      row.intervals,
+      edit?.day === row.day ? { index: edit.index, field: edit.field } : undefined,
+    );
+    return {
+      ...row,
+      enabled: row.enabled && intervals.length > 0,
+      intervals,
+    };
+  });
+}
+
+export function updateWeeklyAvailabilityIntervalValue(
+  value: string,
+  day: WeeklyAvailabilityDayCode,
+  index: number,
+  field: "start" | "end",
+  nextValue: string,
+) {
+  const nextSchedule = parseWeeklyAvailability(value).map((row) =>
+    row.day === day
+      ? {
+          ...row,
+          intervals: row.intervals.map((interval, intervalIndex) =>
+            intervalIndex === index ? { ...interval, [field]: nextValue } : interval,
+          ),
+        }
+      : row,
+  );
+  return formatWeeklyAvailabilityValue(
+    normalizeWeeklyAvailabilitySchedule(nextSchedule, { day, index, field }),
+  );
+}
+
 function normalizeAvailabilityIntervals(
   intervals: readonly WeeklyAvailabilityInterval[],
 ) {

@@ -39,6 +39,7 @@ import {
   buildEditAppointmentForm,
   hasAppointmentFormChanges,
 } from "@/pages/appointments/model/form-factories";
+import { buildEditAppointmentUpdatePayload } from "@/pages/appointments/model/edit-payload";
 import {
   appointmentText,
   appointmentTypeLabel,
@@ -53,7 +54,6 @@ import {
   buildLocalScheduleWarnings,
   buildScheduleNotice,
 } from "@/pages/appointments/model/schedule-warnings";
-import { parsePositiveIntegerInput } from "@/pages/appointments/model/workflow-helpers";
 import { filterAppointmentOwnerOptions } from "@/pages/appointments/model/staff-roles";
 import {
   recurrenceFrequencyLabel,
@@ -565,10 +565,18 @@ function useEditAppointmentSectionContentContent({
     setBusy(true);
     setError("");
     try {
-      const applyRecurrenceRule =
-        Boolean(detail.recurrence_frequency) && recurrenceScope !== "single";
-      const repeatInterval = parsePositiveIntegerInput(form.repeatInterval);
-      const repeatCount = parsePositiveIntegerInput(form.repeatCount);
+      const {
+        applyRecurrenceRule,
+        payload: updatePayload,
+        repeatCount,
+        repeatInterval,
+      } = buildEditAppointmentUpdatePayload({
+        detail,
+        form,
+        recurrenceScope,
+        canEditAppointmentType,
+        canManageChecklist,
+      });
       if (applyRecurrenceRule) {
         if (!repeatInterval) {
           setError(t.appointments_repeat_interval_error);
@@ -578,38 +586,6 @@ function useEditAppointmentSectionContentContent({
           setError(t.appointments_repeat_require_end_error);
           return;
         }
-      }
-      const updatePayload: Record<string, unknown> = {
-        provider_id: form.providerId || null,
-        doctor_id: form.doctorId || null,
-        owner_user_id: form.ownerUserId || null,
-        interpreter_id: form.interpreterId || null,
-        care_path_kind: normalizeCarePathKindForAppointmentType(
-          form.appointmentType,
-          form.carePathKind,
-        ),
-        title: form.title.trim(),
-        date: form.date,
-        time_start: form.timeStart || null,
-        time_end: form.timeEnd || null,
-        location: form.location.trim() || null,
-        category: form.category.trim() || null,
-        notes: form.notes.trim() || null,
-        recurrence_scope: detail.recurrence_frequency
-          ? recurrenceScope
-          : "single",
-      };
-      if (applyRecurrenceRule) {
-        updatePayload.recurrence_frequency = form.repeatFrequency;
-        updatePayload.recurrence_interval = repeatInterval;
-        updatePayload.recurrence_count = repeatCount;
-        updatePayload.recurrence_until = form.repeatUntil || null;
-      }
-      if (canEditAppointmentType) {
-        updatePayload.appointment_type = form.appointmentType;
-      }
-      if (canManageChecklist) {
-        updatePayload.checklist_phase = form.checklistPhase;
       }
 
       const result = await apiFetch<{
@@ -911,7 +887,7 @@ function useEditAppointmentSectionContentContent({
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
         {editSheetSectionTitle(appointmentText("appointments_appointment_and_timing"))}
         <div className="grid gap-4 md:grid-cols-3">
-        <Field compact label={t.appointments_title_col}>
+        <Field compact required label={t.appointments_title_col}>
           <Input
             value={form.title}
             onChange={(event) =>
@@ -974,7 +950,7 @@ function useEditAppointmentSectionContentContent({
         </Field>
         </div>
         <div className="grid gap-4 md:grid-cols-3">
-          <Field compact label={t.appointments_date}>
+          <Field compact required label={t.appointments_date}>
             <Input
               type="date"
               value={form.date}

@@ -105,6 +105,7 @@ import {
   joinDoctorTitleValue,
   makeContactFormId,
   normalizeAvailabilityEditorIntervals,
+  normalizeWeeklyAvailabilitySchedule,
   normalizeDoctorTitleKey,
   parseWeeklyAvailability,
   patientLabel,
@@ -708,31 +709,7 @@ type WeeklyAvailabilitySchedule = ReturnType<typeof parseWeeklyAvailability>;
 type WeeklyAvailabilityRow = WeeklyAvailabilitySchedule[number];
 
 function buildAvailabilityEditorSchedule(value: string) {
-  return parseWeeklyAvailability(value).map((row) => {
-    const intervals = normalizeAvailabilityEditorIntervals(row.intervals);
-    return {
-      ...row,
-      enabled: row.enabled && intervals.length > 0,
-      intervals,
-    };
-  });
-}
-
-function normalizeAvailabilityEditorSchedule(
-  schedule: WeeklyAvailabilitySchedule,
-  edit?: { day: WeeklyAvailabilityRow["day"]; index: number; field: "start" | "end" },
-) {
-  return schedule.map((row) => {
-    const intervals = normalizeAvailabilityEditorIntervals(
-      row.intervals,
-      edit?.day === row.day ? { index: edit.index, field: edit.field } : undefined,
-    );
-    return {
-      ...row,
-      enabled: row.enabled && intervals.length > 0,
-      intervals,
-    };
-  });
+  return normalizeWeeklyAvailabilitySchedule(parseWeeklyAvailability(value));
 }
 
 function weeklyAvailabilityIntervalItems(row: WeeklyAvailabilityRow) {
@@ -796,7 +773,7 @@ function WeeklyAvailabilityEditor({
     nextSchedule: WeeklyAvailabilitySchedule,
     edit?: { day: WeeklyAvailabilityRow["day"]; index: number; field: "start" | "end" },
   ) => {
-    const normalized = normalizeAvailabilityEditorSchedule(nextSchedule, edit);
+    const normalized = normalizeWeeklyAvailabilitySchedule(nextSchedule, edit);
     const nextValue = formatWeeklyAvailabilityValue(normalized);
     setDraftSchedule(normalized);
     if (nextValue !== value) {
@@ -810,7 +787,7 @@ function WeeklyAvailabilityEditor({
     commit(draftSchedule.map((row) => (row.day === day ? update(row) : row)));
   };
   const commitCurrentDraft = () => {
-    const normalized = normalizeAvailabilityEditorSchedule(draftSchedule);
+    const normalized = normalizeWeeklyAvailabilitySchedule(draftSchedule);
     const nextValue = formatWeeklyAvailabilityValue(normalized);
     setDraftSchedule(normalized);
     if (nextValue !== value) {

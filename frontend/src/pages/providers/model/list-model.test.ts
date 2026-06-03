@@ -20,6 +20,7 @@ import {
   toProviderPayload,
   toServicePayload,
   updateTaxonomyAttributeValue,
+  updateWeeklyAvailabilityIntervalValue,
 } from "./list-model";
 import type { ProviderFilters } from "./types";
 
@@ -288,6 +289,12 @@ describe("weekly availability helpers", () => {
       { start: "09:00", end: "22:00" },
     ]);
     expect(formatWeeklyAvailabilityDisplay("Mo 9:0-22:0", "de")).toBe("Mo 09:00-22:00");
+  });
+
+  it("commits picker interval edits into the serialized opening hours immediately", () => {
+    expect(
+      updateWeeklyAvailabilityIntervalValue("Mo 09:00-17:00", "mon", 0, "end", "22:00"),
+    ).toBe("Mon 09:00-22:00");
   });
 
   it("supports full-day availability expressed as 00:00-00:00", () => {

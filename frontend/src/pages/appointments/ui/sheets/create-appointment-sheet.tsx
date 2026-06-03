@@ -550,7 +550,7 @@ function useCreateAppointmentSheetContent({
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
                 {sectionTitle(appointmentText("appointments_appointment_and_timing"))}
                 <div className="grid gap-4 md:grid-cols-3">
-                  <Field compact label={t.orders_patient}>
+                  <Field compact required label={t.orders_patient}>
                     <NativeComboboxSelect
                       value={form.patientId}
                       onChange={(event) =>
@@ -621,7 +621,7 @@ function useCreateAppointmentSheetContent({
                     </NativeComboboxSelect>
                   </Field>
                 </div>
-                <Field compact label={t.appointments_title_col}>
+                <Field compact required label={t.appointments_title_col}>
                   <Input
                     value={form.title}
                     onChange={(event) =>
@@ -634,7 +634,7 @@ function useCreateAppointmentSheetContent({
                   />
                 </Field>
                 <div className="grid gap-4 md:grid-cols-3">
-                  <Field compact label={t.appointments_date}>
+                  <Field compact required label={t.appointments_date}>
                     <Input
                       type="date"
                       value={form.date}

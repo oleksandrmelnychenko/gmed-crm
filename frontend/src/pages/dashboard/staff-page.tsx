@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { useStaffDashboardData } from "./data/use-staff-dashboard-data";
-import { greetingFor } from "./model/staff-dashboard-formatters";
+import { dashboardProviderHref, greetingFor } from "./model/staff-dashboard-formatters";
 import type { Period } from "./model/staff-dashboard-types";
 import { StaffDashboardOverviewSection } from "./ui/sections/staff-dashboard-overview-section";
 import { DashboardSectionLoading } from "./ui/shared/dashboard-route-loading";
@@ -104,7 +104,7 @@ export function StaffDashboardPageNew() {
 
       <Suspense fallback={<DashboardSectionLoading />}>
         <StaffDashboardOperationsSection
-          onOpenProvider={(id) => staffGo(`/providers/${id}?return_to=/`)}
+          onOpenProvider={(id) => staffGo(dashboardProviderHref(id))}
           operations={operations}
           sectionsLoading={sectionsLoading}
           tr={tr}
