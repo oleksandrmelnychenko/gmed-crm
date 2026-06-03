@@ -47,6 +47,11 @@ export type DocumentDetailBundle = {
   textExtraction: DocumentTextExtraction | null;
 };
 
+export type DocumentPreviewObjectUrl = {
+  contentType: string;
+  url: string;
+};
+
 function postJson<T>(path: string, payload: JsonPayload) {
   return apiFetch<T>(path, {
     method: "POST",
@@ -116,6 +121,24 @@ export async function openDocumentPreview(
     if (previewWindow) previewWindow.close();
     throw new Error(popupBlockedMessage);
   }
+}
+
+export async function createDocumentPreviewObjectUrl(
+  id: string,
+): Promise<DocumentPreviewObjectUrl> {
+  const { blob, contentType } = await fetchDocumentBlob(id);
+  const previewBlob = contentType.startsWith("text/html")
+    ? new Blob([await blob.text()], { type: contentType || "text/html" })
+    : blob;
+
+  return {
+    contentType,
+    url: URL.createObjectURL(previewBlob),
+  };
+}
+
+export function revokeDocumentPreviewObjectUrl(url: string) {
+  URL.revokeObjectURL(url);
 }
 
 export async function fetchDocumentLookups(canManage: boolean): Promise<DocumentLookups> {

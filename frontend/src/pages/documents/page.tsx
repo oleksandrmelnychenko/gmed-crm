@@ -93,6 +93,7 @@ import {
   confirmDocumentShare,
   createBulkDocumentShares,
   createDocumentShare,
+  createDocumentPreviewObjectUrl,
   createTranslationRequest,
   deleteStoredDocumentFile,
   downloadDocumentFile,
@@ -107,8 +108,8 @@ import {
   fetchTranslationRequestQueue,
   fetchTranslationRequests,
   generateDocument,
-  openDocumentPreview,
   releaseDocumentToPortal,
+  revokeDocumentPreviewObjectUrl,
   revokeDocumentPortalRelease,
   revokeDocumentShare,
   runDocumentTextExtraction,
@@ -1056,6 +1057,15 @@ function StaffDocumentsPage({
     useState<DocumentTextExtraction | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
   const [detailError, setDetailError] = useState("");
+  const [documentPreview, setDocumentPreview] = useState<{
+    contentType: string;
+    id: string;
+    title: string;
+    url: string;
+  } | null>(null);
+  const [documentPreviewBusy, setDocumentPreviewBusy] = useState(false);
+  const [documentPreviewError, setDocumentPreviewError] = useState("");
+  const documentPreviewUrlRef = useRef<string | null>(null);
   const [translationBusy, setTranslationBusy] = useState(false);
   const [translationError, setTranslationError] = useState("");
   const [translationActionMenuOpen, setTranslationActionMenuOpen] = useState<string | null>(null);
@@ -1100,6 +1110,33 @@ function StaffDocumentsPage({
       providers.find((provider) => provider.id === shareForm.providerId) ?? null,
     [providers, shareForm.providerId],
   );
+  function replaceDocumentPreview(
+    nextPreview: typeof documentPreview,
+  ) {
+    const currentUrl = documentPreviewUrlRef.current;
+    if (currentUrl && currentUrl !== nextPreview?.url) {
+      revokeDocumentPreviewObjectUrl(currentUrl);
+    }
+    documentPreviewUrlRef.current = nextPreview?.url ?? null;
+    setDocumentPreview(nextPreview);
+  }
+
+  useEffect(() => () => {
+    if (documentPreviewUrlRef.current) {
+      revokeDocumentPreviewObjectUrl(documentPreviewUrlRef.current);
+      documentPreviewUrlRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (documentPreviewUrlRef.current) {
+      revokeDocumentPreviewObjectUrl(documentPreviewUrlRef.current);
+      documentPreviewUrlRef.current = null;
+    }
+    setDocumentPreview(null);
+    setDocumentPreviewError("");
+  }, [activeDocumentDetailId]);
+
   const shareTargetDocuments = useMemo(() => {
     const targetIds =
       selectedDocumentIds.length > 1
@@ -1928,15 +1965,24 @@ function StaffDocumentsPage({
 
   async function handleOpenPreview() {
     if (!detail) return;
+    setDocumentPreviewBusy(true);
+    setDocumentPreviewError("");
     try {
-      await openDocumentPreview(detail.id, t.documents_popup_blocked);
+      const preview = await createDocumentPreviewObjectUrl(detail.id);
+      replaceDocumentPreview({
+        ...preview,
+        id: detail.id,
+        title: detail.original_filename ?? detail.auto_name,
+      });
       setNotice(t.documents_preview_opened);
     } catch (nextError) {
-      setDetailError(
+      setDocumentPreviewError(
         nextError instanceof Error
           ? nextError.message
           : t.documents_failed_open_preview,
       );
+    } finally {
+      setDocumentPreviewBusy(false);
     }
   }
 
@@ -4087,6 +4133,53 @@ function StaffDocumentsPage({
         </DialogContent>
       </Dialog>
 
+      <Dialog
+        open={Boolean(documentPreview)}
+        onOpenChange={(open) => {
+          if (!open) {
+            replaceDocumentPreview(null);
+          }
+        }}
+      >
+        <DialogContent className="flex h-[86vh] max-w-[min(1120px,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl p-0">
+          <DialogHeader className="border-b border-border/70 px-5 py-4">
+            <div className="flex min-w-0 items-start justify-between gap-4">
+              <div className="min-w-0">
+                <DialogTitle className="truncate text-base">
+                  {documentPreview?.title ?? t.documents_preview}
+                </DialogTitle>
+                <DialogDescription className="truncate">
+                  {documentPreview?.contentType ?? ""}
+                </DialogDescription>
+              </div>
+              {documentPreview ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 shrink-0 gap-1.5 rounded-lg"
+                  onClick={() =>
+                    void downloadDocumentFile(documentPreview.id, documentPreview.title)
+                  }
+                >
+                  <Download className="size-3.5" />
+                  {t.documents_download}
+                </Button>
+              ) : null}
+            </div>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 bg-slate-50 p-3">
+            {documentPreview ? (
+              <iframe
+                title={documentPreview.title || t.documents_preview}
+                src={documentPreview.url}
+                className="h-full min-h-[560px] w-full rounded-lg border border-border bg-white"
+              />
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {(() => {
         const detailContent = (
             <DocumentDetailState
@@ -4156,10 +4249,15 @@ function StaffDocumentsPage({
                           type="button"
                           variant="outline"
                           className="h-9 gap-1.5 rounded-lg px-3.5"
+                          disabled={documentPreviewBusy}
                           onClick={() => void handleOpenPreview()}
                         >
-                          <FileText className="size-3.5" />
-                          {t.documents_preview}
+                          {documentPreviewBusy ? (
+                            <LoaderCircle className="size-3.5 animate-spin" />
+                          ) : (
+                            <FileText className="size-3.5" />
+                          )}
+                          {documentPreviewBusy ? t.common_loading : t.documents_preview}
                         </Button>
                       ) : null}
                       <Button
@@ -4236,6 +4334,10 @@ function StaffDocumentsPage({
                       ) : null}
                     </div>
                   </Banner>
+                ) : null}
+
+                {documentPreviewError ? (
+                  <Banner tone="error">{documentPreviewError}</Banner>
                 ) : null}
 
                 <section className="overflow-hidden rounded-2xl bg-white shadow-[0_10px_24px_rgba(15,23,42,0.035)] ring-1 ring-slate-950/[0.06]">
