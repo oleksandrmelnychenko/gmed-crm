@@ -162,7 +162,7 @@ function contractMetricCard(
   return (
     <article className="relative min-h-[44px] min-w-[190px] px-3 py-1">
       {!options?.groupedLast ? (
-        <span className="absolute right-0 top-1/2 hidden -tranzinc-y-1/2 space-y-1 xl:block">
+        <span className="absolute right-0 top-1/2 hidden -translate-y-1/2 space-y-1 xl:block">
           <span className="block h-1.5 w-px bg-border" />
           <span className="block h-1.5 w-px bg-border" />
           <span className="block h-1.5 w-px bg-border" />
@@ -769,16 +769,28 @@ function useContractsPageContent() {
   }, 250);
 
   const contractQuery = useMemo(
-    () => ({ ...contractFilters, search: deferredContractSearch }),
-    [contractFilters, deferredContractSearch],
+    () => ({
+      patientId: contractFilters.patientId,
+      status: contractFilters.status,
+      search: deferredContractSearch,
+    }),
+    [contractFilters.patientId, contractFilters.status, deferredContractSearch],
   );
   const quoteQuery = useMemo(
-    () => ({ ...quoteFilters, search: deferredQuoteSearch }),
-    [quoteFilters, deferredQuoteSearch],
+    () => ({
+      patientId: quoteFilters.patientId,
+      orderId: quoteFilters.orderId,
+      status: quoteFilters.status,
+      search: deferredQuoteSearch,
+    }),
+    [quoteFilters.patientId, quoteFilters.orderId, quoteFilters.status, deferredQuoteSearch],
   );
   const agencyServiceQuery = useMemo(
-    () => ({ ...agencyServiceFilters, search: deferredAgencyServiceSearch }),
-    [agencyServiceFilters, deferredAgencyServiceSearch],
+    () => ({
+      activeOnly: agencyServiceFilters.activeOnly,
+      search: deferredAgencyServiceSearch,
+    }),
+    [agencyServiceFilters.activeOnly, deferredAgencyServiceSearch],
   );
 
   const syncQuery = (patch: Record<string, string | null | undefined>) => {
@@ -1851,16 +1863,14 @@ function useContractsPageContent() {
 
             <AdminToolbar className="rounded-none border-0 bg-transparent p-0 shadow-none">
               <div className="relative min-w-[260px] flex-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -tranzinc-y-1/2 text-muted-foreground" />
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={agencyServiceFilters.search}
                   onChange={(event) =>
-                    startTransition(() =>
-                      setAgencyServiceFilters((current) => ({
-                        ...current,
-                        search: event.target.value,
-                      })),
-                    )
+                    setAgencyServiceFilters((current) => ({
+                      ...current,
+                      search: event.target.value,
+                    }))
                   }
                   className={cn(shellInputClassName, "pl-9")}
                   placeholder={text.agencyServiceSearchPlaceholder}
@@ -1940,13 +1950,11 @@ function useContractsPageContent() {
               <div className="mt-5 space-y-4 border-b border-border pb-4">
                 <AdminToolbar className="rounded-none border-0 bg-transparent p-0 shadow-none">
                   <div className="relative min-w-[260px] flex-1">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -tranzinc-y-1/2 text-muted-foreground" />
+                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       value={contractFilters.search}
                       onChange={(event) =>
-                        startTransition(() =>
-                          setContractFilters((current) => ({ ...current, search: event.target.value })),
-                        )
+                        setContractFilters((current) => ({ ...current, search: event.target.value }))
                       }
                       className={cn(shellInputClassName, "pl-9")}
                       placeholder={t.common_search}
@@ -2055,13 +2063,11 @@ function useContractsPageContent() {
               <div className="mt-5 space-y-4 border-b border-border pb-4">
                 <AdminToolbar className="rounded-none border-0 bg-transparent p-0 shadow-none">
                   <div className="relative min-w-[240px] flex-1">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -tranzinc-y-1/2 text-muted-foreground" />
+                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       value={quoteFilters.search}
                       onChange={(event) =>
-                        startTransition(() =>
-                          setQuoteFilters((current) => ({ ...current, search: event.target.value })),
-                        )
+                        setQuoteFilters((current) => ({ ...current, search: event.target.value }))
                       }
                       className={cn(shellInputClassName, "pl-9")}
                       placeholder={t.common_search}
