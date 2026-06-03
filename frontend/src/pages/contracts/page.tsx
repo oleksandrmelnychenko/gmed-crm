@@ -48,6 +48,7 @@ import {
   SheetContent,
 } from "@/components/ui/sheet";
 import { clearApiCache } from "@/lib/api";
+import { deNormalize } from "@/components/data-table/search";
 import {
   agencyServiceDescriptionLabel,
   agencyServiceNameLabel,
@@ -809,9 +810,12 @@ function useContractsPageContent() {
   const agencyServiceQuery = useMemo(
     () => ({
       activeOnly: agencyServiceFilters.activeOnly,
-      search: debouncedAgencyServiceSearch,
+      // Agency-service names are localized in the UI but stored in English, so the server
+      // cannot match the visible label. Load all (active) rows and filter client-side over
+      // the localized labels — see filteredAgencyServices.
+      search: "",
     }),
-    [agencyServiceFilters.activeOnly, debouncedAgencyServiceSearch],
+    [agencyServiceFilters.activeOnly],
   );
 
   const syncQuery = (patch: Record<string, string | null | undefined>) => {
@@ -841,6 +845,27 @@ function useContractsPageContent() {
     const priced = agencyServices.filter((item) => Number(item.unit_price ?? 0) > 0).length;
     return { total: agencyServices.length, active, priced };
   }, [agencyServices]);
+
+  // Client-side search over the LOCALIZED labels (German-folded), since the server only
+  // knows the stored English names.
+  const filteredAgencyServices = useMemo(() => {
+    const needle = deNormalize(debouncedAgencyServiceSearch.trim());
+    if (!needle) return agencyServices;
+    return agencyServices.filter((row) => {
+      const haystack = deNormalize(
+        [
+          agencyServiceNameLabel(row.service_key, row.service_name, t),
+          agencyServiceDescriptionLabel(row.service_key, row.description, t),
+          agencyServiceUnitLabel(row.unit_label, t),
+          row.service_key,
+          row.service_name,
+        ]
+          .filter(Boolean)
+          .join(" "),
+      );
+      return haystack.includes(needle);
+    });
+  }, [agencyServices, debouncedAgencyServiceSearch, t]);
 
   const selectedCreateOrder = useMemo(
     () => orders.find((order) => order.id === createQuoteForm.orderId) ?? null,
@@ -1930,7 +1955,7 @@ function useContractsPageContent() {
           </div>
 
           <DataTableSurface
-            rows={agencyServices}
+            rows={filteredAgencyServices}
             columns={agencyServiceColumns}
             rowId={(row) => row.id}
             defaultDensity="compact"
