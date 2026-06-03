@@ -3695,7 +3695,9 @@ struct ProviderTemplatePayload {
     auto_send_on_confirmed_appointment: bool,
 }
 
-const ALLOWED_DOCTOR_TITLES: [&str; 3] = ["Dr. med.", "PD", "Prof."];
+const DOCTOR_TITLE_PARSE_ORDER: [&str; 6] =
+    ["Priv.-Doz.", "Dipl.-Med.", "Dr. med.", "Prof.", "Dr.", "PD"];
+const DOCTOR_TITLE_VALIDATION_MESSAGE: &str = "Doctor title must use academic titles: Prof., Priv.-Doz., PD, Dr. med., Dr. or Dipl.-Med. Use gender for Herr/Frau.";
 
 fn normalize_provider_payload(
     body: UpsertProviderRequest,
@@ -3818,7 +3820,7 @@ fn normalize_doctor_payload(body: UpsertDoctorRequest) -> Result<DoctorPayload, 
 
     let languages = normalize_string_list(body.languages);
     let licensing_valid_until = parse_date(body.licensing_valid_until, "licensing_valid_until")?;
-    let title = normalize_optional(body.title);
+    let title = normalize_doctor_title(body.title);
     let role_code = normalize_optional(body.role_code).map(|value| value.to_lowercase());
     if role_code
         .as_ref()
@@ -3969,23 +3971,52 @@ fn normalize_service_payload(body: UpsertServiceRequest) -> Result<ServicePayloa
 }
 
 fn validate_new_doctor_title(title: Option<&str>) -> Result<(), &'static str> {
-    if let Some(title) = title
-        && !ALLOWED_DOCTOR_TITLES.contains(&title)
-    {
-        return Err("Doctor title must be Dr. med., PD or Prof.");
-    }
-    Ok(())
+    validate_doctor_title_value(title)
 }
 
 fn validate_updated_doctor_title(
     title: Option<&str>,
     current_title: Option<&str>,
 ) -> Result<(), &'static str> {
+    if validate_doctor_title_value(title).is_ok() {
+        return Ok(());
+    }
     if let Some(title) = title
-        && !ALLOWED_DOCTOR_TITLES.contains(&title)
-        && current_title.is_none_or(|current| current.trim() != title)
+        && current_title.is_some_and(|current| current.trim() == title.trim())
     {
-        return Err("Doctor title must be Dr. med., PD or Prof.");
+        return Ok(());
+    }
+    Err(DOCTOR_TITLE_VALIDATION_MESSAGE)
+}
+
+fn validate_doctor_title_value(title: Option<&str>) -> Result<(), &'static str> {
+    let Some(title) = title.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(());
+    };
+
+    let mut remaining = title;
+    let mut seen: Vec<&'static str> = Vec::new();
+    while !remaining.is_empty() {
+        let Some(candidate) = DOCTOR_TITLE_PARSE_ORDER.iter().find(|candidate| {
+            remaining
+                .get(..candidate.len())
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(candidate))
+        }) else {
+            return Err(DOCTOR_TITLE_VALIDATION_MESSAGE);
+        };
+        let candidate = *candidate;
+        let remainder = remaining.get(candidate.len()..).unwrap_or_default();
+        if !remainder.is_empty() && !remainder.chars().next().is_some_and(char::is_whitespace) {
+            return Err(DOCTOR_TITLE_VALIDATION_MESSAGE);
+        }
+        if seen
+            .iter()
+            .any(|seen_title| seen_title.eq_ignore_ascii_case(candidate))
+        {
+            return Err(DOCTOR_TITLE_VALIDATION_MESSAGE);
+        }
+        seen.push(candidate);
+        remaining = remainder.trim_start();
     }
     Ok(())
 }
@@ -4434,6 +4465,15 @@ fn normalize_optional(value: Option<String>) -> Option<String> {
         } else {
             Some(trimmed)
         }
+    })
+}
+
+fn normalize_doctor_title(value: Option<String>) -> Option<String> {
+    normalize_optional(value).map(|raw| {
+        raw.replace(',', " ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
     })
 }
 

@@ -10389,7 +10389,8 @@ async fn non_medical_provider_rejects_provider_specializations() {
         Some(json!({
             "first_name": "Invalid",
             "last_name": "Title",
-            "title": "Dr.",
+            "title": "Frau Dr. med.",
+            "gender": "female",
         })),
     )
     .await;

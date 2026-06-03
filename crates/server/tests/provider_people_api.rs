@@ -326,6 +326,99 @@ async fn provider_people_returns_doctors_staff_counts_and_patient_filter() {
 }
 
 #[tokio::test]
+async fn provider_doctor_accepts_academic_title_combinations_and_keeps_salutation_in_gender() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("provider-doctor-title");
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let bearer = auth_header_for(pm_id, "patient_manager");
+
+    let provider_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO providers (name, provider_type, address_city, address_country, fachbereich)
+           VALUES ($1, 'medical', 'Berlin', 'Germany', 'Cardiology')
+           RETURNING id"#,
+    )
+    .bind(format!("Title Clinic {tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{provider_id}/doctors"),
+        &bearer,
+        Some(json!({
+            "first_name": "Anna",
+            "last_name": format!("Title {tag}"),
+            "title": "Priv.-Doz. Dr. med.",
+            "gender": "female",
+            "specializations": ["Cardiology"],
+            "contacts": [],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let doctor_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+
+    let (saved_title, saved_gender): (Option<String>, String) =
+        sqlx::query_as("SELECT title, gender FROM provider_doctors WHERE id = $1")
+            .bind(doctor_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(saved_title.as_deref(), Some("Priv.-Doz. Dr. med."));
+    assert_eq!(saved_gender, "female");
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{provider_id}/doctors/{doctor_id}/update"),
+        &bearer,
+        Some(json!({
+            "first_name": "Max",
+            "last_name": format!("Title {tag}"),
+            "title": "Prof., Dr.",
+            "gender": "male",
+            "specializations": ["Cardiology"],
+            "contacts": [],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (updated_title, updated_gender): (Option<String>, String) =
+        sqlx::query_as("SELECT title, gender FROM provider_doctors WHERE id = $1")
+            .bind(doctor_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(updated_title.as_deref(), Some("Prof. Dr."));
+    assert_eq!(updated_gender, "male");
+
+    let (status, invalid_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{provider_id}/doctors"),
+        &bearer,
+        Some(json!({
+            "first_name": "Frau",
+            "last_name": format!("WrongField {tag}"),
+            "title": "Frau Dr. med.",
+            "gender": "female",
+            "contacts": [],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let message = invalid_body["message"].as_str().unwrap_or_default();
+    assert!(message.contains("academic titles"));
+    assert!(message.contains("Herr/Frau"));
+}
+
+#[tokio::test]
 async fn provider_specializations_filter_matches_any_selected_specialization() {
     let Some((app, pool, _admin_id)) = test_context().await else {
         return;

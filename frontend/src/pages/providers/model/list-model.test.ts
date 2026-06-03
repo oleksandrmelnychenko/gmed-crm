@@ -175,23 +175,42 @@ describe("toDoctorPayload", () => {
 
     expect(payload.title).toBe("Prof. Dr. med.");
   });
+
+  it("keeps Privatdozent title combinations before sending the payload", () => {
+    const form = {
+      ...blankDoctorForm(),
+      name: "Anna Keller",
+      title: "Dr. med. Priv.-Doz.",
+    };
+
+    const payload = toDoctorPayload(form);
+
+    expect(payload.title).toBe("Priv.-Doz. Dr. med.");
+  });
 });
 
 describe("doctor title helpers", () => {
   it("parses and sorts title values from highest to lowest", () => {
     expect(splitDoctorTitleValue("Dr. med. Prof. PD")).toEqual(["Prof.", "PD", "Dr. med."]);
+    expect(splitDoctorTitleValue("Priv.-Doz. Dr. med.")).toEqual(["Priv.-Doz.", "Dr. med."]);
     expect(formatDoctorTitleValue("Dr. Prof.")).toBe("Prof. Dr.");
   });
 
-  it("adds gender salutation only for German doctor lists", () => {
-    const doctor = {
+  it("adds Herr/Frau salutation only for German doctor lists", () => {
+    const maleDoctor = {
       name: "JOHN REMBO",
       title: "Prof. Dr.",
       gender: "male" as const,
     };
+    const femaleDoctor = {
+      name: "ANNA KELLER",
+      title: "Dr. med. Priv.-Doz.",
+      gender: "female" as const,
+    };
 
-    expect(doctorListDisplayName(doctor, "de")).toBe("Herr Prof. Dr. JOHN REMBO");
-    expect(doctorListDisplayName(doctor, "ru")).toBe("Prof. Dr. JOHN REMBO");
+    expect(doctorListDisplayName(maleDoctor, "de")).toBe("Herr Prof. Dr. JOHN REMBO");
+    expect(doctorListDisplayName(femaleDoctor, "de")).toBe("Frau Priv.-Doz. Dr. med. ANNA KELLER");
+    expect(doctorListDisplayName(maleDoctor, "ru")).toBe("Prof. Dr. JOHN REMBO");
   });
 });
 
