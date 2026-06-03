@@ -316,6 +316,18 @@ describe("weekly availability helpers", () => {
     ).toBe("Mon 09:00-22:00");
   });
 
+  it("does not move the start time when an end picker edit is earlier than the current start", () => {
+    expect(
+      updateWeeklyAvailabilityIntervalValue("Mo 08:00-16:00", "mon", 0, "end", "01:00"),
+    ).toBe("Mon 08:00-08:01");
+  });
+
+  it("does not move the end time when a start picker edit is later than the current end", () => {
+    expect(
+      updateWeeklyAvailabilityIntervalValue("Mo 08:00-16:00", "mon", 0, "start", "18:00"),
+    ).toBe("Mon 15:59-16:00");
+  });
+
   it("supports full-day availability expressed as 00:00-00:00", () => {
     expect(normalizeAvailabilityEditorIntervals([{ start: "00:00", end: "00:00" }])).toEqual([
       { start: "00:00", end: "00:00" },

@@ -439,8 +439,12 @@ export function normalizeAvailabilityEditorIntervals(
     startMinutes ??= previousEndMinutes;
     endMinutes ??= startMinutes + AVAILABILITY_MIN_INTERVAL_MINUTES;
 
-    if (edit?.index === index && edit.field === "end" && endMinutes <= startMinutes) {
-      startMinutes = endMinutes - AVAILABILITY_MIN_INTERVAL_MINUTES;
+    if (edit?.index === index && endMinutes <= startMinutes) {
+      if (edit.field === "end") {
+        endMinutes = startMinutes + AVAILABILITY_MIN_INTERVAL_MINUTES;
+      } else {
+        startMinutes = endMinutes - AVAILABILITY_MIN_INTERVAL_MINUTES;
+      }
     }
 
     const latestStartMinutes = AVAILABILITY_DAY_END_MINUTES - AVAILABILITY_MIN_INTERVAL_MINUTES;
