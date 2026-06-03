@@ -1009,7 +1009,14 @@ async fn list_patients(
                   p.is_active, p.created_at
            FROM patients p
            WHERE ($1::bool = false OR p.is_active = true)
-             AND ($2::text = '%%' OR p.first_name ILIKE $2 OR p.last_name ILIKE $2 OR p.patient_id ILIKE $2)
+             AND ($2::text = '%%'
+                  OR de_normalize(concat_ws(' ',
+                       p.first_name, p.last_name, p.patient_id,
+                       p.email, p.phone_primary, p.phone_secondary,
+                       p.insurance_provider, p.insurance_number,
+                       p.nationality, p.residence_country,
+                       array_to_string(p.languages, ' ')
+                     )) LIKE de_normalize($2))
              AND (
                 $3::uuid IS NULL
                 OR EXISTS (

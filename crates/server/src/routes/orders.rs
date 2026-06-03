@@ -248,22 +248,20 @@ async fn list_orders(
            FROM orders o
            JOIN patients p ON p.id = o.patient_id
            WHERE ($1::text = '%%'
-                  OR o.order_number ILIKE $1
-                  OR COALESCE(o.needs_description, '') ILIKE $1
-                  OR p.first_name ILIKE $1
-                  OR p.last_name ILIKE $1
-                  OR p.patient_id ILIKE $1
+                  OR de_normalize(concat_ws(' ',
+                       o.order_number, o.needs_description,
+                       p.first_name, p.last_name, p.patient_id,
+                       p.email, p.phone_primary, p.phone_secondary
+                     )) LIKE de_normalize($1)
                   OR EXISTS (
                         SELECT 1
                         FROM order_leistungen ol
                         LEFT JOIN providers pr ON pr.id = ol.provider_id
                         LEFT JOIN provider_doctors d ON d.id = ol.doctor_id
                         WHERE ol.order_id = o.id
-                          AND (
-                                ol.description ILIKE $1
-                                OR COALESCE(pr.name, '') ILIKE $1
-                                OR COALESCE(d.name, '') ILIKE $1
-                          )
+                          AND de_normalize(concat_ws(' ',
+                                ol.description, ol.notes, pr.name, d.name
+                              )) LIKE de_normalize($1)
                   )
            )
              AND ($2::text IS NULL OR o.phase = $2)

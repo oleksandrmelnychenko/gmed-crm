@@ -869,6 +869,116 @@ async fn patients_list_supports_provider_and_doctor_filters_across_appointments_
     assert!(!ids.contains(&hidden_patient.to_string().as_str()));
 }
 
+async fn patient_search_matches(
+    app: &axum::Router,
+    bearer: &str,
+    query: &str,
+    patient_id: Uuid,
+) -> bool {
+    let encoded = query.replace(' ', "%20");
+    let (status, body) = json_request(
+        app,
+        "GET",
+        &format!("/api/v1/patients?search={encoded}"),
+        bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let needle = patient_id.to_string();
+    body.as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["id"].as_str())
+        .any(|id| id == needle)
+}
+
+#[tokio::test]
+async fn patients_list_search_matches_contact_full_name_and_insurance() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("psearch");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+
+    // Give the patient distinctive contact + insurance identifiers to search by.
+    let email = format!("mail-{tag}@example.org");
+    let phone = format!("PHN-{tag}");
+    let insurance = format!("INS-{tag}");
+    sqlx::query(
+        r#"UPDATE patients
+           SET email = $2, phone_primary = $3, insurance_number = $4
+           WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .bind(&email)
+    .bind(&phone)
+    .bind(&insurance)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Widened search scope: each identifier must now match (regression for search-scope audit).
+    assert!(
+        patient_search_matches(&app, &bearer, &format!("mail-{tag}"), patient_id).await,
+        "email should be searchable"
+    );
+    assert!(
+        patient_search_matches(&app, &bearer, &phone, patient_id).await,
+        "phone_primary should be searchable"
+    );
+    assert!(
+        patient_search_matches(&app, &bearer, &insurance, patient_id).await,
+        "insurance_number should be searchable"
+    );
+    assert!(
+        patient_search_matches(
+            &app,
+            &bearer,
+            &format!("First {tag} Last {tag}"),
+            patient_id
+        )
+        .await,
+        "full name (first + last) should match via concatenation"
+    );
+    // Existing per-column coverage must still work.
+    assert!(
+        patient_search_matches(&app, &bearer, &format!("PT-{tag}"), patient_id).await,
+        "patient_id should still be searchable"
+    );
+    // Negative control: an unrelated token must not match.
+    assert!(
+        !patient_search_matches(&app, &bearer, &format!("zzz-none-{tag}"), patient_id).await,
+        "non-matching token must not return the patient"
+    );
+
+    // German umlaut/eszett tolerance: a query typed without a German keyboard (ASCII
+    // digraphs ue/oe/ae/ss) must match stored text that contains the real umlauts.
+    let de_tag = unique_tag("psearch-de");
+    let de_patient = seed_patient(&pool, admin_id, &de_tag).await;
+    let de_surname = format!("Müßner-{de_tag}"); // contains ü and ß
+    sqlx::query("UPDATE patients SET last_name = $2 WHERE id = $1")
+        .bind(de_patient)
+        .bind(&de_surname)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        patient_search_matches(&app, &bearer, &format!("Muessner-{de_tag}"), de_patient).await,
+        "ASCII digraph form (ue, ss) must match stored umlauts (ü, ß)"
+    );
+    assert!(
+        patient_search_matches(&app, &bearer, &format!("MUESSNER-{de_tag}"), de_patient).await,
+        "German digraph matching must be case-insensitive"
+    );
+    // And the real umlaut surname is still found by its own patient_id row.
+    assert!(
+        patient_search_matches(&app, &bearer, &format!("PT-{de_tag}"), de_patient).await,
+        "patient_id still matches alongside German-folded name search"
+    );
+}
+
 #[tokio::test]
 async fn order_detail_includes_provider_and_doctor_chain_for_leistungen() {
     let Some((app, pool, admin_id, _)) = test_context().await else {

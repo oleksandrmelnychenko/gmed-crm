@@ -774,10 +774,12 @@ async fn list_framework_contracts(
            FROM framework_contracts fc
            JOIN patients p ON p.id = fc.patient_id
            WHERE ($1::text = '%%'
-                    OR fc.contract_number ILIKE $1
-                    OR p.first_name ILIKE $1
-                    OR p.last_name ILIKE $1
-                    OR p.patient_id ILIKE $1)
+                    OR de_normalize(concat_ws(' ',
+                         fc.contract_number,
+                         p.first_name, p.last_name, p.patient_id,
+                         p.email, p.phone_primary, p.phone_secondary,
+                         p.insurance_number, p.insurance_provider
+                       )) LIKE de_normalize($1))
              AND ($2::uuid IS NULL OR fc.patient_id = $2)
              AND ($3::text IS NULL OR fc.status = $3)
            ORDER BY fc.created_at DESC
@@ -1330,12 +1332,10 @@ async fn list_quotes(
            JOIN orders o ON o.id = q.order_id
            JOIN patients p ON p.id = o.patient_id
            WHERE ($1::text = '%%'
-                    OR q.quote_number ILIKE $1
-                    OR o.order_number ILIKE $1
-                    OR COALESCE(q.notes, '') ILIKE $1
-                    OR p.first_name ILIKE $1
-                    OR p.last_name ILIKE $1
-                    OR p.patient_id ILIKE $1)
+                    OR de_normalize(concat_ws(' ',
+                         q.quote_number, o.order_number, q.notes,
+                         p.first_name, p.last_name, p.patient_id
+                       )) LIKE de_normalize($1))
              AND ($2::uuid IS NULL OR q.order_id = $2)
              AND ($3::uuid IS NULL OR o.patient_id = $3)
              AND ($4::text IS NULL OR q.status = $4)

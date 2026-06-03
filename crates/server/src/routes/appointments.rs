@@ -1504,14 +1504,13 @@ async fn list_appointments(
            LEFT JOIN users u ON u.id = a.interpreter_id
            LEFT JOIN users owner ON owner.id = a.owner_user_id
            WHERE ($1::text = '%%'
-                  OR a.title ILIKE $1
-                  OR COALESCE(a.location, '') ILIKE $1
-                  OR p.first_name ILIKE $1
-                  OR p.last_name ILIKE $1
-                  OR p.patient_id ILIKE $1
-                  OR COALESCE(pr.name, '') ILIKE $1
-                  OR COALESCE(d.name, '') ILIKE $1
-                  OR COALESCE(owner.name, '') ILIKE $1
+                  OR de_normalize(concat_ws(' ',
+                       a.title, a.location, a.category,
+                       p.first_name, p.last_name, p.patient_id,
+                       p.email, p.phone_primary, p.phone_secondary,
+                       p.insurance_number, p.insurance_provider,
+                       pr.name, d.name, u.name, owner.name
+                     )) LIKE de_normalize($1)
            )
              AND ($2::text IS NULL OR a.appointment_type = $2)
              AND ($3::text IS NULL OR a.care_path_kind = $3)
@@ -1722,14 +1721,13 @@ async fn list_attention_items(
              LIMIT 1
            ) latest_report ON true
            WHERE ($1::text = '%%'
-                  OR a.title ILIKE $1
-                  OR COALESCE(a.location, '') ILIKE $1
-                  OR p.first_name ILIKE $1
-                  OR p.last_name ILIKE $1
-                  OR p.patient_id ILIKE $1
-                  OR COALESCE(pr.name, '') ILIKE $1
-                  OR COALESCE(d.name, '') ILIKE $1
-                  OR COALESCE(owner.name, '') ILIKE $1)
+                  OR de_normalize(concat_ws(' ',
+                       a.title, a.location, a.category,
+                       p.first_name, p.last_name, p.patient_id,
+                       p.email, p.phone_primary, p.phone_secondary,
+                       p.insurance_number, p.insurance_provider,
+                       pr.name, d.name, u.name, owner.name
+                     )) LIKE de_normalize($1))
              AND ($2::text IS NULL OR a.appointment_type = $2)
              AND ($3::text IS NULL OR a.care_path_kind = $3)
              AND ($4::text IS NULL OR a.status = $4)

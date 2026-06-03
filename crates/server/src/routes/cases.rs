@@ -348,11 +348,12 @@ async fn list_cases(
            FROM cases c
            JOIN patients p ON p.id = c.patient_id
            WHERE ($1::text = '%%'
-                  OR c.case_id ILIKE $1
-                  OR COALESCE(c.hauptanfragegrund, '') ILIKE $1
-                  OR p.first_name ILIKE $1
-                  OR p.last_name ILIKE $1
-                  OR p.patient_id ILIKE $1
+                  OR de_normalize(concat_ws(' ',
+                       c.case_id, c.hauptanfragegrund, c.zuweiser,
+                       p.first_name, p.last_name, p.patient_id,
+                       p.email, p.phone_primary, p.phone_secondary,
+                       p.insurance_number
+                     )) LIKE de_normalize($1)
            )
              AND ($2::text IS NULL OR c.status = $2)
              AND ($3::uuid IS NULL OR c.patient_id = $3)

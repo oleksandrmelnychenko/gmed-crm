@@ -226,33 +226,25 @@ async fn load_doctor_people(
              AND ($3::text IS NULL OR p.provider_type = $3)
              AND (
                  $4::text = '%%'
-                 OR d.name ILIKE $4
-                 OR COALESCE(d.display_name, '') ILIKE $4
-                 OR COALESCE(d.first_name, '') ILIKE $4
-                 OR COALESCE(d.last_name, '') ILIKE $4
-                 OR COALESCE(d.title, '') ILIKE $4
-                 OR COALESCE(d.role_code, '') ILIKE $4
-                 OR COALESCE(d.role_label, '') ILIKE $4
-                 OR COALESCE(to_jsonb(d)->>'subrole', '') ILIKE $4
-                 OR COALESCE(d.fachbereich, '') ILIKE $4
-                 OR p.name ILIKE $4
+                 OR de_normalize(concat_ws(' ',
+                      d.name, d.display_name, d.first_name, d.last_name,
+                      d.title, d.role_code, d.role_label,
+                      to_jsonb(d)->>'subrole', d.fachbereich,
+                      d.license_number, d.licensing_country, d.phone, d.email,
+                      p.name, p.legal_name, p.tax_id, p.address_city, p.address_country
+                    )) LIKE de_normalize($4)
                  OR EXISTS (
                      SELECT 1
                      FROM provider_person_contacts pc
                      WHERE pc.doctor_id = d.id
-                       AND pc.value ILIKE $4
+                       AND de_normalize(pc.value) LIKE de_normalize($4)
                  )
                  OR EXISTS (
                      SELECT 1
                      FROM provider_doctor_specializations ds
                      JOIN medical_specializations ms ON ms.id = ds.specialization_id
                      WHERE ds.doctor_id = d.id
-                       AND (
-                           ms.code ILIKE $4
-                           OR ms.name_en ILIKE $4
-                           OR COALESCE(ms.name_de, '') ILIKE $4
-                           OR COALESCE(ms.name_ru, '') ILIKE $4
-                       )
+                       AND de_normalize(concat_ws(' ', ms.code, ms.name_en, ms.name_de, ms.name_ru)) LIKE de_normalize($4)
                  )
              )
              AND (
@@ -441,20 +433,16 @@ async fn load_staff_people(
              AND ($3::text IS NULL OR p.provider_type = $3)
              AND (
                  $4::text = '%%'
-                 OR s.display_name ILIKE $4
-                 OR COALESCE(s.first_name, '') ILIKE $4
-                 OR COALESCE(s.last_name, '') ILIKE $4
-                 OR s.role ILIKE $4
-                 OR COALESCE(sr.name_en, '') ILIKE $4
-                 OR COALESCE(sr.name_de, '') ILIKE $4
-                 OR COALESCE(sr.name_ru, '') ILIKE $4
-                 OR COALESCE(s.department, '') ILIKE $4
-                 OR p.name ILIKE $4
+                 OR de_normalize(concat_ws(' ',
+                      s.display_name, s.first_name, s.last_name, s.role,
+                      sr.name_en, sr.name_de, sr.name_ru, s.department,
+                      p.name, p.legal_name, p.tax_id, p.address_city, p.address_country
+                    )) LIKE de_normalize($4)
                  OR EXISTS (
                      SELECT 1
                      FROM provider_person_contacts pc
                      WHERE pc.staff_id = s.id
-                       AND pc.value ILIKE $4
+                       AND de_normalize(pc.value) LIKE de_normalize($4)
                  )
              )
              AND (

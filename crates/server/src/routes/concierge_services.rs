@@ -781,19 +781,14 @@ async fn list_concierge_services(
            LEFT JOIN users u ON u.id = cs.assigned_concierge_id
            LEFT JOIN appointments a ON a.id = cs.appointment_id
            WHERE ($1::text = '%%'
-                  OR cs.title ILIKE $1
-                  OR COALESCE(cs.booking_reference, '') ILIKE $1
-                  OR COALESCE(cs.vendor_name, '') ILIKE $1
-                  OR COALESCE(cs.vendor_contact, '') ILIKE $1
-                  OR COALESCE(pr.name, '') ILIKE $1
-                  OR COALESCE(sc.service_name, '') ILIKE $1
-                  OR COALESCE(ptn.code, '') ILIKE $1
-                  OR COALESCE(ptn.name_de, '') ILIKE $1
-                  OR COALESCE(ptn.name_ru, '') ILIKE $1
-                  OR COALESCE(a.title, '') ILIKE $1
-                  OR p.first_name ILIKE $1
-                  OR p.last_name ILIKE $1
-                  OR p.patient_id ILIKE $1)
+                  OR de_normalize(concat_ws(' ',
+                       cs.title, cs.booking_reference, cs.vendor_name, cs.vendor_contact,
+                       cs.service_notes, cs.billing_notes,
+                       pr.name, sc.service_name,
+                       ptn.code, ptn.name_de, ptn.name_ru,
+                       a.title, u.name,
+                       p.first_name, p.last_name, p.patient_id
+                     )) LIKE de_normalize($1))
              AND ($2::uuid IS NULL OR cs.patient_id = $2)
              AND ($3::uuid IS NULL OR cs.appointment_id = $3)
              AND ($4::uuid IS NULL OR cs.provider_id = $4)

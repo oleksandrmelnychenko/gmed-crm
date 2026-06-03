@@ -36,8 +36,8 @@ const ctx: SearchContext<Row> = {
 };
 
 describe("tokenize", () => {
-  it("splits by whitespace and lowercases", () => {
-    expect(tokenize("Anna Müller")).toEqual(["anna", "müller"]);
+  it("splits by whitespace, lowercases and folds German umlauts to digraphs", () => {
+    expect(tokenize("Anna Müller")).toEqual(["anna", "mueller"]);
   });
   it("collapses multiple spaces", () => {
     expect(tokenize("  foo   bar  ")).toEqual(["foo", "bar"]);
@@ -82,6 +82,24 @@ describe("matchesSearch", () => {
   it("null field is skipped (no crash)", () => {
     expect(matchesSearch(rows[1], ["anna@"], ctx)).toBe(false);
     expect(matchesSearch(rows[1], ["petrov"], ctx)).toBe(true);
+  });
+});
+
+describe("German umlaut / eszett folding", () => {
+  it("ASCII digraph query matches stored umlaut name", () => {
+    // typing "Mueller" / "mueller" must find "Anna Müller"
+    expect(applySearch(rows, "Mueller", ctx).map((r) => r.id)).toEqual(["1"]);
+    expect(applySearch(rows, "mueller", ctx).map((r) => r.id)).toEqual(["1"]);
+  });
+  it("real umlaut query still matches", () => {
+    expect(applySearch(rows, "Müller", ctx).map((r) => r.id)).toEqual(["1"]);
+  });
+  it("matchesSearch folds a raw umlaut token", () => {
+    expect(matchesSearch(rows[0], ["mueller"], ctx)).toBe(true);
+    expect(matchesSearch(rows[0], ["MÜLLER"], ctx)).toBe(true);
+  });
+  it("Cyrillic is unaffected by German folding", () => {
+    expect(applySearch(rows, "Мельник", ctx).map((r) => r.id)).toEqual(["4"]);
   });
 });
 

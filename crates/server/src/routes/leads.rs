@@ -139,12 +139,13 @@ async fn list_leads(
              AND ($2::text IS NULL OR qualification_status = $2)
              AND (
                 $3::text = '%%'
-                OR first_name ILIKE $3
-                OR last_name ILIKE $3
-                OR COALESCE(email, '') ILIKE $3
-                OR COALESCE(phone, '') ILIKE $3
-                OR COALESCE(source, '') ILIKE $3
-                OR COALESCE(country, '') ILIKE $3
+                OR de_normalize(concat_ws(' ',
+                     first_name, middle_name, last_name,
+                     email, phone, whatsapp_number,
+                     city, country, source,
+                     notes, message, primary_concern_text,
+                     additional_concerns, selected_program
+                   )) LIKE de_normalize($3)
              )
              AND ($4::text = '%%' OR COALESCE(source, '') ILIKE $4)
              AND ($5::text = '%%' OR COALESCE(country, '') ILIKE $5)

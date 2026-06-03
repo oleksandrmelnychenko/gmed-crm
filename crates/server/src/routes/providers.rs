@@ -459,18 +459,13 @@ async fn list_providers(
              AND ($2::text IS NULL OR p.provider_type = $2)
              AND (
                 $3::text = '%%'
-                OR p.name ILIKE $3
-                OR COALESCE(p.legal_name, '') ILIKE $3
-                OR COALESCE(p.tax_id, '') ILIKE $3
-                OR COALESCE(p.address_city, '') ILIKE $3
-                OR COALESCE(p.fachbereich, '') ILIKE $3
-                OR COALESCE(p.address_country, '') ILIKE $3
-                OR COALESCE(p.phone, '') ILIKE $3
-                OR COALESCE(p.email, '') ILIKE $3
-                OR COALESCE(p.opening_hours, '') ILIKE $3
-                OR COALESCE(p.notes, '') ILIKE $3
-                OR COALESCE(parent.name, '') ILIKE $3
-                OR p.taxonomy_attributes::text ILIKE $3
+                OR de_normalize(concat_ws(' ',
+                     p.name, p.legal_name, p.tax_id,
+                     p.address_city, p.address_street, p.address_zip, p.address_country,
+                     p.fachbereich, p.phone, p.email, p.website,
+                     p.opening_hours, p.notes, parent.name,
+                     p.taxonomy_attributes::text
+                   )) LIKE de_normalize($3)
                 OR EXISTS (
                     SELECT 1
                     FROM jsonb_each_text(p.taxonomy_attributes) AS attr(key, value)

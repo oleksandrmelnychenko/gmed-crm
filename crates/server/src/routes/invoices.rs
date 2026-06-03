@@ -3330,11 +3330,12 @@ async fn list_invoices(
            JOIN patients p ON p.id = i.patient_id
            LEFT JOIN quotes q ON q.id = i.quote_id
            WHERE ($1::text IS NULL
-                   OR i.invoice_number ILIKE $1
-                   OR o.order_number ILIKE $1
-                   OR COALESCE(q.quote_number, '') ILIKE $1
-                   OR p.patient_id ILIKE $1
-                   OR CONCAT(p.first_name, ' ', p.last_name) ILIKE $1)
+                   OR de_normalize(concat_ws(' ',
+                        i.invoice_number, o.order_number, q.quote_number,
+                        p.patient_id, p.first_name, p.last_name,
+                        p.email, p.phone_primary, p.phone_secondary,
+                        i.payer_contact_name, i.payer_contact_email, i.payer_contact_phone
+                      )) LIKE de_normalize($1))
              AND ($2::uuid IS NULL OR i.patient_id = $2)
              AND ($3::uuid IS NULL OR i.order_id = $3)
              AND ($4::uuid IS NULL OR i.quote_id = $4)

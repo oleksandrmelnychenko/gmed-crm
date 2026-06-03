@@ -180,7 +180,12 @@ async fn list_interpreter_profiles(
            WHERE u.role IN ('interpreter', 'teamlead_interpreter')
              AND ($1::text IS NULL OR COALESCE(d.status, 'active') = $1)
              AND ($2::text IS NULL OR d.contract_type = $2)
-             AND ($3::text = '%%' OR u.name ILIKE $3 OR u.email ILIKE $3)
+             AND ($3::text = '%%'
+                  OR de_normalize(concat_ws(' ',
+                       u.name, u.email, d.phone, f.tax_number, f.ust_idnr
+                     )) LIKE de_normalize($3)
+                  OR EXISTS (SELECT 1 FROM interpreter_languages il WHERE il.interpreter_id = u.id
+                             AND de_normalize(concat_ws(' ', il.language_code, il.language_label)) LIKE de_normalize($3)))
            ORDER BY u.is_active DESC, u.name"#,
     )
     .bind(status)
