@@ -51,6 +51,11 @@ export function buildCreateAppointmentPayload(
   repeatInterval = parsePositiveIntegerInput(form.repeatInterval),
   repeatCount = parsePositiveIntegerInput(form.repeatCount),
 ) {
+  const recurrenceUntil =
+    form.repeatEnabled && !repeatCount && form.repeatUntil
+      ? form.repeatUntil
+      : null;
+
   return {
     patient_id: form.patientId,
     provider_id: form.providerId || null,
@@ -76,7 +81,6 @@ export function buildCreateAppointmentPayload(
     recurrence_frequency: form.repeatEnabled ? form.repeatFrequency : null,
     recurrence_interval: form.repeatEnabled ? repeatInterval : null,
     recurrence_count: form.repeatEnabled ? repeatCount : null,
-    recurrence_until:
-      form.repeatEnabled && form.repeatUntil ? form.repeatUntil : null,
+    recurrence_until: recurrenceUntil,
   };
 }

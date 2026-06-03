@@ -111,6 +111,58 @@ describe("buildEditAppointmentUpdatePayload", () => {
         recurrence_frequency: "weekly",
         recurrence_interval: 2,
         recurrence_scope: "series",
+        recurrence_until: null,
+      }),
+    );
+  });
+
+  it("does not let a stale repeat-until date truncate recurrence edits when count is set", () => {
+    const result = buildEditAppointmentUpdatePayload({
+      detail,
+      form: {
+        ...form,
+        repeatFrequency: "monthly",
+        repeatInterval: "1",
+        repeatCount: "2",
+        repeatUntil: "2026-07-01",
+      },
+      recurrenceScope: "series",
+      canEditAppointmentType: false,
+      canManageChecklist: false,
+    });
+
+    expect(result.applyRecurrenceRule).toBe(true);
+    expect(result.payload).toEqual(
+      expect.objectContaining({
+        recurrence_count: 2,
+        recurrence_frequency: "monthly",
+        recurrence_interval: 1,
+        recurrence_scope: "series",
+        recurrence_until: null,
+      }),
+    );
+  });
+
+  it("sends repeat-until for recurrence edits when count is empty", () => {
+    const result = buildEditAppointmentUpdatePayload({
+      detail,
+      form: {
+        ...form,
+        repeatCount: "",
+        repeatUntil: "2026-09-01",
+      },
+      recurrenceScope: "series",
+      canEditAppointmentType: false,
+      canManageChecklist: false,
+    });
+
+    expect(result.applyRecurrenceRule).toBe(true);
+    expect(result.payload).toEqual(
+      expect.objectContaining({
+        recurrence_count: null,
+        recurrence_frequency: "weekly",
+        recurrence_interval: 2,
+        recurrence_scope: "series",
         recurrence_until: "2026-09-01",
       }),
     );

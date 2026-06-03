@@ -61,7 +61,7 @@ export function buildEditAppointmentUpdatePayload({
     payload.recurrence_frequency = form.repeatFrequency;
     payload.recurrence_interval = repeatInterval;
     payload.recurrence_count = repeatCount;
-    payload.recurrence_until = form.repeatUntil || null;
+    payload.recurrence_until = repeatCount ? null : form.repeatUntil || null;
   }
   if (canEditAppointmentType) {
     payload.appointment_type = form.appointmentType;

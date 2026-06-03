@@ -111,6 +111,64 @@ describe("buildCreateAppointmentPayload", () => {
     );
   });
 
+  it("prefers repeat count over repeat-until when both recurrence endings are filled", () => {
+    const payload = buildCreateAppointmentPayload(
+      {
+        ...blankAppointmentForm(),
+        patientId: "patient-1",
+        providerId: "provider-1",
+        appointmentType: "medical",
+        title: "Monthly follow-up",
+        date: "2026-06-02",
+        repeatEnabled: true,
+        repeatFrequency: "monthly",
+        repeatInterval: "1",
+        repeatCount: "2",
+        repeatUntil: "2026-06-09",
+      },
+      1,
+      2,
+    );
+
+    expect(payload).toEqual(
+      expect.objectContaining({
+        recurrence_count: 2,
+        recurrence_frequency: "monthly",
+        recurrence_interval: 1,
+        recurrence_until: null,
+      }),
+    );
+  });
+
+  it("uses repeat-until when repeat count is empty", () => {
+    const payload = buildCreateAppointmentPayload(
+      {
+        ...blankAppointmentForm(),
+        patientId: "patient-1",
+        providerId: "provider-1",
+        appointmentType: "medical",
+        title: "Weekly follow-up",
+        date: "2026-06-02",
+        repeatEnabled: true,
+        repeatFrequency: "weekly",
+        repeatInterval: "1",
+        repeatCount: "",
+        repeatUntil: "2026-06-30",
+      },
+      1,
+      null,
+    );
+
+    expect(payload).toEqual(
+      expect.objectContaining({
+        recurrence_count: null,
+        recurrence_frequency: "weekly",
+        recurrence_interval: 1,
+        recurrence_until: "2026-06-30",
+      }),
+    );
+  });
+
   it("sends the medical provider binding opt-out only for providerless medical appointments", () => {
     const payload = buildCreateAppointmentPayload({
       ...blankAppointmentForm(),
