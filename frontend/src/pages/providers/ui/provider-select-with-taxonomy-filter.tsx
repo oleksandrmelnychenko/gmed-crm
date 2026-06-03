@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useId, useMemo, useState, type ReactNode } from "react";
 
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { tokens } from "@/components/ui-shell";
@@ -95,6 +95,9 @@ export function ProviderSelectWithTaxonomyFilter<TProvider extends ProviderTaxon
   onChange,
   onTaxonomyChange,
 }: ProviderSelectWithTaxonomyFilterProps<TProvider>) {
+  const generatedId = useId();
+  const taxonomySelectId = `${generatedId}-taxonomy`;
+  const providerSelectId = `${generatedId}-provider`;
   const [internalTaxonomyValue, setInternalTaxonomyValue] = useState("");
   const selectedTaxonomyValue = taxonomyValue ?? internalTaxonomyValue;
   const filteredProviders = useMemo(
@@ -130,6 +133,7 @@ export function ProviderSelectWithTaxonomyFilter<TProvider extends ProviderTaxon
 
   const taxonomyControl = (
     <ProviderTaxonomyCascadeSelect
+      id={taxonomySelectId}
       value={selectedTaxonomyValue}
       nodes={taxonomyNodes}
       providerType={providerType}
@@ -144,6 +148,7 @@ export function ProviderSelectWithTaxonomyFilter<TProvider extends ProviderTaxon
   );
   const providerControl = (
     <NativeComboboxSelect
+      id={providerSelectId}
       value={selectedProviderStillVisible ? value : ""}
       onChange={(event) => onChange(event.target.value)}
       disabled={disabled || providerDisabled}
@@ -167,7 +172,9 @@ export function ProviderSelectWithTaxonomyFilter<TProvider extends ProviderTaxon
     <div className={cn("grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]", containerClassName)}>
       {taxonomyLabel ? (
         <div className="space-y-1.5">
-          <label className={cn(tokens.text.label, "block")}>{taxonomyLabel}</label>
+          <label htmlFor={taxonomySelectId} className={cn(tokens.text.label, "block")}>
+            {taxonomyLabel}
+          </label>
           {taxonomyControl}
         </div>
       ) : (
@@ -175,7 +182,9 @@ export function ProviderSelectWithTaxonomyFilter<TProvider extends ProviderTaxon
       )}
       {providerSelectLabel ? (
         <div className="space-y-1.5">
-          <label className={cn(tokens.text.label, "block")}>{providerSelectLabel}</label>
+          <label htmlFor={providerSelectId} className={cn(tokens.text.label, "block")}>
+            {providerSelectLabel}
+          </label>
           {providerControl}
         </div>
       ) : (

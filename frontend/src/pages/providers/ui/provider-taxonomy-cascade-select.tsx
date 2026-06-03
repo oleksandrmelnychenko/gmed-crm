@@ -15,6 +15,7 @@ import {
 import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 
 type ProviderTaxonomyCascadeSelectProps = {
+  id?: string;
   value: string;
   nodes: ProviderTaxonomyNode[];
   providerType?: ProviderTaxonomyScope;
@@ -42,6 +43,7 @@ const DEFAULT_LEVEL_PLACEHOLDERS: Record<ProviderTaxonomyNode["level"], string> 
 };
 
 export function ProviderTaxonomyCascadeSelect({
+  id,
   value,
   nodes,
   providerType,
@@ -85,6 +87,7 @@ export function ProviderTaxonomyCascadeSelect({
     return (
       <div className={cn("flex min-w-0 flex-wrap gap-2", containerClassName)}>
         <NativeComboboxSelect
+          id={id}
           value=""
           onChange={() => undefined}
           disabled
@@ -101,6 +104,7 @@ export function ProviderTaxonomyCascadeSelect({
   return (
     <div className={cn("flex min-w-0 flex-wrap gap-2", containerClassName)}>
       <NativeComboboxSelect
+        id={id}
         value={selectedNode ? value : ""}
         onChange={(event) => onChange(event.target.value)}
         disabled={disabled || treeOptions.length === 0}
