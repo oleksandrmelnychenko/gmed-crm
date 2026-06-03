@@ -106,6 +106,19 @@ async fn seed_patient(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
     .unwrap()
 }
 
+async fn assign_patient(pool: &PgPool, patient_id: Uuid, user_id: Uuid, assigned_by: Uuid) {
+    sqlx::query(
+        r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
+           VALUES ($1, $2, $3)"#,
+    )
+    .bind(patient_id)
+    .bind(user_id)
+    .bind(assigned_by)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 async fn seed_provider(pool: &PgPool, tag: &str) -> Uuid {
     sqlx::query_scalar(
         r#"INSERT INTO providers (name, provider_type, address_city, fachbereich, address_country)
@@ -332,6 +345,7 @@ async fn documents_catalog_includes_provider_templates_and_generation_uses_provi
     let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
     let bearer = auth_header_for(pm_id, "patient_manager");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    assign_patient(&pool, patient_id, pm_id, admin_id).await;
     let provider_id = seed_provider(&pool, &tag).await;
     let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
     let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
