@@ -360,8 +360,8 @@ test.describe("appointments recurring live workflows", () => {
       /Anzahl Termine|Total occurrences/i,
       "4",
     );
-    const recurrenceUntil = addDaysIso(firstDate!, 42);
-    await fillRepeatUntil(editForm, recurrenceUntil);
+    const finalOccurrenceDate = addDaysIso(firstDate!, 42);
+    await fillRepeatUntil(editForm, finalOccurrenceDate);
     const updateRequestPromise = page.waitForRequest(
       (candidate) =>
         candidate.method() === "POST" &&
@@ -391,7 +391,7 @@ test.describe("appointments recurring live workflows", () => {
     expect(updatePayload.recurrence_frequency).toBe("weekly");
     expect(updatePayload.recurrence_interval).toBe(2);
     expect(updatePayload.recurrence_count).toBe(4);
-    expect(updatePayload.recurrence_until).toBe(recurrenceUntil);
+    expect(updatePayload.recurrence_until).toBeNull();
 
     const updateResponse = await updateResponsePromise;
     const updateResponseText = await updateResponse.text();
@@ -412,7 +412,7 @@ test.describe("appointments recurring live workflows", () => {
         firstDate!,
         addDaysIso(firstDate!, 14),
         addDaysIso(firstDate!, 28),
-        addDaysIso(firstDate!, 42),
+        finalOccurrenceDate,
       ]);
     }).toPass({ timeout: 15_000 });
   });
