@@ -338,13 +338,12 @@ function OnlineAvatars({
       type="button"
       className="flex items-center cursor-pointer [&>*+*]:-ml-1.5"
       onClick={onToggle}
-      title={t.topbar_online_users}
       aria-label={t.topbar_online_users}
     >
       {show.map((u) => (
         <span
           key={u.user_id}
-          title={u.user_name}
+          aria-hidden="true"
           className="flex items-center justify-center size-7 rounded-full bg-muted text-[10px] font-medium text-foreground border-2 border-background"
         >
           {initials(u.user_name)}
