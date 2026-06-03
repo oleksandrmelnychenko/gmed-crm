@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { buildEditAppointmentUpdatePayload } from "./edit-payload";
+import {
+  buildEditAppointmentUpdatePayload,
+  defaultEditAppointmentRecurrenceScope,
+} from "./edit-payload";
 import type { AppointmentDetail, AppointmentFormState } from "./types";
 
 const detail = {
@@ -76,6 +79,17 @@ const form = {
 } satisfies AppointmentFormState;
 
 describe("buildEditAppointmentUpdatePayload", () => {
+  it("defaults recurring appointment edits to the whole series scope", () => {
+    expect(defaultEditAppointmentRecurrenceScope(detail)).toBe("series");
+    expect(
+      defaultEditAppointmentRecurrenceScope({
+        ...detail,
+        recurrence_frequency: null,
+        recurrence_series_id: null,
+      }),
+    ).toBe("single");
+  });
+
   it("preserves category, notes and recurrence edits for series saves", () => {
     const result = buildEditAppointmentUpdatePayload({
       detail,

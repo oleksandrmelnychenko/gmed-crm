@@ -39,7 +39,10 @@ import {
   buildEditAppointmentForm,
   hasAppointmentFormChanges,
 } from "@/pages/appointments/model/form-factories";
-import { buildEditAppointmentUpdatePayload } from "@/pages/appointments/model/edit-payload";
+import {
+  buildEditAppointmentUpdatePayload,
+  defaultEditAppointmentRecurrenceScope,
+} from "@/pages/appointments/model/edit-payload";
 import {
   appointmentText,
   appointmentTypeLabel,
@@ -137,7 +140,7 @@ function createEditAppointmentSectionState(
 ): EditAppointmentSectionState {
   return {
     form: buildEditAppointmentForm(detail),
-    recurrenceScope: "single",
+    recurrenceScope: defaultEditAppointmentRecurrenceScope(detail),
     doctors: [],
     conflicts: null,
     error: "",
@@ -253,8 +256,7 @@ function defaultProviderTaxonomyNodeId(provider: ProviderSummary | null | undefi
 }
 
 function EditAppointmentSection(props: EditAppointmentSectionProps) {
-  const resetKey = useMemo(() => JSON.stringify(props.detail), [props.detail]);
-  return <EditAppointmentSectionContent key={resetKey} {...props} />;
+  return <EditAppointmentSectionContent key={props.detail.id} {...props} />;
 }
 
 function useEditAppointmentSectionContentContent({
@@ -328,6 +330,21 @@ function useEditAppointmentSectionContentContent({
     }
     wasSheetOpenRef.current = sheetOpen;
   }, [createOpenSnapshot, sheetOpen]);
+  useEffect(() => {
+    if (sheetOpen) {
+      return;
+    }
+    dispatchEditState({
+      type: "patch",
+      value: {
+        form: buildEditAppointmentForm(detail),
+        recurrenceScope: defaultEditAppointmentRecurrenceScope(detail),
+        conflicts: null,
+        error: "",
+        busy: false,
+      },
+    });
+  }, [detail, sheetOpen]);
   const setForm = (value: SetStateAction<AppointmentFormState>) =>
     dispatchEditState(createEditAppointmentFieldAction("form", value));
   const updateDirtyRef = (
@@ -627,7 +644,7 @@ function useEditAppointmentSectionContentContent({
       type: "patch",
       value: {
         form: buildEditAppointmentForm(detail),
-        recurrenceScope: "single",
+        recurrenceScope: defaultEditAppointmentRecurrenceScope(detail),
         conflicts: null,
         error: "",
         busy: false,

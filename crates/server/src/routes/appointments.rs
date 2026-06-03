@@ -167,9 +167,12 @@ struct UpdateAppointment {
     date: String,
     time_start: Option<String>,
     time_end: Option<String>,
-    location: Option<String>,
-    category: Option<String>,
-    notes: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_explicit_nullable_string")]
+    location: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_explicit_nullable_string")]
+    category: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_explicit_nullable_string")]
+    notes: Option<Option<String>>,
     recurrence_frequency: Option<String>,
     recurrence_interval: Option<i32>,
     #[serde(default, deserialize_with = "deserialize_explicit_nullable_i32")]
@@ -3643,9 +3646,18 @@ async fn update_appointment(
     {
         return resp;
     }
-    let location = normalize_optional_text(body.location);
-    let category = normalize_optional_text(body.category);
-    let notes = normalize_optional_text(body.notes);
+    let location = match body.location.clone() {
+        Some(value) => normalize_optional_text(value),
+        None => current_location.clone(),
+    };
+    let category = match body.category.clone() {
+        Some(value) => normalize_optional_text(value),
+        None => current_category.clone(),
+    };
+    let notes = match body.notes.clone() {
+        Some(value) => normalize_optional_text(value),
+        None => current_notes.clone(),
+    };
     let shift_days = date.signed_duration_since(current_date).num_days();
     let mut effective_series_id = current_recurrence_series_id;
     let split_performed = if recurrence_scope == AppointmentRecurrenceScope::Following {

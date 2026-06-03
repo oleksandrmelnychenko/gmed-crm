@@ -6,6 +6,12 @@ import type {
 } from "./types";
 import { parsePositiveIntegerInput } from "./workflow-helpers";
 
+export function defaultEditAppointmentRecurrenceScope(
+  detail: AppointmentDetail,
+): AppointmentRecurringActionScope {
+  return detail.recurrence_frequency ? "series" : "single";
+}
+
 export function shouldApplyAppointmentRecurrenceRule(
   detail: AppointmentDetail,
   recurrenceScope: AppointmentRecurringActionScope,

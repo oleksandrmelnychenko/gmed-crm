@@ -5125,6 +5125,171 @@ async fn patient_manager_can_reschedule_whole_recurring_appointment_series() {
 }
 
 #[tokio::test]
+async fn appointment_update_preserves_category_and_persists_recurrence_rule_edits() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("apt-edit-roundtrip");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let title = format!("Recurring category {tag}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "owner_user_id": pm_id,
+            "appointment_type": "medical",
+            "title": title,
+            "date": "2026-05-04",
+            "time_start": "09:00",
+            "time_end": "10:00",
+            "location": "Initial room",
+            "category": "initial_category",
+            "notes": "Initial note",
+            "recurrence_frequency": "weekly",
+            "recurrence_interval": 1,
+            "recurrence_count": 3
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let root_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{root_id}/update"),
+        &pm_bearer,
+        Some(json!({
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "owner_user_id": pm_id,
+            "interpreter_id": Value::Null,
+            "title": title,
+            "date": "2026-05-04",
+            "time_start": "09:30",
+            "time_end": "10:30",
+            "recurrence_scope": "single"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{root_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["category"], "initial_category");
+    assert_eq!(detail["notes"], "Initial note");
+    assert_eq!(detail["location"], "Initial room");
+    assert_eq!(detail["time_start"], "09:30");
+    assert_eq!(detail["time_end"], "10:30");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{root_id}/update"),
+        &pm_bearer,
+        Some(json!({
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "owner_user_id": pm_id,
+            "interpreter_id": Value::Null,
+            "title": title,
+            "date": "2026-05-04",
+            "time_start": "09:30",
+            "time_end": "10:30",
+            "location": "Series room",
+            "category": "updated_category",
+            "notes": "Updated note",
+            "recurrence_frequency": "weekly",
+            "recurrence_interval": 2,
+            "recurrence_count": 4,
+            "recurrence_until": Value::Null,
+            "recurrence_scope": "series"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["recurrence_scope"], "series");
+    assert_eq!(body["affected_count"], 4);
+    assert_eq!(body["created_occurrence_count"], 1);
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{root_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["category"], "updated_category");
+    assert_eq!(detail["notes"], "Updated note");
+    assert_eq!(detail["location"], "Series room");
+    assert_eq!(detail["recurrence_frequency"], "weekly");
+    assert_eq!(detail["recurrence_interval"], 2);
+    assert_eq!(detail["recurrence_count"], 4);
+    assert_eq!(detail["recurrence_until"], Value::Null);
+    assert_eq!(detail["recurrence_series_size"], 4);
+
+    let rows = sqlx::query(
+        r#"SELECT date, category, notes, location, recurrence_interval, recurrence_count
+           FROM appointments
+           WHERE recurrence_series_id = $1
+           ORDER BY recurrence_index"#,
+    )
+    .bind(root_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(rows.len(), 4);
+    let expected_dates = ["2026-05-04", "2026-05-18", "2026-06-01", "2026-06-15"];
+    for (index, row) in rows.iter().enumerate() {
+        assert_eq!(
+            row.try_get::<chrono::NaiveDate, _>("date")
+                .unwrap()
+                .to_string(),
+            expected_dates[index],
+        );
+        assert_eq!(
+            row.try_get::<Option<String>, _>("category")
+                .unwrap()
+                .as_deref(),
+            Some("updated_category"),
+        );
+        assert_eq!(
+            row.try_get::<Option<String>, _>("notes").unwrap().as_deref(),
+            Some("Updated note"),
+        );
+        assert_eq!(
+            row.try_get::<Option<String>, _>("location")
+                .unwrap()
+                .as_deref(),
+            Some("Series room"),
+        );
+        assert_eq!(row.try_get::<Option<i32>, _>("recurrence_interval").unwrap(), Some(2));
+        assert_eq!(row.try_get::<Option<i32>, _>("recurrence_count").unwrap(), Some(4));
+    }
+}
+
+#[tokio::test]
 async fn patient_manager_can_cancel_whole_recurring_appointment_series() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
